@@ -108,10 +108,22 @@ agent:
       dashboard-url: ${DASHBOARD_URL:https://executespec.ai}
 
 # ── Preview ───────────────────────────────────────────────────────────────────
+# 2026-04-20 — prod routes through preview-engine (on preview-gw VM) over HTTPS.
+# PREVIEW_ENGINE_API_KEY must be set (no default) — it's the shared secret with
+# preview-engine's own PREVIEW_API_KEY in /etc/preview-engine.env.
 preview:
+  mode: ${PREVIEW_MODE:docker}
   fallback-host: ${PREVIEW_FALLBACK_HOST:http://executespec.ai}
   proxy:
     enabled: ${PREVIEW_PROXY_ENABLED:true}
+  engine:
+    route-via: ${PREVIEW_ENGINE_ROUTE_VIA:true}
+    base-url:     ${PREVIEW_ENGINE_URL:https://preview-engine.executespec.ai}
+    registry-url: ${PREVIEW_ENGINE_REGISTRY_URL}                     # required in prod — no default
+    api-key:      ${PREVIEW_ENGINE_API_KEY}                           # required in prod
+    timeout-seconds: 300
+  vm:
+    enabled: false
 
 # ── App (JWT, CORS, Mail) ────────────────────────────────────────────────────
 app:

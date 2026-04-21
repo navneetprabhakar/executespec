@@ -61,10 +61,10 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
 
   return (
     <div className="space-y-3">
-      {/* Provider pills */}
+      {/* Provider pills — stack on mobile to avoid horizontal overflow */}
       <div>
         <label className="block text-sm text-secondary mb-1.5">AI Provider</label>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
           {providers.map((p) => {
             const hasKey = hasKeyForProvider(p.id);
             return (
@@ -75,7 +75,8 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
                 disabled={!hasKey}
                 title={!hasKey ? `Add your ${p.label} API key in Settings to use this provider` : undefined}
                 className={cn(
-                  'flex-1 py-1.5 px-3 rounded-sm text-sm font-medium transition-all border',
+                  'w-full py-2 px-3 rounded-sm text-sm font-medium transition-all border',
+                  'flex items-center justify-center gap-1.5',
                   !hasKey
                     ? 'border-[var(--border-default)] bg-[var(--gray-200)] text-muted opacity-50 cursor-not-allowed'
                     : provider === p.id
@@ -83,10 +84,10 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
                       : 'border-[var(--border-default)] bg-[var(--gray-100)] text-secondary hover:text-primary hover:border-[var(--border-default)]',
                 )}
               >
-                {p.label}
-                {!hasKey && <Lock className="inline h-3 w-3 ml-1 -mt-0.5" />}
+                <span>{p.label}</span>
+                {!hasKey && <Lock className="h-3 w-3" />}
                 {hasKey && p.tag && (
-                  <span className="ml-1.5 text-[10px] font-normal text-muted opacity-70">{p.tag}</span>
+                  <span className="text-[10px] font-normal text-muted opacity-70">{p.tag}</span>
                 )}
               </button>
             );

@@ -62,11 +62,40 @@ public class DevDockerfileGenerator {
                     // Planners (esp. V2) sometimes write lowercase / hyphenated forms like "node-backend".
                     // Normalize to the enum's canonical UPPER_SNAKE form before valueOf().
                     String normalized = declared.trim().toUpperCase().replace('-', '_');
+                    // Planner prompt (prompts/v2/planner.md) emits values like "java-spring-boot"
+                    // and "cli" that don't 1:1 map to PreviewProjectType. Map the aliases so
+                    // we don't fall through to heuristic detection — which wrongly picks
+                    // FULL_STACK when the worker generated an unused frontend/ sibling.
+                    normalized = switch (normalized) {
+                        case "JAVA_SPRING_BOOT" -> "SPRING_BOOT";
+                        case "SPRING" -> "SPRING_BOOT";
+                        case "NODEJS_BACKEND", "NODE_JS_BACKEND" -> "NODE_BACKEND";
+                        case "NODEJS_FRONTEND", "NODE_JS_FRONTEND", "REACT", "VUE", "VITE" -> "NODE_FRONTEND";
+                        case "CLI" -> "JAVA"; // no CLI enum; JAVA template is closest (no preview anyway)
+                        case "STATIC", "HTML" -> "STATIC_HTML";
+                        default -> normalized;
+                    };
                     PreviewProjectType fromPlan = PreviewProjectType.valueOf(normalized);
                     // Validate: if planner declares a Node-based type, package.json must exist
                     if (requiresPackageJson(fromPlan) && !Files.exists(workspace.resolve("package.json"))) {
                         log.warn("[Detect] Planner declared {} but no package.json found — falling back to detection", fromPlan);
                     } else {
+                        // Planner taxonomy (planner.md line 82) has no explicit "full-stack" value —
+                        // specs with Java backend + React frontend come through as
+                        // `java-spring-boot`. Upgrade to FULL_STACK when the workspace actually
+                        // has both a backend/*pom* AND a frontend/package.json, so the preview
+                        // dockerfile runs Vite alongside Spring Boot instead of backend-only.
+                        if (fromPlan == PreviewProjectType.SPRING_BOOT
+                                && Files.exists(workspace.resolve("backend/pom.xml"))
+                                && Files.exists(workspace.resolve("frontend/package.json"))) {
+                            log.info("[Detect] Planner said {}, but workspace has backend/ + frontend/ — upgrading to FULL_STACK", fromPlan);
+                            return PreviewProjectType.FULL_STACK;
+                        }
+                        if (fromPlan == PreviewProjectType.NODE_BACKEND
+                                && Files.exists(workspace.resolve("frontend/package.json"))) {
+                            log.info("[Detect] Planner said {}, but frontend/package.json exists — upgrading to FULL_STACK", fromPlan);
+                            return PreviewProjectType.FULL_STACK;
+                        }
                         log.info("[Detect] Using planner-declared project type: {}", fromPlan);
                         return fromPlan;
                     }
@@ -1344,9 +1373,19 @@ public class DevDockerfileGenerator {
 
         String userBlock;
         if (isAlpine) {
-            userBlock = "RUN addgroup -S app && adduser -S app -G app && chown -R app:app /app\nUSER app\n";
+            // -h creates + assigns a home dir on busybox adduser; -D skips password.
+            userBlock = "RUN addgroup -S app && adduser -S -D -H -h /home/app -G app app "
+                    + "&& mkdir -p /home/app && chown -R app:app /app /home/app\n"
+                    + "ENV HOME=/home/app\n"
+                    + "USER app\n";
         } else {
-            userBlock = "RUN groupadd -r app && useradd -r -g app -s /sbin/nologin app && chown -R app:app /app\nUSER app\n";
+            // -m creates the home dir; explicit HOME env covers cases where the
+            // runtime (Maven, npm, pip) reads HOME rather than /etc/passwd. Without
+            // this, Maven fails with "Could not create local repository at /home/app/.m2".
+            userBlock = "RUN groupadd -r app && useradd -r -m -g app -s /bin/sh app "
+                    + "&& chown -R app:app /app /home/app\n"
+                    + "ENV HOME=/home/app\n"
+                    + "USER app\n";
         }
 
         return injectBeforeCmd(dockerfile, userBlock);
@@ -1380,9 +1419,11 @@ public class DevDockerfileGenerator {
             // Always use vite with explicit --host and --port to ensure container accessibility
             cmd = "CMD [\"npx\", \"vite\", \"--host\", \"0.0.0.0\", \"--port\", \"5173\"]";
         } else {
+            // `serve` defaults to localhost; `-l tcp://0.0.0.0:5173` binds to all
+            // interfaces so Docker's port-forward can reach it from the host.
             cmd = """
                     RUN npm install -g serve
-                    CMD ["npx", "serve", "-s", ".", "-l", "5173"]""";
+                    CMD ["npx", "serve", "-s", ".", "-l", "tcp://0.0.0.0:5173"]""";
         }
 
         // Ensure vite and common React dependencies are installed at build time
@@ -1525,9 +1566,54 @@ public class DevDockerfileGenerator {
     }
 
     private String springBootDockerfile(Path workspace) {
-        boolean isGradle = Files.exists(workspace.resolve("build.gradle"))
-                || Files.exists(workspace.resolve("build.gradle.kts"));
+        // The Spring Boot project might be at workspace root OR in a `backend/`
+        // subdirectory (common when the worker scaffolded a repo that intended
+        // to be full-stack, but the frontend ended up unused — we still
+        // classify SPRING_BOOT here and only want to run the Java app).
+        boolean inBackendSubdir = !Files.exists(workspace.resolve("pom.xml"))
+                && !Files.exists(workspace.resolve("build.gradle"))
+                && !Files.exists(workspace.resolve("build.gradle.kts"))
+                && (Files.exists(workspace.resolve("backend/pom.xml"))
+                    || Files.exists(workspace.resolve("backend/build.gradle"))
+                    || Files.exists(workspace.resolve("backend/build.gradle.kts")));
 
+        Path pomDir = inBackendSubdir ? workspace.resolve("backend") : workspace;
+        boolean isGradle = Files.exists(pomDir.resolve("build.gradle"))
+                || Files.exists(pomDir.resolve("build.gradle.kts"));
+
+        if (inBackendSubdir) {
+            if (isGradle) {
+                return """
+                        FROM eclipse-temurin:21
+                        WORKDIR /app
+                        LABEL preview=true
+                        ENV SERVER_ADDRESS=0.0.0.0
+                        ENV SERVER_PORT=8080
+                        COPY . .
+                        WORKDIR /app/backend
+                        RUN chmod +x gradlew 2>/dev/null || true
+                        EXPOSE 8080
+                        CMD ["sh", "-c", "if [ -f gradlew ]; then ./gradlew bootRun --no-daemon; else gradle bootRun --no-daemon; fi"]
+                        """;
+            }
+            return """
+                    FROM eclipse-temurin:21
+                    WORKDIR /app
+                    LABEL preview=true
+                    ENV SERVER_ADDRESS=0.0.0.0
+                    ENV SERVER_PORT=8080
+                    RUN apt-get update && apt-get install -y maven && rm -rf /var/lib/apt/lists/*
+                    COPY backend/pom.xml ./backend/pom.xml
+                    RUN cd backend && mvn dependency:go-offline -q -B || true
+                    COPY . .
+                    RUN cd backend && mvn compile -DskipTests -q -B
+                    EXPOSE 8080
+                    WORKDIR /app/backend
+                    CMD ["mvn", "spring-boot:run", "-DskipTests", "-q"]
+                    """;
+        }
+
+        // Root-level pom.xml (original behaviour)
         if (isGradle) {
             return """
                     FROM eclipse-temurin:21
@@ -1553,9 +1639,8 @@ public class DevDockerfileGenerator {
                 RUN mvn dependency:go-offline -q -B || true
                 COPY . .
                 RUN mvn compile -DskipTests -q -B
-                RUN mkdir -p /root/.m2 && cp -r /root/.m2 /home/app_m2 || true
                 EXPOSE 8080
-                CMD ["mvn", "-Dmaven.repo.local=/app/.m2", "spring-boot:run", "-DskipTests", "-q"]
+                CMD ["mvn", "spring-boot:run", "-DskipTests", "-q"]
                 """;
     }
 

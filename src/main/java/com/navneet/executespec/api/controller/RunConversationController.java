@@ -2,6 +2,8 @@ package com.navneet.executespec.api.controller;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.v2.chat.V2ApplyService;
+import com.navneet.executespec.v2.chat.V2ChatService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -10,13 +12,14 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
+import java.util.List;
 import java.util.Map;
 
 /**
- * Conversation endpoints retired with V1 deprecation (chat, apply-suggestion,
- * iterate). V2 does not currently support per-run conversation — submit a
- * fresh run instead. Kept as 410 Gone stubs so the existing frontend surfaces
- * a clear "not supported" state until the endpoints are removed from the UI.
+ * Post-run conversation endpoints. V2-native: {@code POST/GET /runs/{id}/chat}
+ * are wired to {@link V2ChatService}. {@code /apply} and {@code /iterate} are
+ * still 410 Gone pending a V2 re-implementation (they need to spin up a new
+ * run from the current workspace, which is more plumbing than chat itself).
  */
 @RestController
 @RequestMapping("/api/runs")
@@ -25,25 +28,78 @@ import java.util.Map;
 public class RunConversationController {
 
     private final RunAccessGuard guard;
+    private final V2ChatService chatService;
+    private final V2ApplyService applyService;
 
-    @PostMapping("/{runId}/chat")
-    public ResponseEntity<Map<String, Object>> sendMessage(
+    public record ChatMessageBody(String message) {}
+    public record ChatResponseBody(String reply, int messageCount, int maxMessages) {}
+    public record ChatHistoryItem(String role, String content) {}
+
+    public record ApplyBody(String suggestion, String source) {}
+    public record ApplyTaskBody(String taskId, String title) {}
+    public record ApplyResponseBody(int taskCount, List<ApplyTaskBody> tasks,
+                                    String workerOutcome, String summary) {}
+
+    @GetMapping("/{runId}/chat")
+    public ResponseEntity<List<ChatHistoryItem>> getHistory(
             @PathVariable String runId,
-            @RequestBody Map<String, String> body,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(runId, userDetails);
-        throw new ResponseStatusException(HttpStatus.GONE,
-                "Chat / copilot not yet supported in V2.");
+        List<ChatHistoryItem> items = chatService.history(runId).stream()
+                .map(m -> new ChatHistoryItem(m.role(), m.content()))
+                .toList();
+        return ResponseEntity.ok(items);
+    }
+
+    @PostMapping("/{runId}/chat")
+    public ResponseEntity<ChatResponseBody> sendMessage(
+            @PathVariable String runId,
+            @RequestBody ChatMessageBody body,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        guard.requireRunAccess(runId, userDetails);
+        if (body == null || body.message() == null || body.message().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message is required");
+        }
+        try {
+            V2ChatService.SendResult r = chatService.send(runId, body.message());
+            return ResponseEntity.ok(new ChatResponseBody(r.reply(), r.messageCount(), r.maxMessages()));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        } catch (RuntimeException e) {
+            log.error("Chat send failed for run={}: {}", runId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Chat failed: " + e.getMessage());
+        }
     }
 
     @PostMapping("/{runId}/apply")
-    public ResponseEntity<Map<String, Object>> applySuggestion(
+    public ResponseEntity<ApplyResponseBody> applySuggestion(
             @PathVariable String runId,
-            @RequestBody Map<String, String> body,
+            @RequestBody ApplyBody body,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(runId, userDetails);
-        throw new ResponseStatusException(HttpStatus.GONE,
-                "Apply-suggestion not yet supported in V2.");
+        if (body == null || body.suggestion() == null || body.suggestion().isBlank()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "suggestion is required");
+        }
+        try {
+            V2ApplyService.ApplyResult r = applyService.apply(
+                    runId, body.suggestion(), body.source() == null ? "COPILOT" : body.source());
+            return ResponseEntity.ok(new ApplyResponseBody(
+                    r.taskCount(),
+                    r.tasks().stream().map(t -> new ApplyTaskBody(t.taskId(), t.title())).toList(),
+                    r.workerOutcome(),
+                    r.summary()));
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        } catch (RuntimeException e) {
+            log.error("Apply failed for run={}: {}", runId, e.getMessage(), e);
+            throw new ResponseStatusException(HttpStatus.INTERNAL_SERVER_ERROR,
+                    "Apply failed: " + e.getMessage());
+        }
     }
 
     @PostMapping("/{runId}/iterate")

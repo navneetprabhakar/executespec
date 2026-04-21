@@ -61,7 +61,7 @@ export default function TaskCard({ task, runId, runStatus, subtasks }: TaskCardP
   return (
     <div className={cn(
       'rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden',
-      isSubtask && 'ml-6 border-l-2 border-l-[var(--gray-400)]'
+      isSubtask && 'ml-3 sm:ml-6 border-l-2 border-l-[var(--gray-400)]'
     )}>
       <button
         onClick={() => setOpen((v) => !v)}

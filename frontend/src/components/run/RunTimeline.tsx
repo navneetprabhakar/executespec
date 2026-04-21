@@ -16,7 +16,7 @@ interface RunTimelineProps {
 
 interface Phase {
   name: string;
-  status: 'done' | 'active' | 'pending';
+  status: 'done' | 'active' | 'pending' | 'warning' | 'failed';
   startedAt?: Date;
   completedAt?: Date;
   detail?: string;
@@ -102,12 +102,48 @@ export function RunTimeline({ events, status, taskCount, completedTaskCount }: R
     ];
   }, [events, status, taskCount, completedTaskCount]);
 
+  // v2.5.13 mobile fix — when terminal status is FAILED/PARTIAL, mark the
+  // phase that failed (the one that was active when the run terminated) so the
+  // stepper doesn't paint everything as a green check while the badge says
+  // PARTIAL/FAILED. mapStatusToPhase returns 'done' for those statuses, so we
+  // re-derive the actual failure phase from events here.
+  const terminalPhases = useMemo<Phase[]>(() => {
+    const isFailed = status === 'FAILED';
+    const isPartial = status === 'PARTIAL';
+    if (!isFailed && !isPartial) return phases;
+    // Find the last 'done' index — that's where the run actually stopped progressing.
+    const lastDoneIdx = phases.reduce((acc, p, i) => p.status === 'done' ? i : acc, -1);
+    return phases.map((p, i) => {
+      if (i === lastDoneIdx && (isFailed || isPartial)) {
+        return { ...p, status: isFailed ? 'failed' : 'warning' };
+      }
+      return p;
+    });
+  }, [phases, status]);
+
   return (
-    <div className="flex items-center gap-1 w-full overflow-x-auto py-4">
-      {phases.map((phase, i) => {
+    <div className="flex items-center gap-1 w-full overflow-x-auto py-4 px-1 scroll-smooth snap-x">
+      {terminalPhases.map((phase, i) => {
         const isSeparator = i === 6; // divider before background phases
+        const nodeBg =
+          phase.status === 'done'    ? 'bg-[var(--text-primary)] text-[var(--geist-bg)]' :
+          phase.status === 'active'  ? 'bg-accent-blue text-primary animate-pulse' :
+          phase.status === 'warning' ? 'bg-accent-amber text-primary' :
+          phase.status === 'failed'  ? 'bg-accent-red text-primary' :
+                                       'bg-[var(--gray-400)] text-secondary opacity-50';
+        const labelColor =
+          phase.status === 'active'  ? 'text-accent-blue font-semibold' :
+          phase.status === 'done'    ? 'text-secondary' :
+          phase.status === 'warning' ? 'text-accent-amber font-semibold' :
+          phase.status === 'failed'  ? 'text-accent-red font-semibold' :
+                                       'text-muted opacity-50';
+        const nodeIcon =
+          phase.status === 'done'    ? '✓' :
+          phase.status === 'failed'  ? '×' :
+          phase.status === 'warning' ? '!' :
+                                       i + 1;
         return (
-          <div key={phase.name} className="flex items-center flex-shrink-0">
+          <div key={phase.name} className="flex items-center flex-shrink-0 snap-start">
             {/* Dashed divider before background phases */}
             {isSeparator && (
               <div className="w-6 flex items-center justify-center mx-1">
@@ -117,15 +153,10 @@ export function RunTimeline({ events, status, taskCount, completedTaskCount }: R
 
             {/* Phase node */}
             <div className="flex flex-col items-center">
-              <div className={`w-7 h-7 rounded-sm flex items-center justify-center text-xs font-bold
-                ${phase.status === 'done'   ? 'bg-[var(--text-primary)] text-[var(--geist-bg)]' :
-                  phase.status === 'active' ? 'bg-accent-blue text-primary animate-pulse' :
-                  'bg-[var(--gray-400)] text-secondary opacity-50'}`}>
-                {phase.status === 'done' ? '✓' : i + 1}
+              <div className={`w-7 h-7 rounded-sm flex items-center justify-center text-xs font-bold ${nodeBg}`}>
+                {nodeIcon}
               </div>
-              <span className={`mt-1 text-xs whitespace-nowrap
-                ${phase.status === 'active' ? 'text-accent-blue font-semibold' :
-                  phase.status === 'done'   ? 'text-secondary' : 'text-muted opacity-50'}`}>
+              <span className={`mt-1 text-[10px] sm:text-xs whitespace-nowrap ${labelColor}`}>
                 {phase.name}
               </span>
               {phase.startedAt && phase.completedAt && (
@@ -136,8 +167,8 @@ export function RunTimeline({ events, status, taskCount, completedTaskCount }: R
             </div>
 
             {/* Connector line (skip after last phase and before the dashed separator) */}
-            {i < phases.length - 1 && i !== 5 && (
-              <div className={`w-8 h-0.5 mx-1 ${
+            {i < terminalPhases.length - 1 && i !== 5 && (
+              <div className={`w-6 sm:w-8 h-0.5 mx-1 ${
                 phase.status === 'done' ? 'bg-[var(--text-primary)]' : 'bg-[var(--gray-400)] opacity-50'
               }`} />
             )}

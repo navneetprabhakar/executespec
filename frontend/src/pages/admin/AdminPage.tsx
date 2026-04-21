@@ -326,7 +326,7 @@ function AdminPageInner() {
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Name / Email</th>
@@ -414,7 +414,7 @@ function AdminPageInner() {
             </div>
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Org', 'Tier', 'Status', 'Run Limit', 'API Keys', 'Usage', 'Actions'].map((h) => (
@@ -637,7 +637,7 @@ function AdminPageInner() {
                 <h3 className="text-sm font-medium text-primary">
                   {editingPkg ? `Edit: ${editingPkg.name}` : 'Create New Package'}
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                   <div>
                     <label className="block text-[10px] text-muted mb-1">Name</label>
                     <input
@@ -709,7 +709,7 @@ function AdminPageInner() {
             {/* Packages table */}
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Name', 'Runs', 'Price (INR)', 'Price (USD)', 'Order', 'Status', 'Actions'].map((h) => (
@@ -882,7 +882,7 @@ function AdminPageInner() {
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Event', 'Entity', 'Tier Change', 'Gateway', 'Amount', 'By', 'Date'].map((h) => (
@@ -959,7 +959,7 @@ function AdminPageInner() {
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Gateway', 'Event ID', 'Event Type', 'Status', 'Attempts', 'Received'].map((h) => (

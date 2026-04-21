@@ -209,8 +209,8 @@ export default function Sidebar() {
         )}
       </nav>
 
-      {/* Upgrade + Usage */}
-      {expanded && (
+      {/* Upgrade + Usage — hidden for SUPER_ADMIN since they bypass billing quotas */}
+      {expanded && !isSuperAdmin && (
         <div className="px-3 py-2 border-t border-[var(--border-default)] space-y-2">
           {tier && tier !== 'ENTERPRISE' && tier !== 'MAX' && (
             <button

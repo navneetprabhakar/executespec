@@ -414,20 +414,23 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
             {/* ── Pro-only options (hidden in Vibe mode) ────────────────────── */}
             {!isVibe && (
               <>
-                {/* Prototype Mode toggle */}
+                {/* Prototype Mode toggle — v2.5.13 colour fix.
+                    Was orange (warning) for the default-on state, which read as
+                    "danger" rather than "fast path". Switched to accent-blue so
+                    the on-state matches the rest of the UI's affirmative cues. */}
                 <div
                   role="switch"
                   aria-checked={executionMode === 'PROTOTYPE'}
                   tabIndex={0}
                   onClick={() => setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE')}
                   onKeyDown={(e) => { if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); setExecutionMode(executionMode === 'PROTOTYPE' ? 'PRODUCTION' : 'PROTOTYPE'); } }}
-                  className="flex items-center justify-between cursor-pointer select-none group"
+                  className="flex items-start gap-2 justify-between cursor-pointer select-none group"
                 >
-                  <div className="flex items-center gap-2">
-                    <Zap className={cn('h-3.5 w-3.5 transition-colors', executionMode === 'PROTOTYPE' ? 'text-accent-amber' : 'text-muted')} />
+                  <div className="flex items-start gap-2 min-w-0 flex-1">
+                    <Zap className={cn('h-3.5 w-3.5 mt-0.5 flex-shrink-0 transition-colors', executionMode === 'PROTOTYPE' ? 'text-accent-blue' : 'text-muted')} />
                     <span className="text-sm text-secondary group-hover:text-secondary transition-colors">
                       Prototype Mode
-                      <span className="text-xs text-muted ml-1.5">
+                      <span className="block sm:inline text-xs text-muted sm:ml-1.5">
                         {executionMode === 'PROTOTYPE'
                           ? '(Auto-approved, fast models, auto-preview)'
                           : '(Plan review, full validation, code review)'}
@@ -436,8 +439,8 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                   </div>
                   <span
                     className={cn(
-                      'relative h-5 w-9 rounded-full transition-colors flex-shrink-0',
-                      executionMode === 'PROTOTYPE' ? 'bg-accent-amber' : 'bg-[var(--border-default)]',
+                      'relative h-5 w-9 rounded-full transition-colors flex-shrink-0 mt-0.5',
+                      executionMode === 'PROTOTYPE' ? 'bg-accent-blue' : 'bg-[var(--border-default)]',
                     )}
                   >
                     <span className={cn(

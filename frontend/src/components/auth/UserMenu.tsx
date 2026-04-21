@@ -18,13 +18,16 @@ export default function UserMenu() {
     <div className="relative">
       <button
         onClick={() => setOpen(o => !o)}
-        className="flex items-center gap-2 rounded-sm bg-[var(--gray-400)] px-3 py-1.5 text-sm text-primary hover:bg-slate-600"
+        className="flex items-center gap-2 rounded-sm bg-[var(--gray-400)] px-2 sm:px-3 py-1.5 text-sm text-primary hover:bg-slate-600 flex-shrink-0"
       >
-        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-blue text-xs font-bold">
+        <span className="flex h-6 w-6 items-center justify-center rounded-full bg-accent-blue text-xs font-bold flex-shrink-0">
           {initials}
         </span>
         <span className="hidden sm:inline">{user.firstName}</span>
-        <TierBadge tier={user.tier} small />
+        {/* Tier chip hidden at mobile — it's already shown in the open dropdown and was eating ~60-90px of the already-crowded header */}
+        <span className="hidden md:inline">
+          <TierBadge tier={user.tier} small />
+        </span>
       </button>
 
       {open && (

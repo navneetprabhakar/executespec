@@ -41,12 +41,12 @@ export default function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
       <div className="w-full max-w-md">
-        <div className="mb-8 text-center">
-          <h1 className="text-3xl font-bold text-[var(--text-secondary)]">executespec</h1>
-          <p className="mt-2 text-muted">Multi-agent coding system</p>
+        <div className="mb-6 sm:mb-8 text-center">
+          <h1 className="text-xl sm:text-3xl font-bold text-[var(--text-secondary)]">executespec</h1>
+          <p className="mt-1 sm:mt-2 text-sm text-muted">Multi-agent coding system</p>
         </div>
-        <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] p-8 ">
-          <h2 className="mb-6 text-xl font-bold text-primary">Sign in</h2>
+        <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] p-5 sm:p-8 ">
+          <h2 className="mb-5 sm:mb-6 text-xl font-bold text-primary">Sign in</h2>
 
           {/* OAuth buttons */}
           <div className="mb-6 space-y-3">

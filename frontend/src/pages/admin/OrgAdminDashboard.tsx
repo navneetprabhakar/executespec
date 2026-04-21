@@ -135,7 +135,7 @@ export default function OrgAdminDashboard() {
       ) : (
         <>
           {/* Row 1: Stat cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <MetricCard
               label="Total Runs"
               value={usage?.totalRuns ?? 0}
@@ -249,7 +249,7 @@ export default function OrgAdminDashboard() {
               </div>
               {sortedMembers.length > 0 ? (
                 <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
+                  <table className="w-full text-xs min-w-[560px] md:min-w-0">
                     <thead>
                       <tr className="border-b border-[var(--border-default)]">
                         <th className="text-left py-2 px-2 text-muted font-medium">Name</th>
@@ -310,7 +310,7 @@ export default function OrgAdminDashboard() {
                 <DollarSign className="h-4 w-4 text-secondary" />
                 <p className="text-xs text-muted font-medium uppercase tracking-wider">Billing Overview</p>
               </div>
-              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
                 <div>
                   <p className="text-[10px] text-muted uppercase tracking-wider">Plan</p>
                   <p className="text-sm font-medium text-primary mt-0.5">

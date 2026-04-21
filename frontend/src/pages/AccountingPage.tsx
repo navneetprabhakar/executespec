@@ -107,38 +107,63 @@ export default function AccountingPage() {
       </div>
 
       {/* Trial balance */}
-      <div className="rounded-sm border border-surface-700 bg-surface-800 p-6">
+      <div className="rounded-sm border border-surface-700 bg-surface-800 p-4 sm:p-6">
         <h3 className="mb-4 text-sm font-semibold text-slate-200">Trial Balance</h3>
         {trial.length === 0 ? (
           <div className="text-sm text-muted">No entries found for this period</div>
         ) : (
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-surface-700 text-left text-xs text-muted">
-                <th className="px-4 py-2">Account</th>
-                <th className="px-4 py-2 text-right">Debit</th>
-                <th className="px-4 py-2 text-right">Credit</th>
-                <th className="px-4 py-2 text-right">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-surface-700 text-left text-xs text-muted">
+                    <th className="px-4 py-2">Account</th>
+                    <th className="px-4 py-2 text-right">Debit</th>
+                    <th className="px-4 py-2 text-right">Credit</th>
+                    <th className="px-4 py-2 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trial.map((entry) => (
+                    <tr key={entry.account} className="border-b border-surface-700/50">
+                      <td className="px-4 py-2 text-secondary">{entry.account}</td>
+                      <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.debitTotal)}</td>
+                      <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.creditTotal)}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-200">
+                        {formatPaise(Math.abs(entry.debitTotal - entry.creditTotal))}
+                        <span className="ml-1 text-xs text-muted">
+                          {entry.debitTotal > entry.creditTotal ? 'DR' : 'CR'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards — Trial Balance has 4 numeric columns that get truncated
+                to "₹2,0…" / "₹11,4…" on a 4-col table at 375px. Cards keep them all readable. */}
+            <ul className="sm:hidden divide-y divide-surface-700">
               {trial.map((entry) => (
-                <tr key={entry.account} className="border-b border-surface-700/50">
-                  <td className="px-4 py-2 text-secondary">{entry.account}</td>
-                  <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.debitTotal)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.creditTotal)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-slate-200">
-                    {formatPaise(Math.abs(entry.debitTotal - entry.creditTotal))}
-                    <span className="ml-1 text-xs text-muted">
-                      {entry.debitTotal > entry.creditTotal ? 'DR' : 'CR'}
+                <li key={entry.account} className="py-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-secondary">{entry.account}</span>
+                    <span className="font-mono text-sm text-slate-200">
+                      {formatPaise(Math.abs(entry.debitTotal - entry.creditTotal))}
+                      <span className="ml-1 text-xs text-muted">
+                        {entry.debitTotal > entry.creditTotal ? 'DR' : 'CR'}
+                      </span>
                     </span>
-                  </td>
-                </tr>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] font-mono text-muted">
+                    <span>Dr {formatPaise(entry.debitTotal)}</span>
+                    <span>Cr {formatPaise(entry.creditTotal)}</span>
+                  </div>
+                </li>
               ))}
-            </tbody>
-          </table>
-          </div>
+            </ul>
+          </>
         )}
       </div>
     </div>

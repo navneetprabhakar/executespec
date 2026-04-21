@@ -205,49 +205,49 @@ function ProjectCard({
         ? 'border-[var(--border-default)] bg-[var(--gray-100)]'
         : 'border-[var(--border-default)] bg-[#0f1117]'
     )}>
-      {/* Card header */}
+      {/* Card header — stacks to 2 rows on mobile so chips + actions don't overlap the title */}
       <div
-        className="flex items-center justify-between px-5 py-4 cursor-pointer select-none"
+        className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-5 py-3 sm:py-4 gap-3 cursor-pointer select-none"
         onClick={handleToggle}
         role="button"
         aria-expanded={expanded}
       >
-        <div className="flex items-center gap-3 min-w-0">
+        <div className="flex items-start sm:items-center gap-3 min-w-0">
           {isArchived
-            ? <FolderArchive className="h-4 w-4 text-muted flex-shrink-0" />
-            : <FolderOpen className="h-4 w-4 text-accent-blue flex-shrink-0" />
+            ? <FolderArchive className="h-4 w-4 text-muted flex-shrink-0 mt-0.5 sm:mt-0" />
+            : <FolderOpen className="h-4 w-4 text-accent-blue flex-shrink-0 mt-0.5 sm:mt-0" />
           }
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className={cn('font-semibold truncate', isArchived ? 'text-muted' : 'text-primary')}>
-                {project.name}
-              </p>
+          <div className="min-w-0 flex-1">
+            <p className={cn('font-semibold truncate', isArchived ? 'text-muted' : 'text-primary')}>
+              {project.name}
+            </p>
+            <div className="flex items-center gap-2 flex-wrap mt-1 sm:mt-0.5">
               <span className={cn(
-                'text-xs px-2 py-0.5 rounded-sm flex-shrink-0',
+                'text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-sm flex-shrink-0 uppercase tracking-wider',
                 isArchived
                   ? 'bg-[var(--gray-200)] text-muted'
                   : 'bg-emerald-900/40 text-emerald-400'
               )}>
                 {project.status}
               </span>
-              <span className="text-xs px-2 py-0.5 rounded-sm flex-shrink-0 bg-blue-900/30 text-accent-blue">
+              <span className="text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-sm flex-shrink-0 bg-blue-900/30 text-accent-blue">
                 {PROVIDER_LABELS[project.aiProvider] ?? project.aiProvider}
               </span>
             </div>
             {project.description && (
-              <p className="text-xs text-muted truncate">{project.description}</p>
+              <p className="text-xs text-muted truncate mt-1 hidden sm:block">{project.description}</p>
             )}
           </div>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0 ml-4">
+        <div className="flex items-center gap-2 flex-shrink-0 sm:ml-4 self-stretch sm:self-auto">
           {!isArchived && (
             <>
               {/* v2.5.7 UX-fix: prominent "Open" CTA so users have a clear path
                   into the project dashboard without hunting through the
-                  expanded card body. */}
+                  expanded card body. Mobile: actions take a full row below the title. */}
               <button
                 onClick={(e) => { e.stopPropagation(); navigate(`/projects/${project.id}/dashboard`); }}
-                className="flex items-center gap-1 text-xs font-medium text-accent-blue hover:text-primary border border-accent-blue/40 hover:border-accent-blue bg-accent-blue/10 hover:bg-accent-blue/20 rounded-sm px-3 py-1.5 transition-colors"
+                className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-xs font-medium text-accent-blue hover:text-primary border border-accent-blue/40 hover:border-accent-blue bg-accent-blue/10 hover:bg-accent-blue/20 rounded-sm px-3 py-1.5 transition-colors"
                 title="Open project dashboard"
               >
                 <FolderOpen className="h-3.5 w-3.5" />
@@ -255,7 +255,7 @@ function ProjectCard({
               </button>
               <button
                 onClick={(e) => { e.stopPropagation(); onViewRuns(project.id); }}
-                className="flex items-center gap-1 text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-white/20 rounded-sm px-3 py-1.5 transition-colors"
+                className="flex flex-1 sm:flex-none items-center justify-center gap-1 text-xs text-secondary hover:text-primary border border-[var(--border-default)] hover:border-white/20 rounded-sm px-3 py-1.5 transition-colors"
                 title="Filter runs to this project"
               >
                 <Eye className="h-3.5 w-3.5" />
@@ -264,8 +264,8 @@ function ProjectCard({
             </>
           )}
           {expanded
-            ? <ChevronUp className="h-4 w-4 text-muted" />
-            : <ChevronDown className="h-4 w-4 text-muted" />
+            ? <ChevronUp className="h-4 w-4 text-muted flex-shrink-0" />
+            : <ChevronDown className="h-4 w-4 text-muted flex-shrink-0" />
           }
         </div>
       </div>
@@ -427,9 +427,9 @@ export default function OrgProjectsPage() {
   const archived = projects.filter((p) => p.status === 'ARCHIVED');
 
   return (
-    <div className="h-full overflow-y-auto p-6 space-y-6">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="h-full overflow-y-auto p-4 sm:p-6 space-y-4 sm:space-y-6">
+      {/* Header — stacks on mobile so the title isn't crushed by the action buttons */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-primary">Projects</h1>
           <p className="text-sm text-muted mt-1">
