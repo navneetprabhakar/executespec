@@ -123,7 +123,7 @@ export default function ProjectMemoryPanel({ projectId }: Props) {
       </div>
 
       {/* Stats tiles */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
         <div className="rounded-sm border border-[var(--border-default)] px-2.5 py-1.5">
           <div className="text-[11px] uppercase tracking-wide text-muted">Total runs</div>
           <div className="text-sm font-mono tabular-nums">{memory.stats.totalRuns}</div>

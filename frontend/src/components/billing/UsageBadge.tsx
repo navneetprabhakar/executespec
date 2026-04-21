@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { fetchBillingStatus, type BillingStatus } from '@/lib/billing-api';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 /** Dispatch this event anywhere to force UsageBadge to refresh. */
 export const refreshUsageBadge = () =>
@@ -7,6 +8,7 @@ export const refreshUsageBadge = () =>
 
 export function UsageBadge() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
+  const user = useAuthStore((s) => s.user);
 
   const refresh = useCallback(() => {
     fetchBillingStatus().then(setStatus).catch(() => {});
@@ -23,6 +25,13 @@ export function UsageBadge() {
       window.removeEventListener('usage-badge:refresh', refresh);
     };
   }, [refresh]);
+
+  // v2.5.13 — SUPER_ADMIN doesn't operate within billing quotas; hide the badge
+  // entirely so they don't see misleading "283/10 runs" red bars when their
+  // backing billing plan is PRO but they're actually unlimited via role.
+  if (user?.globalRole === 'SUPER_ADMIN') return null;
+  // Same for ENTERPRISE / MAX users — these tiers are unlimited by spec.
+  if (user?.tier === 'ENTERPRISE' || user?.tier === 'MAX') return null;
 
   if (!status) return null;
 

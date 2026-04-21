@@ -3,53 +3,61 @@
 <head>
     <meta charset="UTF-8"/>
     <style>
+        /* v2.5.14 — PDF re-themed to match Graphite+Signal brand. Light paper
+           is kept for print legibility; brand accent is Signal Blue (was green
+           which collided with the success semantic). Green now reserved for
+           Passed/Check-passed chips only. */
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #1a1a2e; padding: 40px; }
+        body { font-family: Helvetica, Arial, sans-serif; font-size: 11px; color: #0B0D10; padding: 40px; }
 
-        /* Header */
-        .header { margin-bottom: 24px; border-bottom: 3px solid #10b981; padding-bottom: 16px; }
-        .brand { font-size: 20px; font-weight: bold; color: #10b981; }
-        .brand-sub { font-size: 10px; color: #64748b; margin-top: 2px; }
-        .title { font-size: 22px; font-weight: bold; color: #1a1a2e; margin-top: 12px; }
-        .meta { font-size: 10px; color: #64748b; margin-top: 4px; }
+        /* Header — Signal Blue accent */
+        .header { margin-bottom: 24px; border-bottom: 3px solid #5B8DEF; padding-bottom: 16px; }
+        .brand-row { display: flex; align-items: center; gap: 10px; }
+        .brand-mark { display: inline-block; width: 22px; height: 22px; border-radius: 5px;
+                      background: #5B8DEF; color: #ffffff; text-align: center; line-height: 22px;
+                      font-weight: bold; font-size: 11px; letter-spacing: 0.5px; }
+        .brand { font-size: 18px; font-weight: bold; color: #0B0D10; }
+        .brand-sub { font-size: 10px; color: #6E7785; margin-top: 2px; }
+        .title { font-size: 22px; font-weight: bold; color: #0B0D10; margin-top: 12px; letter-spacing: -0.01em; }
+        .meta { font-size: 10px; color: #6E7785; margin-top: 4px; }
 
         /* Summary box */
-        .summary-box { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 14px 16px; margin-bottom: 20px; }
+        .summary-box { background: #F3F4F6; border: 1px solid #E1E5EB; border-radius: 8px; padding: 14px 16px; margin-bottom: 20px; }
         .summary-row { display: inline-block; margin-right: 24px; }
-        .summary-label { font-size: 9px; color: #64748b; text-transform: uppercase; letter-spacing: 0.5px; }
-        .summary-value { font-size: 14px; font-weight: bold; color: #1a1a2e; margin-top: 2px; }
+        .summary-label { font-size: 9px; color: #6E7785; text-transform: uppercase; letter-spacing: 0.5px; }
+        .summary-value { font-size: 14px; font-weight: bold; color: #0B0D10; margin-top: 2px; }
 
-        /* Result badge */
-        .result-passed { color: #059669; }
-        .result-fixes { color: #d97706; }
-        .result-failed { color: #dc2626; }
+        /* Result badge — semantic-aligned (green=success, amber=partial, red=error) */
+        .result-passed { color: #10B981; }
+        .result-fixes  { color: #D97706; }
+        .result-failed { color: #DC2626; }
 
-        /* Section headings */
-        .section-title { font-size: 12px; font-weight: bold; color: #10b981; text-transform: uppercase;
-                          letter-spacing: 1px; margin: 20px 0 8px; border-bottom: 2px solid #10b981; padding-bottom: 4px; }
+        /* Section headings — Signal Blue */
+        .section-title { font-size: 12px; font-weight: bold; color: #5B8DEF; text-transform: uppercase;
+                          letter-spacing: 1px; margin: 20px 0 8px; border-bottom: 2px solid #5B8DEF; padding-bottom: 4px; }
 
         /* Issues table */
         .issues-table { width: 100%; border-collapse: collapse; margin: 10px 0; }
-        .issues-table th { background: #f1f5f9; color: #475569; font-size: 9px; text-transform: uppercase;
-                            padding: 6px 8px; text-align: left; border-bottom: 2px solid #e2e8f0; }
-        .issues-table td { padding: 6px 8px; border-bottom: 1px solid #e2e8f0; font-size: 10px; vertical-align: top; }
+        .issues-table th { background: #F3F4F6; color: #4C5662; font-size: 9px; text-transform: uppercase;
+                            padding: 6px 8px; text-align: left; border-bottom: 2px solid #E1E5EB; }
+        .issues-table td { padding: 6px 8px; border-bottom: 1px solid #E1E5EB; font-size: 10px; vertical-align: top; }
 
-        /* Severity badges */
-        .severity { font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 3px; white-space: nowrap; }
-        .sev-build { background: #fef2f2; color: #dc2626; border: 1px solid #fecaca; }
-        .sev-bug { background: #fff7ed; color: #d97706; border: 1px solid #fed7aa; }
-        .sev-review { background: #fefce8; color: #ca8a04; border: 1px solid #fef08a; }
-        .sev-lint { background: #f4f4f5; color: #71717a; border: 1px solid #d4d4d8; }
+        /* Severity badges — semantic colours */
+        .severity { font-size: 9px; font-weight: bold; padding: 2px 6px; border-radius: 4px; white-space: nowrap; }
+        .sev-build  { background: #FEF2F2; color: #DC2626; border: 1px solid #FECACA; }
+        .sev-bug    { background: #FFF7ED; color: #D97706; border: 1px solid #FED7AA; }
+        .sev-review { background: #FEFCE8; color: #CA8A04; border: 1px solid #FEF08A; }
+        .sev-lint   { background: #F3F4F6; color: #6E7785; border: 1px solid #D8DCE3; }
 
-        /* Checks */
-        .check-item { display: inline-block; margin-right: 16px; margin-bottom: 6px; font-size: 10px; color: #059669; }
-        .check-icon { color: #10b981; font-weight: bold; }
+        /* Checks (green — semantic success) */
+        .check-item { display: inline-block; margin-right: 16px; margin-bottom: 6px; font-size: 10px; color: #10B981; }
+        .check-icon { color: #10B981; font-weight: bold; }
 
         /* Report markdown (pre-rendered as plain text) */
-        .report-body { font-size: 11px; line-height: 1.6; color: #334155; white-space: pre-wrap; margin: 10px 0; }
+        .report-body { font-size: 11px; line-height: 1.6; color: #333B46; white-space: pre-wrap; margin: 10px 0; }
 
         /* Footer */
-        .footer { margin-top: 30px; border-top: 1px solid #e2e8f0; padding-top: 12px; color: #94a3b8;
+        .footer { margin-top: 30px; border-top: 1px solid #E1E5EB; padding-top: 12px; color: #8A94A6;
                    font-size: 9px; text-align: center; }
     </style>
 </head>
@@ -57,7 +65,10 @@
 
 <!-- Header -->
 <div class="header">
-    <div class="brand">ExecuteSpec</div>
+    <div class="brand-row">
+        <span class="brand-mark">ES</span>
+        <span class="brand">ExecuteSpec</span>
+    </div>
     <div class="brand-sub">Don't prompt. Specify.</div>
     <div class="title">Validation Report</div>
     <div class="meta">

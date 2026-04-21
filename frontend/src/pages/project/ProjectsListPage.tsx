@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import { FolderGit2, Sparkles, ChevronRight } from 'lucide-react';
+import { Sparkles, ChevronRight, FolderGit2 } from 'lucide-react';
+import PageShell from '@/components/shared/PageShell';
 import { getProjects, type ProjectDto } from '@/lib/api';
 import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
@@ -31,30 +32,23 @@ export default function ProjectsListPage() {
   if (!canUseProjectMode) return <Navigate to="/" replace />;
 
   return (
-    <div className="h-full overflow-y-auto">
-    <div className="mx-auto max-w-5xl p-4 space-y-4">
-      {/* Header */}
-      <div className="flex items-end justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <FolderGit2 className="h-4 w-4 text-accent-blue flex-shrink-0" />
-            <h1 className="text-[14px] font-medium text-primary">Projects</h1>
-            <span className="text-[11px] font-mono uppercase tracking-wider text-accent-blue border border-accent-blue/40 bg-accent-blue/10 px-1.5 py-0.5 rounded">
-              Enterprise · Max
-            </span>
-          </div>
-          <p className="text-xs text-muted mt-1">
-            Multi-repo workspaces with launches, pull requests, and memory.
-          </p>
-        </div>
+    <PageShell
+      eyebrow="Projects · Enterprise / Max"
+      eyebrowTone="purple"
+      title="Multi-repo workspaces."
+      accent="Multi-repo"
+      description="Run specs across one or many repos. Architecture docs, tech-debt panel, and project memory."
+      maxWidth="5xl"
+      hero
+      actions={
         <Link
           to="/org/projects"
-          className="text-xs text-muted hover:text-secondary border border-[var(--border-default)] rounded-sm px-2 py-1"
+          className="inline-flex items-center gap-1.5 text-xs text-secondary hover:text-primary border border-[var(--border-default)] rounded-md px-3 py-1.5 hover:border-accent-blue/40 hover:bg-[var(--gray-200)] transition-colors"
         >
-          Manage
+          Manage projects &rarr;
         </Link>
-      </div>
-
+      }
+    >
       {error && (
         <div className="text-xs text-accent-red border border-red-500/40 bg-red-500/10 rounded-sm px-2.5 py-1.5">
           {error}
@@ -120,7 +114,6 @@ export default function ProjectsListPage() {
           })}
         </div>
       )}
-    </div>
-    </div>
+    </PageShell>
   );
 }

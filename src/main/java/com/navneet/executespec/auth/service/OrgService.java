@@ -305,7 +305,7 @@ public class OrgService {
             java.util.Set.of("SYSTEM", "OWN_KEYS", "HYBRID");
 
     private static final java.util.Set<String> VALID_PROVIDERS =
-            java.util.Set.of("anthropic", "openai", "google");
+            java.util.Set.of("anthropic", "openai", "gemini");
 
     @Transactional
     public OrgDto updateKeySourceSettings(String orgId, String keySourceMode, java.util.List<String> enabledProviders, String actorId) {

@@ -100,6 +100,10 @@ public class SequentialExecutorV2 {
     private final AgentTaskRepository taskRepo;
     private final ModelResolver modelResolver;
     private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
+    /** Live per-task token attribution — read the accumulator on every terminal
+     *  transition so the UI's "Token Usage by Model" shows mid-run numbers
+     *  instead of waiting for the end-of-run batch flush. */
+    private final com.navneet.executespec.v2.cost.V2RunCostTracker costTracker;
 
     /** Retrieval knobs for worker-time RAG injection (v2.5.2+). Smaller than the
      *  planner's budget (k=3, 1500) so per-task cost stays bounded across many tasks. */
@@ -400,23 +404,17 @@ public class SequentialExecutorV2 {
         // before it can write, so 2× the fresh-scratch cap is the default.
         if (projectRun) maxIter *= 2;
         try {
-            LlmProvider p = LlmProvider.valueOf(mapToV1Provider(runProvider));
+            // v2.5.13 — enum + V2 strings now agree ("gemini"/"anthropic"/"openai")
+            LlmProvider p = runProvider == null
+                    ? LlmProvider.OPENAI
+                    : LlmProvider.valueOf(runProvider.toUpperCase());
             ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
-            String resolvedProvider = resolved.getActualProvider().name().toLowerCase();
-            if ("google".equals(resolvedProvider)) resolvedProvider = "gemini";
-            return new TierConfig(resolvedProvider, resolved.getModel(), maxIter, maxTokens);
+            return new TierConfig(resolved.providerName(), resolved.getModel(), maxIter, maxTokens);
         } catch (Exception e) {
             log.warn("tierConfigFor: resolve failed for provider={} tier={} — using run-level {} / {}",
                     runProvider, tier, runProvider, runModel);
             return new TierConfig(runProvider, runModel, maxIter, maxTokens);
         }
-    }
-
-    /** V2 uses "gemini"; V1 enum uses "GOOGLE". Normalize for the matrix lookup. */
-    private static String mapToV1Provider(String v2Provider) {
-        if (v2Provider == null) return "OPENAI";
-        String upper = v2Provider.toUpperCase();
-        return "GEMINI".equals(upper) ? "GOOGLE" : upper;
     }
 
     @org.springframework.transaction.annotation.Transactional
@@ -441,6 +439,36 @@ public class SequentialExecutorV2 {
             }
             var t = existing.get();
             t.setStatus(status);
+            // Timestamp live — the Timeline tab needs real per-task start/end to render
+            // staggered bars, and the end-of-run applyExecutionResultToTasks only writes
+            // completedAt + durationMs. Stamp startedAt when a task first moves to WORKING,
+            // completedAt when it reaches a terminal status. Don't overwrite existing values.
+            if ("WORKING".equals(status) && t.getStartedAt() == null) {
+                t.setStartedAt(java.time.Instant.now());
+            }
+            boolean terminal = "COMPLETE".equals(status) || "PARTIAL".equals(status)
+                    || "FAILED".equals(status) || "BLOCKED".equals(status);
+            if (terminal && t.getCompletedAt() == null) {
+                java.time.Instant now = java.time.Instant.now();
+                t.setCompletedAt(now);
+                if (t.getStartedAt() != null && t.getDurationMs() == null) {
+                    t.setDurationMs(java.time.Duration.between(t.getStartedAt(), now).toMillis());
+                }
+            }
+            // Live token flush — pull the cumulative per-task snapshot out of
+            // V2RunCostTracker so the UI sees real numbers for this task the
+            // moment it terminates, not only after the whole run ends.
+            if (terminal && costTracker != null) {
+                try {
+                    var snap = costTracker.snapshotTask(runId, taskIdShort);
+                    if (snap != null && (snap.inputTokens() > 0 || snap.outputTokens() > 0)) {
+                        t.setInputTokens(snap.inputTokens());
+                        t.setOutputTokens(snap.outputTokens());
+                    }
+                } catch (Exception snapEx) {
+                    log.debug("persistTaskStatus: snapshotTask failed for {}: {}", key, snapEx.getMessage());
+                }
+            }
             if (failureReason != null && !failureReason.isBlank()) {
                 t.setLastLlmFailure(failureReason);
             }

@@ -4,10 +4,11 @@ export default function DpaPage() {
   return (
     <div className="min-h-screen bg-[var(--geist-bg)] text-secondary">
       {/* Header */}
-      <header className="border-b border-[var(--border-default)] bg-[var(--gray-100)]">
-        <div className="max-w-3xl mx-auto px-6 py-5 flex items-center justify-between">
-          <Link to="/" className="text-lg font-bold text-[var(--text-secondary)] hover:text-accent-blue transition-colors">
-            executespec
+      <header className="border-b border-[var(--border-default)]">
+        <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between">
+          <Link to="/" className="inline-flex items-center gap-2 font-semibold text-primary hover:text-accent-blue transition-colors">
+            <span className="inline-flex items-center justify-center w-7 h-7 rounded-md bg-[var(--text-primary)] text-[var(--geist-bg)] font-mono font-bold text-xs">ES</span>
+            ExecuteSpec
           </Link>
           <nav className="flex items-center gap-4 text-sm text-muted">
             <Link to="/terms" className="hover:text-secondary transition-colors">Terms</Link>
@@ -17,9 +18,13 @@ export default function DpaPage() {
       </header>
 
       {/* Content */}
-      <main className="max-w-3xl mx-auto px-6 py-12">
-        <h1 className="text-3xl font-bold text-primary mb-2">Data Processing Agreement</h1>
-        <p className="text-sm text-muted mb-10">Last updated: March 31, 2026</p>
+      <main className="max-w-3xl mx-auto px-4 sm:px-6 py-10 sm:py-14 relative">
+        <div aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={{
+          background: 'radial-gradient(ellipse 60% 40% at 20% 0%, color-mix(in srgb, var(--accent-blue) 10%, transparent), transparent 60%)'
+        }} />
+        <span className="inline-block font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue border border-[color-mix(in_srgb,var(--accent-blue)_40%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] rounded-full px-2.5 py-0.5 mb-3">Legal</span>
+        <h1 className="text-2xl sm:text-3xl font-semibold text-primary mb-2 tracking-[-0.02em]">Data Processing Agreement</h1>
+        <p className="text-sm text-muted mb-10 font-mono">Last updated: April 21, 2026</p>
 
         <div className="space-y-10 leading-relaxed">
           {/* Intro */}

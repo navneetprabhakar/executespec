@@ -6,6 +6,7 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 // Main app pages
 import RunsPage from '@/pages/RunsPage';
 import DashboardPage from '@/pages/DashboardPage';
+import ExecSummaryPage from '@/pages/ExecSummaryPage';
 import PricingPage from '@/pages/PricingPage';
 import PlansPage from '@/pages/PlansPage';
 import BillingPage from '@/pages/BillingPage';
@@ -99,6 +100,8 @@ export default function App() {
           <Route path="audit" element={<AuditPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
           <Route path="settings" element={<SettingsPage />} />
+          {/* v2.5.14 Phase 3.1 — executive summary (business-owner persona). */}
+          <Route path="exec" element={<ExecSummaryPage />} />
 
           {/* Org pages */}
           <Route path="org/settings" element={<OrgSettingsPage />} />

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Receipt, Download, Send, CreditCard } from 'lucide-react';
+import { Download, Send, CreditCard } from 'lucide-react';
+import PageShell from '@/components/shared/PageShell';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import {
@@ -72,33 +73,34 @@ export default function InvoicesPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 sm:px-6 py-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Receipt className="h-6 w-6 text-accent-blue" />
-          <h1 className="text-xl font-semibold text-slate-100">Invoices</h1>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
+    <PageShell
+      eyebrow="Invoices"
+      title="Every receipt, right here."
+      accent="receipt,"
+      description="Download PDFs, resend to your AP team, filter by type."
+      hero
+      actions={
+        <div className="flex items-center gap-1.5 flex-wrap">
           {(['all', 'SUBSCRIPTION', 'TOPUP', 'CREDIT_NOTE'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
                 filter === f
-                  ? 'bg-accent-blue/20 text-violet-300'
-                  : 'text-muted hover:bg-surface-700 hover:text-secondary'
+                  ? 'bg-[color-mix(in_srgb,var(--accent-blue)_20%,transparent)] text-accent-blue border border-[color-mix(in_srgb,var(--accent-blue)_40%,transparent)]'
+                  : 'text-muted hover:text-secondary border border-[var(--border-default)] hover:border-[var(--border-hover)]'
               }`}
             >
               {f === 'all' ? 'All' : typeLabel(f)}
             </button>
           ))}
         </div>
-      </div>
+      }
+    >
 
-      {/* Table */}
+      {/* Table — desktop view */}
       <div className="rounded-sm border border-surface-700 bg-surface-800">
-        <div className="overflow-x-auto">
+        <div className="hidden md:block overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-surface-700 text-left text-xs text-muted">
@@ -167,6 +169,54 @@ export default function InvoicesPage() {
           </table>
         </div>
 
+        {/* Mobile cards — table doesn't survive the 375px squeeze (dates split to 3 lines, columns disappear).
+            Cards keep every field visible in a tap-friendly layout. */}
+        <ul className="md:hidden divide-y divide-surface-700">
+          {loading ? (
+            <li className="px-4 py-8 text-center text-muted text-sm">Loading...</li>
+          ) : filtered.length === 0 ? (
+            <li className="px-4 py-8 text-center text-muted text-sm">No invoices found</li>
+          ) : (
+            filtered.map((inv) => (
+              <li key={inv.id} className="px-4 py-3 space-y-2">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-xs text-secondary truncate">{inv.invoiceNumber}</p>
+                    <p className="text-[11px] text-muted mt-0.5">{inv.invoiceDate} · {typeLabel(inv.invoiceType)}</p>
+                  </div>
+                  <span className={`rounded-sm px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${statusColor(inv.status)}`}>
+                    {inv.status}
+                  </span>
+                </div>
+                {inv.description && (
+                  <p className="text-xs text-secondary line-clamp-2">{inv.description}</p>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <span className="font-mono text-sm text-slate-200">{formatPaise(inv.totalAmount)}</span>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleDownload(inv)}
+                      className="flex items-center gap-1 rounded-sm border border-surface-700 px-2.5 py-1 text-xs text-muted hover:bg-surface-700 hover:text-slate-200"
+                    >
+                      <Download className="h-3.5 w-3.5" />
+                      PDF
+                    </button>
+                    {isAdmin && (
+                      <button
+                        onClick={() => handleResend(inv)}
+                        className="flex items-center gap-1 rounded-sm border border-surface-700 px-2.5 py-1 text-xs text-muted hover:bg-surface-700 hover:text-slate-200"
+                      >
+                        <Send className="h-3.5 w-3.5" />
+                        Resend
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </li>
+            ))
+          )}
+        </ul>
+
         {/* Pagination */}
         {totalPages > 1 && (
           <div className="flex items-center justify-between border-t border-surface-700 px-4 py-3">
@@ -188,6 +238,6 @@ export default function InvoicesPage() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

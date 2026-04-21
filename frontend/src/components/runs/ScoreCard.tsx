@@ -20,8 +20,8 @@ function textColor(v: number): string {
 function Row({ label, value }: Dim) {
   if (value == null) return null;
   return (
-    <div className="flex items-center gap-3 text-[11px]">
-      <div className="w-32 text-muted">{label}</div>
+    <div className="flex items-center gap-2 sm:gap-3 text-[11px]">
+      <div className="w-24 sm:w-32 text-muted truncate">{label}</div>
       <div className="flex-1 h-2 rounded bg-[var(--border-default)]">
         <div
           className={`h-2 rounded ${barColor(value)}`}

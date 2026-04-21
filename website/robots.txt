@@ -1,0 +1,78 @@
+# ExecuteSpec — robots.txt
+# https://executespec.ai/robots.txt
+# Policy: allow all well-behaved crawlers, including LLM answer engines.
+# Training-data restrictions (if needed) should be handled via the
+# individual bot headers below, not a blanket Disallow.
+
+User-agent: *
+Allow: /
+Crawl-delay: 1
+
+# ── LLM answer-engine crawlers (explicit allow for GEO/AEO indexing) ────────
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: AppleBot-Extended
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+User-agent: FacebookBot
+Allow: /
+
+User-agent: DuckAssistBot
+Allow: /
+
+User-agent: YouBot
+Allow: /
+
+User-agent: Diffbot
+Allow: /
+
+# ── Sitemap ─────────────────────────────────────────────────────────────────
+Sitemap: https://executespec.ai/sitemap.xml
+
+# ── LLM-friendly site summary (llms.txt convention) ─────────────────────────
+# See https://llmstxt.org — our canonical product summary for AI agents.
+# Hint-only; non-standard crawler instruction.
+# llms.txt: https://executespec.ai/llms.txt

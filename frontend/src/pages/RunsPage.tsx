@@ -79,11 +79,16 @@ export default function RunsPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
-      {/* Left panel — run list (collapsible, resizable) */}
+      {/* Left panel — run list (collapsible, resizable).
+          Mobile: full viewport width so the scope toggle + status filter can
+          scroll horizontally inside the column instead of stretching the
+          column itself to their content width (was hitting 8617px, which
+          pushed the "+ New Run" button's centred label off-screen). */}
       {(!isMobile || !mobileShowDetail) && (
         <div
           className={cn(
             'relative flex-shrink-0 border-r border-[var(--border-default)] overflow-hidden transition-[width] duration-200',
+            isMobile ? 'w-full' : '',
             runListCollapsed && 'w-0 border-r-0'
           )}
           style={!isMobile && !runListCollapsed ? { width: runListWidth } : undefined}

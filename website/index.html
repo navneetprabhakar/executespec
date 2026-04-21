@@ -1,0 +1,1426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ExecuteSpec — Spec-Driven Coding Platform with Autonomous CI/CD Validation</title>
+    
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-Y6JSSQ2Y83');
+    </script>
+
+    <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
+    <meta name="description" content="ExecuteSpec is a spec-driven coding platform with multi-repo project workspaces, 0-100 verified scoring, and autonomous CI/CD validation. Link N repos, generate architecture docs, track tech debt, chat with your codebase. $20/mo for 20 credits; $29/mo + BYOK unlimited. The enterprise alternative to vibe-coding and prompt-based AI tools.">
+    <meta name="keywords" content="spec-driven coding, spec driven development, specification first coding, multi-repo AI coding, project workspace AI, architecture documentation AI, tech debt automation, autonomous coding platform, AI coding agent, enterprise code modernization, BYOK AI tools, CI/CD validation, agentic code review, automated tech debt, Lovable alternative, Bolt.new alternative, emergent.sh competitor, v0 alternative, Cursor alternative, Windsurf alternative, Claude Code alternative">
+    <meta name="author" content="ExecuteSpec">
+    <meta name="publisher" content="ExecuteSpec">
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="bingbot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
+    <meta name="rating" content="General">
+    <meta name="referrer" content="strict-origin-when-cross-origin">
+    <meta name="format-detection" content="telephone=no">
+    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#0a0a0a">
+    <meta name="color-scheme" content="dark">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ExecuteSpec">
+    <meta name="application-name" content="ExecuteSpec">
+    <meta name="generator" content="ExecuteSpec">
+    <link rel="icon" type="image/png" href="images/logo.png">
+    <link rel="apple-touch-icon" href="images/logo.png">
+    <link rel="manifest" href="/site.webmanifest">
+    <link rel="canonical" href="https://executespec.ai/">
+    <link rel="alternate" hreflang="en" href="https://executespec.ai/">
+    <link rel="alternate" hreflang="x-default" href="https://executespec.ai/">
+
+    <!-- ── Agentic Search / LLM Crawler Policy ──────────────────────────────── -->
+    <!-- Signals to major LLM crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended,
+         AppleBot-Extended) that this page is cleared for indexing + snippet use in AI
+         answers. Training restrictions are set via /robots.txt (separate file). -->
+    <meta name="GPTBot" content="index, follow">
+    <meta name="ClaudeBot" content="index, follow">
+    <meta name="PerplexityBot" content="index, follow">
+    <meta name="Google-Extended" content="index, follow">
+    <meta name="AppleBot-Extended" content="index, follow">
+    <meta name="CCBot" content="index, follow">
+
+    <!-- ── Open Graph / Twitter for Social Sharing + Chatbot Previews ───────── -->
+    <meta property="og:site_name" content="ExecuteSpec">
+    <meta property="og:title" content="ExecuteSpec — Spec-Driven Coding: Don't Prompt, Specify.">
+    <meta property="og:description" content="The spec-driven coding platform that turns structured specifications into validated, production-ready code. Multi-repo projects, 0-100 verified scoring, BYOK. $20/mo for 20 credits.">
+    <meta property="og:type" content="website">
+    <meta property="og:url" content="https://executespec.ai/">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:image" content="https://executespec.ai/images/og-hero.png">
+    <meta property="og:image:secure_url" content="https://executespec.ai/images/og-hero.png">
+    <meta property="og:image:type" content="image/png">
+    <meta property="og:image:width" content="1200">
+    <meta property="og:image:height" content="630">
+    <meta property="og:image:alt" content="ExecuteSpec — Specify once. Ship verified code. $20/mo · 20 credits · 3 providers.">
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:site" content="@executespec">
+    <meta name="twitter:creator" content="@executespec">
+    <meta name="twitter:title" content="ExecuteSpec — Spec-Driven Coding Platform">
+    <meta name="twitter:description" content="Don't Prompt. Specify. Multi-agent pipeline with 0-100 verified scoring, multi-repo projects, BYOK. $20/mo for 20 credits.">
+    <meta name="twitter:image" content="https://executespec.ai/images/og-hero.png">
+    <meta name="twitter:image:alt" content="ExecuteSpec — Specify once. Ship verified code.">
+
+    <!-- Structured Data for Agentic Search (GEO/SEO) -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "SoftwareApplication",
+      "name": "ExecuteSpec",
+      "alternateName": "ExecuteSpec Spec-Driven Coding Platform",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Cloud, Web",
+      "description": "ExecuteSpec is a spec-driven coding platform that transforms structured specifications into production-ready code with built-in CI/CD validation, agentic code reviews, and deterministic merge strategies. Unlike prompt-based AI coding tools, ExecuteSpec enforces a specification-first workflow where every generated task must pass syntax, type, lint, and unit test gates before merging. Designed as a reliable enterprise alternative to Lovable, Bolt.new, emergent.sh, Cursor, Windsurf, and Claude Code.",
+      "offers": {
+        "@type": "AggregateOffer",
+        "lowPrice": "0",
+        "highPrice": "29",
+        "priceCurrency": "USD"
+      },
+      "creator": {
+        "@type": "Organization",
+        "name": "ExecuteSpec",
+        "url": "https://executespec.ai"
+      },
+      "featureList": [
+        "Spec-driven coding with 0-100 verified scoring (deterministic, not LLM self-rating)",
+        "Autonomous CI/CD pipeline (syntax, type, lint, unit test gates)",
+        "Dual-mode execution: Prototype Mode and Production Mode",
+        "Multi-repo project workspace with architecture docs + per-repo codemaps",
+        "Project memory with auto-compaction (every new run starts from your current state)",
+        "Project chat with RAG over repos and uploaded docs",
+        "Tech debt panel with category, severity, and file hotspot tracking",
+        "Figma URL to design-compliance score",
+        "React Native + Expo codegen for Android and iOS",
+        "TDD mode (test-first task decomposition)",
+        "Bring Your Own Keys (BYOK) for Anthropic, OpenAI, and Gemini",
+        "Agentic code review with auto-fix (wiring + general passes)",
+        "JIRA and Confluence integration (Enterprise)",
+        "Execution View: multi-repo, multi-solution launches (Enterprise)",
+        "SSO/SAML, RBAC, audit trail (Enterprise)"
+      ]
+    }
+    </script>
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "FAQPage",
+      "mainEntity": [{
+        "@type": "Question",
+        "name": "What is spec-driven coding?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Spec-driven coding is a software development methodology where engineers write a structured specification (requirements, constraints, acceptance criteria) before any code is generated. Unlike prompt-based AI coding where you type informal instructions, spec-driven coding uses deterministic specifications to produce validated, testable code. ExecuteSpec is the first platform purpose-built for spec-driven coding, combining specification parsing with an autonomous CI/CD validation chain."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How is spec-driven coding different from vibe coding or prompt-based coding?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Vibe coding and prompt-based coding rely on informal natural-language prompts that produce unpredictable results. Spec-driven coding uses structured specifications with explicit requirements, constraints, and validation criteria. The key difference is determinism: spec-driven coding produces code that must pass syntax checks, type checks, linting, and unit tests before it can be merged. This makes it suitable for enterprise production codebases, not just prototypes."
+        }
+      }, {
+        "@type": "Question",
+        "name": "What makes ExecuteSpec different from other AI coding tools?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Unlike standard text-to-code generators, ExecuteSpec uses a spec-driven coding approach with a deterministic validation chain. Every AI-generated task must pass Syntax, Type, Lint, and Unit Tests before being automatically merged into the integration branch."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare as an alternative to Lovable, Bolt.new, emergent.sh, Cursor, or Windsurf?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "While pure vibe-coding tools like Lovable, Bolt.new, v0, and emergent.sh are excellent for rapid zero-to-one prototyping, their generated code often collapses under complex business logic. Conversely, agentic IDEs like Cursor, Windsurf, and Claude Code require manual human steering. ExecuteSpec is the spec-driven coding alternative: it combines autonomous code generation with a strict, automated CI/CD validation chain (Syntax, Type, Lint, Test) to ensure day-two maintainability."
+        }
+      }, {
+        "@type": "Question",
+        "name": "Does ExecuteSpec support Bring Your Own Keys (BYOK)?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. The Max tier ($29/mo + BYOK) is built entirely around BYOK. You plug in your own Anthropic, OpenAI, or Gemini API keys, get unlimited runs with zero API markup, and pay providers directly. The Pro tier ($20/mo) uses managed keys — we pay the LLM costs — with 20 credits per month where $1 = 1 credit. Credits scale with complexity: LOW/MEDIUM specs are 1 credit, HIGH specs are 4 credits, mobile (RN + Expo) specs are 2 credits. Top-up credits use the same rate ($1 = 1 credit)."
+        }
+      }, {
+        "@type": "Question",
+        "name": "What enterprise use cases does ExecuteSpec support?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "ExecuteSpec excels at clearing engineering tech debt through spec-driven coding. Key use cases include automated unit test coverage generation, clearing JIRA backlogs autonomously, and modernizing legacy frameworks (e.g., migrating Spring Boot 2.x to 3.x)."
+        }
+      }]
+    }
+    </script>
+
+    <!-- HowTo Schema for Agentic Search (AEO) — explains the spec-driven coding workflow -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "HowTo",
+      "name": "How to use spec-driven coding with ExecuteSpec",
+      "description": "A step-by-step guide to spec-driven coding: write a specification, let AI agents generate validated code, and merge deterministically.",
+      "step": [
+        {
+          "@type": "HowToStep",
+          "name": "Write a specification",
+          "text": "Define your requirements, constraints, tech stack, and acceptance criteria in a structured specification. Unlike vibe coding prompts, a spec is deterministic and reviewable."
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Review the AI-generated task plan",
+          "text": "ExecuteSpec's planning agent decomposes your spec into a sequenced DAG of atomic tasks. In Production Mode, a tech lead reviews and modifies this plan before compute is burned."
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Autonomous code generation with validation",
+          "text": "Worker agents execute each task and every output passes through a deterministic validation chain: Syntax Check, Type Check, Strict Linting, and Automated Unit Tests. Failed gates trigger automatic retries with error context injection."
+        },
+        {
+          "@type": "HowToStep",
+          "name": "Agentic code review and merge",
+          "text": "After all tasks pass validation, ReviewerAgentV2 inspects the merged codebase for critical issues and auto-fixes them. The integration branch is fast-forwarded into main only on full success."
+        }
+      ]
+    }
+    </script>
+
+    <!-- Organization Schema — named-entity resolution for LLM answer engines -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "@id": "https://executespec.ai/#organization",
+      "name": "ExecuteSpec",
+      "alternateName": "ExecuteSpec AI",
+      "url": "https://executespec.ai/",
+      "logo": {
+        "@type": "ImageObject",
+        "url": "https://executespec.ai/images/logo.png",
+        "width": 512,
+        "height": 512
+      },
+      "description": "ExecuteSpec is a spec-driven coding platform with multi-repo project workspaces, 0-100 verified scoring, and autonomous CI/CD validation. Founded by Navneet Prabhakar.",
+      "foundingDate": "2025",
+      "founder": {
+        "@type": "Person",
+        "name": "Navneet Prabhakar",
+        "jobTitle": "Founder",
+        "sameAs": ["https://www.linkedin.com/in/navneetprabhakar/"]
+      },
+      "contactPoint": [
+        {
+          "@type": "ContactPoint",
+          "email": "hello@executespec.ai",
+          "contactType": "sales"
+        },
+        {
+          "@type": "ContactPoint",
+          "email": "admin@executespec.ai",
+          "contactType": "customer support"
+        }
+      ],
+      "sameAs": [
+        "https://www.linkedin.com/company/executespec",
+        "https://www.linkedin.com/in/navneetprabhakar/"
+      ]
+    }
+    </script>
+
+    <!-- WebSite Schema — enables Google sitelinks search box + canonical entity -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebSite",
+      "@id": "https://executespec.ai/#website",
+      "url": "https://executespec.ai/",
+      "name": "ExecuteSpec",
+      "description": "Spec-driven coding platform with 0-100 verified scoring and multi-repo project workspaces.",
+      "publisher": { "@id": "https://executespec.ai/#organization" },
+      "inLanguage": "en-US"
+    }
+    </script>
+
+    <!-- Product Schema with per-tier Offers — gives LLMs precise pricing to cite -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Product",
+      "name": "ExecuteSpec",
+      "description": "Spec-driven coding platform. Plans range from Free (5 runs/month with read-only demo project) to Enterprise (unlimited + multi-repo Execution View + SSO/SAML + RBAC).",
+      "brand": { "@id": "https://executespec.ai/#organization" },
+      "category": "Developer Tools",
+      "image": "https://executespec.ai/images/og-hero.png",
+      "offers": [
+        {
+          "@type": "Offer",
+          "name": "Free",
+          "description": "5 runs/month, 1-credit specs only, all 3 providers (managed keys), read-only demo project, 30-day retention.",
+          "price": "0",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "https://executespec.ai/#pricing",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "0",
+            "priceCurrency": "USD",
+            "unitText": "MONTH",
+            "billingIncrement": "P1M"
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "Pro",
+          "description": "20 credits per month ($1 = 1 credit), 2 projects with 2 repos each, architecture docs, Figma design-compliance score, TDD mode, GitHub push, Slack DMs, 90-day retention.",
+          "price": "20",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "https://executespec.ai/#pricing",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "20",
+            "priceCurrency": "USD",
+            "unitText": "MONTH",
+            "billingIncrement": "P1M"
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "Max",
+          "description": "Unlimited runs (fair use) with BYOK (zero API markup), 10 projects with 10 repos each, tech-debt panel, project memory, project chat, workspace health detection, permanent Cloud Run deployments, Slack channel routing.",
+          "price": "29",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "https://executespec.ai/#pricing",
+          "priceSpecification": {
+            "@type": "UnitPriceSpecification",
+            "price": "29",
+            "priceCurrency": "USD",
+            "unitText": "MONTH",
+            "billingIncrement": "P1M"
+          }
+        },
+        {
+          "@type": "Offer",
+          "name": "Enterprise",
+          "description": "Everything in Max plus unlimited projects + repos, Execution View (multi-repo multi-solution launches), cross-repo handover, org-wide spec templates, JIRA + Confluence inbound, ServiceNow + PagerDuty, SSO/SAML + RBAC + audit trail, dedicated Slack + custom SLA, signed DPA.",
+          "price": "0",
+          "priceCurrency": "USD",
+          "availability": "https://schema.org/InStock",
+          "url": "mailto:hello@executespec.ai",
+          "priceSpecification": {
+            "@type": "PriceSpecification",
+            "priceCurrency": "USD",
+            "description": "Custom enterprise pricing — contact hello@executespec.ai"
+          }
+        }
+      ]
+    }
+    </script>
+
+    <!-- BreadcrumbList — helps crawlers understand the single-page structure -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "BreadcrumbList",
+      "itemListElement": [
+        { "@type": "ListItem", "position": 1, "name": "Home", "item": "https://executespec.ai/" },
+        { "@type": "ListItem", "position": 2, "name": "Project Workspace", "item": "https://executespec.ai/#project-workspace" },
+        { "@type": "ListItem", "position": 3, "name": "Dual-Mode Execution", "item": "https://executespec.ai/#dual-mode" },
+        { "@type": "ListItem", "position": 4, "name": "Quality Gates", "item": "https://executespec.ai/#quality" },
+        { "@type": "ListItem", "position": 5, "name": "Pricing", "item": "https://executespec.ai/#pricing" },
+        { "@type": "ListItem", "position": 6, "name": "FAQ", "item": "https://executespec.ai/#faq" }
+      ]
+    }
+    </script>
+
+    <!-- DefinedTermSet — glossary of terms LLMs often mis-define. Helps GEO (Generative
+         Engine Optimization) by giving answer engines our canonical definition of each
+         domain term so citations come back accurate. -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "DefinedTermSet",
+      "name": "ExecuteSpec Glossary",
+      "hasDefinedTerm": [
+        {
+          "@type": "DefinedTerm",
+          "name": "Spec-driven coding",
+          "description": "A software-development workflow where engineers write a structured specification (requirements, constraints, acceptance criteria) before any code is generated. Produces validated, testable code via deterministic LLM pipelines — the opposite of prompt-based 'vibe coding'.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Verified score",
+          "description": "A 0-100 score produced at the end of every ExecuteSpec run, derived deterministically from final-build status (20 points), test pass rate (20 points scaled), reviewer verdict (CLEAN=20 / FIXED=15 / UNRESOLVED=5 / FAILED=0), a 40-point baseline, minus 5 per unfixed critical issue. Distinct from LLM self-rating.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Project workspace",
+          "description": "A per-project container that links one or more GitHub repos, maintains per-repo codemaps, a combined architecture document, a tech-debt panel, a project memory ledger, and RAG-powered project chat. Available on Pro, Max, and Enterprise tiers.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Dual-Mode Execution",
+          "description": "ExecuteSpec's two run modes: Prototype Mode (auto-approved plans, fast models like Haiku or Flash, syntax validation only, instant Cloud Run preview) and Production Mode (tech-lead plan review, full Syntax/Type/Lint/Unit-Test validation chain, capable models like Opus or Sonnet, integration branch merging).",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Credit",
+          "description": "The unit of run allocation on ExecuteSpec. $1 = 1 credit across subscription and top-up pricing. Credits per run scale by spec complexity: LOW and MEDIUM specs cost 1 credit, HIGH specs cost 4 credits, React Native + Expo mobile specs cost 2 credits. The exact cost is shown at plan approval before any work starts.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "BYOK",
+          "description": "Bring Your Own Keys. ExecuteSpec's Max tier ($29/month + BYOK) and Enterprise tier let customers plug in their own Anthropic, OpenAI, or Gemini API keys. ExecuteSpec adds zero markup to provider costs; customers pay the provider directly.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        },
+        {
+          "@type": "DefinedTerm",
+          "name": "Execution View",
+          "description": "An Enterprise-tier feature for multi-repo, multi-solution launches. Decomposes a single feature across multiple linked repos, tracks cross-repo handovers and dependencies, and opens coordinated pull requests per repo with cross-links. Backend, frontend, and infra move together in one launch.",
+          "inDefinedTermSet": "https://executespec.ai/#glossary"
+        }
+      ]
+    }
+    </script>
+
+    <!-- Preconnect hints for third-party origins used on this page -->
+    <link rel="preconnect" href="https://dev.executespec.ai" crossorigin>
+    <link rel="dns-prefetch" href="https://dev.executespec.ai">
+    <link rel="dns-prefetch" href="https://www.googletagmanager.com">
+    <link rel="dns-prefetch" href="https://www.google-analytics.com">
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Instrument+Serif:ital@1&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <style>
+        /* v2.5.14 — aligned with ExecuteSpec app Graphite + Signal palette.
+           Keeps hero orange→yellow gradient (brand equity) + serif italic;
+           everything else matches the product. */
+        :root {
+            --bg: #0B0D10;
+            --surface: #14171C;
+            --surface-2: #1B1F26;
+            --surface-border: #242A33;
+            --text-main: #ECEEF2;
+            --text-muted: #8A94A6;
+            --text-secondary: #C9D1DB;
+            --blue: #5B8DEF;
+            --blue-light: #7AA5F5;
+            --purple: #A78BFA;
+            --orange: #F97316;
+            --yellow: #FBBF24;
+            --green: #10B981;
+            --red: #F26D6D;
+            --brand-grad: linear-gradient(135deg, #5B8DEF 0%, #7AD1C8 100%);
+            --font-body: 'DM Sans', sans-serif;
+            --font-mono: 'JetBrains Mono', monospace;
+            --font-serif: 'Instrument Serif', serif;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        html { scroll-behavior: smooth; }
+        body {
+            font-family: var(--font-body);
+            background-color: var(--bg);
+            color: var(--text-main);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+        a { color: inherit; text-decoration: none; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+        /* Typography */
+        .h1 { font-size: clamp(3rem, 7vw, 5rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.04em; }
+        .h2 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; }
+        .subtitle { font-size: clamp(1.1rem, 2vw, 1.25rem); color: var(--text-muted); max-width: 750px; }
+        .mono { font-family: var(--font-mono); font-size: 0.9rem; }
+        
+        /* Gradients */
+        .text-gradient-blue { background: linear-gradient(to right, var(--blue), var(--purple)); -webkit-background-clip: text; color: transparent; }
+        .text-gradient-orange { background: linear-gradient(to right, var(--orange), var(--yellow)); -webkit-background-clip: text; color: transparent; }
+        /* v2.5.14 — `bg-gradient-blue` kept as legacy alias; points to new brand gradient so existing CTA markup gets the updated look. */
+        .bg-gradient-blue { background: var(--brand-grad); color: #ffffff; border: none; box-shadow: 0 4px 14px rgba(91,141,239,0.30); }
+
+        /* Navigation */
+        nav {
+            position: fixed; top: 0; width: 100%; z-index: 100; padding: 20px 0; transition: all 0.3s ease;
+            background: rgba(6, 6, 10, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--surface-border);
+        }
+        .nav-inner { display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 1.2rem; }
+        /* v2.5.14 — logo uses brand gradient to match in-app ES mark. */
+        .logo-box { width: 32px; height: 32px; background: var(--brand-grad); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 900; font-family: var(--font-mono); box-shadow: 0 2px 8px rgba(91,141,239,0.25);}
+        .nav-links { display: flex; gap: 32px; align-items: center; }
+        .nav-links a:not(.btn) { font-size: 0.95rem; color: var(--text-muted); transition: color 0.2s; font-weight: 500;}
+        .nav-links a:not(.btn):hover { color: var(--text-main); }
+
+        /* Buttons — v2.5.14 collapsed to 2 variants: primary gradient + ghost.
+           `btn-white` kept for secondary-CTA slots that already use it. */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; padding: 12px 24px;
+            border-radius: 8px; font-weight: 600; font-size: 0.95rem; transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s;
+            cursor: pointer; border: none; text-decoration: none;
+        }
+        .btn:hover { transform: translateY(-2px); opacity: 0.92; }
+        .btn-primary { background: var(--brand-grad); color: #ffffff; box-shadow: 0 4px 14px rgba(91,141,239,0.30); }
+        .btn-primary:hover { box-shadow: 0 6px 20px rgba(91,141,239,0.45); }
+        .btn-white { background: var(--text-main); color: var(--bg); }
+        .btn-ghost { border: 1px solid var(--surface-border); color: var(--text-main); background: transparent; }
+        .btn-ghost:hover { background: var(--surface); border-color: var(--blue); }
+
+        /* Hero */
+        .hero {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            text-align: center; position: relative; padding-top: 80px;
+        }
+        .hero-bg {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background-image: 
+                radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
+                linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px), 
+                linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
+            background-size: 100% 100%, 40px 40px, 40px 40px;
+            z-index: -1;
+        }
+        .hero-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 40px; }
+        
+        /* Layout */
+        section { padding: 100px 0; border-bottom: 1px solid var(--surface-border); }
+        .section-header { margin-bottom: 64px; }
+        .section-label { display: inline-block; margin-bottom: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85rem;}
+
+        /* Dual Mode Comparison */
+        .dual-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .mode-card {
+            background: var(--surface); border: 1px solid var(--surface-border);
+            padding: 40px; border-radius: 16px; position: relative; overflow: hidden;
+            transition: border-color 0.3s ease;
+        }
+        .mode-card:hover { border-color: var(--text-muted); }
+        .mode-icon { font-size: 2rem; margin-bottom: 24px; display: inline-block; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); }
+        .mode-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 12px; }
+        .mode-desc { color: var(--text-muted); margin-bottom: 32px; min-height: 50px;}
+        .feature-list { list-style: none; margin: 0; padding: 0; }
+        .feature-list li { margin-bottom: 16px; display: flex; gap: 12px; color: var(--text-muted); align-items: flex-start;}
+        .feature-list li strong { color: var(--text-main); display: block;}
+        .check-icon { color: var(--green); font-weight: bold; margin-top: 2px;}
+
+        /* Terminal UI */
+        .terminal {
+            background: #0c0c12; border: 1px solid var(--surface-border); border-radius: 12px;
+            padding: 24px; font-family: var(--font-mono); font-size: 0.9rem; line-height: 1.8;
+            overflow-x: auto; box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+        }
+        .term-header { display: flex; gap: 8px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #232336;}
+        .term-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .term-prompt { color: var(--blue-light); }
+        .term-success { color: var(--green); }
+        .term-error { color: var(--red); }
+        .term-warn { color: var(--yellow); }
+        .term-muted { color: var(--text-muted); }
+
+        /* Feature Grid */
+        .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+        .feature-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 32px; border-radius: 12px; }
+        .feature-card h3 { font-size: 1.2rem; margin-bottom: 12px; }
+        .feature-card p { color: var(--text-muted); font-size: 0.95rem; }
+
+        /* Pricing */
+        .pricing-controls { display: flex; justify-content: center; align-items: center; margin-bottom: 48px; }
+        .currency-toggle { display: flex; align-items: center; gap: 12px; font-size: 0.95rem; color: var(--text-muted); font-weight: 500;}
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--surface); border: 1px solid var(--surface-border); transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: var(--text-muted); transition: .4s; border-radius: 50%; }
+        input:checked + .slider:before { transform: translateX(20px); background-color: var(--text-main); }
+        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+        .price-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 40px; border-radius: 16px; display: flex; flex-direction: column; }
+        .price-card.popular { border-color: var(--blue); background: linear-gradient(180deg, rgba(91,141,239,0.08) 0%, transparent 100%); box-shadow: 0 8px 32px rgba(91,141,239,0.10); }
+        .price-amount { font-size: 3rem; font-weight: 700; margin: 16px 0; font-family: var(--font-mono); }
+        .price-amount span { font-size: 1rem; color: var(--text-muted); font-family: var(--font-body); font-weight: 400; }
+        .price-card .btn { margin-top: auto; width: 100%; }
+
+        /* FAQ */
+        .faq-grid { display: flex; flex-direction: column; gap: 16px; max-width: 800px; margin: 0 auto; }
+        .faq-item { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; overflow: hidden; }
+        .faq-item summary { padding: 24px; font-weight: 700; font-size: 1.1rem; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after { content: '+'; color: var(--blue-light); font-size: 1.5rem; transition: transform 0.2s; font-family: var(--font-mono); font-weight: 400;}
+        .faq-item[open] summary::after { transform: rotate(45deg); }
+        .faq-answer { padding: 0 24px 24px 24px; color: var(--text-muted); font-size: 0.95rem; line-height: 1.6; }
+
+        /* About & Contact */
+        .founder-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 40px; border-radius: 16px; max-width: 800px; margin: 0 auto; text-align: left; }
+        .founder-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
+        .founder-avatar { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 2px solid var(--surface-border); flex-shrink: 0; }
+        .founder-name { font-size: 1.5rem; font-weight: 700; }
+        .founder-title { color: var(--text-muted); }
+        .company-info { margin-top: 32px; padding-top: 32px; border-top: 1px solid var(--surface-border); color: var(--text-muted); font-size: 0.95rem; }
+        .contact-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 24px; max-width: 800px; margin: 0 auto; }
+        .contact-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 32px; border-radius: 12px; text-align: center; }
+
+        /* Legal Sections */
+        .legal-content { max-width: 800px; margin: 0 auto; text-align: left; }
+        .legal-collapse { max-width: 800px; margin: 0 auto; }
+        .legal-collapse summary { cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; padding: 16px 0; font-size: 1rem; color: var(--text-muted); font-weight: 500; }
+        .legal-collapse summary::-webkit-details-marker { display: none; }
+        .legal-collapse summary::after { content: 'Expand ↓'; font-family: var(--font-mono); font-size: 0.8rem; color: var(--blue-light); transition: all 0.2s; }
+        .legal-collapse[open] summary::after { content: 'Collapse ↑'; }
+        .legal-collapse .legal-content { padding-top: 16px; }
+        .legal-content .legal-section { margin-bottom: 40px; }
+        .legal-content .legal-section:last-child { margin-bottom: 0; }
+        .legal-content h3 { font-size: 1.15rem; font-weight: 700; margin-bottom: 12px; }
+        .legal-content p { color: var(--text-muted); font-size: 0.95rem; line-height: 1.7; margin-bottom: 12px; }
+        .legal-content p:last-child { margin-bottom: 0; }
+        .legal-content ul { list-style: disc; padding-left: 24px; margin: 12px 0; }
+        .legal-content ul li { color: var(--text-muted); font-size: 0.95rem; line-height: 1.7; margin-bottom: 8px; }
+        .legal-content ul li strong { color: var(--text-main); font-weight: 600; }
+        .legal-content a { color: var(--blue-light); font-weight: 500; }
+        .legal-content a:hover { text-decoration: underline; }
+        .legal-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.9rem; }
+        .legal-table th { text-align: left; padding: 10px 16px; background: var(--surface); color: var(--text-muted); font-weight: 600; border-bottom: 1px solid var(--surface-border); }
+        .legal-table td { padding: 10px 16px; color: var(--text-muted); border-bottom: 1px solid var(--surface-border); }
+        .legal-updated { font-size: 0.85rem; color: var(--text-muted); margin-bottom: 32px; font-family: var(--font-mono); }
+
+        /* Footer */
+        footer { padding: 40px 0; border-top: 1px solid var(--surface-border); font-size: 0.9rem; color: var(--text-muted); text-align: center; }
+
+        /* v2.5.14 — responsive ladder replacing the single 900px breakpoint.
+           Tablet (640-1023) kept in a dense single-column layout so content
+           doesn't clip; hamburger nav for <1024; desktop polish ≥1280. */
+
+        /* Hamburger — hidden on desktop */
+        .nav-hamburger {
+            display: none; background: transparent; border: 1px solid var(--surface-border);
+            color: var(--text-main); padding: 10px 12px; border-radius: 8px; cursor: pointer;
+            font-family: var(--font-mono); font-size: 0.9rem;
+        }
+        .nav-hamburger:hover { border-color: var(--blue); }
+        .mobile-drawer {
+            position: fixed; inset: 0; background: rgba(11,13,16,0.92); backdrop-filter: blur(12px);
+            z-index: 200; display: none; flex-direction: column; gap: 8px; padding: 80px 24px 24px;
+        }
+        .mobile-drawer.open { display: flex; }
+        .mobile-drawer a {
+            padding: 14px 16px; border-radius: 8px; border: 1px solid var(--surface-border);
+            color: var(--text-main); font-size: 1rem; font-weight: 500;
+        }
+        .mobile-drawer a:hover { border-color: var(--blue); background: var(--surface); }
+        .mobile-drawer-close {
+            position: absolute; top: 24px; right: 24px; background: transparent; border: 1px solid var(--surface-border);
+            color: var(--text-main); padding: 8px 12px; border-radius: 8px; cursor: pointer; font-family: var(--font-mono);
+        }
+
+        /* Small phone */
+        @media (max-width: 640px) {
+            .container { padding: 0 16px; }
+            section { padding: 64px 0; }
+            .section-header { margin-bottom: 40px; }
+            .h1 { font-size: 2.4rem; }
+            .mode-card { padding: 28px; }
+            .price-card { padding: 28px; }
+            .hero-buttons { flex-direction: column; }
+            .hero-buttons .btn { width: 100%; }
+        }
+
+        /* Tablet + small laptop */
+        @media (max-width: 1023px) {
+            .dual-mode-grid { grid-template-columns: 1fr; }
+            .nav-links { display: none; }
+            .nav-hamburger { display: inline-flex; }
+            .pricing-grid { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+        }
+
+        /* Large desktop — a bit more air */
+        @media (min-width: 1280px) {
+            .container { max-width: 1200px; }
+            section { padding: 120px 0; }
+        }
+    </style>
+</head>
+<body>
+
+    <nav id="navbar">
+        <div class="container nav-inner">
+            <a href="#" class="logo" aria-label="ExecuteSpec home">
+                <div class="logo-box">E</div>
+                ExecuteSpec
+            </a>
+            <div class="nav-links">
+                <a href="#project-workspace">Project Workspace</a>
+                <a href="#dual-mode">Dual-Mode</a>
+                <a href="#quality">Quality Gates</a>
+                <a href="#use-cases">Enterprise Chores</a>
+                <a href="#pricing">Pricing</a>
+                <a href="#faq">FAQ</a>
+                <a href="https://dev.executespec.ai" class="btn btn-primary" target="_blank">Try Free</a>
+            </div>
+            <button class="nav-hamburger" aria-label="Open menu" onclick="document.getElementById('mobileDrawer').classList.add('open')">Menu</button>
+        </div>
+    </nav>
+
+    <!-- v2.5.14 — mobile drawer. Replaces the vanished <900px nav. -->
+    <div id="mobileDrawer" class="mobile-drawer" role="dialog" aria-label="Navigation">
+        <button class="mobile-drawer-close" aria-label="Close menu" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Close</button>
+        <a href="#project-workspace" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Project Workspace</a>
+        <a href="#dual-mode" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Dual-Mode Execution</a>
+        <a href="#quality" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Quality Gates</a>
+        <a href="#use-cases" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Enterprise Chores</a>
+        <a href="#pricing" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Pricing</a>
+        <a href="#faq" onclick="document.getElementById('mobileDrawer').classList.remove('open')">FAQ</a>
+        <a href="#about" onclick="document.getElementById('mobileDrawer').classList.remove('open')">About</a>
+        <a href="https://dev.executespec.ai" class="btn btn-primary" style="margin-top:8px;" target="_blank">Try Free</a>
+    </div>
+
+    <section class="hero">
+        <div class="hero-bg"></div>
+        <div class="container" style="max-width: 900px;">
+            <a href="https://dev.executespec.ai" target="_blank" style="text-decoration: none;"><span class="section-label mono" style="color: var(--yellow); border: 1px solid var(--yellow); padding: 4px 12px; border-radius: 20px;">Beta Live — Try Free →</span></a>
+            <h1 class="h1" style="margin-top: 24px;">
+                Stop babysitting <br>
+                <span class="text-gradient-orange">your AI.</span>
+            </h1>
+            <p class="subtitle" style="margin: 24px auto 0;">
+                ExecuteSpec is the spec-driven coding platform with built-in CI/CD validation, agentic code reviews, and deterministic merge strategies. Don't prompt. Specify.
+            </p>
+            <div class="hero-buttons">
+                <a href="https://dev.executespec.ai" class="btn btn-primary" target="_blank">Try Free — 5 Runs</a>
+                <a href="#pricing" class="btn btn-ghost">View Pricing ↓</a>
+            </div>
+            <!-- v2.5.14 — proof strip. Replace with real stats once we expose them. -->
+            <p style="margin-top:28px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
+                5 free runs · full project workspace · verified score · no credit card
+            </p>
+        </div>
+    </section>
+
+    <!-- Dual Mode Strategy -->
+    <section id="dual-mode">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--purple);">Execution Architecture</span>
+                <h2 class="h2">Two modes. One powerful engine.</h2>
+                <p class="subtitle" style="margin: 0 auto;">Spec-driven coding gets you to production. Vibe coding gets you started. Choose your execution mode at the point of run submission.</p>
+            </div>
+
+            <div class="dual-mode-grid">
+                <!-- Prototype Mode -->
+                <div class="mode-card" style="border-top: 4px solid var(--orange);">
+                    <div class="mode-icon">⚡</div>
+                    <h3 class="mode-title">Prototype Mode</h3>
+                    <p class="mode-desc">For zero-to-one exploration and weekend projects. Maximize speed and lower token costs.</p>
+                    <ul class="feature-list">
+                        <li><span class="check-icon">✓</span> <div><strong>Bypass Human Gates</strong> Auto-approved task plans go straight to execution.</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Fast-Tier Models</strong> Locked to Haiku and Flash for sub-second agentic loops.</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Syntax Validation Only</strong> Skips heavy unit tests and strict linting to prioritize momentum.</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Instant Preview</strong> Automatically deploys an ephemeral Cloud Run container URL the moment tasks finish.</div></li>
+                    </ul>
+                </div>
+
+                <!-- Production Mode -->
+                <div class="mode-card" style="border-top: 4px solid var(--blue);">
+                    <div class="mode-icon">🛡️</div>
+                    <h3 class="mode-title">Production Mode</h3>
+                    <p class="mode-desc">For enterprise teams clearing tech debt. Enforce rigor, validate builds, and prevent hallucinations.</p>
+                    <ul class="feature-list">
+                        <li><span class="check-icon">✓</span> <div><strong>Enforced Plan Review</strong> Tech leads review and modify the AI's JSON task plan before burning compute.</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Deep Validation Chain</strong> Runs Syntax, Type, Lint, and Unit Tests per-task. Hooks violations block merges.</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Integration Branch Merging</strong> Tasks merge to an isolated branch. Main is updated only via fast-forward on full success.</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Agentic Review & Auto-Fix</strong> ReviewerAgentV2 inspects merged code, flags critical issues, and auto-fixes before final reporting.</div></li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Project Workspace — key offering (v3 positioning). Sits directly after Dual-Mode
+         so the two platform primitives (how you run · where your work lives) pair visually. -->
+    <section id="project-workspace" style="background: var(--bg);">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--blue);">Project Workspace</span>
+                <span class="section-label mono" style="color: var(--green); border: 1px solid var(--green); padding: 4px 12px; border-radius: 20px; margin-left: 12px;">Included on every paid tier</span>
+                <h2 class="h2" style="margin-top: 16px;">Your codebase, made AI-shaped.</h2>
+                <p class="subtitle" style="margin: 0 auto;">Most AI coding tools stare at the file you pasted in. ExecuteSpec understands the whole project — multiple repos, architecture, past work, tech debt — so every run builds on what's already there. Available on Pro, Max, and Enterprise; Free gets a read-only demo project to see the shape.</p>
+            </div>
+
+            <div class="feature-grid" style="margin-top: 40px;">
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <h3>Link multiple repos</h3>
+                    <p>One project, many repos. Org-scope repos (shared across the team) or user-scope (your side-projects). Each repo gets its own codemap; the project gets a combined architecture doc that stays in sync via GitHub webhooks.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <h3>Architecture as a living doc</h3>
+                    <p>3-step pipeline: per-repo codemap → per-repo HLD+LLD → combined project arch. Idempotent by SHA, so re-running when nothing changed costs nothing. Diff any two versions line-by-line with source-file changes from GitHub's compare API.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <h3>Verified score trend</h3>
+                    <p>Dashboard charts your project's 6-dimension score trend over time (code quality, test coverage, architecture, security, performance, design compliance). Watch quality actually move — not a vibe-check.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">MAX &middot; ENTERPRISE</div>
+                    <h3>Tech-debt panel + hotspots</h3>
+                    <p>Issues-by-category (LOGIC / SECURITY / PERFORMANCE / DESIGN) with severity chips, top-5 file hotspots, and a 30-day dimension trend chart. No extra LLM calls — derived from your existing validation reports.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">MAX &middot; ENTERPRISE</div>
+                    <h3>Project memory, compacted</h3>
+                    <p>Every completed run appends a caveman-English digest to the project ledger. Every 10 runs, the ledger is re-summarised into a bounded snapshot — so planner context stays small no matter how old your project gets.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">MAX &middot; ENTERPRISE</div>
+                    <h3>Project chat</h3>
+                    <p>Ask questions about your project's architecture, past decisions, or uploaded PRDs. Chat indexes your codemaps, arch docs, and any Tika-extractable documents (PDF, Confluence exports, markdown).</p>
+                </div>
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--purple); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">ENTERPRISE ONLY</div>
+                    <h3>Execution View</h3>
+                    <p>Multi-repo, multi-solution launches. Decompose a feature across repos, track cross-repo handovers, open coordinated PRs per repo with cross-links. Backend, frontend, and infra move together.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <h3>Spec templates</h3>
+                    <p>Save what works as a template: project-scoped on Pro/Max, or org-wide on Enterprise. Pick a template from the launch screen and customise in place. Stop re-typing the same "here's our coding style" preamble for every run.</p>
+                </div>
+            </div>
+
+            <div style="text-align: center; margin-top: 48px; padding: 24px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 16px; max-width: 900px; margin-left: auto; margin-right: auto;">
+                <div class="mono" style="color: var(--text-muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">Project limits by tier</div>
+                <div style="display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; font-size: 0.9rem;">
+                    <div><strong style="color: var(--text-muted);">Free</strong> &middot; 1 demo project (read-only)</div>
+                    <div><strong style="color: var(--blue-light);">Pro</strong> &middot; 2 projects &middot; 2 repos each</div>
+                    <div><strong style="color: var(--orange);">Max</strong> &middot; 10 projects &middot; 10 repos each</div>
+                    <div><strong style="color: var(--purple);">Enterprise</strong> &middot; Unlimited + Execution View</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quality & Testing Pipeline -->
+    <section id="quality" style="background: #09090e;">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--green);">Deterministic Quality</span>
+                <h2 class="h2">Testing is not an afterthought.</h2>
+                <p class="subtitle" style="margin: 0 auto;">ExecuteSpec forces LLMs to prove their code works. Every task passes through a strict, multi-stage validation chain before it can be merged into your codebase.</p>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-card" style="border-top: 4px solid var(--surface-border); background: var(--bg);">
+                    <div class="mono" style="color: var(--blue-light); margin-bottom: 12px;">Gate 01</div>
+                    <h3 style="margin-bottom: 8px;">Syntax & Type Check</h3>
+                    <p class="text-muted">Runs `tsc`, `mypy`, or `javac` natively on modified files. Type mismatches immediately block the merge, injecting the raw compiler errors back into the worker's context for an automatic retry.</p>
+                </div>
+                <div class="feature-card" style="border-top: 4px solid var(--surface-border); background: var(--bg);">
+                    <div class="mono" style="color: var(--blue-light); margin-bottom: 12px;">Gate 02</div>
+                    <h3 style="margin-bottom: 8px;">Strict Linting</h3>
+                    <p class="text-muted">Enforces architectural rules. For example, React hook violations (`rules-of-hooks`) are treated as fatal errors, preventing spaghetti code from ever reaching the integration branch.</p>
+                </div>
+                <div class="feature-card" style="border-top: 4px solid var(--surface-border); background: var(--bg);">
+                    <div class="mono" style="color: var(--blue-light); margin-bottom: 12px;">Gate 03</div>
+                    <h3 style="margin-bottom: 8px;">Automated Unit Tests</h3>
+                    <p class="text-muted">The `TestGenAgent` generates and executes JUnit, Vitest, or PyTest suites in parallel. Code is only merged if the newly written tests pass and hit your coverage mandates.</p>
+                </div>
+                <div class="feature-card" style="border-top: 4px solid var(--surface-border); background: var(--bg);">
+                    <div class="mono" style="color: var(--blue-light); margin-bottom: 12px;">Gate 04</div>
+                    <h3 style="margin-bottom: 8px;">Reviewer & Auto-Fix</h3>
+                    <p class="text-muted">After merging, `ReviewerAgentV2` inspects the codebase, flags critical vulnerabilities, and automatically applies patches via an escalated model tier (e.g., Haiku → Sonnet).</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Enterprise Chores -->
+    <section id="use-cases" style="background: var(--surface);">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-label mono" style="color: var(--green);">Enterprise Chores</span>
+                <h2 class="h2">Automate the engineering work humans hate.</h2>
+                <p class="subtitle">ExecuteSpec isn't just for building new apps. It's a ruthless, tireless digital engineering team that clears your backlog.</p>
+            </div>
+
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>🧪 Automate Test Coverage</h3>
+                    <p>Point ExecuteSpec at an uncovered Java or React repository. The <code>ApiTestSuiteAgent</code> will systematically generate mocked, passing unit tests (JUnit/Vitest) to hit your 80% coverage mandate.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🎫 Clear the JIRA Backlog</h3>
+                    <p>Stop copy-pasting specs. Mention a JIRA ticket (e.g., <code>AUTH-42</code>) in your prompt. The platform authenticates, extracts the acceptance criteria, drafts a deterministic plan, and executes the fix.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🏗️ Modernize Legacy Frameworks</h3>
+                    <p>Need to upgrade Spring Boot 2.x to 3.x, or migrate old React classes to hooks? ExecuteSpec performs deterministic, file-by-file refactoring with progressive validation gates.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- The Moat (Terminal UI) -->
+    <section id="engine">
+        <div class="container">
+            <div class="section-header">
+                <span class="section-label mono" style="color: var(--blue-light);">Under the Hood</span>
+                <h2 class="h2">Why our code actually compiles.</h2>
+                <p class="subtitle">Generic AI coding tools overwrite files blindly. ExecuteSpec relies on a sequential DAG executor, per-task validation chains, and smart context handling.</p>
+            </div>
+
+            <div class="terminal">
+                <div class="term-header">
+                    <div class="term-dot" style="background: var(--red);"></div>
+                    <div class="term-dot" style="background: #f59e0b;"></div>
+                    <div class="term-dot" style="background: #10b981;"></div>
+                </div>
+                <span class="term-prompt">user@executespec:~$</span> tail -f /var/log/pipeline/run-8f92a.log<br>
+                <span class="term-muted">[INFO] Enforcing PRODUCTION mode. Awaiting Human Plan Approval...</span><br>
+                <span class="term-success">[SUCCESS] Plan Gate approved by Tech Lead.</span><br>
+                <span class="term-muted">[INFO] Initializing Integration Branch: run-8f92a-integration</span><br>
+                <br>
+                <span class="term-prompt">Executing Task 1/3: UserService Refactor</span><br>
+                <span class="term-muted">▸ WorkerAgent (claude-haiku-4-5) modifying files...</span><br>
+                <span class="term-muted">▸ Triggering CodeValidator Chain:</span><br>
+                <span class="term-success">  ├─ SYNTAX: Passed</span><br>
+                <span class="term-error">  ├─ TYPE_CHECK: Failed - TS2322: Type 'string' is not assignable to type 'number'</span><br>
+                <span class="term-warn">[WARN] Validation failed. Injecting structured error into Context. Retrying...</span><br>
+                <span class="term-muted">▸ WorkerAgent applying fix...</span><br>
+                <span class="term-success">  ├─ TYPE_CHECK: Passed</span><br>
+                <span class="term-success">  └─ UNIT_TEST: Passed (4/4)</span><br>
+                <span class="term-success">[SUCCESS] Task 1 merged to run-8f92a-integration.</span><br>
+                <br>
+                <span class="term-prompt">Post-Merge Phase</span><br>
+                <span class="term-muted">▸ CompilerAgent full build...</span> <span class="term-success">BUILD SUCCESS</span><br>
+                <span class="term-muted">▸ ReviewerAgentV2 inspecting codebase... 0 CRITICAL issues found.</span><br>
+                <span class="term-success">[SUCCESS] Fast-forwarding run-8f92a-integration into main. Run Complete.</span>
+            </div>
+            
+            <div class="dual-mode-grid" style="margin-top: 40px;">
+                <div>
+                    <h3 style="margin-bottom: 8px;">Bring Your Own Keys (BYOK)</h3>
+                    <p class="mono text-muted">Protect your margins. Plug in your Anthropic, Google, or OpenAI API keys. We provide the workflow engine; you pay raw API costs with zero markup.</p>
+                </div>
+                <div>
+                    <h3 style="margin-bottom: 8px;">Semantic Context Truncation</h3>
+                    <p class="mono text-muted">No lossy LLM summarization. We programmatically evict intermediate tool payloads and inject real-time <code>git diffs</code> so the agent never hallucinates line numbers.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Pricing -->
+    <section id="pricing">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <h2 class="h2">Simple pricing. Start free, scale up.</h2>
+                <p class="subtitle" style="margin: 0 auto;">No credits. No token markups. Know exactly what you're paying before you start.</p>
+            </div>
+
+            <div class="pricing-controls">
+                <div class="currency-toggle">
+                    USD $
+                    <label class="switch">
+                        <input type="checkbox" id="currencyToggle" onchange="toggleCurrency()">
+                        <span class="slider"></span>
+                    </label>
+                    INR ₹
+                </div>
+            </div>
+
+            <div class="pricing-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: stretch;">
+                <!-- Prototype (Free) -->
+                <div class="price-card">
+                    <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Free</h3>
+                    <p class="text-muted">See the whole platform, including the project workspace.</p>
+                    <div class="price-amount"><span class="sym">$</span><span class="amt" data-usd="0" data-inr="0">0</span><span>/mo</span></div>
+                    <ul class="feature-list" style="margin-bottom: 32px; flex-grow: 1;">
+                        <li><span class="check-icon">✓</span> <div><strong>5 Runs / month</strong> <span style="color: var(--text-muted);">(1-credit specs)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div>All 3 Providers, Managed Keys</div></li>
+                        <li><span class="check-icon">✓</span> <div>Verified 0-100 Score on Every Run</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Read-only Demo Project</strong> <span style="color: var(--text-muted);">(see what's possible)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div>Full Validation Chain</div></li>
+                        <li><span class="check-icon">✓</span> <div>30-Day Retention</div></li>
+                    </ul>
+                    <a href="https://dev.executespec.ai" class="btn btn-ghost" target="_blank">Sign Up Free</a>
+                </div>
+
+                <!-- Pro -->
+                <div class="price-card popular">
+                    <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Pro</h3>
+                    <p class="text-muted">For solo devs and PMs shipping real features.</p>
+                    <div class="price-amount"><span class="sym">$</span><span class="amt" data-usd="20" data-inr="1699">20</span><span>/mo</span></div>
+                    <ul class="feature-list" style="margin-bottom: 32px; flex-grow: 1;">
+                        <li><span class="check-icon">✓</span> <div><strong>20 Credits / month</strong><br><span style="color: var(--text-muted); font-size: 0.85rem;">$1 = 1 credit &middot; ≈ 20 LOW, 5 HIGH, or 10 Mobile runs</span></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>2 Projects, 2 repos each</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div>Architecture Docs + Per-repo Codemaps</div></li>
+                        <li><span class="check-icon">✓</span> <div>Generate Docs (Explanation + Setup)</div></li>
+                        <li><span class="check-icon">✓</span> <div>All 3 Providers, All Models</div></li>
+                        <li><span class="check-icon">✓</span> <div>GitHub Push + Webhooks</div></li>
+                        <li><span class="check-icon">✓</span> <div>Figma URL → Design-Compliance Score</div></li>
+                        <li><span class="check-icon">✓</span> <div>TDD Mode <span style="color: var(--text-muted);">(test-first planning)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div>Slack DM Notifications</div></li>
+                        <li><span class="check-icon">✓</span> <div>Managed API Keys <span style="color: var(--text-muted);">(we pay)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div>90-Day Retention</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Top-up: <span class="sym">$</span><span class="amt" data-usd="1" data-inr="85">1</span> = 1 credit</strong> <span style="color: var(--text-muted); font-size: 0.85rem;">(same rate as subscription)</span></div></li>
+                    </ul>
+                    <a href="https://dev.executespec.ai" class="btn bg-gradient-blue" target="_blank">Get Pro</a>
+                </div>
+
+                <!-- Max -->
+                <div class="price-card" style="border-top: 3px solid var(--orange);">
+                    <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Max</h3>
+                    <p class="text-muted">Unlimited. Your keys. Your margins.</p>
+                    <div class="price-amount"><span class="sym">$</span><span class="amt" data-usd="29" data-inr="2499">29</span><span>/mo + BYOK</span></div>
+                    <ul class="feature-list" style="margin-bottom: 32px; flex-grow: 1;">
+                        <li><span class="check-icon">✓</span> <div><strong>Unlimited Runs</strong> <span style="color: var(--text-muted);">(fair use)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>BYOK — Zero API Markup</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>10 Projects, 10 repos each</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Tech-Debt Panel</strong> <span style="color: var(--text-muted);">(category, severity, hotspots)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Project Memory</strong> <span style="color: var(--text-muted);">+ auto-compaction</span></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Project Chat</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div>Workspace Health / Staleness Detection</div></li>
+                        <li><span class="check-icon">✓</span> <div>Auto Arch-Refresh on Sync</div></li>
+                        <li><span class="check-icon">✓</span> <div>Permanent Cloud Run Deployments</div></li>
+                        <li><span class="check-icon">✓</span> <div>All Models incl. Opus &amp; GPT-5.4</div></li>
+                        <li><span class="check-icon">✓</span> <div>Slack Channels + Routing Rules</div></li>
+                        <li><span class="check-icon">✓</span> <div>Priority Email Support</div></li>
+                    </ul>
+                    <a href="https://dev.executespec.ai" class="btn btn-white" target="_blank">Get Max</a>
+                </div>
+
+                <!-- Enterprise -->
+                <div class="price-card">
+                    <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Enterprise</h3>
+                    <p class="text-muted">For teams running specs across a whole codebase.</p>
+                    <div class="price-amount" style="font-size: 2rem;">Custom</div>
+                    <ul class="feature-list" style="margin-bottom: 32px; flex-grow: 1;">
+                        <li><span class="check-icon">✓</span> <div><strong>Everything in Max</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Unlimited Projects + Repos</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Execution View</strong> <span style="color: var(--text-muted);">(multi-repo, multi-solution launches)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div>Cross-Repo Handover + Dependency Graph</div></li>
+                        <li><span class="check-icon">✓</span> <div>Org-Wide Spec Templates</div></li>
+                        <li><span class="check-icon">✓</span> <div>JIRA + Confluence Inbound</div></li>
+                        <li><span class="check-icon">✓</span> <div>ServiceNow + PagerDuty</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>SSO/SAML + RBAC + Audit Trail</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div>Automated Test Generation Agent</div></li>
+                        <li><span class="check-icon">✓</span> <div>Accounting <span style="color: var(--text-muted);">(MRR/ARR/GST)</span></div></li>
+                        <li><span class="check-icon">✓</span> <div>Dedicated Slack + Custom SLA</div></li>
+                        <li><span class="check-icon">✓</span> <div>Signed DPA &middot; Custom Sub-processors</div></li>
+                    </ul>
+                    <a href="#contact" class="btn btn-ghost">Contact Us</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- About Us -->
+    <section id="about" style="background: var(--surface);">
+        <div class="container" style="display: flex; flex-direction: column; align-items: center;">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--purple);">About Us</span>
+                <h2 class="h2">Built by engineers, for engineers.</h2>
+                <p class="subtitle" style="margin: 0 auto;">We know the pain of maintaining legacy codebases and clearing technical debt because we've lived it for over a decade.</p>
+            </div>
+
+            <div class="founder-card">
+                <div class="founder-header">
+                    <img src="images/navneet.jpg" alt="Navneet Prabhakar, Founder of ExecuteSpec" class="founder-avatar">
+                    <div>
+                        <div class="founder-name">Navneet Prabhakar <a href="https://www.linkedin.com/in/navneetprabhakar/" target="_blank" style="color: var(--blue); font-size: 1.2rem; margin-left: 8px;">in</a></div>
+                        <div class="founder-title">Founder, ExecuteSpec</div>
+                    </div>
+                </div>
+                <p class="text-muted">Navneet brings over 12 years of engineering leadership, scaling complex distributed systems in adtech, fintech, and retail media. Having managed large engineering teams at Fortune 500 companies and high-growth startups—overseeing systems processing millions of daily transactions—he experienced the massive friction of enterprise technical debt firsthand. He founded ExecuteSpec to automate the exact engineering chores he spent years managing.</p>
+                
+                <div class="company-info">
+                    ExecuteSpec is building autonomous AI agents that handle the undifferentiated heavy lifting of software development and maintenance. We believe human engineers should focus on architecture and core product logic, while agents safely handle the rest.
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Frequently Asked Questions (SEO & Agentic Search Target) -->
+    <section id="faq">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--blue-light);">Knowledge Base</span>
+                <h2 class="h2">Frequently Asked Questions</h2>
+                <p class="subtitle" style="margin: 0 auto;">Everything you need to know about the ExecuteSpec engine.</p>
+            </div>
+
+            <div class="faq-grid">
+                <details class="faq-item">
+                    <summary>What is spec-driven coding?</summary>
+                    <div class="faq-answer">
+                        Spec-driven coding is a software development methodology where engineers write a structured specification—requirements, constraints, acceptance criteria—before any code is generated. Unlike prompt-based AI coding where you type informal instructions, spec-driven coding uses deterministic specifications to produce validated, testable code. ExecuteSpec is the first platform purpose-built for this workflow, combining specification parsing with an autonomous CI/CD validation chain that enforces Syntax, Type, Lint, and Unit Test gates on every generated task.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How is spec-driven coding different from vibe coding or prompt-based coding?</summary>
+                    <div class="faq-answer">
+                        Vibe coding and prompt-based coding rely on informal natural-language prompts that produce unpredictable results—great for prototypes, unreliable for production. Spec-driven coding uses structured specifications with explicit requirements, constraints, and validation criteria. The key difference is determinism: spec-driven coding produces code that must pass syntax checks, type checks, linting, and unit tests before it can merge. This makes it suitable for enterprise production codebases, not just weekend side-projects.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>What makes ExecuteSpec different from other AI coding tools?</summary>
+                    <div class="faq-answer">
+                        Unlike standard text-to-code generators that overwrite files blindly, ExecuteSpec uses a deterministic validation chain. Every AI-generated task must pass Syntax, Type, Lint, and Unit Tests before being merged into the integration branch. We prioritize code stability and enterprise readiness over mere generation speed.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does ExecuteSpec compare as an alternative to Lovable, Bolt.new, emergent.sh, Cursor, or Windsurf?</summary>
+                    <div class="faq-answer">
+                        While pure vibe-coding tools like Lovable, Bolt.new, v0, and emergent.sh are excellent for rapid zero-to-one prototyping, their generated code often collapses under complex business logic. Conversely, agentic IDEs like Cursor, Windsurf, and Claude Code require manual human steering. ExecuteSpec is the enterprise alternative: it combines autonomous code generation with a strict, automated CI/CD validation chain (Syntax, Type, Lint, Test) to ensure day-two maintainability.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>Does ExecuteSpec support Bring Your Own Keys (BYOK)?</summary>
+                    <div class="faq-answer">
+                        Yes. The Max tier ($29/mo + BYOK) is built entirely around BYOK — you plug in your own Anthropic, OpenAI, or Gemini API keys, get unlimited runs (fair use), and pay providers directly with zero markup from us. The Pro tier ($20/mo) uses managed keys where we pay the LLM costs: you get 20 credits per month where <strong>$1 = 1 credit</strong>. Credits scale with spec complexity — LOW/MEDIUM specs cost 1 credit, HIGH (large multi-component) specs cost 4 credits, mobile (React Native + Expo) specs cost 2 credits. The credit count is shown at plan approval before any work starts, and top-up credits use the exact same rate as the subscription.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>What enterprise use cases does ExecuteSpec support?</summary>
+                    <div class="faq-answer">
+                        ExecuteSpec excels at clearing engineering tech debt. Key use cases include automated unit test coverage generation, clearing JIRA backlogs autonomously via seamless integrations, and modernizing legacy frameworks (e.g., migrating Spring Boot 2.x to 3.x) with file-by-file deterministic refactoring.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does the "Dual-Mode Execution" work?</summary>
+                    <div class="faq-answer">
+                        At the point of run submission, you can choose between Prototype Mode or Production Mode. Prototype Mode bypasses human approval gates, uses fast models (like Haiku or Flash), and skips heavy unit testing for instant cloud previews. Production Mode enforces tech-lead plan reviews, triggers the full CI/CD validation chain, and utilizes highly capable models (like Opus for planning or Sonnet for execution) for maximum reliability. Both modes are available on all tiers — the difference is which models you can access and whether keys are managed or BYOK.
+                    </div>
+                </details>
+            </div>
+        </div>
+    </section>
+
+    <!-- Reach Out -->
+    <section id="contact" style="border-top: 1px solid var(--surface-border);">
+        <div class="container text-center" style="text-align: center;">
+            <div class="section-header">
+                <span class="section-label mono" style="color: var(--orange);">Reach Out</span>
+                <h2 class="h2">Let's discuss your engineering backlog.</h2>
+                <p class="subtitle" style="margin: 0 auto;">Whether you need an enterprise demo, want to discuss custom integrations, or just want to talk about AI coding, we are here.</p>
+            </div>
+
+            <div class="contact-grid">
+                <div class="contact-card">
+                    <div style="font-size: 2.5rem; margin-bottom: 16px;">✉️</div>
+                    <h3 style="margin-bottom: 8px;">Email Us</h3>
+                    <p class="text-muted" style="margin-bottom: 24px;">Direct line to the founding team.</p>
+                    <a href="/cdn-cgi/l/email-protection#3657525b5f5876534e53554342534546535518575f" class="btn btn-ghost" style="width: 100%;"><span class="__cf_email__" data-cfemail="157471787c7b55706d7076606170666570763b747c">[email&#160;protected]</span></a>
+                </div>
+                <div class="contact-card">
+                    <div style="font-size: 2.5rem; margin-bottom: 16px;">📅</div>
+                    <h3 style="margin-bottom: 8px;">Book a Demo</h3>
+                    <p class="text-muted" style="margin-bottom: 24px;">See Production Mode in action.</p>
+                    <a href="/cdn-cgi/l/email-protection#95f4f1f8fcfbd5f0edf0f6e0e1f0e6e5f0f6bbf4fc" class="btn bg-gradient-blue" style="width: 100%;">Schedule Call</a>
+                </div>
+                <div class="contact-card">
+                    <div style="font-size: 2.5rem; margin-bottom: 16px;">in</div>
+                    <h3 style="margin-bottom: 8px;">Follow on LinkedIn</h3>
+                    <p class="text-muted" style="margin-bottom: 24px;">Product updates, engineering posts, launch news.</p>
+                    <a href="https://www.linkedin.com/company/executespec" target="_blank" rel="noopener" class="btn btn-ghost" style="width: 100%;">Follow ExecuteSpec →</a>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Terms of Service -->
+    <section id="terms" style="border-top: 1px solid var(--surface-border);">
+        <div class="container">
+            <div class="section-header" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--text-muted);">Legal</span>
+                <h2 class="h2">Terms of Service</h2>
+            </div>
+            <p class="legal-updated" style="text-align: center;">Last updated: April 8, 2026</p>
+
+            <details class="legal-collapse">
+                <summary>Read Terms of Service</summary>
+                <div class="legal-content">
+                    <div class="legal-section">
+                        <h3>1. Service Description</h3>
+                    <p>ExecuteSpec is an autonomous code generation platform. You provide a specification describing the software you want, and our multi-agent pipeline plans, writes, compiles, validates, and previews the code for you. The platform orchestrates large language models from third-party providers to generate production-ready code from your instructions.</p>
+                    <p><strong>Definition of a "Run":</strong> A run is a single end-to-end execution of the ExecuteSpec pipeline, initiated when you submit a specification. Each run includes: specification parsing and task planning by the PlannerAgent, code generation across one or more tasks by WorkerAgents, validation through the full quality chain (syntax check, type check, linting, and unit tests), post-merge compilation and agentic code review, and generation of a final validation report. A run is counted regardless of whether it completes successfully, fails validation, or is cancelled mid-execution. Re-submitting the same specification counts as a new run. Retries within a run (e.g., a WorkerAgent re-attempting a task after a validation failure) do not count as additional runs.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>2. Account Registration</h3>
+                    <p>To use ExecuteSpec you must create an account with a valid email address and a secure password. You are responsible for maintaining the confidentiality of your credentials and for all activity that occurs under your account. If you suspect unauthorized access, notify us immediately at <a href="/cdn-cgi/l/email-protection#0d6c696064634d6875686e7879687e7d686e236c64"><span class="__cf_email__" data-cfemail="87e6e3eaeee9c7e2ffe2e4f2f3e2f4f7e2e4a9e6ee">[email&#160;protected]</span></a>.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>3. Acceptable Use</h3>
+                    <p>When using ExecuteSpec, you agree not to:</p>
+                    <ul>
+                        <li>Generate malicious code, malware, exploits, or any software intended to cause harm</li>
+                        <li>Include personally identifiable information (PII) in your run specifications</li>
+                        <li>Attempt to reverse-engineer, decompile, or extract the platform's proprietary logic</li>
+                        <li>Use the service to violate any applicable law or regulation</li>
+                        <li>Circumvent usage limits, rate limits, or tier restrictions</li>
+                    </ul>
+                    <p>We reserve the right to suspend or terminate accounts that violate these terms.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>4. Fair Use Policy</h3>
+                    <p>The Max tier includes unlimited runs subject to this fair use policy. "Unlimited" means reasonable, individual use of the platform for software development purposes. The following guidelines apply:</p>
+                    <ul>
+                        <li><strong>Soft cap:</strong> Up to 500 runs per calendar month is considered normal usage. If your usage consistently exceeds this threshold, we may contact you to discuss your needs or recommend the Enterprise tier.</li>
+                        <li><strong>Concurrent runs:</strong> Max tier accounts may run up to 3 concurrent pipeline executions. Additional runs are queued automatically.</li>
+                        <li><strong>Prohibited usage:</strong> Automated or scripted submission of runs (e.g., via API without human initiation), bulk generation for resale, and load-testing the platform are not permitted under the fair use policy.</li>
+                        <li><strong>Enforcement:</strong> If we determine that usage is excessive, abusive, or intended to circumvent the spirit of the fair use policy, we will notify you and work with you to find a solution. We will not suspend your account without prior notice except in cases of clear abuse.</li>
+                    </ul>
+                    <p>This policy exists to ensure platform reliability for all users. The vast majority of users will never encounter these limits.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>5. API Keys</h3>
+                    <p>ExecuteSpec allows you to provide your own third-party API keys (for Anthropic, OpenAI, Google, and other providers) to power code generation. You are solely responsible for safeguarding these keys and for any charges incurred through their use. We encrypt all stored API keys at rest and transmit them only over encrypted connections. We never share your API keys with other users or third parties.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>6. Generated Code Ownership</h3>
+                    <p>You own all code generated by ExecuteSpec on your behalf. The platform claims no intellectual property rights over the output of your runs. You are free to use, modify, distribute, and commercialize the generated code without restriction. However, you are responsible for reviewing generated code before deploying it to production environments.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>7. Third-Party Services</h3>
+                    <p>Your specifications and generated code are processed by large language model providers, including Anthropic (Claude), Google (Gemini), and OpenAI (GPT). Your data is sent to whichever provider you select for your project. These providers have their own terms of service and privacy policies. ExecuteSpec is not responsible for how these providers handle data once it leaves our platform, though we select providers that commit to not training on customer data.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>8. Payment Terms</h3>
+                    <p>ExecuteSpec offers Prototype (Free), Pro, Max, and Enterprise subscription tiers. Paid subscriptions are billed monthly through Razorpay. If you cancel a paid subscription, your access continues until the end of the current billing period, at which point your account reverts to the Prototype (Free) tier. Run top-up credits are non-refundable once purchased. We may change pricing with 30 days' notice.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>9. Limitation of Liability</h3>
+                    <p>All code generated by ExecuteSpec is provided "as is" without warranty of any kind, express or implied. We do not guarantee that generated code will be error-free, secure, or fit for any particular purpose. You acknowledge that AI-generated code may contain bugs, vulnerabilities, or inaccuracies. ExecuteSpec's total liability to you for any claims arising from your use of the service shall not exceed the amount you paid us in the 12 months preceding the claim.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>10. Termination</h3>
+                    <p>Either party may terminate this agreement at any time. You can delete your account from the Settings page. Upon termination, your data remains available for export for 30 days, after which it is permanently deleted. We may terminate or suspend your account immediately if you violate these terms.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>11. Governing Law</h3>
+                    <p>These terms are governed by the laws of the Republic of India. Any disputes arising from these terms or your use of ExecuteSpec shall be subject to the exclusive jurisdiction of the courts in Bengaluru, Karnataka, India.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>12. Changes to These Terms</h3>
+                    <p>We may update these terms from time to time. When we make material changes, we will notify you by email or through a notice on the platform. Your continued use of ExecuteSpec after changes take effect constitutes acceptance of the revised terms.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>13. Contact</h3>
+                    <p>For questions about these terms, contact us at <a href="/cdn-cgi/l/email-protection#1f7e7b7276715f7a677a7c6a6b7a6c6f7a7c317e76"><span class="__cf_email__" data-cfemail="6607020b0f0826031e03051312031516030548070f">[email&#160;protected]</span></a>.</p>
+                </div>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <!-- Privacy Policy -->
+    <section id="privacy" style="border-top: 1px solid var(--surface-border);">
+        <div class="container">
+            <div class="section-header" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--text-muted);">Legal</span>
+                <h2 class="h2">Privacy Policy</h2>
+            </div>
+            <p class="legal-updated" style="text-align: center;">Last updated: April 8, 2026</p>
+
+            <details class="legal-collapse">
+                <summary>Read Privacy Policy</summary>
+                <div class="legal-content">
+                    <div class="legal-section">
+                        <h3>1. Data We Collect</h3>
+                        <p>We collect only the data necessary to provide and improve ExecuteSpec. This includes:</p>
+                    <ul>
+                        <li><strong>Account information:</strong> your email address and name</li>
+                        <li><strong>Run specifications:</strong> the natural-language descriptions you submit for code generation</li>
+                        <li><strong>Generated code:</strong> all files produced by the pipeline during your runs</li>
+                        <li><strong>Usage metrics:</strong> run counts, response times, and feature usage to improve the platform</li>
+                        <li><strong>Payment data:</strong> processed by Razorpay; we do not store card numbers</li>
+                    </ul>
+                </div>
+                <div class="legal-section">
+                    <h3>2. Data Processors</h3>
+                    <p>To generate code, your specifications are sent to the LLM provider you select for your project. Our current providers are:</p>
+                    <ul>
+                        <li><strong>Anthropic</strong> — Claude models (Opus, Sonnet, Haiku)</li>
+                        <li><strong>OpenAI</strong> — GPT models</li>
+                        <li><strong>Google</strong> — Gemini models</li>
+                    </ul>
+                    <p>Your data is sent only to the provider you choose. All providers have committed to not using customer data for model training. Each provider's own privacy policy governs their handling of data.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>3. Data Storage</h3>
+                    <p>All data is stored on Google Cloud Platform in the <strong>us-east4</strong> (Northern Virginia) region. Data is encrypted at rest using Google-managed encryption keys. All data in transit is encrypted via TLS. API keys you provide are encrypted at rest with application-level encryption before being stored in the database.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>4. Data Retention</h3>
+                    <p>We retain your run data (specifications, generated code, and validation reports) based on your subscription tier:</p>
+                    <table class="legal-table">
+                        <thead>
+                            <tr><th>Tier</th><th>Retention</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Prototype (Free)</td><td>30 days</td></tr>
+                            <tr><td>Pro / Max</td><td>90 days</td></tr>
+                            <tr><td>Enterprise</td><td>Unlimited</td></tr>
+                        </tbody>
+                    </table>
+                    <p>After your retention period expires, data is permanently deleted. Account information (email, name) is retained until you delete your account.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>5. Your Rights</h3>
+                    <p>You have the right to:</p>
+                    <ul>
+                        <li><strong>Access your data:</strong> view all specifications, generated code, and reports through the dashboard</li>
+                        <li><strong>Export your data:</strong> download your entire workspace as a ZIP archive from the Settings page</li>
+                        <li><strong>Request deletion:</strong> delete your account and all associated data from Settings, or email us</li>
+                        <li><strong>Correct your data:</strong> update your name and email from your account settings</li>
+                    </ul>
+                    <p>Deletion requests are processed within 30 days. To exercise any of these rights, use the in-app settings or contact <a href="/cdn-cgi/l/email-protection#d4b5b0b9bdba94b1acb1b7a1a0b1a7a4b1b7fab5bd"><span class="__cf_email__" data-cfemail="85e4e1e8ecebc5e0fde0e6f0f1e0f6f5e0e6abe4ec">[email&#160;protected]</span></a>.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>6. Cookies</h3>
+                    <p>ExecuteSpec uses a httpOnly cookie to store your authentication token (JWT). This cookie is essential for the service to function. We also use Google Analytics cookies (_ga, _gid) to collect anonymous usage data and improve the platform. These analytics cookies are not used for advertising or cross-site tracking. You may disable analytics cookies in your browser without affecting core platform functionality.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>7. Analytics</h3>
+                    <p>We use Google Analytics to collect basic, anonymous usage metrics (page views, feature usage, error rates) to improve the platform. Google Analytics uses cookies to track site interactions; this data is anonymized and not linked to your account. We do not track you across websites. We do not sell or share usage data with any third party.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>8. Children's Privacy</h3>
+                    <p>ExecuteSpec is not intended for use by individuals under 16 years of age. We do not knowingly collect data from children. If you believe a child has provided us with personal data, please contact us and we will delete it promptly.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>9. Changes to This Policy</h3>
+                    <p>We may update this privacy policy from time to time. When we make material changes, we will notify you by email or through a notice on the platform. The "Last updated" date at the top of this section reflects the most recent revision.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>10. Contact</h3>
+                    <p>For questions about this privacy policy or how we handle your data, contact us at <a href="/cdn-cgi/l/email-protection#87e6e3eaeee9c7e2ffe2e4f2f3e2f4f7e2e4a9e6ee"><span class="__cf_email__" data-cfemail="0362676e6a6d43667b6660767766707366602d626a">[email&#160;protected]</span></a>.</p>
+                </div>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <!-- Data Processing Agreement -->
+    <section id="dpa" style="border-top: 1px solid var(--surface-border);">
+        <div class="container">
+            <div class="section-header" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--text-muted);">Legal</span>
+                <h2 class="h2">Data Processing Agreement</h2>
+            </div>
+            <p class="legal-updated" style="text-align: center;">Last updated: April 8, 2026</p>
+
+            <details class="legal-collapse">
+                <summary>Read Data Processing Agreement</summary>
+                <div class="legal-content">
+                    <div class="legal-section">
+                        <h3>Overview</h3>
+                    <p>This page summarizes how ExecuteSpec processes data on behalf of its customers. For enterprise customers who require a formal, signed Data Processing Agreement (DPA) as part of their procurement or compliance process, please contact us at <a href="/cdn-cgi/l/email-protection#b4d5d0d9dddaf4d1ccd1d7c1c0d1c7c4d1d79ad5dd"><span class="__cf_email__" data-cfemail="ed8c89808483ad8895888e9899889e9d888ec38c84">[email&#160;protected]</span></a> and we will provide a full DPA tailored to your organization's requirements.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>Data Processing Scope</h3>
+                    <p>When you use ExecuteSpec, we process the following categories of data on your behalf:</p>
+                    <ul>
+                        <li><strong>Specifications:</strong> the natural-language descriptions you provide for code generation runs</li>
+                        <li><strong>Generated artifacts:</strong> source code, configuration files, and test suites produced by the pipeline</li>
+                        <li><strong>Validation data:</strong> compilation results, review findings, and test execution reports</li>
+                        <li><strong>Context data:</strong> JIRA tickets, Confluence pages, or other documents you choose to attach to a run</li>
+                    </ul>
+                    <p>All processing is performed solely to deliver the code generation service you requested. We do not use your data for any other purpose, including model training.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>Sub-Processors</h3>
+                    <p>ExecuteSpec relies on the following sub-processors to deliver its service:</p>
+                    <table class="legal-table">
+                        <thead>
+                            <tr><th>Provider</th><th>Purpose</th><th>Location</th></tr>
+                        </thead>
+                        <tbody>
+                            <tr><td>Google Cloud Platform</td><td>Infrastructure, database, storage</td><td>us-east4 (Virginia, USA)</td></tr>
+                            <tr><td>Anthropic</td><td>LLM processing (Claude)</td><td>USA</td></tr>
+                            <tr><td>OpenAI</td><td>LLM processing (GPT)</td><td>USA</td></tr>
+                            <tr><td>Google (Vertex AI)</td><td>LLM processing (Gemini)</td><td>USA</td></tr>
+                            <tr><td>Razorpay</td><td>Payment processing</td><td>India</td></tr>
+                        </tbody>
+                    </table>
+                    <p>Your data is sent only to the LLM provider you select for your project. We will notify you before adding new sub-processors.</p>
+                </div>
+                <div class="legal-section">
+                    <h3>Regulatory Compliance</h3>
+                    <p>ExecuteSpec is committed to compliance with applicable data protection regulations:</p>
+                    <ul>
+                        <li><strong>GDPR (EU):</strong> We process data lawfully under contractual necessity. EU customers can request a DPA with Standard Contractual Clauses (SCCs) for international data transfers.</li>
+                        <li><strong>DPDPA (India):</strong> We comply with the Digital Personal Data Protection Act, 2023, including data principal rights, purpose limitation, and data minimization requirements.</li>
+                    </ul>
+                </div>
+                <div class="legal-section">
+                    <h3>Security Measures</h3>
+                    <ul>
+                        <li>Encryption at rest (Google-managed keys) and in transit (TLS 1.2+)</li>
+                        <li>Application-level encryption for stored API keys</li>
+                        <li>Role-based access control (RBAC) with principle of least privilege</li>
+                        <li>JWT-based authentication with short-lived access tokens</li>
+                        <li>Isolated container execution for code previews</li>
+                        <li>Structured audit logging for all administrative actions</li>
+                    </ul>
+                </div>
+                <div class="legal-section">
+                    <h3>Request a DPA</h3>
+                    <p>Enterprise customers who need a signed DPA should contact <a href="/cdn-cgi/l/email-protection#0766636a6e6947627f62647273627477626429666e"><span class="__cf_email__" data-cfemail="bcddd8d1d5d2fcd9c4d9dfc9c8d9cfccd9df92ddd5">[email&#160;protected]</span></a>. We typically respond within 2 business days and can accommodate custom clauses where reasonable.</p>
+                </div>
+                </div>
+            </details>
+        </div>
+    </section>
+
+    <footer>
+        <div class="container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 24px;">
+            <div>© 2026 ExecuteSpec. Built for Engineering Leaders.</div>
+            <div class="nav-links" style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px;">
+                <a href="#project-workspace">Project Workspace</a>
+                <a href="#dual-mode">Features</a>
+                <a href="#quality">Testing</a>
+                <a href="#pricing">Pricing</a>
+                <a href="#faq">FAQ</a>
+                <a href="#contact">Contact</a>
+                <a href="#terms">Terms</a>
+                <a href="#privacy">Privacy</a>
+                <a href="#dpa">DPA</a>
+                <a href="https://www.linkedin.com/company/executespec" target="_blank" rel="noopener" aria-label="ExecuteSpec on LinkedIn" style="display: inline-flex; align-items: center; gap: 6px;">
+                    <span style="font-family: var(--font-mono); font-weight: 700; border: 1px solid currentColor; padding: 2px 6px; border-radius: 4px; font-size: 0.85rem;">in</span>
+                    LinkedIn
+                </a>
+            </div>
+        </div>
+    </footer>
+
+    <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+        function toggleCurrency() {
+            const isINR = document.getElementById('currencyToggle').checked;
+            document.querySelectorAll('.amt').forEach(el => {
+                const usd = el.getAttribute('data-usd');
+                const inr = el.getAttribute('data-inr');
+                el.textContent = isINR ? inr : usd;
+            });
+            document.querySelectorAll('.sym').forEach(el => {
+                el.textContent = isINR ? '₹' : '$';
+            });
+        }
+    </script>

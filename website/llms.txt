@@ -1,0 +1,68 @@
+# ExecuteSpec
+
+> Spec-driven AI coding platform with multi-repo project workspaces, deterministic 0-100 verified scoring, and autonomous CI/CD validation. Turns structured specifications into validated, tested, shippable code. Plans from Free (5 runs/month) to Enterprise (unlimited + multi-repo Execution View + SSO/SAML). Pricing is $1 = 1 credit, flat per complexity band. BYOK available on Max and Enterprise tiers for Anthropic / OpenAI / Gemini.
+
+## What it is
+
+ExecuteSpec runs a multi-agent pipeline: **planner** (decomposes the spec into a DAG of atomic tasks) → **sequential worker** (executes each task with per-task validation) → **reviewer** (general + wiring passes) → **deterministic 0-100 verified score**. The score is derived from real signals (final-build pass, test pass rate, reviewer verdict), not LLM self-rating.
+
+## Key concepts
+
+- **Spec-driven coding**: a workflow where engineers write a structured specification (requirements, constraints, acceptance criteria) before any code is generated. The opposite of prompt-based "vibe coding".
+- **Verified score (0-100)**: baseline 40 + final-build-pass 20 + test-pass-rate × 20 (scaled) + reviewer verdict (CLEAN=20 / FIXED=15 / UNRESOLVED=5 / REVIEW_FAILED=0) − 5 per unfixed critical issue.
+- **Project workspace**: per-project container linking one or more GitHub repos, with per-repo codemaps, a combined architecture doc, a tech-debt panel, a project memory ledger (compacted every 10 runs), and RAG-powered project chat.
+- **Dual-Mode Execution**: Prototype Mode (auto-approved plans, fast models like Haiku/Flash, instant Cloud Run preview) vs. Production Mode (tech-lead plan review, full Syntax/Type/Lint/Unit-Test validation chain, capable models like Opus/Sonnet).
+- **Credit**: $1 = 1 credit. LOW and MEDIUM specs cost 1 credit each; HIGH (large multi-component) specs cost 4 credits; React Native + Expo mobile specs cost 2 credits. The exact count is shown at plan approval before work starts. Top-ups use the same rate.
+- **BYOK**: Bring Your Own Keys. Max tier ($29/mo + BYOK) and Enterprise tier let customers plug in their own Anthropic, OpenAI, or Gemini API keys with zero ExecuteSpec markup.
+- **Execution View**: Enterprise-only feature for multi-repo, multi-solution launches with cross-repo handover contracts and coordinated per-repo pull requests.
+
+## Pricing
+
+- **Free** ($0/month): 5 runs/month (1-credit specs only), all 3 providers (managed keys), read-only demo project, verified 0-100 score on every run, 30-day retention.
+- **Pro** ($20/month): 20 credits/month ($1 = 1 credit), 2 projects × 2 repos each, architecture docs + per-repo codemaps, Generate Docs (explanation + setup), GitHub push + webhooks, Figma URL → design-compliance score, TDD mode, Slack DM notifications, 90-day retention, top-ups at same rate.
+- **Max** ($29/month + BYOK): Unlimited runs (fair use), BYOK with zero API markup, 10 projects × 10 repos each, tech-debt panel (category, severity, hotspots), project memory + auto-compaction, project chat, workspace health / staleness detection, auto arch-refresh on sync, permanent Cloud Run deployments, Slack channels + routing rules.
+- **Enterprise** (custom pricing): Everything in Max, unlimited projects + repos, Execution View (multi-repo multi-solution launches), cross-repo handover + dependency graph, org-wide spec templates, JIRA + Confluence inbound, ServiceNow + PagerDuty, SSO/SAML + RBAC + audit trail, accounting (MRR/ARR/GST), dedicated Slack + custom SLA, signed DPA.
+
+## Capabilities (feature list)
+
+- Multi-repo project workspace with architecture docs
+- Per-repo codemaps (idempotent by SHA)
+- Combined architecture doc generation (3-step pipeline)
+- Tech-debt panel with 30-day trend chart
+- Project memory with caveman-English digests + 10-run compaction
+- RAG-powered project chat over codemaps + uploaded docs
+- Verified 0-100 score + 6-dimension score trend chart
+- Figma URL → design-compliance score
+- React Native + Expo codegen (Android + iOS with Hermes bundle)
+- TDD mode (test-first task decomposition)
+- GitHub push + webhook-driven PR status
+- Dual-Mode Execution (Prototype + Production)
+- Deterministic validation chain (Syntax, Type, Lint, Unit Tests)
+- Agentic code review with auto-fix (wiring + general passes)
+- Multi-gateway billing (Stripe for US/global, Razorpay for India)
+- JIRA + Confluence integration (Enterprise)
+- Execution View for multi-repo launches (Enterprise)
+- SSO/SAML, RBAC, audit trail (Enterprise)
+
+## Technology
+
+- **Providers**: Anthropic, OpenAI, Gemini (user-selectable per project)
+- **Hosting**: Google Cloud Platform, us-east4 (Virginia)
+- **Payments**: Stripe (US/global), Razorpay (India)
+- **Security**: 8-layer defense, application-level encryption for BYOK keys, TLS 1.2+, RBAC
+- **Compliance**: DPDPA 2023 (India), GDPR SCCs available for EU
+
+## Links
+
+- Home: https://executespec.ai/
+- App (sign up): https://dev.executespec.ai
+- Pricing section: https://executespec.ai/#pricing
+- FAQ: https://executespec.ai/#faq
+- Project Workspace deep-dive: https://executespec.ai/#project-workspace
+
+## Contact
+
+- Sales / enterprise: hello@executespec.ai
+- Support: admin@executespec.ai
+- LinkedIn: https://www.linkedin.com/company/executespec
+- Founder: Navneet Prabhakar — https://www.linkedin.com/in/navneetprabhakar/

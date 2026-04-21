@@ -119,18 +119,28 @@ function FeatureFlagsPageInner() {
   const groups = categorize(flags);
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden relative">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={{
+        background: 'radial-gradient(ellipse 60% 40% at 20% 0%, color-mix(in srgb, var(--accent-blue) 12%, transparent), transparent 60%)'
+      }} />
       {/* Header */}
-      <div className="flex items-center gap-3 px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
-        <button onClick={() => navigate('/admin')} className="text-muted hover:text-secondary transition-colors">
+      <div className="flex items-center gap-3 px-4 sm:px-6 py-5 border-b border-[var(--border-default)] flex-shrink-0">
+        <button onClick={() => navigate('/admin')} className="text-muted hover:text-secondary transition-colors" aria-label="Back">
           <ArrowLeft className="h-4 w-4" />
         </button>
-        <Flag className="h-5 w-5 text-accent-blue" />
-        <h1 className="text-lg font-semibold text-primary">Feature Flags</h1>
+        <div className="flex items-center gap-3 flex-1 min-w-0">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0">
+            <Flag className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="inline-block font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue">Platform control</div>
+            <h1 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">Feature flags</h1>
+          </div>
+        </div>
         <button
           onClick={load}
           disabled={loading}
-          className="ml-auto flex items-center gap-1.5 text-xs text-muted hover:text-secondary transition-colors"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors flex-shrink-0"
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh

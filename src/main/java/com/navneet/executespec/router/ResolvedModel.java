@@ -17,8 +17,17 @@ public class ResolvedModel {
     private AgentTier agentTier;
     private boolean fallback;
 
-    /** Provider name in lowercase for LlmRouter calls (e.g. "anthropic", "google", "openai"). */
+    /**
+     * V2-canonical provider string for {@code LlmRouterV2.dispatch}:
+     * {@code anthropic | openai | gemini}. Note the enum value
+     * {@link LlmProvider#GOOGLE} maps to the V2 string {@code "gemini"} —
+     * {@code .name().toLowerCase()} would emit "google" and
+     * {@code LlmRouterV2} rejects it with "Unknown provider: google".
+     * Always call this instead of {@code getActualProvider().name().toLowerCase()}.
+     */
     public String providerName() {
-        return actualProvider.name().toLowerCase();
+        // V2-canonical provider string: "anthropic" | "openai" | "gemini".
+        // Enum values align 1:1 so simple lowercase suffices.
+        return actualProvider == null ? "openai" : actualProvider.name().toLowerCase();
     }
 }

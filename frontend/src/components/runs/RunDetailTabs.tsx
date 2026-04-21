@@ -10,19 +10,18 @@ import {
   getOpenApiSpec,
   getProjects, createProject, updateRunProject,
   applyToRun, editRunPlan,
-  getTestPlan, getTestGraph,
+  getTestPlan,
   getLiveCost,
-  getTaskGraph,
   getRunPrs,
 } from '@/lib/api';
 import type { PrSummary } from '@/types/project';
-import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto, TestGraphData, TaskGraphNode } from '@/lib/api';
+import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto } from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
 import RunConversation from './RunConversation';
-import TaskGraph from './TaskGraph';
+import TaskTimeline from './TaskTimeline';
 import PreviewTab from './PreviewTab';
 import { PIPELINE_STEPS, V2_LEGACY_UI } from '@/lib/constants';
 import { useSseStore } from '@/stores/useSseStore';
@@ -48,7 +47,7 @@ const BASE_TABS = [
   { value: 'overview',  label: 'Overview' },
   { value: 'plan',      label: 'Plan' },
   { value: 'tasks',     label: 'Tasks' },
-  { value: 'graph',     label: 'Graph' },
+  { value: 'timeline',  label: 'Timeline' },
   { value: 'log',       label: 'Live Log' },
   { value: 'code',      label: 'Code' },
 ];
@@ -81,7 +80,6 @@ export default function RunDetailTabs() {
   }, [activeRun?.runId, filesTick, loadFiles]);
   // Test generation tasks — only fetch after test gen has started (avoids 404 noise)
   const [testTasks, setTestTasks] = useState<TestTaskDto[]>([]);
-  const [testGraph, setTestGraph] = useState<TestGraphData | null>(null);
   const sseEntries = useSseStore((s) => s.entries);
   const testGenStarted = sseEntries.some(e => e.type === 'TEST_GEN_STARTED' || e.type === 'TEST_REPORT_READY');
 
@@ -89,9 +87,6 @@ export default function RunDetailTabs() {
     if (!activeRun || !testGenStarted) return;
     getTestPlan(activeRun.runId).then((plan) => {
       if (plan) setTestTasks(plan.tasks);
-    }).catch(() => {});
-    getTestGraph(activeRun.runId).then((graph) => {
-      if (graph) setTestGraph(graph);
     }).catch(() => {});
   }, [activeRun?.runId, filesTick, testGenStarted]);
 
@@ -144,13 +139,13 @@ export default function RunDetailTabs() {
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col">
-      <Tabs.List className="flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 lg:px-4 overflow-x-auto scrollbar-hide sticky top-0 z-10 bg-[var(--gray-100)]">
+      <Tabs.List className="flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 sm:px-3 lg:px-4 overflow-x-auto scrollbar-hide sticky top-0 z-10 bg-[var(--gray-100)]">
         {TABS.map((tab) => (
           <Tabs.Trigger
             key={tab.value}
             value={tab.value}
             className={cn(
-              'px-2.5 lg:px-4 py-2 lg:py-2.5 text-[10px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
+              'px-2.5 lg:px-4 py-2 lg:py-2.5 text-[10px] sm:text-[11px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
               'data-[state=active]:border-[var(--text-primary)] data-[state=active]:text-primary',
               'data-[state=inactive]:border-transparent data-[state=inactive]:text-muted',
               'hover:text-secondary'
@@ -264,15 +259,8 @@ export default function RunDetailTabs() {
           <CodeTab runId={activeRun.runId} files={files} filesLoading={filesLoading} repoUrl={activeRun.repoUrl} status={activeRun.status} scmProvider={activeRun.scmProvider} />
         </Tabs.Content>
 
-        <Tabs.Content value="graph" className="p-4 overflow-auto">
-          <TaskGraphGroups runId={activeRun.runId} isActive={isActive} />
-          {testGraph && testGraph.nodes.length > 0 && (
-            <CollapsibleGraphSection title="Test Pipeline" defaultOpen>
-              <div className="overflow-auto max-h-[50vh] border border-[var(--border-default)] rounded-sm">
-                <TestGraphSection graph={testGraph} />
-              </div>
-            </CollapsibleGraphSection>
-          )}
+        <Tabs.Content value="timeline" className="p-4 overflow-auto">
+          <TaskTimeline tasks={activeRun.tasks} runStartedAt={activeRun.startedAt} />
         </Tabs.Content>
 
         <Tabs.Content value="preview" className="h-[calc(100vh-180px)] overflow-hidden">
@@ -370,7 +358,8 @@ function groupTasksBySource(tasks: RunDetail['tasks']): { label: string; taskCou
 function displayProvider(provider: string | null | undefined): string {
   if (!provider) return '—';
   switch (provider.toUpperCase()) {
-    case 'GOOGLE': return 'Gemini';
+    case 'GEMINI':
+    case 'GOOGLE': return 'Gemini'; // GOOGLE retained for pre-V119 historical runs
     case 'ANTHROPIC': return 'Anthropic';
     case 'OPENAI': return 'OpenAI';
     default: return provider;
@@ -875,7 +864,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
             ?? run.tasks?.[0]?.provider
             ?? (run.plannerModel?.startsWith('claude') ? 'ANTHROPIC'
               : run.plannerModel?.startsWith('gpt') ? 'OPENAI'
-              : run.plannerModel?.startsWith('gemini') ? 'GOOGLE'
+              : run.plannerModel?.startsWith('gemini') ? 'GEMINI'
               : null)
           )}
         </p>
@@ -1910,177 +1899,6 @@ function TestTaskCard({ task }: { task: TestTaskDto }) {
     </div>
   );
 }
-
-// ── Task Graph Groups (original + copilot + review) ─────────────────────────
-
-function TaskGraphGroups({ runId, isActive }: { runId: string; isActive: boolean }) {
-  const [groups, setGroups] = useState<{ title: string; nodes: TaskGraphNode[]; order: number }[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  const load = useCallback(() => {
-    getTaskGraph(runId).then((allNodes) => {
-      // Group nodes by source prefix in taskId: _cop{N}_ → Copilot N, _rev{N}_ → Review Fix N, else → original
-      const buckets = new Map<string, { title: string; nodes: TaskGraphNode[]; order: number }>();
-      buckets.set('original', { title: 'Task Graph', nodes: [], order: 0 });
-
-      for (const node of allNodes) {
-        const copMatch = node.taskId.match(/_cop(\d+)_/);
-        const revMatch = node.taskId.match(/_rev(\d+)_/);
-        if (copMatch) {
-          const idx = parseInt(copMatch[1], 10);
-          const key = `cop${idx}`;
-          if (!buckets.has(key)) buckets.set(key, { title: `Copilot ${idx}`, nodes: [], order: 100 + idx });
-          buckets.get(key)!.nodes.push(node);
-        } else if (revMatch) {
-          const idx = parseInt(revMatch[1], 10);
-          const key = `rev${idx}`;
-          if (!buckets.has(key)) buckets.set(key, { title: `Review Fix ${idx}`, nodes: [], order: 200 + idx });
-          buckets.get(key)!.nodes.push(node);
-        } else {
-          buckets.get('original')!.nodes.push(node);
-        }
-      }
-
-      // Sort by order (original first, then copilot, then review, each ascending by index)
-      const sorted = Array.from(buckets.values())
-        .filter(g => g.nodes.length > 0)
-        .sort((a, b) => a.order - b.order);
-
-      setGroups(sorted);
-      setLoading(false);
-    }).catch(() => {
-      setLoading(false);
-    });
-  }, [runId]);
-
-  // Initial load
-  useEffect(() => {
-    setLoading(true);
-    load();
-  }, [load]);
-
-  // Poll every 30s while the run is active
-  useEffect(() => {
-    if (!isActive) return;
-    const id = setInterval(() => { if (!document.hidden) load(); }, 30_000);
-    return () => clearInterval(id);
-  }, [isActive, load]);
-
-  if (loading && groups.length === 0) {
-    return (
-      <div className="flex items-center gap-2 text-muted text-sm py-4">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading task graph…
-      </div>
-    );
-  }
-
-  if (groups.length === 0) {
-    return <p className="text-muted text-sm py-4">No tasks to display.</p>;
-  }
-
-  return (
-    <>
-      {groups.map((group, i) => (
-        <CollapsibleGraphSection
-          key={group.title}
-          title={group.title}
-          defaultOpen={i === groups.length - 1}
-        >
-          <div className="overflow-auto max-h-[60vh] border border-[var(--border-default)] rounded-sm">
-            <TaskGraph nodes={group.nodes} />
-          </div>
-        </CollapsibleGraphSection>
-      ))}
-    </>
-  );
-}
-
-// ── Collapsible Graph Section ────────────────────────────────────────────────
-
-function CollapsibleGraphSection({ title, defaultOpen = true, children }: { title: string; defaultOpen?: boolean; children: React.ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
-  return (
-    <div className="mb-4">
-      <button
-        onClick={() => setOpen(!open)}
-        className="flex items-center gap-2 w-full py-2 text-sm font-medium text-secondary hover:text-primary transition-colors"
-      >
-        {open ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-        {title}
-        {!open && <span className="text-[var(--text-muted)] text-xs ml-1">(collapsed)</span>}
-      </button>
-      {open && children}
-    </div>
-  );
-}
-
-// ── Test Graph Section (for Graph tab) ──────────────────────────────────────
-
-const NODE_STATUS_COLORS: Record<string, string> = {
-  COMPLETED: 'border-accent-blue/50 bg-accent-blue/10',
-  COMPILED: 'border-accent-blue/50 bg-accent-blue/10',
-  PENDING: 'border-[var(--gray-400)] bg-[var(--gray-200)]/50',
-  GENERATING: 'border-accent-amber/50 bg-accent-amber/10',
-  EXECUTING: 'border-accent-blue/50 bg-accent-blue/10',
-  FAILED: 'border-accent-red/50 bg-accent-red/10',
-};
-
-function TestGraphSection({ graph }: { graph: TestGraphData }) {
-  const agents = graph.nodes.filter(n => n.type === 'agent');
-  const workers = graph.nodes.filter(n => n.type === 'worker');
-  const gates = graph.nodes.filter(n => n.type === 'gate' || n.type === 'execution' || n.type === 'report');
-
-  return (
-    <div className="mt-6 border-t border-[var(--border-default)] pt-4">
-      <div className="flex items-center gap-2 mb-4">
-        <TestTube2 className="h-4 w-4 text-accent-blue" />
-        <span className="text-sm font-medium text-secondary">Test Generation Pipeline</span>
-        {graph.testResults.total > 0 && (
-          <span className="text-xs text-muted ml-2">
-            {graph.testResults.passed}/{graph.testResults.total} passed
-          </span>
-        )}
-      </div>
-
-      {/* Pipeline flow: Planner → Workers → Compile → Execute → Report */}
-      <div className="flex flex-col gap-3">
-        {/* Planner */}
-        {agents.map(node => (
-          <GraphNode key={node.id} node={node} />
-        ))}
-
-        {/* Workers */}
-        {workers.length > 0 && (
-          <div className="ml-4 pl-4 border-l-2 border-dashed border-violet-500/30 space-y-2">
-            {workers.map(node => (
-              <GraphNode key={node.id} node={node} />
-            ))}
-          </div>
-        )}
-
-        {/* Gates: Compile, Execute, Report */}
-        {gates.map(node => (
-          <GraphNode key={node.id} node={node} />
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function GraphNode({ node }: { node: { id: string; label: string; type: string; status: string; category?: string } }) {
-  const colors = NODE_STATUS_COLORS[node.status] || NODE_STATUS_COLORS.PENDING;
-  return (
-    <div className={cn('rounded-sm border px-3 py-2 flex items-center gap-2', colors)}>
-      <TestTube2 className="h-3.5 w-3.5 text-accent-blue flex-shrink-0" />
-      <span className="text-xs text-primary">{node.label}</span>
-      {node.category && (
-        <span className="text-xs text-muted bg-[var(--gray-200)]/50 rounded px-1 py-0.5">{node.category}</span>
-      )}
-      <span className="ml-auto text-xs text-muted">{node.status}</span>
-    </div>
-  );
-}
-
 
 // ─── Pilot R5: Pull request list ────────────────────────────────────────────
 function RunPrList({ run }: { run: RunDetail }) {

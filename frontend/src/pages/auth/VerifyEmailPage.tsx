@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
+import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import * as api from '@/lib/api';
+import { AuthShell } from './LoginPage';
 
 export default function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
@@ -11,7 +13,6 @@ export default function VerifyEmailPage() {
 
   useEffect(() => {
     if (!token) { setStatus('error'); setError('Missing verification token.'); return; }
-    // Guard against React StrictMode double-invocation — only call the API once
     if (calledRef.current) return;
     calledRef.current = true;
     api.authVerifyEmail(token)
@@ -20,36 +21,41 @@ export default function VerifyEmailPage() {
   }, [token]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#0f1117] p-4">
-      <div className="w-full max-w-md rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] p-8 text-center ">
+    <AuthShell>
+      <div className="text-center">
         {status === 'loading' && (
           <>
-            <div className="mb-4 flex justify-center">
-              <div className="h-10 w-10 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--accent-blue)_15%,transparent)] border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)]">
+              <Loader2 className="h-7 w-7 text-accent-blue animate-spin" />
             </div>
-            <p className="text-muted">Verifying your email…</p>
+            <h2 className="text-2xl font-semibold text-primary mb-2">Verifying your email</h2>
+            <p className="text-sm text-muted">One moment…</p>
           </>
         )}
         {status === 'success' && (
           <>
-            <div className="mb-4 text-5xl">✅</div>
-            <h2 className="mb-2 text-xl font-bold text-primary">Email verified!</h2>
-            <p className="mb-6 text-muted">Your account is now active. You can log in.</p>
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--status-success)_15%,transparent)] border border-[color-mix(in_srgb,var(--status-success)_30%,transparent)]">
+              <CheckCircle2 className="h-7 w-7 text-accent-green" />
+            </div>
+            <h2 className="text-2xl font-semibold text-primary mb-2">Email verified</h2>
+            <p className="text-sm text-muted mb-6">Your account is active. Let's ship something.</p>
             <Link to="/login"
-              className="inline-block rounded-sm bg-accent-blue px-6 py-2.5 font-semibold text-primary hover:bg-accent-blue">
-              Go to login
+              className="inline-flex items-center justify-center rounded-md bg-accent-blue px-6 py-2.5 text-sm font-medium text-primary hover:bg-[var(--accent-blue-hover)] transition-colors">
+              Sign in &rarr;
             </Link>
           </>
         )}
         {status === 'error' && (
           <>
-            <div className="mb-4 text-5xl">❌</div>
-            <h2 className="mb-2 text-xl font-bold text-primary">Verification failed</h2>
-            <p className="mb-4 text-muted">{error}</p>
-            <Link to="/login" className="text-[var(--text-secondary)] hover:text-accent-blue text-sm">Back to login</Link>
+            <div className="mx-auto mb-5 flex h-14 w-14 items-center justify-center rounded-full bg-[color-mix(in_srgb,var(--status-error)_15%,transparent)] border border-[color-mix(in_srgb,var(--status-error)_30%,transparent)]">
+              <XCircle className="h-7 w-7 text-accent-red" />
+            </div>
+            <h2 className="text-2xl font-semibold text-primary mb-2">Verification failed</h2>
+            <p className="text-sm text-muted mb-6">{error}</p>
+            <Link to="/login" className="text-sm text-accent-blue hover:underline font-medium">&larr; Back to login</Link>
           </>
         )}
       </div>
-    </div>
+    </AuthShell>
   );
 }

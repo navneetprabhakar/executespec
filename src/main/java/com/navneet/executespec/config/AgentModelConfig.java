@@ -151,7 +151,7 @@ public class AgentModelConfig {
             log.info("[AgentModelConfig] No GOOGLE_API_KEY configured — system Gemini fallback disabled");
             return null;
         }
-        String geminiModel = modelRegistry.planningModelFor("google");
+        String geminiModel = modelRegistry.planningModelFor("gemini");
         log.info("[AgentModelConfig] Creating system Gemini bean ({})", geminiModel);
         Client client = Client.builder().apiKey(apiKey).build();
         return GoogleGenAiChatModel.builder()

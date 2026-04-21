@@ -1,21 +1,33 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
-<head><meta charset="UTF-8"><title>Subscription Renewal Reminder</title></head>
-<body style="font-family:'SFMono-Regular',ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;background:#000000;color:#ededed;padding:40px">
-  <div style="max-width:480px;margin:0 auto;background:#111111;border:1px solid #252525;border-radius:6px;padding:32px">
-    <h1 style="color:#ededed;margin:0 0 8px">executespec</h1>
-    <h2 style="margin:0 0 24px;font-size:20px">Subscription renewing soon</h2>
-    <p>Hi <span th:text="${firstName}">there</span>,</p>
-    <p>Your <strong th:text="${planName}">Pro Monthly</strong> subscription will renew on <strong th:text="${renewalDate}">April 15, 2026</strong>.</p>
-    <p>No action is needed — your subscription will automatically renew and you'll receive an invoice via email.</p>
-    <p>If you'd like to make any changes to your plan before renewal, you can do so from your billing page.</p>
-    <a th:href="${baseUrl + '/billing'}" href="#"
-       style="display:inline-block;background:#ededed;color:#000000;text-decoration:none;
-              padding:12px 28px;border-radius:4px;font-weight:600;margin:16px 0">
-      Manage Subscription
-    </a>
-    <hr style="border:1px solid #252525;margin:24px 0"/>
-    <p style="color:#a1a1a1;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:underline" href="#">executespec.ai</a></p>
-  </div>
-</body>
-</html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Your ExecuteSpec subscription renews soon</title>
+</head>
+<body style="margin:0;padding:0;background:#0B0D10;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#ededed;line-height:1.55;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#0B0D10;">
+  <tr><td align="center" style="padding:24px 12px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;border-collapse:collapse;background:#14171C;border:1px solid #242A33;border-radius:14px;overflow:hidden;">
+      <tr><td style="padding:32px 28px 20px;background:linear-gradient(135deg,rgba(91,141,239,0.18),rgba(139,92,246,0.10) 60%,transparent);border-bottom:1px solid #242A33;">
+        <div style="display:inline-flex;align-items:center;gap:10px;margin-bottom:18px;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#ededed;color:#0B0D10;border-radius:6px;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:12px;">ES</span>
+          <span style="color:#ededed;font-weight:600;font-size:15px;letter-spacing:-0.01em;">ExecuteSpec</span>
+        </div>
+        <div style="display:inline-block;background:rgba(91,141,239,0.14);border:1px solid rgba(91,141,239,0.45);border-radius:999px;padding:3px 10px;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;color:#5B8DEF;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">Renewal reminder</div>
+        <h1 style="margin:0;color:#ededed;font-size:24px;line-height:1.18;letter-spacing:-0.025em;font-weight:600;">Renewal in <span style="font-family:&#39;Instrument Serif&#39;,&#39;Georgia&#39;,serif;font-style:italic;font-weight:400;" th:text="${daysLeft}">7</span> days.</h1>
+      </td></tr>
+      <tr><td style="padding:24px 28px 8px;">
+        <p style="margin:0 0 14px;color:#C9D1DB;font-size:14.5px;">Hi <span th:text="${firstName}" style="color:#ededed;font-weight:500;">there</span>,</p>
+        <p style="margin:0 0 14px;color:#C9D1DB;font-size:14.5px;">Your <strong th:text="${planName}" style="color:#ededed;">Pro</strong> subscription renews on <strong th:text="${renewsOn}" style="color:#ededed;">Feb 1, 2026</strong> for <strong th:text="${amount}" style="color:#ededed;">&dollar;20.00</strong>.</p>
+        <p style="margin:0 0 14px;color:#C9D1DB;font-size:14.5px;">No action needed — we'll charge your saved payment method automatically.</p>
+<table role="presentation" cellspacing="0" cellpadding="0"><tr><td><a th:href="${billingUrl}" href="#" style="display:inline-block;background:#5B8DEF;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:500;font-size:14px;letter-spacing:-0.005em;">Manage subscription</a></td></tr></table>
+        <p style="margin:22px 0 0;color:#8A94A6;font-size:12.5px;">Change plan, update payment method, or cancel any time from Billing.</p>
+      </td></tr>
+      <tr><td style="padding:18px 28px 22px;border-top:1px solid #242A33;background:#14171C;color:#8A94A6;font-size:11.5px;">
+        &copy; 2026 ExecuteSpec &middot; <a th:href="${baseUrl}" style="color:#C9D1DB;text-decoration:none;" href="#">executespec.ai</a>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>

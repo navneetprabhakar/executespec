@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban, ClipboardList,
-  Receipt, Calculator, Rocket, ArrowUpCircle, X, ChevronLeft, Plus,
+  Receipt, Calculator, Rocket, ArrowUpCircle, X, ChevronLeft, Plus, TrendingUp,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -19,7 +19,7 @@ import { fetchBillingStatus } from '@/lib/billing-api';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   LayoutDashboard, BarChart3, DollarSign, Plug, ClipboardList, Settings,
-  Receipt, Calculator, Rocket,
+  Receipt, Calculator, Rocket, TrendingUp,
 };
 
 export default function Sidebar() {
@@ -92,10 +92,13 @@ export default function Sidebar() {
 
   const sidebarContent = (
     <>
-      {/* Logo */}
+      {/* Logo — v2.5.14 Phase 2.8 uses brand gradient. */}
       <div className="flex items-center h-14 px-4 border-b border-[var(--border-default)] flex-shrink-0">
-        <div className="h-6 w-6 rounded-md bg-[var(--text-primary)] flex items-center justify-center flex-shrink-0">
-          <span className="text-[var(--geist-bg)] text-xs font-bold">ES</span>
+        <div
+          className="h-6 w-6 rounded-md flex items-center justify-center flex-shrink-0 shadow-sm"
+          style={{ background: 'var(--brand-grad)' }}
+        >
+          <span className="text-white text-xs font-bold">ES</span>
         </div>
         {expanded && (
           <span className="ml-2.5 text-sm font-semibold text-primary whitespace-nowrap">
@@ -130,10 +133,13 @@ export default function Sidebar() {
               to={item.path}
               end={item.path === '/'}
               onClick={isMobile ? closeMobileDrawer : undefined}
+              aria-label={item.label}
+              title={!expanded ? item.label : undefined}
               className={({ isActive }) =>
                 cn(
                   'flex items-center h-9 px-2.5 gap-2.5 rounded-md transition-colors',
                   'hover:bg-[var(--gray-200)] group',
+                  !expanded && 'justify-center',
                   isActive
                     ? 'bg-[var(--gray-200)] text-primary'
                     : 'text-secondary'
@@ -209,8 +215,8 @@ export default function Sidebar() {
         )}
       </nav>
 
-      {/* Upgrade + Usage */}
-      {expanded && (
+      {/* Upgrade + Usage — hidden for SUPER_ADMIN since they bypass billing quotas */}
+      {expanded && !isSuperAdmin && (
         <div className="px-3 py-2 border-t border-[var(--border-default)] space-y-2">
           {tier && tier !== 'ENTERPRISE' && tier !== 'MAX' && (
             <button

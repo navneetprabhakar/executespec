@@ -16,53 +16,165 @@
   font-display: swap;
 }
 
-/* ── Geist Design Tokens ───────────────────────────────────────────────── */
+/* ── Graphite + Signal Design Tokens (v2.5.14, Phase 2) ─────────────────
+ *
+ * Design goal: decouple ExecuteSpec from the Vercel/Geist clone aesthetic.
+ * Graphite backgrounds (not pure black) reduce OLED fatigue and create a real
+ * 2-layer depth system. Signal blue accent is softer on dark and accessible
+ * on light. Money is now neutral (was amber, which collided with the warning
+ * semantic). Status tokens unchanged — they were already correct.
+ *
+ * A matching `[data-theme="light"]` override below lets every component flip
+ * to light mode without component-level rewrites.
+ * ──────────────────────────────────────────────────────────────────────── */
 
 :root {
-  /* Gray scale (dark mode) */
-  --geist-bg:           #000000;
-  --geist-bg-secondary: #0a0a0a;
-  --gray-100:           #111111;
-  --gray-200:           #1a1a1a;
-  --gray-300:           #252525;
-  --gray-400:           #333333;
-  --gray-500:           #555555;
-  --gray-600:           #666666;
-  --gray-700:           #888888;
-  --gray-800:           #999999;
-  --gray-900:           #a1a1a1;
-  --gray-1000:          #ededed;
+  /* ── Surface ladder (dark = default) ─────────────────────────────────── */
+  --geist-bg:           #0B0D10;   /* was #000 — cuts glare, creates depth */
+  --geist-bg-secondary: #14171C;   /* was #0a0a0a */
+  --gray-100:           #14171C;
+  --gray-200:           #1B1F26;
+  --gray-300:           #242A33;
+  --gray-400:           #333B46;
+  --gray-500:           #4C5662;
+  --gray-600:           #66707D;
+  --gray-700:           #8A94A6;   /* was #888 — lifts muted text past AA 7:1 */
+  --gray-800:           #AAB2BF;
+  --gray-900:           #C9D1DB;
+  --gray-1000:          #ECEEF2;
 
   /* Borders */
-  --border-default:     #252525;
-  --border-hover:       #333333;
+  --border-default:     #242A33;
+  --border-hover:       #333B46;
 
   /* Text */
-  --text-primary:       #ededed;
-  --text-secondary:     #a1a1a1;
-  --text-muted:         #666666;
+  --text-primary:       #ECEEF2;
+  --text-secondary:     #C9D1DB;
+  --text-muted:         #8A94A6;
 
-  /* Accent */
-  --accent-blue:        #0070F3;
-  --accent-blue-hover:  #0060D0;
-  --accent-harness:     #8b5cf6;
-  --accent-planner:     #10b981;
+  /* Accent — Signal palette */
+  --accent-blue:        #5B8DEF;   /* was Vercel #0070F3 */
+  --accent-blue-hover:  #7AA5F5;
+  --accent-harness:     #A78BFA;
+  --accent-planner:     #22D3EE;   /* teal — contrast with blue */
 
-  /* Status — distinct color per semantic group */
-  --status-success:     #10B981;   /* green — COMPLETE */
-  --status-executing:   #3B82F6;   /* blue — WORKING, COMPILING, MERGING */
-  --status-thinking:    #8B5CF6;   /* purple — PLANNING, REVIEWING */
-  --status-waiting:     #F59E0B;   /* amber — AWAITING_* */
-  --status-partial:     #F97316;   /* orange — PARTIAL */
-  --status-error:       #EF4444;   /* red — FAILED, STUCK */
-  --status-blocked:     #EC4899;   /* pink — BLOCKED */
-  --status-queued:      #666666;   /* gray — QUEUED, PAUSED, CANCELLED, PENDING, LOCKED */
+  /* Brand gradient (logo, primary CTAs, scorecard highlight) */
+  --brand-grad:         linear-gradient(135deg, #5B8DEF 0%, #7AD1C8 100%);
 
-  /* Legacy aliases (deprecated — use semantic names above) */
+  /* Status — distinct color per semantic group (unchanged, just retuned) */
+  --status-success:     #10B981;
+  --status-executing:   #5B8DEF;   /* was #3B82F6 — align with accent */
+  --status-thinking:    #A78BFA;
+  --status-waiting:     #F59E0B;
+  --status-partial:     #F97316;
+  --status-error:       #F26D6D;   /* slightly less aggressive red */
+  --status-blocked:     #EC4899;
+  --status-queued:      #66707D;
+
+  /* Numeric neutral — money/tokens/stats. Was amber (collided with warning). */
+  --numeric-neutral:    #C9D1DB;
+
+  /* Legacy aliases */
   --status-building:    #F59E0B;
 
   /* Radius */
-  --radius-sm:          2px;
-  --radius-md:          4px;
-  --radius-lg:          6px;
+  --radius-sm:          4px;       /* was 2px — less crunchy */
+  --radius-md:          6px;       /* was 4px */
+  --radius-lg:          8px;       /* was 6px */
+  --radius-xl:          12px;
+  --radius-2xl:         16px;
+  --radius-full:        9999px;
+
+  /* Spacing scale (rem) — unchanged */
+  --space-0:  0;
+  --space-1:  0.25rem;
+  --space-2:  0.5rem;
+  --space-3:  0.75rem;
+  --space-4:  1rem;
+  --space-5:  1.25rem;
+  --space-6:  1.5rem;
+  --space-8:  2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --space-16: 4rem;
+
+  --page-gutter-mobile:  var(--space-4);
+  --page-gutter-tablet:  var(--space-6);
+  --page-gutter-desktop: var(--space-8);
+  --page-stack:          var(--space-6);
+
+  /* Elevation */
+  --elevation-1: 0 1px 2px 0 rgba(0,0,0,0.4);
+  --elevation-2: 0 4px 12px 0 rgba(0,0,0,0.5);
+  --elevation-3: 0 12px 32px 0 rgba(0,0,0,0.6);
+
+  /* Motion */
+  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --duration-fast:   120ms;
+  --duration-base:   200ms;
+  --duration-slow:   320ms;
+
+  /* Focus ring — must be visible on every dark-theme control */
+  --focus-ring: 0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue);
+
+  /* Font scale */
+  --text-xs:    0.75rem;
+  --text-sm:    0.8125rem;
+  --text-base:  0.9375rem;
+  --text-lg:    1.0625rem;
+  --text-xl:    1.25rem;
+  --text-2xl:   1.5rem;
+  --text-3xl:   1.875rem;
+  --text-4xl:   2.5rem;
+  --text-5xl:   3.25rem;
+}
+
+/* ── Light theme override (v2.5.14 Phase 2) ─────────────────────────────
+ *
+ * Activated by `document.documentElement.dataset.theme = 'light'` or by
+ * setting `<html data-theme="light">`. Persisted by the header ThemeToggle
+ * in useUiStore. Falls back to dark if no user preference.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+[data-theme='light'] {
+  --geist-bg:           #FAFAFB;
+  --geist-bg-secondary: #F3F4F6;
+  --gray-100:           #F3F4F6;
+  --gray-200:           #E7E9EE;
+  --gray-300:           #D8DCE3;
+  --gray-400:           #BFC6D0;
+  --gray-500:           #959EAB;
+  --gray-600:           #6E7785;
+  --gray-700:           #4C5662;
+  --gray-800:           #333B46;
+  --gray-900:           #1B1F26;
+  --gray-1000:          #0B0D10;
+
+  --border-default:     #E1E5EB;
+  --border-hover:       #C9CFD8;
+
+  --text-primary:       #0B0D10;
+  --text-secondary:     #333B46;
+  --text-muted:         #6E7785;
+
+  --accent-blue:        #2563EB;
+  --accent-blue-hover:  #1D4ED8;
+
+  --status-error:       #DC2626;
+  --status-waiting:     #D97706;
+  --numeric-neutral:    #4C5662;
+
+  --elevation-1: 0 1px 2px 0 rgba(15,23,42,0.05);
+  --elevation-2: 0 4px 12px 0 rgba(15,23,42,0.08);
+  --elevation-3: 0 12px 32px 0 rgba(15,23,42,0.12);
+
+  --focus-ring: 0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue);
+}
+
+/* ── prefers-color-scheme default for first-time visitors (no saved pref) ── */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) {
+    color-scheme: light;
+  }
 }

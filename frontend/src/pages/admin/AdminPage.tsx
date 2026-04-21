@@ -240,12 +240,20 @@ function AdminPageInner() {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden relative">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={{
+        background: 'radial-gradient(ellipse 60% 40% at 20% 0%, color-mix(in srgb, var(--accent-blue) 12%, transparent), transparent 60%)'
+      }} />
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 sm:px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Shield className="h-5 w-5 text-accent-blue" />
-          <h1 className="text-lg font-semibold text-primary">Super Admin</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 sm:px-6 py-5 border-b border-[var(--border-default)] flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0">
+            <Shield className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="inline-block font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue">Admin</div>
+            <h1 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">Super admin console</h1>
+          </div>
         </div>
         <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
           <button
@@ -326,7 +334,7 @@ function AdminPageInner() {
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     <th className="px-4 py-3 text-left font-medium">Name / Email</th>
@@ -414,7 +422,7 @@ function AdminPageInner() {
             </div>
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Org', 'Tier', 'Status', 'Run Limit', 'API Keys', 'Usage', 'Actions'].map((h) => (
@@ -637,7 +645,7 @@ function AdminPageInner() {
                 <h3 className="text-sm font-medium text-primary">
                   {editingPkg ? `Edit: ${editingPkg.name}` : 'Create New Package'}
                 </h3>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                   <div>
                     <label className="block text-[10px] text-muted mb-1">Name</label>
                     <input
@@ -709,7 +717,7 @@ function AdminPageInner() {
             {/* Packages table */}
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Name', 'Runs', 'Price (INR)', 'Price (USD)', 'Order', 'Status', 'Actions'].map((h) => (
@@ -723,7 +731,7 @@ function AdminPageInner() {
                       <td className="px-4 py-3 text-primary font-medium">{p.name}</td>
                       <td className="px-4 py-3 text-secondary">{p.runCount}</td>
                       <td className="px-4 py-3 text-secondary font-mono text-xs">
-                        {'\u20B9'}{(p.amountInr / 100).toFixed(0)}
+                        {'₹'}{(p.amountInr / 100).toFixed(0)}
                         <span className="text-muted ml-1">({p.amountInr}p)</span>
                       </td>
                       <td className="px-4 py-3 text-secondary font-mono text-xs">
@@ -882,7 +890,7 @@ function AdminPageInner() {
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Event', 'Entity', 'Tier Change', 'Gateway', 'Amount', 'By', 'Date'].map((h) => (
@@ -959,7 +967,7 @@ function AdminPageInner() {
 
             <div className="rounded-sm border border-[var(--border-default)] overflow-hidden">
               <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-sm min-w-[600px] md:min-w-0">
                 <thead className="bg-[var(--gray-100)] text-muted text-xs">
                   <tr>
                     {['Gateway', 'Event ID', 'Event Type', 'Status', 'Attempts', 'Received'].map((h) => (

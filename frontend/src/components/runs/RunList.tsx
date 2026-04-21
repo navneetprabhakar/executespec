@@ -58,11 +58,13 @@ export default function RunList() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Mobile: New Run button at top */}
+      {/* Mobile: New Run button at top — v2.5.13: switched to accent-blue so it
+          reads as a dark-theme primary action instead of an inverted-light bar
+          with black text (which looked like an empty/broken element). */}
       {isMobile && (
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-[var(--text-primary)] text-[var(--geist-bg)] text-sm font-medium hover:bg-[var(--gray-900)] transition-colors"
+          className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
         >
           <Plus className="h-4 w-4" />
           New Run
@@ -71,7 +73,7 @@ export default function RunList() {
 
       {/* Scope toggle — SUPER_ADMIN: 3 views; org members: 2 views */}
       {(isSuperAdmin || isOrgMember) && (
-        <div className="flex items-center gap-0 px-4 border-b border-[var(--border-default)] flex-shrink-0">
+        <div className="flex items-center gap-0 px-3 lg:px-4 border-b border-[var(--border-default)] flex-shrink-0 overflow-x-auto scrollbar-hide">
           <button
             onClick={() => setScopeFilter('mine')}
             className={cn(
@@ -252,13 +254,13 @@ export default function RunList() {
 
       {/* New Run button — desktop only (mobile has top button) */}
       {!isMobile && (
-        <div className="px-3 py-2 border-t border-[var(--border-default)] flex-shrink-0">
+        <div className="px-3 py-3 border-t border-[var(--border-default)] flex-shrink-0">
           <button
             onClick={() => setShowModal(true)}
-            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-sm bg-[var(--text-primary)] text-[var(--geist-bg)] text-sm font-medium hover:bg-[var(--gray-900)] transition-colors"
+            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md bg-accent-blue text-primary text-sm font-medium hover:bg-[var(--accent-blue-hover)] transition-colors"
           >
             <Plus className="h-4 w-4" />
-            New Run
+            New run
           </button>
         </div>
       )}

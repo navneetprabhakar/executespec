@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Calculator, Download, TrendingUp, IndianRupee } from 'lucide-react';
+import { Download, TrendingUp, IndianRupee } from 'lucide-react';
+import PageShell from '@/components/shared/PageShell';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import {
   getRevenueMetrics, getGstSummary, getTrialBalance, getGstr1ExportUrl,
@@ -52,14 +53,14 @@ export default function AccountingPage() {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 sm:px-6 py-6">
-      {/* Header */}
-      <div className="flex items-center gap-3">
-        <Calculator className="h-6 w-6 text-accent-blue" />
-        <h1 className="text-xl font-semibold text-slate-100">Accounting</h1>
-        <span className="ml-auto text-xs text-muted">FY {fy} &middot; Q{quarter}</span>
-      </div>
-
+    <PageShell
+      eyebrow={`FY ${fy} · Q${quarter}`}
+      eyebrowTone="purple"
+      title="Financials at a glance."
+      accent="glance"
+      description="MRR, ARR, revenue, collections, and GST — all in one quarter view."
+      hero
+    >
       {/* Revenue metric cards */}
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
         <MetricCard label="MRR" value={metrics?.mrr} />
@@ -107,41 +108,66 @@ export default function AccountingPage() {
       </div>
 
       {/* Trial balance */}
-      <div className="rounded-sm border border-surface-700 bg-surface-800 p-6">
+      <div className="rounded-sm border border-surface-700 bg-surface-800 p-4 sm:p-6">
         <h3 className="mb-4 text-sm font-semibold text-slate-200">Trial Balance</h3>
         {trial.length === 0 ? (
           <div className="text-sm text-muted">No entries found for this period</div>
         ) : (
-          <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-surface-700 text-left text-xs text-muted">
-                <th className="px-4 py-2">Account</th>
-                <th className="px-4 py-2 text-right">Debit</th>
-                <th className="px-4 py-2 text-right">Credit</th>
-                <th className="px-4 py-2 text-right">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
+          <>
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-surface-700 text-left text-xs text-muted">
+                    <th className="px-4 py-2">Account</th>
+                    <th className="px-4 py-2 text-right">Debit</th>
+                    <th className="px-4 py-2 text-right">Credit</th>
+                    <th className="px-4 py-2 text-right">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {trial.map((entry) => (
+                    <tr key={entry.account} className="border-b border-surface-700/50">
+                      <td className="px-4 py-2 text-secondary">{entry.account}</td>
+                      <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.debitTotal)}</td>
+                      <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.creditTotal)}</td>
+                      <td className="px-4 py-2 text-right font-mono text-slate-200">
+                        {formatPaise(Math.abs(entry.debitTotal - entry.creditTotal))}
+                        <span className="ml-1 text-xs text-muted">
+                          {entry.debitTotal > entry.creditTotal ? 'DR' : 'CR'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile cards — Trial Balance has 4 numeric columns that get truncated
+                to "₹2,0…" / "₹11,4…" on a 4-col table at 375px. Cards keep them all readable. */}
+            <ul className="sm:hidden divide-y divide-surface-700">
               {trial.map((entry) => (
-                <tr key={entry.account} className="border-b border-surface-700/50">
-                  <td className="px-4 py-2 text-secondary">{entry.account}</td>
-                  <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.debitTotal)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-muted">{formatPaise(entry.creditTotal)}</td>
-                  <td className="px-4 py-2 text-right font-mono text-slate-200">
-                    {formatPaise(Math.abs(entry.debitTotal - entry.creditTotal))}
-                    <span className="ml-1 text-xs text-muted">
-                      {entry.debitTotal > entry.creditTotal ? 'DR' : 'CR'}
+                <li key={entry.account} className="py-3 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm font-medium text-secondary">{entry.account}</span>
+                    <span className="font-mono text-sm text-slate-200">
+                      {formatPaise(Math.abs(entry.debitTotal - entry.creditTotal))}
+                      <span className="ml-1 text-xs text-muted">
+                        {entry.debitTotal > entry.creditTotal ? 'DR' : 'CR'}
+                      </span>
                     </span>
-                  </td>
-                </tr>
+                  </div>
+                  <div className="flex items-center gap-3 text-[11px] font-mono text-muted">
+                    <span>Dr {formatPaise(entry.debitTotal)}</span>
+                    <span>Cr {formatPaise(entry.creditTotal)}</span>
+                  </div>
+                </li>
               ))}
-            </tbody>
-          </table>
-          </div>
+            </ul>
+          </>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }
 

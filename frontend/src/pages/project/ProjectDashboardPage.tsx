@@ -26,18 +26,39 @@ import type { RunDetail } from '@/lib/api';
 
 type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'docs' | 'memory' | 'chat' | 'team';
 
-const TABS: { key: TabKey; label: string }[] = [
-  { key: 'overview', label: 'Overview' },
-  { key: 'launches', label: 'Launches' },
-  { key: 'prs', label: 'PRs' },
-  { key: 'tasks', label: 'Tasks' },
-  { key: 'repos', label: 'Repos' },
-  { key: 'architecture', label: 'Architecture' },
-  { key: 'docs', label: 'Docs' },
-  { key: 'memory', label: 'Memory' },
-  { key: 'chat', label: 'Chat' },
-  { key: 'team', label: 'Team' },
+// v2.5.14 Phase 2.4 — tab IA restructured from 10 flat tabs to 5 top-level
+// groups. Underlying content is preserved; users who rely on Memory or Docs
+// still get there in 1 click (same click cost as today) but the first tier
+// only shows meaningful categories so non-engineers aren't overwhelmed.
+// Chat is a first-class top-level tab (next to Settings) — it's a separate
+// mode of interaction, not a knowledge artefact.
+type TabGroup = 'overview' | 'work' | 'knowledge' | 'settings' | 'chat';
+
+const TAB_GROUPS: { key: TabGroup; label: string; children: { key: TabKey; label: string }[] }[] = [
+  { key: 'overview',  label: 'Overview',  children: [{ key: 'overview', label: 'Overview' }] },
+  { key: 'work',      label: 'Work',      children: [
+      { key: 'launches', label: 'Launches' },
+      { key: 'prs', label: 'PRs' },
+      { key: 'tasks', label: 'Tasks' },
+  ]},
+  { key: 'knowledge', label: 'Knowledge', children: [
+      { key: 'architecture', label: 'Architecture' },
+      { key: 'docs', label: 'Docs' },
+      { key: 'memory', label: 'Memory' },
+  ]},
+  { key: 'settings',  label: 'Settings',  children: [
+      { key: 'repos', label: 'Repos' },
+      { key: 'team', label: 'Team' },
+  ]},
+  { key: 'chat',      label: 'Chat',      children: [{ key: 'chat', label: 'Chat' }] },
 ];
+
+function findTabGroup(tab: TabKey): TabGroup {
+  for (const g of TAB_GROUPS) {
+    if (g.children.some((c) => c.key === tab)) return g.key;
+  }
+  return 'overview';
+}
 
 // v2.5.12 — STATUS_COLOR map removed; status pills now use the shared
 // <StatusBadge /> primitive (frontend/src/components/shared/StatusBadge.tsx)
@@ -132,7 +153,7 @@ export default function ProjectDashboardPage() {
       case 'repos':
         return <ProjectRepoManager projectId={projectId} />;
       case 'architecture':
-        return <ArchitectureViewer projectId={projectId} />;
+        return <ArchitectureViewer projectId={projectId} repoCount={repos?.length ?? null} />;
       case 'docs':
         return <ProjectDocumentsPanel projectId={projectId} />;
       case 'memory':
@@ -182,37 +203,44 @@ export default function ProjectDashboardPage() {
 
         {projectId && <PostMergeBar projectId={projectId} />}
 
-        <header className="flex items-center justify-between gap-3">
-          <div className="min-w-0 flex items-center gap-2">
-            <FolderGit2 className="h-4 w-4 text-accent-blue flex-shrink-0" />
-            <h1 className="text-[14px] font-medium text-primary truncate">
-              {project?.name ?? 'Project'}
-            </h1>
-            {project?.status && (
-              <span className="text-[11px] font-mono uppercase tracking-wide text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
-                {project.status}
-              </span>
-            )}
-            {project?.aiProvider && (
-              <span className="text-[11px] font-mono text-muted">{project.aiProvider}</span>
-            )}
-            {project?.githubOwner && (
-              <span className="text-[11px] font-mono text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
-                {project.githubOwner}
-              </span>
-            )}
+        <header className="flex items-start justify-between gap-3">
+          <div className="min-w-0 flex items-start gap-3">
+            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0">
+              <FolderGit2 className="h-5 w-5" />
+            </span>
+            <div className="min-w-0">
+              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5">Project</div>
+              <h1 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate">
+                {project?.name ?? 'Project'}
+              </h1>
+              <div className="mt-1 flex items-center gap-2 flex-wrap">
+                {project?.status && (
+                  <span className="text-[10.5px] font-mono uppercase tracking-[0.06em] text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
+                    {project.status}
+                  </span>
+                )}
+                {project?.aiProvider && (
+                  <span className="text-[10.5px] font-mono text-muted">{project.aiProvider}</span>
+                )}
+                {project?.githubOwner && (
+                  <span className="text-[10.5px] font-mono text-muted border border-[var(--border-default)] px-1.5 py-0.5 rounded">
+                    {project.githubOwner}
+                  </span>
+                )}
+              </div>
+            </div>
           </div>
           <NewExecutionButton projectId={projectId} repoCount={repos?.length ?? 0} />
         </header>
         {project?.description && (
-          <p className="text-xs text-muted">{project.description}</p>
+          <p className="text-xs text-secondary max-w-2xl">{project.description}</p>
         )}
 
         {loading && <div className="text-xs text-muted">Loading…</div>}
         {error && <div className="text-xs text-accent-red">{error}</div>}
 
         {/* Metric tiles: +tokens +cost */}
-        <section className="grid grid-cols-3 md:grid-cols-6 gap-2">
+        <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           <MetricTile label="Active"    value={dashboard?.activeRuns ?? '—'}    accent="text-accent-blue" />
           <MetricTile label="Completed" value={dashboard?.completedRuns ?? '—'} accent="text-emerald-400" />
           <MetricTile label="Failed"    value={dashboard?.failedRuns ?? '—'}    accent="text-accent-red" />
@@ -231,28 +259,63 @@ export default function ProjectDashboardPage() {
           />
         </section>
 
-        <nav className="flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto -mx-4 px-4">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              onClick={() => setTab(t.key)}
-              className={cn(
-                'px-2.5 py-1.5 text-xs font-medium whitespace-nowrap transition-colors border-b-2 -mb-px',
-                tab === t.key
-                  ? 'border-accent-blue text-primary'
-                  : 'border-transparent text-muted hover:text-secondary',
+        {/* v2.5.14 Phase 2.4 — two-tier tab navigation.
+            Row 1: top-level groups (Overview / Work / Knowledge / Settings).
+            Row 2: child tabs within the active group. Overview group is single-tab so no row 2.
+            Mobile: both rows scroll horizontally for no-overflow guarantee. */}
+        {(() => {
+          const activeGroup = findTabGroup(tab);
+          const groupChildren = TAB_GROUPS.find((g) => g.key === activeGroup)?.children ?? [];
+          return (
+            <>
+              <nav className="flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto -mx-4 px-4">
+                {TAB_GROUPS.map((g) => {
+                  const isActive = activeGroup === g.key;
+                  return (
+                    <button
+                      key={g.key}
+                      onClick={() => setTab(g.children[0].key)}
+                      className={cn(
+                        'px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors border-b-2 -mb-px',
+                        isActive
+                          ? 'border-accent-blue text-primary'
+                          : 'border-transparent text-muted hover:text-secondary',
+                      )}
+                    >
+                      {g.label}
+                    </button>
+                  );
+                })}
+              </nav>
+              {groupChildren.length > 1 && (
+                <nav className="flex gap-0.5 overflow-x-auto -mx-4 px-4 pt-1">
+                  {groupChildren.map((t) => (
+                    <button
+                      key={t.key}
+                      onClick={() => setTab(t.key)}
+                      className={cn(
+                        'px-2.5 py-1 text-[11px] font-medium whitespace-nowrap rounded-sm transition-colors',
+                        tab === t.key
+                          ? 'bg-accent-blue/10 text-accent-blue border border-accent-blue/30'
+                          : 'border border-transparent text-muted hover:text-secondary hover:border-[var(--border-default)]',
+                      )}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </nav>
               )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
+            </>
+          );
+        })()}
       </div>
 
-      {/* Body: left runs list (own scroll) + right tab content (own scroll, InlineRunDetail flows freely inside). */}
-      <div className="flex-1 min-h-0 flex overflow-hidden">
+      {/* Body: left runs list + right tab content.
+          Mobile: stack vertically (runs list collapses to a horizontal scroller above content).
+          Desktop ≥md: side-by-side with own scroll regions. */}
+      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
         {showLeftList && (
-          <aside className="w-[320px] flex-shrink-0 border-r border-[var(--border-default)] overflow-y-auto">
+          <aside className="w-full lg:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] overflow-y-auto max-h-40 lg:max-h-none">
             <RunsSidebar
               tasks={tasks}
               selectedRunId={selectedRunId}
@@ -263,7 +326,7 @@ export default function ProjectDashboardPage() {
             />
           </aside>
         )}
-        <main className="flex-1 min-w-0 overflow-y-auto p-4">
+        <main className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4">
           {currentContent}
         </main>
       </div>
@@ -481,12 +544,17 @@ function RunsSidebar({
 }
 
 function MetricTile({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
+  const isEmpty = value === '—' || value === 0 || value === '0';
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2.5 py-2">
       <div className="text-[11px] font-medium text-secondary uppercase tracking-wide">{label}</div>
-      <div className={cn('text-lg font-semibold tabular-nums mt-0.5', accent ?? 'text-primary')}>
-        {value}
-      </div>
+      {isEmpty && value === '—' ? (
+        <div className="text-[11px] text-muted italic mt-1.5">No data yet</div>
+      ) : (
+        <div className={cn('text-lg font-semibold tabular-nums mt-0.5', accent ?? 'text-primary')}>
+          {value}
+        </div>
+      )}
     </div>
   );
 }
@@ -511,19 +579,27 @@ function NewExecutionButton({ projectId, repoCount }: { projectId: string; repoC
     ? 'Link at least one repository to launch.'
     : 'Start a cross-repo Launch (ENTERPRISE / MAX)';
   return (
-    <button
-      onClick={() => !disabled && navigate(`/projects/${projectId}/executions/new`)}
-      disabled={disabled}
-      className={
-        'flex items-center gap-1.5 text-xs font-medium rounded-sm border px-2.5 py-1 transition-colors ' +
-        (disabled
-          ? 'border-[var(--border-default)] bg-[var(--gray-100)] text-muted cursor-not-allowed opacity-60'
-          : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20')
-      }
-      title={title}
-    >
-      <Rocket className="h-3 w-3" />
-      Launch
-    </button>
+    <div className="flex flex-col items-end gap-1">
+      <button
+        onClick={() => !disabled && navigate(`/projects/${projectId}/executions/new`)}
+        disabled={disabled}
+        aria-label={title}
+        className={
+          'flex items-center gap-1.5 text-xs font-medium rounded-sm border px-2.5 py-1 transition-colors ' +
+          (disabled
+            ? 'border-[var(--border-default)] bg-[var(--gray-100)] text-muted cursor-not-allowed opacity-60'
+            : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20')
+        }
+        title={title}
+      >
+        <Rocket className="h-3 w-3" />
+        Launch
+      </button>
+      {disabled && (
+        <span className="text-[10px] text-muted italic whitespace-nowrap">
+          Link a repo to enable
+        </span>
+      )}
+    </div>
   );
 }

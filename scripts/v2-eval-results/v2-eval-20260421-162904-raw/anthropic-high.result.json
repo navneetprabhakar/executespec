@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "high",
+  "run_id": "9db3ab96-e872-4000-b3d9-bb54fb8a3b8a",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-21T11:06:48.584224Z",
+  "completedAt": "2026-04-21T11:26:23.941274Z",
+  "tasks_total": 12,
+  "tasks_done": 12,
+  "tasks_failed": 0,
+  "review": "{\"totalLatencyMs\":135740,\"wiringPassSummary\":\"No wiring issues found. Full audit results for this Spring Boot project:\\n\\n1. **Component-scan coverage** — `@SpringBootApplication` is on `com.library.LibraryApplication`. Every bean-carrying class lives in a sub-package of `com.library` (`controller`, `service`, `repository`, `exception`), so all are picked up by the default component scan. No stray classes outside the scan path.\\n\\n2. **Controllers** — `BookController`, `MemberController`, and `LoanController` are all annotated `@RestController`, in `com.library.controller`, and correctly wired to their respective `@Service` beans via constructor injection.\\n\\n3. **Services** — `BookService`, `MemberService`, and `LoanService` are all annotated `@Service` and use constructor injection to receive their `@Repository` dependencies. No `@Autowired` field injection in production code.\\n\\n4. **Repositories** — `BookRepository`, `MemberRepository`, and `LoanRepository` are all annotated `@Repository` and extend `JpaRepository`, making them Spring Data proxies that are automatically registered. `LoanRepository.findByMemberId` is the only custom query method and it follows Spring Data naming conventions correctly.\\n\\n5. **Exception handler** — `GlobalExceptionHandler` is annotated `@RestControllerAdvice` (in `com.library.exception`), which is within the scan path, so it is registered as a global handler. It handles `EntityNotFoundException`, `ConflictException`, `MethodArgumentNotValidException`, and the catch-all `Exception` — all exceptions thrown by the service layer are covered.\\n\\n6. **`@Autowired` field injection** — The only `@Autowired` occurrences are in the test classes (`TestRestTemplate` injection), which is the standard and acceptable pattern for `@SpringBootTest` integration tests. Zero field injection in production beans.\\n\\n7. **Package declarations** — Every `.java` file's `package` declaration matches its directory path under `src/main/java`. No mismatched packages.\\n\\nBuild passed (`mvn -q -DskipTests compile` → exit 0). No fixes were required.\",\"generalPassSummary\":\"Found 1 issue, fixed 1. Issue: In `GlobalExceptionHandler.handleValidationException`, the stream first mapped each `FieldError` to its field name (a `String`), then in the next chained `map` called `getBindingResult().getFieldError(fieldName)` — which always returns the *first* error registered for that field name, not the specific `FieldError` from the stream. When multiple distinct fields fail validation, every entry in the error list would carry the message of whichever field was registered first, producing incorrect error messages. Fixed by collapsing the two-step map into a single lambda that reads `fe.getField()` and `fe.getDefaultMessage()` directly from the `FieldError` object already in the stream.\",\"overall\":\"FIXED_ISSUES\",\"finalBuildExitCode\":0,\"finalBuildPassed\":true}",
+  "actual_cost": 2.652035,
+  "est_low": 10.145000000000001,
+  "est_high": 17.753750000000004,
+  "credits": 4,
+  "total_input": 632787,
+  "total_output": 61441,
+  "accuracy": 87,
+  "report_ok": true
+}

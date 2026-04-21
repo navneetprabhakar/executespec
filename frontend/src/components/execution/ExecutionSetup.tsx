@@ -13,7 +13,7 @@ const PROVIDERS = [
   { key: '',          label: 'Use project default' },
   { key: 'ANTHROPIC', label: 'Anthropic · Claude' },
   { key: 'OPENAI',    label: 'OpenAI · GPT' },
-  { key: 'GOOGLE',    label: 'Google · Gemini' },
+  { key: 'GEMINI',    label: 'Google · Gemini' },
 ];
 
 interface Props {

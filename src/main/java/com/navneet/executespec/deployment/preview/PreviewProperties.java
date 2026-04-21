@@ -37,6 +37,15 @@ public class PreviewProperties {
 
     private ConcurrencyConfig concurrency = new ConcurrencyConfig();
 
+    /**
+     * Route previews through the external preview-engine service instead of
+     * running docker-compose locally. When ON + eligible, main app builds
+     * the image, pushes to {@link EngineConfig#registryUrl}, and hands off
+     * to {@link EngineConfig#baseUrl}'s {@code /api/previews/from-image}.
+     * Legacy docker-compose path stays authoritative until the flag is on.
+     */
+    private EngineConfig engine = new EngineConfig();
+
     @Data
     public static class ProxyConfig {
         /** Enable Spring Boot preview proxy (PreviewProxyFilter). Set true on server. */
@@ -48,5 +57,23 @@ public class PreviewProperties {
         private int freeMax = 1;
         private int proMax = 3;
         private int enterpriseMax = 10;
+    }
+
+    @Data
+    public static class EngineConfig {
+        /** Route previews through preview-engine when true. */
+        private boolean routeVia = false;
+
+        /** Preview-engine control plane base URL (no trailing slash). */
+        private String baseUrl = "http://localhost:8090";
+
+        /** Service-to-service API key sent as X-Preview-Api-Key. */
+        private String apiKey = "change-me-in-prod";
+
+        /** Image registry preview-engine can pull from. Local dev default = :5500. */
+        private String registryUrl = "localhost:5500";
+
+        /** HTTP timeout for calls to preview-engine. */
+        private int timeoutSeconds = 300;
     }
 }

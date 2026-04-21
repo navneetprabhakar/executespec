@@ -88,7 +88,7 @@ export default function ProjectSelector({ value, onChange, required }: Props) {
               {selectedProject.name}
             </span>
           ) : (
-            'Select a project\u2026'
+            'Select a project…'
           )}
         </span>
         <ChevronDown className={`h-4 w-4 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />

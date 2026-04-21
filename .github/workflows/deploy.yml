@@ -223,6 +223,18 @@ jobs:
           upsert "MAIL_TRANSPORT=smtp"
           upsert "MAIL_FROM=admin@executespec.ai"
 
+          # ── Preview-engine handoff (2026-04-21) ──────────────────────
+          # main-app delegates per-run preview lifecycle to preview-engine
+          # running on preview-gw (us-east4-b). PREVIEW_ENGINE_API_KEY is
+          # the shared secret — must be present in gs://${DEPLOY_BUCKET}/config/api-keys
+          # (same file the next block reads). Registry URL is the AR repo
+          # main-app pushes per-run preview images to; preview-engine pulls
+          # from the same path.
+          upsert "PREVIEW_ENGINE_URL=https://preview-engine.executespec.ai"
+          upsert "PREVIEW_ENGINE_REGISTRY_URL=us-east4-docker.pkg.dev/executespecv1/preview-images"
+          upsert "PREVIEW_ENGINE_ROUTE_VIA=true"
+          upsert "PREVIEW_MODE=docker"
+
           # ── API keys from GCS (never committed to repo) ──────────────
           DEPLOY_BUCKET="$2"
           if [ -n "$DEPLOY_BUCKET" ]; then

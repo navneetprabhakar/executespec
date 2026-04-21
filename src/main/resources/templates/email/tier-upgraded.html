@@ -1,27 +1,32 @@
 <!DOCTYPE html>
 <html xmlns:th="http://www.thymeleaf.org">
-<head><meta charset="UTF-8"><title>Plan Upgraded</title></head>
-<body style="font-family:'SFMono-Regular',ui-monospace,'Cascadia Mono','Segoe UI Mono',monospace;background:#000000;color:#ededed;padding:40px">
-  <div style="max-width:480px;margin:0 auto;background:#111111;border:1px solid #252525;border-radius:6px;padding:32px">
-    <h1 style="color:#ededed;margin:0 0 8px">executespec</h1>
-    <h2 style="margin:0 0 24px;font-size:20px">You've been upgraded!</h2>
-    <p>Hi <span th:text="${firstName}">there</span>,</p>
-    <p>Your account has been upgraded to the <strong th:text="${planName}">Pro</strong> plan (<strong th:text="${tier}">PRO</strong> tier).</p>
-    <p>Here's what's unlocked:</p>
-    <ul style="padding-left:20px;margin:16px 0">
-      <li th:if="${tier == 'PRO' or tier == 'ENTERPRISE'}">Create and manage organizations</li>
-      <li th:if="${tier == 'PRO' or tier == 'ENTERPRISE'}">Higher monthly run limits</li>
-      <li th:if="${tier == 'PRO' or tier == 'ENTERPRISE'}">AI-powered chat copilot</li>
-      <li th:if="${tier == 'ENTERPRISE'}">Bring your own API keys</li>
-      <li th:if="${tier == 'ENTERPRISE'}">Unlimited team members</li>
-    </ul>
-    <a th:href="${baseUrl + '/billing'}" href="#"
-       style="display:inline-block;background:#ededed;color:#000000;text-decoration:none;
-              padding:12px 28px;border-radius:4px;font-weight:600;margin:16px 0">
-      View Your Plan
-    </a>
-    <hr style="border:1px solid #252525;margin:24px 0"/>
-    <p style="color:#a1a1a1;font-size:12px">&copy; 2026 executespec &middot; <a th:href="${baseUrl}" style="color:#a1a1a1;text-decoration:underline" href="#">executespec.ai</a></p>
-  </div>
-</body>
-</html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>You're upgraded</title>
+</head>
+<body style="margin:0;padding:0;background:#0B0D10;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#ededed;line-height:1.55;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#0B0D10;">
+  <tr><td align="center" style="padding:24px 12px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;border-collapse:collapse;background:#14171C;border:1px solid #242A33;border-radius:14px;overflow:hidden;">
+      <tr><td style="padding:32px 28px 20px;background:linear-gradient(135deg,rgba(16,185,129,0.20),rgba(91,141,239,0.10) 60%,transparent);border-bottom:1px solid #242A33;">
+        <div style="display:inline-flex;align-items:center;gap:10px;margin-bottom:18px;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#ededed;color:#0B0D10;border-radius:6px;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:12px;">ES</span>
+          <span style="color:#ededed;font-weight:600;font-size:15px;letter-spacing:-0.01em;">ExecuteSpec</span>
+        </div>
+        <div style="display:inline-block;background:rgba(16,185,129,0.14);border:1px solid rgba(16,185,129,0.45);border-radius:999px;padding:3px 10px;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;color:#10B981;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">Upgrade complete</div>
+        <h1 style="margin:0;color:#ededed;font-size:24px;line-height:1.18;letter-spacing:-0.025em;font-weight:600;">Welcome to <span style="font-family:&#39;Instrument Serif&#39;,&#39;Georgia&#39;,serif;font-style:italic;font-weight:400;" th:text="${newTier}">PRO</span>.</h1>
+      </td></tr>
+      <tr><td style="padding:24px 28px 8px;">
+        <p style="margin:0 0 14px;color:#C9D1DB;font-size:14.5px;">Hi <span th:text="${firstName}" style="color:#ededed;font-weight:500;">there</span>,</p>
+        <p style="margin:0 0 14px;color:#C9D1DB;font-size:14.5px;">Your plan has been upgraded to <strong th:text="${newTier}" style="color:#10b981;">PRO</strong>. New features unlocked, higher run ceilings, and everything you had before.</p>
+<table role="presentation" cellspacing="0" cellpadding="0"><tr><td><a th:href="${baseUrl}" href="#" style="display:inline-block;background:#5B8DEF;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:500;font-size:14px;letter-spacing:-0.005em;">Explore what's new &rarr;</a></td></tr></table>
+        <p style="margin:22px 0 0;color:#8A94A6;font-size:12.5px;">Receipt and billing details are on your invoices page.</p>
+      </td></tr>
+      <tr><td style="padding:18px 28px 22px;border-top:1px solid #242A33;background:#14171C;color:#8A94A6;font-size:11.5px;">
+        &copy; 2026 ExecuteSpec &middot; <a th:href="${baseUrl}" style="color:#C9D1DB;text-decoration:none;" href="#">executespec.ai</a>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>

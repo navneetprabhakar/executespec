@@ -181,12 +181,16 @@ public class ProjectService {
         String oldGithubOwner = project.getGithubOwner();
 
         if (req.aiProvider() != null) {
+            // v2.5.13 — GOOGLE → GEMINI rename; accept either legacy "GOOGLE"
+            // or canonical "GEMINI" input and always store GEMINI enum.
+            String raw = req.aiProvider().trim().toUpperCase();
+            if ("GOOGLE".equals(raw)) raw = "GEMINI";
             try {
-                LlmProvider provider = LlmProvider.valueOf(req.aiProvider().toUpperCase());
+                LlmProvider provider = LlmProvider.valueOf(raw);
                 project.setAiProvider(provider);
             } catch (IllegalArgumentException e) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                        "Invalid AI provider: " + req.aiProvider() + ". Valid: ANTHROPIC, GOOGLE, OPENAI");
+                        "Invalid AI provider: " + req.aiProvider() + ". Valid: ANTHROPIC, GEMINI, OPENAI");
             }
         }
 
