@@ -1,0 +1,21 @@
+{
+  "provider": "openai",
+  "band": "high",
+  "run_id": "356ce6cb-78a7-4dc2-ad71-0947d04f88e5",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-21T11:52:43.816663Z",
+  "completedAt": "2026-04-21T12:11:06.435268Z",
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"totalLatencyMs\":42401,\"wiringPassSummary\":\"no wiring issues found\",\"generalPassSummary\":\"Found 1 issues, fixed 1. Issues: added eager fetching for LoanRepository.findById so loan return/check-out responses can safely access lazy book/member associations without runtime LazyInitializationException.\",\"overall\":\"FIXED_ISSUES\",\"finalBuildExitCode\":0,\"finalBuildPassed\":true}",
+  "actual_cost": 1.513831,
+  "est_low": 6.692500000000001,
+  "est_high": 11.711875000000001,
+  "credits": 3,
+  "total_input": 531400,
+  "total_output": 25211,
+  "accuracy": 78,
+  "report_ok": true
+}

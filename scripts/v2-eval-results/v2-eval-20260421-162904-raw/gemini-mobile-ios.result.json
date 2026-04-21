@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "mobile-ios",
+  "run_id": "616298ed-ea0e-4b36-8aa3-d4f68e831ff0",
+  "status": "FAILED",
+  "harness": "v2",
+  "startedAt": "2026-04-21T12:23:12.721096Z",
+  "completedAt": "2026-04-21T12:23:12.801211Z",
+  "tasks_total": 0,
+  "tasks_done": 0,
+  "tasks_failed": 0,
+  "review": null,
+  "actual_cost": 0.0,
+  "est_low": 0,
+  "est_high": 0,
+  "credits": 1,
+  "total_input": 0,
+  "total_output": 0,
+  "accuracy": null,
+  "report_ok": false
+}
