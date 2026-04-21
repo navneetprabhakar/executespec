@@ -254,13 +254,13 @@ export default function RunList() {
 
       {/* New Run button — desktop only (mobile has top button) */}
       {!isMobile && (
-        <div className="px-3 py-2 border-t border-[var(--border-default)] flex-shrink-0">
+        <div className="px-3 py-3 border-t border-[var(--border-default)] flex-shrink-0">
           <button
             onClick={() => setShowModal(true)}
-            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-sm bg-[var(--text-primary)] text-[var(--geist-bg)] text-sm font-medium hover:bg-[var(--gray-900)] transition-colors"
+            className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md bg-accent-blue text-primary text-sm font-medium hover:bg-[var(--accent-blue-hover)] transition-colors"
           >
             <Plus className="h-4 w-4" />
-            New Run
+            New run
           </button>
         </div>
       )}

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Receipt, Download, Send, CreditCard } from 'lucide-react';
+import { Download, Send, CreditCard } from 'lucide-react';
+import PageShell from '@/components/shared/PageShell';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import {
@@ -72,29 +73,30 @@ export default function InvoicesPage() {
   };
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 px-4 sm:px-6 py-6">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <Receipt className="h-6 w-6 text-accent-blue" />
-          <h1 className="text-xl font-semibold text-slate-100">Invoices</h1>
-        </div>
-        <div className="flex items-center gap-2 flex-wrap">
+    <PageShell
+      eyebrow="Invoices"
+      title="Every receipt, right here."
+      accent="receipt,"
+      description="Download PDFs, resend to your AP team, filter by type."
+      hero
+      actions={
+        <div className="flex items-center gap-1.5 flex-wrap">
           {(['all', 'SUBSCRIPTION', 'TOPUP', 'CREDIT_NOTE'] as const).map((f) => (
             <button
               key={f}
               onClick={() => setFilter(f)}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition ${
                 filter === f
-                  ? 'bg-accent-blue/20 text-violet-300'
-                  : 'text-muted hover:bg-surface-700 hover:text-secondary'
+                  ? 'bg-[color-mix(in_srgb,var(--accent-blue)_20%,transparent)] text-accent-blue border border-[color-mix(in_srgb,var(--accent-blue)_40%,transparent)]'
+                  : 'text-muted hover:text-secondary border border-[var(--border-default)] hover:border-[var(--border-hover)]'
               }`}
             >
               {f === 'all' ? 'All' : typeLabel(f)}
             </button>
           ))}
         </div>
-      </div>
+      }
+    >
 
       {/* Table — desktop view */}
       <div className="rounded-sm border border-surface-700 bg-surface-800">
@@ -236,6 +238,6 @@ export default function InvoicesPage() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

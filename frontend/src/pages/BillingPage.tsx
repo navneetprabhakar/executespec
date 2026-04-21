@@ -4,6 +4,7 @@ import { Gift, Package, ShoppingCart, Clock, Zap } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import BillingProfileForm from '@/components/billing/BillingProfileForm';
+import PageShell from '@/components/shared/PageShell';
 import { useUiStore } from '@/stores/useUiStore';
 import {
   fetchBillingStatus,
@@ -124,11 +125,14 @@ export default function BillingPage() {
   const bonusAvailable = bonusRuns?.available ?? 0;
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-4 sm:py-6 space-y-4 sm:space-y-6">
-
-        {/* Page header */}
-        <h1 className="text-xl font-bold text-primary">Billing</h1>
+    <PageShell
+      eyebrow="Billing"
+      title="Your plan, usage, and invoices."
+      accent="usage"
+      description="Track what you've shipped this cycle and manage subscriptions, add-ons, and invoices."
+      maxWidth="3xl"
+      hero
+    >
 
         {/* Current Plan */}
         <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 sm:p-6">
@@ -410,7 +414,6 @@ export default function BillingPage() {
             </p>
           </div>
         )}
-      </div>
 
       {/* Razorpay Order Checkout overlay */}
       {orderData && (
@@ -428,7 +431,7 @@ export default function BillingPage() {
 
       {/* Billing profile (GST details) — admin only for org accounts */}
       {(!isOrgUser || isAdmin) && <BillingProfileForm />}
-    </div>
+    </PageShell>
   );
 }
 

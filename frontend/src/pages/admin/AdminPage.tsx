@@ -240,12 +240,20 @@ function AdminPageInner() {
   ];
 
   return (
-    <div className="h-full flex flex-col overflow-hidden">
+    <div className="h-full flex flex-col overflow-hidden relative">
+      <div aria-hidden className="pointer-events-none absolute inset-0 -z-10" style={{
+        background: 'radial-gradient(ellipse 60% 40% at 20% 0%, color-mix(in srgb, var(--accent-blue) 12%, transparent), transparent 60%)'
+      }} />
       {/* Page header */}
-      <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 sm:px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
-        <div className="flex items-center gap-3">
-          <Shield className="h-5 w-5 text-accent-blue" />
-          <h1 className="text-lg font-semibold text-primary">Super Admin</h1>
+      <div className="flex flex-col sm:flex-row sm:items-center gap-3 px-4 sm:px-6 py-5 border-b border-[var(--border-default)] flex-shrink-0">
+        <div className="flex items-center gap-3 min-w-0 flex-1">
+          <span className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0">
+            <Shield className="h-4 w-4" />
+          </span>
+          <div className="min-w-0">
+            <div className="inline-block font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue">Admin</div>
+            <h1 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">Super admin console</h1>
+          </div>
         </div>
         <div className="flex items-center gap-2 sm:ml-auto flex-wrap">
           <button

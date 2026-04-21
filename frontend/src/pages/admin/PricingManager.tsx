@@ -1,7 +1,8 @@
 import { useState, useEffect } from 'react';
 import { Navigate } from 'react-router-dom';
-import { Save, Loader2, DollarSign, Check } from 'lucide-react';
+import { Save, Loader2, Check } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
+import PageShell from '@/components/shared/PageShell';
 import { useAuthStore, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import { getAllPricing, updateModelPricing, type PricingRow  } from '@/lib/api';
 import { cn } from '@/lib/utils';
@@ -75,13 +76,13 @@ export default function PricingManager() {
   }, {});
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      <div className="flex items-center gap-2">
-        <DollarSign className="h-5 w-5 text-secondary" />
-        <h2 className="text-lg font-semibold text-primary">Model Pricing</h2>
-      </div>
-      <p className="text-xs text-muted">Edit cost per 1M tokens for each model. Changes take effect immediately for cost estimation.</p>
-
+    <PageShell
+      eyebrow="Admin \u00b7 Pricing"
+      title="Model cost matrix."
+      accent="cost"
+      description="Edit input + output rates per 1M tokens. Changes take effect immediately on new runs."
+      hero
+    >
       {loading ? (
         <div className="flex items-center justify-center py-20">
           <div className="animate-spin h-6 w-6 border-2 border-[var(--gray-400)] border-t-[#8B5CF6] rounded-full" />
@@ -160,6 +161,6 @@ export default function PricingManager() {
           </GlassPanel>
         ))
       )}
-    </div>
+    </PageShell>
   );
 }

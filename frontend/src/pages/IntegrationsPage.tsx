@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import IntegrationLogo from '@/components/integrations/IntegrationLogo';
 import GlassPanel from '@/components/shared/GlassPanel';
+import PageShell from '@/components/shared/PageShell';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
@@ -707,23 +708,22 @@ export default function IntegrationsPage() {
   };
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-semibold text-primary">Integrations</h1>
-          <p className="text-xs text-muted mt-0.5">
-            External tools that can trigger agent runs.
-            {isAdmin && ' Click Configure to enable an integration for your organization.'}
-          </p>
-        </div>
+    <PageShell
+      eyebrow="Integrations"
+      title="Connect your stack."
+      accent="stack"
+      description={`External tools that can trigger agent runs.${isAdmin ? ' Click Configure to enable an integration.' : ''}`}
+      hero
+      actions={
         <button
           onClick={() => setShowGuide(!showGuide)}
-          className="flex items-center gap-1.5 text-xs text-secondary hover:text-accent-blue transition-colors px-3 py-1.5 rounded-sm border border-[var(--border-default)] hover:border-accent-blue/30"
+          className="inline-flex items-center gap-1.5 text-xs text-secondary hover:text-accent-blue transition-colors px-3 py-1.5 rounded-md border border-[var(--border-default)] hover:border-accent-blue/30"
         >
           <HelpCircle className="h-3.5 w-3.5" />
           Setup Guide
         </button>
-      </div>
+      }
+    >
 
       {/* No org warning */}
       {!user?.orgId && (
@@ -914,6 +914,6 @@ export default function IntegrationsPage() {
           </table>
         </GlassPanel>
       )}
-    </div>
+    </PageShell>
   );
 }

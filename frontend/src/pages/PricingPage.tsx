@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import GlassPanel from '@/components/shared/GlassPanel';
 import PricingTable from '@/components/pricing/PricingTable';
 import { getPricing } from '@/lib/api';
 import type { PricingRow } from '@/lib/api';
 import { Skeleton } from '@/components/shared/SkeletonLoader';
+import PageShell, { Section } from '@/components/shared/PageShell';
 
 export default function PricingPage() {
   const [rows, setRows] = useState<PricingRow[]>([]);
@@ -17,17 +17,19 @@ export default function PricingPage() {
   useEffect(() => { load(); }, []);
 
   return (
-    <div className="h-full overflow-y-auto p-4 space-y-4">
-      <GlassPanel className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-[var(--border-default)]">
-          <h2 className="text-base font-semibold text-primary">Model Pricing</h2>
-          <p className="text-xs text-muted mt-0.5">Click a cost value to edit inline</p>
-        </div>
+    <PageShell
+      eyebrow="Model pricing"
+      title="Transparent, per-1M-token rates."
+      accent="Transparent,"
+      description="Live pricing for every model. Click any cost to edit inline \u2014 changes apply immediately to new runs."
+      hero
+    >
+      <Section eyebrow="Cost matrix" title="Per-model input + output rates" card={false}>
         {loading
-          ? <div className="p-4 space-y-3">{Array.from({ length: 7 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>
+          ? <div className="rounded-lg border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3">{Array.from({ length: 7 }).map((_, i) => <Skeleton key={i} className="h-8" />)}</div>
           : <PricingTable rows={rows} onRefresh={load} />
         }
-      </GlassPanel>
-    </div>
+      </Section>
+    </PageShell>
   );
 }
