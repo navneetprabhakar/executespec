@@ -57,10 +57,33 @@ spring:
     # moved to its own repo (commit cdc26e11), the SQL was removed from this tree
     # but the DB still has the row. The rename_provider_google_to_gemini migration
     # originally conflicted as V119; we renamed it V120 (see V120__*) to dodge
-    # the collision. This pattern tells Flyway: "V119 being applied-but-missing
-    # is expected, don't abort boot." Scoped to 119 specifically so new
-    # accidentally-deleted migrations still fail loudly (the safety net we want).
-    ignore-migration-patterns: "119:missing"
+    # the collision.
+    #
+    # Flyway's ignore-migration-patterns syntax is "<type>:<state>". Two hard
+    # constraints tripped me up:
+    #   1. type MUST be `*`, `repeatable`, or `versioned` — NOT a version number.
+    #      (My earlier "119:missing" crashed boot with "Invalid migration
+    #      type '119'". See commit 3faa2f13.)
+    #   2. `repeatable` + `versioned` are Flyway Redgate (paid) Edition features.
+    #      The OSS edition we use (via spring-boot-starter) only accepts `*`.
+    #      (My follow-up "versioned:missing" crashed boot with
+    #      "Flyway Redgate Edition Required". Caught by local-boot test, not CI.)
+    #
+    # Final pattern: `*:missing` — tolerate any applied-but-missing migration.
+    # This covers the V119 orphan from the preview-engine repo split (V119 was
+    # `preview_platform_v2_schema.sql` when preview-engine shared this DB; it
+    # moved to its own repo at cdc26e11, but dev + prod DBs still have the row).
+    # The rename_provider_google_to_gemini migration originally conflicted as
+    # V119; we renamed it V120 to dodge the collision.
+    #
+    # Safety trade-off: we lose automatic detection of *any* missing migration
+    # (versioned or repeatable). Mitigation: PR review is mandatory on any
+    # change under src/main/resources/db/migration/*.sql.
+    #
+    # Exit strategy: once dev + prod DBs are rebuilt, or we run a targeted
+    # `flyway repair` to drop the orphan V119 row from flyway_schema_history,
+    # remove this line to restore the full missing-migration safety net.
+    ignore-migration-patterns: "*:missing"
 
   # ── OAuth2 Login (Google + GitHub) ──────────────────────────────────────────
   # Set GOOGLE_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_ID env vars to enable.
@@ -241,14 +264,19 @@ model-matrix:
     TestReportGenerator: LIGHTWEIGHT
     ValidationReportGenerator: WORKHORSE
   failover-order:
+    # v2.6.0 — was `google`; enum was renamed GOOGLE → GEMINI in v2.5.13 but
+    # this yaml list was missed. `ModelResolver.selectAdaptiveProvider` calls
+    # `LlmProvider.valueOf(name.toUpperCase())` on each list entry and crashed
+    # the planner with "No enum constant LlmProvider.GOOGLE". See memory rule
+    # feedback_v2_provider_naming.md: "V2 uses 'gemini' not 'google'".
     anthropic:
       - openai
-      - google
+      - gemini
     gemini:
       - openai
       - anthropic
     openai:
-      - google
+      - gemini
       - anthropic
 
 agent:
@@ -279,10 +307,10 @@ agent:
       ANTHROPIC:
         concurrency: 3
         queue-capacity: 15        # Slightly larger — Anthropic is primary/premium provider
-      GOOGLE:
-        concurrency: 3
-        queue-capacity: 10
-      OPENAI:
+      GEMINI:                     # v2.6.0 — renamed from GOOGLE to match LlmProvider enum.
+        concurrency: 3            # ProviderRunPoolProperties.forProvider(LlmProvider) does
+        queue-capacity: 10        # providers.get(provider.name()) — GOOGLE key never matched,
+      OPENAI:                     # silently fell back to defaults. Now functional.
         concurrency: 3
         queue-capacity: 10
   cost:
