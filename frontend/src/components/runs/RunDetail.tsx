@@ -422,7 +422,7 @@ export default function RunDetail() {
                   </div>
                   <button
                     onClick={() => handle(() => approveRun(activeRun.runId, false), 'Run rejected')}
-                    className="mt-2 text-xs text-muted hover:text-red-400 w-full text-center"
+                    className="mt-2 text-xs text-muted hover:text-status-error w-full text-center"
                   >
                     Reject Plan
                   </button>

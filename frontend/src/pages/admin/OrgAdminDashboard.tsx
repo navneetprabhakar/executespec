@@ -283,7 +283,7 @@ export default function OrgAdminDashboard() {
                           <td className="py-2 px-2 text-right">
                             <span className={cn(
                               'font-mono',
-                              m.successRate >= 80 ? 'text-emerald-400' :
+                              m.successRate >= 80 ? 'text-status-success' :
                               m.successRate >= 50 ? 'text-accent-amber' : 'text-rose-400'
                             )}>
                               {m.successRate}%
@@ -328,7 +328,7 @@ export default function OrgAdminDashboard() {
                   <p className="text-[10px] text-muted uppercase tracking-wider">Status</p>
                   <p className={cn(
                     'text-sm font-medium mt-0.5',
-                    billing.subscriptionStatus === 'ACTIVE' ? 'text-emerald-400' :
+                    billing.subscriptionStatus === 'ACTIVE' ? 'text-status-success' :
                     billing.subscriptionStatus === 'PAST_DUE' ? 'text-accent-amber' : 'text-secondary'
                   )}>
                     {billing.subscriptionStatus}
@@ -357,7 +357,7 @@ export default function OrgAdminDashboard() {
                     className={cn(
                       'h-full rounded-full transition-all duration-500',
                       billing.periodUsage / billing.runLimit > 0.9 ? 'bg-rose-500' :
-                      billing.periodUsage / billing.runLimit > 0.7 ? 'bg-amber-500' : 'bg-[#8B5CF6]'
+                      billing.periodUsage / billing.runLimit > 0.7 ? 'bg-status-waiting' : 'bg-[#8B5CF6]'
                     )}
                     style={{ width: `${Math.min(100, (billing.periodUsage / billing.runLimit) * 100)}%` }}
                   />
@@ -378,7 +378,7 @@ export default function OrgAdminDashboard() {
                           </span>
                           <span className={cn(
                             'px-1.5 py-0.5 rounded text-[10px] font-medium',
-                            inv.status === 'PAID' ? 'bg-emerald-500/10 text-emerald-400' :
+                            inv.status === 'PAID' ? 'bg-status-success/10 text-status-success' :
                             inv.status === 'ISSUED' ? 'bg-blue-500/10 text-accent-blue' :
                             'bg-[var(--gray-400)]/50 text-secondary'
                           )}>

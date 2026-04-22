@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Share2, Check, Shield, AlertTriangle, FileCo
 import { getValidationReport, shareValidationReport, downloadValidationReportPdf, retryValidationReport, type ValidationReportData, type ReportIssue } from '@/lib/api';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import ScoreCard from './ScoreCard';
+import ScoreRing from './ScoreRing';
 import SignalBreakdown from './SignalBreakdown';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
@@ -314,52 +315,101 @@ export default function ValidationReportPanel({ runId, status, statusReason }: V
 
       {/* ── Expanded content ──────────────────────────────────────────── */}
       {expanded && (
-        <div className="border-t border-[var(--border-default)] max-h-[600px] overflow-y-auto bg-[var(--gray-100)]">
-          <div className="px-4 py-3 space-y-3 text-xs leading-relaxed">
+        <div className="border-t border-[var(--border-default)] max-h-[680px] overflow-y-auto bg-[var(--gray-100)]">
+          <div className="px-4 py-4 space-y-4 text-xs leading-relaxed">
 
-            {/* Issue counter grid — single-dimension semantic */}
-            {(accuracyScore != null || report.issuesCaught > 0) && (
+            {/* Hero: ring + signal tiles in a 2-column layout matching the
+                executespec.ai tour panel. Ring appears only when we have a
+                verified score — LLM-only scoring keeps the legacy chip view. */}
+            {primaryScore != null && (
+              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 pb-3 border-b border-[var(--border-default)]">
+                <ScoreRing
+                  score={primaryScore}
+                  label={primaryLabel === 'Verified' ? 'verified / 100' : 'accuracy / 100'}
+                  size={132}
+                />
+                <div className="grid grid-cols-2 gap-2 flex-1 w-full">
+                  {report.finalBuildPassed != null && (
+                    <div className={cn(
+                      'rounded-sm border px-3 py-2',
+                      report.finalBuildPassed
+                        ? 'border-status-success/30 bg-status-success/10'
+                        : 'border-status-error/30 bg-status-error/10'
+                    )}>
+                      <div className={cn('text-[10px] uppercase tracking-wide font-mono', report.finalBuildPassed ? 'text-status-success' : 'text-status-error')}>Build</div>
+                      <div className="text-sm font-medium mt-0.5 text-primary">{report.finalBuildPassed ? 'Passed' : 'Failed'}</div>
+                    </div>
+                  )}
+                  {report.testsTotal != null && (
+                    <div className={cn(
+                      'rounded-sm border px-3 py-2',
+                      report.testsTotal === 0
+                        ? 'border-[var(--border-default)] bg-[var(--gray-200)]'
+                        : (report.testsPassed ?? 0) === report.testsTotal
+                          ? 'border-status-success/30 bg-status-success/10'
+                          : (report.testsPassed ?? 0) >= report.testsTotal * 0.8
+                            ? 'border-status-waiting/30 bg-status-waiting/10'
+                            : 'border-status-error/30 bg-status-error/10'
+                    )}>
+                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">Tests</div>
+                      <div className="text-sm font-medium mt-0.5 text-primary tabular-nums">
+                        {report.testsTotal === 0 ? 'Not run' : `${report.testsPassed ?? 0} / ${report.testsTotal}`}
+                      </div>
+                    </div>
+                  )}
+                  {report.reviewerVerdict && (
+                    <div className={cn(
+                      'rounded-sm border px-3 py-2',
+                      report.reviewerVerdict === 'CLEAN' || report.reviewerVerdict === 'FIXED_ISSUES'
+                        ? 'border-status-success/30 bg-status-success/10'
+                        : report.reviewerVerdict === 'UNRESOLVED_ISSUES'
+                          ? 'border-status-waiting/30 bg-status-waiting/10'
+                          : 'border-status-error/30 bg-status-error/10'
+                    )}>
+                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">Reviewer</div>
+                      <div className="text-sm font-medium mt-0.5 text-primary">{report.reviewerVerdict.replace(/_/g, ' ')}</div>
+                    </div>
+                  )}
+                  {accuracyScore != null && primaryLabel === 'Verified' && (
+                    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2">
+                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">LLM estimate</div>
+                      <div className="text-sm font-medium mt-0.5 text-secondary tabular-nums">
+                        {accuracyScore}<span className="text-[10px] text-muted ml-0.5">/100</span>
+                        {grade && <span className="ml-1.5 text-[11px] text-muted">· {grade}</span>}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Issue counter grid — only shown when there are non-zero issues.
+                Hero tiles above already cover build/tests/reviewer, so this is
+                purely for severity-bucketed issue counts. */}
+            {report.issuesCaught > 0 && (
               <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                {accuracyScore != null && primaryLabel === 'Verified' && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', 'border-[var(--border-default)] bg-[var(--gray-200)] text-muted')}>
-                    <div className="text-[10px] uppercase tracking-wide text-muted">LLM estimate</div>
-                    <div className="text-sm font-mono font-semibold tabular-nums text-secondary">
-                      {accuracyScore}<span className="text-[10px] text-muted">/100</span>
-                      {grade && <span className="ml-1 text-[11px] text-muted">· {grade}</span>}
-                    </div>
-                  </div>
-                )}
-                {accuracyScore != null && primaryLabel !== 'Verified' && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', primaryScoreCls)}>
-                    <div className="text-[10px] uppercase tracking-wide opacity-70">Accuracy</div>
-                    <div className="text-sm font-mono font-semibold tabular-nums">
-                      {accuracyScore}<span className="text-[10px] opacity-60">/100</span>
-                      {grade && <span className="ml-1 text-[11px]">· {grade}</span>}
-                    </div>
-                  </div>
-                )}
                 {report.buildBreakers > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_BREAK_BUILD.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide opacity-70">Build breakers</div>
-                    <div className="text-sm font-mono tabular-nums">{report.buildBreakers}</div>
+                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_BREAK_BUILD.cls)}>
+                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Build breakers</div>
+                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.buildBreakers}</div>
                   </div>
                 )}
                 {report.productionBugs > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_CAUSE_BUG.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide opacity-70">Bug risks</div>
-                    <div className="text-sm font-mono tabular-nums">{report.productionBugs}</div>
+                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_CAUSE_BUG.cls)}>
+                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Bug risks</div>
+                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.productionBugs}</div>
                   </div>
                 )}
                 {report.reviewFailures > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide opacity-70">Review</div>
-                    <div className="text-sm font-mono tabular-nums">{report.reviewFailures}</div>
+                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.cls)}>
+                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Review issues</div>
+                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.reviewFailures}</div>
                   </div>
                 )}
                 {report.lintFailures > 0 && (
-                  <div className={cn('rounded-sm border px-2 py-1.5', SEVERITY_CONFIG.WOULD_FAIL_LINT.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide opacity-70">Lint</div>
-                    <div className="text-sm font-mono tabular-nums">{report.lintFailures}</div>
+                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_FAIL_LINT.cls)}>
+                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Lint</div>
+                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.lintFailures}</div>
                   </div>
                 )}
               </div>

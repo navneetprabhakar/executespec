@@ -2,24 +2,39 @@ import { useEffect, useState } from 'react';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
 import { getTechDebt, type TechDebtReport } from '@/lib/api';
 
-const SEVERITY_COLOR: Record<string, string> = {
-  BLOCKER: '#ef4444',
-  MAJOR: '#f59e0b',
-  MINOR: '#3b82f6',
-  INFO: '#6b7280',
+/**
+ * v2.6.0 UI polish — token-aligned. All colours resolve to CSS custom
+ * properties declared in tokens.css so the palette changes with theme
+ * (dark / light) and stays in lock-step with the rest of the app.
+ *
+ * Only recharts (canvas-rendered) needs concrete hex — we resolve the
+ * CSS variables at render time via getComputedStyle so the chart respects
+ * both themes without duplicating the palette.
+ */
+const SEVERITY_VARS: Record<string, string> = {
+  BLOCKER: '--status-error',
+  MAJOR:   '--status-waiting',
+  MINOR:   '--accent-blue',
+  INFO:    '--status-queued',
 };
-const CATEGORY_COLOR: Record<string, string> = {
-  LOGIC: '#3b82f6',
-  COMPLETENESS: '#8b5cf6',
-  SECURITY: '#ef4444',
-  PERFORMANCE: '#f59e0b',
-  STYLE: '#10b981',
-  ARCHITECTURE: '#ec4899',
-  TEST: '#06b6d4',
-  WIRING: '#84cc16',
+const CATEGORY_VARS: Record<string, string> = {
+  LOGIC:        '--accent-blue',
+  COMPLETENESS: '--accent-harness',
+  SECURITY:     '--status-error',
+  PERFORMANCE:  '--status-waiting',
+  STYLE:        '--status-success',
+  ARCHITECTURE: '--status-blocked',
+  TEST:         '--accent-planner',
+  WIRING:       '--status-success',
 };
-const catColor = (k: string) => CATEGORY_COLOR[k] ?? '#6b7280';
-const sevColor = (k: string) => SEVERITY_COLOR[k] ?? '#6b7280';
+function resolveVar(name: string | undefined): string {
+  if (!name) return '#66707D';
+  if (typeof window === 'undefined') return '#66707D';
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || '#66707D';
+}
+const catColor = (k: string) => resolveVar(CATEGORY_VARS[k] ?? '--status-queued');
+const sevColor = (k: string) => resolveVar(SEVERITY_VARS[k] ?? '--status-queued');
 
 /**
  * v2.5.2 — Tech Debt roll-up. Entirely DB-derived (no LLM); safe to render
@@ -40,7 +55,7 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
   }, [projectId, since]);
 
   if (error) {
-    return <div className="text-xs text-accent-red">{error}</div>;
+    return <div className="text-xs text-status-error">{error}</div>;
   }
   if (!report) return null;
   if (report.totalRunsAnalyzed === 0) {
@@ -100,12 +115,17 @@ export default function TechDebtPanel({ projectId }: { projectId: string }) {
                     type="category"
                     dataKey="name"
                     width={96}
-                    tick={{ fontSize: 10, fill: '#9ca3af' }}
+                    tick={{ fontSize: 10, fill: resolveVar('--text-muted') }}
                     axisLine={false}
                     tickLine={false}
                   />
                   <Tooltip cursor={{ fill: 'rgba(255,255,255,0.04)' }}
-                           contentStyle={{ fontSize: 11, background: '#111', border: '1px solid #333' }} />
+                           contentStyle={{
+                             fontSize: 11,
+                             background: resolveVar('--gray-200'),
+                             border: `1px solid ${resolveVar('--border-default')}`,
+                             color: resolveVar('--text-primary'),
+                           }} />
                   <Bar dataKey="count" radius={[2, 2, 2, 2]}>
                     {data.map((d) => <Cell key={d.name} fill={catColor(d.name)} />)}
                   </Bar>

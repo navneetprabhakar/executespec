@@ -6,11 +6,11 @@ import { executionApi } from '@/lib/execution-api';
 import { cn } from '@/lib/utils';
 
 const STATUS_COLOR: Record<string, string> = {
-  DONE: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
+  DONE: 'bg-status-success/20 text-status-success border-status-success/40',
   RUNNING: 'bg-accent-blue/20 text-accent-blue border-accent-blue/40',
   VALIDATING: 'bg-accent-blue/20 text-accent-blue border-accent-blue/40',
-  PR_RAISED: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-  FAILED: 'bg-red-500/20 text-accent-red border-red-500/40',
+  PR_RAISED: 'bg-status-waiting/20 text-status-waiting border-status-waiting/40',
+  FAILED: 'bg-status-error/20 text-accent-red border-status-error/40',
   SKIPPED: 'bg-[var(--gray-200)] text-muted border-[var(--border-default)]',
   QUEUED: 'bg-[var(--gray-200)] text-muted border-[var(--border-default)]',
 };
@@ -93,9 +93,9 @@ export default function SolutionSection({ executionId, solution }: Props) {
                     className="flex items-center gap-2 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1">
                     <span className="font-mono text-muted">#{r.attemptNumber}</span>
                     <span className={cn('text-[11px] px-1.5 py-0.5 rounded border',
-                        r.terminalStatus === 'COMPLETE' ? 'text-emerald-400 border-emerald-500/40'
-                        : r.terminalStatus === 'PARTIAL' ? 'text-yellow-400 border-yellow-500/40'
-                        : r.terminalStatus ? 'text-accent-red border-red-500/40'
+                        r.terminalStatus === 'COMPLETE' ? 'text-status-success border-status-success/40'
+                        : r.terminalStatus === 'PARTIAL' ? 'text-status-waiting border-status-waiting/40'
+                        : r.terminalStatus ? 'text-accent-red border-status-error/40'
                         : 'text-muted border-[var(--border-default)]')}>
                       {r.terminalStatus ?? 'RUNNING'}
                     </span>

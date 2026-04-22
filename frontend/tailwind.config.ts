@@ -23,13 +23,16 @@ export default {
           900: 'var(--gray-900)',
           1000: 'var(--gray-1000)',
         },
-        // Semantic accent — color only for meaning
+        // Semantic accent — color only for meaning.
+        // v2.6.0 UI polish: accent-green was #17B169 hardcoded (drift vs
+        // --status-success #10B981). Aliased to the same token now so the
+        // two palettes can't diverge again. See docs/design/ui-tokens.md.
         accent: {
           blue: 'var(--accent-blue)',
           'blue-hover': 'var(--accent-blue-hover)',
           red: 'var(--status-error)',
           amber: 'var(--status-waiting)',
-          green: '#17B169',
+          green: 'var(--status-success)',
           harness: 'var(--accent-harness)',
           planner: 'var(--accent-planner)',
         },

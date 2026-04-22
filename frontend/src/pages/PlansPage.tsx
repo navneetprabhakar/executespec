@@ -153,7 +153,7 @@ export default function PlansPage() {
 
       {/* Error message */}
       {checkoutError && (
-        <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-sm text-sm text-center">
+        <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 text-status-error rounded-sm text-sm text-center">
           {checkoutError}
         </div>
       )}

@@ -49,7 +49,7 @@ export function UsageBadge() {
       <div className="w-16 h-1.5 bg-[var(--gray-400)] rounded-full overflow-hidden">
         <div
           className={`h-full rounded-full ${
-            pct > 90 ? 'bg-red-500' : pct > 70 ? 'bg-amber-500' : 'bg-accent-blue'
+            pct > 90 ? 'bg-status-error' : pct > 70 ? 'bg-status-waiting' : 'bg-accent-blue'
           }`}
           style={{ width: `${Math.min(pct, 100)}%` }}
         />

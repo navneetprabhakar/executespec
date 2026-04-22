@@ -7,9 +7,9 @@ import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
 
 const STATUS_COLOR: Record<string, string> = {
-  ACTIVE:   'text-emerald-400 border-emerald-500/40 bg-emerald-500/10',
+  ACTIVE:   'text-status-success border-status-success/40 bg-status-success/10',
   ARCHIVED: 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]',
-  DELETED:  'text-accent-red border-red-500/40 bg-red-500/10',
+  DELETED:  'text-status-error border-status-error/40 bg-status-error/10',
 };
 
 /**
@@ -50,7 +50,7 @@ export default function ProjectsListPage() {
       }
     >
       {error && (
-        <div className="text-xs text-accent-red border border-red-500/40 bg-red-500/10 rounded-sm px-2.5 py-1.5">
+        <div className="text-xs text-status-error border border-status-error/40 bg-status-error/10 rounded-sm px-2.5 py-1.5">
           {error}
         </div>
       )}
