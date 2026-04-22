@@ -140,16 +140,46 @@ public class BillingService {
     // ─────────────────────────────────────────────────────────────
 
     public SubscriptionInitResult subscribe(String userId, UUID planId) {
-        return subscribe(userId, planId, null, null, null);
+        return subscribe(userId, planId, null, null, null, 1);
     }
 
+    /** Back-compat overload — defaults seats=1 for non-TEAM tiers. */
     public SubscriptionInitResult subscribe(String userId, UUID planId,
                                               String preferredGateway, String successUrl, String cancelUrl) {
+        return subscribe(userId, planId, preferredGateway, successUrl, cancelUrl, 1);
+    }
+
+    /**
+     * v2.6.1 — seat-aware subscribe. For TEAM tier plans, {@code seats} must
+     * be 2-20 (self-serve range). For other tiers, {@code seats} is forced
+     * to 1 with a warning log. Stripe charges {@code price × seats}; Razorpay
+     * flow is unchanged for v1 (seat adjustment post-checkout via the
+     * adjust-seats endpoint).
+     */
+    public SubscriptionInitResult subscribe(String userId, UUID planId,
+                                              String preferredGateway, String successUrl, String cancelUrl,
+                                              int seats) {
         AppUser user = userRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         BillingPlan plan = planRepo.findById(planId)
                 .orElseThrow(() -> new IllegalArgumentException("Plan not found"));
+
+        // v2.6.1 — seat validation per tier
+        int effectiveSeats;
+        if ("TEAM".equals(plan.getTier())) {
+            if (seats < 2 || seats > 20) {
+                throw new BillingException(
+                        "TEAM tier requires 2-20 seats (got " + seats
+                        + "). Contact sales for larger orgs.");
+            }
+            effectiveSeats = seats;
+        } else {
+            if (seats != 1) {
+                log.warn("seats={} ignored for non-TEAM tier={} — forcing 1", seats, plan.getTier());
+            }
+            effectiveSeats = 1;
+        }
 
         if (!plan.isActive()) {
             throw new BillingException("This plan is no longer available.");
@@ -231,9 +261,9 @@ public class BillingService {
         SubscriptionInitResult result;
 
         if ("STRIPE".equalsIgnoreCase(gateway.gatewayType())) {
-            // Stripe: create checkout session
+            // Stripe: create checkout session — pass seats for per-seat pricing
             var checkout = gateway.createCheckoutSession(
-                    billingEntity, plan.getId().toString(),
+                    billingEntity, plan.getId().toString(), effectiveSeats,
                     successUrl != null ? successUrl : "/billing?status=success",
                     cancelUrl != null ? cancelUrl : "/billing?status=cancelled");
 

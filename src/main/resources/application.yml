@@ -628,6 +628,11 @@ billing:
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
     pro-price-id: ${STRIPE_PRO_PRICE_ID:}
     enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
+    # v2.6.1 Wave 1 — TEAM tier per-seat pricing. Must be a Stripe Price with
+    # per-unit pricing enabled (LineItem.setQuantity honours the seat count).
+    # INR variant is optional; falls back to the monthly plan in database.
+    team-price-id: ${STRIPE_TEAM_PRICE_ID:}
+    team-price-id-inr: ${STRIPE_TEAM_PRICE_ID_INR:}
   razorpay:
     enabled: true
   currency-gateway-map:
