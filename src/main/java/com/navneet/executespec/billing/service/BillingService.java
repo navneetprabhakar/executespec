@@ -77,6 +77,9 @@ public class BillingService {
     // Tier resolution (org tier > user tier, SUPER_ADMIN → ENTERPRISE)
     private final TierEnforcementService tierEnforcementService;
 
+    /** v2.6.0 — used to filter non-LISTED tiers from public listPlans + block subscribe. */
+    private final com.navneet.executespec.auth.repository.TierConfigRepository tierConfigRepo;
+
     @Value("${billing.terms-version:2026-03-v1}")
     private String currentTermsVersion;
 
@@ -85,7 +88,7 @@ public class BillingService {
 
     /** Tier rank for upgrade/downgrade detection. Higher = better. */
     private static final Map<String, Integer> TIER_RANK = Map.of(
-            "FREE", 0, "STARTER", 1, "PRO", 2, "MAX", 3, "ENTERPRISE", 4);
+            "FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "MAX", 4, "ENTERPRISE", 5);
 
     private static int tierRank(String tier) {
         return TIER_RANK.getOrDefault(tier, 0);
@@ -96,15 +99,40 @@ public class BillingService {
     // ─────────────────────────────────────────────────────────────
 
     public List<PlanResponse> listPlans(String keyMode) {
+        return listPlans(keyMode, false);
+    }
+
+    /**
+     * v2.6.0 — {@code includeHidden} SHOULD be false for normal callers;
+     * SUPER_ADMIN dev-time inspection can pass true via
+     * {@code GET /api/billing/plans?includeHidden=true}. Filters out any plan
+     * whose {@code lifecycle_state != LISTED} OR whose owning tier_config is
+     * not LISTED. Existing subscribers holding a HIDDEN plan are unaffected
+     * — this filter is list-only, not renewal-blocking.
+     */
+    public List<PlanResponse> listPlans(String keyMode, boolean includeHidden) {
         List<BillingPlan> plans;
         if (keyMode != null && !keyMode.isBlank()) {
             plans = planRepo.findByActiveTrueAndKeyMode(keyMode);
         } else {
             plans = planRepo.findByActiveTrue();
         }
+        if (!includeHidden) {
+            plans = plans.stream()
+                    .filter(p -> "LISTED".equals(p.getLifecycleState()))
+                    .filter(p -> tierIsListed(p.getTier()))
+                    .collect(Collectors.toList());
+        }
         return plans.stream()
                 .map(p -> PlanResponse.from(p, limitRepo.findByBillingPlanId(p.getId())))
                 .collect(Collectors.toList());
+    }
+
+    private boolean tierIsListed(String tier) {
+        if (tier == null) return true;
+        return tierConfigRepo.findById(tier)
+                .map(tc -> "LISTED".equals(tc.getLifecycleState()))
+                .orElse(true); // missing row → default to LISTED so we never over-hide
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -125,6 +153,14 @@ public class BillingService {
 
         if (!plan.isActive()) {
             throw new BillingException("This plan is no longer available.");
+        }
+
+        // v2.6.0 — lifecycle gate. Reject new subscriptions on HIDDEN or
+        // SUNSETTING plans (existing subscribers continue renewing). SUPER_ADMIN
+        // can still trigger subscribes via the internal admin path if needed;
+        // standard user flow has no bypass.
+        if (!"LISTED".equals(plan.getLifecycleState()) || !tierIsListed(plan.getTier())) {
+            throw new BillingException("This plan is not available for new subscriptions.");
         }
 
         if ("FREE".equals(plan.getTier())) {
