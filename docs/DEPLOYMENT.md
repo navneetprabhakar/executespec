@@ -98,6 +98,13 @@ export RAZORPAY_KEY_ID=...                # Razorpay gateway (INR)
 export RAZORPAY_KEY_SECRET=...
 export STRIPE_SECRET_KEY=...              # Stripe gateway (USD/EUR/GBP)
 export STRIPE_WEBHOOK_SECRET=...
+export STRIPE_PUBLISHABLE_KEY=...         # v2.6.0 — prod frontend reads this
+export STRIPE_PRO_PRICE_ID=price_...      # v2.6.0 — Stripe price IDs for subscription routing
+export STRIPE_ENTERPRISE_PRICE_ID=price_...
+
+# v2.6.0 — billing gateway selection (prod defaults to stripe when env present)
+export BILLING_DEFAULT_GATEWAY=stripe     # razorpay | stripe (default: razorpay on dev, stripe on prod)
+export BILLING_STRIPE_ENABLED=true        # set false to revert prod to Razorpay default
 
 # Optional — Slack
 export SLACK_CLIENT_ID=...
@@ -1600,9 +1607,11 @@ Key `application.yml` settings relevant to deployment:
 | `preview.mode` | `docker` | Preview mode: `docker` (local) or `cloud-run` (GCP) |
 | `preview.preview-ttl-minutes` | 5 | Auto-shutdown previews after N minutes |
 | `deploy.ttl-days` | 3 | Auto-delete permanent Cloud Run deployments after N days |
-| `billing.default-gateway` | `razorpay` | Default payment gateway |
-| `billing.stripe.enabled` | `false` | Enable Stripe gateway |
+| `billing.default-gateway` | `razorpay` (dev) / `stripe` (prod, env-gated via `BILLING_DEFAULT_GATEWAY`) | Default payment gateway. **v2.6.0:** prod defaults to Stripe when `application-prod.yml` is active AND `STRIPE_*` env vars are present; fallback `BILLING_DEFAULT_GATEWAY=razorpay` reverts. |
+| `billing.stripe.enabled` | `false` (dev) / `true` (prod, env-gated via `BILLING_STRIPE_ENABLED`) | Enable Stripe gateway |
 | `billing.razorpay.enabled` | `true` | Enable Razorpay gateway |
+| `spring.flyway.out-of-order` | `true` | **v2.6.0:** tolerate applied-but-missing migrations (V119 on dev/prod was executed under the old `preview_platform_v2_schema.sql` name and subsequently renamed/superseded). |
+| `spring.flyway.ignore-migration-patterns` | `repeatable:missing,versioned:missing` | **v2.6.0:** companion to `out-of-order`. Boot-time `flyway` validation no longer fails the VM when a past migration has been deleted. |
 | `app.security.csp.enabled` | `true` | Content Security Policy headers |
 | `app.security.hsts.enabled` | `true` | Strict Transport Security headers |
 | `executespec.rate-limit.enabled` | `true` | Per-tenant rate limiting |

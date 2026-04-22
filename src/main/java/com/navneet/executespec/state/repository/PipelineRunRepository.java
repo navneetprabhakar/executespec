@@ -143,6 +143,9 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
 
     long countByProjectId(String projectId);
 
+    /** Wave 2.2 — used by {@code SandboxCleanupJob} to detect "recent activity." */
+    long countByProjectIdAndStartedAtGreaterThanEqual(String projectId, Instant since);
+
     @Query("SELECT r FROM PipelineRun r WHERE r.projectId = :pid ORDER BY r.startedAt DESC")
     List<PipelineRun> findByProjectIdOrderByStartedAtDesc(@Param("pid") String projectId, Pageable pageable);
 

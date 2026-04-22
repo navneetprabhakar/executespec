@@ -27,6 +27,7 @@ export default function PlansPage() {
 
   // Checkout flow state
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [selectedSeats, setSelectedSeats] = useState<number>(1);
   const [showDisclaimer, setShowDisclaimer] = useState(false);
   const [subscribing, setSubscribing] = useState(false);
   const [checkoutData, setCheckoutData] = useState<SubscriptionInitResult | null>(null);
@@ -48,8 +49,11 @@ export default function PlansPage() {
       const currency = p.baseAmountInr > 0 ? 'INR' : 'USD';
       byTier[p.tier][currency] = p;
     }
-    // Return plans in tier order: PRO first, then MAX
-    const tierOrder = ['PRO', 'MAX'];
+    // v2.6.0 — tier order: PRO (hidden via backend lifecycle filter for new
+    // buyers, still shown to existing PRO subscribers as CURRENT), TEAM,
+    // then MAX. The /api/billing/plans endpoint already filters HIDDEN rows
+    // so TEAM launch day PRO disappears automatically.
+    const tierOrder = ['PRO', 'TEAM', 'MAX'];
     return tierOrder
       .filter(t => byTier[t])
       .map(t => byTier[t][showInr ? 'INR' : 'USD'])
@@ -58,8 +62,9 @@ export default function PlansPage() {
 
   // ─── Checkout Flow ───
 
-  const handleSelectPlan = (planId: string) => {
+  const handleSelectPlan = (planId: string, seats?: number) => {
     setSelectedPlanId(planId);
+    setSelectedSeats(seats ?? 1);
     setShowDisclaimer(true);
     setCheckoutError(null);
   };
@@ -76,6 +81,7 @@ export default function PlansPage() {
         gateway,
         gateway === 'STRIPE' ? `${window.location.origin}/billing?status=success` : undefined,
         gateway === 'STRIPE' ? `${window.location.origin}/billing?status=cancelled` : undefined,
+        selectedSeats,
       );
 
       if (result.gateway === 'STRIPE' && result.checkoutUrl) {

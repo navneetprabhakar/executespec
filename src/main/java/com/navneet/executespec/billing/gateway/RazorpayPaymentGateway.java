@@ -44,8 +44,25 @@ public class RazorpayPaymentGateway implements PaymentGateway {
 
     @Override
     public void cancelSubscription(String gatewaySubscriptionId) {
+        // "cancelSubscription" in PaymentGateway semantics = immediate cancel.
+        // Map to the BillingGateway cancelImmediately path.
+        razorpayGateway.cancelImmediately(gatewaySubscriptionId);
+        log.info("Razorpay subscription cancelled immediately via PaymentGateway adapter: {}",
+                gatewaySubscriptionId);
+    }
+
+    /**
+     * v2.6.0 — explicitly override the default {@code cancelAtPeriodEnd} so
+     * the {@code SUNSETTING} path uses Razorpay's
+     * {@code cancel_at_cycle_end} API (via the existing
+     * {@link BillingGateway#cancelAtPeriodEnd}) instead of falling through
+     * to immediate cancellation.
+     */
+    @Override
+    public void cancelAtPeriodEnd(String gatewaySubscriptionId) {
         razorpayGateway.cancelAtPeriodEnd(gatewaySubscriptionId);
-        log.info("Razorpay subscription cancelled via PaymentGateway adapter: {}", gatewaySubscriptionId);
+        log.info("Razorpay subscription queued for cancellation at cycle end: {}",
+                gatewaySubscriptionId);
     }
 
     @Override

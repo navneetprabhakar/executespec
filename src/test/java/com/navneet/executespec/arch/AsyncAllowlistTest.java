@@ -54,6 +54,8 @@ class AsyncAllowlistTest {
             "MailService#sendEscalationToAdmin",
             "MailService#sendInviteRejectedEmail",
             "MailService#sendNewUserAlertToAdmin",
+            "MailService#sendWeeklyAdminSummary",  // v2.6.0 — Thymeleaf render + SMTP send, no JPA access
+            "MailService#sendAdminReminderEmail",  // v2.6.0 — Thymeleaf render + SMTP send, no JPA access
             "MailService#sendContactFeedbackEmail",
             "MailService#sendWelcomeEmail",
             "MailService#sendTierUpgradeEmail",
@@ -102,7 +104,14 @@ class AsyncAllowlistTest {
 
             // v2 post-merge orchestrator + recovery
             "PostMergeOrchestrator#onMergeCompleted",
-            "StartupRunResumerV2#onApplicationReady"
+            "StartupRunResumerV2#onApplicationReady",
+
+            // Wave 2.1 — activation instrumentation. Tracks events to PostHog +
+            // user_activation_event row. Takes primitive args (userId, enum, map);
+            // no lazy JPA nav. Exceptions never propagate — analytics is a
+            // side-effect, not a pre-condition. See
+            // docs/plans/activation-instrumentation-plan.md.
+            "EventTrackingService#track"
     ));
 
     @Test

@@ -34,5 +34,24 @@ public record RegisterRequest(
         // run inside AuthService.validatePasswordStrength after this passes.
         @NotBlank(message = "password is required")
         @Size(min = 10, max = 128, message = "password must be 10-128 characters; needs uppercase, lowercase, digit, and special character")
-        String password
-) {}
+        String password,
+
+        /**
+         * Wave 2.1 — attribution fields. All optional; frontend forwards whatever
+         * it captures from the signup URL (utm_source, utm_campaign, ref). Length
+         * capped at 64/128 to fit the app_user columns + avoid log spam.
+         */
+        @Size(max = 64, message = "signupSource must not exceed 64 characters")
+        String signupSource,
+
+        @Size(max = 64, message = "utmSource must not exceed 64 characters")
+        String utmSource,
+
+        @Size(max = 128, message = "utmCampaign must not exceed 128 characters")
+        String utmCampaign
+) {
+    /** Back-compat for callers pre-Wave-2.1 — no attribution. */
+    public RegisterRequest(String email, String firstName, String lastName, String password) {
+        this(email, firstName, lastName, password, null, null, null);
+    }
+}

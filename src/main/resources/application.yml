@@ -533,6 +533,11 @@ app:
     transport: smtp
     base-url: http://localhost:5173
     from: admin@executespec.ai
+    # v2.6.0 — recipient for new-signup alerts + weekly admin summary
+    admin-address: ${ADMIN_NOTIFICATION_EMAIL:admin@executespec.ai}
+    # v2.6.0 — shared secret for /api/internal/reminder/send (remote-trigger hits this).
+    # Leave blank in prod to disable the endpoint (returns 503).
+    admin-reminder-token: ${ADMIN_REMINDER_TOKEN:}
     # ── SMTP config (used when transport=smtp) ──────────────────────────────
     smtp:
       host: smtp.gmail.com
@@ -623,6 +628,11 @@ billing:
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
     pro-price-id: ${STRIPE_PRO_PRICE_ID:}
     enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
+    # v2.6.1 Wave 1 — TEAM tier per-seat pricing. Must be a Stripe Price with
+    # per-unit pricing enabled (LineItem.setQuantity honours the seat count).
+    # INR variant is optional; falls back to the monthly plan in database.
+    team-price-id: ${STRIPE_TEAM_PRICE_ID:}
+    team-price-id-inr: ${STRIPE_TEAM_PRICE_ID_INR:}
   razorpay:
     enabled: true
   currency-gateway-map:
@@ -642,6 +652,16 @@ logging:
     "[org.springframework.ai.chat.client]": INFO
     "[io.opentelemetry]": WARN
     "[io.micrometer.tracing]": INFO
+
+# ── Product analytics (Wave 2.1 — 6-event activation funnel) ──────────────────
+# When posthog.api-key is blank, EventTrackingService is a no-op (safe for
+# local dev). Prod: set POSTHOG_API_KEY + POSTHOG_HOST env vars.
+# Full plan: docs/plans/activation-instrumentation-plan.md.
+analytics:
+  posthog:
+    enabled: ${POSTHOG_ENABLED:false}
+    api-key: ${POSTHOG_API_KEY:}
+    host: ${POSTHOG_HOST:https://us.i.posthog.com}
 
 # ── Observability (Actuator + OTel + Metrics) ────────────────────────────────
 management:
