@@ -215,3 +215,4 @@ eval-outputs/
 # Temporary/Generated items
 javac.*.args
 scripts/e2e-preview-results.json
+.wrangler/

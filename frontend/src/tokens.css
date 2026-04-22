@@ -61,12 +61,16 @@
   /* Brand gradient (logo, primary CTAs, scorecard highlight) */
   --brand-grad:         linear-gradient(135deg, #5B8DEF 0%, #7AD1C8 100%);
 
-  /* Status — distinct color per semantic group (unchanged, just retuned) */
+  /* Status — distinct color per semantic group.
+     v2.6.0 (UI polish v1): PARTIAL nudged from #F97316 orange (was reading as
+     red-adjacent on run-list chips) to #F5A524 — clearly amber/warning, not
+     fire-alarm. Runs that completed with warnings should feel like caution,
+     not emergency. */
   --status-success:     #10B981;
   --status-executing:   #5B8DEF;   /* was #3B82F6 — align with accent */
   --status-thinking:    #A78BFA;
   --status-waiting:     #F59E0B;
-  --status-partial:     #F97316;
+  --status-partial:     #F5A524;   /* was #F97316 — softer amber, not red-adjacent */
   --status-error:       #F26D6D;   /* slightly less aggressive red */
   --status-blocked:     #EC4899;
   --status-queued:      #66707D;

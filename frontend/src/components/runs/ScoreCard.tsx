@@ -2,33 +2,35 @@ import type { ValidationReportData } from '@/lib/api';
 
 type Dim = { label: string; value: number | null | undefined };
 
-// v2.5.12 — token-aligned. Swapped raw `emerald-*` Tailwind hex for the
-// platform `status-success` token so score bars match every other status
-// indicator (StatusBadge, SignalBreakdown, ValidationReport pills).
+// v2.6.0 (UI polish v1) — graduated palette matching the landing-site tour.
+// 4-band scale prevents the binary "green OR red" flip that made borderline
+// scores (70-79) read as failures. Same thresholds as ScoreRing.defaultColor.
 function barColor(v: number): string {
-  if (v >= 80) return 'bg-status-success';
-  if (v >= 60) return 'bg-status-waiting';
+  if (v >= 85) return 'bg-status-success';
+  if (v >= 70) return 'bg-accent-blue';
+  if (v >= 50) return 'bg-status-waiting';
   return 'bg-status-error';
 }
 
 function textColor(v: number): string {
-  if (v >= 80) return 'text-status-success';
-  if (v >= 60) return 'text-status-waiting';
+  if (v >= 85) return 'text-status-success';
+  if (v >= 70) return 'text-accent-blue';
+  if (v >= 50) return 'text-status-waiting';
   return 'text-status-error';
 }
 
 function Row({ label, value }: Dim) {
   if (value == null) return null;
   return (
-    <div className="flex items-center gap-2 sm:gap-3 text-[11px]">
-      <div className="w-24 sm:w-32 text-muted truncate">{label}</div>
-      <div className="flex-1 h-2 rounded bg-[var(--border-default)]">
+    <div className="flex items-center gap-3 text-[11px]">
+      <div className="w-28 sm:w-36 text-secondary truncate">{label}</div>
+      <div className="flex-1 h-2.5 rounded-full bg-[var(--gray-300)] overflow-hidden">
         <div
-          className={`h-2 rounded ${barColor(value)}`}
+          className={`h-full rounded-full transition-[width] duration-500 ease-out ${barColor(value)}`}
           style={{ width: `${value}%` }}
         />
       </div>
-      <div className={`w-10 text-right font-mono ${textColor(value)}`}>{value}</div>
+      <div className={`w-10 text-right font-mono tabular-nums font-medium ${textColor(value)}`}>{value}</div>
     </div>
   );
 }
@@ -70,31 +72,31 @@ export default function ScoreCard({ report }: { report: ValidationReportData }) 
     overall != null && nonNull.length >= 3 && nonNull.every((v) => v === overall);
 
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 mb-3 space-y-2.5">
+    <div className="rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary">Quality dimensions</h3>
+        <h3 className="text-[10px] font-mono font-medium uppercase tracking-wider text-muted">Quality dimensions</h3>
         {overall != null && (
-          <div className={`text-xl font-semibold ${textColor(overall)}`}>
-            {overall}
-            <span className="text-[11px] font-normal text-muted"> / 100</span>
+          <div className="flex items-baseline gap-2">
+            <span className={`text-lg font-semibold tabular-nums ${textColor(overall)}`}>{overall}</span>
+            <span className="text-[11px] font-normal text-muted">/ 100</span>
             {verified != null && llmScore != null && llmScore !== verified && (
-              <span className="ml-2 text-[10px] font-normal text-muted">(Est. {llmScore})</span>
+              <span className="text-[10px] font-mono text-muted">· Est. {llmScore}</span>
             )}
             {verified == null && report.accuracyGrade && (
-              <span className="ml-2 text-xs text-muted">({report.accuracyGrade})</span>
+              <span className="text-[11px] text-muted">· {report.accuracyGrade}</span>
             )}
           </div>
         )}
       </div>
-      <div className="space-y-1.5">
+      <div className="space-y-2">
         {dims.map((d) => (
           <Row key={d.label} label={d.label} value={d.value} />
         ))}
       </div>
       {allDimsEqualAnchor && (
-        <p className="text-[10px] text-muted leading-relaxed">
+        <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-[var(--border-default)]">
           Dimensions match the verified score because the reviewer found no issues.
-          Each bar is <code>anchor − issue penalty</code>; zero penalties → all bars equal the anchor.
+          Each bar is <code>anchor − issue penalty</code>; zero penalties means every bar equals the anchor.
         </p>
       )}
     </div>
