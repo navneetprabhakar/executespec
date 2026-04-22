@@ -367,6 +367,13 @@
       <version>26.1.0</version>
     </dependency>
 
+    <!-- PostHog Java SDK — product analytics (Wave 2.1 activation instrumentation) -->
+    <dependency>
+      <groupId>com.posthog.java</groupId>
+      <artifactId>posthog</artifactId>
+      <version>1.2.0</version>
+    </dependency>
+
     <!-- Caffeine — high-performance in-memory cache with TTL/size eviction -->
     <dependency>
       <groupId>com.github.ben-manes.caffeine</groupId>
