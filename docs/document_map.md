@@ -1,7 +1,14 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-18 (v2.5.12 — 3-step architecture + Generate Docs + Sync enhancement; v2.5.0: project workspace + RAG; pilot v3.0)
+> Last updated: 2026-04-22 (v2.6.0 — UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot + PH launch kit; v2.5.12: 3-step architecture + Generate Docs + Sync; v2.5.0: project workspace + RAG; pilot v3.0)
+>
+> **v2.6.0 docs to know about:**
+> - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — new single source of truth for every color in the app. Semantic palette (`--status-success/executing/waiting/partial/error/...`), graduated 4-band score palette, accent palette, radius/spacing scale, Tailwind mapping, chip patterns, MUST/MUST NOT rules. If you add a component, start here.
+> - [`docs/reports/session-handoff-2026-04-21.md`](reports/session-handoff-2026-04-21.md) — detailed handoff: commits landed, pricing v3 rationale (Option C over B), US-first pivot, Stripe prod default, blocking list for PH launch, deferred follow-ups (Stripe top-up wiring, country-aware routing, currency-gateway-map, Stripe refund path, Gemini token bloat fix, mobile accuracy floor, Bug #1c strict-provider bypass).
+> - [`docs/reports/launch-checklist-2026-04-21.md`](reports/launch-checklist-2026-04-21.md) — PH launch readiness tracker; website + press-kit + OG hero + screenshots.
+> - `website/tier-decision.md` / `website/pricing-analysis.md` / `website/product-hunt-launch.md` — external-facing source of truth for pricing + launch messaging.
+>
 >
 > **v2.5.12 docs to know about:**
 > - [`docs/test-scenarios/personas-journeys-and-cases.md`](test-scenarios/personas-journeys-and-cases.md) — 6 personas, 8 user journeys, ~55 test cases organised in 12 blocks, 10-minute smoke pack, persona × feature coverage matrix.
@@ -101,6 +108,10 @@ Find the **type of change** you are making in the table below. Update every docu
 | `eval/` | JAVADOC §24 Eval Framework |
 | `frontend/src/components/runs/` | `frontend-api-usage.md`; WORKFLOWS if new workflow surface |
 | `frontend/src/lib/api.ts` | `frontend-api-usage.md` |
+| `frontend/src/tokens.css` + `tailwind.config.ts` | [`docs/design/ui-tokens.md`](design/ui-tokens.md) |
+| `frontend/src/stores/useUiStore.ts` (theme slice) | USER_MANUAL §v2.6.0 quick links + `docs/design/ui-tokens.md` |
+| `frontend/src/pages/ExecSummaryPage.tsx` | USER_MANUAL §v2.6.0; CLAUDE.md §Key File Locations (v2.6.0 UX v3 row) |
+| `website/` | `docs/reports/session-handoff-2026-04-21.md` + `docs/reports/launch-checklist-2026-04-21.md` (external launch-facing assets) |
 | `src/main/resources/db/migration/` | JAVADOC §21.1 Flyway Migrations; CLAUDE.md Flyway note |
 | `src/main/resources/application.yml` | JAVADOC §20 Configuration Reference; CLAUDE.md env vars |
 | `src/main/resources/prompts/` | JAVADOC §5.x (per agent); CLAUDE.md Prompt architecture bullet |
