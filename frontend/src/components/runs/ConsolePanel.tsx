@@ -47,7 +47,7 @@ export default function ConsolePanel({ runId }: { runId: string }) {
     <div className="flex flex-col h-full bg-neutral-950 rounded-lg border border-neutral-800 overflow-hidden">
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-2 border-b border-neutral-800 bg-neutral-900">
-        <Terminal className="w-4 h-4 text-emerald-400" />
+        <Terminal className="w-4 h-4 text-status-success" />
         <span className="text-sm font-medium text-neutral-200">Container Console</span>
         <span className="ml-auto text-xs text-neutral-500">
           Allowed: {ALLOWED_COMMANDS.join(', ')}
@@ -67,7 +67,7 @@ export default function ConsolePanel({ runId }: { runId: string }) {
         )}
         {history.map((entry, i) => (
           <div key={i}>
-            <div className="flex items-center gap-1 text-emerald-400 mb-1">
+            <div className="flex items-center gap-1 text-status-success mb-1">
               <span>$</span>
               <span>{entry.cmd}</span>
             </div>
@@ -77,23 +77,23 @@ export default function ConsolePanel({ runId }: { runId: string }) {
               </pre>
             )}
             {entry.result.stderr && (
-              <pre className="whitespace-pre-wrap text-red-400 leading-relaxed">
+              <pre className="whitespace-pre-wrap text-status-error leading-relaxed">
                 {entry.result.stderr}
               </pre>
             )}
             {entry.result.exitCode !== 0 && (
-              <span className="text-red-500 text-xs">exit {entry.result.exitCode}</span>
+              <span className="text-status-error text-xs">exit {entry.result.exitCode}</span>
             )}
           </div>
         ))}
         {error && (
-          <p className="text-red-400 text-xs">{error}</p>
+          <p className="text-status-error text-xs">{error}</p>
         )}
       </div>
 
       {/* Input */}
       <div className="flex items-center gap-2 px-4 py-2 border-t border-neutral-800 bg-neutral-900">
-        <span className="text-emerald-400 font-mono text-sm">$</span>
+        <span className="text-status-success font-mono text-sm">$</span>
         <input
           type="text"
           value={input}
@@ -106,7 +106,7 @@ export default function ConsolePanel({ runId }: { runId: string }) {
         <button
           onClick={handleRun}
           disabled={running || !input.trim()}
-          className="flex items-center gap-1 px-3 py-1 text-xs rounded bg-emerald-600 hover:bg-emerald-500 text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="flex items-center gap-1 px-3 py-1 text-xs rounded bg-status-success hover:bg-status-success text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {running ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
           Run

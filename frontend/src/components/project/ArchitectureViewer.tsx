@@ -245,7 +245,7 @@ function ArchDiffBlock({ oldText, newText, oldV, newV }:
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
       <div className="px-3 py-1.5 bg-[var(--gray-200)] border-b border-[var(--border-default)] text-[11px] font-mono flex items-center gap-3">
         <span className="text-secondary">v{oldV} → v{newV}</span>
-        <span className="text-emerald-400">+{adds}</span>
+        <span className="text-status-success">+{adds}</span>
         <span className="text-accent-red">-{dels}</span>
       </div>
       <pre className="text-xs font-mono leading-relaxed overflow-x-auto m-0">
@@ -253,8 +253,8 @@ function ArchDiffBlock({ oldText, newText, oldV, newV }:
           <div
             key={i}
             className={
-              r.kind === 'add' ? 'bg-emerald-500/10 text-emerald-300 px-3' :
-              r.kind === 'del' ? 'bg-red-500/10 text-red-300 px-3' :
+              r.kind === 'add' ? 'bg-status-success/10 text-status-success px-3' :
+              r.kind === 'del' ? 'bg-status-error/10 text-status-error px-3' :
               'text-secondary px-3'
             }
           >
@@ -350,7 +350,7 @@ function ArchSourceChanges({ projectId, fromVersion, toVersion }:
         return (
           <div key={rp.repoFullName} className="space-y-1">
             <div className="text-xs font-mono text-primary">{rp.repoFullName}</div>
-            <FileGroup label="Added" files={added} tone="text-emerald-400" />
+            <FileGroup label="Added" files={added} tone="text-status-success" />
             <FileGroup label="Modified" files={modified} tone="text-accent-amber" />
             <FileGroup label="Removed" files={removed} tone="text-accent-red" />
             <FileGroup label="Renamed" files={renamed} tone="text-accent-blue" />
@@ -373,7 +373,7 @@ function FileGroup({ label, files, tone }:
             <span className="truncate flex-1">{f.filename}</span>
             {(f.additions > 0 || f.deletions > 0) && (
               <span className="shrink-0">
-                <span className="text-emerald-400">+{f.additions}</span>
+                <span className="text-status-success">+{f.additions}</span>
                 {' '}
                 <span className="text-accent-red">-{f.deletions}</span>
               </span>

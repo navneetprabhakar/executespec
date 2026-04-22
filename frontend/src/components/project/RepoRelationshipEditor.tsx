@@ -28,7 +28,7 @@ export default function RepoRelationshipEditor({ initial, onSave, onCancel }: Pr
             className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs"
           >
             {item}
-            <button onClick={() => remove(idx)} className="text-gray-400 hover:text-red-600">
+            <button onClick={() => remove(idx)} className="text-muted hover:text-status-error">
               ×
             </button>
           </span>

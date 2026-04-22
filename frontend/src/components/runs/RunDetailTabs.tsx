@@ -1234,7 +1234,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
               {issue.autoFixed && (
                 <span className={cn(
                   'inline-block text-xs mt-1',
-                  issue.fixSucceeded ? 'text-emerald-400' : 'text-accent-red'
+                  issue.fixSucceeded ? 'text-status-success' : 'text-accent-red'
                 )}>
                   {issue.fixSucceeded ? 'Auto-fixed \u2713' : 'Auto-fix failed'}
                 </span>
@@ -1263,7 +1263,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
               disabled={applyingReview}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-medium transition-all',
-                'bg-amber-500/15 text-accent-amber hover:bg-amber-500/25 border border-amber-500/20',
+                'bg-status-waiting/15 text-accent-amber hover:bg-status-waiting/25 border border-status-waiting/20',
                 'disabled:opacity-40 disabled:cursor-not-allowed'
               )}
             >
@@ -1343,10 +1343,10 @@ function FileTypeIcon({ name }: { name: string }) {
   const colorMap: Record<string, string> = {
     java: 'text-accent-amber', kt: 'text-[var(--text-secondary)]',
     ts: 'text-accent-blue', tsx: 'text-accent-blue',
-    js: 'text-yellow-400', jsx: 'text-yellow-400',
+    js: 'text-status-waiting', jsx: 'text-status-waiting',
     py: 'text-[var(--status-success)]', go: 'text-sky-400',
-    rs: 'text-orange-500', sql: 'text-accent-blue',
-    json: 'text-yellow-500', xml: 'text-accent-red',
+    rs: 'text-status-partial', sql: 'text-accent-blue',
+    json: 'text-status-waiting', xml: 'text-accent-red',
     yml: 'text-[var(--text-secondary)]', yaml: 'text-[var(--text-secondary)]',
     html: 'text-accent-amber', css: 'text-accent-blue',
     scss: 'text-accent-red', md: 'text-secondary',
@@ -1869,9 +1869,9 @@ export function CodeTab({
 
 const TEST_STATUS_COLORS: Record<string, string> = {
   PENDING: 'bg-[var(--gray-200)] text-secondary',
-  GENERATING: 'bg-amber-500/20 text-accent-amber',
-  COMPILED: 'bg-emerald-500/20 text-emerald-400',
-  FAILED: 'bg-red-500/20 text-accent-red',
+  GENERATING: 'bg-status-waiting/20 text-accent-amber',
+  COMPILED: 'bg-status-success/20 text-status-success',
+  FAILED: 'bg-status-error/20 text-accent-red',
 };
 
 function TestTaskCard({ task }: { task: TestTaskDto }) {
@@ -1938,7 +1938,7 @@ function RunPrList({ run }: { run: RunDetail }) {
                 'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide',
                 pr.status === 'MERGED' && 'bg-purple-500/10 text-purple-500',
                 pr.status === 'OPEN' && 'bg-blue-500/10 text-blue-500',
-                pr.status === 'CLOSED' && 'bg-red-500/10 text-red-500',
+                pr.status === 'CLOSED' && 'bg-status-error/10 text-status-error',
               )}>
                 {pr.status}
               </span>

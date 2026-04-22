@@ -463,7 +463,7 @@ export default function PreviewTab({ runId }: { runId: string }) {
               className={cn(
                 'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
                 showConsole
-                  ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30'
+                  ? 'bg-status-success/20 text-status-success hover:bg-status-success/30'
                   : 'bg-[var(--gray-200)] text-muted hover:text-secondary hover:bg-[var(--gray-300)]'
               )}
               title="Toggle container console"

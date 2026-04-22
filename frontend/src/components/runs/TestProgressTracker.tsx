@@ -51,7 +51,7 @@ export default function TestProgressTracker({ runId, status }: Props) {
           <span className="ml-auto text-xs text-accent-red">Pipeline failed</span>
         )}
         {hasReport && (
-          <span className="ml-auto text-xs text-emerald-400">Complete</span>
+          <span className="ml-auto text-xs text-status-success">Complete</span>
         )}
       </div>
 
@@ -68,7 +68,7 @@ export default function TestProgressTracker({ runId, status }: Props) {
 
           return (
             <div key={step.key} className="flex items-center gap-2 text-xs">
-              {state === 'done' && <Check className="h-3.5 w-3.5 text-emerald-400" />}
+              {state === 'done' && <Check className="h-3.5 w-3.5 text-status-success" />}
               {state === 'active' && <Loader2 className="h-3.5 w-3.5 text-accent-blue animate-spin" />}
               {state === 'pending' && <Circle className="h-3.5 w-3.5 text-muted" />}
               {state === 'failed' && <Circle className="h-3.5 w-3.5 text-accent-red" />}

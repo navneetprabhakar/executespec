@@ -744,7 +744,7 @@ export default function IntegrationsPage() {
 
       {/* No org warning */}
       {!user?.orgId && (
-        <GlassPanel className="px-4 py-3 border-amber-500/20">
+        <GlassPanel className="px-4 py-3 border-status-waiting/20">
           <p className="text-xs text-accent-amber">
             <AlertCircle className="h-3.5 w-3.5 inline mr-1 -mt-0.5" />
             You must be part of an organization to manage integrations.

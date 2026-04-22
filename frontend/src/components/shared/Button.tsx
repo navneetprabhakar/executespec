@@ -16,9 +16,9 @@ const buttonVariants = cva(
         ghost:
           'bg-transparent text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--gray-200)]',
         danger:
-          'bg-[var(--status-error)] text-white hover:bg-red-600 disabled:hover:bg-[var(--status-error)]',
+          'bg-[var(--status-error)] text-white hover:bg-status-error disabled:hover:bg-[var(--status-error)]',
         success:
-          'bg-[var(--status-success)] text-white hover:bg-emerald-600 disabled:hover:bg-[var(--status-success)]',
+          'bg-[var(--status-success)] text-white hover:bg-status-success disabled:hover:bg-[var(--status-success)]',
       },
       size: {
         sm: 'text-xs px-2.5 py-1 h-7',

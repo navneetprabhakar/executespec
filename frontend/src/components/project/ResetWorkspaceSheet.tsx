@@ -99,7 +99,7 @@ export default function ResetWorkspaceSheet({ projectId, onClose, onDone }: Prop
         </div>
 
         {done && (
-          <div className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 text-xs text-emerald-400">
+          <div className="rounded-sm border border-status-success/40 bg-status-success/10 px-2 py-1.5 text-xs text-status-success">
             ✓ Workspace refreshed — codemaps & architecture regenerated.
           </div>
         )}

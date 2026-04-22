@@ -297,7 +297,7 @@ export default function RunConversation({ runId }: Props) {
               onClick={() => { setShowApplyBox((v) => !v); setShowIterateBox(false); }}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all',
-                'bg-emerald-500/15 text-emerald-400 hover:bg-emerald-500/25',
+                'bg-status-success/15 text-status-success hover:bg-status-success/25',
                 (applying || iterating) && 'opacity-50 cursor-not-allowed'
               )}
               disabled={applying || iterating}
@@ -342,7 +342,7 @@ export default function RunConversation({ runId }: Props) {
               disabled={applyingFixes}
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all',
-                'bg-red-500/15 text-accent-red hover:bg-red-500/25',
+                'bg-status-error/15 text-accent-red hover:bg-status-error/25',
                 applyingFixes && 'opacity-50 cursor-not-allowed'
               )}
             >
@@ -357,7 +357,7 @@ export default function RunConversation({ runId }: Props) {
           {hasConversation && messages.length >= 2 && (
             <button
               onClick={compileSpec}
-              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all bg-amber-500/15 text-accent-amber hover:bg-amber-500/25"
+              className="flex items-center gap-1.5 px-3 py-2 min-h-[44px] rounded text-xs font-medium transition-all bg-status-waiting/15 text-accent-amber hover:bg-status-waiting/25"
             >
               <FileText className="h-3 w-3" />
               Compile as Spec
@@ -392,7 +392,7 @@ export default function RunConversation({ runId }: Props) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden border-b border-[var(--border-default)] flex-shrink-0"
           >
-            <div className="px-4 py-3 space-y-2 bg-emerald-500/[0.03]">
+            <div className="px-4 py-3 space-y-2 bg-status-success/[0.03]">
               <p className="text-xs text-muted leading-relaxed">
                 Apply improvements directly to this run. The system will create a mini-plan
                 ({'\u2264'}6 tasks), append them to the existing task graph, and execute them.
@@ -401,7 +401,7 @@ export default function RunConversation({ runId }: Props) {
                 className={cn(
                   'w-full bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm px-3 py-2',
                   'text-sm text-primary placeholder-[var(--text-muted)] resize-none focus:outline-none',
-                  'focus:border-emerald-500/40 focus:bg-[var(--gray-200)] transition-colors'
+                  'focus:border-status-success/40 focus:bg-[var(--gray-200)] transition-colors'
                 )}
                 rows={3}
                 placeholder={buildSuggestedRequest() || 'Describe the improvement to apply…'}
@@ -420,7 +420,7 @@ export default function RunConversation({ runId }: Props) {
                   disabled={applying || (!applyInput.trim() && !buildSuggestedRequest())}
                   className={cn(
                     'flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-all',
-                    'bg-emerald-600 text-primary hover:bg-emerald-500',
+                    'bg-status-success text-primary hover:bg-status-success',
                     'disabled:opacity-40 disabled:cursor-not-allowed'
                   )}
                 >
@@ -498,7 +498,7 @@ export default function RunConversation({ runId }: Props) {
             transition={{ duration: 0.2 }}
             className="overflow-hidden border-b border-[var(--border-default)] flex-shrink-0"
           >
-            <div className="px-4 py-3 bg-amber-500/[0.03]">
+            <div className="px-4 py-3 bg-status-waiting/[0.03]">
               <div className="flex items-center justify-between mb-2">
                 <span className="text-xs font-medium text-accent-amber">Compiled Spec</span>
                 <button
@@ -514,7 +514,7 @@ export default function RunConversation({ runId }: Props) {
               <div className="flex justify-end gap-2 flex-wrap">
                 <button
                   onClick={() => { handleApply(compiledSpec); setShowCompiledSpec(false); }}
-                  className="flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded text-xs font-medium bg-emerald-600 text-primary hover:bg-emerald-500 transition-colors"
+                  className="flex items-center gap-1.5 px-4 py-2.5 min-h-[44px] rounded text-xs font-medium bg-status-success text-primary hover:bg-status-success transition-colors"
                 >
                   {applying
                     ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Applying...</>
@@ -650,8 +650,8 @@ export default function RunConversation({ runId }: Props) {
               disabled={sending}
               className={cn(
                 'flex items-center gap-1.5 w-full px-3 py-2.5 mb-2 rounded-sm text-xs transition-all',
-                'bg-red-500/10 border border-red-500/20 text-accent-red',
-                'hover:bg-red-500/15 hover:border-red-500/30',
+                'bg-status-error/10 border border-status-error/20 text-accent-red',
+                'hover:bg-status-error/15 hover:border-status-error/30',
                 sending && 'opacity-50 cursor-not-allowed'
               )}
             >

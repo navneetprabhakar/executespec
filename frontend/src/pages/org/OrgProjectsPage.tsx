@@ -230,7 +230,7 @@ function ProjectCard({
                 'text-[10px] sm:text-xs px-1.5 sm:px-2 py-0.5 rounded-sm flex-shrink-0 uppercase tracking-wider',
                 isArchived
                   ? 'bg-[var(--gray-200)] text-muted'
-                  : 'bg-emerald-900/40 text-emerald-400'
+                  : 'bg-status-success/20 text-status-success'
               )}>
                 {project.status}
               </span>
