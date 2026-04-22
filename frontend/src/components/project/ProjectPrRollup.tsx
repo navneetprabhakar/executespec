@@ -117,7 +117,7 @@ function PrGroup({
 
 function statusPill(status: string): string {
   if (status === 'MERGED')
-    return 'text-[11px] px-1.5 py-0.5 rounded border text-emerald-400 border-emerald-500/40';
+    return 'text-[11px] px-1.5 py-0.5 rounded border text-status-success border-status-success/40';
   if (status === 'CLOSED')
     return 'text-[11px] px-1.5 py-0.5 rounded border text-muted border-[var(--border-default)]';
   return 'text-[11px] px-1.5 py-0.5 rounded border text-accent-blue border-accent-blue/40';
@@ -227,7 +227,7 @@ function PrPreview({ snap }: { snap: PullRequestSnapshot }) {
       <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted font-mono">
         <span>branch: <span className="text-secondary">{snap.headBranch}</span> → <span className="text-secondary">{snap.baseBranch}</span></span>
         <span>files: <span className={cn(snap.changedFiles > 0 ? 'text-primary' : 'text-muted')}>{snap.changedFiles}</span></span>
-        <span className="text-emerald-400">+{snap.additions}</span>
+        <span className="text-status-success">+{snap.additions}</span>
         <span className="text-accent-red">−{snap.deletions}</span>
       </div>
       {snap.body && snap.body.trim() && (

@@ -145,7 +145,7 @@ export default function PricingManager() {
                           </button>
                         )}
                         {saved === key(r) && (
-                          <span className="inline-flex items-center gap-1 text-emerald-400 text-[10px]">
+                          <span className="inline-flex items-center gap-1 text-status-success text-[10px]">
                             <Check className="h-3 w-3" /> Saved
                           </span>
                         )}

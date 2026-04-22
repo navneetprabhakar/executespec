@@ -18,7 +18,7 @@ export default function QuotaUsageBar({ used, limit, tier }: Props) {
   }
 
   const pct = Math.min((used / limit) * 100, 100);
-  // v2.5.12 — token-aligned. Was raw `bg-red-500` / `bg-amber-500`; now
+  // v2.5.12 — token-aligned. Was raw `bg-status-error` / `bg-status-waiting`; now
   // uses status tokens that match StatusBadge + ValidationReport.
   const barColor =
     pct >= 90 ? 'bg-status-error' :

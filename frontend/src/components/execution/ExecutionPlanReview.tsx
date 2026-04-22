@@ -52,7 +52,7 @@ export default function ExecutionPlanReview({ executionId }: { executionId: stri
 
       <button
         onClick={() => approvePlan(executionId)}
-        className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-sm"
+        className="rounded-sm border border-status-success/40 bg-status-success/10 text-status-success px-3 py-1.5 text-sm"
       >
         Approve &amp; execute
       </button>

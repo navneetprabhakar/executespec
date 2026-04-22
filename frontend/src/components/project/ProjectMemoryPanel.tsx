@@ -77,7 +77,7 @@ export default function ProjectMemoryPanel({ projectId }: Props) {
         <div className="text-xs text-muted">
           {compactStatus && (
             <span className={cn(
-              compactStatus.startsWith('Failed') ? 'text-accent-red' : 'text-emerald-400',
+              compactStatus.startsWith('Failed') ? 'text-accent-red' : 'text-status-success',
             )}>
               {compactStatus}
             </span>

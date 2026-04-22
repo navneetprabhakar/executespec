@@ -27,7 +27,7 @@ export default function ExecutionAnalysis() {
 
 function StatusChip({ label, status }: { label: string; status: string }) {
   const color =
-    status === 'DONE' ? 'bg-emerald-500/20 text-emerald-400'
+    status === 'DONE' ? 'bg-status-success/20 text-status-success'
     : status === 'RUNNING' ? 'bg-accent-blue/20 text-accent-blue'
     : 'bg-[var(--gray-200)] text-muted';
   return (

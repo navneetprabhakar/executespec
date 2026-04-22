@@ -237,7 +237,7 @@ export default function ExecutionSetup({ projectId, onSubmitted, continueOnPr }:
                   className="flex-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 font-mono"
                 />
                 <span className={ownerChecks[i]?.startsWith('✓')
-                    ? 'text-emerald-400 text-[11px]'
+                    ? 'text-status-success text-[11px]'
                     : 'text-accent-red text-[11px]'}>
                   {ownerChecks[i] ?? ''}
                 </span>
@@ -357,7 +357,7 @@ export default function ExecutionSetup({ projectId, onSubmitted, continueOnPr }:
               <button onClick={() => setShowConfirm(false)} className="text-muted px-2 py-1">Cancel</button>
               <button
                 onClick={confirmLaunch}
-                className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 px-3 py-1"
+                className="rounded-sm border border-status-success/40 bg-status-success/10 text-status-success px-3 py-1"
               >
                 Confirm & Launch
               </button>

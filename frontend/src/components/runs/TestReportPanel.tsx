@@ -13,7 +13,7 @@ interface Props {
 }
 
 const STATUS_CONFIG: Record<string, { color: string; icon: typeof Check; label: string }> = {
-  PASSED: { color: 'text-emerald-400', icon: Check, label: 'Passed' },
+  PASSED: { color: 'text-status-success', icon: Check, label: 'Passed' },
   FAILED: { color: 'text-accent-red', icon: X, label: 'Failed' },
   SKIPPED: { color: 'text-muted', icon: SkipForward, label: 'Skipped' },
   ERROR: { color: 'text-accent-amber', icon: AlertTriangle, label: 'Error' },
@@ -44,8 +44,8 @@ export default function TestReportPanel({ runId, status }: Props) {
     ? Math.round((report.passed / report.totalTests) * 100)
     : 0;
 
-  const resultColor = report.failed === 0 ? 'text-emerald-400' : 'text-accent-red';
-  const borderColor = report.failed === 0 ? 'border-emerald-500/30' : 'border-red-500/30';
+  const resultColor = report.failed === 0 ? 'text-status-success' : 'text-accent-red';
+  const borderColor = report.failed === 0 ? 'border-status-success/30' : 'border-status-error/30';
 
   const handleMarkInvalid = async (resultId: number) => {
     try {
@@ -143,7 +143,7 @@ export default function TestReportPanel({ runId, status }: Props) {
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2">
                         <span className="text-xs font-medium text-primary">{group.signature}</span>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/15 text-accent-red border border-red-500/20">
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-status-error/15 text-accent-red border border-status-error/20">
                           {group.count} test{group.count !== 1 ? 's' : ''}
                         </span>
                       </div>
@@ -194,7 +194,7 @@ export default function TestReportPanel({ runId, status }: Props) {
                       <p className="text-xs text-accent-red/80 font-mono break-all">{r.failureMessage}</p>
                       {r.expected && r.actual && (
                         <div className="mt-0.5 text-xs text-muted">
-                          Expected: <span className="text-emerald-400/70">{r.expected}</span>
+                          Expected: <span className="text-status-success/70">{r.expected}</span>
                           {' '}Actual: <span className="text-accent-red/70">{r.actual}</span>
                         </div>
                       )}
@@ -229,9 +229,9 @@ function Badge({ color, label }: { color: string; label: string }) {
   return (
     <span className={cn(
       'inline-flex items-center rounded-sm px-2 py-0.5 text-xs font-medium',
-      color === 'emerald' && 'bg-emerald-500/10 text-emerald-400',
-      color === 'red' && 'bg-red-500/10 text-accent-red',
-      color === 'orange' && 'bg-orange-500/10 text-accent-amber',
+      color === 'emerald' && 'bg-status-success/10 text-status-success',
+      color === 'red' && 'bg-status-error/10 text-accent-red',
+      color === 'orange' && 'bg-status-partial/10 text-accent-amber',
       color === 'zinc' && 'bg-[var(--gray-200)] text-secondary',
     )}>
       {label}
