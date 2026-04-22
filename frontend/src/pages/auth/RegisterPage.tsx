@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Check, AlertCircle } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { readSignupAttribution } from '@/lib/analytics';
 import { AuthShell } from './LoginPage';
 
 const PWD_RULES: Array<{ label: string; test: (p: string) => boolean }> = [
@@ -35,7 +36,11 @@ export default function RegisterPage() {
     if (!pwdValid) { setError('Password does not meet all requirements'); return; }
     setLoading(true);
     try {
-      await register(form.email, form.firstName, form.lastName, form.password);
+      // Wave 2.1 — capture ?utm_source / ?utm_campaign / ?ref from the signup URL
+      // so the backend persists attribution on app_user + forwards it to PostHog
+      // on the SIGNUP funnel event. Safe when no query params present.
+      const attribution = readSignupAttribution();
+      await register(form.email, form.firstName, form.lastName, form.password, attribution);
       setSuccess(true);
     } catch (err: any) {
       setError(err.message?.includes('409') ? 'This email is already registered.' :

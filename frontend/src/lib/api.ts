@@ -887,7 +887,18 @@ export interface LoginResponse {
   user: AuthUser;
 }
 
-export const authRegister = (body: { email: string; firstName: string; lastName: string; password: string }) =>
+/** Wave 2.1 — registration payload with optional attribution fields. */
+export interface RegisterPayload {
+  email: string;
+  firstName: string;
+  lastName: string;
+  password: string;
+  signupSource?: string;
+  utmSource?: string;
+  utmCampaign?: string;
+}
+
+export const authRegister = (body: RegisterPayload) =>
   req<AuthUser>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
 
 export const authLogin = (body: { email: string; password: string }) =>
