@@ -20,8 +20,10 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class TierLifecycleServiceTest {
 
+    // Pure state-machine tests — validateTransition never touches repos,
+    // gateway router, or feature flags. Null constructor args are safe here.
     private final TierLifecycleService svc =
-            new TierLifecycleService(null, null, null);
+            new TierLifecycleService(null, null, null, null, null, null);
 
     @Nested
     class AllowedTransitions {

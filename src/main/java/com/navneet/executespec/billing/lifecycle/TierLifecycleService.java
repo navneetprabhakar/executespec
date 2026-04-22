@@ -5,9 +5,15 @@ import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.billing.entity.BillingPlan;
+import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.gateway.PaymentGateway;
+import com.navneet.executespec.billing.gateway.PaymentGatewayRouter;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,7 +21,9 @@ import org.springframework.web.server.ResponseStatusException;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -48,9 +56,20 @@ public class TierLifecycleService {
 
     static final Duration MIN_HIDDEN_BEFORE_SUNSET = Duration.ofDays(14);
 
+    /** Feature-flag key gating SUNSETTING gateway side-effects. See V124 migration. */
+    static final String SUNSETTING_ENABLED_FLAG = "billing.lifecycle.sunsetting.enabled";
+
     private final TierConfigRepository tierConfigRepo;
     private final BillingPlanRepository billingPlanRepo;
     private final ActivityAuditService auditService;
+    /**
+     * Injected as ObjectProvider to avoid boot-time cycles and allow the
+     * service to start even before Billing beans are fully wired (e.g. in
+     * the Day-1 unit tests which construct the service with null repos).
+     */
+    private final ObjectProvider<BillingSubscriptionRepository> subscriptionRepoProvider;
+    private final ObjectProvider<PaymentGatewayRouter> gatewayRouterProvider;
+    private final ObjectProvider<FeatureFlagService> featureFlagProvider;
 
     /**
      * Transition a tier between lifecycle states. Validates the transition
@@ -91,6 +110,12 @@ public class TierLifecycleService {
 
         log.info("Tier lifecycle: {} {} → {} (actor={}, reason={})",
                 tier, current, target, actorUserId, reason);
+
+        // Fire SUNSETTING side-effects only when transitioning INTO that state.
+        if (target == LifecycleState.SUNSETTING) {
+            executeSunsettingSideEffects(tier, actorUserId);
+        }
+
         return saved;
     }
 
@@ -173,6 +198,92 @@ public class TierLifecycleService {
             }
         }
     }
+
+    /**
+     * v2.6.0 — enumerate active subscriptions on the sunsetted tier and queue
+     * cancel-at-period-end on each gateway. Gated behind the
+     * {@code billing.lifecycle.sunsetting.enabled} feature flag — when the
+     * flag is OFF (default), this is a no-op and only the audit row + DB
+     * column reflect the state change.
+     *
+     * <p>Failures per-subscription are logged and recorded in audit (one row
+     * per failure) but do not abort the rest of the cascade — we want to
+     * queue as many as possible on the first pass; a retry job can pick up
+     * stragglers. Returns a summary of processed / failed counts.
+     *
+     * <p>Email dispatch to affected subscribers is a Day-6 follow-up;
+     * scaffolded here with a log line so the call site is visible.
+     */
+    public SunsettingSideEffectsResult executeSunsettingSideEffects(String tier, String actorUserId) {
+        FeatureFlagService flags = featureFlagProvider != null ? featureFlagProvider.getIfAvailable() : null;
+        if (flags == null || !flags.isEnabled(SUNSETTING_ENABLED_FLAG)) {
+            log.info("SUNSETTING side-effects skipped for tier={} (flag off — flip {} to enable)",
+                    tier, SUNSETTING_ENABLED_FLAG);
+            return new SunsettingSideEffectsResult(0, 0, 0, List.of("flag_off"));
+        }
+
+        BillingSubscriptionRepository subRepo = subscriptionRepoProvider != null
+                ? subscriptionRepoProvider.getIfAvailable() : null;
+        PaymentGatewayRouter router = gatewayRouterProvider != null
+                ? gatewayRouterProvider.getIfAvailable() : null;
+        if (subRepo == null || router == null) {
+            log.error("SUNSETTING side-effects skipped for tier={} — billing dependencies not available", tier);
+            return new SunsettingSideEffectsResult(0, 0, 0, List.of("dependencies_unavailable"));
+        }
+
+        List<BillingSubscription> subs = subRepo.findActiveByTier(tier);
+        log.info("SUNSETTING: enumerating {} active subscription(s) on tier={}", subs.size(), tier);
+
+        int queued = 0;
+        int failed = 0;
+        List<String> errors = new ArrayList<>();
+        for (BillingSubscription sub : subs) {
+            try {
+                String gatewayName = sub.getPaymentGateway() != null ? sub.getPaymentGateway() : sub.getGateway();
+                if (gatewayName == null || sub.getGatewaySubscriptionId() == null) {
+                    errors.add("no_gateway_or_sub_id:" + sub.getId());
+                    failed++;
+                    continue;
+                }
+                PaymentGateway gateway = router.resolveByName(gatewayName);
+                gateway.cancelAtPeriodEnd(sub.getGatewaySubscriptionId());
+                sub.setStatus("CANCELLING_AT_PERIOD_END");
+                subRepo.save(sub);
+                auditService.record(ActivityAudit.builder()
+                        .eventType("TIER_SUNSET_QUEUED")
+                        .entityType("BILLING_SUBSCRIPTION")
+                        .entityId(sub.getId().toString())
+                        .actorId(actorUserId)
+                        .newValue("CANCELLING_AT_PERIOD_END")
+                        .metadata("{\"tier\":\"" + tier + "\",\"gateway\":\"" + gatewayName + "\"}")
+                        .build());
+                queued++;
+                // TODO Day-6: fire tier-sunsetting.html email to sub.userId.
+                log.info("SUNSETTING queued: subId={} gateway={} tier={}",
+                        sub.getGatewaySubscriptionId(), gatewayName, tier);
+            } catch (Exception e) {
+                log.error("SUNSETTING cancel-at-period-end failed: sub={}, tier={}, error={}",
+                        sub.getGatewaySubscriptionId(), tier, e.getMessage(), e);
+                errors.add(sub.getId() + ":" + e.getMessage());
+                failed++;
+            }
+        }
+
+        log.info("SUNSETTING complete: tier={} queued={} failed={} errors={}",
+                tier, queued, failed, errors.size());
+        return new SunsettingSideEffectsResult(subs.size(), queued, failed, errors);
+    }
+
+    /**
+     * Result of a {@link #executeSunsettingSideEffects} run. Exposed so the
+     * admin UI can show "N queued, M failed" after a SUNSETTING transition.
+     */
+    public record SunsettingSideEffectsResult(
+            int totalConsidered,
+            int queuedForCancellation,
+            int failed,
+            List<String> errors
+    ) {}
 
     private static String escape(String s) {
         return s.replace("\\", "\\\\").replace("\"", "\\\"");

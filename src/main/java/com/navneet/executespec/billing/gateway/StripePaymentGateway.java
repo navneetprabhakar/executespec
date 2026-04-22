@@ -9,6 +9,7 @@ import com.stripe.model.Subscription;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.SubscriptionCancelParams;
+import com.stripe.param.SubscriptionUpdateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -49,6 +50,23 @@ public class StripePaymentGateway implements PaymentGateway {
     @Override
     public CheckoutResult createCheckoutSession(BillingEntity entity, String planId,
                                                   String successUrl, String cancelUrl) {
+        return createCheckoutSession(entity, planId, 1, successUrl, cancelUrl);
+    }
+
+    /**
+     * v2.6.0 — seat-aware Stripe checkout. For per-plan tiers (PRO/MAX), call
+     * with {@code seats=1}. For per-seat tiers (TEAM), pass the user's
+     * requested seat count (2-20 enforced upstream in BillingService).
+     * Stripe charges {@code price × seats} automatically and records the
+     * quantity on the resulting {@code Subscription} — pulled on webhook
+     * and written to {@code BillingSubscription.totalSeats}.
+     */
+    @Override
+    public CheckoutResult createCheckoutSession(BillingEntity entity, String planId,
+                                                  int seats, String successUrl, String cancelUrl) {
+        if (seats < 1) {
+            throw new IllegalArgumentException("seats must be >= 1, got " + seats);
+        }
         try {
             String priceId = resolvePriceId(planId);
 
@@ -58,11 +76,12 @@ public class StripePaymentGateway implements PaymentGateway {
                     .setCancelUrl(cancelUrl)
                     .addLineItem(SessionCreateParams.LineItem.builder()
                             .setPrice(priceId)
-                            .setQuantity(1L)
+                            .setQuantity((long) seats)
                             .build())
                     .putMetadata("billing_entity_id", entity.getId())
                     .putMetadata("billing_entity_type", entity.getEntityType())
-                    .putMetadata("plan_id", planId);
+                    .putMetadata("plan_id", planId)
+                    .putMetadata("seats", String.valueOf(seats));
 
             // Attach existing Stripe customer if available
             if (entity.getStripeCustomerId() != null && !entity.getStripeCustomerId().isBlank()) {
@@ -120,6 +139,35 @@ public class StripePaymentGateway implements PaymentGateway {
         } catch (StripeException e) {
             log.error("Failed to cancel Stripe subscription {}: {}", gatewaySubscriptionId, e.getMessage(), e);
             throw new RuntimeException("Stripe subscription cancellation failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * v2.6.0 — queue cancellation at the end of the current billing period.
+     * Used by {@code TierLifecycleService} when a tier transitions to
+     * {@code SUNSETTING}. No refund, no mid-cycle proration — the subscriber
+     * keeps full access until {@code current_period_end}, then
+     * {@code PeriodEndDowngradeScheduler} picks them up and moves them to
+     * FREE.
+     *
+     * <p>Idempotent: calling this multiple times on the same subscription is
+     * a no-op on Stripe's side — the {@code cancel_at_period_end=true} flag
+     * is state, not an event.
+     */
+    @Override
+    public void cancelAtPeriodEnd(String gatewaySubscriptionId) {
+        try {
+            Subscription subscription = Subscription.retrieve(gatewaySubscriptionId);
+            subscription.update(SubscriptionUpdateParams.builder()
+                    .setCancelAtPeriodEnd(true)
+                    .build());
+            log.info("Stripe subscription queued for cancellation at period end: {}",
+                    gatewaySubscriptionId);
+        } catch (StripeException e) {
+            log.error("Failed to queue Stripe subscription {} for period-end cancel: {}",
+                    gatewaySubscriptionId, e.getMessage(), e);
+            throw new RuntimeException(
+                    "Stripe subscription cancel-at-period-end failed: " + e.getMessage(), e);
         }
     }
 
