@@ -78,6 +78,24 @@ public class BillingPlan {
     @Column(nullable = false)
     private boolean active;
 
+    /**
+     * v2.6.0 — lifecycle state ({@link com.navneet.executespec.billing.lifecycle.LifecycleState}).
+     * LISTED | HIDDEN | SUNSETTING. See tier_config.lifecycle_state for the tier-level
+     * counterpart; resolution rule is "both must be LISTED to appear on public surfaces."
+     */
+    @Column(name = "lifecycle_state", nullable = false, length = 16)
+    @Builder.Default
+    private String lifecycleState = "LISTED";
+
+    @Column(name = "lifecycle_changed_at")
+    private Instant lifecycleChangedAt;
+
+    @Column(name = "lifecycle_changed_by", length = 64)
+    private String lifecycleChangedBy;
+
+    @Column(name = "lifecycle_reason", columnDefinition = "TEXT")
+    private String lifecycleReason;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private Instant createdAt;
 

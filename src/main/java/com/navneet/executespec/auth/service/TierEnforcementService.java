@@ -53,6 +53,8 @@ public class TierEnforcementService {
     /** Safe fallback limits if tier_config rows are missing. */
     private static final int FALLBACK_FREE = 3;   // lifetime limit
     private static final int FALLBACK_PRO  = 50;
+    /** v2.6.0 — TEAM stores credits PER SEAT; effective limit = seats × 50 computed in {@link #effectiveOrgLimit}. */
+    private static final int FALLBACK_TEAM_PER_SEAT = 50;
     private static final int FALLBACK_MAX  = -1;  // unlimited
     private static final int FALLBACK_ENT  = 5000;
 
@@ -240,16 +242,17 @@ public class TierEnforcementService {
             hasByok = false; // standalone users don't have org-level BYOK
         }
 
-        // MAX, PRO and ENTERPRISE with BYOK are always allowed
+        // MAX, TEAM, PRO and ENTERPRISE with BYOK are always allowed
         if ("MAX".equals(effectiveTier)) return;
         if ("ENTERPRISE".equals(effectiveTier) && hasByok) return;
+        if ("TEAM".equals(effectiveTier)) return;  // v2.6.0 — TEAM unlocks high-complexity
         if ("PRO".equals(effectiveTier)) return;
 
         // FREE tier or ENTERPRISE without BYOK — block high-complexity plans
         log.info("[TierEnforcement] Blocking high-complexity plan for user {} (tier={}, byok={})",
                 userId, effectiveTier, hasByok);
         throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "This plan has high overall complexity and requires a PRO plan or BYOK (Bring Your Own Keys) setup. " +
+                "This plan has high overall complexity and requires a paid tier (Pro, Team, Max) or BYOK (Bring Your Own Keys) setup. " +
                 "Upgrade your plan or configure your own API keys to run complex plans.");
     }
 
@@ -369,6 +372,17 @@ public class TierEnforcementService {
         // Per-org override
         if (org.getMonthlyRunLimitOverride() != null) return org.getMonthlyRunLimitOverride();
 
+        // v2.6.0 — TEAM tier: per-seat limit × seat count. 50 credits/seat is
+        // the shared pool. tier_config.monthly_run_limit for TEAM stores the
+        // PER-SEAT value; we multiply by org.seatCount here to get the
+        // effective shared pool.
+        if ("TEAM".equals(effectiveTier)) {
+            int perSeat = getMonthlyLimit("TEAM");
+            if (perSeat < 0) return -1; // defensive — if someone sets TEAM tier_config to -1 (unlimited)
+            int seats = Math.max(1, org.getSeatCount());
+            return perSeat * seats;
+        }
+
         // Tier default from DB
         return getMonthlyLimit(effectiveTier);
     }
@@ -430,6 +444,7 @@ public class TierEnforcementService {
                 .orElseGet(() -> switch (tier.toUpperCase()) {
                     case "ENTERPRISE" -> FALLBACK_ENT;
                     case "MAX"        -> FALLBACK_MAX;
+                    case "TEAM"       -> FALLBACK_TEAM_PER_SEAT;
                     case "PRO"        -> FALLBACK_PRO;
                     default           -> FALLBACK_FREE;
                 });
