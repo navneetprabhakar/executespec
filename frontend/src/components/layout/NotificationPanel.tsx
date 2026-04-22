@@ -60,7 +60,23 @@ export default function NotificationPanel({ onClose, onRead, onReadAll }: Props)
   };
 
   return (
-    <div className="absolute right-0 top-full mt-1 w-[calc(100vw-1rem)] sm:w-80 max-w-sm max-h-96 rounded-lg border border-[var(--border-default)] bg-[var(--geist-bg)] shadow-lg overflow-hidden z-50">
+    <div
+      className={cn(
+        // Mobile (< sm 640px): pin to viewport, right-anchored with 8px gutter,
+        // width = viewport - 16px (both gutters), below the 56px (h-14) header.
+        //
+        // Previously the panel used `absolute right-0 top-full` with
+        // `w-[calc(100vw-1rem)]`, which anchored the panel to the tiny bell
+        // button. `right-0` = right edge of the bell (not viewport). On a 390px
+        // screen the 374px-wide panel then extended ~16px past the LEFT edge of
+        // the viewport. `fixed` detaches from the bell. `right-2` + the calc()
+        // width makes the panel span the viewport with symmetric gutters.
+        'fixed right-2 top-14 mt-1 w-[calc(100vw-1rem)] max-w-sm',
+        // Desktop: revert to the original dropdown-from-bell behaviour.
+        'sm:absolute sm:right-0 sm:top-full sm:mt-1 sm:w-80',
+        'max-h-96 rounded-lg border border-[var(--border-default)] bg-[var(--geist-bg)] shadow-lg overflow-hidden z-50',
+      )}
+    >
       <div className="flex items-center justify-between px-3 py-2 border-b border-[var(--border-default)]">
         <span className="text-xs font-semibold text-primary">Notifications</span>
         <button
