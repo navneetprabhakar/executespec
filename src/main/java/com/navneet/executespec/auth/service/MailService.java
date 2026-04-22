@@ -49,6 +49,13 @@ public class MailService {
     @Value("${app.mail.from:admin@executespec.ai}")
     private String fromEmail;
 
+    @Value("${app.mail.admin-address:admin@executespec.ai}")
+    private String adminAddress;
+
+    public String getAdminAddress() {
+        return adminAddress;
+    }
+
     // SMTP settings
     @Value("${app.mail.smtp.host:smtp.gmail.com}")
     private String smtpHost;
@@ -152,11 +159,43 @@ public class MailService {
 
     @Async
     public void sendNewUserAlertToAdmin(String adminEmail, String newUserEmail) {
+        sendNewUserAlertToAdmin(adminEmail, newUserEmail, null, null, "Email");
+    }
+
+    @Async
+    public void sendNewUserAlertToAdmin(String adminEmail, String newUserEmail,
+                                         String firstName, String lastName,
+                                         String signupMethod) {
         Context ctx = new Context();
         ctx.setVariable("newUserEmail", newUserEmail);
+        ctx.setVariable("email", newUserEmail);
+        ctx.setVariable("firstName", firstName != null ? firstName : "");
+        ctx.setVariable("lastName", lastName != null ? lastName : "");
+        ctx.setVariable("signupMethod", signupMethod != null ? signupMethod : "Email");
         ctx.setVariable("baseUrl", baseUrl);
+        ctx.setVariable("adminUrl", baseUrl + "/admin");
         sendHtml(adminEmail, "New user registered: " + newUserEmail,
                 "email/new-user-alert", ctx);
+    }
+
+    /**
+     * v2.6.0 — weekly admin summary. Rendered from {@code email/weekly-admin-summary.html}.
+     * Expects a {@code summary} map with keys: periodStart, periodEnd, newSignups,
+     * newSignupList (List&lt;Map&lt;String,String&gt;&gt; with name/email/signupMethod/createdAt),
+     * totalRuns, completedRuns, failedRuns, partialRuns, completionPct,
+     * activeUsers, openApprovalGates, baseUrl, adminUrl.
+     */
+    @Async
+    public void sendWeeklyAdminSummary(String adminEmail, java.util.Map<String, Object> summary) {
+        Context ctx = new Context();
+        summary.forEach(ctx::setVariable);
+        ctx.setVariable("baseUrl", baseUrl);
+        ctx.setVariable("adminUrl", baseUrl + "/admin");
+        String subject = String.format("Weekly summary · %s signups · %s runs · %s",
+                summary.getOrDefault("newSignups", 0),
+                summary.getOrDefault("totalRuns", 0),
+                summary.getOrDefault("periodLabel", ""));
+        sendHtml(adminEmail, subject, "email/weekly-admin-summary", ctx);
     }
 
     @Async
