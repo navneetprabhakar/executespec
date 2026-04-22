@@ -901,6 +901,40 @@ export interface RegisterPayload {
 export const authRegister = (body: RegisterPayload) =>
   req<AuthUser>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
 
+// Wave 2.2 — onboarding (sandbox + sample specs on signup)
+export interface SampleSpecDto {
+  id: string;
+  title: string;
+  category: string;
+  complexity: string;
+  preferredProvider: string;
+  projectType: string;
+}
+
+export interface PickSampleResponse {
+  projectId: string;
+  spec: string;
+  projectType: string;
+  preferredProvider: string;
+}
+
+export interface SandboxStatus {
+  sandboxProjectId: string;
+  hasSandbox: boolean;
+}
+
+export const listOnboardingSamples = () =>
+  req<SampleSpecDto[]>('/onboarding/sample-specs');
+
+export const pickOnboardingSample = (sampleId: string) =>
+  req<PickSampleResponse>('/onboarding/pick-sample', {
+    method: 'POST',
+    body: JSON.stringify({ sampleId }),
+  });
+
+export const getSandboxStatus = () =>
+  req<SandboxStatus>('/onboarding/sandbox-status');
+
 export const authLogin = (body: { email: string; password: string }) =>
   req<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
 

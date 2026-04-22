@@ -53,6 +53,10 @@ import TermsPage from '@/pages/TermsPage';
 import PrivacyPage from '@/pages/PrivacyPage';
 import DpaPage from '@/pages/DpaPage';
 
+// Wave 2.2 — onboarding
+import WelcomePage from '@/pages/onboarding/WelcomePage';
+import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
+
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
 import { initAnalytics, identify, page, reset as resetAnalytics } from '@/lib/analytics';
@@ -115,7 +119,12 @@ export default function App() {
 
       {/* ── Protected app routes ── */}
       <Route element={<ProtectedRoute />}>
+        {/* Wave 2.2 — welcome/onboarding (chrome-free, before AppLayout). */}
+        <Route path="welcome" element={<WelcomePage />} />
+
+        {/* Wave 2.2 — sandbox → run-submit prefill landing (inside AppLayout for nav consistency) */}
         <Route element={<AppLayout />}>
+          <Route path="runs/new" element={<RunsNewLanding />} />
           <Route index element={<RunsPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="pricing" element={<PricingPage />} />
