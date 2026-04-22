@@ -179,6 +179,21 @@ public class MailService {
     }
 
     /**
+     * v2.6.0 — generic admin reminder email. Body is rendered verbatim inside
+     * a Graphite+Signal-styled wrapper. Used by the remote-trigger scheduler
+     * via {@code POST /api/internal/reminder/send}.
+     */
+    @Async
+    public void sendAdminReminderEmail(String to, String subject, String body) {
+        Context ctx = new Context();
+        ctx.setVariable("subject", subject);
+        ctx.setVariable("body", body);
+        ctx.setVariable("baseUrl", baseUrl);
+        ctx.setVariable("adminUrl", baseUrl + "/admin");
+        sendHtml(to, subject, "email/admin-reminder", ctx);
+    }
+
+    /**
      * v2.6.0 — weekly admin summary. Rendered from {@code email/weekly-admin-summary.html}.
      * Expects a {@code summary} map with keys: periodStart, periodEnd, newSignups,
      * newSignupList (List&lt;Map&lt;String,String&gt;&gt; with name/email/signupMethod/createdAt),
