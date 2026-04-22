@@ -54,6 +54,8 @@ class AsyncAllowlistTest {
             "MailService#sendEscalationToAdmin",
             "MailService#sendInviteRejectedEmail",
             "MailService#sendNewUserAlertToAdmin",
+            "MailService#sendWeeklyAdminSummary",  // v2.6.0 — Thymeleaf render + SMTP send, no JPA access
+            "MailService#sendAdminReminderEmail",  // v2.6.0 — Thymeleaf render + SMTP send, no JPA access
             "MailService#sendContactFeedbackEmail",
             "MailService#sendWelcomeEmail",
             "MailService#sendTierUpgradeEmail",

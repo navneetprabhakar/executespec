@@ -44,7 +44,7 @@ public class OrgService {
 
         if ("FREE".equals(creator.getTier())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only PRO or ENTERPRISE users can create an org");
+                    "Only paid tiers (Pro, Team, Max, Enterprise) can create an org");
         }
         if (creator.getOrgId() != null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,

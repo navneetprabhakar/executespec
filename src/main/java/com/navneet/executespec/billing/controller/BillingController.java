@@ -25,11 +25,21 @@ public class BillingController {
     /**
      * GET /api/billing/plans
      * List all active plans for the pricing page. Public-ish (requires auth but no specific role).
+     *
+     * <p>v2.6.0 — non-LISTED tiers and plans are filtered out by default.
+     * SUPER_ADMIN can inspect hidden plans via {@code ?includeHidden=true};
+     * the backend silently ignores the flag for non-admin callers, so there's
+     * no information leak.
      */
     @GetMapping("/plans")
     public ResponseEntity<List<PlanResponse>> listPlans(
-            @RequestParam(required = false) String keyMode) {
-        return ResponseEntity.ok(billingService.listPlans(keyMode));
+            @RequestParam(required = false) String keyMode,
+            @RequestParam(required = false, defaultValue = "false") boolean includeHidden,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        boolean effectiveIncludeHidden = includeHidden
+                && userDetails != null
+                && "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole());
+        return ResponseEntity.ok(billingService.listPlans(keyMode, effectiveIncludeHidden));
     }
 
     /**

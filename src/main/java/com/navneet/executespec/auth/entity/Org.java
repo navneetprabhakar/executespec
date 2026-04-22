@@ -44,6 +44,15 @@ public class Org {
     @Column(name = "run_count_reset_at")
     private Instant runCountResetAt;
 
+    /**
+     * v2.6.0 — seat count, populated from BillingSubscription.totalSeats on
+     * webhook events. Drives the TEAM tier shared credit pool (seats × 50).
+     * Default 1 so non-TEAM orgs behave identically to pre-v2.6.0.
+     */
+    @Column(name = "seat_count", nullable = false)
+    @Builder.Default
+    private int seatCount = 1;
+
     @Column(name = "is_payment_verified", nullable = false)
     @Builder.Default
     private boolean isPaymentVerified = false;
