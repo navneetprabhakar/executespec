@@ -70,4 +70,14 @@ public class Project {
      *  Pre-fills the githubOwner field in Launch new-repo specs. */
     @Column(name = "github_owner")
     private String githubOwner;
+
+    /**
+     * Wave 2.2 — disposable onboarding project auto-provisioned on first login.
+     * Hidden from {@code /org/projects} list, GC'd after 24h of inactivity by
+     * {@code SandboxCleanupJob}. Exists so a new user can submit a sample
+     * spec in under 3 minutes without linking a real GitHub repo first.
+     */
+    @Column(name = "is_sandbox", nullable = false)
+    @Builder.Default
+    private boolean isSandbox = false;
 }

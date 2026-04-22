@@ -198,4 +198,13 @@ public class AppUser {
 
     @Column(name = "signup_utm_campaign", length = 128)
     private String signupUtmCampaign;
+
+    /**
+     * Wave 2.2 — id of the disposable sandbox project auto-provisioned on
+     * first login. Null for pre-existing users and users who skip /welcome
+     * onboarding. Nullable FK with ON DELETE SET NULL — deleting the sandbox
+     * project doesn't cascade-delete the user.
+     */
+    @Column(name = "sandbox_project_id", length = 255)
+    private String sandboxProjectId;
 }
