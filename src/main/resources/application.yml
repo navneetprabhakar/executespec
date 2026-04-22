@@ -264,14 +264,19 @@ model-matrix:
     TestReportGenerator: LIGHTWEIGHT
     ValidationReportGenerator: WORKHORSE
   failover-order:
+    # v2.6.0 — was `google`; enum was renamed GOOGLE → GEMINI in v2.5.13 but
+    # this yaml list was missed. `ModelResolver.selectAdaptiveProvider` calls
+    # `LlmProvider.valueOf(name.toUpperCase())` on each list entry and crashed
+    # the planner with "No enum constant LlmProvider.GOOGLE". See memory rule
+    # feedback_v2_provider_naming.md: "V2 uses 'gemini' not 'google'".
     anthropic:
       - openai
-      - google
+      - gemini
     gemini:
       - openai
       - anthropic
     openai:
-      - google
+      - gemini
       - anthropic
 
 agent:
@@ -302,10 +307,10 @@ agent:
       ANTHROPIC:
         concurrency: 3
         queue-capacity: 15        # Slightly larger — Anthropic is primary/premium provider
-      GOOGLE:
-        concurrency: 3
-        queue-capacity: 10
-      OPENAI:
+      GEMINI:                     # v2.6.0 — renamed from GOOGLE to match LlmProvider enum.
+        concurrency: 3            # ProviderRunPoolProperties.forProvider(LlmProvider) does
+        queue-capacity: 10        # providers.get(provider.name()) — GOOGLE key never matched,
+      OPENAI:                     # silently fell back to defaults. Now functional.
         concurrency: 3
         queue-capacity: 10
   cost:
