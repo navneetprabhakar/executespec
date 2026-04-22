@@ -851,7 +851,7 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  tier: 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE';
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;
@@ -1009,6 +1009,8 @@ export interface OrgDto {
   tier: string;
   status: string;
   monthlyRunCount: number;
+  /** v2.6.0 — TEAM-tier seat count (shared pool). 1 for non-TEAM orgs. */
+  seatCount?: number;
   isPaymentVerified: boolean;
   monthlyRunLimitOverride: number | null;
   apiKeysProvided: boolean;
@@ -1057,6 +1059,26 @@ export const createOrg = (body: { name: string; domains: string[]; adminEmail: s
 
 export const updateOrg = (body: { name?: string; domains?: string[] }) =>
   req<OrgDto>('/org/me', { method: 'PUT', body: JSON.stringify(body) });
+
+// v2.6.0 — TEAM tier seat management
+export interface SeatsAdjustResponse {
+  previousSeats: number;
+  newSeats: number;
+  activeMembers: number;
+  message: string;
+}
+
+/**
+ * Adjust seat count on the caller's TEAM-tier org (ORG_ADMIN / SUPER_ADMIN).
+ * Pushes new quantity to Stripe (prorated) and syncs org.seat_count locally.
+ * Rejects reducing below current active member count (400).
+ * Range: 2-20 (self-serve).
+ */
+export const adjustOrgSeats = (newSeats: number) =>
+  req<SeatsAdjustResponse>('/org/me/seats/adjust', {
+    method: 'POST',
+    body: JSON.stringify({ newSeats }),
+  });
 
 /** Saves org-wide AI provider API keys (ORG_ADMIN only). Pass empty string to clear. */
 export const updateOrgAiKeySettings = (anthropicApiKey: string, openAiApiKey: string, geminiApiKey: string) =>

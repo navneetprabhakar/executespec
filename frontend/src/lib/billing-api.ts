@@ -112,11 +112,14 @@ export const fetchBillingStatus = () =>
 /**
  * Initiate subscription. Returns gateway-specific checkout data.
  * For Stripe: redirects to checkoutUrl. For Razorpay: uses client SDK.
+ *
+ * v2.6.0 — `seats` is used for TEAM tier (2-20). Omitting it defaults to 1
+ * for PRO/MAX (per-plan tiers).
  */
-export const subscribe = (planId: string, gateway?: string, successUrl?: string, cancelUrl?: string) =>
+export const subscribe = (planId: string, gateway?: string, successUrl?: string, cancelUrl?: string, seats?: number) =>
   req<SubscriptionInitResult>('/billing/subscribe', {
     method: 'POST',
-    body: JSON.stringify({ planId, gateway, successUrl, cancelUrl }),
+    body: JSON.stringify({ planId, gateway, successUrl, cancelUrl, seats }),
   });
 
 /**
