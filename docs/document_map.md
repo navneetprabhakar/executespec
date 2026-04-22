@@ -1,7 +1,24 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-18 (v2.5.12 — 3-step architecture + Generate Docs + Sync enhancement; v2.5.0: project workspace + RAG; pilot v3.0)
+> Last updated: 2026-04-22 (v2.6.0 — UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot + PH launch kit + persona roadmap; v2.5.12: 3-step architecture + Generate Docs + Sync; v2.5.0: project workspace + RAG; pilot v3.0)
+>
+> **v2.6.1 Wave 1 (2026-04-22 → 2026-04-28): TEAM tier + tier-lifecycle tooling shipped together (Option Z). See [docs/plans/team-tier-plan.md](plans/team-tier-plan.md) + [docs/plans/tier-lifecycle-plan.md](plans/tier-lifecycle-plan.md). PRO grandfathered to `HIDDEN` via V122 migration — existing subscribers unaffected. SUNSETTING gateway side-effects gated by `billing.lifecycle.sunsetting.enabled` feature flag (default OFF).**
+>
+> **v2.6.0 docs to know about:**
+> - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — new single source of truth for every color in the app. Semantic palette (`--status-success/executing/waiting/partial/error/...`), graduated 4-band score palette, accent palette, radius/spacing scale, Tailwind mapping, chip patterns, MUST/MUST NOT rules. If you add a component, start here.
+> - [`docs/reports/session-handoff-2026-04-21.md`](reports/session-handoff-2026-04-21.md) — detailed handoff: commits landed, pricing v3 rationale (Option C over B), US-first pivot, Stripe prod default, blocking list for PH launch, deferred follow-ups (Stripe top-up wiring, country-aware routing, currency-gateway-map, Stripe refund path, Gemini token bloat fix, mobile accuracy floor, Bug #1c strict-provider bypass).
+> - [`docs/reports/launch-checklist-2026-04-21.md`](reports/launch-checklist-2026-04-21.md) — PH launch readiness tracker; website + press-kit + OG hero + screenshots.
+> - `website/tier-decision.md` / `website/pricing-analysis.md` / `website/product-hunt-launch.md` — external-facing source of truth for pricing + launch messaging.
+>
+> **Persona roadmap docs (2026-04-22 session — 3 buyer personas × 4 tiers × PM lens → 6 waves of shipping):**
+> - [`docs/plans/persona-roadmap-2026-04-22.md`](plans/persona-roadmap-2026-04-22.md) — **master roadmap**. All persona × tier interventions, PM-view action items, 6-wave shipping calendar (Apr 28 → Jul 15), open decisions, non-goals. Start here.
+> - [`docs/plans/team-tier-plan.md`](plans/team-tier-plan.md) — Wave 1. TEAM tier at $49/seat (2-20 devs, 50 credits/seat shared pool) + bundled tier-lifecycle tooling (Option Z). Ships 2026-04-28 → 2026-05-06.
+> - [`docs/plans/tier-lifecycle-plan.md`](plans/tier-lifecycle-plan.md) — standalone reference for the 3-state (LISTED/HIDDEN/SUNSETTING) lifecycle machine. Used by team-tier launch to grandfather PRO; reusable for any future tier retirement.
+> - [`docs/plans/activation-instrumentation-plan.md`](plans/activation-instrumentation-plan.md) — Wave 2a. 6-event PostHog funnel (signup → project_created → spec_submitted → plan_approved → run_complete → pr_merged). Ships 2026-05-07 → 2026-05-20.
+> - [`docs/plans/ttfv-reduction-plan.md`](plans/ttfv-reduction-plan.md) — Wave 2b (parallel with activation). Sandbox project + pre-filled sample spec on signup; target median TTFV under 3 min. Ships 2026-05-07 → 2026-05-20.
+> - [`docs/plans/complimentary-pro-promo-2026-04-30-plan.md`](plans/complimentary-pro-promo-2026-04-30-plan.md) — founder thank-you promo for recent FREE signups; 30-day PRO upgrade. Executes 2026-04-30 (reminder scheduled).
+>
 >
 > **v2.5.12 docs to know about:**
 > - [`docs/test-scenarios/personas-journeys-and-cases.md`](test-scenarios/personas-journeys-and-cases.md) — 6 personas, 8 user journeys, ~55 test cases organised in 12 blocks, 10-minute smoke pack, persona × feature coverage matrix.
@@ -101,6 +118,10 @@ Find the **type of change** you are making in the table below. Update every docu
 | `eval/` | JAVADOC §24 Eval Framework |
 | `frontend/src/components/runs/` | `frontend-api-usage.md`; WORKFLOWS if new workflow surface |
 | `frontend/src/lib/api.ts` | `frontend-api-usage.md` |
+| `frontend/src/tokens.css` + `tailwind.config.ts` | [`docs/design/ui-tokens.md`](design/ui-tokens.md) |
+| `frontend/src/stores/useUiStore.ts` (theme slice) | USER_MANUAL §v2.6.0 quick links + `docs/design/ui-tokens.md` |
+| `frontend/src/pages/ExecSummaryPage.tsx` | USER_MANUAL §v2.6.0; CLAUDE.md §Key File Locations (v2.6.0 UX v3 row) |
+| `website/` | `docs/reports/session-handoff-2026-04-21.md` + `docs/reports/launch-checklist-2026-04-21.md` (external launch-facing assets) |
 | `src/main/resources/db/migration/` | JAVADOC §21.1 Flyway Migrations; CLAUDE.md Flyway note |
 | `src/main/resources/application.yml` | JAVADOC §20 Configuration Reference; CLAUDE.md env vars |
 | `src/main/resources/prompts/` | JAVADOC §5.x (per agent); CLAUDE.md Prompt architecture bullet |

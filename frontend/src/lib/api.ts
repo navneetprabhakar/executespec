@@ -851,7 +851,7 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  tier: 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE';
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;
@@ -887,8 +887,53 @@ export interface LoginResponse {
   user: AuthUser;
 }
 
-export const authRegister = (body: { email: string; firstName: string; lastName: string; password: string }) =>
+/** Wave 2.1 — registration payload with optional attribution fields. */
+export interface RegisterPayload {
+  email: string;
+  firstName: string;
+  lastName: string;
+  password: string;
+  signupSource?: string;
+  utmSource?: string;
+  utmCampaign?: string;
+}
+
+export const authRegister = (body: RegisterPayload) =>
   req<AuthUser>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
+
+// Wave 2.2 — onboarding (sandbox + sample specs on signup)
+export interface SampleSpecDto {
+  id: string;
+  title: string;
+  category: string;
+  complexity: string;
+  preferredProvider: string;
+  projectType: string;
+}
+
+export interface PickSampleResponse {
+  projectId: string;
+  spec: string;
+  projectType: string;
+  preferredProvider: string;
+}
+
+export interface SandboxStatus {
+  sandboxProjectId: string;
+  hasSandbox: boolean;
+}
+
+export const listOnboardingSamples = () =>
+  req<SampleSpecDto[]>('/onboarding/sample-specs');
+
+export const pickOnboardingSample = (sampleId: string) =>
+  req<PickSampleResponse>('/onboarding/pick-sample', {
+    method: 'POST',
+    body: JSON.stringify({ sampleId }),
+  });
+
+export const getSandboxStatus = () =>
+  req<SandboxStatus>('/onboarding/sandbox-status');
 
 export const authLogin = (body: { email: string; password: string }) =>
   req<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
@@ -1009,6 +1054,8 @@ export interface OrgDto {
   tier: string;
   status: string;
   monthlyRunCount: number;
+  /** v2.6.0 — TEAM-tier seat count (shared pool). 1 for non-TEAM orgs. */
+  seatCount?: number;
   isPaymentVerified: boolean;
   monthlyRunLimitOverride: number | null;
   apiKeysProvided: boolean;
@@ -1057,6 +1104,57 @@ export const createOrg = (body: { name: string; domains: string[]; adminEmail: s
 
 export const updateOrg = (body: { name?: string; domains?: string[] }) =>
   req<OrgDto>('/org/me', { method: 'PUT', body: JSON.stringify(body) });
+
+// v2.6.0 — TEAM tier seat management
+export interface SeatsAdjustResponse {
+  previousSeats: number;
+  newSeats: number;
+  activeMembers: number;
+  message: string;
+}
+
+// v2.6.0 — tier lifecycle (admin-only)
+export type LifecycleState = 'LISTED' | 'HIDDEN' | 'SUNSETTING';
+
+export interface TierLifecycleDto {
+  tier: string;
+  displayName: string;
+  state: LifecycleState;
+  changedAt: string | null;
+  changedBy: string | null;
+  reason: string | null;
+  activeSubscribers: number;
+  /** Monthly recurring revenue in USD cents. Divide by 100 for dollar amount. */
+  monthlyRecurringRevenueUsdCents: number;
+}
+
+export interface TierLifecycleUpdateRequest {
+  state: LifecycleState;
+  reason: string;
+  /** Required when state='SUNSETTING' — must match tier name. */
+  confirmTierName?: string;
+}
+
+export const fetchTiersLifecycle = () =>
+  req<TierLifecycleDto[]>('/admin/tiers');
+
+export const updateTierLifecycle = (tier: string, body: TierLifecycleUpdateRequest) =>
+  req<unknown>(`/admin/tiers/${tier}/lifecycle`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+/**
+ * Adjust seat count on the caller's TEAM-tier org (ORG_ADMIN / SUPER_ADMIN).
+ * Pushes new quantity to Stripe (prorated) and syncs org.seat_count locally.
+ * Rejects reducing below current active member count (400).
+ * Range: 2-20 (self-serve).
+ */
+export const adjustOrgSeats = (newSeats: number) =>
+  req<SeatsAdjustResponse>('/org/me/seats/adjust', {
+    method: 'POST',
+    body: JSON.stringify({ newSeats }),
+  });
 
 /** Saves org-wide AI provider API keys (ORG_ADMIN only). Pass empty string to clear. */
 export const updateOrgAiKeySettings = (anthropicApiKey: string, openAiApiKey: string, geminiApiKey: string) =>

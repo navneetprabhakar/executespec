@@ -184,4 +184,27 @@ public class AppUser {
     @Column(name = "view_mode")
     @Builder.Default
     private String viewMode = "vibe";
+
+    // ── Wave 2.1 — signup attribution (V125 migration) ───────────────────────
+    // Captured from signup request (utm_source / utm_campaign / ref). Null for
+    // pre-existing users + direct-navigation signups. Used as a cohort
+    // dimension on every activation event forwarded to PostHog.
+
+    @Column(name = "signup_source", length = 64)
+    private String signupSource;
+
+    @Column(name = "signup_utm_source", length = 64)
+    private String signupUtmSource;
+
+    @Column(name = "signup_utm_campaign", length = 128)
+    private String signupUtmCampaign;
+
+    /**
+     * Wave 2.2 — id of the disposable sandbox project auto-provisioned on
+     * first login. Null for pre-existing users and users who skip /welcome
+     * onboarding. Nullable FK with ON DELETE SET NULL — deleting the sandbox
+     * project doesn't cascade-delete the user.
+     */
+    @Column(name = "sandbox_project_id", length = 255)
+    private String sandboxProjectId;
 }

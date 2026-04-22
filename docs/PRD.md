@@ -1,8 +1,8 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 4.7
-> **Last Updated:** 2026-04-14 (project shell + launch → v2.4.0)
-> **Status:** Production (v2.4.0 — V2 harness + pilot v3.0 project workspace + project memory + execution view + project shell)
+> **Version:** 4.8
+> **Last Updated:** 2026-04-22 (v2.6.0 — UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot + PH launch kit)
+> **Status:** Production (v2.6.0 — V2 harness + pilot v3.0 project workspace + project memory + execution view + project shell + dark/light theme + Exec summary + $20=20 credits flat-band pricing)
 > **Author:** Navneet Prabhakar
 
 > **⚠️ Implementation note (2026-04-13).** Product requirements below are
@@ -167,6 +167,8 @@ Additional security controls:
 ## 3. Tiers & Pricing
 
 ### 3.1 Tier Matrix
+
+> **v2.6.0 pricing v3 (locked 2026-04-21):** $1 = 1 credit, flat per complexity band (not per-provider). LOW=1, MEDIUM=1, HIGH=4, Mobile=2. Rationale: "your provider, your choice" — picking Anthropic (expensive but accurate) should not cost the user more than picking OpenAI. Anthropic HIGH runs at `-32%` gross margin; blended 3-provider HIGH margin is `+59%`. Source of truth: `website/tier-decision.md` + `website/pricing-analysis.md`.
 
 | Capability | FREE | PRO | ENTERPRISE |
 |-----------|------|-----|------------|

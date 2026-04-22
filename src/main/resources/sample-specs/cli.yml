@@ -1,0 +1,12 @@
+# Wave 2.2 — sandbox sample spec (CLI path).
+id: cli
+title: "Word-frequency CLI"
+category: "CLI / script"
+projectType: "python-cli"
+preferredProvider: "gemini"
+complexity: "LOW"
+spec: |
+  A Python CLI that reads lines from stdin, counts word frequency, and prints
+  the top-10 most common words as JSON to stdout (sorted descending by count).
+  Ignore punctuation and case. Accept an optional --top N flag to override the
+  default of 10. Include pytest tests for the counting logic and CLI parsing.

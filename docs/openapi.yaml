@@ -4,7 +4,12 @@ info:
   description: |
     Multi-agent code generation platform API.
     All endpoints under `/api` except those marked public require a JWT Bearer token.
-  version: 1.5.0
+
+    v2.6.0 (2026-04-22) — LlmProvider enum renamed GOOGLE → GEMINI. `aiProvider`
+    request fields now prefer GEMINI; GOOGLE is retained as a back-compat alias
+    on input and rewritten to GEMINI before persistence. YAML keys under
+    `model-matrix` / `failover-order` use `gemini`.
+  version: 1.6.0
   contact:
     name: ExecuteSpec
     url: https://executespec.ai
@@ -2894,7 +2899,8 @@ components:
           type: string
         aiProvider:
           type: string
-          enum: [ANTHROPIC, GOOGLE, OPENAI]
+          description: "v2.6.0: canonical value is GEMINI; GOOGLE still accepted as back-compat input alias (rewritten to GEMINI on persist)"
+          enum: [ANTHROPIC, GEMINI, OPENAI, GOOGLE]
         projectId:
           type: string
           format: uuid

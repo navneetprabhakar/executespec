@@ -34,4 +34,14 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
     /** Find cancelled subscriptions whose grace period has ended (currentPeriodEnd is in the past). */
     @Query("SELECT s FROM BillingSubscription s WHERE s.status = 'CANCELLED' AND s.currentPeriodEnd < :now")
     List<BillingSubscription> findCancelledPastPeriodEnd(@Param("now") Instant now);
+
+    /**
+     * v2.6.0 — find active subscriptions on a given tier. Used by
+     * {@code TierLifecycleService.executeSunsettingSideEffects} to enumerate
+     * subscribers who need their renewal queued for cancel-at-period-end
+     * when a tier transitions to SUNSETTING.
+     */
+    @Query("SELECT s FROM BillingSubscription s WHERE s.status IN ('ACTIVE', 'PAST_DUE') " +
+           "AND s.billingPlanId IN (SELECT p.id FROM BillingPlan p WHERE p.tier = :tier)")
+    List<BillingSubscription> findActiveByTier(@Param("tier") String tier);
 }

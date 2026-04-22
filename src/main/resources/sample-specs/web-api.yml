@@ -1,0 +1,17 @@
+# Wave 2.2 — sandbox sample spec (web-api path).
+#
+# Target: LOW complexity. Blended provider + project-type heuristic aims for
+# ~90s LLM + ~20s smoke → verified score ≥ 85 on all three providers.
+# Full plan: docs/plans/ttfv-reduction-plan.md §3.
+id: web-api
+title: "Contact endpoint (REST API)"
+category: "Web app / API"
+projectType: "spring-boot-sqlite"
+preferredProvider: "openai"
+complexity: "LOW"
+spec: |
+  Add a POST /api/contacts endpoint that accepts {name, email} and returns 201
+  with the created row, stored in SQLite. Validate email format and return 400
+  on malformed input. Include a GET /api/contacts endpoint that returns the
+  list ordered by createdAt DESC. Write unit tests for both endpoints and the
+  validation logic.

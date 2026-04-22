@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download, Layers } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
@@ -276,6 +276,13 @@ function AdminPageInner() {
           >
             <Flag className="h-3.5 w-3.5" />
             Feature Flags
+          </button>
+          <button
+            onClick={() => navigate('/admin/tiers')}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors"
+          >
+            <Layers className="h-3.5 w-3.5" />
+            Tier lifecycle
           </button>
         </div>
       </div>

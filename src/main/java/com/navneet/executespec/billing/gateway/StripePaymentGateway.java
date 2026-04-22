@@ -9,6 +9,7 @@ import com.stripe.model.Subscription;
 import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.SubscriptionCancelParams;
+import com.stripe.param.SubscriptionUpdateParams;
 import com.stripe.param.checkout.SessionCreateParams;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +37,16 @@ public class StripePaymentGateway implements PaymentGateway {
     @Value("${billing.stripe.enterprise-price-id:}")
     private String enterprisePriceId;
 
+    @Value("${billing.stripe.team-price-id:}")
+    private String teamPriceId;
+
+    @Value("${billing.stripe.team-price-id-inr:}")
+    private String teamPriceIdInr;
+
+    /** Injected lazily so the gateway can boot before BillingPlan repo is wired. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.navneet.executespec.billing.repository.BillingPlanRepository planRepo;
+
     @PostConstruct
     void init() {
         if (secretKey != null && !secretKey.isBlank()) {
@@ -49,6 +60,23 @@ public class StripePaymentGateway implements PaymentGateway {
     @Override
     public CheckoutResult createCheckoutSession(BillingEntity entity, String planId,
                                                   String successUrl, String cancelUrl) {
+        return createCheckoutSession(entity, planId, 1, successUrl, cancelUrl);
+    }
+
+    /**
+     * v2.6.0 — seat-aware Stripe checkout. For per-plan tiers (PRO/MAX), call
+     * with {@code seats=1}. For per-seat tiers (TEAM), pass the user's
+     * requested seat count (2-20 enforced upstream in BillingService).
+     * Stripe charges {@code price × seats} automatically and records the
+     * quantity on the resulting {@code Subscription} — pulled on webhook
+     * and written to {@code BillingSubscription.totalSeats}.
+     */
+    @Override
+    public CheckoutResult createCheckoutSession(BillingEntity entity, String planId,
+                                                  int seats, String successUrl, String cancelUrl) {
+        if (seats < 1) {
+            throw new IllegalArgumentException("seats must be >= 1, got " + seats);
+        }
         try {
             String priceId = resolvePriceId(planId);
 
@@ -58,11 +86,12 @@ public class StripePaymentGateway implements PaymentGateway {
                     .setCancelUrl(cancelUrl)
                     .addLineItem(SessionCreateParams.LineItem.builder()
                             .setPrice(priceId)
-                            .setQuantity(1L)
+                            .setQuantity((long) seats)
                             .build())
                     .putMetadata("billing_entity_id", entity.getId())
                     .putMetadata("billing_entity_type", entity.getEntityType())
-                    .putMetadata("plan_id", planId);
+                    .putMetadata("plan_id", planId)
+                    .putMetadata("seats", String.valueOf(seats));
 
             // Attach existing Stripe customer if available
             if (entity.getStripeCustomerId() != null && !entity.getStripeCustomerId().isBlank()) {
@@ -120,6 +149,77 @@ public class StripePaymentGateway implements PaymentGateway {
         } catch (StripeException e) {
             log.error("Failed to cancel Stripe subscription {}: {}", gatewaySubscriptionId, e.getMessage(), e);
             throw new RuntimeException("Stripe subscription cancellation failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * v2.6.0 — update the seat count on an active subscription. Called from
+     * the TEAM seat-adjust endpoint. Stripe prorates automatically; the next
+     * invoice reflects the new quantity × price.
+     *
+     * <p>Mutates the first subscription item's quantity — fine for the TEAM
+     * tier which has exactly one line item. Caller should pre-validate that
+     * {@code newQuantity} is within the TEAM 2-20 self-serve range.
+     *
+     * @throws IllegalArgumentException when {@code newQuantity < 1}
+     * @throws RuntimeException when the Stripe API call fails
+     */
+    public void updateSubscriptionQuantity(String gatewaySubscriptionId, long newQuantity) {
+        if (newQuantity < 1) {
+            throw new IllegalArgumentException("newQuantity must be >= 1, got " + newQuantity);
+        }
+        try {
+            Subscription subscription = Subscription.retrieve(gatewaySubscriptionId);
+            if (subscription.getItems() == null
+                    || subscription.getItems().getData() == null
+                    || subscription.getItems().getData().isEmpty()) {
+                throw new RuntimeException("Stripe subscription has no line items: " + gatewaySubscriptionId);
+            }
+            String itemId = subscription.getItems().getData().get(0).getId();
+
+            subscription.update(SubscriptionUpdateParams.builder()
+                    .addItem(SubscriptionUpdateParams.Item.builder()
+                            .setId(itemId)
+                            .setQuantity(newQuantity)
+                            .build())
+                    .setProrationBehavior(SubscriptionUpdateParams.ProrationBehavior.CREATE_PRORATIONS)
+                    .build());
+            log.info("Stripe subscription quantity updated: subId={} itemId={} newQuantity={}",
+                    gatewaySubscriptionId, itemId, newQuantity);
+        } catch (StripeException e) {
+            log.error("Failed to update Stripe subscription {} quantity to {}: {}",
+                    gatewaySubscriptionId, newQuantity, e.getMessage(), e);
+            throw new RuntimeException(
+                    "Stripe subscription quantity update failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * v2.6.0 — queue cancellation at the end of the current billing period.
+     * Used by {@code TierLifecycleService} when a tier transitions to
+     * {@code SUNSETTING}. No refund, no mid-cycle proration — the subscriber
+     * keeps full access until {@code current_period_end}, then
+     * {@code PeriodEndDowngradeScheduler} picks them up and moves them to
+     * FREE.
+     *
+     * <p>Idempotent: calling this multiple times on the same subscription is
+     * a no-op on Stripe's side — the {@code cancel_at_period_end=true} flag
+     * is state, not an event.
+     */
+    @Override
+    public void cancelAtPeriodEnd(String gatewaySubscriptionId) {
+        try {
+            Subscription subscription = Subscription.retrieve(gatewaySubscriptionId);
+            subscription.update(SubscriptionUpdateParams.builder()
+                    .setCancelAtPeriodEnd(true)
+                    .build());
+            log.info("Stripe subscription queued for cancellation at period end: {}",
+                    gatewaySubscriptionId);
+        } catch (StripeException e) {
+            log.error("Failed to queue Stripe subscription {} for period-end cancel: {}",
+                    gatewaySubscriptionId, e.getMessage(), e);
+            throw new RuntimeException(
+                    "Stripe subscription cancel-at-period-end failed: " + e.getMessage(), e);
         }
     }
 
@@ -192,16 +292,62 @@ public class StripePaymentGateway implements PaymentGateway {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
+    /**
+     * v2.6.1 — resolve a Stripe Price ID for a given billing_plan.
+     *
+     * <p>Priority order:
+     * <ol>
+     *   <li>{@code billing_plan.stripe_price_id} column — authoritative when
+     *       the ops team has seeded it post-Stripe-Product creation. Lets us
+     *       run test vs. live accounts without code changes.</li>
+     *   <li>Tier + currency env var — {@code STRIPE_*_PRICE_ID} / {@code _INR}
+     *       fallback used in dev and before the DB column is populated.</li>
+     *   <li>{@code STRIPE_PRO_PRICE_ID} as an ultimate fallback for legacy
+     *       call sites that don't map to any recognised tier.</li>
+     * </ol>
+     */
     private String resolvePriceId(String planId) {
-        // planId is the internal plan identifier — map to Stripe price IDs
-        // The planId here comes from the billing_plan table, we match on tier
-        if (planId != null) {
-            String lower = planId.toLowerCase();
-            if (lower.contains("enterprise")) {
-                return enterprisePriceId;
+        if (planId == null) return proPriceId;
+
+        // Step 1: DB stripe_price_id when the plan id parses as UUID.
+        if (planRepo != null) {
+            try {
+                java.util.UUID uuid = java.util.UUID.fromString(planId);
+                com.navneet.executespec.billing.entity.BillingPlan plan =
+                        planRepo.findById(uuid).orElse(null);
+                if (plan != null) {
+                    if (plan.getStripePriceId() != null && !plan.getStripePriceId().isBlank()) {
+                        return plan.getStripePriceId();
+                    }
+                    // Step 2: tier + currency env var fallback
+                    String tier = plan.getTier() == null ? "" : plan.getTier().toUpperCase();
+                    boolean isInr = plan.getBaseAmountInr() > 0 && plan.getBaseAmountUsd() == 0;
+                    return resolvePriceIdByTier(tier, isInr);
+                }
+            } catch (IllegalArgumentException ignore) {
+                // not a UUID — fall through to string-pattern match below
             }
         }
-        // Default to Pro price
+
+        // Legacy string-pattern match on the planId string.
+        String lower = planId.toLowerCase();
+        if (lower.contains("enterprise")) return enterprisePriceId;
+        if (lower.contains("team")) {
+            return (lower.contains("inr") && teamPriceIdInr != null && !teamPriceIdInr.isBlank())
+                    ? teamPriceIdInr : teamPriceId;
+        }
         return proPriceId;
+    }
+
+    private String resolvePriceIdByTier(String tier, boolean isInr) {
+        switch (tier) {
+            case "ENTERPRISE": return enterprisePriceId;
+            case "TEAM":
+                return (isInr && teamPriceIdInr != null && !teamPriceIdInr.isBlank())
+                        ? teamPriceIdInr : teamPriceId;
+            case "PRO":
+            default:
+                return proPriceId;
+        }
     }
 }

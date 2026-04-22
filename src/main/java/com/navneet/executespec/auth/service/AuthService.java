@@ -1,5 +1,7 @@
 package com.navneet.executespec.auth.service;
 
+import com.navneet.executespec.analytics.EventName;
+import com.navneet.executespec.analytics.EventTrackingService;
 import com.navneet.executespec.auth.dto.*;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.entity.AppUser;
@@ -48,6 +50,7 @@ public class AuthService {
     private final ActivityAuditService auditService;
     private final BillingPlanRepository billingPlanRepo;
     private final BillingSubscriptionRepository billingSubscriptionRepo;
+    private final EventTrackingService eventTracking;
 
     @Value("${app.mail.base-url:http://localhost:5173}")
     private String baseUrl;
@@ -71,6 +74,9 @@ public class AuthService {
                 .tier("FREE")
                 .status("PENDING_VERIFICATION")
                 .emailVerified(false)
+                .signupSource(req.signupSource())
+                .signupUtmSource(req.utmSource())
+                .signupUtmCampaign(req.utmCampaign())
                 .build();
         userRepo.save(user);
 
@@ -80,6 +86,28 @@ public class AuthService {
         // Send verification email
         String token = createEmailToken(user.getId(), "EMAIL_VERIFICATION", 24);
         mailService.sendVerificationEmail(user.getEmail(), user.getFirstName(), token);
+
+        // Admin notification — fire-and-forget (@Async), failures logged not rethrown
+        try {
+            mailService.sendNewUserAlertToAdmin(
+                    mailService.getAdminAddress(),
+                    user.getEmail(),
+                    user.getFirstName(),
+                    user.getLastName(),
+                    "Email");
+        } catch (Exception e) {
+            log.warn("Admin new-signup notification failed for {}: {}", user.getEmail(), e.getMessage());
+        }
+
+        // Wave 2.1 — activation funnel step 1
+        java.util.Map<String, Object> signupProps = new java.util.HashMap<>();
+        signupProps.put("signupMethod", "email");
+        signupProps.put("tier", user.getTier());
+        if (req.signupSource() != null) signupProps.put("signupSource", req.signupSource());
+        if (req.utmSource() != null) signupProps.put("utmSource", req.utmSource());
+        if (req.utmCampaign() != null) signupProps.put("utmCampaign", req.utmCampaign());
+        eventTracking.track(user.getId(), EventName.SIGNUP, signupProps);
+
         log.info("User registered: {}", user.getEmail());
 
         auditService.record(ActivityAudit.builder()
@@ -379,6 +407,24 @@ public class AuthService {
 
         // Auto-create FREE billing subscription
         createFreeSubscription(user.getId());
+
+        // Admin notification — fire-and-forget, same as email-signup path
+        try {
+            mailService.sendNewUserAlertToAdmin(
+                    mailService.getAdminAddress(),
+                    user.getEmail(),
+                    user.getFirstName(),
+                    user.getLastName(),
+                    provider == null ? "OAuth" : provider.substring(0, 1).toUpperCase() + provider.substring(1));
+        } catch (Exception e) {
+            log.warn("Admin new-signup OAuth notification failed for {}: {}", user.getEmail(), e.getMessage());
+        }
+
+        // Wave 2.1 — activation funnel step 1 (OAuth new-user branch only)
+        eventTracking.track(user.getId(), EventName.SIGNUP, java.util.Map.of(
+                "signupMethod", provider == null ? "oauth" : provider.toLowerCase(),
+                "tier", user.getTier() == null ? "FREE" : user.getTier()
+        ));
 
         auditService.record(ActivityAudit.builder()
                 .eventType("USER_REGISTERED_OAUTH")

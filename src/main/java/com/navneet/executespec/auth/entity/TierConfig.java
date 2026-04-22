@@ -8,9 +8,15 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.time.Instant;
+
 /**
  * Global tier configuration — run quotas editable by super admin at runtime.
- * One row per tier: FREE, PRO, ENTERPRISE.
+ * One row per tier: FREE, PRO, TEAM, MAX, ENTERPRISE.
+ *
+ * v2.6.0 adds {@code lifecycleState} ({@link com.navneet.executespec.billing.lifecycle.LifecycleState})
+ * so any tier can be hidden from new buyers without forcing churn on existing
+ * subscribers. See docs/plans/tier-lifecycle-plan.md.
  */
 @Entity
 @Table(name = "tier_config")
@@ -84,4 +90,23 @@ public class TierConfig {
     /** Whether this tier unlocks the multi-repo Execution View. ENTERPRISE=true, others=false. */
     @Column(name = "execution_view_enabled", nullable = false)
     private boolean executionViewEnabled = false;
+
+    /**
+     * v2.6.0 — lifecycle state. LISTED = shown on pricing page + accepts new
+     * signups. HIDDEN = invisible to new buyers, existing subscribers
+     * untouched. SUNSETTING = HIDDEN + renewal cancellation queued on gateway.
+     * Stored as a string to match the DB CHECK constraint values; parsed via
+     * {@link com.navneet.executespec.billing.lifecycle.LifecycleState#valueOf(String)}.
+     */
+    @Column(name = "lifecycle_state", nullable = false, length = 16)
+    private String lifecycleState = "LISTED";
+
+    @Column(name = "lifecycle_changed_at")
+    private Instant lifecycleChangedAt;
+
+    @Column(name = "lifecycle_changed_by", length = 64)
+    private String lifecycleChangedBy;
+
+    @Column(name = "lifecycle_reason", columnDefinition = "TEXT")
+    private String lifecycleReason;
 }

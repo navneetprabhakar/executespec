@@ -1,7 +1,15 @@
 # Frontend API Usage Audit
 
 > Every API call made from the frontend, organized by file. Use this to understand which backend endpoints the frontend depends on.
-> Last updated: 2026-04-03
+> Last updated: 2026-04-22 (v2.6.0 — LlmProvider GOOGLE → GEMINI rename, new `/exec` ExecSummaryPage, theme toggle on useUiStore)
+
+## v2.6.0 additions
+
+- **Theme state** — `frontend/src/stores/useUiStore.ts` adds a `theme: 'dark' | 'light'` slice with `setTheme(t)` / `toggleTheme()` actions. Pre-paint applies `<html data-theme>` + persists to `localStorage`. No backend API involved.
+- **`ExecSummaryPage` (`/exec`)** — reads `/api/billing/usage`, `/api/runs?scope=org&limit=30`, `/api/projects?scope=org`, and the cross-project awaiting-approval digest via `/api/runs?status=AWAITING_APPROVAL&scope=org`. Gated behind `canViewCostBreakdown` (PRO/MAX/ENTERPRISE).
+- **Provider name in `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider`** — send `GEMINI` (preferred). `GOOGLE` still accepted as an input alias (rewritten server-side). Select options in `ProviderModelSelector.tsx` + `ProjectSelector.tsx` now read "Gemini".
+- **ScoreRing consumer** — `ValidationReportPanel` hero renders the `ScoreRing` component with `report.verifiedScore`; no new endpoint, just a UI surface change.
+
 
 ## API Client Architecture
 
