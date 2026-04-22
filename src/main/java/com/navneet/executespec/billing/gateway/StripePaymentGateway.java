@@ -143,6 +143,48 @@ public class StripePaymentGateway implements PaymentGateway {
     }
 
     /**
+     * v2.6.0 — update the seat count on an active subscription. Called from
+     * the TEAM seat-adjust endpoint. Stripe prorates automatically; the next
+     * invoice reflects the new quantity × price.
+     *
+     * <p>Mutates the first subscription item's quantity — fine for the TEAM
+     * tier which has exactly one line item. Caller should pre-validate that
+     * {@code newQuantity} is within the TEAM 2-20 self-serve range.
+     *
+     * @throws IllegalArgumentException when {@code newQuantity < 1}
+     * @throws RuntimeException when the Stripe API call fails
+     */
+    public void updateSubscriptionQuantity(String gatewaySubscriptionId, long newQuantity) {
+        if (newQuantity < 1) {
+            throw new IllegalArgumentException("newQuantity must be >= 1, got " + newQuantity);
+        }
+        try {
+            Subscription subscription = Subscription.retrieve(gatewaySubscriptionId);
+            if (subscription.getItems() == null
+                    || subscription.getItems().getData() == null
+                    || subscription.getItems().getData().isEmpty()) {
+                throw new RuntimeException("Stripe subscription has no line items: " + gatewaySubscriptionId);
+            }
+            String itemId = subscription.getItems().getData().get(0).getId();
+
+            subscription.update(SubscriptionUpdateParams.builder()
+                    .addItem(SubscriptionUpdateParams.Item.builder()
+                            .setId(itemId)
+                            .setQuantity(newQuantity)
+                            .build())
+                    .setProrationBehavior(SubscriptionUpdateParams.ProrationBehavior.CREATE_PRORATIONS)
+                    .build());
+            log.info("Stripe subscription quantity updated: subId={} itemId={} newQuantity={}",
+                    gatewaySubscriptionId, itemId, newQuantity);
+        } catch (StripeException e) {
+            log.error("Failed to update Stripe subscription {} quantity to {}: {}",
+                    gatewaySubscriptionId, newQuantity, e.getMessage(), e);
+            throw new RuntimeException(
+                    "Stripe subscription quantity update failed: " + e.getMessage(), e);
+        }
+    }
+
+    /**
      * v2.6.0 — queue cancellation at the end of the current billing period.
      * Used by {@code TierLifecycleService} when a tier transitions to
      * {@code SUNSETTING}. No refund, no mid-cycle proration — the subscriber
