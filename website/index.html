@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ExecuteSpec — Spec-Driven Coding Platform with Autonomous CI/CD Validation</title>
+    <title>ExecuteSpec — Spec-Driven AI Coding with Verified Scoring</title>
     
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
@@ -15,8 +15,8 @@
     </script>
 
     <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
-    <meta name="description" content="ExecuteSpec is a spec-driven coding platform with multi-repo project workspaces, 0-100 verified scoring, and autonomous CI/CD validation. Link N repos, generate architecture docs, track tech debt, chat with your codebase. $20/mo for 20 credits; $29/mo + BYOK unlimited. The enterprise alternative to vibe-coding and prompt-based AI tools.">
-    <meta name="keywords" content="spec-driven coding, spec driven development, specification first coding, multi-repo AI coding, project workspace AI, architecture documentation AI, tech debt automation, autonomous coding platform, AI coding agent, enterprise code modernization, BYOK AI tools, CI/CD validation, agentic code review, automated tech debt, Lovable alternative, Bolt.new alternative, emergent.sh competitor, v0 alternative, Cursor alternative, Windsurf alternative, Claude Code alternative">
+    <meta name="description" content="Spec-driven AI coding platform. Multi-repo project workspaces, 0-100 verified scoring, autonomous CI/CD validation. From $20/mo; BYOK unlimited.">
+    <meta name="keywords" content="spec-driven coding, spec driven development, specification first coding, multi-repo AI coding, project workspace AI, architecture documentation AI, tech debt automation, autonomous coding platform, AI coding agent, AI pair programmer, enterprise AI coding, verified code generation, AI code review tool, deterministic code generation, BYOK AI tools, CI/CD validation, agentic code review, automated tech debt, AI PR reviewer, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
     <meta name="author" content="ExecuteSpec">
     <meta name="publisher" content="ExecuteSpec">
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
@@ -157,6 +157,48 @@
         "acceptedAnswer": {
           "@type": "Answer",
           "text": "ExecuteSpec excels at clearing engineering tech debt through spec-driven coding. Key use cases include automated unit test coverage generation, clearing JIRA backlogs autonomously, and modernizing legacy frameworks (e.g., migrating Spring Boot 2.x to 3.x)."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Cursor?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Cursor is an AI-powered IDE — you edit code inline with the model as a pair programmer. ExecuteSpec is a hosted delivery pipeline — you write a spec, the platform generates a plan, executes tasks, runs validation gates, and produces a PR with a 0-100 verified score. Cursor shines for line-level editing; ExecuteSpec shines when you want a structured spec to produce merged, tested code without sitting at the keyboard. Many teams use both."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Windsurf?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Windsurf is Codeium's agentic IDE fork with deeper multi-file agent flows. Like Cursor, it's an editor you drive manually. ExecuteSpec is not an editor; it's an async pipeline that takes a spec, decomposes it into a DAG of atomic tasks, validates each task against Syntax/Type/Lint/Unit-Test gates, and merges deterministically. Use Windsurf if you want to stay in your IDE. Use ExecuteSpec if you want to hand off feature-sized work and get back a merged PR with a verified score."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Claude Code?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Claude Code is Anthropic's terminal-first coding agent — run locally, reads/writes files in your current workspace, pay Anthropic directly by token. ExecuteSpec is a hosted multi-agent platform with a browser UI, multi-repo project workspaces, architecture doc generation, tech-debt tracking, and team features (RBAC, SSO, audit trail). Both support BYOK for Anthropic. Claude Code is the minimalist CLI; ExecuteSpec is the workbench around it."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to GitHub Copilot?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "GitHub Copilot is primarily an autocomplete and chat assistant inside your IDE. ExecuteSpec operates at a higher altitude: you give it a spec, it plans the decomposition, executes multi-step tasks across one or more repos, runs CI validation, and ships a PR. Copilot is great for 'finish this function'; ExecuteSpec is for 'ship this feature'. Copilot has deeper IDE integration; ExecuteSpec has deeper verification, project context, and multi-repo orchestration."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Lovable, Bolt.new, or v0?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Lovable, Bolt.new, and v0 are zero-to-one web prototyping tools — type a prompt, get a running web app in minutes. Optimised for greenfield demos. Their output often struggles with complex business logic, multi-repo codebases, test coverage, and day-two maintenance. ExecuteSpec enters where those leave off: operates on existing codebases, enforces validation gates on every task, tracks tech debt over time, supports multi-repo projects, generates architecture documentation. Use Bolt for a 10-minute prototype; use ExecuteSpec for verified production code."
+        }
+      }, {
+        "@type": "Question",
+        "name": "How does ExecuteSpec compare to Devin?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Devin (from Cognition Labs) is an autonomous coding agent that goes from ticket to merged PR with minimal human input. ExecuteSpec shares the ambition but differs on transparency and pricing. ExecuteSpec always pauses at a plan-approval gate before burning compute, surfaces every tool call via live SSE, produces a deterministic 0-100 verified score from real signals (not LLM self-rating), and starts at $20/mo. Devin starts at $500+/mo and is optimised for full autonomy. Choose Devin for pure autonomy; ExecuteSpec for autonomy with a reviewable plan gate and transparent scoring."
         }
       }]
     }
@@ -653,6 +695,132 @@
             .container { max-width: 1200px; }
             section { padding: 120px 0; }
         }
+
+        /* ── Product Tour (tabbed preview) ──────────────────────────────────── */
+        .tour-tabs { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin: 40px 0 32px; padding: 0 8px; }
+        .tour-tab { appearance: none; border: 1px solid var(--surface-border); background: var(--surface); color: var(--text-muted); padding: 10px 18px; border-radius: 999px; font-size: 0.9rem; font-weight: 500; cursor: pointer; transition: all 0.15s ease; font-family: inherit; }
+        .tour-tab:hover { color: var(--text-main); border-color: var(--blue); }
+        .tour-tab.is-active { background: var(--blue); border-color: var(--blue); color: #fff; }
+        .tour-viewport { position: relative; }
+        .tour-panel { display: none; animation: tourFade 0.3s ease; }
+        .tour-panel.is-active { display: block; }
+        @keyframes tourFade { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .tour-browser { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 14px; overflow: hidden; box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+        .tour-browser-chrome { display: flex; align-items: center; gap: 8px; padding: 12px 16px; background: var(--surface-alt, #1a1a1a); border-bottom: 1px solid var(--surface-border); }
+        .tour-dot { width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0; }
+        .tour-url { margin-left: 12px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tour-mock { padding: 32px; min-height: 400px; }
+        .tour-caption { margin-top: 20px; text-align: center; color: var(--text-muted); font-size: 0.95rem; max-width: 720px; margin-left: auto; margin-right: auto; line-height: 1.6; }
+
+        /* Tour mock primitives (reusable across panels) */
+        .tm-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 16px; }
+        .tm-eyebrow { font-family: var(--font-mono); font-size: 0.72rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 6px; }
+        .tm-title { font-size: 1.25rem; font-weight: 700; color: var(--text-main); margin: 0; }
+        .tm-credit-chip { background: var(--bg); border: 1px solid var(--blue); padding: 10px 14px; border-radius: 10px; text-align: right; }
+        .tm-credit-chip strong { display: block; color: var(--blue-light); font-family: var(--font-mono); font-size: 1.1rem; }
+        .tm-credit-chip span { font-size: 0.8rem; color: var(--text-muted); }
+        .tm-tasklist { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--surface-border); }
+        .tm-tasklist li { display: flex; gap: 14px; padding: 14px 0; border-bottom: 1px solid var(--surface-border); align-items: flex-start; }
+        .tm-tasklist li div { flex: 1; }
+        .tm-tasklist li strong { display: block; color: var(--text-main); font-size: 0.95rem; margin-bottom: 2px; }
+        .tm-tasklist li span { font-family: var(--font-mono); font-size: 0.78rem; color: var(--text-muted); }
+        .tm-dot { width: 8px; height: 8px; background: var(--text-muted); border-radius: 50%; margin-top: 8px; flex-shrink: 0; }
+        .tm-reqs { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 20px; }
+        .tm-chip { display: inline-flex; align-items: center; padding: 5px 12px; border-radius: 999px; font-size: 0.78rem; font-weight: 500; font-family: var(--font-mono); }
+        .tm-chip-ok { background: rgba(16,185,129,0.12); color: #10b981; border: 1px solid rgba(16,185,129,0.3); }
+        .tm-chip-warn { background: rgba(245,158,11,0.12); color: #f59e0b; border: 1px solid rgba(245,158,11,0.3); }
+        .tm-chip-neutral { background: var(--bg); color: var(--text-muted); border: 1px solid var(--surface-border); }
+        .tm-actions { display: flex; gap: 10px; margin-top: 28px; flex-wrap: wrap; }
+        .tm-btn { padding: 10px 18px; border-radius: 8px; font-size: 0.9rem; font-weight: 600; cursor: pointer; border: 1px solid transparent; font-family: inherit; }
+        .tm-btn-primary { background: var(--blue); color: #fff; border-color: var(--blue); }
+        .tm-btn-ghost { background: transparent; color: var(--text-muted); border-color: var(--surface-border); }
+
+        /* Execution panel */
+        .tm-exec-row { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 20px; }
+        .tm-task { padding: 14px; border-radius: 10px; background: var(--bg); border: 1px solid var(--surface-border); }
+        .tm-task-done { border-color: rgba(16,185,129,0.4); }
+        .tm-task-running { border-color: var(--blue); box-shadow: 0 0 0 3px rgba(91,141,239,0.15); }
+        .tm-task-pending { opacity: 0.55; }
+        .tm-badge { display: inline-block; font-family: var(--font-mono); font-size: 0.72rem; padding: 2px 8px; border-radius: 5px; background: var(--surface-border); color: var(--text-muted); margin-bottom: 8px; }
+        .tm-badge-ok { background: rgba(16,185,129,0.15); color: #10b981; }
+        .tm-badge-running { background: var(--blue); color: #fff; animation: tmPulse 1.4s ease-in-out infinite; }
+        @keyframes tmPulse { 0%,100% { opacity: 1; } 50% { opacity: 0.6; } }
+        .tm-task-title { font-size: 0.88rem; font-weight: 600; color: var(--text-main); margin-bottom: 4px; }
+        .tm-task-meta { font-size: 0.74rem; color: var(--text-muted); font-family: var(--font-mono); }
+        .tm-log { background: #0a0a0a; border: 1px solid var(--surface-border); border-radius: 10px; padding: 14px; font-family: var(--font-mono); font-size: 0.78rem; max-height: 180px; overflow: hidden; }
+        .tm-log-line { padding: 3px 0; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .tm-log-time { color: #6b7280; margin-right: 10px; }
+        .tm-log-tag { display: inline-block; padding: 1px 6px; border-radius: 3px; margin-right: 8px; font-size: 0.72rem; font-weight: 600; }
+        .tm-log-tag-info { background: rgba(91,141,239,0.2); color: var(--blue-light); }
+        .tm-log-tag-warn { background: rgba(245,158,11,0.2); color: #f59e0b; }
+        .tm-log-tag-ok { background: rgba(16,185,129,0.2); color: #10b981; }
+
+        /* Score panel */
+        .tm-score-hero { display: flex; gap: 32px; align-items: center; margin-bottom: 28px; flex-wrap: wrap; }
+        .tm-score-ring { width: 140px; height: 140px; border-radius: 50%; background: conic-gradient(#10b981 0% 92%, var(--surface-border) 92% 100%); display: flex; align-items: center; justify-content: center; position: relative; flex-shrink: 0; }
+        .tm-score-ring::before { content: ""; position: absolute; inset: 10px; background: var(--surface); border-radius: 50%; }
+        .tm-score-num { position: relative; font-size: 3rem; font-weight: 700; font-family: var(--font-mono); color: var(--text-main); line-height: 1; }
+        .tm-score-label { position: absolute; bottom: 28px; font-size: 0.7rem; color: var(--text-muted); font-family: var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }
+        .tm-signals { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; flex: 1; min-width: 240px; }
+        .tm-signal { background: var(--bg); border: 1px solid var(--surface-border); border-radius: 8px; padding: 10px 14px; }
+        .tm-signal span { display: block; font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); margin-bottom: 4px; letter-spacing: 0.06em; text-transform: uppercase; }
+        .tm-sig-ok { color: #10b981 !important; }
+        .tm-sig-neutral { color: var(--text-muted) !important; }
+        .tm-signal strong { font-family: var(--font-mono); color: var(--text-main); font-size: 0.95rem; }
+        .tm-dimensions { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+        .tm-dim { display: grid; grid-template-columns: 110px 1fr 30px; gap: 10px; align-items: center; }
+        .tm-dim span { font-size: 0.85rem; color: var(--text-muted); }
+        .tm-dim strong { font-family: var(--font-mono); text-align: right; color: var(--text-main); }
+        .tm-bar { height: 8px; background: var(--surface-border); border-radius: 4px; overflow: hidden; }
+        .tm-bar-fill { height: 100%; border-radius: 4px; }
+
+        /* Project Dashboard panel */
+        .tm-proj-head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; flex-wrap: wrap; gap: 12px; }
+        .tm-proj-meta { display: flex; gap: 8px; flex-wrap: wrap; }
+        .tm-proj-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+        .tm-proj-card { background: var(--bg); border: 1px solid var(--surface-border); border-radius: 10px; padding: 16px; }
+        .tm-proj-card h5 { font-size: 0.8rem; font-family: var(--font-mono); color: var(--text-muted); margin: 0 0 12px; letter-spacing: 0.06em; text-transform: uppercase; font-weight: 500; }
+        .tm-debt-row { display: grid; grid-template-columns: 100px 1fr 24px; gap: 10px; align-items: center; margin-bottom: 8px; }
+        .tm-debt-cat { font-family: var(--font-mono); font-size: 0.7rem; font-weight: 600; letter-spacing: 0.05em; }
+        .tm-debt-row strong { font-family: var(--font-mono); text-align: right; font-size: 0.85rem; color: var(--text-main); }
+        .tm-trend { width: 100%; height: 90px; }
+        .tm-trend-foot { display: flex; justify-content: space-between; margin-top: 6px; font-size: 0.72rem; color: var(--text-muted); font-family: var(--font-mono); }
+        .tm-run-row { display: flex; align-items: center; gap: 10px; padding: 6px 0; font-size: 0.85rem; color: var(--text-main); }
+        .tm-run-row div { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tm-run-age { font-family: var(--font-mono); font-size: 0.7rem; color: var(--text-muted); }
+        .tm-health-row { display: flex; justify-content: space-between; align-items: center; padding: 6px 0; font-size: 0.85rem; }
+        .tm-health-row strong { font-family: var(--font-mono); color: var(--text-main); font-size: 0.82rem; }
+
+        /* Mobile preview panel */
+        .tour-mock-mobile { display: grid; grid-template-columns: 1fr 240px; gap: 40px; align-items: center; }
+        @media (max-width: 720px) { .tour-mock-mobile { grid-template-columns: 1fr; gap: 24px; } }
+        .tm-mobile-left { max-width: 420px; }
+        .tm-qr { width: 180px; height: 180px; margin: 20px 0 16px; background: #fff; padding: 14px; border-radius: 10px; }
+        .tm-mobile-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+        .tm-mobile-hint { font-size: 0.88rem; color: var(--text-muted); line-height: 1.5; }
+        .tm-device { position: relative; width: 220px; height: 440px; background: #000; border-radius: 32px; padding: 14px 10px 20px; border: 2px solid var(--surface-border); box-shadow: 0 30px 70px rgba(0,0,0,0.7); margin: 0 auto; }
+        .tm-device-notch { width: 80px; height: 18px; background: #000; border-radius: 0 0 12px 12px; position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 2; }
+        .tm-device-screen { background: #111; height: 100%; border-radius: 22px; padding: 28px 14px 14px; display: flex; flex-direction: column; gap: 10px; overflow: hidden; }
+        .tm-app-header { font-weight: 700; font-size: 1.1rem; color: #fff; margin-bottom: 8px; }
+        .tm-app-card { display: flex; gap: 10px; align-items: center; background: #1a1a1a; border-radius: 10px; padding: 10px 12px; }
+        .tm-app-card > span:first-child { font-size: 1.6rem; }
+        .tm-app-card div { flex: 1; }
+        .tm-app-card strong { display: block; color: #fff; font-size: 0.88rem; }
+        .tm-app-card div span { font-size: 0.72rem; color: #888; }
+        .tm-app-cta { margin-top: auto; background: var(--blue); color: #fff; text-align: center; padding: 10px; border-radius: 10px; font-weight: 600; font-size: 0.88rem; }
+
+        /* ── Comparison table ────────────────────────────────────────────────── */
+        .compare-wrap { overflow-x: auto; margin-top: 32px; border-radius: 14px; border: 1px solid var(--surface-border); background: var(--surface); }
+        .compare-table { width: 100%; min-width: 720px; border-collapse: collapse; }
+        .compare-table thead th { background: var(--surface-alt, #1a1a1a); padding: 16px 14px; text-align: left; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--surface-border); font-family: var(--font-mono); letter-spacing: 0.04em; }
+        .compare-table thead th.is-us { color: var(--blue-light); background: rgba(91,141,239,0.08); }
+        .compare-table td { padding: 14px; border-bottom: 1px solid var(--surface-border); font-size: 0.88rem; color: var(--text-main); vertical-align: top; }
+        .compare-table td:first-child { font-weight: 600; color: var(--text-muted); width: 180px; }
+        .compare-table td.is-us { background: rgba(91,141,239,0.04); color: var(--text-main); }
+        .compare-yes { color: #10b981; font-weight: 700; }
+        .compare-no { color: var(--text-muted); opacity: 0.5; }
+        .compare-partial { color: #f59e0b; }
+        .compare-foot { font-size: 0.8rem; color: var(--text-muted); padding: 16px; border-top: 1px solid var(--surface-border); text-align: center; font-style: italic; }
     </style>
 </head>
 <body>
@@ -811,6 +979,253 @@
                     <div><strong style="color: var(--blue-light);">Pro</strong> &middot; 2 projects &middot; 2 repos each</div>
                     <div><strong style="color: var(--orange);">Max</strong> &middot; 10 projects &middot; 10 repos each</div>
                     <div><strong style="color: var(--purple);">Enterprise</strong> &middot; Unlimited + Execution View</div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Product Tour — tabbed preview of 5 core surfaces. Lets visitors see what
+         each piece of the platform actually looks like without requiring a signup.
+         Uses mock UI (styled HTML/CSS) until we ship real screenshots; each panel
+         is a <div data-tour-panel> and can be swapped for <img src="..."> later. -->
+    <section id="tour" style="background: var(--bg); border-top: 1px solid var(--surface-border);">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--yellow);">Product Tour</span>
+                <h2 class="h2">See every surface before you sign up.</h2>
+                <p class="subtitle" style="margin: 0 auto;">Five core views, one click away. No video, no demo booking — just the screens themselves.</p>
+            </div>
+
+            <div class="tour-tabs" role="tablist" aria-label="Product Tour">
+                <button class="tour-tab is-active" role="tab" aria-selected="true" aria-controls="tour-panel-plan" id="tour-tab-plan" data-tour-target="tour-panel-plan">1. Plan Gate</button>
+                <button class="tour-tab" role="tab" aria-selected="false" aria-controls="tour-panel-exec" id="tour-tab-exec" data-tour-target="tour-panel-exec">2. Live Execution</button>
+                <button class="tour-tab" role="tab" aria-selected="false" aria-controls="tour-panel-score" id="tour-tab-score" data-tour-target="tour-panel-score">3. Verified Score</button>
+                <button class="tour-tab" role="tab" aria-selected="false" aria-controls="tour-panel-project" id="tour-tab-project" data-tour-target="tour-panel-project">4. Project Dashboard</button>
+                <button class="tour-tab" role="tab" aria-selected="false" aria-controls="tour-panel-mobile" id="tour-tab-mobile" data-tour-target="tour-panel-mobile">5. Mobile Preview</button>
+            </div>
+
+            <div class="tour-viewport">
+                <!-- Panel 1: Plan Approval Gate -->
+                <div class="tour-panel is-active" role="tabpanel" id="tour-panel-plan" aria-labelledby="tour-tab-plan">
+                    <div class="tour-browser">
+                        <div class="tour-browser-chrome">
+                            <span class="tour-dot" style="background:#ef4444"></span>
+                            <span class="tour-dot" style="background:#f59e0b"></span>
+                            <span class="tour-dot" style="background:#10b981"></span>
+                            <span class="tour-url">app.executespec.ai/runs/a79f · Plan Approval</span>
+                        </div>
+                        <div class="tour-mock">
+                            <div class="tm-head">
+                                <div>
+                                    <div class="tm-eyebrow">Run a79f · AWAITING APPROVAL</div>
+                                    <h4 class="tm-title">Review the plan before compute runs</h4>
+                                </div>
+                                <div class="tm-credit-chip">
+                                    <strong>1 credit</strong>
+                                    <span>est. $0.34 · cap $0.60</span>
+                                </div>
+                            </div>
+                            <ul class="tm-tasklist">
+                                <li><span class="tm-dot"></span><div><strong>T1 · Scaffold Express app + TypeScript</strong><span>dependsOn: — · LOW complexity</span></div></li>
+                                <li><span class="tm-dot"></span><div><strong>T2 · Implement /health and /metrics endpoints</strong><span>dependsOn: T1 · LOW complexity</span></div></li>
+                                <li><span class="tm-dot"></span><div><strong>T3 · Write Vitest suite (happy + edge)</strong><span>dependsOn: T2 · TEST-kind</span></div></li>
+                                <li><span class="tm-dot"></span><div><strong>T4 · Dockerfile + GitHub Actions CI</strong><span>dependsOn: T2,T3 · MEDIUM</span></div></li>
+                            </ul>
+                            <div class="tm-reqs">
+                                <div class="tm-chip tm-chip-ok">Requirements enumerated: 4</div>
+                                <div class="tm-chip tm-chip-ok">Coverage: 4/4 ✓</div>
+                                <div class="tm-chip tm-chip-neutral">Provider: Anthropic · Sonnet</div>
+                            </div>
+                            <div class="tm-actions">
+                                <button class="tm-btn tm-btn-primary">Approve &amp; burn 1 credit</button>
+                                <button class="tm-btn tm-btn-ghost">Edit plan</button>
+                                <button class="tm-btn tm-btn-ghost">Cancel</button>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="tour-caption">Every run pauses here before a single token burns. You see the task DAG, requirement coverage, the exact credit cost, and a hard cap. No surprise bills.</p>
+                </div>
+
+                <!-- Panel 2: Live Execution (SSE stream) -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-exec" aria-labelledby="tour-tab-exec">
+                    <div class="tour-browser">
+                        <div class="tour-browser-chrome">
+                            <span class="tour-dot" style="background:#ef4444"></span>
+                            <span class="tour-dot" style="background:#f59e0b"></span>
+                            <span class="tour-dot" style="background:#10b981"></span>
+                            <span class="tour-url">app.executespec.ai/runs/a79f · WORKING (2m 14s elapsed)</span>
+                        </div>
+                        <div class="tour-mock">
+                            <div class="tm-exec-row">
+                                <div class="tm-task tm-task-done">
+                                    <span class="tm-badge tm-badge-ok">✓ T1</span>
+                                    <div class="tm-task-title">Scaffold Express app</div>
+                                    <div class="tm-task-meta">Build ✓ · 18 files · 847 tokens</div>
+                                </div>
+                                <div class="tm-task tm-task-done">
+                                    <span class="tm-badge tm-badge-ok">✓ T2</span>
+                                    <div class="tm-task-title">Implement /health + /metrics</div>
+                                    <div class="tm-task-meta">Build ✓ · 5 files · 1.2k tokens</div>
+                                </div>
+                                <div class="tm-task tm-task-running">
+                                    <span class="tm-badge tm-badge-running">● T3</span>
+                                    <div class="tm-task-title">Write Vitest suite</div>
+                                    <div class="tm-task-meta">Iteration 7/22 · readFile, writeFile, shell…</div>
+                                </div>
+                                <div class="tm-task tm-task-pending">
+                                    <span class="tm-badge">○ T4</span>
+                                    <div class="tm-task-title">Dockerfile + CI</div>
+                                    <div class="tm-task-meta">Waiting on T3</div>
+                                </div>
+                            </div>
+                            <div class="tm-log">
+                                <div class="tm-log-line"><span class="tm-log-time">14:32:07</span><span class="tm-log-tag tm-log-tag-info">planner</span> Plan approved by human gate · 1 credit debited</div>
+                                <div class="tm-log-line"><span class="tm-log-time">14:32:09</span><span class="tm-log-tag tm-log-tag-info">worker</span> T1 → buildProject: SUCCESS (2.1s)</div>
+                                <div class="tm-log-line"><span class="tm-log-time">14:33:04</span><span class="tm-log-tag tm-log-tag-info">worker</span> T2 → writeFile src/routes/health.ts (44 lines)</div>
+                                <div class="tm-log-line"><span class="tm-log-time">14:33:21</span><span class="tm-log-tag tm-log-tag-warn">validator</span> T2 → TYPE_CHECK failed · retrying with error injected</div>
+                                <div class="tm-log-line"><span class="tm-log-time">14:33:38</span><span class="tm-log-tag tm-log-tag-ok">validator</span> T2 → all gates passed · merged to exec branch</div>
+                                <div class="tm-log-line"><span class="tm-log-time">14:34:21</span><span class="tm-log-tag tm-log-tag-info">worker</span> T3 → iteration 7 · searchFiles("*.test.ts")</div>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="tour-caption">Live SSE stream as agents work. Every tool call, every validation gate, every retry is visible. No black-box agent runs.</p>
+                </div>
+
+                <!-- Panel 3: Verified Score / Validation Report -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-score" aria-labelledby="tour-tab-score">
+                    <div class="tour-browser">
+                        <div class="tour-browser-chrome">
+                            <span class="tour-dot" style="background:#ef4444"></span>
+                            <span class="tour-dot" style="background:#f59e0b"></span>
+                            <span class="tour-dot" style="background:#10b981"></span>
+                            <span class="tour-url">app.executespec.ai/runs/a79f · COMPLETE</span>
+                        </div>
+                        <div class="tour-mock">
+                            <div class="tm-score-hero">
+                                <div class="tm-score-ring">
+                                    <div class="tm-score-num">92</div>
+                                    <div class="tm-score-label">verified / 100</div>
+                                </div>
+                                <div class="tm-signals">
+                                    <div class="tm-signal"><span class="tm-sig-ok">Build</span><strong>✓ passed</strong></div>
+                                    <div class="tm-signal"><span class="tm-sig-ok">Tests</span><strong>73 / 73</strong></div>
+                                    <div class="tm-signal"><span class="tm-sig-ok">Reviewer</span><strong>CLEAN</strong></div>
+                                    <div class="tm-signal"><span class="tm-sig-neutral">LLM est.</span><strong>97</strong></div>
+                                </div>
+                            </div>
+                            <div class="tm-dimensions">
+                                <div class="tm-dim"><span>Code quality</span><div class="tm-bar"><div class="tm-bar-fill" style="width:92%; background:#5b8def"></div></div><strong>92</strong></div>
+                                <div class="tm-dim"><span>Test coverage</span><div class="tm-bar"><div class="tm-bar-fill" style="width:95%; background:#10b981"></div></div><strong>95</strong></div>
+                                <div class="tm-dim"><span>Architecture</span><div class="tm-bar"><div class="tm-bar-fill" style="width:88%; background:#5b8def"></div></div><strong>88</strong></div>
+                                <div class="tm-dim"><span>Security</span><div class="tm-bar"><div class="tm-bar-fill" style="width:90%; background:#10b981"></div></div><strong>90</strong></div>
+                                <div class="tm-dim"><span>Performance</span><div class="tm-bar"><div class="tm-bar-fill" style="width:85%; background:#5b8def"></div></div><strong>85</strong></div>
+                                <div class="tm-dim"><span>Design</span><div class="tm-bar"><div class="tm-bar-fill" style="width:93%; background:#10b981"></div></div><strong>93</strong></div>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="tour-caption">The 92 on the left is deterministic: build passed (20pts) + 73/73 tests (20pts) + reviewer verdict (20pts) + baseline (40pts) − issues. The "LLM est. 97" on the right is the model's self-rating — shown for comparison, not authority.</p>
+                </div>
+
+                <!-- Panel 4: Project Dashboard -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-project" aria-labelledby="tour-tab-project">
+                    <div class="tour-browser">
+                        <div class="tour-browser-chrome">
+                            <span class="tour-dot" style="background:#ef4444"></span>
+                            <span class="tour-dot" style="background:#f59e0b"></span>
+                            <span class="tour-dot" style="background:#10b981"></span>
+                            <span class="tour-url">app.executespec.ai/projects/checkout-api</span>
+                        </div>
+                        <div class="tour-mock">
+                            <div class="tm-proj-head">
+                                <div>
+                                    <div class="tm-eyebrow">Project · Max tier</div>
+                                    <h4 class="tm-title">checkout-api</h4>
+                                </div>
+                                <div class="tm-proj-meta">
+                                    <span class="tm-chip tm-chip-ok">3 repos linked</span>
+                                    <span class="tm-chip tm-chip-ok">Arch v12 · fresh</span>
+                                    <span class="tm-chip tm-chip-neutral">47 runs · last 30 days</span>
+                                </div>
+                            </div>
+                            <div class="tm-proj-grid">
+                                <div class="tm-proj-card">
+                                    <h5>Tech debt</h5>
+                                    <div class="tm-debt-row"><span class="tm-debt-cat" style="color:#5b8def">LOGIC</span><div class="tm-bar"><div class="tm-bar-fill" style="width:60%; background:#5b8def"></div></div><strong>12</strong></div>
+                                    <div class="tm-debt-row"><span class="tm-debt-cat" style="color:#ef4444">SECURITY</span><div class="tm-bar"><div class="tm-bar-fill" style="width:25%; background:#ef4444"></div></div><strong>5</strong></div>
+                                    <div class="tm-debt-row"><span class="tm-debt-cat" style="color:#f59e0b">PERFORMANCE</span><div class="tm-bar"><div class="tm-bar-fill" style="width:40%; background:#f59e0b"></div></div><strong>8</strong></div>
+                                    <div class="tm-debt-row"><span class="tm-debt-cat" style="color:#10b981">DESIGN</span><div class="tm-bar"><div class="tm-bar-fill" style="width:15%; background:#10b981"></div></div><strong>3</strong></div>
+                                </div>
+                                <div class="tm-proj-card">
+                                    <h5>Score trend · 30 days</h5>
+                                    <svg class="tm-trend" viewBox="0 0 240 90" preserveAspectRatio="none" aria-hidden="true">
+                                        <polyline points="0,60 30,55 60,52 90,45 120,40 150,38 180,32 210,28 240,24" fill="none" stroke="#5b8def" stroke-width="2.5"/>
+                                        <polyline points="0,60 30,55 60,52 90,45 120,40 150,38 180,32 210,28 240,24" fill="rgba(91,141,239,0.12)" stroke="none" points-with-base="0,90 240,90"/>
+                                    </svg>
+                                    <div class="tm-trend-foot"><span>Apr 1: verified 71</span><span>Apr 21: verified 92</span></div>
+                                </div>
+                                <div class="tm-proj-card">
+                                    <h5>Recent runs</h5>
+                                    <div class="tm-run-row"><span class="tm-chip tm-chip-ok">92</span><div>Add idempotency keys</div><span class="tm-run-age">2h ago</span></div>
+                                    <div class="tm-run-row"><span class="tm-chip tm-chip-ok">87</span><div>Refund webhook handler</div><span class="tm-run-age">yesterday</span></div>
+                                    <div class="tm-run-row"><span class="tm-chip tm-chip-warn">74</span><div>Stripe retry backoff</div><span class="tm-run-age">3d ago</span></div>
+                                </div>
+                                <div class="tm-proj-card">
+                                    <h5>Workspace health</h5>
+                                    <div class="tm-health-row"><strong>payments-api</strong><span class="tm-chip tm-chip-ok">in-sync</span></div>
+                                    <div class="tm-health-row"><strong>checkout-web</strong><span class="tm-chip tm-chip-ok">in-sync</span></div>
+                                    <div class="tm-health-row"><strong>email-svc</strong><span class="tm-chip tm-chip-warn">3 commits behind</span></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="tour-caption">One project, many repos, one rollup. Tech debt, score trend, recent runs, staleness signals — all in view before you type the next spec.</p>
+                </div>
+
+                <!-- Panel 5: Mobile Preview (RN + Expo) -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-mobile" aria-labelledby="tour-tab-mobile">
+                    <div class="tour-browser">
+                        <div class="tour-browser-chrome">
+                            <span class="tour-dot" style="background:#ef4444"></span>
+                            <span class="tour-dot" style="background:#f59e0b"></span>
+                            <span class="tour-dot" style="background:#10b981"></span>
+                            <span class="tour-url">app.executespec.ai/runs/49f8 · Mobile preview ready</span>
+                        </div>
+                        <div class="tour-mock tour-mock-mobile">
+                            <div class="tm-mobile-left">
+                                <div class="tm-eyebrow">React Native · Expo SDK 55</div>
+                                <h4 class="tm-title">Scan to preview on your device</h4>
+                                <svg class="tm-qr" viewBox="0 0 21 21" aria-hidden="true" shape-rendering="crispEdges">
+                                    <rect width="21" height="21" fill="#fff"/>
+                                    <g fill="#000">
+                                        <rect x="0" y="0" width="7" height="1"/><rect x="0" y="6" width="7" height="1"/><rect x="0" y="1" width="1" height="5"/><rect x="6" y="1" width="1" height="5"/>
+                                        <rect x="2" y="2" width="3" height="3"/>
+                                        <rect x="14" y="0" width="7" height="1"/><rect x="14" y="6" width="7" height="1"/><rect x="14" y="1" width="1" height="5"/><rect x="20" y="1" width="1" height="5"/>
+                                        <rect x="16" y="2" width="3" height="3"/>
+                                        <rect x="0" y="14" width="7" height="1"/><rect x="0" y="20" width="7" height="1"/><rect x="0" y="15" width="1" height="5"/><rect x="6" y="15" width="1" height="5"/>
+                                        <rect x="2" y="16" width="3" height="3"/>
+                                        <rect x="8" y="2" width="1" height="1"/><rect x="10" y="3" width="1" height="1"/><rect x="12" y="2" width="1" height="1"/><rect x="9" y="5" width="2" height="1"/><rect x="8" y="8" width="1" height="2"/><rect x="10" y="8" width="1" height="1"/><rect x="12" y="9" width="1" height="2"/><rect x="14" y="8" width="2" height="1"/><rect x="17" y="8" width="1" height="2"/><rect x="9" y="11" width="1" height="2"/><rect x="11" y="12" width="2" height="1"/><rect x="14" y="11" width="1" height="1"/><rect x="17" y="12" width="2" height="1"/><rect x="8" y="14" width="1" height="1"/><rect x="10" y="15" width="1" height="2"/><rect x="12" y="14" width="1" height="1"/><rect x="14" y="14" width="1" height="2"/><rect x="17" y="15" width="1" height="1"/><rect x="19" y="14" width="1" height="2"/><rect x="9" y="18" width="1" height="1"/><rect x="11" y="19" width="2" height="1"/><rect x="14" y="18" width="1" height="1"/><rect x="16" y="19" width="1" height="1"/><rect x="18" y="18" width="1" height="1"/>
+                                    </g>
+                                </svg>
+                                <div class="tm-mobile-actions">
+                                    <span class="tm-chip tm-chip-ok">Android</span>
+                                    <span class="tm-chip tm-chip-neutral">iOS</span>
+                                    <span class="tm-chip tm-chip-neutral">Cross-platform</span>
+                                </div>
+                                <p class="tm-mobile-hint">Open <strong>Expo Go</strong> on your phone and scan. Hot-reload works across your LAN. On iOS, scan with the Camera app.</p>
+                            </div>
+                            <div class="tm-device">
+                                <div class="tm-device-notch"></div>
+                                <div class="tm-device-screen">
+                                    <div class="tm-app-header">Habit Tracker</div>
+                                    <div class="tm-app-card"><span>💧</span><div><strong>Drink water</strong><span>5 / 8 glasses</span></div></div>
+                                    <div class="tm-app-card"><span>🏃</span><div><strong>Morning run</strong><span>Done · 3.2 km</span></div></div>
+                                    <div class="tm-app-card"><span>📖</span><div><strong>Read 20 min</strong><span>Streak: 7 days</span></div></div>
+                                    <div class="tm-app-cta">+ Add habit</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="tour-caption">Mobile specs compile to a real Expo app. QR code, device preview, Hermes bundle — same pipeline, mobile surface.</p>
                 </div>
             </div>
         </div>
@@ -1057,6 +1472,176 @@
         </div>
     </section>
 
+    <!-- Comparison table — captures "X alternative" search intent by showing the
+         honest diff between ExecuteSpec and the major AI coding tools. Used by
+         Google/Bing for featured-snippet tables; also helps LLM answer engines
+         cite our differentiation accurately. -->
+    <section id="compare" style="background: var(--bg); border-top: 1px solid var(--surface-border);">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--purple);">Honest Comparison</span>
+                <h2 class="h2">How ExecuteSpec compares.</h2>
+                <p class="subtitle" style="margin: 0 auto;">Every AI coding tool does one thing well. Here's what ExecuteSpec does that the others don't — and vice versa. No trash-talk.</p>
+            </div>
+
+            <div class="compare-wrap">
+                <table class="compare-table">
+                    <thead>
+                        <tr>
+                            <th></th>
+                            <th class="is-us">ExecuteSpec</th>
+                            <th>Cursor</th>
+                            <th>Claude Code</th>
+                            <th>GitHub Copilot</th>
+                            <th>Lovable / Bolt</th>
+                            <th>Devin</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Primary surface</td>
+                            <td class="is-us">Hosted pipeline</td>
+                            <td>IDE</td>
+                            <td>CLI / terminal</td>
+                            <td>IDE plugin</td>
+                            <td>Browser</td>
+                            <td>Hosted agent</td>
+                        </tr>
+                        <tr>
+                            <td>Deterministic 0-100 verified score</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — build + tests + reviewer signals</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span> — LLM self-rating only</td>
+                        </tr>
+                        <tr>
+                            <td>Multi-repo project workspace</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — N repos, combined arch doc</td>
+                            <td><span class="compare-partial">Partial</span> — single workspace</td>
+                            <td><span class="compare-partial">Partial</span> — single repo</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span></td>
+                        </tr>
+                        <tr>
+                            <td>Plan-approval gate (human-in-the-loop)</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — cost shown before burn</td>
+                            <td><span class="compare-partial">Optional</span></td>
+                            <td><span class="compare-partial">Optional</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                        </tr>
+                        <tr>
+                            <td>Autonomous CI/CD validation chain</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — syntax, type, lint, tests per task</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span> — via shell</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span> — preview only</td>
+                            <td><span class="compare-partial">Partial</span></td>
+                        </tr>
+                        <tr>
+                            <td>BYOK (bring your own keys)</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — Max + Enterprise, zero markup</td>
+                            <td><span class="compare-partial">Partial</span> — limited</td>
+                            <td><span class="compare-yes">✓ Yes</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                        </tr>
+                        <tr>
+                            <td>Architecture doc generation</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — 3-step, SHA-idempotent</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                        </tr>
+                        <tr>
+                            <td>Tech debt panel + trend</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — category, severity, hotspots</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                        </tr>
+                        <tr>
+                            <td>Figma URL → design score</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span> — Figma import</td>
+                            <td><span class="compare-no">—</span></td>
+                        </tr>
+                        <tr>
+                            <td>React Native + Expo codegen</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — Android + iOS, Hermes bundle</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span> — web-only on most</td>
+                            <td><span class="compare-no">—</span></td>
+                        </tr>
+                        <tr>
+                            <td>JIRA + Confluence integration</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — Enterprise tier</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span></td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-no">—</span></td>
+                        </tr>
+                        <tr>
+                            <td>SSO/SAML + RBAC + audit trail</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — Enterprise tier</td>
+                            <td><span class="compare-partial">Partial</span> — Business+</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-yes">✓ Yes</span> — Enterprise</td>
+                            <td><span class="compare-no">—</span></td>
+                            <td><span class="compare-partial">Partial</span></td>
+                        </tr>
+                        <tr>
+                            <td>Entry price</td>
+                            <td class="is-us"><strong>Free</strong> → $20/mo Pro</td>
+                            <td>Free → $20/mo Pro</td>
+                            <td>Metered usage (API)</td>
+                            <td>Free limited → $10/mo</td>
+                            <td>Free → $20/mo</td>
+                            <td>$500+/mo</td>
+                        </tr>
+                        <tr>
+                            <td>Pricing model</td>
+                            <td class="is-us">$1 = 1 credit · flat-per-band</td>
+                            <td>Token-based</td>
+                            <td>Token-based</td>
+                            <td>Flat subscription</td>
+                            <td>Credit-based</td>
+                            <td>Metered ACU</td>
+                        </tr>
+                        <tr>
+                            <td>Best for</td>
+                            <td class="is-us">Shipping verified features &amp; clearing tech debt</td>
+                            <td>Inline editing in IDE</td>
+                            <td>Power-user terminal workflows</td>
+                            <td>Single-file autocomplete</td>
+                            <td>Zero-to-one prototypes</td>
+                            <td>Autonomous ticket-to-PR</td>
+                        </tr>
+                    </tbody>
+                </table>
+                <div class="compare-foot">
+                    Data compiled 2026-04-21 from each vendor's public pricing and feature documentation. Feature presence varies by plan tier — check each vendor's current site for latest. Happy to be corrected: <a href="mailto:hello@executespec.ai" style="color: var(--blue-light);">hello@executespec.ai</a>.
+                </div>
+            </div>
+        </div>
+    </section>
+
     <!-- Frequently Asked Questions (SEO & Agentic Search Target) -->
     <section id="faq">
         <div class="container">
@@ -1107,6 +1692,42 @@
                     <summary>How does the "Dual-Mode Execution" work?</summary>
                     <div class="faq-answer">
                         At the point of run submission, you can choose between Prototype Mode or Production Mode. Prototype Mode bypasses human approval gates, uses fast models (like Haiku or Flash), and skips heavy unit testing for instant cloud previews. Production Mode enforces tech-lead plan reviews, triggers the full CI/CD validation chain, and utilizes highly capable models (like Opus for planning or Sonnet for execution) for maximum reliability. Both modes are available on all tiers — the difference is which models you can access and whether keys are managed or BYOK.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does ExecuteSpec compare to Cursor?</summary>
+                    <div class="faq-answer">
+                        Cursor is an AI-powered IDE — you edit code inline with the model as a pair programmer. ExecuteSpec is a hosted delivery pipeline — you write a spec, the platform generates a plan, executes tasks, runs validation gates, and produces a PR with a 0-100 verified score. Different problem: Cursor shines for line-level editing and exploratory coding; ExecuteSpec shines when you want a structured spec to produce merged, tested code without sitting at the keyboard. Many teams use both — Cursor for inline edits, ExecuteSpec for feature-sized work.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does ExecuteSpec compare to Windsurf?</summary>
+                    <div class="faq-answer">
+                        Windsurf is Codeium's agentic IDE fork — similar positioning to Cursor with deeper multi-file agent flows. Like Cursor, it's an editor you drive manually. ExecuteSpec is not an editor; it's an async pipeline that takes a spec, decomposes it into a DAG of atomic tasks, validates each task against Syntax/Type/Lint/Unit-Test gates, and merges deterministically. If you want to stay in your IDE, use Windsurf. If you want to hand off feature-sized work and come back to a merged PR with a verified score, ExecuteSpec is built for that.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does ExecuteSpec compare to Claude Code?</summary>
+                    <div class="faq-answer">
+                        Claude Code is Anthropic's terminal-first coding agent — you run it locally, it reads/writes files in your current workspace, you pay Anthropic directly by token. It's a great power-user tool for single-machine, single-repo flows. ExecuteSpec is a hosted multi-agent platform with a browser UI, multi-repo project workspaces, architecture doc generation, tech-debt tracking, and team features (RBAC, SSO, audit trail). Both support BYOK for Anthropic. Claude Code is the minimalist CLI; ExecuteSpec is the workbench around it.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does ExecuteSpec compare to GitHub Copilot?</summary>
+                    <div class="faq-answer">
+                        GitHub Copilot is primarily an autocomplete and chat assistant inside your IDE — it completes the line you're typing, suggests functions, and answers questions in chat. ExecuteSpec operates at a higher altitude: you give it a spec, it plans the decomposition, executes multi-step tasks across one or more repos, runs CI validation, and ships a PR. Copilot is great for "finish this function"; ExecuteSpec is for "ship this feature". Copilot has deeper IDE integration today; ExecuteSpec has deeper verification, project context, and multi-repo orchestration.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does ExecuteSpec compare to Lovable, Bolt.new, or v0?</summary>
+                    <div class="faq-answer">
+                        Lovable, Bolt.new, and v0 are excellent zero-to-one web prototyping tools — type a prompt, get a running web app in minutes. They're optimised for greenfield demos, landing pages, and throwaway prototypes. Their output often struggles under day-two maintenance: complex business logic, multi-repo codebases, test coverage, and architectural discipline. ExecuteSpec enters where those tools leave off: it operates on existing codebases (not just greenfield), enforces validation gates on every task, tracks tech debt over time, supports multi-repo projects, and generates architecture documentation. If you need a prototype in 10 minutes, use Bolt. If you need verified code that ships to production, use ExecuteSpec.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>How does ExecuteSpec compare to Devin?</summary>
+                    <div class="faq-answer">
+                        Devin (from Cognition Labs) is an autonomous coding agent that tries to go from a ticket/issue to a merged PR with minimal human input. ExecuteSpec and Devin share a similar ambition — deliver code, not just suggestions — but differ on transparency and pricing. ExecuteSpec always pauses at a plan-approval gate before burning compute, surfaces every tool call via live SSE, produces a deterministic 0-100 verified score from real signals (not LLM self-rating), and starts at $20/mo. Devin's pricing starts higher ($500+/mo) and is optimised for full autonomy. If you want autonomy with no pause, Devin; if you want autonomy with a human-reviewable plan gate and transparent scoring, ExecuteSpec.
                     </div>
                 </details>
             </div>
@@ -1423,4 +2044,54 @@
                 el.textContent = isINR ? '₹' : '$';
             });
         }
+
+        /* Auto-detect India visitors so INR doesn't require a manual toggle.
+           USD stays the default for everyone else (primary market is US + global).
+           Users can still flip the toggle manually after auto-detect. */
+        (function detectCcy() {
+            try {
+                const lang = (navigator.language || '').toLowerCase();
+                const tz = (Intl.DateTimeFormat().resolvedOptions().timeZone || '');
+                const isIndia = lang.indexOf('en-in') === 0 || lang.indexOf('hi') === 0 || tz === 'Asia/Kolkata';
+                if (isIndia) {
+                    const box = document.getElementById('currencyToggle');
+                    if (box && !box.checked) { box.checked = true; toggleCurrency(); }
+                }
+            } catch (e) { /* default USD */ }
+        })();
+
+        /* Product Tour — tab switching with keyboard support.
+           Arrow Left/Right cycles tabs. Home/End jump to first/last. */
+        (function initTour() {
+            const tabs = document.querySelectorAll('.tour-tab');
+            const panels = document.querySelectorAll('.tour-panel');
+            if (!tabs.length) return;
+
+            function activate(targetId, focusTab) {
+                tabs.forEach(t => {
+                    const isActive = t.dataset.tourTarget === targetId;
+                    t.classList.toggle('is-active', isActive);
+                    t.setAttribute('aria-selected', isActive ? 'true' : 'false');
+                    t.setAttribute('tabindex', isActive ? '0' : '-1');
+                    if (isActive && focusTab) t.focus();
+                });
+                panels.forEach(p => {
+                    p.classList.toggle('is-active', p.id === targetId);
+                });
+            }
+
+            tabs.forEach((tab, idx) => {
+                tab.addEventListener('click', () => activate(tab.dataset.tourTarget, false));
+                tab.addEventListener('keydown', e => {
+                    let next = idx;
+                    if (e.key === 'ArrowRight') next = (idx + 1) % tabs.length;
+                    else if (e.key === 'ArrowLeft') next = (idx - 1 + tabs.length) % tabs.length;
+                    else if (e.key === 'Home') next = 0;
+                    else if (e.key === 'End') next = tabs.length - 1;
+                    else return;
+                    e.preventDefault();
+                    activate(tabs[next].dataset.tourTarget, true);
+                });
+            });
+        })();
     </script>
