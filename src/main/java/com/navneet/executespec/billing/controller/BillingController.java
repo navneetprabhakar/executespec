@@ -60,9 +60,10 @@ public class BillingController {
     public ResponseEntity<SubscriptionInitResult> subscribe(
             @RequestBody CreateSubscriptionRequest request,
             @AuthenticationPrincipal AppUserDetails userDetails) {
+        int seats = request.seats() != null ? request.seats() : 1;
         SubscriptionInitResult result = billingService.subscribe(
                 userDetails.getUser().getId(), request.planId(),
-                request.gateway(), request.successUrl(), request.cancelUrl());
+                request.gateway(), request.successUrl(), request.cancelUrl(), seats);
         return ResponseEntity.ok(result);
     }
 

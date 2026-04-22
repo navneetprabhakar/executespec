@@ -37,6 +37,16 @@ public class StripePaymentGateway implements PaymentGateway {
     @Value("${billing.stripe.enterprise-price-id:}")
     private String enterprisePriceId;
 
+    @Value("${billing.stripe.team-price-id:}")
+    private String teamPriceId;
+
+    @Value("${billing.stripe.team-price-id-inr:}")
+    private String teamPriceIdInr;
+
+    /** Injected lazily so the gateway can boot before BillingPlan repo is wired. */
+    @org.springframework.beans.factory.annotation.Autowired(required = false)
+    private com.navneet.executespec.billing.repository.BillingPlanRepository planRepo;
+
     @PostConstruct
     void init() {
         if (secretKey != null && !secretKey.isBlank()) {
@@ -282,16 +292,62 @@ public class StripePaymentGateway implements PaymentGateway {
 
     // ── Helpers ─────────────────────────────────────────────────────────────
 
+    /**
+     * v2.6.1 — resolve a Stripe Price ID for a given billing_plan.
+     *
+     * <p>Priority order:
+     * <ol>
+     *   <li>{@code billing_plan.stripe_price_id} column — authoritative when
+     *       the ops team has seeded it post-Stripe-Product creation. Lets us
+     *       run test vs. live accounts without code changes.</li>
+     *   <li>Tier + currency env var — {@code STRIPE_*_PRICE_ID} / {@code _INR}
+     *       fallback used in dev and before the DB column is populated.</li>
+     *   <li>{@code STRIPE_PRO_PRICE_ID} as an ultimate fallback for legacy
+     *       call sites that don't map to any recognised tier.</li>
+     * </ol>
+     */
     private String resolvePriceId(String planId) {
-        // planId is the internal plan identifier — map to Stripe price IDs
-        // The planId here comes from the billing_plan table, we match on tier
-        if (planId != null) {
-            String lower = planId.toLowerCase();
-            if (lower.contains("enterprise")) {
-                return enterprisePriceId;
+        if (planId == null) return proPriceId;
+
+        // Step 1: DB stripe_price_id when the plan id parses as UUID.
+        if (planRepo != null) {
+            try {
+                java.util.UUID uuid = java.util.UUID.fromString(planId);
+                com.navneet.executespec.billing.entity.BillingPlan plan =
+                        planRepo.findById(uuid).orElse(null);
+                if (plan != null) {
+                    if (plan.getStripePriceId() != null && !plan.getStripePriceId().isBlank()) {
+                        return plan.getStripePriceId();
+                    }
+                    // Step 2: tier + currency env var fallback
+                    String tier = plan.getTier() == null ? "" : plan.getTier().toUpperCase();
+                    boolean isInr = plan.getBaseAmountInr() > 0 && plan.getBaseAmountUsd() == 0;
+                    return resolvePriceIdByTier(tier, isInr);
+                }
+            } catch (IllegalArgumentException ignore) {
+                // not a UUID — fall through to string-pattern match below
             }
         }
-        // Default to Pro price
+
+        // Legacy string-pattern match on the planId string.
+        String lower = planId.toLowerCase();
+        if (lower.contains("enterprise")) return enterprisePriceId;
+        if (lower.contains("team")) {
+            return (lower.contains("inr") && teamPriceIdInr != null && !teamPriceIdInr.isBlank())
+                    ? teamPriceIdInr : teamPriceId;
+        }
         return proPriceId;
+    }
+
+    private String resolvePriceIdByTier(String tier, boolean isInr) {
+        switch (tier) {
+            case "ENTERPRISE": return enterprisePriceId;
+            case "TEAM":
+                return (isInr && teamPriceIdInr != null && !teamPriceIdInr.isBlank())
+                        ? teamPriceIdInr : teamPriceId;
+            case "PRO":
+            default:
+                return proPriceId;
+        }
     }
 }
