@@ -139,6 +139,8 @@ public class V2RunOrchestrator {
     private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
     private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
+    /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
+    private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
     /** v2.5.8 — publishes PipelineEvent.RunCompleted/RunFailed so in-app
      *  notifications, quota refund, and workspace GCS upload listeners fire for
      *  V2 runs. Previously only V1 PipelineHarness published these events,
@@ -300,6 +302,18 @@ public class V2RunOrchestrator {
 
         log.info("V2RunOrchestrator submitRun runId={} provider={} model={} user={} org={} project={}",
                 runId, provider, model, createdByUserId, orgId, projectId);
+
+        // Wave 2.1 — activation funnel step 3.
+        if (createdByUserId != null) {
+            java.util.Map<String, Object> props = new java.util.HashMap<>();
+            props.put("aiProvider", provider);
+            props.put("executionMode", executionMode == null ? "PRODUCTION" : executionMode);
+            props.put("skipApproval", skipApproval);
+            props.put("hasProject", projectId != null);
+            props.put("tddMode", tddMode);
+            eventTracking.track(createdByUserId,
+                    com.navneet.executespec.analytics.EventName.SPEC_SUBMITTED, props);
+        }
 
         // Kick off the pipeline on a background thread. The returned PipelineRun is the
         // initial state; the frontend polls GET /api/runs/{id} to observe progression.
@@ -1095,6 +1109,28 @@ public class V2RunOrchestrator {
             }
         } catch (Exception eventEx) {
             log.warn("V2 run={} event publish failed (non-fatal): {}", runId, eventEx.getMessage());
+        }
+
+        // Wave 2.1 — activation funnel step 5. Fires once per user on the
+        // first run that reaches COMPLETE or PARTIAL (terminal-but-usable).
+        // FAILED/CANCELLED don't count as activation signals — a user who
+        // submits 3 runs that all fail hasn't hit the "my code works" moment.
+        if ("COMPLETE".equalsIgnoreCase(finalStatus) || "PARTIAL".equalsIgnoreCase(finalStatus)) {
+            try {
+                runRepo.findById(runId).ifPresent(r -> {
+                    if (r.getCreatedByUserId() != null) {
+                        eventTracking.track(r.getCreatedByUserId(),
+                                com.navneet.executespec.analytics.EventName.RUN_COMPLETE,
+                                java.util.Map.of(
+                                        "terminalStatus", finalStatus,
+                                        "statusReason", statusReason == null ? "" : statusReason,
+                                        "aiProvider", r.getAiProvider() == null ? "" : r.getAiProvider()
+                                ));
+                    }
+                });
+            } catch (Exception trackEx) {
+                log.warn("Activation track RUN_COMPLETE failed for run={}: {}", runId, trackEx.getMessage());
+            }
         }
     }
 

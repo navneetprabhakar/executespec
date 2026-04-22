@@ -24,6 +24,8 @@ public class PullRequestRecordService {
     private final InAppNotificationService notificationService;
     private final NotificationRepository notificationRepository;
     private final PipelineRunRepository pipelineRunRepo;
+    /** Wave 2.1 — activation funnel PR_MERGED step. */
+    private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
     @Transactional
     public PullRequestRecord recordCreated(
@@ -97,6 +99,22 @@ public class PullRequestRecordService {
                 // Non-fatal: notification failure must not undo the PR state update.
                 log.warn("Failed to create PR_MERGED notification for run {} PR {}#{}: {}",
                         r.getRunId(), repoFullName, prNumber, e.getMessage());
+            }
+            // Wave 2.1 — activation funnel step 6. The run owner's first-ever
+            // merged PR is the clearest "the AI shipped my code" signal.
+            try {
+                PipelineRun run = pipelineRunRepo.findById(r.getRunId()).orElse(null);
+                if (run != null && run.getCreatedByUserId() != null) {
+                    eventTracking.track(run.getCreatedByUserId(),
+                            com.navneet.executespec.analytics.EventName.PR_MERGED,
+                            java.util.Map.of(
+                                    "repoFullName", repoFullName,
+                                    "runId", r.getRunId() == null ? "" : r.getRunId()
+                            ));
+                }
+            } catch (Exception e) {
+                log.warn("Activation track PR_MERGED failed for PR {}#{}: {}",
+                        repoFullName, prNumber, e.getMessage());
             }
         }
     }

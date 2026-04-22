@@ -1,5 +1,7 @@
 package com.navneet.executespec.auth.service;
 
+import com.navneet.executespec.analytics.EventName;
+import com.navneet.executespec.analytics.EventTrackingService;
 import com.navneet.executespec.auth.dto.CreateProjectRequest;
 import com.navneet.executespec.auth.dto.ProjectDto;
 import com.navneet.executespec.auth.dto.ProjectMemberDto;
@@ -33,6 +35,7 @@ public class ProjectService {
     private final ProjectMemberRepository projectMemberRepo;
     private final AppUserRepository userRepo;
     private final ActivityAuditService auditService;
+    private final EventTrackingService eventTracking;
 
     @Transactional
     public ProjectDto createProject(String orgId, String createdBy, CreateProjectRequest req) {
@@ -68,6 +71,15 @@ public class ProjectService {
                 .orgId(orgId).actorId(createdBy)
                 .newValue("{\"name\":\"" + req.name() + "\",\"orgId\":\"" + orgId + "\"}")
                 .build());
+
+        // Wave 2.1 — activation funnel step 2 (fires once per user — the
+        // EventTrackingService composite PK guarantees idempotency across
+        // the user's second+ project).
+        eventTracking.track(createdBy, EventName.PROJECT_CREATED, java.util.Map.of(
+                "aiProvider", provider.name(),
+                "hasGithubOwner", req.githubOwner() != null && !req.githubOwner().isBlank(),
+                "orgId", orgId == null ? "" : orgId
+        ));
 
         log.info("Project created: {} ({}) in org {}", req.name(), project.getId(), orgId);
         return ProjectDto.from(project);
