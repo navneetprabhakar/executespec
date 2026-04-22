@@ -10,4 +10,7 @@ public interface ProjectRepository extends JpaRepository<Project, String> {
     List<Project> findByOrgId(String orgId);
 
     List<Project> findByOrgIdAndStatus(String orgId, String status);
+
+    /** Wave 2.2 — used by {@code SandboxCleanupJob}. */
+    List<Project> findByIsSandboxTrueAndStatus(String status);
 }
