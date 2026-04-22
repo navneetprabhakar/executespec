@@ -535,6 +535,9 @@ app:
     from: admin@executespec.ai
     # v2.6.0 — recipient for new-signup alerts + weekly admin summary
     admin-address: ${ADMIN_NOTIFICATION_EMAIL:admin@executespec.ai}
+    # v2.6.0 — shared secret for /api/internal/reminder/send (remote-trigger hits this).
+    # Leave blank in prod to disable the endpoint (returns 503).
+    admin-reminder-token: ${ADMIN_REMINDER_TOKEN:}
     # ── SMTP config (used when transport=smtp) ──────────────────────────────
     smtp:
       host: smtp.gmail.com

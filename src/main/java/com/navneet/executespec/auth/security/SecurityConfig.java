@@ -135,6 +135,8 @@ public class SecurityConfig {
                         .requestMatchers("/api/integrations/*/webhook").permitAll()
                         // Pilot R5 — GitHub PR webhook (HMAC SHA-256 verified in controller)
                         .requestMatchers(HttpMethod.POST, "/webhooks/github").permitAll()
+                        // v2.6.0 — internal reminder endpoint (shared-secret X-Admin-Reminder-Token, verified in controller)
+                        .requestMatchers(HttpMethod.POST, "/api/internal/reminder/send").permitAll()
                         // Slack OAuth callback (external redirect — no JWT)
                         .requestMatchers("/api/integrations/slack/oauth/callback").permitAll()
                         // SSE streaming (authenticated via ?token= query param)
