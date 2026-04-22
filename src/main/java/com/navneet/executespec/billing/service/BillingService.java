@@ -77,6 +77,9 @@ public class BillingService {
     // Tier resolution (org tier > user tier, SUPER_ADMIN → ENTERPRISE)
     private final TierEnforcementService tierEnforcementService;
 
+    /** v2.6.0 — used to filter non-LISTED tiers from public listPlans + block subscribe. */
+    private final com.navneet.executespec.auth.repository.TierConfigRepository tierConfigRepo;
+
     @Value("${billing.terms-version:2026-03-v1}")
     private String currentTermsVersion;
 
@@ -85,7 +88,7 @@ public class BillingService {
 
     /** Tier rank for upgrade/downgrade detection. Higher = better. */
     private static final Map<String, Integer> TIER_RANK = Map.of(
-            "FREE", 0, "STARTER", 1, "PRO", 2, "MAX", 3, "ENTERPRISE", 4);
+            "FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "MAX", 4, "ENTERPRISE", 5);
 
     private static int tierRank(String tier) {
         return TIER_RANK.getOrDefault(tier, 0);
@@ -96,15 +99,40 @@ public class BillingService {
     // ─────────────────────────────────────────────────────────────
 
     public List<PlanResponse> listPlans(String keyMode) {
+        return listPlans(keyMode, false);
+    }
+
+    /**
+     * v2.6.0 — {@code includeHidden} SHOULD be false for normal callers;
+     * SUPER_ADMIN dev-time inspection can pass true via
+     * {@code GET /api/billing/plans?includeHidden=true}. Filters out any plan
+     * whose {@code lifecycle_state != LISTED} OR whose owning tier_config is
+     * not LISTED. Existing subscribers holding a HIDDEN plan are unaffected
+     * — this filter is list-only, not renewal-blocking.
+     */
+    public List<PlanResponse> listPlans(String keyMode, boolean includeHidden) {
         List<BillingPlan> plans;
         if (keyMode != null && !keyMode.isBlank()) {
             plans = planRepo.findByActiveTrueAndKeyMode(keyMode);
         } else {
             plans = planRepo.findByActiveTrue();
         }
+        if (!includeHidden) {
+            plans = plans.stream()
+                    .filter(p -> "LISTED".equals(p.getLifecycleState()))
+                    .filter(p -> tierIsListed(p.getTier()))
+                    .collect(Collectors.toList());
+        }
         return plans.stream()
                 .map(p -> PlanResponse.from(p, limitRepo.findByBillingPlanId(p.getId())))
                 .collect(Collectors.toList());
+    }
+
+    private boolean tierIsListed(String tier) {
+        if (tier == null) return true;
+        return tierConfigRepo.findById(tier)
+                .map(tc -> "LISTED".equals(tc.getLifecycleState()))
+                .orElse(true); // missing row → default to LISTED so we never over-hide
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -112,19 +140,57 @@ public class BillingService {
     // ─────────────────────────────────────────────────────────────
 
     public SubscriptionInitResult subscribe(String userId, UUID planId) {
-        return subscribe(userId, planId, null, null, null);
+        return subscribe(userId, planId, null, null, null, 1);
     }
 
+    /** Back-compat overload — defaults seats=1 for non-TEAM tiers. */
     public SubscriptionInitResult subscribe(String userId, UUID planId,
                                               String preferredGateway, String successUrl, String cancelUrl) {
+        return subscribe(userId, planId, preferredGateway, successUrl, cancelUrl, 1);
+    }
+
+    /**
+     * v2.6.1 — seat-aware subscribe. For TEAM tier plans, {@code seats} must
+     * be 2-20 (self-serve range). For other tiers, {@code seats} is forced
+     * to 1 with a warning log. Stripe charges {@code price × seats}; Razorpay
+     * flow is unchanged for v1 (seat adjustment post-checkout via the
+     * adjust-seats endpoint).
+     */
+    public SubscriptionInitResult subscribe(String userId, UUID planId,
+                                              String preferredGateway, String successUrl, String cancelUrl,
+                                              int seats) {
         AppUser user = userRepo.findById(userId)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
 
         BillingPlan plan = planRepo.findById(planId)
                 .orElseThrow(() -> new IllegalArgumentException("Plan not found"));
 
+        // v2.6.1 — seat validation per tier
+        int effectiveSeats;
+        if ("TEAM".equals(plan.getTier())) {
+            if (seats < 2 || seats > 20) {
+                throw new BillingException(
+                        "TEAM tier requires 2-20 seats (got " + seats
+                        + "). Contact sales for larger orgs.");
+            }
+            effectiveSeats = seats;
+        } else {
+            if (seats != 1) {
+                log.warn("seats={} ignored for non-TEAM tier={} — forcing 1", seats, plan.getTier());
+            }
+            effectiveSeats = 1;
+        }
+
         if (!plan.isActive()) {
             throw new BillingException("This plan is no longer available.");
+        }
+
+        // v2.6.0 — lifecycle gate. Reject new subscriptions on HIDDEN or
+        // SUNSETTING plans (existing subscribers continue renewing). SUPER_ADMIN
+        // can still trigger subscribes via the internal admin path if needed;
+        // standard user flow has no bypass.
+        if (!"LISTED".equals(plan.getLifecycleState()) || !tierIsListed(plan.getTier())) {
+            throw new BillingException("This plan is not available for new subscriptions.");
         }
 
         if ("FREE".equals(plan.getTier())) {
@@ -195,9 +261,9 @@ public class BillingService {
         SubscriptionInitResult result;
 
         if ("STRIPE".equalsIgnoreCase(gateway.gatewayType())) {
-            // Stripe: create checkout session
+            // Stripe: create checkout session — pass seats for per-seat pricing
             var checkout = gateway.createCheckoutSession(
-                    billingEntity, plan.getId().toString(),
+                    billingEntity, plan.getId().toString(), effectiveSeats,
                     successUrl != null ? successUrl : "/billing?status=success",
                     cancelUrl != null ? cancelUrl : "/billing?status=cancelled");
 
@@ -717,6 +783,31 @@ public class BillingService {
         }
     }
 
+    /**
+     * v2.6.0 — fetch the seat quantity from the first line-item of a Stripe
+     * subscription. Falls back to 1 on any error (TEAM checkout will still
+     * succeed, just with wrong seat count — webhook replay or manual
+     * reconciliation can fix later).
+     */
+    private int fetchStripeSubscriptionSeatCount(String stripeSubscriptionId) {
+        try {
+            com.stripe.model.Subscription stripeSub =
+                    com.stripe.model.Subscription.retrieve(stripeSubscriptionId);
+            if (stripeSub.getItems() != null
+                    && stripeSub.getItems().getData() != null
+                    && !stripeSub.getItems().getData().isEmpty()) {
+                Long q = stripeSub.getItems().getData().get(0).getQuantity();
+                if (q != null && q > 0) {
+                    return q.intValue();
+                }
+            }
+        } catch (com.stripe.exception.StripeException e) {
+            log.warn("Stripe seat-quantity fetch failed for subId={}, defaulting to 1: {}",
+                    stripeSubscriptionId, e.getMessage());
+        }
+        return 1;
+    }
+
     private void handleStripeCheckoutCompleted(JsonNode session) {
         String stripeSubscriptionId = session.path("subscription").asText("");
         String stripeCustomerId = session.path("customer").asText("");
@@ -744,12 +835,28 @@ public class BillingService {
             });
         }
 
+        // v2.6.0 — pull the seat quantity off the Stripe Subscription so TEAM
+        // tier purchases sync totalSeats locally. Stripe doesn't include
+        // line_items on the checkout.session.completed payload by default;
+        // the Subscription object is the source of truth.
+        final int seatQuantity = fetchStripeSubscriptionSeatCount(stripeSubscriptionId);
+
+        // Sync org.seat_count for org-scoped subscriptions (TEAM tier pathway).
+        if ("ORG".equals(billingEntityType) && !billingEntityId.isBlank() && seatQuantity > 0) {
+            orgRepo.findById(billingEntityId).ifPresent(org -> {
+                org.setSeatCount(seatQuantity);
+                orgRepo.save(org);
+                log.info("Org seat_count synced from Stripe: orgId={}, seats={}",
+                        org.getId(), seatQuantity);
+            });
+        }
+
         // Find subscription by gateway subscription ID
         BillingSubscription sub = subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
         if (sub == null) {
             // Create subscription record if checkout was initiated outside our flow
-            log.info("Stripe checkout completed for new subscription: subId={}, entityId={}",
-                    stripeSubscriptionId, billingEntityId);
+            log.info("Stripe checkout completed for new subscription: subId={}, entityId={}, seats={}",
+                    stripeSubscriptionId, billingEntityId, seatQuantity);
             // Subscription will be fully set up by invoice.paid event
             return;
         }
@@ -757,9 +864,11 @@ public class BillingService {
         sub.setStatus("ACTIVE");
         sub.setGatewayCustomerId(stripeCustomerId);
         sub.setCurrentPeriodStart(Instant.now());
+        sub.setTotalSeats(seatQuantity);
         subRepo.save(sub);
 
-        log.info("Stripe checkout completed: subId={}, entityId={}", stripeSubscriptionId, billingEntityId);
+        log.info("Stripe checkout completed: subId={}, entityId={}, seats={}",
+                stripeSubscriptionId, billingEntityId, seatQuantity);
     }
 
     private void handleStripeInvoicePaid(JsonNode invoice) {

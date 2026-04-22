@@ -3,6 +3,8 @@ package com.navneet.executespec.auth.service;
 import com.navneet.executespec.auth.dto.InviteRequest;
 import com.navneet.executespec.auth.entity.*;
 import com.navneet.executespec.auth.repository.*;
+import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -30,6 +32,7 @@ public class InvitationService {
     private final AppUserRepository userRepo;
     private final ProjectMemberRepository projectMemberRepo;
     private final TierConfigRepository tierConfigRepo;
+    private final BillingSubscriptionRepository subRepo;
     private final MailService mailService;
     private final ActivityAuditService auditService;
 
@@ -83,6 +86,20 @@ public class InvitationService {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Organization has reached its member limit (" + maxMembers + "). " +
                     "Upgrade to ENTERPRISE for unlimited members.");
+        }
+
+        // ── TEAM seat-cap check (v2.6.0) ─────────────────────────────────────
+        // For TEAM tier orgs, the hard cap on members is the number of paid
+        // seats on the active subscription — not the tier_config.max_org_members
+        // value. Exceeding seats returns 402 Payment Required so the frontend
+        // can show a "buy more seats" CTA (distinct from 403 "upgrade tier").
+        if ("TEAM".equals(org.getTier())) {
+            int seatLimit = resolveTeamSeatLimit(orgId, org.getSeatCount());
+            if (orgMemberRepo.countByOrgId(orgId) >= seatLimit) {
+                throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                        "Organization has reached its seat limit (" + seatLimit + " seats). " +
+                        "Add more seats in the Team admin dashboard to invite additional members.");
+            }
         }
 
         String token = UUID.randomUUID().toString().replace("-", "");
@@ -414,5 +431,30 @@ public class InvitationService {
         return tierConfigRepo.findById(org.getTier())
                 .map(com.navneet.executespec.auth.entity.TierConfig::getMaxOrgMembers)
                 .orElse(-1);
+    }
+
+    /**
+     * v2.6.0 — resolve the seat limit for a TEAM-tier org.
+     *
+     * <p>Priority order:
+     * <ol>
+     *   <li>Active TEAM {@link BillingSubscription}'s {@code totalSeats} — the
+     *       source of truth, synced from Stripe webhook</li>
+     *   <li>{@code org.seat_count} column — fallback when the subscription
+     *       hasn't webhooked through yet (race between checkout success +
+     *       webhook delivery)</li>
+     *   <li>Conservative default of 2 — minimum TEAM size</li>
+     * </ol>
+     */
+    private int resolveTeamSeatLimit(String orgId, int orgSeatCount) {
+        BillingSubscription teamSub = subRepo.findActiveByTier("TEAM").stream()
+                .filter(s -> orgId.equals(s.getOrgId()))
+                .findFirst()
+                .orElse(null);
+        if (teamSub != null && teamSub.getTotalSeats() > 0) {
+            return teamSub.getTotalSeats();
+        }
+        if (orgSeatCount > 0) return orgSeatCount;
+        return 2; // conservative minimum
     }
 }

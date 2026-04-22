@@ -322,4 +322,37 @@ public class OrgController {
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
+
+    // ── Seat management (v2.6.0 TEAM tier) ──────────────────────────────────
+
+    public record SeatsAdjustRequest(int newSeats) {}
+
+    public record SeatsAdjustResponse(int previousSeats, int newSeats, int activeMembers,
+                                       String message) {}
+
+    /**
+     * v2.6.0 — adjust the seat count on a TEAM-tier org subscription. Updates
+     * the Stripe/Razorpay subscription quantity (prorated) then syncs
+     * {@code org.seat_count} + {@code BillingSubscription.totalSeats}
+     * locally — the webhook will also fire but we update eagerly so the UI
+     * reflects the new count immediately.
+     *
+     * <p>Rejects reducing seats below current active member count (400) —
+     * admin must remove members first.
+     * <p>Rejects seats outside 2-20 range (400) — larger orgs route to
+     * ENTERPRISE sales.
+     * <p>Returns 402 if no active TEAM subscription found (the org isn't
+     * on a seat-priced tier).
+     */
+    @PostMapping("/me/seats/adjust")
+    @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+    public ResponseEntity<SeatsAdjustResponse> adjustSeats(
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody SeatsAdjustRequest req) {
+        String orgId = userDetails.getUser().getOrgId();
+        if (orgId == null) return ResponseEntity.badRequest().build();
+        SeatsAdjustResponse resp = orgService.adjustSeats(
+                orgId, req.newSeats(), userDetails.getUser().getId());
+        return ResponseEntity.ok(resp);
+    }
 }

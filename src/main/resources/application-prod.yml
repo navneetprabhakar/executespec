@@ -150,6 +150,8 @@ billing:
     webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
     pro-price-id: ${STRIPE_PRO_PRICE_ID:}
     enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
+    team-price-id: ${STRIPE_TEAM_PRICE_ID:}
+    team-price-id-inr: ${STRIPE_TEAM_PRICE_ID_INR:}
   razorpay:
     enabled: ${BILLING_RAZORPAY_ENABLED:true}
 

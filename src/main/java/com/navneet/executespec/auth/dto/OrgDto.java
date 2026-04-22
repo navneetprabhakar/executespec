@@ -13,6 +13,8 @@ public record OrgDto(
         String tier,
         String status,
         int monthlyRunCount,
+        /** v2.6.0 — TEAM-tier seat count (shared pool). 1 for non-TEAM orgs. */
+        int seatCount,
         boolean isPaymentVerified,
         Integer monthlyRunLimitOverride,
         boolean apiKeysProvided,
@@ -44,6 +46,7 @@ public record OrgDto(
                 org.getTier(),
                 org.getStatus(),
                 org.getMonthlyRunCount(),
+                org.getSeatCount(),
                 org.isPaymentVerified(),
                 org.getMonthlyRunLimitOverride(),
                 org.isApiKeysProvided(),
