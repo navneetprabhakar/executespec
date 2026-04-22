@@ -119,7 +119,7 @@ export default function FailureDecisionModal({ executionId, failed, onClose }: P
       </div>
 
       {submitting === 'FIX' && (
-        <div className="mt-3 rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-2 py-1.5 space-y-1">
+        <div className="mt-3 rounded-sm border border-status-success/40 bg-status-success/10 px-2 py-1.5 space-y-1">
           <div className="text-[11px] text-muted">
             Push your fix to the execution branch on GitHub, then signal done below.
           </div>

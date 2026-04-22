@@ -242,7 +242,7 @@ export default function ProjectDashboardPage() {
         {/* Metric tiles: +tokens +cost */}
         <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
           <MetricTile label="Active"    value={dashboard?.activeRuns ?? '—'}    accent="text-accent-blue" />
-          <MetricTile label="Completed" value={dashboard?.completedRuns ?? '—'} accent="text-emerald-400" />
+          <MetricTile label="Completed" value={dashboard?.completedRuns ?? '—'} accent="text-status-success" />
           <MetricTile label="Failed"    value={dashboard?.failedRuns ?? '—'}    accent="text-accent-red" />
           <MetricTile
             label="Avg score"
@@ -560,10 +560,13 @@ function MetricTile({ label, value, accent }: { label: string; value: string | n
 }
 
 function scoreAccent(score: number | null | undefined): string {
+  // v2.6.0 UI polish — 4-band graduated palette (see docs/design/ui-tokens.md).
+  // Binary >=90 green / <75 red was too harsh — borderline scores read as failures.
   if (score == null) return 'text-muted';
-  if (score >= 90) return 'text-emerald-400';
-  if (score >= 75) return 'text-accent-amber';
-  return 'text-accent-red';
+  if (score >= 85) return 'text-status-success';
+  if (score >= 70) return 'text-accent-blue';
+  if (score >= 50) return 'text-status-waiting';
+  return 'text-status-error';
 }
 
 function formatK(n: number): string {

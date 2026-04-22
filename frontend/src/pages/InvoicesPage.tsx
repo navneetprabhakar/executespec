@@ -55,10 +55,10 @@ export default function InvoicesPage() {
 
   const statusColor = (status: string) => {
     switch (status) {
-      case 'PAID': return 'text-emerald-400 bg-emerald-500/10';
+      case 'PAID': return 'text-status-success bg-status-success/10';
       case 'DRAFT': return 'text-secondary bg-[var(--gray-200)]';
-      case 'ISSUED': return 'text-accent-blue bg-blue-500/10';
-      case 'VOID': return 'text-accent-red bg-red-500/10';
+      case 'ISSUED': return 'text-accent-blue bg-accent-blue/10';
+      case 'VOID': return 'text-status-error bg-status-error/10';
       default: return 'text-secondary bg-[var(--gray-200)]';
     }
   };

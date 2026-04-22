@@ -117,7 +117,7 @@ export default function Header() {
       {user?.tier && user.tier !== 'FREE' && user.tier !== 'MAX' && user.tier !== 'ENTERPRISE' && (
         <Link
           to="/billing#topup"
-          className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-500 text-xs font-medium hover:bg-emerald-500/20 transition-colors flex-shrink-0"
+          className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-status-success/10 text-status-success text-xs font-medium hover:bg-status-success/20 transition-colors flex-shrink-0"
         >
           <Plus className="h-3 w-3" />
           Top-up

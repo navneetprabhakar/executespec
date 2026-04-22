@@ -81,7 +81,7 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
         </div>
       </div>
 
-      {error && <div className="text-sm text-red-600">{error}</div>}
+      {error && <div className="text-sm text-status-error">{error}</div>}
 
       {repos.length === 0 && (
         <EmptyState

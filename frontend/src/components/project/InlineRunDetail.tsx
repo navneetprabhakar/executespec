@@ -6,15 +6,15 @@ import { CodeTab } from '@/components/runs/RunDetailTabs';
 import { cn } from '@/lib/utils';
 
 const STATUS_COLOR: Record<string, string> = {
-  COMPLETE:   'text-emerald-400',
-  PARTIAL:    'text-accent-amber',
-  FAILED:     'text-accent-red',
-  CANCELLED:  'text-accent-red',
-  RUNNING:    'text-accent-blue',
-  PLANNING:   'text-accent-blue',
-  WORKING:    'text-accent-blue',
-  REVIEWING:  'text-accent-blue',
-  AWAITING_APPROVAL: 'text-accent-amber',
+  COMPLETE:   'text-status-success',
+  PARTIAL:    'text-status-partial',
+  FAILED:     'text-status-error',
+  CANCELLED:  'text-status-error',
+  RUNNING:    'text-status-executing',
+  PLANNING:   'text-status-thinking',
+  WORKING:    'text-status-executing',
+  REVIEWING:  'text-status-thinking',
+  AWAITING_APPROVAL: 'text-status-waiting',
 };
 
 /**
@@ -168,7 +168,7 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
         {pushStatus && (
           <div className={cn(
             'text-[11px]',
-            pushStatus.startsWith('Push failed') ? 'text-accent-red' : 'text-emerald-400',
+            pushStatus.startsWith('Push failed') ? 'text-status-error' : 'text-status-success',
           )}>
             {pushStatus}
           </div>
