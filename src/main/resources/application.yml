@@ -533,6 +533,8 @@ app:
     transport: smtp
     base-url: http://localhost:5173
     from: admin@executespec.ai
+    # v2.6.0 — recipient for new-signup alerts + weekly admin summary
+    admin-address: ${ADMIN_NOTIFICATION_EMAIL:admin@executespec.ai}
     # ── SMTP config (used when transport=smtp) ──────────────────────────────
     smtp:
       host: smtp.gmail.com

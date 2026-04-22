@@ -80,6 +80,19 @@ public class AuthService {
         // Send verification email
         String token = createEmailToken(user.getId(), "EMAIL_VERIFICATION", 24);
         mailService.sendVerificationEmail(user.getEmail(), user.getFirstName(), token);
+
+        // Admin notification — fire-and-forget (@Async), failures logged not rethrown
+        try {
+            mailService.sendNewUserAlertToAdmin(
+                    mailService.getAdminAddress(),
+                    user.getEmail(),
+                    user.getFirstName(),
+                    user.getLastName(),
+                    "Email");
+        } catch (Exception e) {
+            log.warn("Admin new-signup notification failed for {}: {}", user.getEmail(), e.getMessage());
+        }
+
         log.info("User registered: {}", user.getEmail());
 
         auditService.record(ActivityAudit.builder()
@@ -379,6 +392,18 @@ public class AuthService {
 
         // Auto-create FREE billing subscription
         createFreeSubscription(user.getId());
+
+        // Admin notification — fire-and-forget, same as email-signup path
+        try {
+            mailService.sendNewUserAlertToAdmin(
+                    mailService.getAdminAddress(),
+                    user.getEmail(),
+                    user.getFirstName(),
+                    user.getLastName(),
+                    provider == null ? "OAuth" : provider.substring(0, 1).toUpperCase() + provider.substring(1));
+        } catch (Exception e) {
+            log.warn("Admin new-signup OAuth notification failed for {}: {}", user.getEmail(), e.getMessage());
+        }
 
         auditService.record(ActivityAudit.builder()
                 .eventType("USER_REGISTERED_OAUTH")
