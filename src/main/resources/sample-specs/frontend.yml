@@ -1,0 +1,13 @@
+# Wave 2.2 — sandbox sample spec (frontend path).
+id: frontend
+title: "Landing page for NotesAI"
+category: "Frontend / landing page"
+projectType: "node-frontend-vite"
+preferredProvider: "anthropic"
+complexity: "LOW"
+spec: |
+  Create a landing page for a SaaS tool called "NotesAI" with a hero section,
+  three feature cards (Speed, Privacy, Collaboration), and a signup form with
+  email + password fields. Use Tailwind CSS. Fully responsive — mobile, tablet,
+  desktop breakpoints. Dark mode by default; simple toggle in header. No
+  backend submission — stub the form to log to console.
