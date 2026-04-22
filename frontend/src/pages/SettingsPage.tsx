@@ -292,7 +292,7 @@ export default function SettingsPage() {
                   : planTier === 'PRO' ? 'Pro Plan'
                   : 'Free Plan');
             const badge = planTier === 'ENTERPRISE' ? { cls: 'bg-accent-amber/20 text-accent-amber', letter: 'E' }
-              : planTier === 'MAX' ? { cls: 'bg-emerald-500/20 text-emerald-400', letter: 'M' }
+              : planTier === 'MAX' ? { cls: 'bg-status-success/20 text-status-success', letter: 'M' }
               : planTier === 'PRO' ? { cls: 'bg-accent-blue/20 text-accent-blue', letter: 'P' }
               : { cls: 'bg-[var(--gray-400)] text-secondary', letter: 'F' };
             const subtitle = planTier === 'ENTERPRISE'
@@ -694,7 +694,7 @@ function OrgKeySourceCard({ org, onSaved }: { org: OrgDto; onSaved: (o: OrgDto) 
 
       {/* Warning */}
       {missingKeys && (
-        <div className="rounded-sm border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+        <div className="rounded-sm border border-status-waiting/30 bg-status-waiting/5 px-3 py-2">
           <p className="text-xs text-accent-amber">
             <AlertCircle className="h-3.5 w-3.5 inline mr-1 -mt-0.5" />
             OWN_KEYS mode is selected but no org/user keys are configured for the enabled providers.

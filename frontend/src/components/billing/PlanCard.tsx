@@ -26,7 +26,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
 
   return (
     <div className={`relative rounded-md border p-4 sm:p-6 flex flex-col ${
-      isMax ? 'border-emerald-600' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
+      isMax ? 'border-status-success' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
     } ${isCurrentPlan ? 'ring-2 ring-accent-blue' : ''}`}>
 
       {isPopular && (
@@ -36,7 +36,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
       )}
 
       {isMax && !isCurrentPlan && (
-        <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-xs font-semibold px-3 py-1 rounded-sm">
+        <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-status-success text-white text-xs font-semibold px-3 py-1 rounded-sm">
           BEST VALUE
         </span>
       )}
@@ -115,7 +115,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
             : isDowngrade
               ? 'bg-[var(--gray-200)] text-muted cursor-not-allowed'
               : isMax
-                ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                ? 'bg-status-success text-white hover:bg-status-success/80'
                 : isPopular
                   ? 'bg-accent-blue text-primary hover:bg-accent-blue-hover'
                   : 'bg-[var(--gray-300)] text-primary hover:bg-[var(--gray-400)]'
