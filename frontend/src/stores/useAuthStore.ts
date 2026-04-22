@@ -12,7 +12,8 @@ interface AuthStore {
 
   login: (email: string, password: string) => Promise<void>;
   logout: () => Promise<void>;
-  register: (email: string, firstName: string, lastName: string, password: string) => Promise<void>;
+  register: (email: string, firstName: string, lastName: string, password: string,
+             attribution?: { signupSource?: string; utmSource?: string; utmCampaign?: string }) => Promise<void>;
   refreshAccessToken: () => Promise<boolean>;
   loadMe: () => Promise<void>;
   setUser: (user: api.AuthUser | null) => void;
@@ -40,8 +41,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     set({ accessToken: null, user: null, isAuthenticated: false, permissions: null });
   },
 
-  register: async (email, firstName, lastName, password) => {
-    await api.authRegister({ email, firstName, lastName, password });
+  register: async (email, firstName, lastName, password, attribution) => {
+    await api.authRegister({ email, firstName, lastName, password, ...attribution });
     // Don't auto-login — user must verify email first
   },
 

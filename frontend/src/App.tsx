@@ -55,16 +55,43 @@ import DpaPage from '@/pages/DpaPage';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
+import { initAnalytics, identify, page, reset as resetAnalytics } from '@/lib/analytics';
 
 export default function App() {
-  const { loadMe } = useAuthStore();
+  const { loadMe, user } = useAuthStore();
 
   // iOS Safari: scroll focused input into view when soft keyboard opens
   useKeyboardScroll();
 
   useEffect(() => {
+    // Wave 2.1 — initialize PostHog once. Safe no-op when VITE_POSTHOG_API_KEY
+    // is unset.
+    initAnalytics();
     // Try to restore session from access_token or refresh cookie on mount
     loadMe();
+  }, []);
+
+  // Wave 2.1 — identify once the user record resolves; reset on logout.
+  useEffect(() => {
+    if (user?.id) {
+      identify(user.id, {
+        tier: user.tier,
+        orgId: user.orgId ?? null,
+        orgRole: user.orgRole ?? null,
+        viewMode: user.viewMode ?? null,
+      });
+    } else {
+      resetAnalytics();
+    }
+  }, [user?.id, user?.tier, user?.orgId]);
+
+  // Wave 2.1 — lightweight pageview tracking. Routes are controlled by
+  // react-router; re-trigger on path changes via location.pathname.
+  useEffect(() => {
+    page(window.location.pathname);
+    const handler = () => page(window.location.pathname);
+    window.addEventListener('popstate', handler);
+    return () => window.removeEventListener('popstate', handler);
   }, []);
 
   return (
