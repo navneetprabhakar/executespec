@@ -40,11 +40,11 @@ const STATUS_FILL: Record<string, string> = {
 
 const pillClass = (status: string): string => {
   const s = (status || '').toUpperCase();
-  if (s === 'COMPLETE') return 'bg-emerald-500/15 text-emerald-300';
+  if (s === 'COMPLETE') return 'bg-status-success/15 text-status-success';
   if (['WORKING', 'RUNNING', 'COMPILING', 'MERGING'].includes(s)) return 'bg-blue-500/15 text-blue-300';
   if (['PLANNING', 'REVIEWING'].includes(s)) return 'bg-violet-500/15 text-violet-300';
-  if (['PARTIAL', 'BLOCKED'].includes(s)) return 'bg-amber-500/15 text-amber-300';
-  if (s === 'FAILED') return 'bg-red-500/15 text-red-300';
+  if (['PARTIAL', 'BLOCKED'].includes(s)) return 'bg-status-waiting/15 text-status-waiting';
+  if (s === 'FAILED') return 'bg-status-error/15 text-status-error';
   return 'bg-neutral-500/15 text-neutral-300';
 };
 
@@ -287,8 +287,8 @@ export default function TaskTimeline({ tasks, runStartedAt }: Props) {
                     )}
                     {r.failureReason && (
                       <>
-                        <span className="col-span-2 mt-1 text-red-400">Failure</span>
-                        <span className="col-span-2 text-red-300 whitespace-pre-wrap">{r.failureReason}</span>
+                        <span className="col-span-2 mt-1 text-status-error">Failure</span>
+                        <span className="col-span-2 text-status-error whitespace-pre-wrap">{r.failureReason}</span>
                       </>
                     )}
                   </div>

@@ -76,7 +76,7 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
             <span
               className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${
                 repo.webhookInstalled
-                  ? 'bg-emerald-500/10 text-emerald-400'
+                  ? 'bg-status-success/10 text-status-success'
                   : 'bg-[var(--gray-400)]/50 text-muted'
               }`}
               title={repo.webhookInstalled

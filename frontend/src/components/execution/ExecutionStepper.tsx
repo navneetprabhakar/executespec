@@ -71,7 +71,7 @@ export default function ExecutionStepper({
                       ? 'bg-accent-amber text-white border-accent-amber'
                       : 'bg-accent-blue text-white border-accent-blue')
                   : isDone
-                  ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40'
+                  ? 'bg-status-success/20 text-status-success border-status-success/40'
                   : 'text-muted border-[var(--border-default)]',
               )}
             >

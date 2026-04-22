@@ -43,7 +43,7 @@ export default function StalenessWarning({
   if (staleSelected.length === 0) {
     if (just) {
       return (
-        <div className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-xs text-emerald-400">
+        <div className="rounded-sm border border-status-success/40 bg-status-success/10 px-3 py-1.5 text-xs text-status-success">
           ✓ Codemaps refreshed — ready to plan.
         </div>
       );

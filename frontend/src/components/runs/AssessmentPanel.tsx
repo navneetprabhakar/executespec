@@ -58,7 +58,7 @@ export default function AssessmentPanel({ raw }: Props) {
 
 function ComplexityChip({ complexity }: { complexity: string }) {
   const colors: Record<string, string> = {
-    S: 'bg-emerald-500/10 text-emerald-400',
+    S: 'bg-status-success/10 text-status-success',
     M: 'bg-accent-amber/10 text-accent-amber',
     L: 'bg-accent-red/10 text-accent-red',
   };

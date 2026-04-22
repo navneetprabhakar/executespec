@@ -39,7 +39,7 @@ export default function ArchReviewGate({ executionId }: { executionId: string })
               throw e;
             }
           }}
-          className="rounded-sm border border-emerald-500/40 bg-emerald-500/10 text-emerald-400 px-3 py-1.5 text-sm disabled:opacity-60"
+          className="rounded-sm border border-status-success/40 bg-status-success/10 text-status-success px-3 py-1.5 text-sm disabled:opacity-60"
         >
           {approved ? 'Generating plan…' : 'Approve & continue'}
         </button>

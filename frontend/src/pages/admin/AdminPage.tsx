@@ -996,7 +996,7 @@ function AdminPageInner() {
                           'inline-block px-2 py-0.5 text-xs rounded-full',
                           w.processingStatus === 'PROCESSED' && 'bg-accent-green/10 text-accent-green',
                           w.processingStatus === 'IGNORED' && 'bg-accent-amber/10 text-accent-amber',
-                          w.processingStatus === 'FAILED' && 'bg-red-500/10 text-red-400',
+                          w.processingStatus === 'FAILED' && 'bg-status-error/10 text-status-error',
                         )}>{w.processingStatus}</span>
                       </td>
                       <td className="px-4 py-3 text-xs text-muted text-center">{w.attempts}</td>

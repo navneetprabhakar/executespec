@@ -34,7 +34,7 @@ export default function CancellationPanel() {
                      : s.status === 'FAILED' ? '✗'
                      : s.status === 'RUNNING' ? '◉'
                      : '○';
-          const cls = s.status === 'COMPLETE' ? 'text-emerald-400'
+          const cls = s.status === 'COMPLETE' ? 'text-status-success'
                     : s.status === 'FAILED' ? 'text-accent-red'
                     : s.status === 'RUNNING' ? 'text-accent-blue'
                     : 'text-muted';

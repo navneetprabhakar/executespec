@@ -8,7 +8,7 @@ const STATUS_PILL: Record<ProjectDocumentRow['status'], string> = {
   UPLOADED: 'text-muted',
   EXTRACTING: 'text-accent-blue',
   EMBEDDING: 'text-accent-blue',
-  READY: 'text-emerald-400',
+  READY: 'text-status-success',
   FAILED: 'text-accent-red',
 };
 

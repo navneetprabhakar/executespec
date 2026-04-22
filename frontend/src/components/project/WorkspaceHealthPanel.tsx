@@ -82,7 +82,7 @@ export default function WorkspaceHealthPanel({ projectId }: { projectId: string 
               ? { label: 'not yet analysed', cls: 'bg-accent-amber/10 text-accent-amber' }
               : r.isStale
                 ? { label: 'stale codemap', cls: 'bg-accent-red/10 text-accent-red' }
-                : { label: 'up to date', cls: 'bg-emerald-500/10 text-emerald-400' };
+                : { label: 'up to date', cls: 'bg-status-success/10 text-status-success' };
             const freshnessDetail = r.lastCodeMapSha == null
               ? `current: ${sha7(r.currentOriginSha)}`
               : `${sha7(r.lastCodeMapSha)} → ${sha7(r.currentOriginSha)}`;
@@ -99,7 +99,7 @@ export default function WorkspaceHealthPanel({ projectId }: { projectId: string 
                   <span
                     className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${
                       r.webhookInstalled
-                        ? 'bg-emerald-500/10 text-emerald-400'
+                        ? 'bg-status-success/10 text-status-success'
                         : 'bg-[var(--gray-400)]/50 text-muted'
                     }`}
                   >

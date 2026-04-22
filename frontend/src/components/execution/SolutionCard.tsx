@@ -4,11 +4,11 @@ import type { SolutionDto } from '@/types/execution';
 import { cn } from '@/lib/utils';
 
 const STATUS_COLOR: Record<string, string> = {
-  DONE: 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40',
+  DONE: 'bg-status-success/20 text-status-success border-status-success/40',
   RUNNING: 'bg-accent-blue/20 text-accent-blue border-accent-blue/40',
   VALIDATING: 'bg-accent-blue/20 text-accent-blue border-accent-blue/40',
-  PR_RAISED: 'bg-yellow-500/20 text-yellow-400 border-yellow-500/40',
-  FAILED: 'bg-red-500/20 text-accent-red border-red-500/40',
+  PR_RAISED: 'bg-status-waiting/20 text-status-waiting border-status-waiting/40',
+  FAILED: 'bg-status-error/20 text-accent-red border-status-error/40',
   SKIPPED: 'bg-[var(--gray-200)] text-muted border-[var(--border-default)]',
   QUEUED: 'bg-[var(--gray-200)] text-muted border-[var(--border-default)]',
 };

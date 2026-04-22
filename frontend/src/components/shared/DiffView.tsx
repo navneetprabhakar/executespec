@@ -43,7 +43,7 @@ function FileBlock({ block }: { block: FileBlockT }) {
         <span className="text-secondary truncate">{block.filePath}</span>
         {(block.additions > 0 || block.deletions > 0) && (
           <span className="ml-auto text-[10px] font-mono flex items-center gap-2">
-            {block.additions > 0 && <span className="text-emerald-400">+{block.additions}</span>}
+            {block.additions > 0 && <span className="text-status-success">+{block.additions}</span>}
             {block.deletions > 0 && <span className="text-accent-red">−{block.deletions}</span>}
           </span>
         )}
@@ -67,11 +67,11 @@ function FileBlock({ block }: { block: FileBlockT }) {
 function DiffLine({ line }: { line: Line }) {
   const { kind, oldNo, newNo, content } = line;
   const rowBg =
-    kind === 'add' ? 'bg-emerald-500/10'
+    kind === 'add' ? 'bg-status-success/10'
     : kind === 'del' ? 'bg-accent-red/10'
     : '';
   const marker =
-    kind === 'add' ? <span className="text-emerald-400">+</span>
+    kind === 'add' ? <span className="text-status-success">+</span>
     : kind === 'del' ? <span className="text-accent-red">−</span>
     : <span className="text-muted"> </span>;
   const textColor =
