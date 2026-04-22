@@ -52,6 +52,15 @@ spring:
     baseline-on-migrate: true   # Safe for existing databases
     baseline-version: 0         # Baseline before V1
     locations: classpath:db/migration
+    # v2.6.0 — V119 was `preview_platform_v2_schema.sql` on Apr 19 when dev/prod
+    # DBs were migrated. That file belonged to preview-engine; when preview-engine
+    # moved to its own repo (commit cdc26e11), the SQL was removed from this tree
+    # but the DB still has the row. The rename_provider_google_to_gemini migration
+    # originally conflicted as V119; we renamed it V120 (see V120__*) to dodge
+    # the collision. This pattern tells Flyway: "V119 being applied-but-missing
+    # is expected, don't abort boot." Scoped to 119 specifically so new
+    # accidentally-deleted migrations still fail loudly (the safety net we want).
+    ignore-migration-patterns: "119:missing"
 
   # ── OAuth2 Login (Google + GitHub) ──────────────────────────────────────────
   # Set GOOGLE_OAUTH_CLIENT_ID / GITHUB_OAUTH_CLIENT_ID env vars to enable.
