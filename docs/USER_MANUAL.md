@@ -4,6 +4,12 @@
 > **Date**: 2026-04-22
 > **Audience**: Developers, Product Managers, Tech Leads
 
+> **v2.6.1 what's new (2026-04-22 → 2026-04-28 Wave 1)**
+> - **TEAM tier** — new $49/seat plan for 2-20 dev teams. Shared credit pool (50 credits/seat/month), Google OIDC sign-in, team admin dashboard with seat management, 180-day retention. Starts showing on the pricing page once Wave 1 ships.
+> - **PRO is now "grandfathered"** — existing PRO subscribers keep their plan and price untouched. New buyers see FREE / TEAM / MAX / ENTERPRISE on the pricing page. If TEAM conversion proves out, PRO may be further sunset down the road — existing subscribers would get at least 60 days' notice.
+> - **Seat adjustment in the Org admin dashboard** — TEAM admins can now raise or lower seats (2-20) with a single number input. Stripe prorates automatically.
+> - **/admin/tiers** console (SUPER_ADMIN only) — shows per-tier subscriber count + monthly revenue and exposes the 3-state lifecycle machine for retiring future tiers without forcing churn on paying customers.
+>
 > **v2.6.0 what's new (2026-04-22)**
 > - **Dark / light theme toggle** — Sun/Moon button in the header top-right. Choice persists in `localStorage` (pre-paint applied so there's no flash). New Graphite+Signal palette is softer than the previous pure-black theme. See [design/ui-tokens.md](design/ui-tokens.md) for the full design system.
 > - **Project dashboard IA** — the 10 flat tabs on a project are now 5 groups (Overview / Work / Knowledge / Settings / Chat). Chat is first-class (was buried under Knowledge).
