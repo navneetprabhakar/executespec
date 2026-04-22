@@ -57,7 +57,7 @@ Every action item grouped by urgency and numbered for unambiguous reference. Quo
 - [x] **P0-18** · Product Tour section deployed (5 tabbed mock views)
 - [x] **P0-19** · Comparison table deployed (ExecuteSpec vs 5 competitors)
 - [x] **P0-20** · 6 new per-tool FAQ entries deployed + reflected in JSON-LD `FAQPage` schema
-- [ ] **P0-21** · Replace placeholder `og-hero.png` (68KB Pillow-generated) with a real designed 1200×630 social card — blocks high-quality social shares
+- [x] **P0-21** · Replace placeholder `og-hero.png` with a real designed 1200×630 social card — 2026-04-22: composited left text panel (brand + "Specify once. Ship _verified_ code." headline + pricing pill) with right-side product screenshot tightly cropped on the Verified 80 score ring + pipeline stages + Validation Report header. Rendered via Playwright → quantized to 256 colors → 92 KB PNG. Deployed to Cloudflare Worker; live bytes verified (etag `621d3fdf1b60c688ba867c859d7204d3`). Source template archived at `website/press-kit/og-hero-template/` with rebuild instructions.
 - [x] **P0-22** · Shoot 6 product screenshots — **5 of 6 captured** as 1440×900 HiDPI PNGs to `website/press-kit/` (ss-01…ss-05 + bonus score-trend). Shot 6 (mobile QR) deferred — needs live Expo preview session.
 - [ ] **P0-23** · Record 60-90s Loom demo video — script in `website/product-hunt-launch.md §6.4`
 - [ ] **P0-24** · Swap mock HTML tour panels for real screenshots — _attempted then reverted 2026-04-22_. Real screenshots from dev data (`ss-05-validation-report.png` + `ss-03-project-overview.png`) showed too much red/orange (legitimate failures + tech-debt bars) for marketing landing. Reverting to green-state styled HTML mocks until we can seed a project with clean/high-score runs for cleaner captures. Real PNGs still live in `website/press-kit/` for the PH gallery — just not embedded in the tour.
@@ -231,11 +231,11 @@ From `website/product-hunt-launch.md §9`:
 
 > **This is a view, not a stable-ID list.** The `1. / 2. / 3.` ranking below re-orders as items get checked off. Per the numbering contract at the top of this doc, the `P0-N` IDs referenced inside each bullet never change.
 
-(Updated after Bing + Google indexing all went live.)
+(Updated 2026-04-22 after P0-21 OG card ship.)
 
-1. **P0-22** (shoot 6 real product screenshots) — 60-90 min. Biggest remaining unlock: fuels both the PH gallery AND the tour-panel asset swap (P0-24). Nothing else on the list touches two downstream items at once.
-2. **P2-7** (submit to alternativeto.net) — 20 min. Single-highest-authority backlink for every "X alternative" search intent. Matches 20 of our 41 keywords.
-3. **P0-28** (ops: wire 5 Stripe env vars on prod GCE) — ~15 min of ops work. Until this lands, US paid conversions fall back to Razorpay, which doesn't ideally serve US cards.
+1. **P2-7** (submit to alternativeto.net) — 20 min. Single-highest-authority backlink for every "X alternative" search intent. Matches 20 of our 41 keywords. Now #1 because P0-21 is done and the social card P2-7 would drive clicks into is finally presentable.
+2. **P0-28** (ops: wire 5 Stripe env vars on prod GCE) — ~15 min of ops work. Until this lands, US paid conversions fall back to Razorpay, which doesn't ideally serve US cards.
+3. **P0-23** (record 60-90s Loom demo) — 60 min of focused recording time. Script exists in `website/product-hunt-launch.md §6.4`. Required for Product Hunt submission slot.
 
 Everything else compounds off these three.
 
