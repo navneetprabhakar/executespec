@@ -4,7 +4,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { updateViewMode as apiUpdateViewMode } from '../lib/api';
 
 type ViewMode = 'vibe' | 'pro' | 'project';
-type Tier = 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE';
+type Tier = 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
 
 export function useViewMode() {
   const uiViewMode = useUiStore((s) => s.viewMode);
