@@ -75,6 +75,8 @@ public class RunController {
     private final com.navneet.executespec.harness.GateStore gateStore;
     private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
     private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
+    /** Wave 2.1 — activation funnel (SPEC_SUBMITTED fired here on run submit, PLAN_APPROVED here on approval). */
+    private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
     /** Submit a new run. Returns immediately with the run summary (status may be PLANNING or QUEUED). */
     @PostMapping
@@ -319,6 +321,17 @@ public class RunController {
         if (!claimed) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                     "Plan gate has already been resolved by another caller.");
+        }
+
+        // Wave 2.1 — activation funnel step 4 (fires once per user, only on
+        // positive approval — rejections don't count as "crossed the credit bar").
+        if (req.approved() && approveRun.getCreatedByUserId() != null) {
+            eventTracking.track(approveRun.getCreatedByUserId(),
+                    com.navneet.executespec.analytics.EventName.PLAN_APPROVED,
+                    java.util.Map.of(
+                            "executionMode", req.executionMode() == null ? "REALTIME" : req.executionMode(),
+                            "creditsConfirmed", req.creditsConfirmed() == null ? 0 : req.creditsConfirmed()
+                    ));
         }
         return ResponseEntity.ok().build();
     }

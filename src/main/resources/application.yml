@@ -653,6 +653,16 @@ logging:
     "[io.opentelemetry]": WARN
     "[io.micrometer.tracing]": INFO
 
+# ── Product analytics (Wave 2.1 — 6-event activation funnel) ──────────────────
+# When posthog.api-key is blank, EventTrackingService is a no-op (safe for
+# local dev). Prod: set POSTHOG_API_KEY + POSTHOG_HOST env vars.
+# Full plan: docs/plans/activation-instrumentation-plan.md.
+analytics:
+  posthog:
+    enabled: ${POSTHOG_ENABLED:false}
+    api-key: ${POSTHOG_API_KEY:}
+    host: ${POSTHOG_HOST:https://us.i.posthog.com}
+
 # ── Observability (Actuator + OTel + Metrics) ────────────────────────────────
 management:
   endpoints:
