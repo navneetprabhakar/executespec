@@ -753,6 +753,31 @@ public class BillingService {
         }
     }
 
+    /**
+     * v2.6.0 — fetch the seat quantity from the first line-item of a Stripe
+     * subscription. Falls back to 1 on any error (TEAM checkout will still
+     * succeed, just with wrong seat count — webhook replay or manual
+     * reconciliation can fix later).
+     */
+    private int fetchStripeSubscriptionSeatCount(String stripeSubscriptionId) {
+        try {
+            com.stripe.model.Subscription stripeSub =
+                    com.stripe.model.Subscription.retrieve(stripeSubscriptionId);
+            if (stripeSub.getItems() != null
+                    && stripeSub.getItems().getData() != null
+                    && !stripeSub.getItems().getData().isEmpty()) {
+                Long q = stripeSub.getItems().getData().get(0).getQuantity();
+                if (q != null && q > 0) {
+                    return q.intValue();
+                }
+            }
+        } catch (com.stripe.exception.StripeException e) {
+            log.warn("Stripe seat-quantity fetch failed for subId={}, defaulting to 1: {}",
+                    stripeSubscriptionId, e.getMessage());
+        }
+        return 1;
+    }
+
     private void handleStripeCheckoutCompleted(JsonNode session) {
         String stripeSubscriptionId = session.path("subscription").asText("");
         String stripeCustomerId = session.path("customer").asText("");
@@ -780,12 +805,28 @@ public class BillingService {
             });
         }
 
+        // v2.6.0 — pull the seat quantity off the Stripe Subscription so TEAM
+        // tier purchases sync totalSeats locally. Stripe doesn't include
+        // line_items on the checkout.session.completed payload by default;
+        // the Subscription object is the source of truth.
+        final int seatQuantity = fetchStripeSubscriptionSeatCount(stripeSubscriptionId);
+
+        // Sync org.seat_count for org-scoped subscriptions (TEAM tier pathway).
+        if ("ORG".equals(billingEntityType) && !billingEntityId.isBlank() && seatQuantity > 0) {
+            orgRepo.findById(billingEntityId).ifPresent(org -> {
+                org.setSeatCount(seatQuantity);
+                orgRepo.save(org);
+                log.info("Org seat_count synced from Stripe: orgId={}, seats={}",
+                        org.getId(), seatQuantity);
+            });
+        }
+
         // Find subscription by gateway subscription ID
         BillingSubscription sub = subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
         if (sub == null) {
             // Create subscription record if checkout was initiated outside our flow
-            log.info("Stripe checkout completed for new subscription: subId={}, entityId={}",
-                    stripeSubscriptionId, billingEntityId);
+            log.info("Stripe checkout completed for new subscription: subId={}, entityId={}, seats={}",
+                    stripeSubscriptionId, billingEntityId, seatQuantity);
             // Subscription will be fully set up by invoice.paid event
             return;
         }
@@ -793,9 +834,11 @@ public class BillingService {
         sub.setStatus("ACTIVE");
         sub.setGatewayCustomerId(stripeCustomerId);
         sub.setCurrentPeriodStart(Instant.now());
+        sub.setTotalSeats(seatQuantity);
         subRepo.save(sub);
 
-        log.info("Stripe checkout completed: subId={}, entityId={}", stripeSubscriptionId, billingEntityId);
+        log.info("Stripe checkout completed: subId={}, entityId={}, seats={}",
+                stripeSubscriptionId, billingEntityId, seatQuantity);
     }
 
     private void handleStripeInvoicePaid(JsonNode invoice) {
