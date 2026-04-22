@@ -1068,6 +1068,37 @@ export interface SeatsAdjustResponse {
   message: string;
 }
 
+// v2.6.0 — tier lifecycle (admin-only)
+export type LifecycleState = 'LISTED' | 'HIDDEN' | 'SUNSETTING';
+
+export interface TierLifecycleDto {
+  tier: string;
+  displayName: string;
+  state: LifecycleState;
+  changedAt: string | null;
+  changedBy: string | null;
+  reason: string | null;
+  activeSubscribers: number;
+  /** Monthly recurring revenue in USD cents. Divide by 100 for dollar amount. */
+  monthlyRecurringRevenueUsdCents: number;
+}
+
+export interface TierLifecycleUpdateRequest {
+  state: LifecycleState;
+  reason: string;
+  /** Required when state='SUNSETTING' — must match tier name. */
+  confirmTierName?: string;
+}
+
+export const fetchTiersLifecycle = () =>
+  req<TierLifecycleDto[]>('/admin/tiers');
+
+export const updateTierLifecycle = (tier: string, body: TierLifecycleUpdateRequest) =>
+  req<unknown>(`/admin/tiers/${tier}/lifecycle`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
 /**
  * Adjust seat count on the caller's TEAM-tier org (ORG_ADMIN / SUPER_ADMIN).
  * Pushes new quantity to Stripe (prorated) and syncs org.seat_count locally.

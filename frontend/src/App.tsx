@@ -36,6 +36,7 @@ import AdminPage from '@/pages/admin/AdminPage';
 import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
 import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
 import PricingManager from '@/pages/admin/PricingManager';
+import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
 
 // Audit page
 import AuditPage from '@/pages/AuditPage';
@@ -121,6 +122,7 @@ export default function App() {
           <Route path="admin/analytics" element={<OrgAdminDashboard />} />
           <Route path="admin/pricing" element={<PricingManager />} />
           <Route path="admin/feature-flags" element={<FeatureFlagsPage />} />
+          <Route path="admin/tiers" element={<TierLifecyclePage />} />
           <Route path="admin/*" element={<AdminPage />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />

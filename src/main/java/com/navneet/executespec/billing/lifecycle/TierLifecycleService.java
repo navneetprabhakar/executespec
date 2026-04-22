@@ -200,6 +200,64 @@ public class TierLifecycleService {
     }
 
     /**
+     * v2.6.0 — per-tier lifecycle + MRR summary for the admin page. Reads
+     * the static tier_config metadata, joins active subscriptions to compute
+     * subscriber count and monthly revenue (USD). Billing plans are
+     * aggregated by tier — TEAM row sums {@code totalSeats × perSeatUsd}
+     * across all subscriptions on the tier; non-TEAM sums
+     * {@code baseAmountUsd} per active sub.
+     */
+    @Transactional(readOnly = true)
+    public List<TierLifecycleDto> listAll() {
+        List<TierLifecycleDto> out = new ArrayList<>();
+        BillingSubscriptionRepository subRepo = subscriptionRepoProvider != null
+                ? subscriptionRepoProvider.getIfAvailable() : null;
+
+        for (TierConfig t : tierConfigRepo.findAll()) {
+            long subs = 0;
+            long mrrCents = 0;
+            if (subRepo != null) {
+                List<BillingSubscription> list = subRepo.findActiveByTier(t.getTier());
+                subs = list.size();
+                for (BillingSubscription s : list) {
+                    BillingPlan plan = s.getBillingPlanId() != null
+                            ? billingPlanRepo.findById(s.getBillingPlanId()).orElse(null)
+                            : null;
+                    if (plan == null) continue;
+                    if ("TEAM".equals(t.getTier())) {
+                        mrrCents += (long) plan.getPerSeatUsd() * Math.max(s.getTotalSeats(), 1);
+                    } else {
+                        mrrCents += plan.getBaseAmountUsd();
+                    }
+                }
+            }
+            out.add(new TierLifecycleDto(
+                    t.getTier(),
+                    t.getDisplayName(),
+                    LifecycleState.fromDbValue(t.getLifecycleState()),
+                    t.getLifecycleChangedAt(),
+                    t.getLifecycleChangedBy(),
+                    t.getLifecycleReason(),
+                    subs,
+                    mrrCents
+            ));
+        }
+        return out;
+    }
+
+    /** Admin-summary DTO for {@code GET /api/admin/tiers}. */
+    public record TierLifecycleDto(
+            String tier,
+            String displayName,
+            LifecycleState state,
+            Instant changedAt,
+            String changedBy,
+            String reason,
+            long activeSubscribers,
+            long monthlyRecurringRevenueUsdCents
+    ) {}
+
+    /**
      * v2.6.0 — enumerate active subscriptions on the sunsetted tier and queue
      * cancel-at-period-end on each gateway. Gated behind the
      * {@code billing.lifecycle.sunsetting.enabled} feature flag — when the
