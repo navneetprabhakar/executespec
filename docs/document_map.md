@@ -3,6 +3,8 @@
 > Which docs to update for each type of change.
 > Last updated: 2026-04-22 (v2.6.0 — UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot + PH launch kit + persona roadmap; v2.5.12: 3-step architecture + Generate Docs + Sync; v2.5.0: project workspace + RAG; pilot v3.0)
 >
+> **v2.6.1 Wave 1 (2026-04-22 → 2026-04-28): TEAM tier + tier-lifecycle tooling shipped together (Option Z). See [docs/plans/team-tier-plan.md](plans/team-tier-plan.md) + [docs/plans/tier-lifecycle-plan.md](plans/tier-lifecycle-plan.md). PRO grandfathered to `HIDDEN` via V122 migration — existing subscribers unaffected. SUNSETTING gateway side-effects gated by `billing.lifecycle.sunsetting.enabled` feature flag (default OFF).**
+>
 > **v2.6.0 docs to know about:**
 > - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — new single source of truth for every color in the app. Semantic palette (`--status-success/executing/waiting/partial/error/...`), graduated 4-band score palette, accent palette, radius/spacing scale, Tailwind mapping, chip patterns, MUST/MUST NOT rules. If you add a component, start here.
 > - [`docs/reports/session-handoff-2026-04-21.md`](reports/session-handoff-2026-04-21.md) — detailed handoff: commits landed, pricing v3 rationale (Option C over B), US-first pivot, Stripe prod default, blocking list for PH launch, deferred follow-ups (Stripe top-up wiring, country-aware routing, currency-gateway-map, Stripe refund path, Gemini token bloat fix, mobile accuracy floor, Bug #1c strict-provider bypass).
