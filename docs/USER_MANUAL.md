@@ -1,8 +1,18 @@
 # ExecuteSpec — User Manual
 
-> **Version**: 2.4.0
-> **Date**: 2026-04-14
+> **Version**: 2.6.0
+> **Date**: 2026-04-22
 > **Audience**: Developers, Product Managers, Tech Leads
+
+> **v2.6.0 what's new (2026-04-22)**
+> - **Dark / light theme toggle** — Sun/Moon button in the header top-right. Choice persists in `localStorage` (pre-paint applied so there's no flash). New Graphite+Signal palette is softer than the previous pure-black theme. See [design/ui-tokens.md](design/ui-tokens.md) for the full design system.
+> - **Project dashboard IA** — the 10 flat tabs on a project are now 5 groups (Overview / Work / Knowledge / Settings / Chat). Chat is first-class (was buried under Knowledge).
+> - **Exec summary** — new `/exec` page for the Business Owner / PgM view: MTD spend, success rate, needs-attention count, spend-by-project bars, top-3 wins, cross-project Awaiting-approval digest. Gated behind PRO/MAX/ENTERPRISE — FREE sees an upgrade wall.
+> - **AI provider name** — the third provider is now spelled **Gemini** everywhere in the UI (was "Google"). Existing runs / projects using `GOOGLE` are auto-migrated on first load (no action required).
+> - **Pricing v3** — $1 = 1 credit, flat per complexity band: LOW=1, MEDIUM=1, HIGH=4, Mobile=2. Same credit cost regardless of which provider you pick — so you can pick Anthropic for accuracy without a price penalty. 20 PRO credits ≈ 20 LOW, 6 HIGH, or 10 Mobile runs.
+> - **US-first billing** — USD default on the Plans page. India users (detected by browser locale or timezone) auto-flip to INR. Stripe is the default gateway in prod when `STRIPE_*` env vars are wired; Razorpay is the fallback.
+> - **ScoreRing hero** — the validation report now shows a 0-100 verified score as a graduated 4-band ring (green ≥85, blue 70-84, amber 50-69, red <50). Borderline 70-79 reads as "good enough, ship it" — no longer red.
+> - **Better notifications** — NotificationPanel no longer clips off the left edge of the screen on mobile.
 
 > **Pilot v3.0 quick links**
 > - [Project workspace walkthrough](#13-pilot-v30--project-workspace) — one-time setup, multi-repo runs, architecture doc, scoring

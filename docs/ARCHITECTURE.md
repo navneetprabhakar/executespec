@@ -1,9 +1,20 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 4.7
-> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; **Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16**
-> **App Version**: v2.5.11
+> **Version**: 4.8
+> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; **v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22**
+> **App Version**: v2.6.0
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
+
+## 0a. 2026-04-22 refresh — v2.6.0 (merged to `dev` + `main`)
+
+- **UX v3 Graphite+Signal (theme + IA + a11y):** `tokens.css` palette swap `#000 → #0B0D10` graphite + Signal Blue `#5B8DEF` accent + neutralised money colour. Full `[data-theme="light"]` override ruleset enables dark/light toggle. `useUiStore` adds theme slice + `setTheme/toggleTheme` with pre-paint apply to `<html data-theme>` + `localStorage` persistence. `ProjectDashboardPage` tabs refactored from 10 flat tabs to 5 top-level groups (Overview / Work / Knowledge / Settings / Chat). New `/exec` route + `ExecSummaryPage` (Business Owner / PgM persona view: MTD spend, success rate, needs-attention count, spend-by-project bars, cross-project awaiting-approval digest — gated behind `canViewCostBreakdown` PRO/MAX/ENTERPRISE). Sidebar a11y fix: `aria-label` + `title` on every NavLink (WCAG 2.4.4/4.1.2). Dynamic Header breadcrumb per route. 17 email templates + `validation-report-pdf.html` bulk palette swap.
+- **UI polish v1 (ScoreRing + 4-band graduated palette):** new `ScoreRing` (SVG stroke-dasharray, 4-band color) replaces the old text-centric `verifiedScore` hero. 4-band rule: `>=85 success` / `70-84 accent-blue` / `50-69 waiting` / `<50 error` — applied everywhere we render a 0-100 number (`ScoreRing`, `ScoreCard`, `SignalBreakdown`). Binary pass/fail at 80 was too harsh — borderline 70-79 read as failures. Single source of truth: [`docs/design/ui-tokens.md`](design/ui-tokens.md) (new).
+- **Semantic-token drift fix — 50 files:** two passes (13 + 37 components) eliminated raw Tailwind colors (`bg-red-500`, `text-emerald-600`) from every user-facing component. `tailwind.config.ts` extends `colors: { muted, primary, secondary, 'status-*' }`. Rule enforced: PARTIAL is never red (it's amber `--status-partial`).
+- **LlmProvider.GOOGLE → GEMINI rename:** root-cause fix for the "No enum constant LlmProvider.GOOGLE" planner crash. 12 call sites + `application.yml` `model-matrix:` `google:` → `gemini:`, `failover-order:` `google` → `gemini`, model pricing rows `provider: google` → `provider: gemini`, `provider-pool.GOOGLE` → `GEMINI`. New V120 migration `rename_provider_google_to_gemini.sql` rewrites legacy rows in `project/execution_run/pipeline_run`. `FailoverOrderEnumAlignmentTest` asserts YAML ↔ enum alignment at build time.
+- **Flyway dev/prod tolerance:** V119 (`preview_platform_v2_schema.sql`) was applied on dev/prod then superseded — `spring.flyway.out-of-order=true` + `ignore-migration-patterns: repeatable:missing,versioned:missing` in `application.yml` lets boot tolerate the missing V119 row in `flyway_schema_history`.
+- **Pricing v3 — $1 = 1 credit flat per band:** LOW=1, MEDIUM=1, HIGH=4, Mobile=2. Anthropic HIGH eats a `-32%` margin loss as CAC (treated as the price of the "your provider, your choice" positioning). Blended HIGH margin `+59%` across the 3-provider mix. Source of truth: `website/tier-decision.md`. Real cost data: `website/pricing-analysis.md`.
+- **US-first pivot + Stripe prod default:** `PlansPage.tsx` + `website/index.html` — USD default, geo-detect flips to INR for `navigator.language` starting `en-in`/`hi` or timezone `Asia/Kolkata`. `application-prod.yml` adds `billing.default-gateway: ${BILLING_DEFAULT_GATEWAY:stripe}` + `billing.stripe.enabled: ${BILLING_STRIPE_ENABLED:true}` (env-gated — takes effect when ops wires the 5 `STRIPE_*` vars). Razorpay still the local default on dev profile. Legal copy (Terms §8, Privacy data-collection, DPA sub-processors) now reads "Stripe (US/global) · Razorpay (India)".
+- **Product Hunt launch kit:** `website/product-hunt-launch.md`, `website/press-kit/README.md` + 6 screenshots + 1200×630 designed OG hero (via HTML+CSS template renderer), SEO config (`sitemap.xml`, `robots.txt`, `site.webmanifest`, `llms.txt`, `BingSiteAuth.xml`, `wrangler.toml`).
 
 ## 0. 2026-04-16 refresh — Validation v3 (in progress)
 
@@ -53,7 +64,7 @@ C4Context
 
     System_Ext(anthropic, "Anthropic API", "Claude models")
     System_Ext(openai, "OpenAI API", "GPT models")
-    System_Ext(google, "Google AI", "Gemini models")
+    System_Ext(gemini, "Google AI (Gemini)", "Gemini models — LlmProvider.GEMINI")
     System_Ext(github, "GitHub", "Source code repos + OAuth2 login")
     System_Ext(jira, "JIRA", "Issue tracking")
     System_Ext(confluence, "Confluence", "Documentation")
@@ -1142,7 +1153,7 @@ graph TB
         SUBMIT --> PPM[ProviderRunPoolManager]
         PPM --> |ANTHROPIC pool| AP[provider-pool-ANTHROPIC-n]
         PPM --> |OPENAI pool| OP[provider-pool-OPENAI-n]
-        PPM --> |GOOGLE pool| GP[provider-pool-GOOGLE-n]
+        PPM --> |GEMINI pool| GP[provider-pool-GEMINI-n]
 
         AP & OP & GP --> PIPELINE[Pipeline Thread]
 

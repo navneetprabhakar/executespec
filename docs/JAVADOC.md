@@ -2341,13 +2341,16 @@ spring:
             model: gemini-3-flash-preview
 
 # Model Matrix (user-selected provider x agent tier -> model)
+#
+# v2.6.0 — provider key is `gemini` (was `google`). LlmProvider enum canonical name
+# is GEMINI; `FailoverOrderEnumAlignmentTest` asserts YAML ↔ enum alignment at build time.
 model-matrix:
   providers:
     anthropic:
       planning: claude-sonnet-4-6
       workhorse: claude-haiku-4-5-20251001
       lightweight: claude-haiku-4-5-20251001
-    google:
+    gemini:
       planning: gemini-3-flash-preview
       workhorse: gemini-3-flash-preview
       lightweight: gemini-3-flash-preview
@@ -2371,9 +2374,9 @@ model-matrix:
     ValidationReportGenerator: WORKHORSE
     RequestTriageService: LIGHTWEIGHT
   failover-order:
-    anthropic: [openai, google]
-    google: [openai, anthropic]
-    openai: [google, anthropic]
+    anthropic: [openai, gemini]
+    gemini:    [openai, anthropic]
+    openai:    [gemini, anthropic]
 
 agent:
   workspace: ./workspace
@@ -2581,6 +2584,43 @@ billing:
 | V73 | Plan effectiveness tracking (`plan_effectiveness` table — per-run planner model + provider + task outcome rates) |
 | V74 | Validation report accuracy (`validation_report.accuracy_score` INTEGER, `accuracy_grade` TEXT, `accuracy_json` TEXT — persists Phase 3 accuracy assessment results) |
 | V75 | Validation report preview URL (`validation_report.preview_url` TEXT — stores the preview URL at time of report generation for persistent access) |
+| V80 | `validation_report.status` column (PENDING/COMPLETE/FAILED) |
+| V81 | Project settings + repo registry |
+| V82 | `pull_request_record` table |
+| V83 | `validation_report` score dimensions |
+| V84 | Codebase intelligence (codemap, architecture_doc) |
+| V85 | Assessment result + figma_url |
+| V86 | `pipeline_run.selected_repo_ids` |
+| V87 | `run_code_map` |
+| V88 | Project memory (ledger + snapshot) |
+| V89 | Execution view schema |
+| V90 | Project shell + multi-run solutions + MAX tier gate |
+| V95 | pgvector + project_document + project_document_chunk |
+| V96 | auto-push flag (PLATFORM scope) |
+| V97 | execution_* id columns widened to VARCHAR(64) + tenant_isolation policy drop-recreate |
+| V98 | auto-push flag follow-up |
+| V99 | Backfill `execution_run.ai_provider` for legacy rows |
+| V100 | `run_repo_snapshot` (per-repo SHA captured at clone) |
+| V101 | `project_repo.webhook_installed` NOT NULL default FALSE |
+| V102 | `project_spec_template` (owner_type PROJECT\|ORG, soft-delete) + Batch 4 cancel rollback |
+| V103 | `execution_run.branch` |
+| V104 | `project.github_owner` |
+| V105 | `execution_run.continue_pr` |
+| V106 | `validation_report.verified_score` + seed flag `scoring.v2-verified` |
+| V107 | `pipeline_run.status_reason` (CLEAN_COMPLETION / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / …) |
+| V108 | Backfill historical PARTIAL runs to honest status |
+| V109 | `pipeline_run.plan_requirements_json` + `agent_task.meets_requirements_json` + flag `validation.v3-strict` |
+| V110 | Enable `scoring.v2-verified` |
+| V111 | `execution_solution` failure-signature dedup |
+| V112 | `execution_run.version` BIGINT (`@Version` optimistic lock for Bug #3) |
+| V113 | `project_generated_doc` (Generate Docs feature) |
+| V114 | Widen `project_generated_doc.generated_by` → VARCHAR(255) |
+| V115 | `repo_architecture_doc` (3-step arch pipeline) |
+| V116 | Seed `security.guardrail_level` feature flag |
+| V117 | Seed `v2.batch.enabled` feature flag |
+| V118 | Seed `codegen.react_native.enabled` feature flag |
+| V119 | _(deleted on `dev`/`prod`)_ — executed-but-missing on both DBs. `application.yml` sets `spring.flyway.out-of-order=true` + `ignore-migration-patterns: repeatable:missing,versioned:missing` to tolerate the gap. |
+| V120 | **v2.6.0** — Rename legacy `GOOGLE` provider rows to `GEMINI` in `project/execution_run/pipeline_run`. Idempotent. Closes the JPA `@Enumerated(EnumType.STRING)` crash that surfaced as HTTP 500 on `/api/projects` for orgs that once picked Gemini. |
 
 ### 21.2 Entity Relationship Diagram
 
