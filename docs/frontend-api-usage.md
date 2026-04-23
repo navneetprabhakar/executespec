@@ -1,14 +1,37 @@
 # Frontend API Usage Audit
 
 > Every API call made from the frontend, organized by file. Use this to understand which backend endpoints the frontend depends on.
-> Last updated: 2026-04-22 (v2.6.0 — LlmProvider GOOGLE → GEMINI rename, new `/exec` ExecSummaryPage, theme toggle on useUiStore)
+> Last updated: 2026-04-23 (v2.6.1 — Waves 1-6 persona roadmap: TEAM tier + lifecycle, onboarding+activation, SSO + team-trial, startup program shells)
 
-## v2.6.0 additions
+## v2.6.1 additions (Waves 1-6)
 
-- **Theme state** — `frontend/src/stores/useUiStore.ts` adds a `theme: 'dark' | 'light'` slice with `setTheme(t)` / `toggleTheme()` actions. Pre-paint applies `<html data-theme>` + persists to `localStorage`. No backend API involved.
-- **`ExecSummaryPage` (`/exec`)** — reads `/api/billing/usage`, `/api/runs?scope=org&limit=30`, `/api/projects?scope=org`, and the cross-project awaiting-approval digest via `/api/runs?status=AWAITING_APPROVAL&scope=org`. Gated behind `canViewCostBreakdown` (PRO/MAX/ENTERPRISE).
-- **Provider name in `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider`** — send `GEMINI` (preferred). `GOOGLE` still accepted as an input alias (rewritten server-side). Select options in `ProviderModelSelector.tsx` + `ProjectSelector.tsx` now read "Gemini".
-- **ScoreRing consumer** — `ValidationReportPanel` hero renders the `ScoreRing` component with `report.verifiedScore`; no new endpoint, just a UI surface change.
+**Wave 1 — TEAM tier + 3-state lifecycle**
+- **`adjustOrgSeats(newSeats)`** → `POST /api/org/me/seats/adjust` body `{newSeats}` → `OrgDto`. Used by `OrgAdminDashboard`'s Seats panel on TEAM orgs. Rejects values outside `[2,20]`, below `activeMemberCount`, or non-TEAM tier with 400.
+- **`fetchTiersLifecycle()`** → `GET /api/admin/tiers` → `{tiers: TierLifecycleRow[]}`. Used by the new `TierLifecyclePage` under `/admin/tiers`. Each row includes `tier`, `lifecycleState` (`LISTED|HIDDEN|SUNSETTING`), `sunsettingStartedAt`, `sunsettingEndsAt`, `hiddenSinceTs`, `metadataJson`.
+- **`updateTierLifecycle(tier, body)`** → `PUT /api/admin/tiers/{tier}` body `{state, reason?, observationDays?}`. SUNSETTING transitions require a 14-day `HIDDEN` observation window — backend enforces 409 if not met.
+- **Billing subscribe seats param** — `subscribe(planId, gateway, successUrl, cancelUrl, seats?)` now accepts an optional `seats` (2-20). Stripe path threads it through `/billing/subscribe` → `SubscriptionUpdateParams` → Checkout Session line_items quantity.
+- **`PlanCard.tsx`** — introduces TIER_RANK slot `TEAM=2.5` between PRO and MAX; adds a seat picker (2-20) on the TEAM card wired to `subscribe`.
+- **`PlansPage.tsx`** — tier display order locked as FREE → PRO (hidden when `LISTED`-only is on) → TEAM → MAX → ENTERPRISE.
+
+**Wave 2 — onboarding + activation funnel**
+- **`listOnboardingSamples()`** → `GET /api/onboarding/sample-specs` → `SampleSpec[]` (`{id, title, surface, description, tags[], expectedTimeMinutes}`). Reads from `sample-specs/{web-api,frontend,cli}.yml` shipped on the backend classpath.
+- **`pickOnboardingSample(sampleId)`** → `POST /api/onboarding/pick-sample` body `{sampleId}` → `{runId, projectId}`. Provisions (or reuses) the sandbox project, drops the sample spec into the new run, dispatches via `V2RunOrchestrator.submitRun`.
+- **`getSandboxStatus()`** → `GET /api/onboarding/sandbox-status` → `{provisioned, projectId?, lastActivity?, expiresAt?}`. Called by `WelcomePage` + `FirstRunCelebration` to decide whether to deep-link into the sandbox.
+- **`RegisterPayload`** — adds `signupSource`, `utmCampaign`, `utmMedium`, `utmSource`, `referrer` (optional). `RegisterPage.tsx` reads `document.referrer` + querystring UTM params before the submit; backend writes to `app_user.signup_*` columns (Wave 2 V125 ledger + V126 sandbox).
+- **`analytics.ts`** — thin wrapper over `posthog-js` (`initAnalytics`, `identify`, `page`, `reset`, `track`). Enabled only when `VITE_POSTHOG_KEY` is set. Events mirror the 6-event funnel (SIGNUP, PROJECT_CREATED, SPEC_SUBMITTED, PLAN_APPROVED, RUN_COMPLETE, PR_MERGED).
+- **New pages** — `WelcomePage` (post-signup), `RunsNewLanding` (empty-state aware of sandbox), `FirstRunCelebration` (fires on first `RUN_COMPLETE`).
+
+**Wave 3 — SSO + team-trial shells** (schema + docs live; UI lands post-launch)
+- **`requestTeamTrial(body)`** → `POST /api/org/trial-request` body `{orgId, contactEmail, intendedSeats, notes?}` → `{id, status: 'PENDING'}`. Backed by `team_trial_request` table (V127). Not yet wired to a UI surface.
+- **Org SSO preview** — `OrgDto` gains read-only `samlMetadataUrl`, `ssoRequired`, `scimProvisioning` fields. Admin UI is deferred; see `docs/plans/wave-3-sso-githubapp-procurement-plan.md`.
+
+**Wave 4-6** — landing proof, routing heuristic scaffold, changelog, startup program application (`POST /api/startup-program/apply`), CLI bootstrap — all ship as schema + docs in v2.6.1; no new frontend-facing endpoints beyond the documented shells.
+
+**Carryover from v2.6.0**
+- **Theme state** — `useUiStore.ts` `theme: 'dark' | 'light'` slice with `setTheme(t)` / `toggleTheme()`. Pre-paint applies `<html data-theme>` + persists to `localStorage`. No backend API involved.
+- **`ExecSummaryPage` (`/exec`)** — reads `/api/billing/usage`, `/api/runs?scope=org&limit=30`, `/api/projects?scope=org`, cross-project AWAITING_APPROVAL digest. Gated behind `canViewCostBreakdown` (PRO/TEAM/MAX/ENTERPRISE).
+- **Provider name** — send `GEMINI` (preferred); `GOOGLE` accepted as input alias, rewritten server-side.
+- **ScoreRing consumer** — `ValidationReportPanel` hero renders `ScoreRing` with `report.verifiedScore`.
 
 
 ## API Client Architecture
@@ -226,6 +249,21 @@
 | `markTestInvalid(testResultId)` | PUT | `/test-results/{testResultId}/mark-invalid` | | |
 | `applyTestFixes(runId, signature?)` | POST | `/runs/{runId}/apply-test-fixes?signature=` | | |
 
+### Onboarding (v2.6.1 Wave 2)
+
+| Function | Method | Endpoint | Request | Response |
+|----------|--------|----------|---------|----------|
+| `listOnboardingSamples()` | GET | `/onboarding/sample-specs` | | `SampleSpec[]` |
+| `pickOnboardingSample(sampleId)` | POST | `/onboarding/pick-sample` | `{sampleId}` | `{runId, projectId}` |
+| `getSandboxStatus()` | GET | `/onboarding/sandbox-status` | | `{provisioned, projectId?, lastActivity?, expiresAt?}` |
+
+### Tier Lifecycle (v2.6.1 Wave 1, SUPER_ADMIN)
+
+| Function | Method | Endpoint | Request | Response |
+|----------|--------|----------|---------|----------|
+| `fetchTiersLifecycle()` | GET | `/admin/tiers` | | `{tiers: TierLifecycleRow[]}` |
+| `updateTierLifecycle(tier, body)` | PUT | `/admin/tiers/{tier}` | `{state, reason?, observationDays?}` | `TierLifecycleRow` |
+
 ### Organization (lines 967-1034)
 
 | Function | Method | Endpoint | Request | Response |
@@ -247,6 +285,8 @@
 | `getOrgInvitations()` | GET | `/org/me/invitations` | | `OrgInvitation[]` |
 | `resendInvitation(id)` | POST | `/org/me/invitations/{id}/resend` | | `{message}` |
 | `acceptInvite(token)` | POST | `/org/accept-invite?token=` | | `{message}` |
+| `adjustOrgSeats(newSeats)` | POST | `/org/me/seats/adjust` | `{newSeats}` | `OrgDto` |
+| `requestTeamTrial(body)` | POST | `/org/trial-request` | `{orgId, contactEmail, intendedSeats, notes?}` | `{id, status}` |
 
 ### Projects (lines 1057-1078)
 
@@ -316,7 +356,7 @@ Multi-gateway support: `subscribe()` accepts optional `gateway` param (`'stripe'
 |----------|--------|----------|---------|----------|
 | `fetchPlans(keyMode?)` | GET | `/billing/plans?keyMode=` | | `BillingPlan[]` |
 | `fetchBillingStatus()` | GET | `/billing/status` | | `BillingStatus` |
-| `subscribe(planId, gateway?, successUrl?, cancelUrl?)` | POST | `/billing/subscribe` | `{planId, gateway, successUrl, cancelUrl}` | `SubscriptionInitResult` |
+| `subscribe(planId, gateway?, successUrl?, cancelUrl?, seats?)` | POST | `/billing/subscribe` | `{planId, gateway, successUrl, cancelUrl, seats?}` | `SubscriptionInitResult` |
 | `verifyPayment(razorpaySubscriptionId, razorpayPaymentId, razorpaySignature)` | POST | `/billing/verify` | `{razorpaySubscriptionId, razorpayPaymentId, razorpaySignature}` | `BillingStatus` |
 | `cancelSubscription()` | POST | `/billing/cancel` | | |
 | `updateSeats(totalSeats)` | POST | `/billing/seats` | `{totalSeats}` | `BillingStatus` |

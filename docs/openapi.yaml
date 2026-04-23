@@ -9,7 +9,14 @@ info:
     request fields now prefer GEMINI; GOOGLE is retained as a back-compat alias
     on input and rewritten to GEMINI before persistence. YAML keys under
     `model-matrix` / `failover-order` use `gemini`.
-  version: 1.6.0
+
+    v2.6.1 (2026-04-23) — persona roadmap Waves 1-6. Wave 1 adds TEAM tier +
+    3-state tier lifecycle (`/api/admin/tiers`, `/api/org/me/seats/adjust`) +
+    seat-aware Stripe checkout. Wave 2 adds onboarding sandbox + sample specs
+    (`/api/onboarding/*`) and a 6-event activation funnel (PostHog). Waves 3-6
+    land schema + docs for SSO, team-trial, startup program, and provider
+    smart-routing; full UI surfaces follow post-launch.
+  version: 1.7.0
   contact:
     name: ExecuteSpec
     url: https://executespec.ai
@@ -70,6 +77,12 @@ tags:
     description: Pre-run requirement clarification chat
   - name: SSE
     description: Server-Sent Events for live run updates
+  - name: Onboarding
+    description: Wave 2 — sandbox provisioning + sample specs for first-run activation
+  - name: Tier Lifecycle
+    description: Wave 1 — 3-state tier lifecycle admin controls (LISTED | HIDDEN | SUNSETTING)
+  - name: Team Trial
+    description: Wave 3 — TEAM tier trial request intake
 
 paths:
   # ──────────────────────────────────────────────────
@@ -1435,6 +1448,10 @@ paths:
     post:
       tags: [Billing]
       summary: Initiate subscription (routed to Razorpay or Stripe)
+      description: |
+        Returns a gateway-specific checkout payload. Wave 1 (v2.6.1) adds an
+        optional `seats` parameter (2-20) for TEAM tier — Stripe threads it into
+        the Checkout Session line_items quantity; Razorpay ignores it.
       requestBody:
         content:
           application/json:
@@ -1444,6 +1461,18 @@ paths:
               properties:
                 planId:
                   type: string
+                gateway:
+                  type: string
+                  enum: [stripe, razorpay]
+                successUrl:
+                  type: string
+                cancelUrl:
+                  type: string
+                seats:
+                  type: integer
+                  minimum: 2
+                  maximum: 20
+                  description: TEAM tier only. Omit for per-seat-quantity=1 (PRO/MAX).
       responses:
         '200':
           content:
@@ -1451,10 +1480,20 @@ paths:
               schema:
                 type: object
                 properties:
+                  gateway:
+                    type: string
+                  checkoutUrl:
+                    type: string
+                    description: Stripe — redirect target
+                  sessionId:
+                    type: string
+                    description: Stripe session id
                   gatewaySubscriptionId:
                     type: string
+                    description: Razorpay subscription id
                   shortUrl:
                     type: string
+                    description: Razorpay checkout short URL
                   razorpayKeyId:
                     type: string
 
@@ -2753,6 +2792,193 @@ paths:
               schema:
                 $ref: '#/components/schemas/LoginResponse'
 
+  # ──────────────────────────────────────────────────
+  # ONBOARDING (Wave 2)
+  # ──────────────────────────────────────────────────
+  /onboarding/sample-specs:
+    get:
+      tags: [Onboarding]
+      summary: List onboarding sample specs
+      description: Returns the curated sample-spec catalog (web-api / frontend / cli) used by the post-signup welcome flow.
+      responses:
+        '200':
+          description: Sample specs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    id: { type: string }
+                    title: { type: string }
+                    surface: { type: string, enum: [HTTP, CLI, STATIC_WEB, LIBRARY] }
+                    description: { type: string }
+                    expectedTimeMinutes: { type: integer }
+                    tags:
+                      type: array
+                      items: { type: string }
+
+  /onboarding/pick-sample:
+    post:
+      tags: [Onboarding]
+      summary: Launch a sample spec into the caller's sandbox project
+      description: Provisions (or reuses) the sandbox project, drops the sample spec into a new run, dispatches via V2RunOrchestrator.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sampleId]
+              properties:
+                sampleId: { type: string }
+      responses:
+        '202':
+          description: Run submitted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runId: { type: string, format: uuid }
+                  projectId: { type: string, format: uuid }
+
+  /onboarding/sandbox-status:
+    get:
+      tags: [Onboarding]
+      summary: Return the caller's sandbox project status
+      responses:
+        '200':
+          description: Sandbox status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  provisioned: { type: boolean }
+                  projectId: { type: string, format: uuid, nullable: true }
+                  lastActivity: { type: string, format: date-time, nullable: true }
+                  expiresAt: { type: string, format: date-time, nullable: true }
+
+  # ──────────────────────────────────────────────────
+  # TIER LIFECYCLE (Wave 1, SUPER_ADMIN)
+  # ──────────────────────────────────────────────────
+  /admin/tiers:
+    get:
+      tags: [Tier Lifecycle]
+      summary: List tiers with lifecycle state
+      responses:
+        '200':
+          description: Tier lifecycle rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tiers:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TierLifecycleRow'
+
+  /admin/tiers/{tier}:
+    put:
+      tags: [Tier Lifecycle]
+      summary: Transition a tier between LISTED | HIDDEN | SUNSETTING
+      description: |
+        SUNSETTING transitions require a 14-day `HIDDEN` observation window (enforced
+        as 409 Conflict when not yet elapsed). The request body must repeat the
+        tier name in `reason` as a typed-name confirmation guard.
+      parameters:
+        - name: tier
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [FREE, PRO, TEAM, MAX, ENTERPRISE]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [state]
+              properties:
+                state: { type: string, enum: [LISTED, HIDDEN, SUNSETTING] }
+                reason: { type: string }
+                observationDays: { type: integer, minimum: 0 }
+      responses:
+        '200':
+          description: Updated lifecycle row
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TierLifecycleRow'
+        '409':
+          description: Transition rejected (e.g. SUNSETTING before 14-day HIDDEN window elapses)
+
+  # ──────────────────────────────────────────────────
+  # TEAM TRIAL (Wave 3)
+  # ──────────────────────────────────────────────────
+  /org/trial-request:
+    post:
+      tags: [Team Trial]
+      summary: Submit a TEAM tier trial request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [orgId, contactEmail, intendedSeats]
+              properties:
+                orgId: { type: string, format: uuid }
+                contactEmail: { type: string, format: email }
+                intendedSeats: { type: integer, minimum: 2, maximum: 20 }
+                notes: { type: string }
+      responses:
+        '201':
+          description: Trial request accepted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string, format: uuid }
+                  status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
+
+  # ──────────────────────────────────────────────────
+  # ORG SEATS (Wave 1)
+  # ──────────────────────────────────────────────────
+  /org/me/seats/adjust:
+    post:
+      tags: [Organization]
+      summary: Adjust seat count for a TEAM org
+      description: |
+        TEAM tier only. `newSeats` must be within `[2,20]` and ≥ `activeMemberCount`.
+        The backend eagerly syncs the local `org.seat_count` column and pushes the
+        new quantity to Stripe via `SubscriptionItem.update` with `CREATE_PRORATIONS`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [newSeats]
+              properties:
+                newSeats: { type: integer, minimum: 2, maximum: 20 }
+      responses:
+        '200':
+          description: Updated org
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/OrgDto'
+        '400':
+          description: Invalid seat count (below activeMemberCount, outside [2,20], or non-TEAM tier)
+        '402':
+          description: Stripe payment required (sync rejected)
+
 # ──────────────────────────────────────────────────
 # COMPONENTS
 # ──────────────────────────────────────────────────
@@ -2788,6 +3014,18 @@ components:
         password:
           type: string
           minLength: 8
+        signupSource:
+          type: string
+          description: Wave 2 — attribution tag (e.g. `product-hunt`, `direct`, `organic`). Written to `app_user.signup_source`.
+        utmSource:
+          type: string
+        utmMedium:
+          type: string
+        utmCampaign:
+          type: string
+        referrer:
+          type: string
+          description: Wave 2 — caller-captured `document.referrer` at registration time.
 
     LoginRequest:
       type: object
@@ -3110,6 +3348,7 @@ components:
             type: string
         tier:
           type: string
+          enum: [FREE, PRO, TEAM, MAX, ENTERPRISE]
         status:
           type: string
         keySourceMode:
@@ -3118,6 +3357,41 @@ components:
           type: array
           items:
             type: string
+        seatCount:
+          type: integer
+          description: Wave 1 — purchased TEAM seats (2-20). `null` on non-TEAM tiers.
+          nullable: true
+        activeMemberCount:
+          type: integer
+          description: Wave 1 — current accepted-member count; readable without ORG_ADMIN for seat-adjust preflight.
+          nullable: true
+
+    TierLifecycleRow:
+      type: object
+      description: Wave 1 — 3-state tier lifecycle row returned by `GET /admin/tiers`.
+      properties:
+        tier:
+          type: string
+          enum: [FREE, PRO, TEAM, MAX, ENTERPRISE]
+        lifecycleState:
+          type: string
+          enum: [LISTED, HIDDEN, SUNSETTING]
+        hiddenSinceTs:
+          type: string
+          format: date-time
+          nullable: true
+        sunsettingStartedAt:
+          type: string
+          format: date-time
+          nullable: true
+        sunsettingEndsAt:
+          type: string
+          format: date-time
+          nullable: true
+        metadataJson:
+          type: object
+          additionalProperties: true
+          description: Free-form JSON (reason, operator, observation days, etc.).
 
     ProjectDto:
       type: object
