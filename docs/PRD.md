@@ -1,9 +1,22 @@
 # ExecuteSpec - Product Requirements Document
 
-> **Version:** 4.8
-> **Last Updated:** 2026-04-22 (v2.6.0 — UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot + PH launch kit)
-> **Status:** Production (v2.6.0 — V2 harness + pilot v3.0 project workspace + project memory + execution view + project shell + dark/light theme + Exec summary + $20=20 credits flat-band pricing)
+> **Version:** 4.9
+> **Last Updated:** 2026-04-23 (v2.6.1 — persona-driven roadmap Waves 1-6 merged: TEAM tier + tier lifecycle + activation funnel + sandbox onboarding + SSO/GitHub App + smart routing + startup program + 14-day trial + CLI/SLA docs)
+> **Status:** Production (v2.6.1 — deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23)
 > **Author:** Navneet Prabhakar
+
+> **v2.6.1 tier matrix (merged 2026-04-23):**
+> | | FREE | PRO (grandfathered) | TEAM (new) | MAX | ENTERPRISE |
+> |---|---|---|---|---|---|
+> | Price | $0 | $20/mo (hidden from new buyers) | $49/seat/mo | $29/mo + BYOK | Custom (from $1,500/mo) |
+> | Monthly runs | 5 credits | 20 credits | 50 credits/seat shared | Unlimited fair-use | Unlimited + SLA |
+> | Seats | 1 | 1 | 2-20 self-serve | 1 | Unlimited |
+> | Retention | 30d | 90d | 180d | 90d | Unlimited + CSV export |
+> | SSO | — | — | Google OIDC (Wave 3) | Google OIDC + SAML (Wave 3) | All + SCIM (future) |
+> | Admin console | — | — | Seat management | — | Audit log export |
+> | SLA | None | None | None | 99.5% target (no credit) | 99.9% with credits |
+>
+> **v2.6.1 adds:** TEAM tier + 3-state lifecycle machine + PostHog activation funnel + sandbox onboarding (`/welcome`) + enterprise one-pager + SSO/GitHub App schema + startup program schema + 14-day MAX trial schema + SLA reference doc + CLI plan stub.
 
 > **⚠️ Implementation note (2026-04-13).** Product requirements below are
 > harness-agnostic and remain accurate. Internal references to V1 pipeline

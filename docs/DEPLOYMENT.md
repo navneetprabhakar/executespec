@@ -101,10 +101,23 @@ export STRIPE_WEBHOOK_SECRET=...
 export STRIPE_PUBLISHABLE_KEY=...         # v2.6.0 — prod frontend reads this
 export STRIPE_PRO_PRICE_ID=price_...      # v2.6.0 — Stripe price IDs for subscription routing
 export STRIPE_ENTERPRISE_PRICE_ID=price_...
+export STRIPE_TEAM_PRICE_ID=price_...     # v2.6.1 Wave 1 — TEAM $49/seat/mo USD per-unit price
+export STRIPE_TEAM_PRICE_ID_INR=price_... # v2.6.1 Wave 1 — TEAM ₹3,999/seat/mo INR per-unit price
 
 # v2.6.0 — billing gateway selection (prod defaults to stripe when env present)
 export BILLING_DEFAULT_GATEWAY=stripe     # razorpay | stripe (default: razorpay on dev, stripe on prod)
 export BILLING_STRIPE_ENABLED=true        # set false to revert prod to Razorpay default
+
+# v2.6.0 — admin email notifications
+export ADMIN_NOTIFICATION_EMAIL=admin@executespec.ai  # recipient for new-signup alerts + weekly summary
+export ADMIN_REMINDER_TOKEN=...           # shared secret for POST /api/internal/reminder/send (claude.ai remote-trigger calls here)
+
+# v2.6.1 Wave 2 — Product analytics (PostHog)
+# Leave blank in dev — EventTrackingService becomes a no-op, ledger rows still write locally.
+# Same key on backend + frontend so client + server events land on one user timeline.
+export POSTHOG_ENABLED=false                          # flip to true on dev/prod when the project exists
+export POSTHOG_API_KEY=                               # phc_... from https://us.i.posthog.com
+export POSTHOG_HOST=https://us.i.posthog.com          # override for EU data residency
 
 # Optional — Slack
 export SLACK_CLIENT_ID=...

@@ -1,14 +1,38 @@
 # ExecuteSpec — User Manual
 
-> **Version**: 2.6.0
-> **Date**: 2026-04-22
+> **Version**: 2.6.1
+> **Date**: 2026-04-23
 > **Audience**: Developers, Product Managers, Tech Leads
 
-> **v2.6.1 what's new (2026-04-22 → 2026-04-28 Wave 1)**
-> - **TEAM tier** — new $49/seat plan for 2-20 dev teams. Shared credit pool (50 credits/seat/month), Google OIDC sign-in, team admin dashboard with seat management, 180-day retention. Starts showing on the pricing page once Wave 1 ships.
-> - **PRO is now "grandfathered"** — existing PRO subscribers keep their plan and price untouched. New buyers see FREE / TEAM / MAX / ENTERPRISE on the pricing page. If TEAM conversion proves out, PRO may be further sunset down the road — existing subscribers would get at least 60 days' notice.
-> - **Seat adjustment in the Org admin dashboard** — TEAM admins can now raise or lower seats (2-20) with a single number input. Stripe prorates automatically.
-> - **/admin/tiers** console (SUPER_ADMIN only) — shows per-tier subscriber count + monthly revenue and exposes the 3-state lifecycle machine for retiring future tiers without forcing churn on paying customers.
+> **v2.6.1 what's new (2026-04-22/23 — Waves 1-6 merged + deployed to dev)**
+>
+> **Wave 1 — TEAM tier (full-stack live):**
+> - **TEAM tier** — new $49/seat plan for 2-20 dev teams. Shared credit pool (50 credits/seat/month), Google OIDC sign-in, team admin dashboard with seat management, 180-day retention.
+> - **PRO is grandfathered** — existing PRO subscribers keep their plan and price untouched. New buyers see FREE / TEAM / MAX / ENTERPRISE on the pricing page.
+> - **Seat adjustment** in the Org admin dashboard — TEAM admins can raise or lower seats (2-20). Stripe prorates automatically.
+> - **`/admin/tiers`** console (SUPER_ADMIN) — per-tier subscriber count + MRR; 3-state lifecycle machine (LISTED / HIDDEN / SUNSETTING).
+>
+> **Wave 2 — Sandbox onboarding + activation funnel (full-stack live):**
+> - **`/welcome` page** on first login — pick a sample spec (Web API / Frontend / CLI); sandbox auto-provisions with the spec pre-filled; submit in under 3 minutes from signup.
+> - **Abandoned sandboxes auto-clean** — 24h idle threshold; archived hourly.
+> - **Celebrate banner** on first completed run with verified score + "Run another" + "Link your own repo" CTAs.
+> - **Analytics** — 6-event PostHog funnel wired; event ledger rows also write locally regardless of PostHog config.
+>
+> **Wave 3 — SSO + GitHub App + team trial (schema + docs live; frontend in follow-up):**
+> - **Enterprise one-pager** at [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison + data-handling Q&A.
+> - **SSO/SAML schema** ready (org.sso_provider / sso_enforced / sso_metadata_url / sso_domain). Frontend + auth-enforcement flow in Wave 3 window.
+> - **GitHub App install schema** ready (org.github_installation_id). App registration + install flow in Wave 3 window.
+> - **Team trial queue** schema ready — `team_trial_request` table captures work email + company + team size + intended use.
+>
+> **Waves 4-6 (schema + docs live; services + frontend in roadmap windows):**
+> - **Smart provider routing** — `ProviderRecommendationService` heuristic (project type → provider); gated by `provider.smart-routing.enabled` (OFF).
+> - **Persona-first pricing A/B** — `pricing.persona-first` flag wired; alternate layout ships in Wave 4.
+> - **Startup program** — 50% off MAX for 12 months for <20-employee companies; application table + schema live.
+> - **14-day MAX trial** on signup — `trial_tier/trial_started_at/trial_ends_at` columns live.
+> - **Free-org teammates** — `app_user.can_invite_teammates` flag; `/api/org/free-team` endpoint in Wave 5.
+> - **ENTERPRISE SLA** at [`docs/enterprise-sla.md`](enterprise-sla.md) — P1-P4 definitions + 99.9% credit schedule + CSM engagement + P1 after-hours escalation.
+> - **External follow-ups:** [`executespec-cli`](plans/cli-plan.md) Node CLI + [`executespec-vscode`](plans/vscode-extension-plan.md) VS Code extension.
+> - Roadmap: [`docs/plans/persona-roadmap-2026-04-22.md`](plans/persona-roadmap-2026-04-22.md).
 >
 > **v2.6.0 what's new (2026-04-22)**
 > - **Dark / light theme toggle** — Sun/Moon button in the header top-right. Choice persists in `localStorage` (pre-paint applied so there's no flash). New Graphite+Signal palette is softer than the previous pure-black theme. See [design/ui-tokens.md](design/ui-tokens.md) for the full design system.

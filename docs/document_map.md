@@ -1,7 +1,7 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-22 (v2.6.0 — UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot + PH launch kit + persona roadmap; v2.5.12: 3-step architecture + Generate Docs + Sync; v2.5.0: project workspace + RAG; pilot v3.0)
+> Last updated: 2026-04-23 (v2.6.1 Waves 1-6 merged to dev + main + deployed to dev.executespec.ai; v2.6.0: UX v3 Graphite+Signal + pricing v3 + US-first pivot + PH launch kit; v2.5.x: earlier releases)
 >
 > **v2.6.1 Wave 1 (2026-04-22 → 2026-04-28): TEAM tier + tier-lifecycle tooling shipped together (Option Z). See [docs/plans/team-tier-plan.md](plans/team-tier-plan.md) + [docs/plans/tier-lifecycle-plan.md](plans/tier-lifecycle-plan.md). PRO grandfathered to `HIDDEN` via V122 migration — existing subscribers unaffected. SUNSETTING gateway side-effects gated by `billing.lifecycle.sunsetting.enabled` feature flag (default OFF).**
 >
@@ -17,6 +17,14 @@
 > - [`docs/plans/tier-lifecycle-plan.md`](plans/tier-lifecycle-plan.md) — standalone reference for the 3-state (LISTED/HIDDEN/SUNSETTING) lifecycle machine. Used by team-tier launch to grandfather PRO; reusable for any future tier retirement.
 > - [`docs/plans/activation-instrumentation-plan.md`](plans/activation-instrumentation-plan.md) — Wave 2a. 6-event PostHog funnel (signup → project_created → spec_submitted → plan_approved → run_complete → pr_merged). Ships 2026-05-07 → 2026-05-20.
 > - [`docs/plans/ttfv-reduction-plan.md`](plans/ttfv-reduction-plan.md) — Wave 2b (parallel with activation). Sandbox project + pre-filled sample spec on signup; target median TTFV under 3 min. Ships 2026-05-07 → 2026-05-20.
+> - [`docs/plans/wave-3-sso-githubapp-procurement-plan.md`](plans/wave-3-sso-githubapp-procurement-plan.md) — **Wave 3** (schema + docs shipped 2026-04-23; controllers in follow-up). SSO/SAML on MAX, GitHub App install, team trial CTA, procurement one-pager. Ships 2026-05-21 → 2026-06-03.
+> - [`docs/plans/wave-4-landing-proof-routing-changelog-plan.md`](plans/wave-4-landing-proof-routing-changelog-plan.md) — **Wave 4** (scaffold shipped). `ProviderRecommendationService` skeleton + 2 A/B feature flags + live-demo hero + enterprise proof pack + changelog/status pages. Ships 2026-06-04 → 2026-06-17.
+> - [`docs/plans/vscode-extension-plan.md`](plans/vscode-extension-plan.md) — Wave 4 external-repo stub; `executespec-vscode` with device-code OAuth flow.
+> - [`docs/plans/wave-5-startup-and-polish-plan.md`](plans/wave-5-startup-and-polish-plan.md) — **Wave 5** (schema shipped). Startup program (50% off MAX for <20-employee companies) + 14-day MAX trial on signup + free-tier 2-teammate invites + progressive disclosure + BYOK credit meter + shareable report links on FREE. Ships 2026-06-18 → 2026-07-01.
+> - [`docs/plans/wave-6-cli-enterprise-depth-plan.md`](plans/wave-6-cli-enterprise-depth-plan.md) — **Wave 6** (docs shipped). ExecuteSpec CLI (external repo) + audit CSV export on ENTERPRISE + CSM/SLA docs + customer logos page. Ships 2026-07-02 → 2026-07-15.
+> - [`docs/plans/cli-plan.md`](plans/cli-plan.md) — Wave 6 external-repo stub; `executespec-cli` Node CLI with device-code OAuth.
+> - [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison + data-handling Q&A (Wave 3 deliverable).
+> - [`docs/enterprise-sla.md`](enterprise-sla.md) — ENTERPRISE-tier support SLA (P1-P4 definitions + 99.9% uptime credit schedule + CSM engagement) (Wave 6 deliverable).
 > - [`docs/plans/complimentary-pro-promo-2026-04-30-plan.md`](plans/complimentary-pro-promo-2026-04-30-plan.md) — founder thank-you promo for recent FREE signups; 30-day PRO upgrade. Executes 2026-04-30 (reminder scheduled).
 >
 >
