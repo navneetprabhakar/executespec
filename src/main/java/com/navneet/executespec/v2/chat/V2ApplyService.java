@@ -14,8 +14,6 @@ import com.navneet.executespec.v2.tool.ExecutionContext;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Propagation;
-import org.springframework.transaction.annotation.Transactional;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -44,12 +42,10 @@ import java.util.concurrent.TimeUnit;
  * fire on the same run, git may throw dirty-index errors; that's acceptable
  * for now since the UI only surfaces one button at a time.
  *
- * <p>The {@link #apply} method is annotated {@link Propagation#NOT_SUPPORTED}
- * to guarantee no enclosing transaction holds a DB connection across the
- * multi-minute worker loop. In normal operation the caller already dispatches
- * async (see {@code RunConversationController.applyExecutor}) so there is no
- * outer tx, but the annotation is defence-in-depth against a future sync
- * call site landing inside a {@code @Transactional} boundary.
+ * <p>Intentionally NOT annotated {@code @Transactional}. Callers dispatch
+ * async (see {@code RunConversationController.applyExecutor}) and the inner
+ * JPA calls manage their own short tx scope — wrapping this 25-iteration loop
+ * in an outer tx would pin a Hikari connection for the entire worker run.
  */
 @Slf4j
 @Service
@@ -74,7 +70,6 @@ public class V2ApplyService {
      * @param source     "COPILOT" or "REVIEW" — used in the commit message
      *                   prefix and in logs
      */
-    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public ApplyResult apply(String runId, String suggestion, String source) {
         if (suggestion == null || suggestion.isBlank()) {
             throw new IllegalArgumentException("suggestion is required");
