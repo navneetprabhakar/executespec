@@ -60,6 +60,18 @@ spring:
     hibernate:
       ddl-auto: validate        # Hibernate only validates — Flyway manages all schema
     show-sql: false
+    properties:
+      hibernate:
+        connection:
+          # v2.6.1 — release the JDBC connection back to Hikari on every tx
+          # commit instead of holding it for the whole EM lifetime. Without
+          # this, OSIV's request-scoped session pins the connection from the
+          # first @Transactional read (e.g. guard.requireRunAccess → findRun)
+          # until the request completes — on async endpoints like
+          # /runs/{id}/apply that's the full worker loop (~1-8 min). Trade-off:
+          # lazy-loads outside an explicit tx re-acquire a connection per
+          # query (Hikari handles the churn fine at pool-size 30).
+          handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION
   flyway:
     enabled: true
     baseline-on-migrate: true   # Safe for existing databases
