@@ -34,7 +34,20 @@ spring:
       idle-timeout: 120000           # 2 min — reclaim idle connections faster
       max-lifetime: 600000           # 10 min — rotate connections before DB-side timeouts
       validation-timeout: 3000       # 3s — quick validation for health checks
-      leak-detection-threshold: 60000 # 60s — log warning if connection held > 1 min
+      # v2.6.1 — bumped 60s → 90s. Async apply-suggestion dispatch (see
+      # RunConversationController.applyExecutor) means the worker loop no
+      # longer pins a connection, but short JPA reads inside the loop
+      # (runRepo.findById, etc.) can still brush up against 60s under p99
+      # slow-query conditions. 90s reduces false positives while still
+      # flagging real leaks early.
+      leak-detection-threshold: 90000
+  mvc:
+    async:
+      # v2.6.1 — 15 min. The apply-suggestion endpoint dispatches async
+      # (CompletableFuture) and the worker can burn up to ~25 iterations ×
+      # ~20 s/Sonnet call = ~8 min in the worst case. Default Tomcat
+      # async timeout (30 s) would cancel these before they finish.
+      request-timeout: 900000
   jpa:
     # Keep the Hibernate session open for the full HTTP request. Required by the
     # execution + project view controllers, which walk lazy collections
