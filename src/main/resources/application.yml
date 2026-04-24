@@ -253,11 +253,11 @@ model-matrix:
     ContextAgent: LIGHTWEIGHT
     RunLedgerAgent: LIGHTWEIGHT
     RunTitleSummarizer: LIGHTWEIGHT
-    ProjectChatCompiler: LIGHTWEIGHT
+    ProjectChatCompiler: PLANNING
     ProjectBriefService: LIGHTWEIGHT
-    # v2.5.12 — 3-step architecture pipeline
-    RepoArchitectureGenerator: LIGHTWEIGHT   # per-repo HLD+LLD from codemap
-    ArchitectureDocGenerator: WORKHORSE      # cross-repo synthesis from per-repo docs
+    # v2.5.12 — 3-step architecture pipeline (bumped to PLANNING v2.6.1 — Haiku/WORKHORSE missed cross-repo wiring and mangled spec compilation)
+    RepoArchitectureGenerator: PLANNING      # per-repo HLD+LLD from codemap
+    ArchitectureDocGenerator: PLANNING       # cross-repo synthesis from per-repo docs
     ProjectDocGeneratorService: WORKHORSE    # EXPLANATION / SETUP docs
     ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE

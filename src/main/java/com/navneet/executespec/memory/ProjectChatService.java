@@ -93,7 +93,7 @@ public class ProjectChatService {
             LlmProvider provider = project.getAiProvider() != null
                     ? project.getAiProvider() : LlmProvider.OPENAI;
             ResolvedModel resolved = modelResolver.resolve(
-                    "ProjectChatCompiler", provider, AgentTier.LIGHTWEIGHT);
+                    "ProjectChatCompiler", provider, AgentTier.PLANNING);
             ExecutionContext ctx = new ExecutionContext(
                     "chat-compile-" + projectId, "__project_chat_compile__",
                     java.nio.file.Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
