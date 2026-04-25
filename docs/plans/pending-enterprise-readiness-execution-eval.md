@@ -392,7 +392,7 @@ plan's scope).
 |---|---|---|---|
 | **E1.1** ✓ | `feat(executespec): E1.1 — folder-tracking schema` | V131 migration + `ProjectRepo` entity columns + `folderStatusEnum()` normaliser (NULL → NOT_BOOTSTRAPPED) | **Shipped 2026-04-25.** `mvn compile` green, `mvn test` 303 green (5 new tests in `ProjectRepoFolderStatusTest`). |
 | **E1.4** ✓ | `feat(executespec): E1.4 — folder-writer chokepoint` | `ExecutespecFolderWriter` service (writeFiles / readFile / listFiles / hasDrift) + V132 `executespec_pr_mode` flag column + path-validator + project-namespacing helper + initial conflict-resolution policy in javadoc | **Shipped 2026-04-25.** `mvn compile` green, `mvn test` 315 of 315 (12 new in `ExecutespecFolderWriterTest`). Deferred to §13: `writeToBranch`, real-PR integration test, ArchUnit caller-allowlist guard. |
-| **E1.6** | `feat(executespec): E1.6 — folder readme generator` | Template renderer + unit test | Generated README renders correctly against fixture inputs |
+| **E1.6** ✓ | `feat(executespec): E1.6 — folder readme generator` | Template under `resources/templates/executespec/README.md.template` + `FolderReadmeGenerator` service + simple `${var}` substituter | **Shipped 2026-04-25.** `mvn test` 321 of 321 (6 new in `FolderReadmeGeneratorTest`). README includes "auto-section ends here" marker so future regen logic can preserve manual edits. |
 | **E1.8 + E1.10 + E1.9** (single commit) | `feat(activity): E1.8/9/10 — event taxonomy + feed table + emitter` | `ActivityEventType` enum + `@ActivityMeta` + V133 `activity_feed` partitioned table + `ActivityFeedPartitionJob` + `ActivityEventEmitter` chokepoint | Unit + integration test; emitter writes to feed AND dual-writes to `activity_audit` for AUDIT-surface events; partition job creates next 3 months on boot |
 | **E1.5** | `feat(executespec): E1.5 — bootstrap PR flow + PAT pre-flight` | Pre-flight PAT scope check + `BootstrapService` + bootstrap PR on `linkRepo` + `EXECUTESPEC_BOOTSTRAP_*` activity events | Linking a fixture repo with adequate PAT opens a PR within 30s; inadequate PAT surfaces tooltip with required scopes; idempotent on existing `.executespec/` |
 | **E1.2** | `refactor(codeintel): E1.2 — codemap relocation to .executespec/arch/` | Codemap path migration + `PostMergeCascadeService` PR-mode + behavioural-regression doc + opt-in DIRECT_PUSH path for codemap | All readers resolve via new path; cascade test verifies PR opening (or direct push when flag set); existing repos handled by E1.3 |
@@ -494,6 +494,30 @@ For the **whole effort** (post-Phase E4):
   workarounds, with the cuts in §7 of this doc accepted
 - Picky enterprise persona has no architectural-shape pushback
   (UX/perf/specific-rule pushback acceptable)
+
+**Post-Phase-E1 acceptance gate** (binding, added 2026-04-25 per user
+direction): once every E1 slice (E1.1, E1.4, E1.6, E1.8/9/10 bundle,
+E1.5, E1.2, E1.3, E1.7) is committed on this branch:
+
+1. Run servers locally (Spring Boot backend + Vite frontend dev
+   server). All boot flags pass; Flyway applies V131+V132+V133 (and
+   any further migrations from this phase) without errors.
+2. Run a quick eval-style smoke (reuse `scripts/v2-eval.sh` shape) to
+   confirm the run pipeline still works end-to-end with the new
+   schema.
+3. Run a quick projects smoke (create project → link repo →
+   bootstrap PR opens → activity feed receives the
+   `EXECUTESPEC_BOOTSTRAP_INITIATED` event).
+4. Exhaustive UX test per screen + adversarial pass (use
+   `docs/test-scenarios/personas-journeys-and-cases.md` and
+   `adversarial-test-report-2026-04-18.md` as the script; record
+   findings in a new `docs/reports/enterprise-readiness-e1-test-<date>.md`).
+5. Consolidated mail to navneet.prabhakar007@gmail.com via
+   `scripts/slice-email.py` — slice-id `E1-FINAL`, includes the test
+   report inline.
+6. **Push only the `feature/enterprise-readiness-eval` branch.** Do
+   not open PR to dev or main; do not touch the hotfix branch in this
+   sequence; do not push anything else.
 
 ---
 
