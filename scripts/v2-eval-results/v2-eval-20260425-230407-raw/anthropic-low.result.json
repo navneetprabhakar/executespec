@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "low",
+  "run_id": "0687a622-0c78-4cbb-b585-2e25d0eb139c",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-04-25T17:34:08.069929Z",
+  "completedAt": "2026-04-25T17:35:58.470341Z",
+  "tasks_total": 2,
+  "tasks_done": 2,
+  "tasks_failed": 0,
+  "review": "{\"overall\":\"CLEAN\",\"generalPassSummary\":\"Found 0 issues, fixed 0. The fibonacci implementation in fib.py is correct: base cases (n=0, n=1) are handled properly, the iterative loop range(2, n+1) is correct, the ValueError is raised for negative inputs, and all 5 tests pass cleanly.\",\"wiringPassSummary\":\"No wiring issues found. This is a minimal Python project with two files: `fib.py` exports the `fibonacci` function, and `test_fib.py` correctly imports it via `from fib import fibonacci`. There are no unregistered routes, missing blueprint registrations, orphaned modules, or any other integration/registration wiring gaps. Build passed cleanly.\",\"totalLatencyMs\":39114,\"finalBuildPassed\":true,\"finalBuildExitCode\":0}",
+  "actual_cost": 0.087513,
+  "est_low": 0.2165,
+  "est_high": 0.378875,
+  "credits": 1,
+  "total_input": 23302,
+  "total_output": 5575,
+  "accuracy": 98,
+  "report_ok": true
+}

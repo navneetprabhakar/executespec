@@ -4,6 +4,14 @@
 > Companion to [ARCHITECTURE.md](ARCHITECTURE.md) (deep-dive) and [JAVADOC.md](JAVADOC.md) (class-level reference).
 > When a new top-level package is added, update this file and `document_map.md`.
 >
+> **v2.6.3-track** is on `feature/enterprise-readiness-eval` (48+ commits ahead of `dev`,
+> not yet merged). 8 new top-level packages — `folder/`, `activity/`, `contracts/`,
+> `standards/`, `adr/`, `arch/invariants/`, `export/`, `notification/pref/` — wired
+> by the `ExecutespecFolderWriter` chokepoint with PR vs DIRECT_PUSH dispatch and
+> pinned by an ArchUnit caller-allowlist. Schema V131-V139. Server-up sweep
+> 2026-04-25 landed clean (3-provider low-band v2-eval all CLEAN, 23/23 enterprise
+> endpoints behaving correctly) — see [reports/enterprise-readiness-eval-2026-04-25.md](reports/enterprise-readiness-eval-2026-04-25.md).
+>
 > **v2.6.2-track** is on `feature/hierarchical-planner` (8 commits ahead of `dev`,
 > not yet merged). Phase 0 classifier + Phase 1 outline planner + Phase 2
 > parallel expander + Phase 3 coherence patcher all shipped on the branch
@@ -17,10 +25,13 @@
 src/main/java/com/navneet/executespec/
 ├── ExecutespecApplication.java          # Spring Boot entry point
 ├── v2/                                  # V2 harness — the only active pipeline
+├── activity/                            # Customer-facing project activity feed (E1, v2.6.3-track)
+├── adr/                                 # ADRs as first-class — frontmatter cache (E3.12, v2.6.3-track)
 ├── agent/                               # V1 surface still used by chat/test-gen
 ├── analytics/                           # PostHog activation funnel (Wave 2)
 ├── api/                                 # Controllers + DTOs + advice (REST surface)
 ├── apitests/                            # API test suite agent
+├── arch/                                #   .invariants/ — architectural invariant checker (E3.14, v2.6.3-track)
 ├── assessment/                          # Pre-plan feature assessment
 ├── auth/                                # JWT + OAuth2 + RBAC + tier permissions
 ├── billing/                             # Razorpay + Stripe + lifecycle (Wave 1)
@@ -29,14 +40,17 @@ src/main/java/com/navneet/executespec/
 ├── config/                              # Feature flags, secrets, observability
 ├── contact/                             # Public contact form
 ├── context/                             # ContextAgent (legacy V1 helper)
+├── contracts/                           # Cross-repo contract registry — drift, consumers, coverage (E2, v2.6.3-track)
 ├── crypto/                              # KMS / encryption-at-rest
 ├── deployment/                          # Cloud Run + Docker preview/deploy
+├── export/                              # Project export bundle — zip of .executespec/ (E4.7, v2.6.3-track)
 ├── eval/                                # Model evaluation framework
 ├── execution/                           # Execution View (multi-repo, multi-solution)
+├── folder/                              # .executespec/ folder write chokepoint + bootstrap (E1, v2.6.3-track)
 ├── harness/                             # V1 primitives reused by V2 (workspace, gates)
 ├── integration/                         # Slack, JIRA, Confluence, GitHub, Bitbucket, ScmProvider
 ├── memory/                              # Project memory + chat
-├── notification/                        # In-app notifications
+├── notification/                        # In-app notifications  (subpkg pref/ — per-user pref matrix, E4.5, v2.6.3-track)
 ├── onboarding/                          # Sandbox + sample specs (Wave 2)
 ├── optimiser/                           # Prompt optimiser
 ├── pricing/                             # Model pricing matrix
@@ -50,6 +64,7 @@ src/main/java/com/navneet/executespec/
 ├── saga/                                # Side-effect outbox (compensation)
 ├── scoring/                             # 6-dimension scoring + test-coverage rescorer
 ├── security/                            # Sanitizers, abuse scanner, guardrail levels
+├── standards/                           # Engineering standards as binding policy — AST/LLM checks + override (E3, v2.6.3-track)
 ├── sse/                                 # SSE channel — RunEvent, broadcaster
 ├── state/                               # StateStore + JPA entities for runs/tasks
 ├── tenant/                              # Tenant filter + interceptor + thread context
@@ -81,6 +96,25 @@ The V2 pipeline is the only active path. V1 was deleted in deprecation P1–P6 (
 | `v2/chat/`, `v2/compiler/`, `v2/rollout/` | (auxiliary) | Internal helpers |
 
 Entry point: `V2RunOrchestrator.submitRun(...)` — see [ARCHITECTURE.md §3 V2 pipeline](ARCHITECTURE.md).
+
+---
+
+## Enterprise readiness (v2.6.3-track) — `folder/`, `activity/`, `contracts/`, `standards/`, `adr/`, `arch/invariants/`, `export/`, `notification/pref/`
+
+> Entire stripe lives on `feature/enterprise-readiness-eval` (NOT merged to dev/main). Schema V131-V139.
+> Plan + slice list: [`docs/plans/pending-enterprise-readiness-execution-eval.md`](plans/pending-enterprise-readiness-execution-eval.md).
+> Server-up sweep: [`docs/reports/enterprise-readiness-eval-2026-04-25.md`](reports/enterprise-readiness-eval-2026-04-25.md).
+
+| Package | Key files | Purpose |
+|---------|-----------|---------|
+| `folder/` | `ExecutespecFolderWriter`, `BootstrapService`, `FolderReadmeGenerator`, `ProjectConfigPathResolver`, `ExecutespecMigrationController` | Single chokepoint for every `.executespec/` mutation in customer git. PR vs DIRECT_PUSH dispatch via `ProjectRepo.prModeEnum()`. 4-state status machine on `project_repo` (MISSING/BOOTSTRAP_PENDING/PR_PENDING/READY). FOLDER_FLAT vs FOLDER_NAMESPACED vs DATABASE decision tree per (project, repo). ArchUnit-pinned to 4 callers. |
+| `activity/` | `ActivityEventEmitter`, `ActivityFeedController`, `ActivityFeedRetentionJob`, `ActivityFeedPartitionJob` | Customer-facing project activity feed. Dual-writes to `activity_audit` for AUDIT-tagged events. `activity_feed` partitioned-by-month + 12 partitions seeded 2026-04 → 2027-03. `@Scheduled` + `@SchedulerLock` jobs. |
+| `contracts/` | `breaking/BreakingChangeService` + per-kind classifiers (`ProtoBreakingChangeClassifier`, etc.), `consumers/ContractConsumerController`, `coverage/ContractCoverageController`, `detection/` (per-kind detectors), `drift/ContractDriftController`, `injection/` (planner-side hooks) | Cross-repo contract registry — 4 contract kinds (OPENAPI/GRAPHQL/JSON_SCHEMA/PROTO), drift detection, consumer pinning, per-repo coverage rescan. Materialised paths: `.executespec/contracts/<contract>.{yaml,json,proto,graphql}` per producer + `.executespec/contracts/consumed/<contract>.json` per consumer. |
+| `standards/` | `EffectiveStandardsResolver`, `OrgStandardRepository`, `ProjectStandardOverrideRepository`, `StandardsViolationRepository`, `ast/` (AST-based checks), `llmreview/` (LLM-augmented review for non-AST), `override/StandardsOverrideController`, `report/StandardsComplianceController` | Engineering standards as binding policy. Org-level + project-level merge with override semantics. Single-violation overrides + standing exceptions, both require ≥30 char rationale. |
+| `adr/` | `Adr`, `AdrRepository`, `AdrFrontmatterParser`, `AdrInjectionService` | ADRs as first-class — `.executespec/arch/adrs/<NNNN>-<slug>.md` parsed by frontmatter parser, cached in `adr` table for query speed (status: PROPOSED/ACCEPTED/SUPERSEDED/DEPRECATED). |
+| `arch/invariants/` | `ArchInvariant`, `ArchInvariantViolation`, `InvariantChecker`, `ArchInvariantRepository`, `ArchInvariantViolationRepository` | Continuous architectural properties (e.g. "only payment-service writes to the payments table") defined in customer git as `.executespec/arch/invariants.yaml` per repo. `InvariantChecker` runs per-codemap-version. |
+| `export/` | `ProjectExportController` | `POST /api/projects/{id}/export` returns zip of every `.executespec/` artefact + DB-only counterparts when `config_storage=DATABASE`. |
+| `notification/pref/` | `UserNotificationPref`, `NotificationPrefService`, `UserNotificationPrefRepository` | Per-user × event-type × channel opt-in/out matrix with sensible defaults. Replaces the implicit "everything goes everywhere" fan-out. |
 
 ---
 
@@ -268,7 +302,7 @@ ENTERPRISE + MAX project-level workbench for multi-repo, multi-solution work.
 
 ## Migrations index
 
-V1–V130 across the lifetime of the project. Recent ranges:
+V1–V139 across the lifetime of the project. Recent ranges:
 
 | Range | Theme |
 |-------|-------|
@@ -279,6 +313,7 @@ V1–V130 across the lifetime of the project. Recent ranges:
 | V128 | Smart provider routing scaffold (Wave 4) |
 | V129 | Startup program + 14-day trial (Wave 5) |
 | V130 | Hierarchical planner — `pipeline_run.{plan_strategy, plan_outline_json, classifier_reasoning, {classifier,outline,expansion,coherence}_{input,output}_tokens, _cost_usd}` + `agent_task.{task_type, expansion_status, expanded_at}` + partial index on `plan_strategy`. Committed on `feature/hierarchical-planner`; not yet merged to `dev`/`main`. |
+| V131–V139 | **Enterprise readiness (v2.6.3-track, on `feature/enterprise-readiness-eval`, NOT yet merged to dev/main)** — V131 4-state `.executespec/` folder status + bootstrap PR url + last synced at on `project_repo` (E1.1) · V132 `executespec_pr_mode` enum (PR / DIRECT_PUSH) on `project_repo` (E1.4) · V133 `activity_feed` partitioned-by-month + 12 partitions seeded 2026-04 → 2027-03 + 4 hot-path indexes (E1.8/9/10) · V134 `project.config_storage` (FOLDER / DATABASE) + `project_config` table for confidential-project DATABASE opt-out (E1.7) · V135 `contract_registry` + `contract_version` + `contract_consumer` + `contract_drift_event` + 3 hot-path indexes including unresolved-drift partial (E2.1) · V136 `org_standard` + `project_standard_override` + `standards_violation` four-table model + ≥30-char rationale validators (E3.1) · V137 `adr` table caches `.executespec/arch/adrs/<NNNN>-<slug>.md` frontmatter for query speed (E3.12) · V138 `arch_invariant` + `arch_invariant_violation` for continuous architectural properties (E3.14) · V139 `user_notification_pref` (per-user × event × channel opt-in/out matrix) (E4.5). |
 
 Older ranges are documented in `JAVADOC.md §21.1 Flyway Migrations` and `DEPLOYMENT.md`.
 

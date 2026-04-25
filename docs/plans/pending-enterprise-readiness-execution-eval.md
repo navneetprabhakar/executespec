@@ -1,21 +1,35 @@
 # Enterprise Readiness — Evaluation + Slice-1 Sequencing
 
-> Status: draft for review (2026-04-25). Evaluates the two source docs against
-> the current dev state of ExecuteSpec (v2.6.1 deployed; v2.6.2-track
-> hierarchical-planner pending merge) and proposes a v1 ship plan that
-> preserves the existing UX system. Author judgements are called out
-> explicitly — they are not echoes of the source docs.
+> Status: **all 4 phases (E1+E2+E3+E4, 40 slices) shipped on `feature/enterprise-readiness-eval`** (2026-04-25; 48+ commits ahead of `dev`, NOT yet merged).
+> Evaluates the two source docs against the dev state of ExecuteSpec and proposes
+> a v1 ship plan that preserves the existing UX system.
+> Author judgements are called out explicitly — they are not echoes of the
+> source docs.
 >
 > **Source docs** (live outside the repo):
 > - `~/Downloads/project-enterprise-readiness-plan.md` — design lock, 5 feature areas
 > - `~/Downloads/project-enterprise-readiness-execution.md` — task slicing, ~46 numbered tasks across 4 phases
 >
-> **Dependencies:** none for this doc. Phase 1 of the actual work depends
-> on `feature/hierarchical-planner` merging to `dev` (V130 lands first,
-> reserves the migration number this plan claims at V131+).
+> **Dependencies:** V130 (hierarchical planner) sits on `feature/hierarchical-planner`,
+> V131-V139 (this branch) sit on `feature/enterprise-readiness-eval`. Neither merged
+> to dev yet — the two branches will need to converge cleanly when they're both
+> ready for promotion.
 >
-> **Status of work:** not started. This is an evaluation + sequencing
-> proposal. No code shipped under this branch beyond this doc.
+> **Status of work (updated 2026-04-25 server-up sweep):**
+> - **E1 — folder + activity (8 slices, V131-V134):** SHIPPED. `.executespec/` folder bootstrap (`BootstrapService`) + 4-state status machine on `project_repo` + `ExecutespecFolderWriter` chokepoint with PR vs DIRECT_PUSH dispatch + per-project config namespacing decision tree (`ProjectConfigPathResolver`) + `activity_feed` partitioned-by-month + `ActivityEventEmitter` (dual-writes to `activity_audit` for AUDIT-tagged events).
+> - **E2 — contracts + monorepo (12 slices, V135):** SHIPPED. Cross-repo contract registry — 4 contract kinds (OPENAPI/GRAPHQL/JSON_SCHEMA/PROTO), drift detection via per-kind classifiers, consumer pinning, per-repo coverage rescan, materialised paths under `.executespec/contracts/` per producer + `.executespec/contracts/consumed/` per consumer.
+> - **E3 — standards + ADR + invariants (13 slices, V136-V138):** SHIPPED. Engineering standards as binding policy (`org_standard` + `project_standard_override` merged via `EffectiveStandardsResolver`) + violation override workflow (≥30 char rationale required) + ADRs as first-class (`AdrFrontmatterParser` + `adr` cache table) + architectural invariants (`InvariantChecker` + `arch_invariant`/`arch_invariant_violation`).
+> - **E4 — visibility + retention + export (7 slices, V139):** SHIPPED. Per-user notification preferences (`UserNotificationPref` opt-in/out matrix + `NotificationPrefService` defaults) + project export bundle (`POST /api/projects/{id}/export` returns zip of every `.executespec/` artefact + DB-only counterparts when `config_storage=DATABASE`) + `activity_feed` retention policy.
+> - **Server-up sweep (deferred from §13):** SHIPPED 2026-04-25. Local stack stood up (Postgres 18 + Redis + backend `local` profile + Vite frontend), 23/23 enterprise-readiness endpoints behaving correctly (200/204 happy paths, 4xx with structured error bodies on negative paths), 3-provider low-band v2-eval all CLEAN at $0.378 total. Two-constructor boot crash on `ExecutespecFolderWriter` + `BootstrapService` discovered + fixed (`@Autowired` on prod constructors). Full report: [`docs/reports/enterprise-readiness-eval-2026-04-25.md`](../reports/enterprise-readiness-eval-2026-04-25.md).
+>
+> **Carry-over deferrals (still NOT shipped):**
+> - GitHub-write integration end-to-end — writer is wired and bean-validated, but real PR vs DIRECT_PUSH dispatch needs a sandbox repo + webhook to exercise.
+> - Planner-side wiring of `{{CONTRACTS}}` / `{{ADR}}` / `{{STANDARDS}}` / `{{INVARIANTS}}` blocks — kept bounded on this branch to avoid hierarchical-planner merge conflicts.
+> - DIRECT_PUSH admin endpoint UI for `executespec_pr_mode` flip.
+> - Real-PR integration tests against a sandbox GitHub repo.
+> - `ExecutespecFolderWriter.writeToBranch` (only needed for chat-action batching).
+> - Activity-feed event-source integration — table + emitter shipped, emit-points into project create / run terminal / PR merge follow.
+> - Adversarial sweep + UX click-through (deferred again this session).
 
 ---
 
