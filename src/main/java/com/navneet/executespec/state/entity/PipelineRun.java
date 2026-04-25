@@ -200,7 +200,8 @@ public class PipelineRun {
     private String planStrategy;
 
     /** JSON outline emitted by {@code OutlinePlannerAgent} (slice 2+). */
-    @Column(name = "plan_outline_json", columnDefinition = "TEXT")
+    @Column(name = "plan_outline_json", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String planOutlineJson;
 
     /**
