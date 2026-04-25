@@ -354,34 +354,75 @@ engineers.** Source plan as written: ~7–9 months.
 
 ---
 
-## 8. Slice-1 sequencing (Phase E1, broken into shippable PRs)
+## 8. Slice-1 sequencing (single-branch, stacked commits)
 
-Each slice = one PR against `dev`. Slice IDs are also the branch
-suffix: `feature/e1.1-...`, `feature/e1.2-...`, etc. Each slice ships
-with doc-refresh in the same commit per CLAUDE.md house rule.
+**Branch policy (overrides source execution doc §0):** the entire
+enterprise-readiness effort lives on **one long-lived branch** —
+`feature/enterprise-readiness-eval` (the branch this doc is on). Each
+slice ships as its own commit on that branch, not its own branch +
+PR. One PR opens against `dev` when Phase E1 is complete; subsequent
+phases either extend that PR (if it hasn't merged yet) or open
+additional PRs from the same branch sequentially.
 
-| Slice | Branch | Scope | Acceptance gate |
+Rationale (per user direction): single branch reduces per-slice
+overhead (no branch creation, no per-slice rebase, one Flyway-history
+to reason about) at the cost of a longer-lived branch and a larger
+final PR. We accept that trade explicitly. To keep review tractable:
+each commit is self-contained, named with its slice ID, includes
+doc-refresh in the same commit per CLAUDE.md house rule, and is small
+enough to review in isolation by browsing the commit list.
+
+**Drift management — REQUIRED.** This branch will live for weeks.
+Rebase from `dev` after every merged dev change touching:
+`v2/agent/`, `project/`, `codeintel/`, `notification/`, `auth/`, or
+any V13x migration. At minimum once per week. Use:
+
+```
+git fetch origin dev
+git rebase origin/dev   # never merge dev in — keep history linear
+```
+
+If a rebase conflict touches a `.executespec/` path, treat it as a
+real review item (might mean a parallel feature is colliding with this
+plan's scope).
+
+**Slice list (ship in this exact order; each = one commit):**
+
+| Slice | Commit subject prefix | Scope | Acceptance gate |
 |---|---|---|---|
-| **E1.1** | `feature/e1.1-folder-tracking-schema` | V131 migration + `ProjectRepo` entity columns + repository read paths default `NOT_BOOTSTRAPPED` | `mvn test -Pintegration` green; existing `ProjectRepo` rows readable |
-| **E1.4** | `feature/e1.4-folder-writer-chokepoint` | `ExecutespecFolderWriter` service + conflict-resolution policy doc + `executespec_pr_mode` flag column (new V132) + integration test against a fixture repo opening a real PR | Service is the *only* writer; ArchUnit test forbids direct GitHub-API writes to `.executespec/` from anywhere else |
-| **E1.6** | `feature/e1.6-folder-readme-generator` | Template renderer + unit test | Generated README renders correctly against fixture inputs |
-| **E1.8 + E1.10 + E1.9** (bundle) | `feature/e1.activity-foundation` | `ActivityEventType` enum + `@ActivityMeta` + V133 `activity_feed` partitioned table + `ActivityFeedPartitionJob` + `ActivityEventEmitter` chokepoint | Unit + integration test; emitter writes to feed AND dual-writes to `activity_audit` for AUDIT-surface events; partition job creates next 3 months on boot |
-| **E1.5** | `feature/e1.5-bootstrap-pr-flow` | Pre-flight PAT scope check + `BootstrapService` + bootstrap PR on `linkRepo` + `EXECUTESPEC_BOOTSTRAP_*` activity events | Linking a fixture repo with adequate PAT opens a PR within 30s; inadequate PAT surfaces tooltip with required scopes; idempotent on existing `.executespec/` |
-| **E1.2** | `feature/e1.2-codemap-relocation` | Codemap path migration + `PostMergeCascadeService` PR-mode + behavioural-regression doc + opt-in DIRECT_PUSH path for codemap | All readers resolve via new path; cascade test verifies PR opening (or direct push when flag set); existing repos handled by E1.3 |
-| **E1.3** | `feature/e1.3-codemap-migration-helper` | Admin endpoint + idempotency + per-repo status response | Re-running on the same project doesn't open duplicate PRs |
-| **E1.7** | `feature/e1.7-multi-project-config` | `ProjectConfigPathResolver` + auto-migration on second link + `config_storage: database` opt-out | Two projects can link to same repo with isolated configs; first-project legacy config migrates cleanly |
+| **E1.1** | `feat(executespec): E1.1 — folder-tracking schema` | V131 migration + `ProjectRepo` entity columns + repository read paths default `NOT_BOOTSTRAPPED` | `mvn test -Pintegration` green; existing `ProjectRepo` rows readable |
+| **E1.4** | `feat(executespec): E1.4 — folder-writer chokepoint` | `ExecutespecFolderWriter` service + conflict-resolution policy doc + `executespec_pr_mode` flag column (new V132) + integration test against a fixture repo opening a real PR | Service is the *only* writer; ArchUnit test forbids direct GitHub-API writes to `.executespec/` from anywhere else |
+| **E1.6** | `feat(executespec): E1.6 — folder readme generator` | Template renderer + unit test | Generated README renders correctly against fixture inputs |
+| **E1.8 + E1.10 + E1.9** (single commit) | `feat(activity): E1.8/9/10 — event taxonomy + feed table + emitter` | `ActivityEventType` enum + `@ActivityMeta` + V133 `activity_feed` partitioned table + `ActivityFeedPartitionJob` + `ActivityEventEmitter` chokepoint | Unit + integration test; emitter writes to feed AND dual-writes to `activity_audit` for AUDIT-surface events; partition job creates next 3 months on boot |
+| **E1.5** | `feat(executespec): E1.5 — bootstrap PR flow + PAT pre-flight` | Pre-flight PAT scope check + `BootstrapService` + bootstrap PR on `linkRepo` + `EXECUTESPEC_BOOTSTRAP_*` activity events | Linking a fixture repo with adequate PAT opens a PR within 30s; inadequate PAT surfaces tooltip with required scopes; idempotent on existing `.executespec/` |
+| **E1.2** | `refactor(codeintel): E1.2 — codemap relocation to .executespec/arch/` | Codemap path migration + `PostMergeCascadeService` PR-mode + behavioural-regression doc + opt-in DIRECT_PUSH path for codemap | All readers resolve via new path; cascade test verifies PR opening (or direct push when flag set); existing repos handled by E1.3 |
+| **E1.3** | `feat(admin): E1.3 — codemap migration helper endpoint` | Admin endpoint + idempotency + per-repo status response | Re-running on the same project doesn't open duplicate PRs |
+| **E1.7** | `feat(executespec): E1.7 — multi-project namespaced config` | `ProjectConfigPathResolver` + auto-migration on second link + `config_storage: database` opt-out | Two projects can link to same repo with isolated configs; first-project legacy config migrates cleanly |
 
-**Phase E1 ship order:** E1.1 → E1.4 → E1.6 → (E1.8 + E1.10 + E1.9 bundle) → E1.5 → E1.2 → E1.3 → E1.7.
+**Why E1.8/E1.10/E1.9 are bundled into one commit:** they form the
+activity-event foundation. Splitting into 3 commits ships nothing
+useful incrementally and forces 3 round-trips of doc-refresh.
+Bundling lands a working emitter + table together.
 
-Justification for the bundle: E1.8/E1.9/E1.10 together form the
-activity-event foundation — splitting them into 3 PRs ships nothing
-useful incrementally and forces 3 round-trips of doc-refresh. Bundling
-ships a working emitter + table in one merge.
-
-E1.5 ships *before* E1.2 because the bootstrap PR creates the initial
+**Why E1.5 ships before E1.2:** the bootstrap PR creates the initial
 `.executespec/` folder; E1.2's codemap relocation assumes the folder
 exists. Source execution doc has these in 1.2 → 1.5 order; that's
 incorrect.
+
+**When to open the PR against `dev`:** after E1.7 lands, open the PR
+as **draft** (not ready for review) so CI runs against the branch and
+catches anything the local build missed. Move the PR out of draft
+only when Phase E1's definition of done in §11 is met. If review
+comments require non-trivial changes, address them as additional
+commits on the same branch (don't squash until the merge).
+
+**Phase E2/E3/E4 commits** continue on the same branch after the E1
+PR merges (or as additional commits if the E1 PR hasn't merged yet,
+with the understanding that the PR scope grows). If review burden
+becomes the bottleneck, split each later phase into its own PR off
+the same branch using `git push origin
+feature/enterprise-readiness-eval:refs/heads/pr/phase-e2` style
+naming — but the working branch stays singular.
 
 ---
 
