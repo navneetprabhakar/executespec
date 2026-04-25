@@ -2132,6 +2132,52 @@ export const getStandardsReport = (projectId: string, orgId: string, sinceDays =
   req<ComplianceReport>(
     `/projects/${projectId}/standards/report?orgId=${encodeURIComponent(orgId)}&sinceDays=${sinceDays}`);
 
+// E4.1 — activity feed
+export interface ActivityEntry {
+  id: string;
+  occurredAt: string;
+  actorUserId?: string | null;
+  actorType: 'USER' | 'SYSTEM';
+  eventType: string;
+  tier: 'HIGH_SIGNAL' | 'ADMIN_TOGGLE' | 'AUDIT_ONLY';
+  targetType?: string | null;
+  targetId?: string | null;
+  summary: string;
+  payload?: string | null;
+  schemaVersion: number;
+}
+export interface ActivityPage {
+  projectId: string;
+  from: string;
+  to: string;
+  entries: ActivityEntry[];
+  hasMore: boolean;
+}
+export const getActivityFeed = (
+  projectId: string,
+  opts: {
+    sinceDays?: number;
+    eventTypes?: string[];
+    actorId?: string;
+    targetType?: string;
+    targetId?: string;
+    includeAdminEvents?: boolean;
+    limit?: number;
+  } = {},
+) => {
+  const params = new URLSearchParams();
+  if (opts.sinceDays != null) params.set('sinceDays', String(opts.sinceDays));
+  if (opts.eventTypes && opts.eventTypes.length)
+    opts.eventTypes.forEach((t) => params.append('eventTypes', t));
+  if (opts.actorId) params.set('actorId', opts.actorId);
+  if (opts.targetType) params.set('targetType', opts.targetType);
+  if (opts.targetId) params.set('targetId', opts.targetId);
+  if (opts.includeAdminEvents) params.set('includeAdminEvents', 'true');
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return req<ActivityPage>(`/projects/${projectId}/activity${qs}`);
+};
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
