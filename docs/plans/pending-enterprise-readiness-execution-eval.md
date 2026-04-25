@@ -569,18 +569,19 @@ steps creates either silent test debt or a missed status email.
    (1M context) <noreply@anthropic.com>`. Do NOT push without explicit
    user confirmation per memory rule
    `feedback_no_push_without_approval`.
-7. **Email + Telegram (dual-channel)** — `python3 scripts/slice-email.py
-   --metadata /tmp/slice-<id>.json` sends the long-form progress
-   report to navneet.prabhakar007@gmail.com (SMTP creds from
-   `application-local.yml` → `app.mail.smtp.password`). In parallel,
-   `python3 scripts/slice-telegram.py --metadata /tmp/slice-<id>.json`
-   sends a compact HTML summary to the user's Telegram. Telegram creds
-   come from (priority order): env vars `TELEGRAM_BOT_TOKEN +
-   TELEGRAM_CHAT_ID` / file `~/.executespec/telegram.json` /
-   `application-local.yml` keys `telegram.bot-token` + `telegram.chat-id`.
-   The Telegram script no-ops with a clear "no creds" message if the
-   user hasn't configured them yet — never fails the slice.
-   Email contents:
+7. **Telegram** — `python3 scripts/slice-telegram.py
+   --metadata /tmp/slice-<id>.json` sends a compact HTML summary to
+   the user's Telegram. **Telegram is now the only channel** (user
+   instruction 2026-04-25 — "instead of sending mails send telegram
+   message"). Telegram creds come from (priority order): env vars
+   `TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID` / file
+   `~/.executespec/telegram.json` / `application-local.yml` keys
+   `telegram.bot-token` + `telegram.chat-id`. The script no-ops with
+   a clear "no creds" message if not configured — never fails the
+   slice. `scripts/slice-email.py` is kept on disk as a fallback /
+   for the consolidated phase-end reports but is NOT part of the
+   per-slice workflow.
+   Telegram message contents:
    - **Subject:** `ExecuteSpec slice <id> — <title> — <PASS|FAIL>`
    - **Body (mobile-readable HTML):**
      - Slice ID + title + commit SHA
