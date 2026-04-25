@@ -569,11 +569,18 @@ steps creates either silent test debt or a missed status email.
    (1M context) <noreply@anthropic.com>`. Do NOT push without explicit
    user confirmation per memory rule
    `feedback_no_push_without_approval`.
-7. **Email** — `python3 scripts/slice-email.py
-   --metadata /tmp/slice-<id>.json` sends the per-slice progress
-   report to navneet.prabhakar007@gmail.com. The script reads SMTP
-   credentials from `application-local.yml` (`app.mail.smtp.password`
-   default). Email contents:
+7. **Email + Telegram (dual-channel)** — `python3 scripts/slice-email.py
+   --metadata /tmp/slice-<id>.json` sends the long-form progress
+   report to navneet.prabhakar007@gmail.com (SMTP creds from
+   `application-local.yml` → `app.mail.smtp.password`). In parallel,
+   `python3 scripts/slice-telegram.py --metadata /tmp/slice-<id>.json`
+   sends a compact HTML summary to the user's Telegram. Telegram creds
+   come from (priority order): env vars `TELEGRAM_BOT_TOKEN +
+   TELEGRAM_CHAT_ID` / file `~/.executespec/telegram.json` /
+   `application-local.yml` keys `telegram.bot-token` + `telegram.chat-id`.
+   The Telegram script no-ops with a clear "no creds" message if the
+   user hasn't configured them yet — never fails the slice.
+   Email contents:
    - **Subject:** `ExecuteSpec slice <id> — <title> — <PASS|FAIL>`
    - **Body (mobile-readable HTML):**
      - Slice ID + title + commit SHA
