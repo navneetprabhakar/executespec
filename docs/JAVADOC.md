@@ -1,6 +1,8 @@
 # ExecuteSpec -- Complete System Documentation
 
-**Version:** v2.4.0 (2026-04-14)
+**Version:** v2.6.1 (2026-04-25)
+
+> **Header note (2026-04-25):** the body of this document was last comprehensively refreshed at v2.4.0 (2026-04-14). The class-level reference, method signatures, and Flyway range V1–V90 below remain accurate. For everything from v2.5.0 onward, treat [`CLAUDE.md`](../CLAUDE.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`CODEMAP.md`](CODEMAP.md) as the source of truth. Highlights NOT yet captured in the per-section detail below: V2 harness deletion of V1 (P1–P6), 3-step architecture pipeline + Generate Docs (v2.5.12, V112–V115), validation v3 Pillar 1 + verified-score (v2.5.10/11, V106–V109), RN+Expo codegen (v2.5.13, V118), guardrail levels P1–P5, UX v3 Graphite+Signal + LlmProvider GEMINI rename (v2.6.0, V120), and Wave 1–6 persona roadmap (v2.6.1, V121–V129). The migration table at §21.1 is authoritative within its range; for V91–V130 see [`DEPLOYMENT.md`](DEPLOYMENT.md) §Migration Reference.
 
 > **Project Shell + Launch (v2.4.0)** — adds `ProjectLaunchController` + `ScaffoldController` + `ExecutionSolutionRun` entity + `ProjectRepoService.createAndLinkNewRepo`. ExecutionView gate widened to ENTERPRISE + MAX. New-repo creation supported as part of a Launch via `NewRepoSpec`. Multi-run solutions persist per-attempt history. Migration V90.
 
