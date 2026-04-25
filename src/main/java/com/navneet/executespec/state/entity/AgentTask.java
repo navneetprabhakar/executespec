@@ -105,4 +105,16 @@ public class AgentTask {
     @Column(name = "prompt_hash", length = 12)
     private String promptHash;          // 12-char SHA-256 prefix of assembled prompt
 
+    // ── Hierarchical Planner (v2.6.2 — V130) ────────────────────────────────
+    /** "LEAF" (terminal task) | "EPIC" (will spawn subtasks via expander). */
+    @Column(name = "task_type", length = 16)
+    private String taskType;
+
+    /** "PENDING" | "EXPANDED" | "FAILED" | null (not part of hierarchical run). */
+    @Column(name = "expansion_status", length = 16)
+    private String expansionStatus;
+
+    @Column(name = "expanded_at")
+    private java.time.Instant expandedAt;
+
 }

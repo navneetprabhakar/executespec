@@ -31,7 +31,9 @@ import com.navneet.executespec.v2.cost.V2RunCostTracker;
 import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
+import com.navneet.executespec.v2.agent.ClassificationResult;
 import com.navneet.executespec.v2.agent.PlannerAgentV2;
+import com.navneet.executespec.v2.agent.SmartClassifierAgent;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
 import com.navneet.executespec.v2.agent.SpecClassifier;
 import com.navneet.executespec.project.entity.ProjectRepo;
@@ -54,6 +56,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -108,6 +111,7 @@ public class V2RunOrchestrator {
     private final PipelineRunRepository runRepo;
     private final AgentTaskRepository taskRepo;
     private final PlannerAgentV2 planner;
+    private final SmartClassifierAgent smartClassifier;
     private final SequentialExecutorV2 executor;
     private final ReviewerAgentV3 reviewer;
     private final V2Metrics metrics;
@@ -464,6 +468,13 @@ public class V2RunOrchestrator {
                 Classification autoClassification = SpecClassifier.classify(userRequest);
                 log.info("V2 run={} spec classified as {} (len={})",
                         runId, autoClassification, userRequest == null ? 0 : userRequest.length());
+
+                // v2.6.2 — Smart classifier (hierarchical-planner phase 0). Runs
+                // alongside the legacy SpecClassifier for slice 1; downstream
+                // planner is unchanged. Verdict + per-phase token cost persist
+                // on the run row for offline calibration. The cost flows through
+                // V2RunCostTracker so it's also already in the run's grand total.
+                runClassifierShadow(runId, runRow, userRequest, projectId, selectedRepoIds, provider);
                 String projectMemory = projectId != null
                         ? projectMemoryProvider.buildPlannerContext(projectId)
                         : "";
@@ -1767,6 +1778,102 @@ public class V2RunOrchestrator {
         if (fullName == null) return "repo";
         int slash = fullName.lastIndexOf('/');
         return slash < 0 ? fullName : fullName.substring(slash + 1);
+    }
+
+    /**
+     * v2.6.2 — hierarchical-planner phase 0 (slice 1, shadow mode). Runs the
+     * smart classifier alongside the legacy {@link SpecClassifier}, persists
+     * verdict + per-phase token cost on the run row for offline calibration.
+     * Downstream planner is unchanged in slice 1; this only writes new columns.
+     *
+     * <p>Cost note: the classifier's LLM call (when it fires) flows through
+     * {@link LlmRouterV2} → {@link V2RunCostTracker#record}, so it auto-aggregates
+     * into the run's grand totals. We diff the per-run snapshot before and after
+     * the classifier call to attribute the slice to the new
+     * {@code classifier_*} columns. Any future cost reads on the run total
+     * already include this — no separate reconciliation needed.
+     *
+     * <p>Failures are swallowed: classifier outage must never block planning.
+     */
+    private void runClassifierShadow(
+            String runId, PipelineRun runRow, String userRequest,
+            String projectId, List<UUID> selectedRepoIds, String provider
+    ) {
+        try {
+            // Repo full names — best effort. Skip lookup if not multi-repo.
+            List<String> repoNames = new ArrayList<>();
+            if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
+                try {
+                    List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
+                    for (ProjectRepo r : repos) {
+                        if (r.getGithubRepoFullName() != null) repoNames.add(r.getGithubRepoFullName());
+                    }
+                } catch (Exception ignored) { /* fall through with empty list */ }
+            }
+
+            // Project type — Project entity doesn't carry one yet (slice 1
+            // skips this signal). Future slices will plumb it through from
+            // detected_stack on linked repos.
+            String projectType = null;
+
+            // Project memory snippet — short tail of last 3 ledger entries.
+            String projectMemorySnippet = null;
+            if (projectId != null) {
+                try {
+                    String full = projectMemoryProvider.buildPlannerContext(projectId);
+                    if (full != null && !full.isBlank()) {
+                        // Cap at ~600 chars so the classifier prompt stays compact.
+                        projectMemorySnippet = full.length() > 600
+                                ? full.substring(full.length() - 600)
+                                : full;
+                    }
+                } catch (Exception ignored) { /* leave null */ }
+            }
+
+            com.navneet.executespec.router.LlmProvider providerEnum;
+            try {
+                providerEnum = com.navneet.executespec.router.LlmProvider.valueOf(
+                        provider == null ? "OPENAI" : provider.toUpperCase());
+            } catch (Exception e) {
+                providerEnum = com.navneet.executespec.router.LlmProvider.OPENAI;
+            }
+
+            V2RunCostTracker.Snapshot before = costTracker.snapshot(runId);
+            ClassificationResult result = smartClassifier.classify(
+                    userRequest, repoNames, projectId, projectType, providerEnum, projectMemorySnippet);
+            V2RunCostTracker.Snapshot after = costTracker.snapshot(runId);
+
+            long classifierIn = Math.max(0, after.inputTokens() - before.inputTokens());
+            long classifierOut = Math.max(0, after.outputTokens() - before.outputTokens());
+            double classifierCost = Math.max(0.0, after.costUsd() - before.costUsd());
+
+            log.info("V2 run={} smart classifier → {} (source={}, est tasks={}, repos={}, in/out={}/{}, ${})",
+                    runId, result.strategy(), result.source(),
+                    result.estimatedTaskCount(), result.estimatedRepoTouchCount(),
+                    classifierIn, classifierOut,
+                    String.format("%.6f", classifierCost));
+
+            // Persist verdict + per-phase cost on the run row. Use a fresh load
+            // so we don't overwrite columns that other writers may have touched
+            // (initialisation log, codemap summary, etc.).
+            try {
+                PipelineRun fresh = runRepo.findById(runId).orElse(null);
+                if (fresh != null) {
+                    fresh.setPlanStrategy(result.strategy().name());
+                    fresh.setClassifierReasoning(result.reasoning());
+                    fresh.setClassifierInputTokens(classifierIn);
+                    fresh.setClassifierOutputTokens(classifierOut);
+                    fresh.setClassifierCostUsd(classifierCost);
+                    runRepo.save(fresh);
+                }
+            } catch (Exception persistEx) {
+                log.warn("V2 run={} smart classifier persist failed (non-fatal): {}",
+                        runId, persistEx.getMessage());
+            }
+        } catch (Exception e) {
+            log.warn("V2 run={} smart classifier shadow run failed (non-fatal): {}",
+                    runId, e.getMessage());
+        }
     }
 
     private static String shortMsg(Exception e) {
