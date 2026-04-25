@@ -38,6 +38,11 @@ public class ProjectRepoService {
     /** Lazy to break potential circular wiring on startup. */
     private final org.springframework.beans.factory.ObjectProvider<
             com.navneet.executespec.codeintel.ProjectArchitectureService> archServiceProvider;
+    /** E1.5 — fires bootstrap PR async after a successful link. Lazy to keep
+     *  service start-up cheap when the bootstrap pipeline isn't on the critical
+     *  path (e.g. tests, admin tooling, migrations). */
+    private final org.springframework.beans.factory.ObjectProvider<
+            com.navneet.executespec.folder.BootstrapService> bootstrapServiceProvider;
 
     /* ────────────────────────────── repo lifecycle ─────────────────────────── */
 
@@ -226,7 +231,29 @@ public class ProjectRepoService {
         linkRepo.save(link);
 
         log.info("Linked repo {} ({}) to project {}", repoId, repo.getGithubRepoFullName(), projectId);
+
+        // E1.5 — fire bootstrap async so the controller responds immediately;
+        // the slow GH round-trip (PAT preflight + branch creation + content
+        // PUTs + open PR) runs on the background executor. Failures persist
+        // BOOTSTRAP_FAILED on the project_repo row + emit an activity event;
+        // they never bubble back to this thread.
+        com.navneet.executespec.folder.BootstrapService bootstrap = bootstrapServiceProvider.getIfAvailable();
+        if (bootstrap != null) {
+            String pat = userRepo.findById(callerUserId)
+                    .map(u -> u.getGithubPat()).orElse(null);
+            UUID actorUserId = parseUuidOrNull(callerUserId);
+            UUID projectUuid = parseUuidOrNull(projectId);
+            if (projectUuid != null) {
+                bootstrap.bootstrapAsync(repo.getId(), projectUuid, project.getName(), actorUserId, pat);
+            }
+        }
+
         return ProjectRepoLinkDto.from(link, repo);
+    }
+
+    private static UUID parseUuidOrNull(String s) {
+        try { return s == null ? null : UUID.fromString(s); }
+        catch (IllegalArgumentException ex) { return null; }
     }
 
     @Transactional
