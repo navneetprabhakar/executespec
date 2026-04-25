@@ -49,13 +49,18 @@ spring:
       # async timeout (30 s) would cancel these before they finish.
       request-timeout: 900000
   jpa:
-    # Keep the Hibernate session open for the full HTTP request. Required by the
-    # execution + project view controllers, which walk lazy collections
-    # (ExecutionSolution.dependencies, ExecutionRun proxies, etc.) in the
-    # response mapping layer. Tradeoff: DB connection held for the request's
-    # duration and potential for N+1 queries; acceptable given our traffic
-    # profile and already-amortised LLM call costs per request.
-    open-in-view: true
+    # v2.6.1 — OSIV flipped OFF after audit (2026-04-25). It was enabled in
+    # v2.5.1 to silence lazy-init crashes in execution + project view
+    # controllers, but a code-walk showed every concerning lazy walk is now
+    # covered by either entity-level FetchType.EAGER (ExecutionSolution
+    # dependencies + repoMappings) or @EntityGraph queries
+    # (ExecutionRunRepository.findListByProjectId / findDetailById +
+    # ExecutionSolutionRepository.findWith*) — and the DTO-walk endpoints
+    # in ProjectLaunchController are wrapped in @Transactional(readOnly=true).
+    # OSIV's session-scoped EM was the last reason connections were held
+    # across long async work (chat /apply); turning it off pairs with the
+    # connection.handling_mode change to release each connection at tx commit.
+    open-in-view: false
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: validate        # Hibernate only validates — Flyway manages all schema
