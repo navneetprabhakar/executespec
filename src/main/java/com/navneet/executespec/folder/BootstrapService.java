@@ -5,6 +5,7 @@ import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -73,6 +74,7 @@ public class BootstrapService {
     @Value("${agent.github.pat:#{null}}")
     private String systemPat;
 
+    @Autowired
     public BootstrapService(ExecutespecFolderWriter writer,
                             FolderReadmeGenerator readmeGenerator,
                             ProjectRepoRepository repoRepo,

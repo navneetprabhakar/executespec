@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.repo.GitHubRepoService;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -88,6 +89,7 @@ public class ExecutespecFolderWriter {
     @Value("${agent.github.pat:#{null}}")
     private String systemPat;
 
+    @Autowired
     public ExecutespecFolderWriter(ObjectMapper json, GitHubRepoService gh) {
         this(HttpClient.newHttpClient(), json, gh);
     }
