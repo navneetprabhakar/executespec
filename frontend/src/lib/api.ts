@@ -2091,6 +2091,47 @@ export const dismissContractDrift = (
     `/projects/${projectId}/contracts/${contractId}/dismiss-drift`,
     { method: 'POST', body: JSON.stringify({ rationale }) });
 
+// E3.16 — standards compliance report
+export interface StandardEntry {
+  id: string;
+  severity: 'BLOCKING' | 'WARNING' | 'ADVISORY';
+  source: 'ORG' | 'PROJECT';
+  overridden: boolean;
+  originalSeverity: string;
+  orgLevelLocked: boolean;
+  enforcementType: string;
+  description: string;
+}
+export interface ViolationEntry {
+  id: string;
+  standardId: string;
+  enforcementType: string;
+  severity: string;
+  summary: string;
+  detectedAt: string;
+  overrideApplied: boolean;
+}
+export interface OverrideEntry {
+  id: string;
+  standardId: string;
+  overrideType: string;
+  newSeverity?: string | null;
+  rationale: string;
+  createdByUserId?: string | null;
+  createdAt?: string | null;
+}
+export interface ComplianceReport {
+  projectId: string;
+  orgId: string;
+  sinceDays: number;
+  standards: StandardEntry[];
+  recentViolations: ViolationEntry[];
+  persistentOverrides: OverrideEntry[];
+}
+export const getStandardsReport = (projectId: string, orgId: string, sinceDays = 30) =>
+  req<ComplianceReport>(
+    `/projects/${projectId}/standards/report?orgId=${encodeURIComponent(orgId)}&sinceDays=${sinceDays}`);
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
