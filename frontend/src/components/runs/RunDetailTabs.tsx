@@ -424,16 +424,32 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
   const [liveTokens, setLiveTokens] = useState<{ input: number; output: number } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    getLiveCost(run.runId)
-      .then((res) => {
-        if (cancelled) return;
-        setLiveCost(res.costUsd);
-        if (typeof res.inputTokens === 'number' && typeof res.outputTokens === 'number') {
-          setLiveTokens({ input: res.inputTokens, output: res.outputTokens });
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const fetchCost = () => {
+      getLiveCost(run.runId)
+        .then((res) => {
+          if (cancelled) return;
+          setLiveCost(res.costUsd);
+          if (typeof res.inputTokens === 'number' && typeof res.outputTokens === 'number') {
+            setLiveTokens({ input: res.inputTokens, output: res.outputTokens });
+          }
+        })
+        .catch(() => {});
+    };
+    fetchCost();
+    // v2.6.1 — poll while non-terminal. Without this the chip showed the
+    // mount-time snapshot for the entire worker phase (status doesn't flip
+    // between PLANNING → WORKING → REVIEWING for cost accumulation, but the
+    // accumulator updates on every LLM call).
+    const isTerminal = run.status === 'COMPLETE' || run.status === 'FAILED'
+      || run.status === 'CANCELLED' || run.status === 'PARTIAL';
+    if (isTerminal) {
+      return () => { cancelled = true; };
+    }
+    const interval = setInterval(fetchCost, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [run.runId, run.status]);
 
   // ── Project tagging ──────────────────────────────────────────────────

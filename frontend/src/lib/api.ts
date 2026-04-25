@@ -2208,6 +2208,15 @@ export const getPullRequestSnapshot = (repoFullName: string, prNumber: number, m
 export const compileProjectChatToSpec = (projectId: string) =>
   req<{ spec: string }>(`/projects/${projectId}/chat/compile`, { method: 'POST' });
 
+export const clearProjectChat = (projectId: string) =>
+  req<{ deleted: number }>(`/projects/${projectId}/chat`, { method: 'DELETE' });
+
+export const compactProjectChat = (projectId: string) =>
+  req<{ compactedFrom: number; kept: number; totalAfter: number }>(
+    `/projects/${projectId}/chat/compact`,
+    { method: 'POST' },
+  );
+
 // Assessment approval (R4)
 export const approveAssessment = (runId: string, constraints?: string[]) =>
   req<void>(`/runs/${runId}/approve-assessment`, {
