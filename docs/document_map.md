@@ -1,7 +1,7 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-25 (plan-doc cleanup: 12 done plans deleted, 4 partial plans consolidated into `partial-work.md`, 5 not-started plans renamed `pending-*`).
+> Last updated: 2026-04-25 (plan-doc cleanup: 12 done plans deleted, 4 partial plans consolidated into `partial-work.md`, 5 not-started plans renamed `pending-*`. Document Index + Per-Package Quick Reference also expanded to cover the 9 packages and 4 doc files that were missing — `api/`, `apitests/`, `assessment/`, `compliance/`, `contact/`, `context/`, `crypto/`, `repo/`, `validator/` + `billing-workflows.html`, `design/ui-tokens.md`, `test-scenarios/`, `reports/`).
 >
 > **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Hierarchical planner (v2.6.2-track) currently in progress on `feature/hierarchical-planner` — see [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md).
 
@@ -93,6 +93,10 @@ Find the **type of change** you are making in the table below. Update every docu
 | `enterprise-one-pager.md` | Procurement / IT / security one-pager | Tier table, security posture, data-handling Q&A changes |
 | `enterprise-sla.md` | ENTERPRISE-tier support SLA | P1–P4 definitions, uptime credit schedule changes |
 | `hierarchical-planner-plan.md` | In-progress design for v2.6.2 hierarchical planner | While the feature is on `feature/hierarchical-planner` |
+| `billing-workflows.html` | Rendered billing flow diagrams (subscribe, top-up, refund, webhook handling) | Billing / payment flow changes |
+| `design/ui-tokens.md` | Single source of truth for color/radius/spacing tokens | Adding a UI primitive, tweaking the palette, theme work |
+| `test-scenarios/` | Persona + adversarial + E2E test plans + post-merge retest | New persona / coverage matrix updates; persona regression sweeps |
+| `reports/` | Historical session handoffs, eval results, launch checklists, persona reports | Append-only — new reports are added, prior ones not edited |
 | `document_map.md` | This file | Adding a new doc, adding a new change type |
 
 ---
@@ -103,18 +107,25 @@ Find the **type of change** you are making in the table below. Update every docu
 
 | Package | Primary Doc Sections |
 |---------|----------------------|
-| `v2/` (V2 harness — agent/, batch/, chat/, context/, cost/, harness/, integration/, observability/, recovery/, reviewer/, smoketest/, test/, tool/) | JAVADOC §8 Pipeline Harness; ARCHITECTURE §3 V2 pipeline; CLAUDE.md V2 bullets |
-| `agent/` (LlmRouter V1, PromptAssembler, ConversationAgent, CostEstimator) | JAVADOC §5 Agent System (V1 surface still used by chat/test-gen) |
+| `v2/` (V2 harness — agent/, batch/, chat/, context/, cost/, harness/, integration/, observability/, recovery/, reviewer/, smoketest/, test/, tool/) | JAVADOC §8 Pipeline Harness; ARCHITECTURE §3 V2 pipeline; CLAUDE.md V2 bullets; CODEMAP.md §V2 |
+| `agent/` (LlmRouter V1, PromptAssembler, ConversationAgent, CostEstimator) | JAVADOC §5 Agent System (V1 surface still used by chat/test-gen); CODEMAP.md §LLM router |
 | `analytics/` (UserActivationEvent + EventTrackingService + PostHogClient) | ARCHITECTURE §0b Wave 2; CLAUDE.md activation funnel bullet |
+| `api/` (RunMapper + advice/ + controller/ + dto/) | JAVADOC §17.x REST API Reference |
+| `apitests/` (ApiTestSuiteAgent) | JAVADOC §apitests |
+| `assessment/` (FeatureAssessmentService heuristic + LLM-gated) | ARCHITECTURE §pilot v3.0 (pre-plan assessment) |
 | `auth/` | JAVADOC §10–11 Auth; ARCHITECTURE §5 Security; RBAC.md |
 | `billing/` (incl. lifecycle/) | JAVADOC §14–15 Billing; ARCHITECTURE §7 Billing + §0b Wave 1; billing-workflows.html |
 | `codeintel/` | JAVADOC §codeintel; ARCHITECTURE §3-step arch pipeline (v2.5.12) |
+| `compliance/` (DataRetentionService — GDPR soft-delete) | JAVADOC §compliance; CLAUDE.md retention bullet |
 | `config/featureflag/` | JAVADOC §12 Feature Flags; ARCHITECTURE §7.2 |
+| `contact/` (public contact form) | JAVADOC §contact controller |
+| `context/` (legacy V1 ContextAgent) | JAVADOC §context (legacy) |
+| `crypto/` (KMS / encryption-at-rest) | ARCHITECTURE §5 Security |
 | `deployment/`, `deployment/preview/` | JAVADOC §16; ARCHITECTURE §6.2; WORKFLOWS §12 |
 | `eval/` | JAVADOC §24 Eval Framework |
 | `execution/` (Execution View) | ARCHITECTURE §execution view (v2.3.0) |
 | `harness/` (V1 — workspace, GateStore, design-system) | JAVADOC §8 (legacy V1 surface kept); ARCHITECTURE §V2 reuses these primitives |
-| `integration/` (slack, github, jira, confluence, scm) | JAVADOC §17.11–17.12; WORKFLOWS §7–8 |
+| `integration/` (slack, jira, confluence, bitbucket, pagerduty, servicenow, scm) | JAVADOC §17.11–17.12; WORKFLOWS §7–8 |
 | `memory/` | ARCHITECTURE §project memory (v2.2.0) |
 | `notification/` | JAVADOC §notification; CLAUDE.md notification bullet |
 | `onboarding/` | ARCHITECTURE §0b Wave 2 (sandbox); USER_MANUAL §v2.6.1 onboarding |
@@ -122,23 +133,27 @@ Find the **type of change** you are making in the table below. Update every docu
 | `pricing/` | JAVADOC §pricing; ARCHITECTURE §0a v3 pricing |
 | `project/` (incl. dashboard/, estimation/, pr/, rag/, scores/, techdebt/, template/, workspace/) | JAVADOC §project; ARCHITECTURE §pilot v3.0; project-user-journeys.md |
 | `ratelimit/` | JAVADOC §13 Rate Limiting |
+| `repo/` (GitHubRepoService, BitbucketRepoService, ScmProvider) | JAVADOC §repo (SCM clients) |
 | `report/` | JAVADOC §17.10 Validation Report Endpoints |
 | `reviewer/` (V1 surface — V2 uses v2/reviewer/) | JAVADOC §reviewer (legacy) |
 | `router/` (LlmProvider enum, ModelResolver, ProviderHealthTracker, ProviderRecommendationService) | JAVADOC §9 Model Routing; ARCHITECTURE §Model Matrix |
 | `run/` | JAVADOC §run controllers |
 | `saga/` | JAVADOC §saga |
 | `scoring/` | JAVADOC §scoring; ARCHITECTURE §6-dimension scoring |
-| `security/` | JAVADOC §25 Security Architecture |
+| `security/` (incl. guardrail/) | JAVADOC §25 Security Architecture |
 | `sse/` | JAVADOC §SSE channel (RunEvent, ExecutionEventTypes) |
 | `state/` | JAVADOC §7 State Management |
 | `tenant/` | JAVADOC §tenant isolation |
 | `testgen/` | JAVADOC §5.10 Test Generation Agents; WORKFLOWS §2 |
 | `tool/` (V1 GitTool, etc.) | JAVADOC §tool (legacy V1 surface) |
+| `validator/` (CodeValidator + execution/gate/language/prompt subpackages) | JAVADOC §validator |
 | `frontend/src/` | frontend-api-usage.md; user-journeys.md; project-user-journeys.md |
 | `frontend/src/tokens.css` + `tailwind.config.ts` | [`docs/design/ui-tokens.md`](design/ui-tokens.md) |
-| `src/main/resources/db/migration/` | JAVADOC §21.1 Flyway Migrations; CLAUDE.md Flyway note |
+| `src/main/resources/db/migration/` | JAVADOC §21.1 Flyway Migrations; CLAUDE.md Flyway note; DEPLOYMENT.md migration ranges |
 | `src/main/resources/application.yml` | JAVADOC §20 Configuration Reference; CLAUDE.md env vars; DEPLOYMENT.md env-var section |
 | `src/main/resources/prompts/` | JAVADOC §5.x (per agent); CLAUDE.md Prompt architecture bullet |
+| `src/main/resources/sample-specs/` | ARCHITECTURE §0b Wave 2 (sandbox onboarding); USER_MANUAL §v2.6.1 |
+| `src/main/resources/templates/email/` + `templates/report/` | JAVADOC §email templates; ARCHITECTURE §0a UX v3 (palette swap) |
 
 ---
 
