@@ -149,24 +149,48 @@ public class StartupRunResumerV2 {
             // repeated deploy-interrupt cycles trip the cap and don't thrash.
             run.setResumeAttempts(attempts + 1);
 
-            // v2.6.2 slice 4 — outline-checkpoint awareness. When the
+            // v2.6.2 slice 4 + 5d — outline-checkpoint awareness. When the
             // hierarchical planner has already written `plan_outline_json`
-            // before the JVM died, surface that to the user so they know the
-            // expensive Phase 1 (LLM outline call) didn't have to be redone
-            // — the orchestrator can cheaply restart from the persisted
-            // skeleton on the resubmit. Future slices replay automatically;
-            // for now it's a clearer error message.
+            // before the JVM died, surface what was preserved so the user
+            // knows what work would replay vs needs redoing. Slice 5d adds
+            // per-task expansion-status reporting so the picture is precise:
+            // we count agent_task rows by expansion_status to show how much
+            // of phase 2 had completed.
             String checkpointHint;
             if (run.getPlanStrategy() != null
                     && run.getPlanOutlineJson() != null
                     && !run.getPlanOutlineJson().isBlank()) {
+                String taskBreakdown = "";
+                try {
+                    List<AgentTask> tasks = taskRepo.findByRunId(run.getRunId());
+                    int total = tasks.size();
+                    int expanded = (int) tasks.stream()
+                            .filter(t -> "EXPANDED".equals(t.getExpansionStatus()))
+                            .count();
+                    int pending = (int) tasks.stream()
+                            .filter(t -> "PENDING".equals(t.getExpansionStatus()))
+                            .count();
+                    int failed = (int) tasks.stream()
+                            .filter(t -> "FAILED".equals(t.getExpansionStatus()))
+                            .count();
+                    if (total > 0) {
+                        taskBreakdown = ", tasks=" + total
+                                + " (expanded=" + expanded
+                                + ", pending=" + pending
+                                + ", failed=" + failed + ")";
+                    }
+                } catch (Exception breakdownEx) {
+                    log.debug("StartupRunResumerV2: task-breakdown lookup failed for run={}: {}",
+                            run.getRunId(), breakdownEx.getMessage());
+                }
                 checkpointHint = " Outline-checkpoint preserved (strategy="
                         + run.getPlanStrategy() + ", outline_json size="
-                        + run.getPlanOutlineJson().length() + " bytes) — a "
-                        + "resubmission with the same spec will reuse the "
-                        + "classifier verdict via the 1h Redis cache; the "
-                        + "outline + per-task expansion are not yet auto-"
-                        + "replayed (see slice 5 follow-up).";
+                        + run.getPlanOutlineJson().length() + " bytes"
+                        + taskBreakdown + ") — a resubmission with the same "
+                        + "spec will reuse the classifier verdict via the 1h "
+                        + "Redis cache. Auto-replay of the outline + per-task "
+                        + "expansion is a slice-5 follow-up; for now please "
+                        + "resubmit.";
             } else {
                 checkpointHint = "";
             }

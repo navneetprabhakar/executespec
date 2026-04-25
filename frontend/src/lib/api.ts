@@ -224,6 +224,26 @@ export interface RunDetail extends RunSummary {
   creditsCharged?: number | null;
   /** Hard cap in USD (safety net ceiling). */
   hardCapUsd?: number | null;
+  /** v2.6.2-track — hierarchical-planner strategy chosen by SmartClassifierAgent. */
+  planStrategy?: 'SINGLE_SHOT' | 'SMALL' | 'MEDIUM' | 'LARGE' | 'LEGACY' | null;
+  /** v2.6.2-track — one-line classifier rationale. */
+  classifierReasoning?: string | null;
+  /** v2.6.2-track — phase-0 (classifier) cost. */
+  classifierCostUsd?: number | null;
+  classifierInputTokens?: number | null;
+  classifierOutputTokens?: number | null;
+  /** v2.6.2-track — phase-1 (outline) cost. */
+  outlineCostUsd?: number | null;
+  outlineInputTokens?: number | null;
+  outlineOutputTokens?: number | null;
+  /** v2.6.2-track — phase-2 (expansion) cost (sum across parallel calls). */
+  expansionCostUsd?: number | null;
+  expansionInputTokens?: number | null;
+  expansionOutputTokens?: number | null;
+  /** v2.6.2-track — phase-3 (coherence) cost. */
+  coherenceCostUsd?: number | null;
+  coherenceInputTokens?: number | null;
+  coherenceOutputTokens?: number | null;
   /** Per-agent (planner/reviewer/compiler) token breakdown. Empty for pre-V19 runs. */
   agentTokens?: AgentTokenEntry[];
   /** Number of apply-suggestion actions used on this run. */

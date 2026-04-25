@@ -865,6 +865,20 @@ public class V2RunOrchestrator {
                     .title(task.title())
                     .complexity(task.complexity().name())
                     .status("PENDING")
+                    // v2.6.2 slice 5d — record the planner-shape metadata so
+                    // StartupRunResumerV2 can tell EXPANDED vs PENDING tasks
+                    // apart on resume + a future auto-replay pass can skip
+                    // tasks already filled in.
+                    .taskType(task.taskType() == null ? "LEAF" : task.taskType().name())
+                    // EXPANDED for full-bodied tasks (slices 1-2 + LEGACY's
+                    // recursive children) and post-expansion LARGE tasks.
+                    // Skeleton-only tasks pre-expansion would be PENDING here —
+                    // but persistTasks runs after the LARGE pipeline has
+                    // already stitched bodies in, so all rows reach this point
+                    // with full descriptions. Distinction matters for future
+                    // resume: a row written EXPANDED never needs a re-expand.
+                    .expansionStatus(task.isSkeleton() ? "PENDING" : "EXPANDED")
+                    .expandedAt(task.isSkeleton() ? null : java.time.Instant.now())
                     .build();
             try {
                 row.setTaskJson(objectMapper.writeValueAsString(task));

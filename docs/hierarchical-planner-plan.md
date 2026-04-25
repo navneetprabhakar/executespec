@@ -238,9 +238,107 @@ slice 3, removed in slice 4.
 | **4** | `LEGACY` strategy with recursive depth-2 expansion + outline-checkpoint resumability. Legacy single-phase planner deletion deferred (pure refactor follow-up). | **Shipped** on branch — `expandEpic` recursive sub-outline + parallel sub-expansion (depth-2 cap, T3 → T3.1/T3.2/…), 20-min phase-2 timeout, `StartupRunResumerV2` outline-checkpoint awareness in failure messages. PlannerAgentV2 deletion is a follow-up commit (touches test controllers + validation test). 298 tests green. |
 | **5a** | `V2RunCostTracker.estimateRun` re-tune for the 4-phase shape (per-strategy phase costs, LEGACY adds sub-outline + sub-expansion fan-out). | **Shipped** on branch — `estimateRunTierAware(provider, complexities, strategy)` overload, persistEstimate reads `plan_strategy`. 298 tests green. |
 | **5b** | Legacy `PlannerAgentV2` deletion + `PlannerOutputUtils` extraction + test-controller migration. | **Shipped** on branch — `PlannerOutputUtils.java` (static, takes ObjectMapper per-call), SINGLE_SHOT synthesis migrated to `OutlinePlannerAgent.synthesizeSingleShot`, `PlannerAgentV2.java` + `prompts/v2/planner.md` + `PlannerAgentV2ValidationTest.java` deleted. Test controllers (`ExecutorTestController`, `PlannerTestController`) + `V2RunService` updated. New `PlannerOutputUtilsValidationTest` (9 tests). 298 tests green. |
-| **5c** | Dashboard per-phase cost surfacing on RunDetail Overview tab (frontend). | Pending |
-| **5d** | Auto-replay from outline checkpoint in `StartupRunResumerV2` (per-task expansion-status + resume the expansion phase). | Pending |
-| **5e** | Calibration methodology + heuristic-threshold-tuning notes (doc only). | Pending |
+| **5c** | Dashboard per-phase cost surfacing on RunDetail Overview tab (frontend). | **Shipped** on branch — RunDetail DTO + RunMapper + frontend `lib/api.ts` types + new `PlannerPhaseBreakdown` component on the Overview tab. Renders only when `planStrategy` is set + ≥1 phase has tokens. Hides for legacy runs. Frontend build green. |
+| **5d** | Auto-replay from outline checkpoint in `StartupRunResumerV2` (per-task expansion-status + resume the expansion phase). | **Partial — shipped** persisted-status visibility on branch. `persistTasks` writes `expansion_status` per AgentTask row (EXPANDED for fully-bodied tasks, PENDING for skeletons that didn't get expanded). `StartupRunResumerV2`'s outline-checkpoint failure message now reports per-task counts (expanded/pending/failed) so the user knows the exact state at JVM-restart time. **Full auto-replay (re-trigger `runLargePipeline.continueExpansion(...)` on boot, skipping EXPANDED tasks) is the remaining gap** — needs a careful design pass to re-acquire workspace state, re-establish Redis cache for the classifier, and prove idempotency on partial-state recovery. Tracked as a follow-up commit. |
+| **5e** | Calibration methodology + heuristic-threshold-tuning notes (doc only). | **Shipped** on branch — see "Calibration methodology" section below. |
+
+## Calibration methodology (slice 5e)
+
+After ~50 production runs go through the hierarchical pipeline, we audit classifier accuracy + cost-estimate accuracy + heuristic-fast-path threshold to make the calls data-driven.
+
+### Sources of truth
+
+- **`pipeline_run.classifier_reasoning`** — LLM verifier's one-line rationale.
+- **`pipeline_run.plan_strategy`** — final verdict (after heuristic fallback if LLM failed).
+- **`pipeline_run.{classifier,outline,expansion,coherence}_{input,output}_tokens` + `_cost_usd`** — per-phase actuals from `V2RunCostTracker.snapshot()` diffs.
+- **`pipeline_run.cost_estimate_low/high` vs `actual_cost_usd`** — pre-plan estimate vs reality.
+- **`agent_task.expansion_status` + `expanded_at`** — slice-5d per-task expansion outcome.
+
+### Audit queries
+
+```sql
+-- Classifier accuracy proxy: for each strategy, what % of runs ended COMPLETE?
+SELECT plan_strategy,
+       COUNT(*) FILTER (WHERE status = 'COMPLETE') AS complete,
+       COUNT(*) FILTER (WHERE status = 'FAILED')   AS failed,
+       COUNT(*)                                    AS total
+  FROM pipeline_run
+ WHERE plan_strategy IS NOT NULL
+   AND started_at > NOW() - INTERVAL '7 days'
+ GROUP BY plan_strategy;
+
+-- Estimate accuracy: actual vs estimated midpoint, by strategy.
+SELECT plan_strategy,
+       AVG(actual_cost_usd / NULLIF((cost_estimate_low + cost_estimate_high) / 2, 0)) AS actual_over_estimate
+  FROM pipeline_run
+ WHERE plan_strategy IS NOT NULL
+   AND actual_cost_usd IS NOT NULL
+   AND status = 'COMPLETE'
+ GROUP BY plan_strategy;
+
+-- Heuristic-fast-path leakage: how many SINGLE_SHOT plans had >1 task in agent_task?
+-- High count = fast-path threshold is too loose, downgrading SMALL specs.
+SELECT pr.plan_strategy, COUNT(*) AS run_count,
+       AVG(task_count) AS avg_tasks
+  FROM (
+    SELECT run_id, COUNT(*) AS task_count
+      FROM agent_task GROUP BY run_id
+  ) t JOIN pipeline_run pr USING (run_id)
+ WHERE pr.plan_strategy = 'SINGLE_SHOT'
+ GROUP BY pr.plan_strategy;
+
+-- Per-phase cost vs estimate by strategy (verifies estimateRun re-tune).
+SELECT plan_strategy,
+       AVG(classifier_cost_usd) AS avg_classifier,
+       AVG(outline_cost_usd)    AS avg_outline,
+       AVG(expansion_cost_usd)  AS avg_expansion,
+       AVG(coherence_cost_usd)  AS avg_coherence,
+       AVG(actual_cost_usd)     AS avg_total
+  FROM pipeline_run
+ WHERE plan_strategy IS NOT NULL
+   AND status = 'COMPLETE'
+   AND started_at > NOW() - INTERVAL '7 days'
+ GROUP BY plan_strategy;
+```
+
+### Tuning targets
+
+| Metric | Action |
+|---|---|
+| Classifier success-rate < 90% on a strategy | Re-prompt the classifier with concrete failure examples. |
+| `actual / estimate_midpoint` consistently > 1.3 | Bump the corresponding band in `V2RunCostTracker.{CLASSIFIER,OUTLINE,EXPANDER,COHERENCE}_TOKENS`. |
+| `actual / estimate_midpoint` consistently < 0.6 | Trim the same bands or the `HIGH_MULTIPLIER`. |
+| SINGLE_SHOT runs where `task_count > 1` | Tighten the heuristic-fast-path threshold (`HEURISTIC_FAST_PATH_CHAR_CAP`) or add domain-explosive keywords. |
+| LARGE expansion failures > 5% | Bump `EXPAND_MAX_TOKENS` or split big tasks via the EPIC path. |
+| Coherence pass producing >1 patch on average | Tighten the outline-planner skeleton prompt (over-eager EPIC marking is the usual cause). |
+
+### Heuristic-threshold-tuning notes
+
+- **`HEURISTIC_FAST_PATH_CHAR_CAP` = 150** today. Targets ~70% of VIBE traffic. If audit shows >5% of SINGLE_SHOT runs had multi-task plans, reduce to 120; if <1%, raise to 200.
+- **`DOMAIN_EXPLOSIVE` keyword set** — append words that frequently surface in misclassified-down specs. Current set covers the obvious heavy-hitters (auth, stripe, multi-tenant, real-time, migrate, …).
+- **`MULTI_FEATURE_PHRASES` set** — add phrases that signal cross-cutting scope. The "and also" / "across" patterns we have today catch ~60% of multi-feature specs from limited dev data; expand based on real misclassifications.
+- **LLM-augmented classifier** is always-on (per design). Tuning the heuristic only changes how often the LLM verifier fires, not the final accuracy.
+
+### Cadence
+
+Run the audit weekly during the first month of production traffic, monthly after. Post results to `docs/reports/planner-calibration-<YYYY-MM-DD>.md` (template below) and update the bands in `V2RunCostTracker` if the audit calls for it. Always commit calibration changes alongside the methodology run that justified them — keeps the trail navigable.
+
+```
+# Planner calibration <YYYY-MM-DD>
+
+## Sample
+Window: <start> → <end>
+Runs: <total>, <by-strategy breakdown>
+
+## Findings
+1. Classifier accuracy: <%>
+2. Estimate accuracy: actual/estimate ratio = <x>
+3. Heuristic leakage: <count> SINGLE_SHOT with >1 task
+4. ...
+
+## Changes
+<commit hash + line refs>
+```
 
 ## Risk + mitigation
 

@@ -64,6 +64,36 @@ public class RunDetail {
     /** Hard cap in USD (safety ceiling). */
     Double hardCapUsd;
 
+    /**
+     * v2.6.2-track — hierarchical-planner strategy chosen by SmartClassifierAgent.
+     * SINGLE_SHOT | SMALL | MEDIUM | LARGE | LEGACY. Null for runs that submitted
+     * before slice 1 of the rollout.
+     */
+    String planStrategy;
+
+    /** v2.6.2-track — one-line classifier rationale (heuristic vs LLM verdict). */
+    String classifierReasoning;
+
+    /** v2.6.2-track — phase 0 cost (USD). Null when phase didn't run. */
+    Double classifierCostUsd;
+    Long classifierInputTokens;
+    Long classifierOutputTokens;
+
+    /** v2.6.2-track — phase 1 cost. */
+    Double outlineCostUsd;
+    Long outlineInputTokens;
+    Long outlineOutputTokens;
+
+    /** v2.6.2-track — phase 2 cost (sum across parallel expansion calls). */
+    Double expansionCostUsd;
+    Long expansionInputTokens;
+    Long expansionOutputTokens;
+
+    /** v2.6.2-track — phase 3 cost. */
+    Double coherenceCostUsd;
+    Long coherenceInputTokens;
+    Long coherenceOutputTokens;
+
     /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). */
     String techStack;
 
