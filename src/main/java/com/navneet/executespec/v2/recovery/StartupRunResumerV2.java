@@ -148,10 +148,33 @@ public class StartupRunResumerV2 {
             // Count this as a resume attempt even in Phase 1 (fail-cleanly) so
             // repeated deploy-interrupt cycles trip the cap and don't thrash.
             run.setResumeAttempts(attempts + 1);
+
+            // v2.6.2 slice 4 — outline-checkpoint awareness. When the
+            // hierarchical planner has already written `plan_outline_json`
+            // before the JVM died, surface that to the user so they know the
+            // expensive Phase 1 (LLM outline call) didn't have to be redone
+            // — the orchestrator can cheaply restart from the persisted
+            // skeleton on the resubmit. Future slices replay automatically;
+            // for now it's a clearer error message.
+            String checkpointHint;
+            if (run.getPlanStrategy() != null
+                    && run.getPlanOutlineJson() != null
+                    && !run.getPlanOutlineJson().isBlank()) {
+                checkpointHint = " Outline-checkpoint preserved (strategy="
+                        + run.getPlanStrategy() + ", outline_json size="
+                        + run.getPlanOutlineJson().length() + " bytes) — a "
+                        + "resubmission with the same spec will reuse the "
+                        + "classifier verdict via the 1h Redis cache; the "
+                        + "outline + per-task expansion are not yet auto-"
+                        + "replayed (see slice 5 follow-up).";
+            } else {
+                checkpointHint = "";
+            }
             markFailed(run, status,
                     "Interrupted during " + status
                             + " (JVM restart / deploy). Please retry the run. "
-                            + "Resume attempts used: " + (attempts + 1) + "/" + MAX_RESUME_ATTEMPTS);
+                            + "Resume attempts used: " + (attempts + 1) + "/" + MAX_RESUME_ATTEMPTS
+                            + checkpointHint);
             failedInterrupted++;
         }
         log.warn("StartupRunResumerV2: recovery complete — awaiting-approval={} "

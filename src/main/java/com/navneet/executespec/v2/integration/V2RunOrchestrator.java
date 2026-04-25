@@ -558,6 +558,13 @@ public class V2RunOrchestrator {
                     log.warn("V2 run={} circuit breaker degraded {} → {}", runId, planStrategy, effective);
                 }
 
+                // Slice 4 — LEGACY classifications now drive depth-2 recursive
+                // expansion in the LARGE pipeline. The classifier verdict
+                // (pre-degrade) tells us whether to recurse on EPIC tasks; the
+                // breaker still degrades to LARGE for capacity reasons but the
+                // intent (and the recursion) is preserved.
+                boolean legacyRecursion = planStrategy == PlanStrategy.LEGACY;
+
                 if (effective == PlanStrategy.SMALL || effective == PlanStrategy.MEDIUM) {
                     try {
                         plan = runOutlinePhase(runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
@@ -570,7 +577,7 @@ public class V2RunOrchestrator {
                     }
                 } else if (effective == PlanStrategy.LARGE) {
                     try {
-                        plan = runLargePipeline(runId, plannerReq, rootCtx);
+                        plan = runLargePipeline(runId, plannerReq, rootCtx, legacyRecursion);
                         planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
                     } catch (Exception largeEx) {
                         planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
@@ -1998,7 +2005,8 @@ public class V2RunOrchestrator {
      * persisted to the matching {@code pipeline_run.{outline,expansion,coherence}_*}
      * columns. Run total auto-aggregates via the tracker's accumulator.
      */
-    private PlanV2 runLargePipeline(String runId, PlannerRequestV2 req, ExecutionContext rootCtx) {
+    private PlanV2 runLargePipeline(String runId, PlannerRequestV2 req, ExecutionContext rootCtx,
+                                     boolean enableEpicRecursion) {
         // ── Phase 1: skeleton outline ─────────────────────────────────────
         PlanV2 skeleton = runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
         if (skeleton.tasks() == null || skeleton.tasks().isEmpty()) {
@@ -2006,31 +2014,44 @@ public class V2RunOrchestrator {
         }
 
         // ── Phase 2: parallel expansion ──────────────────────────────────
+        // For LEAF tasks: a single TaskExpanderAgent call fills the body.
+        // For EPIC tasks under LEGACY recursion (slice 4): recurse via
+        // OutlinePlannerAgent (skeleton-mode) to get child skeletons, then
+        // expand each child as a LEAF in parallel. Children inherit the
+        // parent's id as a prefix (T3 → T3.1, T3.2, …). Without LEGACY
+        // recursion, EPIC tasks are treated identically to LEAF tasks (slice 3
+        // behaviour) — the worker either handles the breadth or the planner
+        // declared EPIC mistakenly.
         V2RunCostTracker.Snapshot beforeExpand = costTracker.snapshot(runId);
         long expansionStart = System.currentTimeMillis();
         List<PlannedTaskV2> tasksToExpand = skeleton.tasks();
-        java.util.concurrent.ConcurrentMap<String, PlannedTaskV2> expanded =
+        // Per-skeleton-id → list of resulting LEAF tasks (1 for LEAF, N for
+        // recursively-expanded EPIC).
+        java.util.concurrent.ConcurrentMap<String, List<PlannedTaskV2>> expanded =
                 new java.util.concurrent.ConcurrentHashMap<>();
         java.util.concurrent.ConcurrentMap<String, Throwable> expansionFailures =
                 new java.util.concurrent.ConcurrentHashMap<>();
 
         List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
         for (PlannedTaskV2 t : tasksToExpand) {
-            // Slice 3 treats EPIC the same as LEAF — recursive depth-2
-            // expansion lands in slice 4.
             futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
                 try {
-                    ExecutionContext taskCtx = new ExecutionContext(
-                            runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
-                    PlannedTaskV2 full = taskExpander.expand(t, skeleton, req, taskCtx);
-                    expanded.put(t.id(), full);
+                    if (enableEpicRecursion && t.taskType() == PlannedTaskV2.TaskType.EPIC) {
+                        List<PlannedTaskV2> children = expandEpic(runId, t, skeleton, req, rootCtx);
+                        expanded.put(t.id(), children);
+                    } else {
+                        ExecutionContext taskCtx = new ExecutionContext(
+                                runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
+                        PlannedTaskV2 full = taskExpander.expand(t, skeleton, req, taskCtx);
+                        expanded.put(t.id(), List.of(full));
+                    }
                 } catch (Throwable ex) {
                     log.warn("V2 run={} task expansion failed for {}: {}",
                             runId, t.id(), ex.getMessage());
                     expansionFailures.put(t.id(), ex);
                     // Fall back to a LEAF carrying just the title-derived
                     // description so the pipeline can still progress.
-                    expanded.put(t.id(), PlannedTaskV2.builder()
+                    expanded.put(t.id(), List.of(PlannedTaskV2.builder()
                             .id(t.id())
                             .title(t.title())
                             .description("Implement: " + t.title()
@@ -2040,25 +2061,31 @@ public class V2RunOrchestrator {
                             .dependsOn(t.dependsOn())
                             .hardConstraints(List.of())
                             .meetsRequirements(List.of())
-                            .taskType(t.taskType())
-                            .build());
+                            .taskType(PlannedTaskV2.TaskType.LEAF)
+                            .build()));
                 }
             }, pool));
         }
         try {
             java.util.concurrent.CompletableFuture
                     .allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0]))
-                    .get(15, java.util.concurrent.TimeUnit.MINUTES);
+                    .get(20, java.util.concurrent.TimeUnit.MINUTES);
         } catch (Exception expandWaitEx) {
             throw new IllegalStateException(
-                    "LARGE expansion phase exceeded 15-minute timeout: "
+                    "LARGE expansion phase exceeded 20-minute timeout: "
                             + expandWaitEx.getMessage(), expandWaitEx);
         }
 
-        // Stitch expanded bodies back onto the plan in original order.
+        // Stitch expanded bodies back onto the plan in original order. EPIC
+        // entries are replaced by their N child LEAFs in-place.
         List<PlannedTaskV2> assembledTasks = new ArrayList<>(tasksToExpand.size());
         for (PlannedTaskV2 sk : tasksToExpand) {
-            assembledTasks.add(expanded.getOrDefault(sk.id(), sk));
+            List<PlannedTaskV2> result = expanded.get(sk.id());
+            if (result == null || result.isEmpty()) {
+                assembledTasks.add(sk);
+            } else {
+                assembledTasks.addAll(result);
+            }
         }
         PlanV2 assembled = PlanV2.builder()
                 .planTitle(skeleton.planTitle())
@@ -2126,6 +2153,162 @@ public class V2RunOrchestrator {
         }
 
         return patchResult.patchedPlan();
+    }
+
+    /**
+     * v2.6.2 slice 4 — depth-2 recursive expansion for an EPIC skeleton task.
+     * The orchestrator detects EPICs after the top-level skeleton outline,
+     * makes a focused sub-outline call ({@link OutlinePlannerAgent.Mode#SKELETON_ONLY})
+     * for just this epic, then expands each sub-skeleton as a LEAF in
+     * parallel. Sub-task IDs are prefixed with the parent's id (e.g. T3 →
+     * T3.1, T3.2, …) so the assembled plan keeps stable references for
+     * downstream {@code dependsOn} resolution.
+     *
+     * <p>Recursion stops at depth 2: if a child of an EPIC also comes back
+     * marked EPIC, it's coerced to LEAF and expanded normally. We prevent
+     * runaway planning trees from a hallucinating outline planner.
+     */
+    private List<PlannedTaskV2> expandEpic(String runId, PlannedTaskV2 epic, PlanV2 parentPlan,
+                                            PlannerRequestV2 parentReq, ExecutionContext rootCtx) {
+        log.info("V2 run={} expandEpic {} → recursing", runId, epic.id());
+
+        String subSpec = "Sub-task: " + epic.title();
+        if (epic.description() != null && !epic.description().isBlank()) {
+            subSpec += "\n\nFurther context: " + epic.description();
+        }
+        // Add parent-plan summary so the sub-planner knows the broader scope.
+        if (parentPlan.planSummary() != null && !parentPlan.planSummary().isBlank()) {
+            subSpec += "\n\nParent plan: " + parentPlan.planSummary();
+        }
+
+        PlannerRequestV2 subReq = PlannerRequestV2.builder()
+                .spec(subSpec)
+                // MEDIUM caps sub-tasks at 4 (per Classification.maxTasks); a
+                // sub-outline that overflows is almost always a sign the
+                // planner mistakenly marked something EPIC that should have
+                // been LEAF. Better to truncate than blow the budget.
+                .classification(Classification.MEDIUM)
+                .provider(parentReq.provider())
+                .model(parentReq.model())
+                .context(parentReq.context())
+                .workspaceSummary(parentReq.workspaceSummary())
+                .projectMemory(parentReq.projectMemory())
+                .projectBrief(parentReq.projectBrief())
+                .referenceDocs(parentReq.referenceDocs())
+                .tddMode(parentReq.tddMode())
+                .build();
+
+        PlanV2 subSkeleton;
+        try {
+            subSkeleton = outlinePlanner.plan(subReq, OutlinePlannerAgent.Mode.SKELETON_ONLY);
+        } catch (Exception subOutlineEx) {
+            log.warn("V2 run={} sub-outline for EPIC {} failed — falling back to single LEAF expansion: {}",
+                    runId, epic.id(), subOutlineEx.getMessage());
+            return List.of(coerceToLeafFallback(epic));
+        }
+
+        List<PlannedTaskV2> children = subSkeleton.tasks();
+        if (children == null || children.isEmpty()) {
+            log.warn("V2 run={} sub-outline for EPIC {} returned 0 children — coercing to single LEAF",
+                    runId, epic.id());
+            return List.of(coerceToLeafFallback(epic));
+        }
+
+        // Re-id with parent prefix and force LEAF (depth cap).
+        List<PlannedTaskV2> reIdChildren = new ArrayList<>(children.size());
+        for (int i = 0; i < children.size(); i++) {
+            PlannedTaskV2 c = children.get(i);
+            String childId = epic.id() + "." + (i + 1);
+            reIdChildren.add(PlannedTaskV2.builder()
+                    .id(childId)
+                    .title(c.title())
+                    .description(c.description())
+                    .complexity(c.complexity() == null ? PlannedTaskV2.Complexity.MEDIUM : c.complexity())
+                    .touchesFiles(c.touchesFiles())
+                    .dependsOn(c.dependsOn())
+                    .hardConstraints(c.hardConstraints())
+                    .meetsRequirements(c.meetsRequirements())
+                    .taskType(PlannedTaskV2.TaskType.LEAF) // depth cap: no further recursion
+                    .build());
+        }
+
+        // Build a sub-plan view for the expander prompt so siblings cross-reference correctly.
+        PlanV2 subPlanForContext = PlanV2.builder()
+                .planTitle(parentPlan.planTitle())
+                .planSummary(parentPlan.planSummary())
+                .projectType(parentPlan.projectType())
+                .buildCommand(parentPlan.buildCommand())
+                .smokeTestStrategy(parentPlan.smokeTestStrategy())
+                .runtimeSurface(parentPlan.runtimeSurface())
+                .tasks(reIdChildren)
+                .classification(parentPlan.classification())
+                .requirements(parentPlan.requirements())
+                .build();
+
+        // Expand each child in parallel. Reuses the same pipeline pool — bounded
+        // concurrency means we won't thrash the LLM provider even on big EPICs.
+        java.util.concurrent.ConcurrentMap<String, PlannedTaskV2> bodied =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        List<java.util.concurrent.CompletableFuture<Void>> subFutures = new ArrayList<>();
+        for (PlannedTaskV2 child : reIdChildren) {
+            subFutures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    ExecutionContext childCtx = new ExecutionContext(
+                            runId, "_expand_" + child.id(), rootCtx.workspaceRoot());
+                    bodied.put(child.id(),
+                            taskExpander.expand(child, subPlanForContext, parentReq, childCtx));
+                } catch (Throwable ex) {
+                    log.warn("V2 run={} sub-task expansion failed for {}: {}",
+                            runId, child.id(), ex.getMessage());
+                    bodied.put(child.id(), PlannedTaskV2.builder()
+                            .id(child.id())
+                            .title(child.title())
+                            .description("Implement: " + child.title()
+                                    + " (sub-expansion failed; worker will figure it out)")
+                            .complexity(child.complexity())
+                            .touchesFiles(child.touchesFiles())
+                            .dependsOn(child.dependsOn())
+                            .hardConstraints(List.of())
+                            .meetsRequirements(List.of())
+                            .taskType(PlannedTaskV2.TaskType.LEAF)
+                            .build());
+                }
+            }, pool));
+        }
+        try {
+            java.util.concurrent.CompletableFuture
+                    .allOf(subFutures.toArray(new java.util.concurrent.CompletableFuture[0]))
+                    .get(10, java.util.concurrent.TimeUnit.MINUTES);
+        } catch (Exception subExpandEx) {
+            log.warn("V2 run={} sub-expansion for EPIC {} hit timeout/error — using whatever completed: {}",
+                    runId, epic.id(), subExpandEx.getMessage());
+        }
+
+        // Stitch sub-children in input order.
+        List<PlannedTaskV2> result = new ArrayList<>(reIdChildren.size());
+        for (PlannedTaskV2 c : reIdChildren) {
+            result.add(bodied.getOrDefault(c.id(), c));
+        }
+        log.info("V2 run={} expandEpic {} → {} LEAF children", runId, epic.id(), result.size());
+        return result;
+    }
+
+    /** Fallback when sub-outline fails: collapse the EPIC into a single LEAF
+     *  carrying the title + description so the worker still sees the work. */
+    private static PlannedTaskV2 coerceToLeafFallback(PlannedTaskV2 epic) {
+        return PlannedTaskV2.builder()
+                .id(epic.id())
+                .title(epic.title())
+                .description(epic.description() == null || epic.description().isBlank()
+                        ? "Implement: " + epic.title() + " (sub-outline failed; treat as a single task)"
+                        : epic.description())
+                .complexity(epic.complexity() == null ? PlannedTaskV2.Complexity.HIGH : epic.complexity())
+                .touchesFiles(epic.touchesFiles())
+                .dependsOn(epic.dependsOn())
+                .hardConstraints(epic.hardConstraints())
+                .meetsRequirements(epic.meetsRequirements())
+                .taskType(PlannedTaskV2.TaskType.LEAF)
+                .build();
     }
 
     private static String shortMsg(Exception e) {
