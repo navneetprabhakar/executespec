@@ -1,9 +1,9 @@
 package com.navneet.executespec.v2.test;
 
 import com.navneet.executespec.v2.agent.Classification;
+import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
 import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
-import com.navneet.executespec.v2.agent.PlannerAgentV2;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import lombok.RequiredArgsConstructor;
@@ -23,9 +23,11 @@ import java.util.Map;
 /**
  * V2 Phase 4 verification endpoint.
  *
- * <p>Exercises {@link PlannerAgentV2} against a spec + classification and returns
- * the produced plan. Runs all three classifications (SINGLE_SHOT bypass, MEDIUM
- * with ≤ 4 tasks, MULTI_TASK unlimited) using the default provider/model.
+ * <p>v2.6.2 slice 5b — was tied to {@code PlannerAgentV2}; now exercises
+ * {@link OutlinePlannerAgent}. SINGLE_SHOT goes through
+ * {@link OutlinePlannerAgent#synthesizeSingleShot} (no LLM call), MEDIUM /
+ * MULTI_TASK go through {@link OutlinePlannerAgent#plan} in {@code FULL_PLAN}
+ * mode for parity with the legacy probe.
  *
  * <p>Usage: {@code GET /api/v2/test/planner?provider=anthropic&model=claude-haiku-4-5-20251001}
  * or override spec via {@code &spec=...}.
@@ -47,7 +49,7 @@ public class PlannerTestController {
             + "three REST endpoints (list, add, delete), unit tests with JUnit 5, "
             + "OpenAPI 3 documentation via springdoc. Use constructor injection throughout.";
 
-    private final PlannerAgentV2 planner;
+    private final OutlinePlannerAgent planner;
 
     @GetMapping("/planner")
     public Map<String, Object> testPlanner(
@@ -92,14 +94,17 @@ public class PlannerTestController {
         r.put("spec", spec);
         long start = System.currentTimeMillis();
         try {
-            PlanV2 plan = planner.plan(PlannerRequestV2.builder()
+            PlannerRequestV2 req = PlannerRequestV2.builder()
                     .spec(spec)
                     .classification(cx)
                     .provider(provider)
                     .model(model)
                     .context(ctx)
                     .workspaceSummary("empty scratch workspace")
-                    .build());
+                    .build();
+            PlanV2 plan = (cx == Classification.SINGLE_SHOT)
+                    ? planner.synthesizeSingleShot(req)
+                    : planner.plan(req, OutlinePlannerAgent.Mode.FULL_PLAN);
             r.put("ok", plan.tasks().size() >= 1 && plan.tasks().size() <= cx.maxTasks());
             r.put("latencyMs", System.currentTimeMillis() - start);
             r.put("planTitle", plan.planTitle());

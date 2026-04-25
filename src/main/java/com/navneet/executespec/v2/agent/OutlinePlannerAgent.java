@@ -56,8 +56,9 @@ public class OutlinePlannerAgent {
     private final V2Metrics metrics;
     private final ModelResolver modelResolver;
     private final FeatureFlagService featureFlagService;
-    /** For shared parsing + validation — see class-level javadoc. */
-    private final PlannerAgentV2 plannerAgent;
+    /** v2.6.2 slice 5b — used by {@link #synthesizeSingleShot} to give the
+     *  bypass path a sensible run title (LIGHTWEIGHT-tier call only). */
+    private final RunTitleSummarizer titleSummarizer;
 
     private static final String PROMPT_PATH_FULL = "prompts/v2/outline-planner.md";
     /** v2.6.2 slice 3 — skeleton-mode prompt for LARGE/LEGACY classifications.
@@ -96,6 +97,62 @@ public class OutlinePlannerAgent {
     }
 
     /**
+     * v2.6.2 slice 5b — synthesise a one-task plan for {@code SINGLE_SHOT}
+     * specs. No LLM planner call (the title summarizer is LIGHTWEIGHT and only
+     * fires when the synthesised title would otherwise come from a regex
+     * fallback). Migrated from {@code PlannerAgentV2#synthesizeSingleShotPlan}
+     * so the legacy planner can be deleted.
+     */
+    public PlanV2 synthesizeSingleShot(PlannerRequestV2 req) {
+        log.info("OutlinePlanner SINGLE_SHOT synthesise (LIGHTWEIGHT title call only): spec={}chars",
+                req.spec() == null ? 0 : req.spec().length());
+        LlmProvider provider = resolveProviderForTitle(req.provider());
+        String runId = req.context() != null ? req.context().runId() : null;
+        String summarized = titleSummarizer.summarize(req.spec(), provider, runId);
+        String title = (summarized != null && !summarized.isBlank())
+                ? summarized
+                : cleanTitle(req.spec(), 70);
+        String description = req.spec()
+                + "\n\nAlso include unit tests for any new public function, endpoint, "
+                + "or module this task adds. If a test framework already exists in the "
+                + "workspace (Jest/Vitest, pytest, Go *_test.go, JUnit), extend it; "
+                + "otherwise scaffold a minimal test file with at least one happy-path "
+                + "test + one error case.";
+        // v2.5.11 Validation v3 / Pillar 1 — synthesise a single requirement so
+        // SINGLE_SHOT plans honour the same coverage contract as LLM-driven plans.
+        String r1Text = req.spec();
+        int nl = r1Text.indexOf('\n');
+        if (nl > 0) r1Text = r1Text.substring(0, nl);
+        if (r1Text.length() > 120) r1Text = r1Text.substring(0, 120) + "...";
+        RequirementSpec r1 = new RequirementSpec("R1", r1Text.trim(),
+                RequirementSpec.RequirementKind.FUNCTIONAL);
+        PlannedTaskV2 task = PlannedTaskV2.builder()
+                .id("T1")
+                .title(title)
+                .description(description)
+                .complexity(PlannedTaskV2.Complexity.LOW)
+                .taskType(PlannedTaskV2.TaskType.LEAF)
+                .meetsRequirements(List.of("R1"))
+                .build();
+        return PlanV2.builder()
+                .planTitle(title)
+                .planSummary(req.spec())
+                .projectType("unknown")
+                .smokeTestStrategy(PlanV2.SmokeTestStrategy.BUILD)
+                .runtimeSurface(PlanV2.RuntimeSurface.HTTP)
+                .classification(Classification.SINGLE_SHOT)
+                .tasks(List.of(task))
+                .requirements(List.of(r1))
+                .build();
+    }
+
+    /** Deterministic title fallback when the title summarizer doesn't produce
+     *  anything usable. Delegates to {@link PlannerOutputUtils#cleanTitle}. */
+    private static String cleanTitle(String spec, int max) {
+        return PlannerOutputUtils.cleanTitle(spec, max);
+    }
+
+    /**
      * Run the outline phase. Synchronous — cost flows through {@link LlmRouterV2} →
      * {@link com.navneet.executespec.v2.cost.V2RunCostTracker} automatically; the
      * orchestrator diffs the per-run snapshot before/after to attribute the phase
@@ -119,7 +176,7 @@ public class OutlinePlannerAgent {
             if (mode == Mode.FULL_PLAN
                     && featureFlagService != null
                     && featureFlagService.isEnabled(FLAG_V3_STRICT)) {
-                List<String> violations = plannerAgent.validatePlan(plan);
+                List<String> violations = PlannerOutputUtils.validatePlan(plan);
                 if (!violations.isEmpty()) {
                     String feedback = "Your previous plan had these requirement-graph violations:\n  - "
                             + String.join("\n  - ", violations)
@@ -129,7 +186,7 @@ public class OutlinePlannerAgent {
                     log.warn("OutlinePlanner plan invalid on first try ({} violations) — retrying. First violation: {}",
                             violations.size(), violations.get(0));
                     PlanV2 retry = planOnce(req, feedback, mode);
-                    List<String> retryViolations = plannerAgent.validatePlan(retry);
+                    List<String> retryViolations = PlannerOutputUtils.validatePlan(retry);
                     if (!retryViolations.isEmpty()) {
                         throw new IllegalStateException(
                                 "PLAN_COVERAGE_INVALID: outline planner produced an invalid requirement graph "
@@ -210,20 +267,20 @@ public class OutlinePlannerAgent {
             // Same Gemini pseudo-code salvage path as PlannerAgentV2 — text-form
             // tool-call recovery. The salvage helper is tool-name-agnostic; it
             // pulls a JSON-ish payload out of any "default_api.*(...)" call.
-            String salvaged = plannerAgent.salvagePlanFromText(textPreview);
+            String salvaged = PlannerOutputUtils.salvagePlanFromText(textPreview);
             if (salvaged != null) {
                 log.warn("OutlinePlanner did not emit a structured submitOutline call (finish={}); salvaged text-form args",
                         finishReason);
-                PlanV2 plan = plannerAgent.parsePlanFromArgs(salvaged, req.classification());
-                plannerAgent.warnIfConstraintsUnderpropagated(plan, req.spec());
+                PlanV2 plan = PlannerOutputUtils.parsePlanFromArgs(salvaged, req.classification(), objectMapper);
+                PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
                 return plan;
             }
             throw new IllegalStateException(
                     "OutlinePlanner did not call submitOutline. Finish reason: " + finishReason
-                            + "; text preview: " + (textPreview == null ? "" : PlannerAgentV2.truncate(textPreview, 200)));
+                            + "; text preview: " + (textPreview == null ? "" : PlannerOutputUtils.truncate(textPreview, 200)));
         }
-        PlanV2 plan = plannerAgent.parsePlanFromArgs(planCall.arguments(), req.classification());
-        plannerAgent.warnIfConstraintsUnderpropagated(plan, req.spec());
+        PlanV2 plan = PlannerOutputUtils.parsePlanFromArgs(planCall.arguments(), req.classification(), objectMapper);
+        PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
         return plan;
     }
 
@@ -308,7 +365,7 @@ public class OutlinePlannerAgent {
                 // Like submitPlan's callback — never actually dispatched. The router
                 // returns the tool call object; we read arguments directly.
                 log.debug("submitOutline callback invoked unexpectedly ({}); args={}",
-                        callbackId, PlannerAgentV2.truncate(toolInput, 200));
+                        callbackId, PlannerOutputUtils.truncate(toolInput, 200));
                 return "{\"ok\":true,\"note\":\"outline captured\"}";
             }
         };
@@ -338,17 +395,8 @@ public class OutlinePlannerAgent {
                 """;
     }
 
-    /**
-     * Resolve the {@link LlmProvider} enum from the request's provider string.
-     * Mirrors {@code PlannerAgentV2#resolveProviderForTitle} so adaptive routing
-     * picks the right tier model. Falls back to OPENAI on unrecognised input.
-     */
+    /** Delegates to {@link PlannerOutputUtils#resolveProviderForTitle}. */
     private static LlmProvider resolveProviderForTitle(String provider) {
-        if (provider == null || provider.isBlank()) return LlmProvider.OPENAI;
-        try {
-            return LlmProvider.valueOf(provider.trim().toUpperCase().replace('-', '_'));
-        } catch (IllegalArgumentException e) {
-            return LlmProvider.OPENAI;
-        }
+        return PlannerOutputUtils.resolveProviderForTitle(provider);
     }
 }
