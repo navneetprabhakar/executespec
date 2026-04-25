@@ -90,6 +90,16 @@ public class ProjectRepo {
     @Column(name = "executespec_last_synced_at")
     private Instant executespecLastSyncedAt;
 
+    /** v2.6.2 (E1.4) — write strategy for {@code .executespec/} mutations.
+     *  Default (NULL or PR) opens a PR for every change — right for the picky
+     *  enterprise persona (every change reviewable, audit trail in git).
+     *  DIRECT_PUSH is the opt-in bypass for trusted, high-frequency writes
+     *  (codemap regen post-merge) so customers who don't want bot-PR fatigue
+     *  can reduce noise; toggled by PROJECT_ADMIN via a future admin endpoint.
+     *  See {@link #prModeEnum()} for the NULL → PR normalisation. */
+    @Column(name = "executespec_pr_mode", length = 16)
+    private String executespecPrMode;
+
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();
@@ -133,4 +143,32 @@ public class ProjectRepo {
         /** Bootstrap PR could not be opened (PAT scopes, GH errors, etc.). */
         BOOTSTRAP_FAILED
     }
+
+    /**
+     * v2.6.2 (E1.4) — strongly-typed read of {@link #executespecPrMode}.
+     * Defaults to {@link PrMode#PR} when the column is null, so the safe
+     * "every change reviewable" behaviour applies unless a customer
+     * explicitly opts into {@link PrMode#DIRECT_PUSH}.
+     */
+    public PrMode prModeEnum() {
+        if (executespecPrMode == null || executespecPrMode.isBlank()) {
+            return PrMode.PR;
+        }
+        try {
+            return PrMode.valueOf(executespecPrMode);
+        } catch (IllegalArgumentException ex) {
+            return PrMode.PR; // unknown forward-compat value → safe default
+        }
+    }
+
+    /**
+     * v2.6.2 (E1.4) — write strategy for {@code .executespec/} mutations.
+     * <ul>
+     *   <li>{@link #PR} (default) — every change opens a PR. Right for the
+     *       picky enterprise persona; auditable; needs human merge.</li>
+     *   <li>{@link #DIRECT_PUSH} — opt-in bypass for trusted high-frequency
+     *       writes (e.g. codemap regen post-merge) to reduce bot-PR noise.</li>
+     * </ul>
+     */
+    public enum PrMode { PR, DIRECT_PUSH }
 }
