@@ -497,7 +497,89 @@ For the **whole effort** (post-Phase E4):
 
 ---
 
-## 12. References
+## 13. Deferred items log (live)
+
+Append-only log. Updated at the end of every slice. Items added here
+get rolled into a future "deferral cleanup" slice or up-streamed into
+the relevant phase backlog.
+
+Format: `slice-id | YYYY-MM-DD | one-line description | why deferred | follow-up trigger`
+
+| Slice | Date | Item | Why | Trigger |
+|---|---|---|---|---|
+| _(none yet)_ | | | | |
+
+---
+
+## 14. Per-slice workflow (binding)
+
+Every slice on this branch follows this exact sequence. Skipping
+steps creates either silent test debt or a missed status email.
+
+1. **Implement** — edit code, write tests, update package-level
+   `CLAUDE.md` files for any package touched.
+2. **Build** — `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q`
+   must exit zero. If a frontend file changed:
+   `npm --prefix frontend run build`.
+3. **Unit tests** — at minimum the new tests + any test file touching
+   modified packages: `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn test
+   -Dtest='<targeted-class-glob>' -q`. For schema-touching slices
+   (E1.1, E1.4, E1.10, E2.1, E3.1, E3.12, E3.14): also run an
+   integration boot via `mvn -Pintegration test` if the migration
+   needs Flyway exercise.
+4. **Update §13** if anything was deferred during the slice.
+5. **Doc-refresh** — root `CLAUDE.md` (only when scope justifies it),
+   per-package `CLAUDE.md` for every package touched, [`CODEMAP.md`](../CODEMAP.md),
+   [`document_map.md`](../document_map.md) (only for new top-level
+   docs), this file's slice table (mark slice complete).
+6. **Commit** — single commit per slice, subject prefix matches §8
+   (`feat(executespec): E1.1 — folder-tracking schema`). Use a
+   HEREDOC for the body. Include `Co-Authored-By: Claude Opus 4.7
+   (1M context) <noreply@anthropic.com>`. Do NOT push without explicit
+   user confirmation per memory rule
+   `feedback_no_push_without_approval`.
+7. **Email** — `python3 scripts/slice-email.py
+   --metadata /tmp/slice-<id>.json` sends the per-slice progress
+   report to navneet.prabhakar007@gmail.com. The script reads SMTP
+   credentials from `application-local.yml` (`app.mail.smtp.password`
+   default). Email contents:
+   - **Subject:** `ExecuteSpec slice <id> — <title> — <PASS|FAIL>`
+   - **Body (mobile-readable HTML):**
+     - Slice ID + title + commit SHA
+     - What changed (files touched, LOC, migration number if any)
+     - Build + test results (pass/fail counts, key timings)
+     - **Updates from this slice** (one-paragraph narrative)
+     - **Deferred items** (full §13 log snapshot at end of slice)
+     - **Remaining slices** (rendered from §8 — slices not yet
+       marked complete)
+     - Next slice + ETA
+8. **Report back to user** — short text reply with commit SHA + email
+   send status + readiness for next slice.
+
+If any step fails, halt the slice. Do not proceed to the next slice
+with a red build, a failed test, or an unsent email.
+
+---
+
+## 15. Context-window handling
+
+The user's standing instruction: **at 90% context window utilisation,
+run `/compact` and continue.** Claude cannot invoke `/compact` itself
+(it's a built-in CLI command, not a tool). Behaviour:
+
+- Monitor approximate context usage every few tool calls.
+- At ~85% utilisation, surface a one-line warning to the user in the
+  next reply: "Approaching 90% context — run `/compact` when convenient."
+- At ~90%, the system's automatic compression usually kicks in. If
+  it doesn't and a tool call risks failure, pause work, reply asking
+  the user to run `/compact`, and resume only after compaction.
+
+This avoids dropped slices mid-work and keeps the per-slice email
+trail complete.
+
+---
+
+## 16. References
 
 - [`docs/CLAUDE.md`](../CLAUDE.md) — root project context (current as of v2.6.1)
 - [`docs/CODEMAP.md`](../CODEMAP.md) — module map
