@@ -1,7 +1,7 @@
 # Distributed Run Processing & File Handling — Execution Plan
 
-> Status: draft for review (2026-04-13). Depends on: `harness-v2-remaining-work.md` Gap 2 (StartupRunResumerV2).
-> Preview scheduling is scoped separately in `preview-control-plane-plan.md` and not covered here.
+> Status: draft for review (2026-04-13). Depends on: [`partial-work.md`](partial-work.md) §3 Gap 2 (full StartupRunResumerV2 replay; consolidated from the former `harness-v2-remaining-work.md`).
+> Preview scheduling is scoped separately in [`pending-preview-control-plane-plan.md`](pending-preview-control-plane-plan.md) and not covered here.
 
 ## Goal
 

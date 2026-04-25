@@ -1,37 +1,20 @@
 package com.navneet.executespec.v2.agent;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.v2.agent.RequirementSpec.RequirementKind;
-import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.mockito.Mockito.mock;
 
 /**
  * Unit tests for the Validation v3 / Pillar 1 planner requirement-graph
- * validation logic. Focuses on {@link PlannerAgentV2#validatePlan(PlanV2)}
- * which is the deterministic gate that decides whether a plan's requirement
- * graph is coherent enough to execute.
+ * validation. Migrated from {@code PlannerAgentV2ValidationTest} (which was
+ * deleted alongside its agent in v2.6.2 slice 5b) and now exercises the
+ * static {@link PlannerOutputUtils#validatePlan(PlanV2)} directly — no
+ * Spring collaborators needed.
  */
-class PlannerAgentV2ValidationTest {
-
-    private PlannerAgentV2 planner;
-
-    @BeforeEach
-    void setUp() {
-        // Collaborators we don't exercise directly in validation tests.
-        planner = new PlannerAgentV2(
-                mock(com.navneet.executespec.v2.agent.LlmRouterV2.class),
-                new ObjectMapper(),
-                mock(com.navneet.executespec.v2.observability.V2Metrics.class),
-                mock(com.navneet.executespec.v2.agent.RunTitleSummarizer.class),
-                mock(com.navneet.executespec.router.ModelResolver.class),
-                mock(FeatureFlagService.class));
-    }
+class PlannerOutputUtilsValidationTest {
 
     @Test
     void cleanPlanProducesNoViolations() {
@@ -48,8 +31,7 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.HTTP,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).isEmpty();
+        assertThat(PlannerOutputUtils.validatePlan(plan)).isEmpty();
     }
 
     @Test
@@ -60,7 +42,7 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.HTTP,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
+        List<String> violations = PlannerOutputUtils.validatePlan(plan);
         assertThat(violations).hasSize(1);
         assertThat(violations.get(0)).contains("No requirements enumerated");
     }
@@ -75,8 +57,8 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.LIBRARY,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).anyMatch(v -> v.contains("Duplicate requirement ids"));
+        assertThat(PlannerOutputUtils.validatePlan(plan))
+                .anyMatch(v -> v.contains("Duplicate requirement ids"));
     }
 
     @Test
@@ -90,8 +72,8 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.HTTP,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).anyMatch(v -> v.contains("not covered by any task") && v.contains("R2") && v.contains("R3"));
+        assertThat(PlannerOutputUtils.validatePlan(plan))
+                .anyMatch(v -> v.contains("not covered by any task") && v.contains("R2") && v.contains("R3"));
     }
 
     @Test
@@ -104,8 +86,8 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.HTTP,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).anyMatch(v -> v.contains("unknown ids") && v.contains("R99"));
+        assertThat(PlannerOutputUtils.validatePlan(plan))
+                .anyMatch(v -> v.contains("unknown ids") && v.contains("R99"));
     }
 
     @Test
@@ -120,8 +102,8 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.HTTP,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).anyMatch(v -> v.contains("No test task") && v.contains("HTTP"));
+        assertThat(PlannerOutputUtils.validatePlan(plan))
+                .anyMatch(v -> v.contains("No test task") && v.contains("HTTP"));
     }
 
     @Test
@@ -134,8 +116,7 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.HTTP,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).isEmpty();
+        assertThat(PlannerOutputUtils.validatePlan(plan)).isEmpty();
     }
 
     @Test
@@ -146,8 +127,7 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.HTTP,
                 Classification.SINGLE_SHOT);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).isEmpty();
+        assertThat(PlannerOutputUtils.validatePlan(plan)).isEmpty();
     }
 
     @Test
@@ -158,8 +138,7 @@ class PlannerAgentV2ValidationTest {
                 PlanV2.RuntimeSurface.STATIC_WEB,
                 Classification.MEDIUM);
 
-        List<String> violations = planner.validatePlan(plan);
-        assertThat(violations).isEmpty();
+        assertThat(PlannerOutputUtils.validatePlan(plan)).isEmpty();
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

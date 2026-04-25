@@ -1,9 +1,24 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 4.9
-> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22; **v2.6.1 Waves 1-6 merged + deployed 2026-04-23**
-> **App Version**: v2.6.1
+> **Version**: 4.10
+> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22; v2.6.1 Waves 1-6 merged + deployed 2026-04-23; **v2.6.2-track hierarchical planner all 5 slices shipped on `feature/hierarchical-planner` 2026-04-25 (not yet merged)**
+> **App Version**: v2.6.1 (`dev`/`main`); v2.6.2-track on `feature/hierarchical-planner`
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
+
+## 0c. 2026-04-25 refresh — v2.6.2-track hierarchical planner (on `feature/hierarchical-planner`, NOT yet merged)
+
+Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-phase pipeline that scales beyond the 8192-token output cap that was failing on multi-repo / legacy specs. All 5 slices on the feature branch.
+
+- **Phase 0 — `SmartClassifierAgent` (LIGHTWEIGHT, slice 1):** picks `PlanStrategy ∈ {SINGLE_SHOT, SMALL, MEDIUM, LARGE, LEGACY}` for the run. Heuristic fast path returns SINGLE_SHOT for obvious tiny specs (≤150 chars + 1 repo + no multi-feature keywords + no domain-explosive verbs) at 0ms / $0; otherwise an LLM verifier hits Haiku/Flash with the heuristic verdict as a hint. Redis cache (1h TTL) keyed by `SHA-256(spec + sortedRepos + projectId)`. Always-fall-back-to-heuristic on timeout / parse error / enum mismatch.
+- **Phase 1 — `OutlinePlannerAgent` (PLANNING, slices 2-3):** two modes. `FULL_PLAN` (32k cap, single tool call) for SMALL/MEDIUM. `SKELETON_ONLY` (8k cap, id/title/complexity/repos/dependsOn/type only) for LARGE/LEGACY. SINGLE_SHOT bypasses the LLM via `synthesizeSingleShot` (migrated from the deleted PlannerAgentV2 in slice 5b — LIGHTWEIGHT title-summarizer call only). New `submitOutline` tool replaces the deleted `submitPlan`.
+- **Phase 2 — `TaskExpanderAgent` (WORKHORSE, slice 3) + recursive `expandEpic` (slice 4):** N parallel `submitTaskDetail` calls — one per LEAF skeleton — fill description / touchesFiles / hardConstraints / meetsRequirements. `CompletableFuture.allOf` on the existing 4-thread pipeline pool, 20-min wall timeout. EPIC tasks (LEGACY only) recurse via depth-2 `expandEpic` — focused `OutlinePlannerAgent.SKELETON_ONLY` sub-call (Classification.MEDIUM, max 4 children) → parallel sub-LEAF expansion. Per-task / per-sub-task expansion failures fall back to title-derived LEAFs.
+- **Phase 3 — `CoherencePlannerAgent` (LIGHTWEIGHT, slice 3):** `patchPlan` tool with 5 patch kinds (`ADD_MEETS_REQUIREMENT`, `ADD_DEPENDS_ON`, `REMOVE_DEPENDS_ON`, `FIX_HARD_CONSTRAINT_CONFLICT`, `MOVE_FILE_TO_REPO_SUBDIR`). Empty patches array = clean plan. Non-fatal on individual patch failure.
+- **`PlanStrategyCircuitBreaker` (slice 3):** Redis-backed health tracker. 5 consecutive failures → 1h open → ladder degrade `LEGACY → LARGE → MEDIUM → SMALL → legacy`. Fail-open on Redis errors.
+- **`PlannerOutputUtils` (slice 5b):** static utility class housing `parsePlanFromArgs`, `validatePlan` (Validation v3 / Pillar 1), `salvagePlanFromText` (Gemini pseudo-code recovery, tool-name-agnostic), `warnIfConstraintsUnderpropagated`, `cleanTitle`, `resolveProviderForTitle`. Both `OutlinePlannerAgent` and the validation test consume from it; no Spring injection chains.
+- **Cost shape (slice 5a):** `V2RunCostTracker.estimateRunTierAware(provider, complexities, strategy)` overload computes per-strategy phase costs. Persisted on `pipeline_run.{classifier,outline,expansion,coherence}_{input,output}_tokens, _cost_usd` columns via before/after `costTracker.snapshot()` diffs in each phase helper. Run totals auto-aggregate via the in-memory accumulator. Frontend `RunDetailTabs` Overview tab shows a `PlannerPhaseBreakdown` component when `planStrategy` is set.
+- **Resume awareness (slice 4 + partial 5d):** `agent_task.{task_type, expansion_status, expanded_at}` written by `persistTasks`. `StartupRunResumerV2` failure message reports `expanded=N pending=M failed=K` per interrupted run. Auto-replay re-trigger (re-run phase 2 from persisted outline) is the one open follow-up.
+- **Migration V130** (additive only, all columns nullable): `pipeline_run` gets the strategy + outline JSON + per-phase cost columns; `agent_task` gets task_type + expansion_status + expanded_at + a partial index on `plan_strategy WHERE NOT NULL`.
+- **Calibration methodology (slice 5e):** documented in [`hierarchical-planner-plan.md`](hierarchical-planner-plan.md) — 4 audit SQL queries, tuning targets, threshold-tuning notes, weekly→monthly cadence, calibration-report template under `docs/reports/planner-calibration-<date>.md`.
 
 ## 0b. 2026-04-23 refresh — v2.6.1 Waves 1-6 (merged to `dev` + `main` + deployed to `dev.executespec.ai`)
 
@@ -37,7 +52,7 @@ The planner emits a structured requirement graph alongside the task list:
 
 - `PlanV2.requirements: List<RequirementSpec>` — enumerated from the spec. `RequirementSpec = {id, text, kind}` where `kind ∈ {FUNCTIONAL, NON_FUNCTIONAL, TEST, CONSTRAINT}`.
 - `PlannedTaskV2.meetsRequirements: List<String>` — requirement IDs this task covers.
-- `PlannerAgentV2.validatePlan(plan)` enforces: (1) non-empty requirements, (2) unique IDs, (3) valid cross-references, (4) every requirement covered by ≥1 task, (5) testable surfaces have a test task. On violation: one retry with feedback; second failure → run ends `PLAN_COVERAGE_INVALID`.
+- `PlannerOutputUtils.validatePlan(plan)` enforces: (1) non-empty requirements, (2) unique IDs, (3) valid cross-references, (4) every requirement covered by ≥1 task, (5) testable surfaces have a test task. On violation: one retry with feedback; second failure → run ends `PLAN_COVERAGE_INVALID`. (Static helper extracted in v2.6.2-track slice 5b from the deleted `PlannerAgentV2`; called from `OutlinePlannerAgent` after every plan synthesis.)
 - Persisted to `pipeline_run.plan_requirements_json` + `agent_task.meets_requirements_json` (V109).
 - Consumed downstream by Pillars 2 (evidence-based reviewer), 3 (sync test gate), 4 (test coverage), 5 (strict scoring formula).
 
@@ -51,7 +66,7 @@ The planner emits a structured requirement graph alongside the task list:
 > merge, clarification / merge gates) has been deleted. Sections below that
 > describe those concepts are historical.
 > **Canonical current architecture:** [`CLAUDE.md`](../CLAUDE.md).
-> **Open gaps:** [`docs/plans/harness-v2-remaining-work.md`](plans/harness-v2-remaining-work.md).
+> **Open gaps:** [`docs/plans/partial-work.md`](plans/partial-work.md) §3 (consolidated 2026-04-25 from the original `harness-v2-remaining-work.md`).
 > **Pilot v3.0 (commit `6bbfde9b`):** project workspace layer added on top of V2 — see
 > [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md). Key additions: dual-scope
 > `ProjectRepo` registry, multi-repo workspace clone + per-repo PR creation,
@@ -1210,7 +1225,7 @@ Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GC
 - **Project brief** — `ProjectBriefService.summarise()` makes one LIGHTWEIGHT-tier LLM call per `generate()` to produce 2-4 sentences; `buildBrief()` returns an ~800-token block (summary + arch headings) injected as `{{PROJECT_BRIEF}}` in the planner system prompt.
 - **Pre-execution refresh** — `V2RunOrchestrator` calls `StalenessService.report()` before planning; if any linked repo is stale, `ProjectArchitectureService.generate()` runs synchronously so the planner sees current codemaps. Post-success: staleness cache invalidated.
 - **RAG pipeline** (`project/rag/`) — `DocumentExtractor` (Tika `AutoDetectParser`) → `ChunkingService` (500-token windows, 50-token overlap, code-fence aware) → `EmbeddingService` (Spring AI OpenAI text-embedding-3-small, batch 100) → `ChunkStore` (JDBC `INSERT ... ?::vector` against `project_document_chunk`). `ProjectDocumentService` runs the index loop async (`@Async`).
-- **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `PlannerAgentV2` as `{{REFERENCE_DOCS}}` and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
+- **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `OutlinePlannerAgent` as `{{REFERENCE_DOCS}}` (was `PlannerAgentV2` until slice 5b deletion) and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
 - **Architecture diff** — frontend renders an LCS line diff of `architecture.md` vN vs vN-1.
 - **Auto-push** — `project.runs.auto-push` flipped ON via V96/V97. Every successful project-scoped V2 run runs `pushToGitHubIfConfigured()` automatically.
 - **Memory budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8K → 12K. Vector spill-over for snapshots > 12K is on the backlog (see [`docs/plans/open-work-2026-04-18.md`](plans/open-work-2026-04-18.md) §D2).

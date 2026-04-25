@@ -221,7 +221,7 @@ ProjectDocumentService.upload(file, user)
     │
     ▼
 Every subsequent Launch / V2 run:
-  • PlannerAgentV2 receives {{REFERENCE_DOCS}} — top-3 chunks, 1500-token cap.
+  • OutlinePlannerAgent receives {{REFERENCE_DOCS}} — top-3 chunks, 1500-token cap.
   • ProjectChatService injects the same block, keyed off the last user turn.
 ```
 

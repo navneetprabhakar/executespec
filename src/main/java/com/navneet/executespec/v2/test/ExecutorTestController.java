@@ -1,8 +1,8 @@
 package com.navneet.executespec.v2.test;
 
 import com.navneet.executespec.v2.agent.Classification;
+import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
 import com.navneet.executespec.v2.agent.PlanV2;
-import com.navneet.executespec.v2.agent.PlannerAgentV2;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
@@ -34,7 +34,7 @@ import java.util.Map;
  *
  * <p>Verifies:
  * <ul>
- *   <li>PlannerAgentV2 produces a valid multi-task plan</li>
+ *   <li>OutlinePlannerAgent produces a valid multi-task plan (slice 5b — was PlannerAgentV2)</li>
  *   <li>SequentialExecutorV2 iterates tasks in order, each reaching COMPLETED</li>
  *   <li>Smoke test runs after each task and the aggregate verdict is ALL_SUCCESS
  *       (or PARTIAL_WITH_WARNINGS if any task retried)</li>
@@ -75,7 +75,7 @@ public class ExecutorTestController {
             console.log('smoke ok');"
             """;
 
-    private final PlannerAgentV2 planner;
+    private final OutlinePlannerAgent planner;
     private final SequentialExecutorV2 executor;
 
     @GetMapping("/executor")
@@ -101,14 +101,20 @@ public class ExecutorTestController {
             long planStart = System.currentTimeMillis();
             PlanV2 plan;
             try {
-                plan = planner.plan(PlannerRequestV2.builder()
+                PlannerRequestV2 req = PlannerRequestV2.builder()
                         .spec(effectiveSpec)
                         .classification(cx)
                         .provider(provider)
                         .model(model)
                         .context(runCtx)
                         .workspaceSummary("empty scratch workspace")
-                        .build());
+                        .build();
+                // v2.6.2 slice 5b — SINGLE_SHOT bypass uses synthesizeSingleShot
+                // (no LLM call); other classifications go through the
+                // OutlinePlannerAgent FULL_PLAN path.
+                plan = (cx == Classification.SINGLE_SHOT)
+                        ? planner.synthesizeSingleShot(req)
+                        : planner.plan(req, OutlinePlannerAgent.Mode.FULL_PLAN);
             } catch (Exception e) {
                 out.put("phase", "plan");
                 out.put("ok", false);
