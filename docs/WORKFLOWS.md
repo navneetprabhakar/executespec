@@ -24,10 +24,11 @@
 > **v2.5.11 — planner requirement graph (Pillar 1 of Validation v3).**
 > Planning step extracts every spec requirement into `PlanV2.requirements`
 > (`{id, text, kind}` where `kind ∈ {FUNCTIONAL, NON_FUNCTIONAL, TEST, CONSTRAINT}`).
-> Each task cites covered IDs via `meetsRequirements`. `PlannerAgentV2.validatePlan`
-> enforces full coverage; on violation the planner retries once with the
-> violation list as feedback, then fails the run with `PLAN_COVERAGE_INVALID`.
-> Gated behind `validation.v3-strict` feature flag (default OFF in prod). See
+> Each task cites covered IDs via `meetsRequirements`. `PlannerOutputUtils.validatePlan`
+> (extracted in v2.6.2-track slice 5b from the deleted `PlannerAgentV2`) enforces
+> full coverage; on violation the planner retries once with the violation list as
+> feedback, then fails the run with `PLAN_COVERAGE_INVALID`. Gated behind
+> `validation.v3-strict` feature flag (default OFF in prod). See
 > [`.claude/plans/immutable-painting-platypus.md`](../.claude/plans/immutable-painting-platypus.md) for the full 5-pillar plan.
 >
 > **Pilot v3.0 amend (commit `6bbfde9b`).** Project-scoped runs add two

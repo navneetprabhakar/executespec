@@ -748,7 +748,7 @@ Content-Type: application/json
 }
 ```
 
-Batch execution is not yet available under V2 — `executionMode` accepts only `REALTIME` (or may be omitted). The V2 batch re-implementation is tracked in `docs/plans/v2-batch-execution-plan.md`.
+Batch execution is not yet available under V2 — `executionMode` accepts only `REALTIME` (or may be omitted). The V2 batch re-implementation is tracked in `docs/plans/pending-v2-batch-execution-plan.md`.
 
 **Cancel run:**
 ```http
