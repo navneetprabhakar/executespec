@@ -8,16 +8,16 @@ User-selected provider architecture with YAML-configured model matrix and Redis-
 - `AgentTier.java` — Enum: PLANNING, WORKHORSE, LIGHTWEIGHT
 - `ResolvedModel.java` — DTO: requestedProvider, actualProvider, model, agentTier, fallback
 - `ProviderHealthTracker.java` — Redis-backed circuit breaker. Marks provider unhealthy after 5 consecutive failures. Auto-recovers via 60s Redis TTL.
-- `LlmProvider.java` — Enum: ANTHROPIC, OPENAI, GOOGLE
+- `LlmProvider.java` — Enum: ANTHROPIC, OPENAI, GEMINI (was GOOGLE until v2.5.13 — see V120 migration; back-compat alias on `RunRequest` / `CreateProjectRequest` accepts `GOOGLE` and rewrites to `GEMINI` before persistence)
 - `AvailableProviderResolver.java` — Resolves available providers per run based on org policy + API key availability
 
 ## Agent Tiers (from application.yml model-matrix)
-- PLANNING: Sonnet 4.6 / GPT-5.4 / Gemini 3 Flash Preview (planner, reviewer, worker stall escalation)
+- PLANNING: Sonnet 4.6 / GPT-5.4 / Gemini 3 Flash Preview (planner, reviewer, worker stall escalation, **v2.6.1: `RepoArchitectureGenerator` + `ArchitectureDocGenerator` + `ProjectChatCompiler` — bumped from LIGHTWEIGHT/WORKHORSE because Anthropic Haiku missed cross-repo wiring + mangled spec compilation**)
 - WORKHORSE: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (workers, compiler, test planner, test worker, conflict resolver, prompt optimiser, report generator)
-- LIGHTWEIGHT: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (chat, context, test report, triage)
+- LIGHTWEIGHT: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (chat, context, test report, triage, **v2.6.1: `ProjectChatCompactor` — chat history compaction**, **v2.6.2-track: `SmartClassifierAgent` — hierarchical-planner phase 0 LLM verifier**)
 
 ## Provider Selection
-Each project selects its AI provider (ANTHROPIC/GOOGLE/OPENAI). ModelResolver maps `agentTier × provider → model` from YAML config. Failover to next healthy provider if selected provider is down.
+Each project selects its AI provider (ANTHROPIC/GEMINI/OPENAI). ModelResolver maps `agentTier × provider → model` from YAML config. Failover to next healthy provider if selected provider is down.
 
 ### Known tech debt — Bug #1c (v2.5.9 eval finding, not yet fixed)
 `ModelResolver.selectAdaptiveProvider` (invoked inside `resolve()`) silently switches providers based on historical success rate even when the caller — e.g. `V2RunOrchestrator` under `-Dexecutespec.strict-provider=true` — has explicitly locked the provider. Evidence: Proj-OpenAI (74270ac6) logged `provider=anthropic model=claude-sonnet-4-6` despite `project.aiProvider=OPENAI`. Fix deferred — needs either a strict-mode guard inside `ModelResolver.resolve()` OR an opt-out flag per org. Until then, adaptive routing remains authoritative over user-selected provider on the planner/reviewer path.
