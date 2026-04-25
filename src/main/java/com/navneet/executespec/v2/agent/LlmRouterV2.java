@@ -21,6 +21,8 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * V2 LLM router — native-tool-only, provider-agnostic single-call dispatcher.
@@ -140,14 +142,41 @@ public class LlmRouterV2 {
                 .messageTypeMinContentLength(MessageType.ASSISTANT, 512)
                 .messageTypeMinContentLength(MessageType.TOOL, 512)
                 .build();
+        boolean dropTemperature = ANTHROPIC_DEPRECATED_TEMP_MODELS.contains(r.model());
         var b = AnthropicChatOptions.builder()
                 .model(r.model())
-                .temperature(r.temperature())
                 .toolCallbacks(tools)
                 .cacheOptions(cache)
                 .internalToolExecutionEnabled(false);
+        if (!dropTemperature) b.temperature(r.temperature());
         if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
-        return anthropicModel.call(new Prompt(r.messages(), b.build()));
+        try {
+            return anthropicModel.call(new Prompt(r.messages(), b.build()));
+        } catch (RuntimeException ex) {
+            if (!isTemperatureDeprecatedError(ex)) throw ex;
+            ANTHROPIC_DEPRECATED_TEMP_MODELS.add(r.model());
+            log.warn("Anthropic rejected `temperature` for model={} — retrying without it (will skip on subsequent calls this JVM)",
+                    r.model());
+            var retry = AnthropicChatOptions.builder()
+                    .model(r.model())
+                    .toolCallbacks(tools)
+                    .cacheOptions(cache)
+                    .internalToolExecutionEnabled(false);
+            if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
+            return anthropicModel.call(new Prompt(r.messages(), retry.build()));
+        }
+    }
+
+    /** Models whose API has rejected `temperature` with the deprecation error within this JVM. */
+    private static final Set<String> ANTHROPIC_DEPRECATED_TEMP_MODELS = ConcurrentHashMap.newKeySet();
+
+    /** Returns true when the exception chain mentions Anthropic's "temperature is deprecated for this model" 400. */
+    private static boolean isTemperatureDeprecatedError(Throwable ex) {
+        for (Throwable t = ex; t != null; t = t.getCause()) {
+            String msg = t.getMessage();
+            if (msg != null && msg.contains("temperature is deprecated")) return true;
+        }
+        return false;
     }
 
     private ChatResponse callGemini(LlmRequestV2 r, List<ToolCallback> tools) {

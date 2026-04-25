@@ -135,7 +135,7 @@ Configurable security headers (CSP, HSTS, X-Frame-Options) via `SecurityProperti
 | Document | Audience | Description |
 |----------|----------|-------------|
 | [CLAUDE.md](CLAUDE.md) | AI assistant | Session instructions, conventions, patterns |
-| [CODEBASE_MAP.md](CODEBASE_MAP.md) | Engineers | Every class → one-line purpose |
+| [docs/CODEMAP.md](docs/CODEMAP.md) | Engineers | Every package + key class → one-line purpose |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Engineers | System design, Mermaid diagrams, design decisions |
 | [docs/JAVADOC.md](docs/JAVADOC.md) | Engineers | Detailed code documentation per package and class |
 | [docs/PRD.md](docs/PRD.md) | Product/Business | Product requirements, tiers, user journeys |

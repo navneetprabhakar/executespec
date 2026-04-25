@@ -1,7 +1,7 @@
 # ExecuteSpec — Deployment Guide
 
 > **Target audience:** Engineers running ExecuteSpec locally or deploying to Google Cloud Platform.
-> Last updated: 2026-04-04
+> Last updated: 2026-04-25 (env-var section already covers v2.6.0 + v2.6.1 Wave 1/2; migration table refreshed for V1-V130).
 
 ---
 
@@ -26,37 +26,31 @@
 psql -U postgres -c "CREATE DATABASE executespec;"
 ```
 
-Flyway migrations run automatically on startup and create all tables (V1-V73).
+Flyway migrations run automatically on startup. The current schema covers **V1–V130** (V130 is the in-progress hierarchical-planner migration on `feature/hierarchical-planner` and is not yet on `main`).
 
-#### Migration Reference (V45-V73)
+For the full per-version description of every migration, see `JAVADOC.md §21.1 Flyway Migrations` and the source files under `src/main/resources/db/migration/`. The summary below highlights migration ranges that materially affect deployment / ops:
 
-| Migration | Description |
-|-----------|-------------|
-| V45 | Widen `plan_version` VARCHAR columns (36 -> 255 for IDs, 64 for source) |
-| V46 | Stripe payment gateway support + multi-gateway schema |
-| V47 | OAuth2 login support (Google + GitHub provider columns) |
-| V48 | View mode column for run display preferences |
-| V49 | Feature flags table (DB-backed, admin-manageable) |
-| V50 | Free tier restrictions enforcement columns |
-| V51 | Force-logout flag for epoch-based JWT invalidation |
-| V52 | `github_pr_url` column on `pipeline_run` |
-| V53 | Run archive support (archive timestamp + status) |
-| V54 | Stripe multi-currency support (currency-gateway mapping) |
-| V55 | Payment audit trail expansion (webhook events, CSV export) |
-| V56 | Task completion notes (`agent_task.completion_notes` TEXT column) |
-| V58 | Subtask support (`parent_task_id`, `subtask_index`, `subtask_total` on `agent_task`) |
-| V59 | Bitbucket integration (`bitbucket_*` columns on `app_user`; `scm_pr_url`, `scm_provider` on `pipeline_run`) |
-| V60-V63 | Billing plan restructure (4 plans INR/USD, 6 top-up packages, prorated refund columns) |
-| V64 | Durable background validation (`background_validation` table — stage, attempt, last_attempt_at) |
-| V65 | DB gate fallback (`gate_record` table — mirrors Redis gate state) |
-| V66 | Per-user force-logout timestamp (`app_user.token_invalidated_at`) |
-| V67 | PostgreSQL row-level security (RLS policies on `pipeline_run`, `agent_task`, `validation_report`) |
-| V68 | Event log + execution heartbeat (`event_log`, `pipeline_run.executing_instance`, `pipeline_run.execution_heartbeat`) |
-| V69 | Side-effect outbox (`side_effect_outbox` — type, payload, status, attempts, compensation_payload) |
-| V70 | Data retention + GDPR soft-delete (`deleted_at`, `retention_expires_at` on core tables; `data_retention_policy` table) |
-| V71 | Triage outcome feedback (`triage_outcome` — classification, escalation_reason, trigger values) |
-| V72 | Prompt audit + task hash (`prompt_audit`, `agent_task.prompt_hash`) |
-| V73 | Plan effectiveness metrics (`plan_effectiveness` — planned vs actual task counts + duration) |
+| Range | Theme |
+|-------|-------|
+| V1–V44 | Initial schema (auth, runs, tasks, billing baseline, integrations baseline) |
+| V45–V73 | Stripe gateway, OAuth2 login, feature flags, view-mode prefs, Bitbucket, durable background validation, DB gate fallback, RLS, event log + heartbeat, side-effect outbox, data retention, triage outcome, prompt audit, plan effectiveness |
+| V74–V87 | Guardrail level seed, project shell + repo registry, validation-report scores, codebase intelligence, assessment + figma_url, run code map |
+| V88–V94 | Project memory, execution view, project shell + multi-run solutions + MAX tier gate |
+| V95–V97 | pgvector + project documents + auto-push flag |
+| V98–V102 | Tenant isolation widen, ai_provider backfill, run_repo_snapshot, project_repo.webhook_installed, project_spec_template |
+| V103–V109 | execution_run.branch + project.github_owner + continue_pr, validation_report verified columns, status_reason, plan-requirements graph |
+| V110–V114 | Enable scoring.v2-verified flag, execution_solution dedup, execution_run.version (@Version optimistic lock), project_generated_doc + widen |
+| V115–V118 | repo_architecture_doc (3-step arch pipeline), codegen.react_native flag |
+| V119 | Preview-platform v2 schema (since superseded — `out-of-order=true` + `ignore-migration-patterns=*:missing` tolerate the executed-but-missing row) |
+| V120 | LlmProvider GOOGLE → GEMINI rename (rewrites legacy `project/execution_run/pipeline_run` rows) |
+| V121–V124 | Tier lifecycle state machine + TEAM tier + PRO HIDDEN + TEAM billing plans + org.seat_count + sunsetting flag (Wave 1) |
+| V125–V126 | user_activation_event ledger + sandbox_on_signup + signup attribution columns (Wave 2) |
+| V127 | SSO/SAML + GitHub App + team_trial_request schema (Wave 3) |
+| V128 | provider_recommendation_log + smart-routing feature flags (Wave 4) |
+| V129 | startup_program_application + 14-day MAX trial columns + free-tier teammate flag (Wave 5) |
+| V130 | Hierarchical planner — in progress on `feature/hierarchical-planner`, not yet on `main` |
+
+> Operational note: `application.yml` sets `spring.flyway.out-of-order=true` + `ignore-migration-patterns: repeatable:missing,versioned:missing` so boot tolerates the V119 orphan in `flyway_schema_history` (left over from the preview-engine repo split).
 
 ### Redis Setup
 
