@@ -284,6 +284,7 @@ model-matrix:
     RunLedgerAgent: LIGHTWEIGHT
     RunTitleSummarizer: LIGHTWEIGHT
     ProjectChatCompiler: PLANNING
+    ProjectChatCompactor: LIGHTWEIGHT       # v2.6.1 — chat history compaction
     ProjectBriefService: LIGHTWEIGHT
     # v2.5.12 — 3-step architecture pipeline (bumped to PLANNING v2.6.1 — Haiku/WORKHORSE missed cross-repo wiring and mangled spec compilation)
     RepoArchitectureGenerator: PLANNING      # per-repo HLD+LLD from codemap

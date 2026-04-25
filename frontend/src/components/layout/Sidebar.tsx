@@ -109,6 +109,8 @@ export default function Sidebar() {
           <button
             onClick={closeMobileDrawer}
             className="ml-auto min-h-[44px] min-w-[44px] flex items-center justify-center -mr-2 text-muted hover:text-primary"
+            aria-label="Close menu"
+            title="Close menu"
           >
             <X className="h-5 w-5" />
           </button>
@@ -117,6 +119,8 @@ export default function Sidebar() {
           <button
             onClick={() => setSidebarExpanded(!sidebarExpanded)}
             className="ml-auto text-muted hover:text-primary transition-colors"
+            aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
           >
             <ChevronLeft className={cn('h-4 w-4 transition-transform', !expanded && 'rotate-180')} />
           </button>

@@ -326,7 +326,15 @@ export default function ProjectDashboardPage() {
             />
           </aside>
         )}
-        <main className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4">
+        <main
+          className={cn(
+            'flex-1 min-w-0 min-h-0',
+            // Chat owns its own internal scroll + pinned input — give it the
+            // raw pane with no padding/overflow so dimensions line up with
+            // the surrounding layout.
+            tab === 'chat' ? 'flex flex-col' : 'overflow-y-auto p-3 sm:p-4',
+          )}
+        >
           {currentContent}
         </main>
       </div>
