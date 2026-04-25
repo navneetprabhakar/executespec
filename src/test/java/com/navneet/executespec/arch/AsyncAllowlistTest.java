@@ -119,7 +119,14 @@ class AsyncAllowlistTest {
             // swallows any persist failure per the plan §1.9 non-blocking
             // contract. See docs/plans/pending-enterprise-readiness-execution-eval.md
             // §8 (E1.8/9/10 bundle).
-            "ActivityEventEmitter#emit"
+            "ActivityEventEmitter#emit",
+
+            // E1.5 — bootstrap PR flow. Loads ProjectRepo by id (no eager
+            // collection nav — it has no @OneToMany relations) and saves
+            // back primitive field updates. Outer try/catch wraps the whole
+            // method so async-thread crashes never go silent. See
+            // docs/plans/pending-enterprise-readiness-execution-eval.md §8 (E1.5).
+            "BootstrapService#bootstrapAsync"
     ));
 
     @Test
