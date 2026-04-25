@@ -20,6 +20,7 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -275,9 +276,60 @@ public class ExecutionOrchestrator {
             log.info("Skipping PR creation for continue-on-PR execution {}", executionRunId);
         }
 
-        run.setStatus("COMPLETE");
-        runRepo.save(run);
-        emit(run.getId(), ExecutionEventTypes.EXEC_COMPLETE, null);
+        // Backlog fix (extends the triggerAnalysis hotfix on
+        // feature/fix-execution-orchestrator-stale-state-2026-04-25 to the
+        // executeApprovedPlan path): the in-memory `run` reference here is
+        // STALE — the long-running solution-dispatch loop above (potentially
+        // many minutes) lets concurrent writes to this row bump @Version.
+        // CAS-style re-fetch + retry so the @Async thread doesn't crash on
+        // ObjectOptimisticLockingFailureException (no @RestControllerAdvice
+        // catches async exceptions).
+        boolean ok = applyTerminalStatus(executionRunId, "COMPLETE");
+        if (!ok) {
+            log.warn("executeApprovedPlan: terminal COMPLETE for exec {} could not be applied",
+                    executionRunId);
+            return;
+        }
+        emit(executionRunId, ExecutionEventTypes.EXEC_COMPLETE, null);
+    }
+
+    /**
+     * Backlog — same retry shape as the triggerAnalysis hotfix. Up to 3
+     * attempts with 50ms × attempt back-off; refuses to trample a parallel
+     * terminal write (caller-driven cancel may have set ABORTED).
+     */
+    /* package */ boolean applyTerminalStatus(String runId, String newStatus) {
+        int attempts = 0;
+        while (attempts < 3) {
+            attempts++;
+            try {
+                ExecutionRun fresh = runRepo.findById(runId).orElse(null);
+                if (fresh == null) return false;
+                if ("ABORTED".equals(fresh.getStatus()) || "COMPLETE".equals(fresh.getStatus())) {
+                    log.info("applyTerminalStatus: exec {} already terminal at {}; skipping {}",
+                            runId, fresh.getStatus(), newStatus);
+                    return true;
+                }
+                fresh.setStatus(newStatus);
+                runRepo.save(fresh);
+                return true;
+            } catch (ObjectOptimisticLockingFailureException ole) {
+                if (attempts >= 3) {
+                    log.error("applyTerminalStatus: optimistic-lock retry exhausted for exec {} → {} after {} attempts",
+                            runId, newStatus, attempts);
+                    return false;
+                }
+                log.info("applyTerminalStatus: optimistic-lock conflict on exec {} → {} attempt {}/3; refetching",
+                        runId, newStatus, attempts);
+                try {
+                    Thread.sleep(50L * attempts);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 
     /**
