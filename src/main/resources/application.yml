@@ -274,6 +274,7 @@ model-matrix:
     # V2 agents
     PlannerAgentV2: PLANNING
     ReviewerAgentV3: PLANNING
+    SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
     WorkerAgentV2: WORKHORSE
     # Shared non-tool-calling agents (use LlmRouter)
     TestPlannerAgent: WORKHORSE
