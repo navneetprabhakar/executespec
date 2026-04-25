@@ -1,7 +1,7 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-25 (plan-doc cleanup: 12 done plans deleted, 4 partial plans consolidated into `partial-work.md`, 5 not-started plans renamed `pending-*`. Document Index + Per-Package Quick Reference also expanded to cover the 9 packages and 4 doc files that were missing — `api/`, `apitests/`, `assessment/`, `compliance/`, `contact/`, `context/`, `crypto/`, `repo/`, `validator/` + `billing-workflows.html`, `design/ui-tokens.md`, `test-scenarios/`, `reports/`).
+> Last updated: 2026-04-25 (added `pending-enterprise-readiness-execution-eval.md` — evaluation + slice-1 sequencing of the external enterprise-readiness plan, UX-preserved, Phase E1 detailed; reserves V131–V137. Earlier same-day: plan-doc cleanup — 12 done plans deleted, 4 partial plans consolidated into `partial-work.md`, 5 not-started plans renamed `pending-*`. Document Index + Per-Package Quick Reference also expanded to cover the 9 packages and 4 doc files that were missing — `api/`, `apitests/`, `assessment/`, `compliance/`, `contact/`, `context/`, `crypto/`, `repo/`, `validator/` + `billing-workflows.html`, `design/ui-tokens.md`, `test-scenarios/`, `reports/`).
 >
 > **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Hierarchical planner (v2.6.2-track) **all 5 slices shipped on `feature/hierarchical-planner`** (8 commits ahead of `dev`, not yet merged) — full design + slice status in [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md). Auto-replay re-trigger from outline checkpoint is the one remaining slice-5d gap.
 >
@@ -21,6 +21,7 @@ After the 2026-04-25 cleanup, `docs/plans/` holds only what is actively useful:
 | [`pending-distributed-processing-plan.md`](plans/pending-distributed-processing-plan.md) | not started | Phase A NFS workspace + Phase B worker-lease pool. |
 | [`pending-vscode-extension-plan.md`](plans/pending-vscode-extension-plan.md) | not started | External-repo VS Code extension; device-code OAuth. |
 | [`pending-complimentary-pro-promo-2026-04-30-plan.md`](plans/pending-complimentary-pro-promo-2026-04-30-plan.md) | not started | Founder thank-you 30-day PRO upgrade for early FREE signups. |
+| [`pending-enterprise-readiness-execution-eval.md`](plans/pending-enterprise-readiness-execution-eval.md) | not started | Evaluation + slice-1 sequencing of the source enterprise-readiness plan: `.executespec/` folder, contract registry, activity feed, export bundle, engineering standards. UX-preserved (no token/font/primitive changes); Phase E1 broken into shippable PRs; ~46 source tasks reduced to ~30 with cuts called out. Reserves V131–V137. |
 
 **Top-level (shipped on `feature/hierarchical-planner`, awaiting dev merge):** [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md) — v2.6.2-track. All 4 phases live on the branch: SmartClassifierAgent (Phase 0) + OutlinePlannerAgent (Phase 1, FULL_PLAN + SKELETON_ONLY) + TaskExpanderAgent (Phase 2 parallel + LEGACY recursive depth-2) + CoherencePlannerAgent (Phase 3). PlanStrategyCircuitBreaker, PlannerOutputUtils, V130 migration, per-strategy estimateRun re-tune, dashboard surfacing — all committed. Open follow-up: full auto-replay re-trigger.
 
