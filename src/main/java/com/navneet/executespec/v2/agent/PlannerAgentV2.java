@@ -490,15 +490,33 @@ public class PlannerAgentV2 {
         } catch (IllegalArgumentException iae) {
             cx = PlannedTaskV2.Complexity.MEDIUM;
         }
+        // v2.6.2 slice 3 — `type` field on the tool-call payload (LEAF | EPIC).
+        // Default LEAF when missing (backward-compat with slice 1+2 plans that
+        // predate the field). EPIC is only legitimate on skeleton-mode outlines.
+        PlannedTaskV2.TaskType taskType;
+        try {
+            taskType = PlannedTaskV2.TaskType.valueOf(t.path("type").asText("LEAF").toUpperCase());
+        } catch (IllegalArgumentException iae) {
+            taskType = PlannedTaskV2.TaskType.LEAF;
+        }
+        // Slice 3 — descriptions can legitimately be blank in skeleton mode (the
+        // expander fills them later). Slice 1+2 plans always include the field.
+        String description = t.path("description").asText("");
+        if (description.isBlank() && taskType == PlannedTaskV2.TaskType.LEAF) {
+            // Legacy LEAF tasks must have a description for the worker prompt.
+            // Stick the placeholder so the worker doesn't get an empty user prompt.
+            description = "(no description)";
+        }
         return PlannedTaskV2.builder()
                 .id(id)
                 .title(t.path("title").asText("(untitled)"))
-                .description(t.path("description").asText("(no description)"))
+                .description(description)
                 .complexity(cx)
                 .touchesFiles(stringList(t.path("touchesFiles")))
                 .dependsOn(stringList(t.path("dependsOn")))
                 .hardConstraints(stringList(t.path("hardConstraints")))
                 .meetsRequirements(stringList(t.path("meetsRequirements")))
+                .taskType(taskType)
                 .build();
     }
 

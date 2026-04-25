@@ -12,9 +12,9 @@ User-selected provider architecture with YAML-configured model matrix and Redis-
 - `AvailableProviderResolver.java` — Resolves available providers per run based on org policy + API key availability
 
 ## Agent Tiers (from application.yml model-matrix)
-- PLANNING: Sonnet 4.6 / GPT-5.4 / Gemini 3 Flash Preview (planner, reviewer, worker stall escalation, **v2.6.1: `RepoArchitectureGenerator` + `ArchitectureDocGenerator` + `ProjectChatCompiler` — bumped from LIGHTWEIGHT/WORKHORSE because Anthropic Haiku missed cross-repo wiring + mangled spec compilation**, **v2.6.2-track: `OutlinePlannerAgent` — hierarchical-planner phase 1, 32k cap so SMALL/MEDIUM specs never truncate**)
-- WORKHORSE: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (workers, compiler, test planner, test worker, conflict resolver, prompt optimiser, report generator)
-- LIGHTWEIGHT: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (chat, context, test report, triage, **v2.6.1: `ProjectChatCompactor` — chat history compaction**, **v2.6.2-track: `SmartClassifierAgent` — hierarchical-planner phase 0 LLM verifier**)
+- PLANNING: Sonnet 4.6 / GPT-5.4 / Gemini 3 Flash Preview (planner, reviewer, worker stall escalation, **v2.6.1: `RepoArchitectureGenerator` + `ArchitectureDocGenerator` + `ProjectChatCompiler` — bumped from LIGHTWEIGHT/WORKHORSE because Anthropic Haiku missed cross-repo wiring + mangled spec compilation**, **v2.6.2-track: `OutlinePlannerAgent` — hierarchical-planner phase 1, 32k cap (FULL_PLAN) / 8k cap (SKELETON_ONLY)**)
+- WORKHORSE: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (workers, compiler, test planner, test worker, conflict resolver, prompt optimiser, report generator, **v2.6.2-track: `TaskExpanderAgent` — hierarchical-planner phase 2, runs in parallel for every LEAF skeleton, 3k cap per task**)
+- LIGHTWEIGHT: Haiku 4.5 / GPT-5.4 / Gemini 3 Flash Preview (chat, context, test report, triage, **v2.6.1: `ProjectChatCompactor` — chat history compaction**, **v2.6.2-track: `SmartClassifierAgent` — hierarchical-planner phase 0 LLM verifier**, **v2.6.2-track: `CoherencePlannerAgent` — hierarchical-planner phase 3, applies minimal patches to assembled plan, 1.5k cap**)
 
 ## Provider Selection
 Each project selects its AI provider (ANTHROPIC/GEMINI/OPENAI). ModelResolver maps `agentTier × provider → model` from YAML config. Failover to next healthy provider if selected provider is down.

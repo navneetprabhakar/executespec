@@ -32,10 +32,14 @@ import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.ClassificationResult;
+import com.navneet.executespec.v2.agent.CoherencePlannerAgent;
 import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
 import com.navneet.executespec.v2.agent.PlanStrategy;
+import com.navneet.executespec.v2.agent.PlanStrategyCircuitBreaker;
 import com.navneet.executespec.v2.agent.PlannerAgentV2;
+import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.SmartClassifierAgent;
+import com.navneet.executespec.v2.agent.TaskExpanderAgent;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
 import com.navneet.executespec.v2.agent.SpecClassifier;
 import com.navneet.executespec.project.entity.ProjectRepo;
@@ -114,6 +118,9 @@ public class V2RunOrchestrator {
     private final AgentTaskRepository taskRepo;
     private final PlannerAgentV2 planner;
     private final OutlinePlannerAgent outlinePlanner;
+    private final TaskExpanderAgent taskExpander;
+    private final CoherencePlannerAgent coherencePlanner;
+    private final PlanStrategyCircuitBreaker planStrategyBreaker;
     private final SmartClassifierAgent smartClassifier;
     private final SequentialExecutorV2 executor;
     private final ReviewerAgentV3 reviewer;
@@ -535,19 +542,40 @@ public class V2RunOrchestrator {
                         .prReviewComments(null)
                         .build();
 
-                // v2.6.2 slice 2 — strategy-driven routing. SMALL/MEDIUM go to the
-                // outline planner (32k cap, designed to never truncate on
-                // bounded specs). Anything else (SINGLE_SHOT bypass, LARGE/LEGACY
-                // pending slices 3-4, classifier failure → null) stays on the
-                // legacy single-phase PlannerAgentV2.
-                boolean useOutlinePlanner = planStrategy == PlanStrategy.SMALL
-                        || planStrategy == PlanStrategy.MEDIUM;
-                if (useOutlinePlanner) {
+                // v2.6.2 slice 3 — strategy-driven routing with auto-degrade
+                // when a strategy's circuit breaker is open.
+                //   SMALL / MEDIUM → outline planner (FULL_PLAN mode, single call).
+                //   LARGE          → outline planner (SKELETON_ONLY) → parallel
+                //                    expansion → coherence pass.
+                //   LEGACY         → defer to slice 4 — recursive depth-2
+                //                    expansion isn't built yet, so degrade to LARGE.
+                //   SINGLE_SHOT / null / classifier failure → legacy planner.
+                PlanStrategy effective = planStrategy == null
+                        ? null
+                        : planStrategyBreaker.degradeIfOpen(
+                                planStrategy == PlanStrategy.LEGACY ? PlanStrategy.LARGE : planStrategy);
+                if (effective != planStrategy && effective != null) {
+                    log.warn("V2 run={} circuit breaker degraded {} → {}", runId, planStrategy, effective);
+                }
+
+                if (effective == PlanStrategy.SMALL || effective == PlanStrategy.MEDIUM) {
                     try {
-                        plan = runOutlinePhase(runId, plannerReq);
+                        plan = runOutlinePhase(runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
+                        planStrategyBreaker.recordSuccess(effective);
                     } catch (Exception outlineEx) {
-                        // Fall back to legacy planner so the run can still progress.
-                        log.warn("V2 run={} outline planner failed → legacy planner fallback", runId);
+                        planStrategyBreaker.recordFailure(effective);
+                        log.warn("V2 run={} outline planner ({}) failed → legacy fallback",
+                                runId, effective);
+                        plan = planner.plan(plannerReq);
+                    }
+                } else if (effective == PlanStrategy.LARGE) {
+                    try {
+                        plan = runLargePipeline(runId, plannerReq, rootCtx);
+                        planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
+                    } catch (Exception largeEx) {
+                        planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
+                        log.warn("V2 run={} LARGE pipeline failed → legacy fallback: {}",
+                                runId, largeEx.getMessage());
                         plan = planner.plan(plannerReq);
                     }
                 } else {
@@ -1912,18 +1940,20 @@ public class V2RunOrchestrator {
      * {@code plan_outline_json}. Failures bubble up so the orchestrator can
      * fall back to the legacy planner.
      */
-    private PlanV2 runOutlinePhase(String runId, PlannerRequestV2 req) {
+    private PlanV2 runOutlinePhase(String runId, PlannerRequestV2 req,
+                                    OutlinePlannerAgent.Mode mode) {
         V2RunCostTracker.Snapshot before = costTracker.snapshot(runId);
         try {
-            PlanV2 plan = outlinePlanner.plan(req);
+            PlanV2 plan = outlinePlanner.plan(req, mode);
             V2RunCostTracker.Snapshot after = costTracker.snapshot(runId);
 
             long inTok = Math.max(0, after.inputTokens() - before.inputTokens());
             long outTok = Math.max(0, after.outputTokens() - before.outputTokens());
             double cost = Math.max(0.0, after.costUsd() - before.costUsd());
 
-            log.info("V2 run={} outline planner → {} tasks, in/out={}/{}, ${}",
-                    runId, plan.tasks().size(), inTok, outTok, String.format("%.6f", cost));
+            log.info("V2 run={} outline planner [{}] → {} tasks, in/out={}/{}, ${}",
+                    runId, mode, plan.tasks().size(), inTok, outTok,
+                    String.format("%.6f", cost));
 
             try {
                 PipelineRun fresh = runRepo.findById(runId).orElse(null);
@@ -1945,13 +1975,157 @@ public class V2RunOrchestrator {
             }
             return plan;
         } catch (Exception e) {
-            // Don't double-attribute cost — the LlmRouter has already recorded
-            // whatever tokens were burned before the failure. Bubble up so the
-            // caller falls back to the legacy planner.
-            log.warn("V2 run={} outline planner failed: {} — falling back to legacy planner",
+            log.warn("V2 run={} outline planner failed: {} — bubbling up for fallback",
                     runId, e.getMessage());
             throw e;
         }
+    }
+
+    /**
+     * v2.6.2 slice 3 — LARGE pipeline. Drives:
+     * <ol>
+     *   <li>Phase 1: outline planner in SKELETON_ONLY mode (id/title/complexity/
+     *       repos/dependsOn/type only).</li>
+     *   <li>Phase 2: parallel expansion of every LEAF task via
+     *       {@link TaskExpanderAgent}. Bounded concurrency via the existing
+     *       pipeline pool. EPIC tasks are NOT recursed yet — slice 4 brings
+     *       depth-2 expansion; for slice 3 they're treated as LEAFs.</li>
+     *   <li>Phase 3: coherence pass via {@link CoherencePlannerAgent} + apply
+     *       any patches.</li>
+     * </ol>
+     *
+     * <p>Per-phase cost is diff'd from {@link V2RunCostTracker#snapshot} and
+     * persisted to the matching {@code pipeline_run.{outline,expansion,coherence}_*}
+     * columns. Run total auto-aggregates via the tracker's accumulator.
+     */
+    private PlanV2 runLargePipeline(String runId, PlannerRequestV2 req, ExecutionContext rootCtx) {
+        // ── Phase 1: skeleton outline ─────────────────────────────────────
+        PlanV2 skeleton = runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
+        if (skeleton.tasks() == null || skeleton.tasks().isEmpty()) {
+            throw new IllegalStateException("LARGE outline returned 0 skeleton tasks");
+        }
+
+        // ── Phase 2: parallel expansion ──────────────────────────────────
+        V2RunCostTracker.Snapshot beforeExpand = costTracker.snapshot(runId);
+        long expansionStart = System.currentTimeMillis();
+        List<PlannedTaskV2> tasksToExpand = skeleton.tasks();
+        java.util.concurrent.ConcurrentMap<String, PlannedTaskV2> expanded =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        java.util.concurrent.ConcurrentMap<String, Throwable> expansionFailures =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
+        List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
+        for (PlannedTaskV2 t : tasksToExpand) {
+            // Slice 3 treats EPIC the same as LEAF — recursive depth-2
+            // expansion lands in slice 4.
+            futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    ExecutionContext taskCtx = new ExecutionContext(
+                            runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
+                    PlannedTaskV2 full = taskExpander.expand(t, skeleton, req, taskCtx);
+                    expanded.put(t.id(), full);
+                } catch (Throwable ex) {
+                    log.warn("V2 run={} task expansion failed for {}: {}",
+                            runId, t.id(), ex.getMessage());
+                    expansionFailures.put(t.id(), ex);
+                    // Fall back to a LEAF carrying just the title-derived
+                    // description so the pipeline can still progress.
+                    expanded.put(t.id(), PlannedTaskV2.builder()
+                            .id(t.id())
+                            .title(t.title())
+                            .description("Implement: " + t.title()
+                                    + " (expansion failed; worker will figure it out)")
+                            .complexity(t.complexity())
+                            .touchesFiles(t.touchesFiles())
+                            .dependsOn(t.dependsOn())
+                            .hardConstraints(List.of())
+                            .meetsRequirements(List.of())
+                            .taskType(t.taskType())
+                            .build());
+                }
+            }, pool));
+        }
+        try {
+            java.util.concurrent.CompletableFuture
+                    .allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0]))
+                    .get(15, java.util.concurrent.TimeUnit.MINUTES);
+        } catch (Exception expandWaitEx) {
+            throw new IllegalStateException(
+                    "LARGE expansion phase exceeded 15-minute timeout: "
+                            + expandWaitEx.getMessage(), expandWaitEx);
+        }
+
+        // Stitch expanded bodies back onto the plan in original order.
+        List<PlannedTaskV2> assembledTasks = new ArrayList<>(tasksToExpand.size());
+        for (PlannedTaskV2 sk : tasksToExpand) {
+            assembledTasks.add(expanded.getOrDefault(sk.id(), sk));
+        }
+        PlanV2 assembled = PlanV2.builder()
+                .planTitle(skeleton.planTitle())
+                .planSummary(skeleton.planSummary())
+                .projectType(skeleton.projectType())
+                .buildCommand(skeleton.buildCommand())
+                .smokeTestStrategy(skeleton.smokeTestStrategy())
+                .runtimeSurface(skeleton.runtimeSurface())
+                .tasks(assembledTasks)
+                .classification(skeleton.classification())
+                .requirements(skeleton.requirements())
+                .build();
+
+        V2RunCostTracker.Snapshot afterExpand = costTracker.snapshot(runId);
+        long expandIn = Math.max(0, afterExpand.inputTokens() - beforeExpand.inputTokens());
+        long expandOut = Math.max(0, afterExpand.outputTokens() - beforeExpand.outputTokens());
+        double expandCost = Math.max(0.0, afterExpand.costUsd() - beforeExpand.costUsd());
+        log.info("V2 run={} expansion: {} tasks, {} failures, wall={}ms, in/out={}/{}, ${}",
+                runId, assembledTasks.size(), expansionFailures.size(),
+                System.currentTimeMillis() - expansionStart,
+                expandIn, expandOut, String.format("%.6f", expandCost));
+
+        // ── Phase 3: coherence ───────────────────────────────────────────
+        V2RunCostTracker.Snapshot beforeCoherence = costTracker.snapshot(runId);
+        ExecutionContext coherenceCtx = new ExecutionContext(
+                runId, "_coherence_", rootCtx.workspaceRoot());
+        CoherencePlannerAgent.PatchResult patchResult;
+        try {
+            patchResult = coherencePlanner.patchIfNeeded(assembled, req, coherenceCtx);
+        } catch (Exception coherenceEx) {
+            log.warn("V2 run={} coherence pass failed (non-fatal — using unpatched plan): {}",
+                    runId, coherenceEx.getMessage());
+            patchResult = new CoherencePlannerAgent.PatchResult(assembled, 0, List.of());
+        }
+        V2RunCostTracker.Snapshot afterCoherence = costTracker.snapshot(runId);
+        long cohIn = Math.max(0, afterCoherence.inputTokens() - beforeCoherence.inputTokens());
+        long cohOut = Math.max(0, afterCoherence.outputTokens() - beforeCoherence.outputTokens());
+        double cohCost = Math.max(0.0, afterCoherence.costUsd() - beforeCoherence.costUsd());
+
+        log.info("V2 run={} coherence: {} patches applied, in/out={}/{}, ${}",
+                runId, patchResult.patchesApplied(), cohIn, cohOut,
+                String.format("%.6f", cohCost));
+
+        // ── Persist per-phase costs + final plan ─────────────────────────
+        try {
+            PipelineRun fresh = runRepo.findById(runId).orElse(null);
+            if (fresh != null) {
+                fresh.setExpansionInputTokens(expandIn);
+                fresh.setExpansionOutputTokens(expandOut);
+                fresh.setExpansionCostUsd(expandCost);
+                fresh.setCoherenceInputTokens(cohIn);
+                fresh.setCoherenceOutputTokens(cohOut);
+                fresh.setCoherenceCostUsd(cohCost);
+                try {
+                    fresh.setPlanOutlineJson(objectMapper.writeValueAsString(patchResult.patchedPlan()));
+                } catch (Exception serEx) {
+                    log.warn("V2 run={} plan_outline_json (post-expand) serialisation failed: {}",
+                            runId, serEx.getMessage());
+                }
+                runRepo.save(fresh);
+            }
+        } catch (Exception persistEx) {
+            log.warn("V2 run={} expansion/coherence persist failed (non-fatal): {}",
+                    runId, persistEx.getMessage());
+        }
+
+        return patchResult.patchedPlan();
     }
 
     private static String shortMsg(Exception e) {
