@@ -32,6 +32,8 @@ import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.ClassificationResult;
+import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
+import com.navneet.executespec.v2.agent.PlanStrategy;
 import com.navneet.executespec.v2.agent.PlannerAgentV2;
 import com.navneet.executespec.v2.agent.SmartClassifierAgent;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
@@ -111,6 +113,7 @@ public class V2RunOrchestrator {
     private final PipelineRunRepository runRepo;
     private final AgentTaskRepository taskRepo;
     private final PlannerAgentV2 planner;
+    private final OutlinePlannerAgent outlinePlanner;
     private final SmartClassifierAgent smartClassifier;
     private final SequentialExecutorV2 executor;
     private final ReviewerAgentV3 reviewer;
@@ -469,12 +472,14 @@ public class V2RunOrchestrator {
                 log.info("V2 run={} spec classified as {} (len={})",
                         runId, autoClassification, userRequest == null ? 0 : userRequest.length());
 
-                // v2.6.2 — Smart classifier (hierarchical-planner phase 0). Runs
-                // alongside the legacy SpecClassifier for slice 1; downstream
-                // planner is unchanged. Verdict + per-phase token cost persist
-                // on the run row for offline calibration. The cost flows through
-                // V2RunCostTracker so it's also already in the run's grand total.
-                runClassifierShadow(runId, runRow, userRequest, projectId, selectedRepoIds, provider);
+                // v2.6.2 — Smart classifier (hierarchical-planner phase 0). Verdict
+                // drives downstream routing in slice 2: SMALL/MEDIUM go through the
+                // OutlinePlannerAgent (32k cap, full plan in one call); SINGLE_SHOT,
+                // LARGE, LEGACY, and the null-on-failure case all stay on the legacy
+                // PlannerAgentV2. Cost flows through V2RunCostTracker so it auto-
+                // aggregates into the run total; per-phase columns get the diff.
+                PlanStrategy planStrategy = runClassifierShadow(
+                        runId, runRow, userRequest, projectId, selectedRepoIds, provider);
                 String projectMemory = projectId != null
                         ? projectMemoryProvider.buildPlannerContext(projectId)
                         : "";
@@ -516,7 +521,7 @@ public class V2RunOrchestrator {
                 } else {
                     summary = "empty scratch workspace (V2 harness)";
                 }
-                plan = planner.plan(PlannerRequestV2.builder()
+                PlannerRequestV2 plannerReq = PlannerRequestV2.builder()
                         .spec(userRequest)
                         .classification(autoClassification)
                         .provider(provider)
@@ -528,7 +533,26 @@ public class V2RunOrchestrator {
                         .referenceDocs(referenceDocs)
                         .tddMode(tddMode)
                         .prReviewComments(null)
-                        .build());
+                        .build();
+
+                // v2.6.2 slice 2 — strategy-driven routing. SMALL/MEDIUM go to the
+                // outline planner (32k cap, designed to never truncate on
+                // bounded specs). Anything else (SINGLE_SHOT bypass, LARGE/LEGACY
+                // pending slices 3-4, classifier failure → null) stays on the
+                // legacy single-phase PlannerAgentV2.
+                boolean useOutlinePlanner = planStrategy == PlanStrategy.SMALL
+                        || planStrategy == PlanStrategy.MEDIUM;
+                if (useOutlinePlanner) {
+                    try {
+                        plan = runOutlinePhase(runId, plannerReq);
+                    } catch (Exception outlineEx) {
+                        // Fall back to legacy planner so the run can still progress.
+                        log.warn("V2 run={} outline planner failed → legacy planner fallback", runId);
+                        plan = planner.plan(plannerReq);
+                    }
+                } else {
+                    plan = planner.plan(plannerReq);
+                }
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
                 terminate(runId, "FAILED", "planner: " + shortMsg(e), startedAt);
@@ -1781,10 +1805,13 @@ public class V2RunOrchestrator {
     }
 
     /**
-     * v2.6.2 — hierarchical-planner phase 0 (slice 1, shadow mode). Runs the
-     * smart classifier alongside the legacy {@link SpecClassifier}, persists
-     * verdict + per-phase token cost on the run row for offline calibration.
-     * Downstream planner is unchanged in slice 1; this only writes new columns.
+     * v2.6.2 — hierarchical-planner phase 0. Runs the smart classifier and
+     * persists the verdict + per-phase token cost on the run row. Returns the
+     * resolved {@link PlanStrategy} so the orchestrator can route SMALL/MEDIUM
+     * specs to {@link OutlinePlannerAgent} (slice 2) and SINGLE_SHOT/LARGE/LEGACY
+     * to {@link PlannerAgentV2}. Returns null when the classifier failed
+     * outright — the caller should treat that as the legacy path
+     * (PlannerAgentV2 handles every classification).
      *
      * <p>Cost note: the classifier's LLM call (when it fires) flows through
      * {@link LlmRouterV2} → {@link V2RunCostTracker#record}, so it auto-aggregates
@@ -1795,7 +1822,7 @@ public class V2RunOrchestrator {
      *
      * <p>Failures are swallowed: classifier outage must never block planning.
      */
-    private void runClassifierShadow(
+    private PlanStrategy runClassifierShadow(
             String runId, PipelineRun runRow, String userRequest,
             String projectId, List<UUID> selectedRepoIds, String provider
     ) {
@@ -1870,9 +1897,60 @@ public class V2RunOrchestrator {
                 log.warn("V2 run={} smart classifier persist failed (non-fatal): {}",
                         runId, persistEx.getMessage());
             }
+            return result.strategy();
         } catch (Exception e) {
             log.warn("V2 run={} smart classifier shadow run failed (non-fatal): {}",
                     runId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * v2.6.2 — hierarchical-planner phase 1. Snapshots per-run cost before
+     * + after the {@link OutlinePlannerAgent} call, attributes the diff to
+     * {@code pipeline_run.outline_*} columns + persists the plan JSON to
+     * {@code plan_outline_json}. Failures bubble up so the orchestrator can
+     * fall back to the legacy planner.
+     */
+    private PlanV2 runOutlinePhase(String runId, PlannerRequestV2 req) {
+        V2RunCostTracker.Snapshot before = costTracker.snapshot(runId);
+        try {
+            PlanV2 plan = outlinePlanner.plan(req);
+            V2RunCostTracker.Snapshot after = costTracker.snapshot(runId);
+
+            long inTok = Math.max(0, after.inputTokens() - before.inputTokens());
+            long outTok = Math.max(0, after.outputTokens() - before.outputTokens());
+            double cost = Math.max(0.0, after.costUsd() - before.costUsd());
+
+            log.info("V2 run={} outline planner → {} tasks, in/out={}/{}, ${}",
+                    runId, plan.tasks().size(), inTok, outTok, String.format("%.6f", cost));
+
+            try {
+                PipelineRun fresh = runRepo.findById(runId).orElse(null);
+                if (fresh != null) {
+                    try {
+                        fresh.setPlanOutlineJson(objectMapper.writeValueAsString(plan));
+                    } catch (Exception serEx) {
+                        log.warn("V2 run={} plan_outline_json serialisation failed: {}",
+                                runId, serEx.getMessage());
+                    }
+                    fresh.setOutlineInputTokens(inTok);
+                    fresh.setOutlineOutputTokens(outTok);
+                    fresh.setOutlineCostUsd(cost);
+                    runRepo.save(fresh);
+                }
+            } catch (Exception persistEx) {
+                log.warn("V2 run={} outline persist failed (non-fatal): {}",
+                        runId, persistEx.getMessage());
+            }
+            return plan;
+        } catch (Exception e) {
+            // Don't double-attribute cost — the LlmRouter has already recorded
+            // whatever tokens were burned before the failure. Bubble up so the
+            // caller falls back to the legacy planner.
+            log.warn("V2 run={} outline planner failed: {} — falling back to legacy planner",
+                    runId, e.getMessage());
+            throw e;
         }
     }
 
