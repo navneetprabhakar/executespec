@@ -244,8 +244,13 @@ public class SolutionExecutionService {
         accumulateExecutionRunTotals(run, solution);
 
         // Write handover contracts to every direct dependent solution.
+        // Use the @EntityGraph-eager dependencies fetch — even though the
+        // ManyToMany is annotated EAGER on the entity, the audit (2026-04-25)
+        // showed Hibernate occasionally lazy-defers it when paged. Now that
+        // OSIV is off the deferral would throw on the stream below; the
+        // explicit graph guarantees the dependencies set is hydrated here.
         List<ExecutionSolution> dependents = solutionRepo
-                .findByExecutionRun_IdOrderBySequenceNumberAsc(run.getId())
+                .findWithDependenciesByExecutionRun_IdOrderBySequenceNumberAsc(run.getId())
                 .stream()
                 .filter(s -> s.getDependencies() != null
                         && s.getDependencies().stream().anyMatch(d -> d.getId().equals(solution.getId())))
