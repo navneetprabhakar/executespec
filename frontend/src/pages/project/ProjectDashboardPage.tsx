@@ -8,6 +8,7 @@ import ArchitectureViewer from '@/components/project/ArchitectureViewer';
 import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
 import WorkspaceHealthPanel from '@/components/project/WorkspaceHealthPanel';
+import ContractCoveragePanel from '@/components/project/ContractCoveragePanel';
 import GeneratedDocsPanel from '@/components/project/GeneratedDocsPanel';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import TechDebtPanel from '@/components/project/TechDebtPanel';
@@ -135,7 +136,7 @@ export default function ProjectDashboardPage() {
     if (!projectId) return null;
     switch (tab) {
       case 'overview':
-        return <OverviewContent projectId={projectId} dashboard={dashboard} scoreTrend={scoreTrend} project={project} onProjectUpdate={setProject} />;
+        return <OverviewContent projectId={projectId} dashboard={dashboard} scoreTrend={scoreTrend} project={project} onProjectUpdate={setProject} repos={repos ?? []} />;
       case 'launches':
         return <ProjectLaunchesList projectId={projectId} />;
       case 'prs':
@@ -343,8 +344,8 @@ export default function ProjectDashboardPage() {
 }
 
 function OverviewContent({
-  projectId, dashboard, scoreTrend, project, onProjectUpdate,
-}: { projectId?: string; dashboard: any; scoreTrend: any; project: api.ProjectDto | null; onProjectUpdate: (p: api.ProjectDto) => void }) {
+  projectId, dashboard, scoreTrend, project, onProjectUpdate, repos,
+}: { projectId?: string; dashboard: any; scoreTrend: any; project: api.ProjectDto | null; onProjectUpdate: (p: api.ProjectDto) => void; repos: any[] }) {
   const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
   return (
     <div className="space-y-4 max-w-3xl">
@@ -352,6 +353,20 @@ function OverviewContent({
       {projectId && <ProjectSummaryPanel projectId={projectId} />}
       {projectId && <GeneratedDocsPanel projectId={projectId} />}
       {projectId && <WorkspaceHealthPanel projectId={projectId} />}
+      {/* E2.4 — one ContractCoveragePanel per linked repo (UX-preserved:
+          same per-repo card pattern as the WorkspaceHealthPanel above). */}
+      {projectId && repos.length > 0 && (
+        <div className="space-y-2">
+          {repos.map((r: any) => (
+            <ContractCoveragePanel
+              key={r.id ?? r.repoId}
+              projectId={projectId}
+              repoId={r.id ?? r.repoId}
+              repoFullName={r.githubRepoFullName ?? r.repoName}
+            />
+          ))}
+        </div>
+      )}
       {projectId && <TechDebtPanel projectId={projectId} />}
       <div className="space-y-2">
         <h3 className="text-xs font-medium text-secondary">Recent submissions</h3>

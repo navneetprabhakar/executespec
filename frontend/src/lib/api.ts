@@ -2029,6 +2029,38 @@ export interface WorkspaceHealthReport {
 export const getWorkspaceHealth = (projectId: string) =>
   req<WorkspaceHealthReport>(`/projects/${projectId}/workspace-health`);
 
+// E2.3 — contract coverage panel (UX-preserved: drives ContractCoveragePanel.tsx
+// which reuses the WorkspaceHealthPanel layout + 4-band semantic tokens).
+export type ContractType =
+  | 'OPENAPI' | 'PROTO' | 'GRAPHQL' | 'JSON_SCHEMA' | 'ASYNCAPI' | 'EVENT_SCHEMA';
+export type DetectorStatus = 'SCANNED' | 'FAILED' | 'SKIPPED';
+export interface DetectorSummary {
+  detector: string;
+  type: ContractType;
+  status: DetectorStatus;
+  contractIds: string[];
+  failureReason?: string | null;
+}
+export interface KnownGap {
+  category: string;
+  explanation: string;
+  actionable: string;
+}
+export interface ContractCoverageResponse {
+  projectId: string;
+  repoId: string;
+  githubRepoFullName: string;
+  scans: DetectorSummary[];
+  knownGaps: KnownGap[];
+}
+export const getContractCoverage = (projectId: string, repoId: string) =>
+  req<ContractCoverageResponse>(
+    `/projects/${projectId}/repos/${repoId}/contract-coverage`);
+export const rescanContractCoverage = (projectId: string, repoId: string) =>
+  req<ContractCoverageResponse>(
+    `/projects/${projectId}/repos/${repoId}/contract-coverage/rescan`,
+    { method: 'POST' });
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
