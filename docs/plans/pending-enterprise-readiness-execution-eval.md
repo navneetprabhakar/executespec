@@ -157,7 +157,7 @@ test + doc-refresh per CLAUDE.md house rule).
 | ID | Task | Status | Reuses / risk | Effort |
 |---|---|---|---|---|
 | E2.1 ✓ | V135 — `contract_registry / contract_version / contract_consumer / contract_drift_event` (V133 was claimed by E1.10) | NEW | Standalone tables; FK on `project_repo` only. **Shipped 2026-04-25.** `mvn test` 368 of 368 (6 new in `ContractRegistryEntityTest`); migrations applied to live Postgres @ V135. | 1 d |
-| E2.2 | 5 file-based detectors (OpenAPI / Proto / GraphQL / JSON Schema / AsyncAPI) | NEW | OpenAPI bundling via `swagger-cli` adds Node toolchain to backend container. Tie into post-merge cascade. | 6–8 d |
+| E2.2 ✓ | 5 file-based detectors + `ContractDetectionService` orchestration | NEW | 5 detectors (OpenAPI / Proto / GraphQL / JSON Schema / AsyncAPI) + shared `DetectorUtils` (sha256, glob match, version pull). Service orchestrates: list files → run detectors → upsert registry+version → emit `CONTRACT_DETECTED` / `CONTRACT_VERSION_CHANGED`. Multi-file `$ref` bundling deferred (logged in §13). **Shipped 2026-04-25.** `mvn test` 386 of 386 (18 new across 2 test files). | 6–8 d |
 | E2.3 | Coverage backend `GET /api/projects/{id}/repos/{repoId}/contract-coverage` | NEW | New service. | 2 d |
 | E2.4 | `ContractCoveragePanel.tsx` | NEW UI | UX: `WorkspaceHealthPanel` layout, 4-band chips, no accordions. | 3 d |
 | E2.5 | `*-contracts` repo classifier (heuristic + LIGHTWEIGHT verifier) | NEW | LIGHTWEIGHT = Haiku 4.5 via `ModelResolver`. | 3 d |
