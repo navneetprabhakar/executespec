@@ -33,6 +33,16 @@ import java.time.format.DateTimeFormatter;
 public class ActivityFeedPartitionJob {
 
     private static final DateTimeFormatter SUFFIX = DateTimeFormatter.ofPattern("yyyy'm'MM");
+    /**
+     * Adversarial-review fix: even though {@link YearMonth#format} is
+     * deterministic, the DDL string is built via concatenation. Validate the
+     * formatted suffix matches the expected shape before letting it into the
+     * SQL — defends against locale/version drift that could ever produce an
+     * unexpected character. Belt-and-suspenders for a CRITICAL-flagged
+     * defensive issue.
+     */
+    private static final java.util.regex.Pattern SAFE_SUFFIX =
+            java.util.regex.Pattern.compile("\\d{4}m\\d{2}");
 
     private final JdbcTemplate jdbc;
 
@@ -62,8 +72,16 @@ public class ActivityFeedPartitionJob {
         for (int i = 0; i <= monthsAhead; i++) {
             YearMonth target = start.plusMonths(i);
             String suffix = target.format(SUFFIX);
+            if (!SAFE_SUFFIX.matcher(suffix).matches()) {
+                // Hard rail against any future locale/JDK change that could
+                // produce an unexpected suffix. Refuse rather than build DDL
+                // we can't reason about.
+                log.error("[ActivityFeedPartitionJob] refused unsafe suffix {} for {}",
+                        suffix, target);
+                continue;
+            }
             String tableName = "activity_feed_y" + suffix;
-            String fromDate = target.atDay(1).toString();
+            String fromDate = target.atDay(1).toString();          // ISO yyyy-mm-dd
             String toDate = target.plusMonths(1).atDay(1).toString();
             String ddl = "CREATE TABLE IF NOT EXISTS " + tableName
                     + " PARTITION OF activity_feed FOR VALUES FROM ('"
