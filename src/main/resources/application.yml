@@ -274,6 +274,8 @@ model-matrix:
     # V2 agents
     PlannerAgentV2: PLANNING
     OutlinePlannerAgent: PLANNING           # v2.6.2 hierarchical-planner phase 1
+    TaskExpanderAgent: WORKHORSE            # v2.6.2 hierarchical-planner phase 2 (parallel)
+    CoherencePlannerAgent: LIGHTWEIGHT      # v2.6.2 hierarchical-planner phase 3
     ReviewerAgentV3: PLANNING
     SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
     WorkerAgentV2: WORKHORSE

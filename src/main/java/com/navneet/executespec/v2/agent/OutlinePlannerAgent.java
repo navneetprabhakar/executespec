@@ -59,31 +59,66 @@ public class OutlinePlannerAgent {
     /** For shared parsing + validation — see class-level javadoc. */
     private final PlannerAgentV2 plannerAgent;
 
-    private static final String PROMPT_PATH = "prompts/v2/outline-planner.md";
+    private static final String PROMPT_PATH_FULL = "prompts/v2/outline-planner.md";
+    /** v2.6.2 slice 3 — skeleton-mode prompt for LARGE/LEGACY classifications.
+     *  Emits id/title/complexity/repos/dependsOn/type only — the expander fills
+     *  the bodies in parallel. Smaller output budget needed because no
+     *  descriptions / hardConstraints / meetsRequirements per task. */
+    private static final String PROMPT_PATH_SKELETON = "prompts/v2/outline-planner-skeleton.md";
     /** v2.6.2 slice 2 — 32k breathing room. The old planner's 8192 cap truncated
      *  on multi-repo specs (the bug that drove the whole hierarchical rewrite).
      *  SMALL/MEDIUM specs are bounded by definition (≤15 tasks, ≤2 repos), so
      *  32k is comfortably enough for full descriptions + hardConstraints +
      *  meetsRequirements per task. */
-    private static final int OUTLINE_MAX_TOKENS = 32_768;
+    private static final int OUTLINE_MAX_TOKENS_FULL = 32_768;
+    /** v2.6.2 slice 3 — skeleton outlines are tiny (id/title/complexity only)
+     *  even for 50-task LARGE plans. 8k is plenty. */
+    private static final int OUTLINE_MAX_TOKENS_SKELETON = 8_192;
 
     /** v2.5.11 — gates strict v3 planner behaviour (requirement enumeration + validation). */
     private static final String FLAG_V3_STRICT = "validation.v3-strict";
 
+    public enum Mode {
+        /** SMALL/MEDIUM classifications — emit a complete plan in one tool call.
+         *  Slice 2 default. */
+        FULL_PLAN,
+        /** LARGE/LEGACY classifications — emit task skeletons (id/title/complexity/
+         *  repos/dependsOn/type) only; {@code TaskExpanderAgent} fills bodies in
+         *  parallel afterwards. Slice 3+. */
+        SKELETON_ONLY
+    }
+
     /**
-     * Run the outline phase for a SMALL/MEDIUM-classified spec. Synchronous —
-     * cost flows through {@link LlmRouterV2} → {@link com.navneet.executespec.v2.cost.V2RunCostTracker}
-     * automatically; the orchestrator diffs the per-run snapshot before/after
-     * to attribute the phase to {@code pipeline_run.outline_*} columns.
+     * Convenience overload — defaults to {@link Mode#FULL_PLAN} (slice 2 contract).
      */
     public PlanV2 plan(PlannerRequestV2 req) {
+        return plan(req, Mode.FULL_PLAN);
+    }
+
+    /**
+     * Run the outline phase. Synchronous — cost flows through {@link LlmRouterV2} →
+     * {@link com.navneet.executespec.v2.cost.V2RunCostTracker} automatically; the
+     * orchestrator diffs the per-run snapshot before/after to attribute the phase
+     * to {@code pipeline_run.outline_*} columns.
+     *
+     * <p>{@link Mode#FULL_PLAN} emits descriptions + hardConstraints + meetsRequirements
+     * per task. {@link Mode#SKELETON_ONLY} emits id/title/complexity/repos/dependsOn/
+     * type — the expander fills the bodies. Skeleton mode bypasses validation-v3
+     * coverage checks (those need filled-in meetsRequirements which haven't been
+     * written yet); coverage is re-checked post-expansion in the coherence pass.
+     */
+    public PlanV2 plan(PlannerRequestV2 req, Mode mode) {
         long start = System.currentTimeMillis();
         try {
-            PlanV2 plan = planOnce(req, null);
+            PlanV2 plan = planOnce(req, null, mode);
 
             // v2.5.11 (Validation v3 / Pillar 1) — strict validation + one retry.
-            // Gated by feature flag; off → log-only behaviour.
-            if (featureFlagService != null && featureFlagService.isEnabled(FLAG_V3_STRICT)) {
+            // Gated by feature flag; off → log-only behaviour. SKELETON_ONLY mode
+            // skips this — meetsRequirements is intentionally blank pre-expansion;
+            // the coherence pass post-expansion runs the same check.
+            if (mode == Mode.FULL_PLAN
+                    && featureFlagService != null
+                    && featureFlagService.isEnabled(FLAG_V3_STRICT)) {
                 List<String> violations = plannerAgent.validatePlan(plan);
                 if (!violations.isEmpty()) {
                     String feedback = "Your previous plan had these requirement-graph violations:\n  - "
@@ -93,7 +128,7 @@ public class OutlinePlannerAgent {
                             + "Every requirement must be cited by at least one task.";
                     log.warn("OutlinePlanner plan invalid on first try ({} violations) — retrying. First violation: {}",
                             violations.size(), violations.get(0));
-                    PlanV2 retry = planOnce(req, feedback);
+                    PlanV2 retry = planOnce(req, feedback, mode);
                     List<String> retryViolations = plannerAgent.validatePlan(retry);
                     if (!retryViolations.isEmpty()) {
                         throw new IllegalStateException(
@@ -112,8 +147,11 @@ public class OutlinePlannerAgent {
         }
     }
 
-    private PlanV2 planOnce(PlannerRequestV2 req, String retryFeedback) {
-        String systemPrompt = loadPrompt()
+    private PlanV2 planOnce(PlannerRequestV2 req, String retryFeedback, Mode mode) {
+        String promptPath = (mode == Mode.SKELETON_ONLY) ? PROMPT_PATH_SKELETON : PROMPT_PATH_FULL;
+        int maxTokens = (mode == Mode.SKELETON_ONLY)
+                ? OUTLINE_MAX_TOKENS_SKELETON : OUTLINE_MAX_TOKENS_FULL;
+        String systemPrompt = loadPrompt(promptPath)
                 .replace("{{SPEC}}", req.spec() == null ? "" : req.spec())
                 .replace("{{CLASSIFICATION}}", req.classification().name())
                 .replace("{{MAX_TASKS}}",
@@ -135,21 +173,21 @@ public class OutlinePlannerAgent {
                 new SystemMessage(systemPrompt),
                 new UserMessage(userMsg));
 
-        ToolCallback submitOutline = buildSubmitOutlineCallback();
+        ToolCallback submitOutline = buildSubmitOutlineCallback(mode);
         LlmProvider plannerProvider = resolveProviderForTitle(req.provider());
         ResolvedModel resolved = modelResolver.resolve("OutlinePlannerAgent", plannerProvider);
         String plannerModel = resolved.getModel();
         String plannerProviderName = resolved.providerName();
 
-        log.info("OutlinePlanner -> {} {} (classification={}, maxTokens={})",
-                plannerProviderName, plannerModel, req.classification(), OUTLINE_MAX_TOKENS);
+        log.info("OutlinePlanner [{}] -> {} {} (classification={}, maxTokens={})",
+                mode, plannerProviderName, plannerModel, req.classification(), maxTokens);
         ChatResponse resp = router.call(LlmRequestV2.builder()
                 .provider(plannerProviderName)
                 .model(plannerModel)
                 .messages(messages)
                 .context(req.context())
                 .temperature(0.0)
-                .maxTokens(OUTLINE_MAX_TOKENS)
+                .maxTokens(maxTokens)
                 .toolsOverride(List.of(submitOutline))
                 .build());
 
@@ -191,14 +229,16 @@ public class OutlinePlannerAgent {
 
     // ─── tool definition ────────────────────────────────────────────────────
 
-    private ToolCallback buildSubmitOutlineCallback() {
-        // Slice 2: identical schema to submitPlan. Slice 3 will branch on
-        // strategy — emit skeleton-only tasks for LARGE, defer body fields
-        // (description / hardConstraints / meetsRequirements) to TaskExpander.
+    private ToolCallback buildSubmitOutlineCallback(Mode mode) {
+        String description = (mode == Mode.SKELETON_ONLY)
+                ? ("Submit a SKELETON outline — task ids/titles/complexity/repos/dependsOn/type only. "
+                        + "Descriptions, hardConstraints, and meetsRequirements will be filled in by the "
+                        + "task expander afterwards. Call exactly once.")
+                : ("Submit the final outline-mode execution plan. Call exactly once with the complete "
+                        + "plan. After this call the planning phase ends.");
         ToolDefinition def = DefaultToolDefinition.builder()
                 .name("submitOutline")
-                .description("Submit the final outline-mode execution plan. Call exactly once with the complete "
-                        + "plan. After this call the planning phase ends.")
+                .description(description)
                 .inputSchema("""
                         {
                           "type": "object",
@@ -241,18 +281,19 @@ public class OutlinePlannerAgent {
                                 "properties": {
                                   "id": {"type": "string"},
                                   "title": {"type": "string"},
-                                  "description": {"type": "string"},
+                                  "description": {"type": "string", "description": "Full task description in FULL_PLAN mode; OMIT in SKELETON_ONLY mode (the expander fills it)."},
                                   "complexity": {"type": "string", "description": "LOW | MEDIUM | HIGH"},
+                                  "type": {"type": "string", "description": "LEAF (terminal task) or EPIC (will be expanded into subtasks). Default LEAF."},
                                   "touchesFiles": {"type": "array", "items": {"type": "string"}},
                                   "dependsOn": {"type": "array", "items": {"type": "string"}},
                                   "hardConstraints": {"type": "array", "items": {"type": "string"}},
                                   "meetsRequirements": {
                                     "type": "array",
-                                    "description": "Requirement IDs (from the top-level requirements array) this task implements.",
+                                    "description": "Requirement IDs (from the top-level requirements array) this task implements. OMIT in SKELETON_ONLY mode.",
                                     "items": {"type": "string"}
                                   }
                                 },
-                                "required": ["id", "title", "description"]
+                                "required": ["id", "title"]
                               }
                             }
                           },
@@ -275,11 +316,11 @@ public class OutlinePlannerAgent {
 
     // ─── helpers ────────────────────────────────────────────────────────────
 
-    private String loadPrompt() {
+    private String loadPrompt(String path) {
         try {
-            return new ClassPathResource(PROMPT_PATH).getContentAsString(StandardCharsets.UTF_8);
+            return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
         } catch (IOException e) {
-            throw new IllegalStateException("OutlinePlanner prompt missing at " + PROMPT_PATH, e);
+            throw new IllegalStateException("OutlinePlanner prompt missing at " + path, e);
         }
     }
 
