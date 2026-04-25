@@ -3,7 +3,9 @@
 > Which docs to update for each type of change.
 > Last updated: 2026-04-25 (plan-doc cleanup: 12 done plans deleted, 4 partial plans consolidated into `partial-work.md`, 5 not-started plans renamed `pending-*`. Document Index + Per-Package Quick Reference also expanded to cover the 9 packages and 4 doc files that were missing — `api/`, `apitests/`, `assessment/`, `compliance/`, `contact/`, `context/`, `crypto/`, `repo/`, `validator/` + `billing-workflows.html`, `design/ui-tokens.md`, `test-scenarios/`, `reports/`).
 >
-> **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Hierarchical planner (v2.6.2-track) currently in progress on `feature/hierarchical-planner` — see [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md).
+> **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Hierarchical planner (v2.6.2-track) **all 5 slices shipped on `feature/hierarchical-planner`** (8 commits ahead of `dev`, not yet merged) — full design + slice status in [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md). Auto-replay re-trigger from outline checkpoint is the one remaining slice-5d gap.
+>
+> **Codemap consolidation (2026-04-25):** the duplicate root-level `CODEBASE_MAP.md` was removed on `feature/hierarchical-planner`. `docs/CODEMAP.md` is now the only codemap; `README.md`'s docs table points there.
 
 ## Plans folder structure (post-cleanup)
 
@@ -20,7 +22,7 @@ After the 2026-04-25 cleanup, `docs/plans/` holds only what is actively useful:
 | [`pending-vscode-extension-plan.md`](plans/pending-vscode-extension-plan.md) | not started | External-repo VS Code extension; device-code OAuth. |
 | [`pending-complimentary-pro-promo-2026-04-30-plan.md`](plans/pending-complimentary-pro-promo-2026-04-30-plan.md) | not started | Founder thank-you 30-day PRO upgrade for early FREE signups. |
 
-**Top-level (in progress):** [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md) — v2.6.2-track. Smart classifier (Phase 0) + outline planner (Phase 1) currently being built on `feature/hierarchical-planner` (V130 migration on disk).
+**Top-level (shipped on `feature/hierarchical-planner`, awaiting dev merge):** [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md) — v2.6.2-track. All 4 phases live on the branch: SmartClassifierAgent (Phase 0) + OutlinePlannerAgent (Phase 1, FULL_PLAN + SKELETON_ONLY) + TaskExpanderAgent (Phase 2 parallel + LEGACY recursive depth-2) + CoherencePlannerAgent (Phase 3). PlanStrategyCircuitBreaker, PlannerOutputUtils, V130 migration, per-strategy estimateRun re-tune, dashboard surfacing — all committed. Open follow-up: full auto-replay re-trigger.
 
 ## Recently shipped (kept here as breadcrumbs; full plans deleted)
 
@@ -92,7 +94,7 @@ Find the **type of change** you are making in the table below. Update every docu
 | `project-user-journeys.md` | Project-workbench end-to-end journeys | Changes to project / launch / chat flows |
 | `enterprise-one-pager.md` | Procurement / IT / security one-pager | Tier table, security posture, data-handling Q&A changes |
 | `enterprise-sla.md` | ENTERPRISE-tier support SLA | P1–P4 definitions, uptime credit schedule changes |
-| `hierarchical-planner-plan.md` | In-progress design for v2.6.2 hierarchical planner | While the feature is on `feature/hierarchical-planner` |
+| `hierarchical-planner-plan.md` | Design + slice status for v2.6.2 hierarchical planner (all 5 slices shipped on the branch) | Whenever a slice ships on `feature/hierarchical-planner`, when auto-replay re-trigger lands, when the branch merges to `dev`/`main` |
 | `billing-workflows.html` | Rendered billing flow diagrams (subscribe, top-up, refund, webhook handling) | Billing / payment flow changes |
 | `design/ui-tokens.md` | Single source of truth for color/radius/spacing tokens | Adding a UI primitive, tweaking the palette, theme work |
 | `test-scenarios/` | Persona + adversarial + E2E test plans + post-merge retest | New persona / coverage matrix updates; persona regression sweeps |

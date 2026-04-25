@@ -95,7 +95,7 @@
 | Tool layer (10 tools + completeTask) | done |
 | LlmRouterV2 (native tool calling, 3 providers) | done |
 | WorkerAgentV2 (sequential, native completeTask) | done |
-| PlannerAgentV2 (restricted-tool plan, runtimeSurface, hardConstraints) | done |
+| ~~PlannerAgentV2~~ → `OutlinePlannerAgent` (restricted-tool plan, runtimeSurface, hardConstraints) | done — legacy `PlannerAgentV2` deleted in v2.6.2-track slice 5b on `feature/hierarchical-planner`; replaced by `OutlinePlannerAgent` (`FULL_PLAN` for SMALL/MEDIUM, `SKELETON_ONLY` for LARGE/LEGACY) + `PlannerOutputUtils` (static parse/validate helpers) |
 | SequentialExecutorV2 (per-task tier routing, smoke test, retry) | done |
 | ReviewerAgentV3 (general + wiring passes) | done |
 | ContextStoreV2 (Redis persistence, per-task) | done |

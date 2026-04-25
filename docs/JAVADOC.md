@@ -8,7 +8,7 @@
 
 > **Execution View (v2.3.0)** — new package `execution/` hosts `ExecutionController`, orchestrator / planner / solution-executor / branch / cross-repo-context / incremental-codemap services, pure-logic `SolutionDependencyResolver` + `FileConflictDetector`, entities `ExecutionRun` / `ExecutionSolution` / `ExecutionSolutionRepo` / `ExecutionContextHandover`, and `ExecutionEventTypes`. Bridges to `V2RunOrchestrator` per solution. Feature-flag + ENTERPRISE-tier gated. Migration V89.
 >
-> **Project memory (v2.2.0)** — package `memory/` hosts `RunLedgerAgent`, `MemoryCompactionService`, `ProjectMemoryProvider`, `ProjectMemoryController` plus entities `ProjectRunLedger` / `ProjectMemorySnapshot`. Wired into `V2RunOrchestrator` post-complete and into `PlannerAgentV2` via `PlannerRequestV2.projectMemory`. Migration V88.
+> **Project memory (v2.2.0)** — package `memory/` hosts `RunLedgerAgent`, `MemoryCompactionService`, `ProjectMemoryProvider`, `ProjectMemoryController` plus entities `ProjectRunLedger` / `ProjectMemorySnapshot`. Wired into `V2RunOrchestrator` post-complete and into the planner pipeline via `PlannerRequestV2.projectMemory` (`OutlinePlannerAgent` from v2.6.2-track; was `PlannerAgentV2` until slice 5b deletion). Migration V88.
 **Last Updated:** 2026-04-14
 **Stack:** Java 21, Spring Boot 3.3, Spring AI 1.1.4, PostgreSQL, Redis, JGit 6.9.0
 
@@ -35,8 +35,11 @@
 > per [docs/plans/deprecation-removal-plan.md](plans/deprecation-removal-plan.md).
 >
 > **Canonical architecture lives in [CLAUDE.md](../CLAUDE.md).** Start there for
-> current V2 internals (`V2RunOrchestrator`, `PlannerAgentV2`, `WorkerAgentV2`,
-> `SequentialExecutorV2`, `ReviewerAgentV3`, `LlmRouterV2`, `ToolRegistryV2`).
+> current V2 internals (`V2RunOrchestrator`, `OutlinePlannerAgent` /
+> `SmartClassifierAgent` / `TaskExpanderAgent` / `CoherencePlannerAgent` /
+> `PlannerOutputUtils` from the v2.6.2-track hierarchical planner — replacing
+> the deleted `PlannerAgentV2`), `WorkerAgentV2`, `SequentialExecutorV2`,
+> `ReviewerAgentV3`, `LlmRouterV2`, `ToolRegistryV2`).
 >
 > A full rewrite of this file will happen as part of the deprecation plan.
 
