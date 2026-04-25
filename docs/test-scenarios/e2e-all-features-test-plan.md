@@ -397,7 +397,7 @@ Covered under RUN-01 step 5.
 
 ### FLAG-03 · feature-flag gating — `validation.v3-strict` (Pillar 1)
 1. Enable `validation.v3-strict` globally.
-2. Submit a run; planner must emit `requirements[]` covering every task (enforced by `PlannerAgentV2.validatePlan`).
+2. Submit a run; planner must emit `requirements[]` covering every task (enforced by `PlannerOutputUtils.validatePlan`, called from `OutlinePlannerAgent`).
 3. Disable flag; planner graph still runs but coverage violations don't fail the run.
 
 ### ADMIN-01 · payment audit CSV export

@@ -52,7 +52,7 @@ The planner emits a structured requirement graph alongside the task list:
 
 - `PlanV2.requirements: List<RequirementSpec>` — enumerated from the spec. `RequirementSpec = {id, text, kind}` where `kind ∈ {FUNCTIONAL, NON_FUNCTIONAL, TEST, CONSTRAINT}`.
 - `PlannedTaskV2.meetsRequirements: List<String>` — requirement IDs this task covers.
-- `PlannerAgentV2.validatePlan(plan)` enforces: (1) non-empty requirements, (2) unique IDs, (3) valid cross-references, (4) every requirement covered by ≥1 task, (5) testable surfaces have a test task. On violation: one retry with feedback; second failure → run ends `PLAN_COVERAGE_INVALID`.
+- `PlannerOutputUtils.validatePlan(plan)` enforces: (1) non-empty requirements, (2) unique IDs, (3) valid cross-references, (4) every requirement covered by ≥1 task, (5) testable surfaces have a test task. On violation: one retry with feedback; second failure → run ends `PLAN_COVERAGE_INVALID`. (Static helper extracted in v2.6.2-track slice 5b from the deleted `PlannerAgentV2`; called from `OutlinePlannerAgent` after every plan synthesis.)
 - Persisted to `pipeline_run.plan_requirements_json` + `agent_task.meets_requirements_json` (V109).
 - Consumed downstream by Pillars 2 (evidence-based reviewer), 3 (sync test gate), 4 (test coverage), 5 (strict scoring formula).
 
@@ -66,7 +66,7 @@ The planner emits a structured requirement graph alongside the task list:
 > merge, clarification / merge gates) has been deleted. Sections below that
 > describe those concepts are historical.
 > **Canonical current architecture:** [`CLAUDE.md`](../CLAUDE.md).
-> **Open gaps:** [`docs/plans/harness-v2-remaining-work.md`](plans/harness-v2-remaining-work.md).
+> **Open gaps:** [`docs/plans/partial-work.md`](plans/partial-work.md) §3 (consolidated 2026-04-25 from the original `harness-v2-remaining-work.md`).
 > **Pilot v3.0 (commit `6bbfde9b`):** project workspace layer added on top of V2 — see
 > [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md). Key additions: dual-scope
 > `ProjectRepo` registry, multi-repo workspace clone + per-repo PR creation,
@@ -1225,7 +1225,7 @@ Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GC
 - **Project brief** — `ProjectBriefService.summarise()` makes one LIGHTWEIGHT-tier LLM call per `generate()` to produce 2-4 sentences; `buildBrief()` returns an ~800-token block (summary + arch headings) injected as `{{PROJECT_BRIEF}}` in the planner system prompt.
 - **Pre-execution refresh** — `V2RunOrchestrator` calls `StalenessService.report()` before planning; if any linked repo is stale, `ProjectArchitectureService.generate()` runs synchronously so the planner sees current codemaps. Post-success: staleness cache invalidated.
 - **RAG pipeline** (`project/rag/`) — `DocumentExtractor` (Tika `AutoDetectParser`) → `ChunkingService` (500-token windows, 50-token overlap, code-fence aware) → `EmbeddingService` (Spring AI OpenAI text-embedding-3-small, batch 100) → `ChunkStore` (JDBC `INSERT ... ?::vector` against `project_document_chunk`). `ProjectDocumentService` runs the index loop async (`@Async`).
-- **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `PlannerAgentV2` as `{{REFERENCE_DOCS}}` and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
+- **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `OutlinePlannerAgent` as `{{REFERENCE_DOCS}}` (was `PlannerAgentV2` until slice 5b deletion) and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
 - **Architecture diff** — frontend renders an LCS line diff of `architecture.md` vN vs vN-1.
 - **Auto-push** — `project.runs.auto-push` flipped ON via V96/V97. Every successful project-scoped V2 run runs `pushToGitHubIfConfigured()` automatically.
 - **Memory budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8K → 12K. Vector spill-over for snapshots > 12K is on the backlog (see [`docs/plans/open-work-2026-04-18.md`](plans/open-work-2026-04-18.md) §D2).

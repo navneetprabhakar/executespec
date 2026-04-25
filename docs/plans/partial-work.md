@@ -57,7 +57,7 @@
 - **Extraction service** — `FigmaExtractionService` facade with MCP-primary + REST-fallback, Resilience4j circuit breaker (5 fail / 60s window), Caffeine cache (30 min TTL keyed by `(orgId, fileKey, nodeId, format)`).
 - **Clients** — `FigmaMcpClient` (lazy `McpSyncClient` per org, cached) + `FigmaRestClient` (Spring WebClient, exponential 429 backoff, 10MB JSON truncation).
 - **V2 tool** — `FigmaDesignContextTool` bound conditionally into `ToolRegistryV2`; JSON schema with `figmaUrl` / `outputFormat` / `includeScreenshot`. Cost attributed via `CostHook` to `V2RunCostTracker` under phase `INTEGRATION`.
-- **Planner / worker prompt augmentation** — section injected into `prompts/v2/planner.md` + `worker.md` only when `figma_urls` are present.
+- **Planner / worker prompt augmentation** — section injected into `prompts/v2/outline-planner.md` (was `planner.md` until v2.6.2-track slice 5b deletion) + `worker.md` only when `figma_urls` are present.
 - **Validation report** — `designComplianceJson` field with color-match %, typography-match %, layout-match %.
 - **Schema** — V78 `figma_credential` + V79 `pipeline_run.figma_urls TEXT[]` + `figma_context_path TEXT`. Renumber to current V-sequence when scheduling.
 - **Feature flags** — `integration.figma.{enabled, mcp_enabled, rest_enabled, max_screenshots_per_run, max_calls_per_run}`.
