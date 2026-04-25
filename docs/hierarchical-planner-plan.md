@@ -230,13 +230,13 @@ Backward-compat fallbacks inside agents keep existing runs working
 through the rollout. Old single-phase planner stays as fallback through
 slice 3, removed in slice 4.
 
-| Day | Ships live on dev |
-|---|---|
-| **1** | Migration V130 + `SmartClassifierAgent` (heuristic + LLM verifier + Redis cache) + classification persisted on every run + `pipeline_run.plan_strategy` populated. Old single-phase planner still runs downstream — classifier verdict recorded but doesn't change behaviour yet. **Shadow mode for safety despite no flag.** |
-| **2** | `OutlinePlannerAgent` + `submitOutline` tool + new plan-shape persistence. Strategies `SMALL` and `MEDIUM` route through outline planner. `LARGE` / `LEGACY` still use old single-phase as fallback. |
-| **3** | `TaskExpanderAgent` + parallel expansion + per-strategy circuit breaker + `LARGE` strategy wired. `CoherencePlannerAgent` + `patchPlan` tool. |
-| **4** | `LEGACY` strategy with recursive depth-2 expansion + outline-checkpoint resumability. **Old single-phase planner deleted.** |
-| **5** | `V2RunCostTracker.estimateRun` re-tune + dashboard surfacing of phase progress + 50-run calibration analysis on classifier accuracy + heuristic threshold tuning. |
+| Day | Ships live on the feature branch | Status |
+|---|---|---|
+| **1** | Migration V130 + `SmartClassifierAgent` (heuristic + LLM verifier + Redis cache) + classification persisted on every run + `pipeline_run.plan_strategy` populated. Legacy single-phase planner still runs downstream — classifier verdict recorded but doesn't change behaviour yet. | **Shipped** on branch — commits `07ce5cc1` (design) + `d2fe73f8` (slice 1) + `6adce0c4` (PreviewServiceTest Mockito fix) |
+| **2** | `OutlinePlannerAgent` + `submitOutline` tool + new plan-shape persistence. Strategies `SMALL` and `MEDIUM` route through outline planner with 32k cap. `LARGE` / `LEGACY` / `SINGLE_SHOT` still on legacy planner. Outline-planner failure falls back to legacy planner so runs always progress. | **Shipped** on branch — outline cost diff'd into `pipeline_run.outline_*` columns, full plan JSON to `plan_outline_json`, all 298 tests green |
+| **3** | `TaskExpanderAgent` + parallel expansion + per-strategy circuit breaker + `LARGE` strategy wired. `CoherencePlannerAgent` + `patchPlan` tool. | Pending |
+| **4** | `LEGACY` strategy with recursive depth-2 expansion + outline-checkpoint resumability. **Legacy single-phase planner deleted.** | Pending |
+| **5** | `V2RunCostTracker.estimateRun` re-tune + dashboard surfacing of phase progress + 50-run calibration analysis on classifier accuracy + heuristic threshold tuning. | Pending |
 
 ## Risk + mitigation
 

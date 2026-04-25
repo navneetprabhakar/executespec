@@ -325,7 +325,8 @@ public class PlannerAgentV2 {
         return out;
     }
 
-    private void warnIfConstraintsUnderpropagated(PlanV2 plan, String spec) {
+    /** Package-private — also called by {@link OutlinePlannerAgent}. */
+    void warnIfConstraintsUnderpropagated(PlanV2 plan, String spec) {
         if (plan.tasks().isEmpty()) return;
         String specLower = spec.toLowerCase();
         boolean specHasSignals =
@@ -348,7 +349,9 @@ public class PlannerAgentV2 {
         }
     }
 
-    private PlanV2 parsePlanFromArgs(String argsJson, Classification classification) {
+    /** Package-private — also called by {@link OutlinePlannerAgent} (slice 2 of
+     *  hierarchical-planner rollout) so both agents emit identical PlanV2 shapes. */
+    PlanV2 parsePlanFromArgs(String argsJson, Classification classification) {
         JsonNode root;
         try {
             root = objectMapper.readTree(argsJson);
@@ -728,7 +731,8 @@ public class PlannerAgentV2 {
      * <p>Returns JSON args string (as {@code submitPlan} expects) or null if the
      * text doesn't contain a recoverable call.
      */
-    private String salvagePlanFromText(String text) {
+    /** Package-private — also called by {@link OutlinePlannerAgent}. */
+    String salvagePlanFromText(String text) {
         if (text == null || text.isBlank()) return null;
         // Look for a submitPlan invocation anywhere in the text
         java.util.regex.Matcher m = java.util.regex.Pattern
@@ -773,7 +777,7 @@ public class PlannerAgentV2 {
         return candidate;
     }
 
-    private static String truncate(String s, int max) {
+    static String truncate(String s, int max) {
         if (s == null) return "";
         return s.length() <= max ? s : s.substring(0, max) + "...";
     }
