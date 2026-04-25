@@ -9,6 +9,7 @@ import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
 import WorkspaceHealthPanel from '@/components/project/WorkspaceHealthPanel';
 import ContractCoveragePanel from '@/components/project/ContractCoveragePanel';
+import StandardsCompliancePanel from '@/components/project/StandardsCompliancePanel';
 import GeneratedDocsPanel from '@/components/project/GeneratedDocsPanel';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import TechDebtPanel from '@/components/project/TechDebtPanel';
@@ -368,6 +369,9 @@ function OverviewContent({
         </div>
       )}
       {projectId && <TechDebtPanel projectId={projectId} />}
+      {projectId && project?.orgId && (
+        <StandardsCompliancePanel projectId={projectId} orgId={project.orgId} />
+      )}
       <div className="space-y-2">
         <h3 className="text-xs font-medium text-secondary">Recent submissions</h3>
         <ExecutionsPanel tasks={tasks} />
