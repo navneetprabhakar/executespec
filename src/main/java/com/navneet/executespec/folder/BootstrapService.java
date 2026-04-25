@@ -271,7 +271,7 @@ public class BootstrapService {
         return null;
     }
 
-    static String slugify(String projectName) {
+    public static String slugify(String projectName) {
         if (projectName == null || projectName.isBlank()) return "default";
         String slug = projectName.toLowerCase()
                 .replaceAll("[^a-z0-9]+", "-")
