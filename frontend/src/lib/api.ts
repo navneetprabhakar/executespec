@@ -2061,6 +2061,36 @@ export const rescanContractCoverage = (projectId: string, repoId: string) =>
     `/projects/${projectId}/repos/${repoId}/contract-coverage/rescan`,
     { method: 'POST' });
 
+// E2.8 — contract drift detection
+export interface DriftCheckResult {
+  contractId: string;
+  hasDrift: boolean;
+  summary: string;
+  eventId?: string | null;
+}
+export const checkContractDrift = (projectId: string, contractId: string) =>
+  req<DriftCheckResult>(
+    `/projects/${projectId}/contracts/${contractId}/check-drift`,
+    { method: 'POST' });
+export const checkRepoDrift = (projectId: string, repoId: string) =>
+  req<DriftCheckResult[]>(
+    `/projects/${projectId}/repos/${repoId}/check-drift`,
+    { method: 'POST' });
+export const checkProjectDrift = (projectId: string) =>
+  req<DriftCheckResult[]>(
+    `/projects/${projectId}/check-drift`,
+    { method: 'POST' });
+export const refreshContractFromSource = (projectId: string, contractId: string) =>
+  req<{ prUrl: string; branchName: string }>(
+    `/projects/${projectId}/contracts/${contractId}/refresh-from-source`,
+    { method: 'POST' });
+export const dismissContractDrift = (
+  projectId: string, contractId: string, rationale: string,
+) =>
+  req<{ dismissedCount: number }>(
+    `/projects/${projectId}/contracts/${contractId}/dismiss-drift`,
+    { method: 'POST', body: JSON.stringify({ rationale }) });
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
