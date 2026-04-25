@@ -36,7 +36,6 @@ import com.navneet.executespec.v2.agent.CoherencePlannerAgent;
 import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
 import com.navneet.executespec.v2.agent.PlanStrategy;
 import com.navneet.executespec.v2.agent.PlanStrategyCircuitBreaker;
-import com.navneet.executespec.v2.agent.PlannerAgentV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
 import com.navneet.executespec.v2.agent.SmartClassifierAgent;
 import com.navneet.executespec.v2.agent.TaskExpanderAgent;
@@ -116,7 +115,6 @@ public class V2RunOrchestrator {
 
     private final PipelineRunRepository runRepo;
     private final AgentTaskRepository taskRepo;
-    private final PlannerAgentV2 planner;
     private final OutlinePlannerAgent outlinePlanner;
     private final TaskExpanderAgent taskExpander;
     private final CoherencePlannerAgent coherencePlanner;
@@ -276,8 +274,10 @@ public class V2RunOrchestrator {
             try {
                 com.navneet.executespec.router.LlmProvider p =
                         com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());
+                // v2.6.2 slice 5b — agent name is now OutlinePlannerAgent;
+                // PlannerAgentV2 was deleted along with the legacy single-phase planner.
                 plannerDbModel = modelResolver.resolve(
-                        "PlannerAgentV2", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
+                        "OutlinePlannerAgent", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
                 reviewerDbModel = modelResolver.resolve(
                         "ReviewerAgentV3", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
             } catch (Exception ex) {
@@ -571,9 +571,9 @@ public class V2RunOrchestrator {
                         planStrategyBreaker.recordSuccess(effective);
                     } catch (Exception outlineEx) {
                         planStrategyBreaker.recordFailure(effective);
-                        log.warn("V2 run={} outline planner ({}) failed → legacy fallback",
+                        log.warn("V2 run={} outline planner ({}) failed → SINGLE_SHOT fallback",
                                 runId, effective);
-                        plan = planner.plan(plannerReq);
+                        plan = outlinePlanner.synthesizeSingleShot(plannerReq);
                     }
                 } else if (effective == PlanStrategy.LARGE) {
                     try {
@@ -581,12 +581,22 @@ public class V2RunOrchestrator {
                         planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
                     } catch (Exception largeEx) {
                         planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
-                        log.warn("V2 run={} LARGE pipeline failed → legacy fallback: {}",
+                        log.warn("V2 run={} LARGE pipeline failed → SINGLE_SHOT fallback: {}",
                                 runId, largeEx.getMessage());
-                        plan = planner.plan(plannerReq);
+                        plan = outlinePlanner.synthesizeSingleShot(plannerReq);
                     }
+                } else if (effective == PlanStrategy.SINGLE_SHOT) {
+                    // v2.6.2 slice 5b — heuristic-fast-path classification.
+                    // No LLM planner call; synthesise a one-task plan from the
+                    // spec verbatim. Migrated from the deleted PlannerAgentV2.
+                    plan = outlinePlanner.synthesizeSingleShot(plannerReq);
                 } else {
-                    plan = planner.plan(plannerReq);
+                    // Classifier failed (effective == null) or returned an
+                    // unhandled value. Treat as SINGLE_SHOT — same shape as
+                    // the legacy synthesised path, no LLM cost beyond the
+                    // optional title summarizer.
+                    log.warn("V2 run={} no usable strategy verdict → synthesised SINGLE_SHOT plan", runId);
+                    plan = outlinePlanner.synthesizeSingleShot(plannerReq);
                 }
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
@@ -1504,7 +1514,16 @@ public class V2RunOrchestrator {
         java.util.List<String> complexities = plan.tasks().stream()
                 .map(t -> t.complexity() == null ? "MEDIUM" : t.complexity().name())
                 .toList();
-        V2RunCostTracker.Estimate est = costTracker.estimateRunTierAware(provider, complexities);
+        // v2.6.2 slice 5 — pull the persisted plan strategy from the run row so
+        // the estimate reflects the actual hierarchical-pipeline phase costs
+        // (classifier + outline + expansion + coherence) instead of the legacy
+        // single-phase shape. Falls back to null = legacy estimate when the
+        // classifier hadn't run yet (classifier failure / pre-slice-1 row).
+        PlanStrategy strategy = runRepo.findById(runId)
+                .map(PipelineRun::getPlanStrategy)
+                .map(PlanStrategy::fromStringSafe)
+                .orElse(null);
+        V2RunCostTracker.Estimate est = costTracker.estimateRunTierAware(provider, complexities, strategy);
         runRepo.findById(runId).ifPresent(r -> {
             r.setCostEstimateLow(est.lowUsd());
             r.setCostEstimateHigh(est.highUsd());
@@ -1512,8 +1531,9 @@ public class V2RunOrchestrator {
             r.setHardCapUsd(est.hardCapUsd());
             runRepo.save(r);
         });
-        log.info("V2RunOrchestrator run={} estimate low=${} high=${} credits={} cap=${} tasks={}",
-                runId, String.format("%.4f", est.lowUsd()), String.format("%.4f", est.highUsd()),
+        log.info("V2RunOrchestrator run={} estimate strategy={} low=${} high=${} credits={} cap=${} tasks={}",
+                runId, strategy, String.format("%.4f", est.lowUsd()),
+                String.format("%.4f", est.highUsd()),
                 est.credits(), String.format("%.2f", est.hardCapUsd()), est.taskCount());
     }
 
