@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.EqualsAndHashCode;
 import lombok.NoArgsConstructor;
 
 import java.time.Instant;
@@ -25,6 +26,12 @@ import java.util.UUID;
 @Table(name = "activity_feed")
 @IdClass(ActivityFeedEntryId.class)
 @Data
+// Adversarial review fix (E1.8/9/10 follow-up): @Data generates equals/hashCode
+// over EVERY field. With a JPA composite key (@IdClass) that breaks Hibernate
+// identity semantics — two entities with the same (id, occurredAt) but different
+// summary/payload would compare unequal, corrupting caches + cascade ops.
+// Constrain equality to the composite primary key only.
+@EqualsAndHashCode(of = {"id", "occurredAt"})
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
