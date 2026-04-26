@@ -1051,6 +1051,13 @@ export const validateGitHub = (pat: string) =>
     body: JSON.stringify({ pat }),
   });
 
+/** Phase 1.2 #24 — Tests a BYOK AI provider key by pinging the provider's models endpoint. */
+export const validateAiKey = (provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', apiKey: string) =>
+  req<ValidationResult>('/auth/settings/ai-keys/validate', {
+    method: 'POST',
+    body: JSON.stringify({ provider, apiKey }),
+  });
+
 /** Tests JIRA credentials by calling the JIRA REST API. */
 export const validateJira = (baseUrl: string, email: string, apiToken: string) =>
   req<ValidationResult>('/auth/settings/jira/validate', {
