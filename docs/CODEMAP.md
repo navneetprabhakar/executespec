@@ -4,13 +4,13 @@
 > Companion to [ARCHITECTURE.md](ARCHITECTURE.md) (deep-dive) and [JAVADOC.md](JAVADOC.md) (class-level reference).
 > When a new top-level package is added, update this file and `document_map.md`.
 >
-> **v2.6.3-track** is on `feature/enterprise-readiness-eval` (48+ commits ahead of `dev`,
+> **v2.6.3-track** is on `feature/enterprise-readiness-eval` (49+ commits ahead of `dev`,
 > not yet merged). 8 new top-level packages — `folder/`, `activity/`, `contracts/`,
 > `standards/`, `adr/`, `arch/invariants/`, `export/`, `notification/pref/` — wired
 > by the `ExecutespecFolderWriter` chokepoint with PR vs DIRECT_PUSH dispatch and
 > pinned by an ArchUnit caller-allowlist. Schema V131-V139. Server-up sweep
 > 2026-04-25 landed clean (3-provider low-band v2-eval all CLEAN, 23/23 enterprise
-> endpoints behaving correctly) — see [reports/enterprise-readiness-eval-2026-04-25.md](reports/enterprise-readiness-eval-2026-04-25.md).
+> endpoints behaving correctly); per-session report archived in the 2026-04-26 cleanup pass.
 >
 > **v2.6.2-track** is on `feature/hierarchical-planner` (8 commits ahead of `dev`,
 > not yet merged). Phase 0 classifier + Phase 1 outline planner + Phase 2
@@ -81,7 +81,7 @@ The V2 pipeline is the only active path. V1 was deleted in deprecation P1–P6 (
 
 | Subpackage | Key files | Purpose |
 |------------|-----------|---------|
-| `v2/agent/` | `SmartClassifierAgent`, `OutlinePlannerAgent`, `TaskExpanderAgent`, `CoherencePlannerAgent`, `PlannerOutputUtils`, `PlanStrategy`, `PlanStrategyCircuitBreaker`, `ClassificationResult`, `WorkerAgentV2`, `LlmRouterV2`, `OpenAiNativeToolClient`, `GeminiNativeToolClient` | Hierarchical planner pipeline (classify → outline → expand → coherence) + per-task worker loop + native-tool LLM dispatch. (v2.6.2-track on `feature/hierarchical-planner`; legacy `PlannerAgentV2` + `prompts/v2/planner.md` were deleted in slice 5b — full plan in [`hierarchical-planner-plan.md`](hierarchical-planner-plan.md).) |
+| `v2/agent/` | `SmartClassifierAgent`, `OutlinePlannerAgent`, `TaskExpanderAgent`, `CoherencePlannerAgent`, `PlannerOutputUtils`, `PlanStrategy`, `PlanStrategyCircuitBreaker`, `ClassificationResult`, `WorkerAgentV2`, `LlmRouterV2`, `OpenAiNativeToolClient`, `GeminiNativeToolClient` | Hierarchical planner pipeline (classify → outline → expand → coherence) + per-task worker loop + native-tool LLM dispatch. (v2.6.2-track on `feature/hierarchical-planner`; legacy `PlannerAgentV2` + `prompts/v2/planner.md` were deleted in slice 5b. The `hierarchical-planner-plan.md` design doc was archived in the 2026-04-26 cleanup pass now that all 5 slices are shipped on the branch.) |
 | `v2/tool/` | `ToolRegistryV2`, `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `ListFilesTool`, `SearchFilesTool`, `ShellTool`, `GitStatusTool`, `GitDiffTool`, `GitCommitTool`, `BuildProjectTool`, `CompleteTaskTool` | 10 tools + native termination |
 | `v2/harness/` | `SequentialExecutorV2` | Per-task tier-routed worker dispatch + smoke + retry |
 | `v2/reviewer/` | `ReviewerAgentV3` | General + wiring passes (project-type-aware) |
@@ -102,8 +102,7 @@ Entry point: `V2RunOrchestrator.submitRun(...)` — see [ARCHITECTURE.md §3 V2 
 ## Enterprise readiness (v2.6.3-track) — `folder/`, `activity/`, `contracts/`, `standards/`, `adr/`, `arch/invariants/`, `export/`, `notification/pref/`
 
 > Entire stripe lives on `feature/enterprise-readiness-eval` (NOT merged to dev/main). Schema V131-V139.
-> Plan + slice list: [`docs/plans/pending-enterprise-readiness-execution-eval.md`](plans/pending-enterprise-readiness-execution-eval.md).
-> Server-up sweep: [`docs/reports/enterprise-readiness-eval-2026-04-25.md`](reports/enterprise-readiness-eval-2026-04-25.md).
+> Plan + slice list + server-up sweep results were captured in `docs/plans/pending-enterprise-readiness-execution-eval.md` and `docs/reports/enterprise-readiness-eval-2026-04-25.md`; both archived in the 2026-04-26 cleanup pass now that all 4 phases are shipped on the branch.
 
 | Package | Key files | Purpose |
 |---------|-----------|---------|
@@ -273,7 +272,7 @@ ENTERPRISE + MAX project-level workbench for multi-repo, multi-solution work.
 | `src/main/resources/application.yml` | All Spring config: model matrix, failover order, model pricing, provider pool, feature flags, billing gateway, security |
 | `src/main/resources/application-prod.yml` | Prod overrides — Stripe default gateway, env-gated billing flags |
 | `src/main/resources/db/migration/` | Flyway V1–V130 (V130 `hierarchical_planner` committed on `feature/hierarchical-planner`; not yet merged to `dev`/`main`) |
-| `src/main/resources/prompts/` | All LLM prompt files. `prompts/v2/{classifier.md, outline-planner.md, outline-planner-skeleton.md, task-expander.md, coherence-planner.md, worker.md}`, `prompts/fragments/`, `prompts/scaffolds/` (legacy `prompts/v2/planner.md` deleted in slice 5b — see `hierarchical-planner-plan.md`) |
+| `src/main/resources/prompts/` | All LLM prompt files. `prompts/v2/{classifier.md, outline-planner.md, outline-planner-skeleton.md, task-expander.md, coherence-planner.md, worker.md}`, `prompts/fragments/`, `prompts/scaffolds/` (legacy `prompts/v2/planner.md` deleted in slice 5b of the hierarchical-planner work) |
 | `src/main/resources/sample-specs/` | 3 onboarding samples (web-api, frontend, cli) loaded by `SampleSpecRegistry` |
 | `src/main/resources/static/` | Frontend bundle (built by `npm --prefix frontend run build`) |
 | `src/main/resources/templates/email/` | 17 email templates |
