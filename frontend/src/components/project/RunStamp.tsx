@@ -14,6 +14,7 @@ import { useState } from 'react';
 import { Check, Copy, Share2, Code2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
+import VerdictPill from '@/components/runs/VerdictPill';
 
 interface RunStampProps {
   runId: string;
@@ -79,6 +80,10 @@ export default function RunStamp({
   return (
     <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
       <div className="flex items-center gap-2 flex-wrap">
+        {/* Plan 1 (this-week #3): verdict leads the share row. The numeric
+            "Verified N" stays inside the stamp text so the copyable string
+            is still informative on Slack / blogs. */}
+        <VerdictPill size="sm" verifiedScore={verifiedScore} />
         <span className="text-[11px] font-mono text-secondary truncate flex-1">{stamp}</span>
         <button
           onClick={() => copy('text', stamp)}
