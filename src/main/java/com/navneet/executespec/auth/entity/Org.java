@@ -166,6 +166,12 @@ public class Org {
     @Column(name = "confluence_api_token")
     private String confluenceApiToken;
 
+    // ── V143 (Plan 1 #1) — product surface discriminator ────────────────────
+    /** "vibe" (consumer) | "executespec" (B2B). Defaulted to 'executespec' on legacy rows. */
+    @Column(name = "product_id", nullable = false)
+    @Builder.Default
+    private String productId = "executespec";
+
     // ── V127 (Wave 3) — SSO/SAML on the org ─────────────────────────────────
     /** null | "GOOGLE_OIDC" | "OKTA_SAML" | "AZURE_AD_SAML" */
     @Column(name = "sso_provider", length = 32)

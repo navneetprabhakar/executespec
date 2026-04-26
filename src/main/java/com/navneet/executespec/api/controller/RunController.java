@@ -373,6 +373,68 @@ public class RunController {
                 "Run retry not yet supported in V2 — submit a fresh run instead.");
     }
 
+    /**
+     * Phase 1.3 #35 — fork-a-teammate's-run. Creates a new run with the source
+     * run's spec / repo / provider settings copied; new run gets a fresh runId,
+     * its own quota slot, and is owned by the caller (not the source's user).
+     *
+     * <p>Visibility: any user with read access to the source run can fork
+     * it. Within an org, this means any org member sees + can fork their
+     * teammates' runs. Outside an org, only the owner can fork their own.
+     *
+     * <p>The fork inherits the source's tone (executionMode, tddMode, model
+     * choices) so the user gets exactly the same setup — they can override
+     * via the optional body before submitting.
+     */
+    @PostMapping("/{runId}/fork")
+    public ResponseEntity<RunSummary> forkRun(
+            @PathVariable String runId,
+            @AuthenticationPrincipal AppUserDetails userDetails,
+            @RequestBody(required = false) ForkOverrides overrides) {
+        guard.requireRunAccess(runId, userDetails);
+        PipelineRun source = stateStore.findRun(runId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found"));
+
+        // Quota + key gates applied to the FORKER, not the source.
+        tierEnforcementService.assertCanSubmitRun(userDetails.getUser().getId());
+        usageTrackingService.assertWithinLimits(userDetails.getUser().getId(), "RUNS");
+        apiKeyResolver.validateKeyAvailability(userDetails.getUser().getId());
+
+        String userRequest = overrides != null && overrides.userRequest() != null && !overrides.userRequest().isBlank()
+            ? overrides.userRequest() : source.getUserRequest();
+        // Re-scan in case the user edited the spec in the fork dialog.
+        inputSanitizer.scan(userRequest);
+        String execMode = overrides != null && overrides.executionMode() != null
+            ? overrides.executionMode()
+            : (source.getApprovedExecutionMode() != null ? source.getApprovedExecutionMode() : "REALTIME");
+
+        log.info("Forking run {} as new run for user {}", runId, userDetails.getUser().getId());
+        PipelineRun forked = v2Orchestrator.submitRun(
+                userRequest,
+                "FORK",
+                source.getRepoUrl(),
+                source.getRepoUrl() != null ? "EXISTING" : null,
+                userDetails.getUser().getGithubPat(),
+                userDetails.getUser().getGithubOwner(),
+                false,                                  // skipApproval — caller approves their fork explicitly
+                false,                                  // autoMerge — same
+                source.getPlannerModel(),
+                source.getAiProvider(),
+                userDetails.getUser().getId(),
+                userDetails.getUser().getOrgId(),
+                source.getProjectId(),
+                execMode,
+                null,                                   // selectedRepoIds — source's projectId carries the repo set
+                source.getFigmaUrl(),
+                false                                   // tddMode — opt-in per fork
+        );
+        usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(forked));
+    }
+
+    /** Optional overrides for {@code POST /api/runs/{id}/fork}. All fields nullable. */
+    public record ForkOverrides(String userRequest, String executionMode) {}
+
     @PostMapping("/{runId}/pause")
     public ResponseEntity<Void> pauseRun(
             @PathVariable String runId,
