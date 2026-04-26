@@ -62,7 +62,7 @@ import static com.navneet.executespec.config.CustomMetricsConfig.*;
  * Shared multi-provider LLM router used by non-tool-calling agents
  * (AccuracyAssessmentService, TestPlannerAgent, TestWorkerAgent,
  * TestReportGenerator, ApiTestSuiteAgent, ConversationAgent, ContextAgent,
- * ValidationReportGenerator, ConflictResolverAgent, PromptOptimiserAgent,
+ * ValidationReportGenerator, PromptOptimiserAgent,
  * eval stack).
  *
  * <p>V2 tool-calling agents use {@code LlmRouterV2} in {@code com.navneet.executespec.v2.agent}.
@@ -114,7 +114,7 @@ public class LlmRouter {
      * <p>The V2 path already routes around this via {@code OpenAiNativeToolClient}.
      * V1 has 17+ live callers (ExecutionPlannerService, ArchitectureDocGenerator,
      * RepoArchitectureGenerator, ProjectDocGeneratorService, MemoryCompactionService,
-     * RunLedgerAgent, ConflictResolverAgent, ConversationAgent, PromptOptimiserAgent,
+     * RunLedgerAgent, ConversationAgent, PromptOptimiserAgent,
      * RunTitleSummarizer, ConversationController, ProjectBriefService,
      * ValidationReportGenerator, AccuracyAssessmentService, TestPlannerAgent,
      * TestWorkerAgent, TestReportGenerator) — patching the router central is
