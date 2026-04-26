@@ -272,14 +272,14 @@ class TierEnforcementServiceProjectLimitsTest {
 
         @Test
         void orgTierWinsOverUserTier() {
-            // User tier is FREE but org tier is MAX → MAX cap applies.
+            // V141 — user tier is FREE but org tier is TEAM (renamed MAX) → TEAM cap applies.
             when(userRepo.findById("u1")).thenReturn(Optional.of(user("u1", "USER", "FREE", "org1")));
-            when(orgRepo.findById("org1")).thenReturn(Optional.of(org("org1", "MAX")));
-            when(tierConfigRepo.findById("MAX")).thenReturn(Optional.of(tierCfg("MAX", 10, 10)));
+            when(orgRepo.findById("org1")).thenReturn(Optional.of(org("org1", "TEAM")));
+            when(tierConfigRepo.findById("TEAM")).thenReturn(Optional.of(tierCfg("TEAM", 10, 10)));
             when(projectRepo.countByOrgIdAndStatus("org1", "ACTIVE")).thenReturn(5L);
 
             svc.assertCanCreateProject("u1", "org1");
-            verify(tierConfigRepo).findById("MAX");
+            verify(tierConfigRepo).findById("TEAM");
             verify(tierConfigRepo, never()).findById("FREE");
         }
 

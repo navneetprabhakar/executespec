@@ -31,7 +31,8 @@ import java.util.regex.Pattern;
 @Slf4j
 public class RunCodeMapService {
 
-    private static final Set<String> ELIGIBLE_TIERS = Set.of("PRO", "MAX", "ENTERPRISE");
+    /** V141 — TEAM (renamed from MAX), PRO and ENTERPRISE all unlock the Run code-map. */
+    private static final Set<String> ELIGIBLE_TIERS = Set.of("PRO", "TEAM", "ENTERPRISE");
     private static final int MAX_RAW_CHARS = 16_000;
     private static final Pattern ROUTE_LINE = Pattern.compile("(?m)^- `[^`]+`\\s*$");
 

@@ -286,18 +286,19 @@ export default function SettingsPage() {
             // v2.5.8 — billing is the source of truth; fall back to JWT tier when
             // the billing call hasn't returned yet (or the user has no subscription).
             const planTier = billing?.plan?.tier ?? user?.tier ?? 'FREE';
+            // V141 — MAX renamed to TEAM (BYOK unlimited).
             const planName = billing?.plan?.name
               ?? (planTier === 'ENTERPRISE' ? 'Enterprise Plan'
-                  : planTier === 'MAX' ? 'Max Plan'
+                  : planTier === 'TEAM' ? 'Team Plan'
                   : planTier === 'PRO' ? 'Pro Plan'
                   : 'Free Plan');
             const badge = planTier === 'ENTERPRISE' ? { cls: 'bg-accent-amber/20 text-accent-amber', letter: 'E' }
-              : planTier === 'MAX' ? { cls: 'bg-status-success/20 text-status-success', letter: 'M' }
+              : planTier === 'TEAM' ? { cls: 'bg-status-success/20 text-status-success', letter: 'T' }
               : planTier === 'PRO' ? { cls: 'bg-accent-blue/20 text-accent-blue', letter: 'P' }
               : { cls: 'bg-[var(--gray-400)] text-secondary', letter: 'F' };
             const subtitle = planTier === 'ENTERPRISE'
               ? 'Unlimited runs, priority support, dedicated infrastructure'
-              : planTier === 'MAX'
+              : planTier === 'TEAM'
               ? 'Unlimited runs, own API keys, 3 concurrent runs'
               : planTier === 'PRO'
               ? '10 runs/month, 2 concurrent runs, managed keys'

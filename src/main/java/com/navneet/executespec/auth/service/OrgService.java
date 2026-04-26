@@ -11,7 +11,6 @@ import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
-import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.gateway.StripePaymentGateway;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.auth.controller.OrgController.SeatsAdjustResponse;
@@ -42,9 +41,10 @@ public class OrgService {
     private final BillingSubscriptionRepository subRepo;
     private final StripePaymentGateway stripeGateway;
 
-    /** TEAM tier self-serve seat range. Orgs above this go to ENTERPRISE. */
-    private static final int TEAM_MIN_SEATS = 2;
-    private static final int TEAM_MAX_SEATS = 20;
+    // V141 (2026-04-26) — TEAM_MIN_SEATS / TEAM_MAX_SEATS removed along
+    // with the seat-aware adjustSeats path. The "TEAM" name now refers
+    // to the renamed MAX tier (BYOK unlimited). subRepo + stripeGateway
+    // fields kept for now since other call paths still reference them.
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Transactional
@@ -54,7 +54,7 @@ public class OrgService {
 
         if ("FREE".equals(creator.getTier())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only paid tiers (Pro, Team, Max, Enterprise) can create an org");
+                    "Only paid tiers (Pro, Team, Enterprise) can create an org");
         }
         if (creator.getOrgId() != null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -481,80 +481,27 @@ public class OrgService {
     }
 
     /**
-     * v2.6.0 — adjust seats on a TEAM-tier org. Pushes to Stripe (prorated),
-     * writes {@code BillingSubscription.totalSeats} + {@code Org.seat_count}
-     * locally so the UI reflects the new count immediately; the webhook
-     * arriving later is idempotent.
+     * V141 (2026-04-26) — the v2.6.1-Wave-1 per-seat TEAM tier was deleted.
+     * The "TEAM" name now refers to the renamed MAX tier ($29/mo BYOK,
+     * unlimited members under tier_config). Seat adjustment is no longer a
+     * meaningful operation — every TEAM org has effectively unlimited seats
+     * subject to tier_config.max_org_members.
      *
-     * <p>Validates:
-     * <ul>
-     *   <li>{@code newSeats ∈ [TEAM_MIN_SEATS, TEAM_MAX_SEATS]} (2-20)</li>
-     *   <li>New seats is not below current active member count</li>
-     *   <li>Org is on TEAM tier and has an active subscription</li>
-     * </ul>
+     * <p>The endpoint is kept around so legacy clients hitting
+     * {@code POST /api/org/me/seats/adjust} get a clean structured 410 Gone
+     * with an explanation, rather than 404 / 500.
      */
     @Transactional
     public SeatsAdjustResponse adjustSeats(String orgId, int newSeats, String performedBy) {
-        Org org = orgRepo.findById(orgId)
+        // Touch the field set so Spring + the unused-import linter stay
+        // happy; remove this stub once the controller is retired.
+        orgRepo.findById(orgId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
-
-        if (!"TEAM".equals(org.getTier())) {
-            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                    "Seat adjustment is only available for TEAM tier. Upgrade first.");
-        }
-        if (newSeats < TEAM_MIN_SEATS || newSeats > TEAM_MAX_SEATS) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "newSeats must be between " + TEAM_MIN_SEATS + " and " + TEAM_MAX_SEATS
-                    + ". Contact sales for larger orgs.");
-        }
-
-        int activeMembers = (int) orgMemberRepo.countByOrgId(orgId);
-        if (newSeats < activeMembers) {
-            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
-                    "Cannot reduce seats to " + newSeats + " — org has " + activeMembers
-                    + " active members. Remove members first, then reduce seats.");
-        }
-
-        int previousSeats = org.getSeatCount();
-        if (previousSeats == newSeats) {
-            return new SeatsAdjustResponse(previousSeats, newSeats, activeMembers,
-                    "No change — org already has " + newSeats + " seats.");
-        }
-
-        // Find the active TEAM subscription + push seat quantity to the gateway.
-        BillingSubscription teamSub = subRepo.findActiveByTier("TEAM").stream()
-                .filter(s -> orgId.equals(s.getOrgId()))
-                .findFirst()
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                        "No active TEAM subscription found for this org. Complete checkout first."));
-
-        String gatewayName = teamSub.getPaymentGateway() != null
-                ? teamSub.getPaymentGateway() : teamSub.getGateway();
-        if ("stripe".equalsIgnoreCase(gatewayName) && teamSub.getGatewaySubscriptionId() != null) {
-            stripeGateway.updateSubscriptionQuantity(teamSub.getGatewaySubscriptionId(), newSeats);
-        } else {
-            log.warn("Seat adjust: non-Stripe gateway '{}' for org {} — gateway push skipped. " +
-                    "Razorpay seat adjustment is not yet implemented.", gatewayName, orgId);
-        }
-
-        // Write locally — webhook will arrive later and be idempotent.
-        teamSub.setTotalSeats(newSeats);
-        subRepo.save(teamSub);
-
-        org.setSeatCount(newSeats);
-        org.setUpdatedAt(Instant.now());
-        orgRepo.save(org);
-
-        auditOrgEvent("ORG_SEATS_ADJUSTED", "ORG", orgId, orgId, performedBy,
-                Map.of("seats", previousSeats),
-                Map.of("seats", newSeats, "activeMembers", activeMembers));
-
-        log.info("Org seats adjusted: orgId={} {}→{} activeMembers={} by userId={}",
-                orgId, previousSeats, newSeats, activeMembers, performedBy);
-
-        String message = newSeats > previousSeats
-                ? "Added " + (newSeats - previousSeats) + " seat(s). You can now invite up to " + newSeats + " members."
-                : "Reduced to " + newSeats + " seat(s). Prorated credit will appear on your next invoice.";
-        return new SeatsAdjustResponse(previousSeats, newSeats, activeMembers, message);
+        log.info("adjustSeats called on V141-deprecated path: orgId={} newSeats={} performedBy={}",
+                orgId, newSeats, performedBy);
+        throw new ResponseStatusException(HttpStatus.GONE,
+                "Seat adjustment is no longer supported. The TEAM tier is now BYOK-unlimited "
+                + "(no per-seat pricing). Contact support if you need to migrate an old TEAM "
+                + "subscription.");
     }
 }

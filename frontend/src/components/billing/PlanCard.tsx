@@ -1,10 +1,11 @@
-import { useState } from 'react';
 import type { BillingPlan } from '@/lib/billing-api';
 
-// v2.6.0 — TEAM sits between PRO and MAX. Fractional rank keeps existing
-// upgrade/downgrade math correct without re-renumbering.
+// V141 (2026-04-26) — collapsed the 5-tier ladder to 4. The previous
+// per-seat TEAM tier was deleted; MAX was renamed to TEAM and now
+// occupies rank 3 directly. The seat picker + per-seat pricing UI
+// were removed because the new TEAM is BYOK unlimited (no per-seat).
 const TIER_RANK: Record<string, number> = {
-  FREE: 0, STARTER: 1, PRO: 2, TEAM: 2.5, MAX: 3, ENTERPRISE: 4
+  FREE: 0, STARTER: 1, PRO: 2, TEAM: 3, ENTERPRISE: 4
 };
 
 interface PlanCardProps {
@@ -15,11 +16,6 @@ interface PlanCardProps {
   userTier?: string;
 }
 
-// v2.6.0 — TEAM self-serve seat range (must match backend OrgService).
-const TEAM_MIN_SEATS = 2;
-const TEAM_MAX_SEATS = 20;
-const TEAM_DEFAULT_SEATS = 3;
-
 export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: PlanCardProps) {
   const userRank = TIER_RANK[userTier ?? 'FREE'] ?? 0;
   const planRank = TIER_RANK[plan.tier] ?? 0;
@@ -27,36 +23,19 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
   const isUpgrade = planRank > userRank;
 
   const isTeam = plan.tier === 'TEAM';
-  const [seats, setSeats] = useState(TEAM_DEFAULT_SEATS);
-  const effectiveSeats = isTeam ? seats : 1;
-
-  // TEAM price = per-seat × seats. Other tiers use base amount.
-  const perSeatInr = plan.perSeatInr ?? 0;
-  const perSeatUsd = plan.perSeatUsd ?? 0;
-  const totalInrPaise = isTeam
-    ? perSeatInr * effectiveSeats
-    : plan.baseAmountInr;
-  const totalUsdCents = isTeam
-    ? perSeatUsd * effectiveSeats
-    : plan.baseAmountUsd;
   const price = showInr
-    ? `\u20B9${(totalInrPaise / 100).toLocaleString('en-IN')}`
-    : `$${(totalUsdCents / 100).toFixed(0)}`;
+    ? `₹${(plan.baseAmountInr / 100).toLocaleString('en-IN')}`
+    : `$${(plan.baseAmountUsd / 100).toFixed(0)}`;
 
   const isPopular = plan.tier === 'PRO';
-  const isMax = plan.tier === 'MAX';
   const runsLabel = plan.runLimit === -1
     ? 'Unlimited runs/month'
-    : isTeam
-      ? `${50 * effectiveSeats} credits/mo (shared pool)`
-      : `${plan.runLimit} runs/month`;
-  const keyModeLabel = isTeam
-    ? 'Managed keys · all 3 providers'
-    : plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Managed Keys';
+    : `${plan.runLimit} runs/month`;
+  const keyModeLabel = plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Managed Keys';
 
   return (
     <div className={`relative rounded-md border p-4 sm:p-6 flex flex-col ${
-      isMax ? 'border-status-success' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
+      isTeam ? 'border-status-success' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
     } ${isCurrentPlan ? 'ring-2 ring-accent-blue' : ''}`}>
 
       {isPopular && (
@@ -65,7 +44,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
         </span>
       )}
 
-      {isMax && !isCurrentPlan && (
+      {isTeam && !isCurrentPlan && (
         <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-status-success text-white text-xs font-semibold px-3 py-1 rounded-sm">
           BEST VALUE
         </span>
@@ -78,74 +57,28 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
       )}
 
       <h3 className="text-lg font-semibold text-primary">
-        {plan.tier === 'MAX' ? 'Max' : plan.tier === 'TEAM' ? 'Team' : 'Pro'}
+        {plan.tier === 'TEAM' ? 'Team' : 'Pro'}
       </h3>
       <p className="text-sm text-muted mt-1">{keyModeLabel}</p>
 
       <div className="mt-4">
         <span className="text-3xl font-bold text-primary">{price}</span>
-        <span className="text-sm text-muted">{isTeam ? '/mo total' : '/mo'}</span>
-        {isTeam && (
-          <p className="text-xs text-muted mt-1">
-            {showInr
-              ? `\u20B9${(perSeatInr / 100).toLocaleString('en-IN')}`
-              : `$${(perSeatUsd / 100).toFixed(0)}`}
-            /seat/month &middot; {effectiveSeats} seat{effectiveSeats > 1 ? 's' : ''}
-          </p>
-        )}
+        <span className="text-sm text-muted">/mo</span>
         {showInr && <p className="text-xs text-muted mt-1">+ 18% GST</p>}
       </div>
-
-      {isTeam && (
-        <div className="mt-4 flex items-center gap-3">
-          <label className="text-xs text-muted font-mono uppercase tracking-wide">Seats</label>
-          <input
-            type="number"
-            min={TEAM_MIN_SEATS}
-            max={TEAM_MAX_SEATS}
-            value={seats}
-            onChange={(e) => {
-              const n = parseInt(e.target.value, 10);
-              if (!Number.isNaN(n)) setSeats(Math.max(TEAM_MIN_SEATS, Math.min(TEAM_MAX_SEATS, n)));
-            }}
-            className="w-20 px-2 py-1 bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
-          />
-          <span className="text-xs text-muted">
-            ({TEAM_MIN_SEATS}-{TEAM_MAX_SEATS} &middot; larger &rarr; Enterprise)
-          </span>
-        </div>
-      )}
 
       <ul className="mt-6 space-y-3 flex-1 text-sm text-secondary">
         <li className="flex items-center gap-2">
           <span className="text-accent-blue">&#10003;</span>
           {runsLabel}
         </li>
-        {!isTeam && (
-          <li className="flex items-center gap-2">
-            <span className="text-accent-blue">&#10003;</span>
-            {plan.includedSeats} seat{plan.includedSeats > 1 ? 's' : ''} included
-          </li>
-        )}
-        {isTeam && (
-          <>
-            <li className="flex items-center gap-2">
-              <span className="text-accent-blue">&#10003;</span>
-              Shared credit pool across your team
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-accent-blue">&#10003;</span>
-              Google OIDC sign-in
-            </li>
-            <li className="flex items-center gap-2">
-              <span className="text-accent-blue">&#10003;</span>
-              Org admin dashboard &middot; seat management
-            </li>
-          </>
-        )}
         <li className="flex items-center gap-2">
           <span className="text-accent-blue">&#10003;</span>
-          {plan.limits?.PROJECTS === -1 ? '\u221E' : plan.limits?.PROJECTS || '\u221E'} projects
+          {plan.includedSeats} seat{plan.includedSeats > 1 ? 's' : ''} included
+        </li>
+        <li className="flex items-center gap-2">
+          <span className="text-accent-blue">&#10003;</span>
+          {plan.limits?.PROJECTS === -1 ? '∞' : plan.limits?.PROJECTS || '∞'} projects
         </li>
         <li className="flex items-center gap-2">
           <span className="text-accent-blue">&#10003;</span>
@@ -158,7 +91,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
           <span className="text-accent-blue">&#10003;</span>
           All products included
         </li>
-        {isMax && (
+        {isTeam && (
           <>
             <li className="flex items-center gap-2">
               <span className="text-accent-blue">&#10003;</span>
@@ -185,14 +118,14 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
       </ul>
 
       <button
-        onClick={() => onSelect(plan.id, isTeam ? effectiveSeats : undefined)}
+        onClick={() => onSelect(plan.id)}
         disabled={isCurrentPlan || isDowngrade}
         className={`mt-6 w-full py-2.5 rounded-md text-sm font-semibold transition ${
           isCurrentPlan
             ? 'bg-accent-blue/10 text-accent-blue cursor-default'
             : isDowngrade
               ? 'bg-[var(--gray-200)] text-muted cursor-not-allowed'
-              : isMax
+              : isTeam
                 ? 'bg-status-success text-white hover:bg-status-success/80'
                 : isPopular
                   ? 'bg-accent-blue text-primary hover:bg-accent-blue-hover'

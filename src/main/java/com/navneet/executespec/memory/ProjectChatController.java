@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Project chat endpoints (v2.4.0). Gated to ENTERPRISE + MAX via the
+ * Project chat endpoints (v2.4.0). Gated to ENTERPRISE + TEAM via the
  * {@link TierConfig#isExecutionViewEnabled()} tier flag, matching the rest of the
  * project-shell premium surface.
  */
@@ -120,7 +120,7 @@ public class ProjectChatController {
                 .orElse(false);
         if (!allowed) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Project chat requires ENTERPRISE or MAX tier");
+                    "Project chat requires ENTERPRISE or TEAM tier");
         }
         return user;
     }

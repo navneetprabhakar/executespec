@@ -114,7 +114,7 @@ export default function Header() {
       )}
 
       {/* Top-up pill — desktop only to keep mobile header lean */}
-      {user?.tier && user.tier !== 'FREE' && user.tier !== 'MAX' && user.tier !== 'ENTERPRISE' && (
+      {user?.tier && user.tier !== 'FREE' && user.tier !== 'TEAM' && user.tier !== 'ENTERPRISE' && (
         <Link
           to="/billing#topup"
           className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-status-success/10 text-status-success text-xs font-medium hover:bg-status-success/20 transition-colors flex-shrink-0"
