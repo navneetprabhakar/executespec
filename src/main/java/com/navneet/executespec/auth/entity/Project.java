@@ -71,6 +71,34 @@ public class Project {
     @Column(name = "github_owner")
     private String githubOwner;
 
+    /** v2.6.2 (E1.7) — where this project's standards / scopes /
+     *  detection-overrides config lives. NULL or FOLDER (default) keeps
+     *  config in {@code .executespec/config/<project-slug>/} on the
+     *  customer repo (visible to anyone with read access). DATABASE is
+     *  the confidential-project opt-out — config stays in the
+     *  {@code project_config} table only, invisible to other readers
+     *  of the repo. See {@link #configStorageEnum()} for the NULL → FOLDER
+     *  normaliser. */
+    @Column(name = "config_storage", length = 16)
+    private String configStorage;
+
+    /**
+     * v2.6.2 (E1.7) — strongly-typed read of {@link #configStorage} with
+     * NULL/blank/unknown all normalised to {@link ConfigStorage#FOLDER}.
+     */
+    public ConfigStorage configStorageEnum() {
+        if (configStorage == null || configStorage.isBlank()) return ConfigStorage.FOLDER;
+        try {
+            return ConfigStorage.valueOf(configStorage);
+        } catch (IllegalArgumentException ex) {
+            return ConfigStorage.FOLDER; // forward-compat unknown value → safe default
+        }
+    }
+
+    /** v2.6.2 (E1.7) — config storage strategy per the multi-project /
+     *  confidential-project opt-out from the enterprise-readiness plan. */
+    public enum ConfigStorage { FOLDER, DATABASE }
+
     /**
      * Wave 2.2 — disposable onboarding project auto-provisioned on first login.
      * Hidden from {@code /org/projects} list, GC'd after 24h of inactivity by

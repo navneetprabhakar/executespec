@@ -101,6 +101,30 @@ public class LlmRouter {
      *  when a fallback fires. Previously this was only logged and sent to an
      *  internal agent inbox — never surfaced to the user. */
     private final com.navneet.executespec.sse.SseBroadcaster sseBroadcaster;
+    /**
+     * 2026-04-26 Spring AI 1.1.4 {@code extra_body} bypass.
+     *
+     * <p>Spring AI 1.1.4's {@code OpenAiChatModel} adds an {@code extra_body}
+     * field to the request body whenever options are non-default — even
+     * {@code temperature(0.0)} alone is enough to trigger it. The OpenAI
+     * Chat Completions endpoint then rejects with
+     * {@code 400 - "Unknown parameter: 'extra_body'"} (verified across
+     * gpt-4o / gpt-4o-mini / gpt-5.4 / gpt-5.4-mini).
+     *
+     * <p>The V2 path already routes around this via {@code OpenAiNativeToolClient}.
+     * V1 has 17+ live callers (ExecutionPlannerService, ArchitectureDocGenerator,
+     * RepoArchitectureGenerator, ProjectDocGeneratorService, MemoryCompactionService,
+     * RunLedgerAgent, ConflictResolverAgent, ConversationAgent, PromptOptimiserAgent,
+     * RunTitleSummarizer, ConversationController, ProjectBriefService,
+     * ValidationReportGenerator, AccuracyAssessmentService, TestPlannerAgent,
+     * TestWorkerAgent, TestReportGenerator) — patching the router central is
+     * one fix that covers all of them.
+     *
+     * <p>When provider=openai, callWithModelOptions delegates to this client
+     * (it handles both text-only and tool-bearing calls and returns a
+     * Spring AI ChatResponse so downstream code stays unchanged).
+     */
+    private final com.navneet.executespec.v2.agent.OpenAiNativeToolClient openAiNativeToolClient;
 
     /**
      * Wraps a ChatResponse with the provider and model that actually served the request.
@@ -543,32 +567,49 @@ public class LlmRouter {
         // Resolve per-run keys (user → org → system)
         ResolvedKeys keys = runKeyStore.get(runId);
 
-        Prompt augmented = switch (provider.toLowerCase()) {
-            case "anthropic" -> {
-                var builder = AnthropicChatOptions.builder().model(model).maxTokens(maxTok).temperature(0.0);
-                if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
-                if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
-                if (finalCacheOpts != null) builder.cacheOptions(finalCacheOpts);
-                if (finalToolChoice != null) builder.toolChoice(finalToolChoice);
-                yield new Prompt(prompt.getInstructions(), builder.build());
+        // 2026-04-26 — OpenAI bypasses Spring AI 1.1.4 entirely (extra_body
+        // bug — see field javadoc on openAiNativeToolClient). For Anthropic +
+        // Gemini we still use Spring AI's ChatModel; both are fine on 1.1.4.
+        ChatResponse response;
+        if ("openai".equalsIgnoreCase(provider)) {
+            String userKey = keys.openAiKey();
+            if (userKey == null && "OWN_KEYS".equals(keys.keySourceMode())) {
+                throw new ProviderUnavailableException(
+                    "OpenAI key not provided, mode=OWN_KEYS — no system fallback");
             }
-            case "openai" -> {
-                var builder = OpenAiChatOptions.builder().model(model).temperature(0.0);
-                if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
-                if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
-                if (maxTok != null) builder.maxCompletionTokens(maxTok);
-                if (finalOpenAiToolChoice != null) builder.toolChoice(finalOpenAiToolChoice);
-                yield new Prompt(prompt.getInstructions(), builder.build());
-            }
-            case "gemini" -> {
-                var builder = GoogleGenAiChatOptions.builder().model(model).temperature(0.0);
-                if (maxTok != null) builder.maxOutputTokens(maxTok);
-                yield new Prompt(prompt.getInstructions(), builder.build());
-            }
-            default -> prompt;
-        };
-
-        ChatResponse response = resolveModel(provider, keys).call(augmented);
+            // userKey == null → native client falls back to its
+            // @Value("${spring.ai.openai.api-key:}") system key.
+            String openAiToolChoiceStr = finalOpenAiToolChoice == null
+                ? null : finalOpenAiToolChoice.toString();
+            response = openAiNativeToolClient.call(
+                com.navneet.executespec.v2.agent.OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
+                    .model(model)
+                    .messages(prompt.getInstructions())
+                    .tools(callbacks)
+                    .toolChoice(openAiToolChoiceStr)
+                    .temperature(0.0)
+                    .maxCompletionTokens(maxTok)
+                    .apiKey(userKey)
+                    .build());
+        } else {
+            Prompt augmented = switch (provider.toLowerCase()) {
+                case "anthropic" -> {
+                    var builder = AnthropicChatOptions.builder().model(model).maxTokens(maxTok).temperature(0.0);
+                    if (!callbacks.isEmpty()) builder.toolCallbacks(callbacks);
+                    if (toolExecEnabled != null) builder.internalToolExecutionEnabled(toolExecEnabled);
+                    if (finalCacheOpts != null) builder.cacheOptions(finalCacheOpts);
+                    if (finalToolChoice != null) builder.toolChoice(finalToolChoice);
+                    yield new Prompt(prompt.getInstructions(), builder.build());
+                }
+                case "gemini" -> {
+                    var builder = GoogleGenAiChatOptions.builder().model(model).temperature(0.0);
+                    if (maxTok != null) builder.maxOutputTokens(maxTok);
+                    yield new Prompt(prompt.getInstructions(), builder.build());
+                }
+                default -> prompt;
+            };
+            response = resolveModel(provider, keys).call(augmented);
+        }
 
         // Guard against null result — Gemini can return a ChatResponse with getResult() == null
         // (e.g., safety filter, empty response). Treat as a provider error to trigger fallback.

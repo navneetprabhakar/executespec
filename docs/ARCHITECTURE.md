@@ -1,9 +1,24 @@
 # ExecuteSpec — Architecture Document
 
-> **Version**: 4.10
-> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22; v2.6.1 Waves 1-6 merged + deployed 2026-04-23; **v2.6.2-track hierarchical planner all 5 slices shipped on `feature/hierarchical-planner` 2026-04-25 (not yet merged)**
-> **App Version**: v2.6.1 (`dev`/`main`); v2.6.2-track on `feature/hierarchical-planner`
+> **Version**: 4.11
+> **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22; v2.6.1 Waves 1-6 merged + deployed 2026-04-23; v2.6.2-track hierarchical planner all 5 slices shipped on `feature/hierarchical-planner` 2026-04-25 (not yet merged); **v2.6.3-track enterprise readiness all 4 phases shipped on `feature/enterprise-readiness-eval` 2026-04-25 (not yet merged) — server-up sweep landed clean**
+> **App Version**: v2.6.1 (`dev`/`main`); v2.6.2-track on `feature/hierarchical-planner`; v2.6.3-track on `feature/enterprise-readiness-eval`
 > **Audience**: Technical Leads, Staff Engineers, Platform Team
+
+## 0d. 2026-04-25 refresh — v2.6.3-track enterprise readiness (on `feature/enterprise-readiness-eval`, NOT yet merged)
+
+Adds the customer-facing `.executespec/` folder as the single persistent surface for every artefact ExecuteSpec generates (codemaps, contracts, ADRs, standards, invariants), gates every write through one chokepoint with PR vs DIRECT_PUSH dispatch, and adds 4 new persistence stripes + an activity feed + an export bundle + per-user notification preferences. Plan + server-up sweep doc were archived in the 2026-04-26 cleanup pass; what stays canonical is this section + the per-package summaries below.
+
+- **`.executespec/` folder write contract (E1, V131-V134, package `folder/`):** Every mutation to a customer's `.executespec/` folder routes through `ExecutespecFolderWriter#writeFiles`. Caller allowlist pinned by an ArchUnit test (`ExecutespecFolderWriterCallerAllowlistTest`) — currently 4 approved callers: `BootstrapService` (E1.5 initial scaffold), `ContractDriftController` (E2.6 contract index publish), `ContractConsumerController` (E2.7 consumer mirror), `ProjectArchitectureService` (E1.6 codemap/arch publish). Per-(project, repo) `prModeEnum()` selects PR (default — opens setup branch + PR for review) or DIRECT_PUSH (opt-in for trusted high-frequency writes like codemap regen). 4-state status machine on `project_repo`: MISSING → BOOTSTRAP_PENDING → PR_PENDING → READY. `ProjectConfigPathResolver` returns FOLDER_FLAT / FOLDER_NAMESPACED / DATABASE per (project, repo) so callers don't re-implement the multi-project namespacing decision tree.
+- **Activity feed (E1, V133, package `activity/`):** Customer-facing project activity feed at `GET /api/projects/{id}/activity`. `activity_feed` partitioned-by-month with 12 partitions seeded 2026-04 → 2027-03; partition + retention jobs (`@Scheduled`, `@SchedulerLock`) keep the table bounded. `ActivityEventEmitter` is the single chokepoint that decides which surfaces (FEED only / FEED+AUDIT / AUDIT only) an event lands on; AUDIT-tagged events dual-write into the existing `activity_audit` (V22) for compliance. Hot-path indexes: `project_time`, `event_type`, `target`, `actor`.
+- **Cross-repo contracts (E2, V135, package `contracts/`):** 4 contract kinds — OPENAPI / GRAPHQL / JSON_SCHEMA / PROTO. Per-kind detectors live under `contracts/detection/`; per-kind breaking-change classifiers under `contracts/breaking/` (`ProtoBreakingChangeClassifier` + 3 others; `BreakingChangeService` is the entry point). Drift detection on every commit via `ContractDriftController`; consumer pinning via `ContractConsumerController` mirrors the pinned version into `.executespec/contracts/consumed/<contract>.json` for the consumer; per-repo coverage roll-up via `ContractCoverageController`. Index hot paths: per-repo coverage lookup (E2.3), unresolved-drift triage (E2.8 partial index), per-project consumer rollup (E2.11 + E2.12).
+- **Engineering standards (E3, V136, package `standards/`):** Standards are first-class binding policy — `org_standard` defines the org-level rules, `project_standard_override` allows per-project deviations (with severity escalation/de-escalation), `EffectiveStandardsResolver` merges them on every read. Two execution paths: `standards/ast/` (deterministic AST-based checks) + `standards/llmreview/` (LLM-augmented review for non-AST checks). Violation surface: `standards/override/StandardsOverrideController` for single-violation override + standing exception (both require ≥30 char rationale via `ValidationAdvice`). Read surface: `standards/report/StandardsComplianceController` returns the project's effective standards + recent violations + persistent overrides.
+- **ADRs as first-class (E3.12, V137, package `adr/`):** ADRs live in customer git as `.executespec/arch/adrs/<NNNN>-<slug>.md`. `AdrFrontmatterParser` parses YAML frontmatter; `adr` table caches the parsed metadata so dashboards / planner can query by status (PROPOSED / ACCEPTED / SUPERSEDED / DEPRECATED) without GitHub round-trips. `AdrInjectionService` is where the planner pulls ADR context from (planner-side wiring deliberately bounded on this branch to avoid hierarchical-planner merge conflicts).
+- **Architecture invariants (E3.14, V138, package `arch/invariants/`):** Continuous architectural properties (e.g. "only payment-service writes to the payments table" / "no module under api/ imports from internal/"). Definitions live in customer git as `.executespec/arch/invariants.yaml` per repo. `InvariantChecker` runs per-codemap-version; violations land in `arch_invariant_violation` with severity + repo coordinates. Same dashboards-versus-GitHub split as ADRs — DB cache for query speed, customer git is the source of truth.
+- **Notification preferences + export (E4, V139, packages `notification/pref/` + `export/`):** `UserNotificationPref` is a per-user × event-type × channel opt-in/out matrix; `NotificationPrefService` applies sensible defaults (notify for things needing attention, don't notify for routine events). `ProjectExportController` (`POST /api/projects/{id}/export`) returns a zip bundle of every `.executespec/` artefact + DB-only counterparts when `config_storage=DATABASE`.
+- **Boot fix shipped this session (2026-04-25):** `ExecutespecFolderWriter` + `BootstrapService` had two constructors (prod + test seam) but neither was annotated with `@Autowired`; Spring 6's bean-factory fell back to the no-arg constructor (which doesn't exist) and refused the bean. Fix: `@Autowired` on the prod constructor of each. Discovered when this session brought up the local stack for the deferred server-up eval — would have crashed the first dev deploy attempt.
+
+Next refresh hooks: planner-side wiring of `{{CONTRACTS}}` / `{{ADR}}` / `{{STANDARDS}}` / `{{INVARIANTS}}` blocks, GitHub-write integration end-to-end against a sandbox repo, DIRECT_PUSH admin endpoint UI, activity-feed event-source integration into project create / run terminal / PR merge.
 
 ## 0c. 2026-04-25 refresh — v2.6.2-track hierarchical planner (on `feature/hierarchical-planner`, NOT yet merged)
 
@@ -18,7 +33,7 @@ Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-
 - **Cost shape (slice 5a):** `V2RunCostTracker.estimateRunTierAware(provider, complexities, strategy)` overload computes per-strategy phase costs. Persisted on `pipeline_run.{classifier,outline,expansion,coherence}_{input,output}_tokens, _cost_usd` columns via before/after `costTracker.snapshot()` diffs in each phase helper. Run totals auto-aggregate via the in-memory accumulator. Frontend `RunDetailTabs` Overview tab shows a `PlannerPhaseBreakdown` component when `planStrategy` is set.
 - **Resume awareness (slice 4 + partial 5d):** `agent_task.{task_type, expansion_status, expanded_at}` written by `persistTasks`. `StartupRunResumerV2` failure message reports `expanded=N pending=M failed=K` per interrupted run. Auto-replay re-trigger (re-run phase 2 from persisted outline) is the one open follow-up.
 - **Migration V130** (additive only, all columns nullable): `pipeline_run` gets the strategy + outline JSON + per-phase cost columns; `agent_task` gets task_type + expansion_status + expanded_at + a partial index on `plan_strategy WHERE NOT NULL`.
-- **Calibration methodology (slice 5e):** documented in [`hierarchical-planner-plan.md`](hierarchical-planner-plan.md) — 4 audit SQL queries, tuning targets, threshold-tuning notes, weekly→monthly cadence, calibration-report template under `docs/reports/planner-calibration-<date>.md`.
+- **Calibration methodology (slice 5e):** 4 audit SQL queries (classifier accuracy, estimate accuracy, heuristic leakage, per-phase cost), tuning targets, threshold-tuning notes for `HEURISTIC_FAST_PATH_CHAR_CAP` / `DOMAIN_EXPLOSIVE` / `MULTI_FEATURE_PHRASES`, weekly→monthly audit cadence. (The standalone plan doc was archived in the 2026-04-26 cleanup pass now that all 5 slices are shipped on the branch.)
 
 ## 0b. 2026-04-23 refresh — v2.6.1 Waves 1-6 (merged to `dev` + `main` + deployed to `dev.executespec.ai`)
 
@@ -44,7 +59,7 @@ Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-
 
 ## 0. 2026-04-16 refresh — Validation v3 (in progress)
 
-This architecture document describes the V2 pipeline as it ships on `dev` today. A 5-pillar rewrite of the validation layer is in progress — Pillar 1 (planner requirement graph) is open as PR #21. The full plan lives at [`.claude/plans/immutable-painting-platypus.md`](../.claude/plans/immutable-painting-platypus.md). Tracked behind the feature flag `validation.v3-strict` (default OFF in prod).
+This architecture document describes the V2 pipeline as it ships on `dev` today. A 5-pillar rewrite of the validation layer is in progress — Pillar 1 (planner requirement graph) is open as PR #21. The full plan lives at `.claude/plans/immutable-painting-platypus.md`. Tracked behind the feature flag `validation.v3-strict` (default OFF in prod).
 
 **Pillar 1 — planner requirement graph (v2.5.11, open)**
 
@@ -68,7 +83,7 @@ The planner emits a structured requirement graph alongside the task list:
 > **Canonical current architecture:** [`CLAUDE.md`](../CLAUDE.md).
 > **Open gaps:** [`docs/plans/partial-work.md`](plans/partial-work.md) §3 (consolidated 2026-04-25 from the original `harness-v2-remaining-work.md`).
 > **Pilot v3.0 (commit `6bbfde9b`):** project workspace layer added on top of V2 — see
-> [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md). Key additions: dual-scope
+> `docs/plans/pilot-v3-plan.md`. Key additions: dual-scope
 > `ProjectRepo` registry, multi-repo workspace clone + per-repo PR creation,
 > per-repo `ProjectCodeMap` + project-wide `ProjectArchitectureDoc` with SHA-based
 > staleness, pre-plan `FeatureAssessmentService` (heuristic by default; LLM-backed
@@ -613,7 +628,7 @@ graph TB
 
 ## 5. Security Architecture
 
-> Full requirements: [docs/requirements/security-guardrails.md](requirements/security-guardrails.md)
+> Full requirements: docs/requirements/security-guardrails.md
 
 8-layer defense-in-depth model. No single layer failing results in full compromise.
 
@@ -1228,6 +1243,6 @@ Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GC
 - **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `OutlinePlannerAgent` as `{{REFERENCE_DOCS}}` (was `PlannerAgentV2` until slice 5b deletion) and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
 - **Architecture diff** — frontend renders an LCS line diff of `architecture.md` vN vs vN-1.
 - **Auto-push** — `project.runs.auto-push` flipped ON via V96/V97. Every successful project-scoped V2 run runs `pushToGitHubIfConfigured()` automatically.
-- **Memory budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8K → 12K. Vector spill-over for snapshots > 12K is on the backlog (see [`docs/plans/open-work-2026-04-18.md`](plans/open-work-2026-04-18.md) §D2).
+- **Memory budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8K → 12K. Vector spill-over for snapshots > 12K is on the backlog.
 - **Schema** — V95 (`pgvector` + `project_document` + `project_document_chunk` with `vector(1536)` + ivfflat cosine), V96 + V97 (auto-push flag).
 - **New dependency** — Apache Tika 2.9.2 (`tika-core` + `tika-parsers-standard-package`).

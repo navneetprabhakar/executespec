@@ -13,4 +13,11 @@ public interface ProjectRepository extends JpaRepository<Project, String> {
 
     /** Wave 2.2 — used by {@code SandboxCleanupJob}. */
     List<Project> findByIsSandboxTrueAndStatus(String status);
+
+    /**
+     * V140 — used by {@code TierEnforcementService.assertCanCreateProject}
+     * to enforce per-tier project caps. Counts only ACTIVE projects so an
+     * archived project doesn't keep blocking new ones.
+     */
+    long countByOrgIdAndStatus(String orgId, String status);
 }
