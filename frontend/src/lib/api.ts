@@ -871,7 +871,8 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
+  // V141 (2026-04-26) — MAX renamed to TEAM; old per-seat TEAM dropped.
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;

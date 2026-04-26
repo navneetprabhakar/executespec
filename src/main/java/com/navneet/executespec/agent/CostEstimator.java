@@ -231,7 +231,7 @@ public class CostEstimator {
             batchAvailable = switch (tier) {
                 case "FREE" -> false;
                 case "PRO" -> credits >= 2;
-                case "MAX", "ENTERPRISE" -> true;
+                case "TEAM", "ENTERPRISE" -> true;  // V141 — TEAM is the renamed MAX tier
                 default -> credits >= 2;
             };
         }

@@ -86,9 +86,14 @@ public class BillingService {
     @Value("${billing.founder-pricing.max-slots:100}")
     private int founderMaxSlots;
 
-    /** Tier rank for upgrade/downgrade detection. Higher = better. */
+    /**
+     * Tier rank for upgrade/downgrade detection. Higher = better.
+     * V141 (2026-04-26) — collapsed the 5-tier ladder to 4. The previous
+     * per-seat TEAM (rank 3) was deleted; MAX was renamed to TEAM and now
+     * occupies rank 3 directly. ENTERPRISE shifts down to rank 4.
+     */
     private static final Map<String, Integer> TIER_RANK = Map.of(
-            "FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "MAX", 4, "ENTERPRISE", 5);
+            "FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "ENTERPRISE", 4);
 
     private static int tierRank(String tier) {
         return TIER_RANK.getOrDefault(tier, 0);
@@ -150,11 +155,10 @@ public class BillingService {
     }
 
     /**
-     * v2.6.1 — seat-aware subscribe. For TEAM tier plans, {@code seats} must
-     * be 2-20 (self-serve range). For other tiers, {@code seats} is forced
-     * to 1 with a warning log. Stripe charges {@code price × seats}; Razorpay
-     * flow is unchanged for v1 (seat adjustment post-checkout via the
-     * adjust-seats endpoint).
+     * V141 (2026-04-26) — seats parameter retained on the signature for
+     * back-compat with existing callers, but always forced to 1. The
+     * v2.6.1-Wave-1 per-seat TEAM tier was deleted and the renamed
+     * MAX-now-TEAM tier is BYOK + unlimited (no per-seat pricing).
      */
     public SubscriptionInitResult subscribe(String userId, UUID planId,
                                               String preferredGateway, String successUrl, String cancelUrl,
@@ -165,21 +169,11 @@ public class BillingService {
         BillingPlan plan = planRepo.findById(planId)
                 .orElseThrow(() -> new IllegalArgumentException("Plan not found"));
 
-        // v2.6.1 — seat validation per tier
-        int effectiveSeats;
-        if ("TEAM".equals(plan.getTier())) {
-            if (seats < 2 || seats > 20) {
-                throw new BillingException(
-                        "TEAM tier requires 2-20 seats (got " + seats
-                        + "). Contact sales for larger orgs.");
-            }
-            effectiveSeats = seats;
-        } else {
-            if (seats != 1) {
-                log.warn("seats={} ignored for non-TEAM tier={} — forcing 1", seats, plan.getTier());
-            }
-            effectiveSeats = 1;
+        if (seats != 1) {
+            log.warn("seats={} ignored for tier={} — V141 collapsed the per-seat TEAM tier; forcing 1",
+                    seats, plan.getTier());
         }
+        int effectiveSeats = 1;
 
         if (!plan.isActive()) {
             throw new BillingException("This plan is no longer available.");
@@ -966,7 +960,7 @@ public class BillingService {
         String authTier = switch (plan.getTier()) {
             case "STARTER" -> "FREE";       // Legacy — billing controls run limit
             case "PRO" -> "PRO";
-            case "MAX" -> "MAX";
+            case "TEAM" -> "TEAM";          // V141 — TEAM is the renamed MAX tier
             case "ENTERPRISE" -> "ENTERPRISE";
             default -> "FREE";
         };
