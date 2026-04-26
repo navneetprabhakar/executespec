@@ -125,7 +125,16 @@ export default function App() {
 
         {/* Wave 2.2 — sandbox → run-submit prefill landing (inside AppLayout for nav consistency) */}
         <Route element={<AppLayout />}>
-          <Route path="runs/new" element={<RunsNewLanding />} />
+          {/* Phase 1.1 #11: drop /runs/new as a top-level entry. RunsNewLanding
+              still exists for the post-sandbox prefill flow but the canonical
+              entry is now /projects (or /welcome for the empty state). */}
+          <Route path="runs/new" element={<Navigate to="/projects" replace />} />
+          <Route path="runs/new/sandbox" element={<RunsNewLanding />} />
+          {/* Phase 1.1 #9: /legacy/billing — soft landing for grandfathered
+              PRO subscribers whose tier-state-changed email links here.
+              Renders /plans with a query flag so the page can show a
+              "your PRO plan still works" banner (non-blocking). */}
+          <Route path="legacy/billing" element={<Navigate to="/plans?legacy=1" replace />} />
           <Route index element={<RunsPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="pricing" element={<PricingPage />} />
