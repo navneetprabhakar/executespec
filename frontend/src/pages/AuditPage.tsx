@@ -264,7 +264,13 @@ export default function AuditPage() {
               {loading && entries.length === 0 ? (
                 <tr><td colSpan={5} className="px-4 py-12 text-center text-muted">Loading...</td></tr>
               ) : entries.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-muted">No audit events found</td></tr>
+                <tr>
+                  <td colSpan={5} className="px-4 py-12 text-center">
+                    {/* Phase 1.1 #12 — empty-state hero (B2B sweep). */}
+                    <p className="text-sm font-medium text-secondary">No audit events for these filters</p>
+                    <p className="text-xs text-muted mt-1">Audit events appear here as users sign in, change tiers, edit org settings, or trigger billable actions. Try widening the date range or clearing the actor filter.</p>
+                  </td>
+                </tr>
               ) : (
                 entries.map((entry) => (
                   <tr key={entry.id} className="border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors">
@@ -314,7 +320,11 @@ export default function AuditPage() {
           {loading && entries.length === 0 ? (
             <li className="px-4 py-12 text-center text-muted text-sm">Loading...</li>
           ) : entries.length === 0 ? (
-            <li className="px-4 py-12 text-center text-muted text-sm">No audit events found</li>
+            <li className="px-4 py-12 text-center">
+              {/* Phase 1.1 #12 — empty-state hero (mobile). */}
+              <p className="text-sm font-medium text-secondary">No audit events for these filters</p>
+              <p className="text-xs text-muted mt-1">Audit events appear here for sign-ins, tier changes, billable actions.</p>
+            </li>
           ) : (
             entries.map((entry) => (
               <li key={entry.id} className="px-4 py-3 space-y-1.5">

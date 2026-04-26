@@ -120,7 +120,13 @@ export default function InvoicesPage() {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted">No invoices found</td>
+                  {/* Phase 1.1 #12 — empty-state hero pattern (B2B sweep). */}
+                  <td colSpan={7} className="px-4 py-10 text-center">
+                    <p className="text-sm font-medium text-secondary">No invoices match these filters</p>
+                    <p className="text-xs text-muted mt-1">
+                      New invoices appear after a subscription, top-up, or per-run charge. Try widening the date range or clearing filters.
+                    </p>
+                  </td>
                 </tr>
               ) : (
                 filtered.map((inv) => (
@@ -175,7 +181,13 @@ export default function InvoicesPage() {
           {loading ? (
             <li className="px-4 py-8 text-center text-muted text-sm">Loading...</li>
           ) : filtered.length === 0 ? (
-            <li className="px-4 py-8 text-center text-muted text-sm">No invoices found</li>
+            <li className="px-4 py-10 text-center">
+              {/* Phase 1.1 #12 — empty-state hero (mobile). */}
+              <p className="text-sm font-medium text-secondary">No invoices match these filters</p>
+              <p className="text-xs text-muted mt-1">
+                New invoices appear after a subscription, top-up, or per-run charge.
+              </p>
+            </li>
           ) : (
             filtered.map((inv) => (
               <li key={inv.id} className="px-4 py-3 space-y-2">
