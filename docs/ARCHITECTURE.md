@@ -7,7 +7,7 @@
 
 ## 0d. 2026-04-25 refresh — v2.6.3-track enterprise readiness (on `feature/enterprise-readiness-eval`, NOT yet merged)
 
-Adds the customer-facing `.executespec/` folder as the single persistent surface for every artefact ExecuteSpec generates (codemaps, contracts, ADRs, standards, invariants), gates every write through one chokepoint with PR vs DIRECT_PUSH dispatch, and adds 4 new persistence stripes + an activity feed + an export bundle + per-user notification preferences. Full plan in [`docs/plans/pending-enterprise-readiness-execution-eval.md`](plans/pending-enterprise-readiness-execution-eval.md); server-up sweep in [`docs/reports/enterprise-readiness-eval-2026-04-25.md`](reports/enterprise-readiness-eval-2026-04-25.md).
+Adds the customer-facing `.executespec/` folder as the single persistent surface for every artefact ExecuteSpec generates (codemaps, contracts, ADRs, standards, invariants), gates every write through one chokepoint with PR vs DIRECT_PUSH dispatch, and adds 4 new persistence stripes + an activity feed + an export bundle + per-user notification preferences. Plan + server-up sweep doc were archived in the 2026-04-26 cleanup pass; what stays canonical is this section + the per-package summaries below.
 
 - **`.executespec/` folder write contract (E1, V131-V134, package `folder/`):** Every mutation to a customer's `.executespec/` folder routes through `ExecutespecFolderWriter#writeFiles`. Caller allowlist pinned by an ArchUnit test (`ExecutespecFolderWriterCallerAllowlistTest`) — currently 4 approved callers: `BootstrapService` (E1.5 initial scaffold), `ContractDriftController` (E2.6 contract index publish), `ContractConsumerController` (E2.7 consumer mirror), `ProjectArchitectureService` (E1.6 codemap/arch publish). Per-(project, repo) `prModeEnum()` selects PR (default — opens setup branch + PR for review) or DIRECT_PUSH (opt-in for trusted high-frequency writes like codemap regen). 4-state status machine on `project_repo`: MISSING → BOOTSTRAP_PENDING → PR_PENDING → READY. `ProjectConfigPathResolver` returns FOLDER_FLAT / FOLDER_NAMESPACED / DATABASE per (project, repo) so callers don't re-implement the multi-project namespacing decision tree.
 - **Activity feed (E1, V133, package `activity/`):** Customer-facing project activity feed at `GET /api/projects/{id}/activity`. `activity_feed` partitioned-by-month with 12 partitions seeded 2026-04 → 2027-03; partition + retention jobs (`@Scheduled`, `@SchedulerLock`) keep the table bounded. `ActivityEventEmitter` is the single chokepoint that decides which surfaces (FEED only / FEED+AUDIT / AUDIT only) an event lands on; AUDIT-tagged events dual-write into the existing `activity_audit` (V22) for compliance. Hot-path indexes: `project_time`, `event_type`, `target`, `actor`.
@@ -33,7 +33,7 @@ Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-
 - **Cost shape (slice 5a):** `V2RunCostTracker.estimateRunTierAware(provider, complexities, strategy)` overload computes per-strategy phase costs. Persisted on `pipeline_run.{classifier,outline,expansion,coherence}_{input,output}_tokens, _cost_usd` columns via before/after `costTracker.snapshot()` diffs in each phase helper. Run totals auto-aggregate via the in-memory accumulator. Frontend `RunDetailTabs` Overview tab shows a `PlannerPhaseBreakdown` component when `planStrategy` is set.
 - **Resume awareness (slice 4 + partial 5d):** `agent_task.{task_type, expansion_status, expanded_at}` written by `persistTasks`. `StartupRunResumerV2` failure message reports `expanded=N pending=M failed=K` per interrupted run. Auto-replay re-trigger (re-run phase 2 from persisted outline) is the one open follow-up.
 - **Migration V130** (additive only, all columns nullable): `pipeline_run` gets the strategy + outline JSON + per-phase cost columns; `agent_task` gets task_type + expansion_status + expanded_at + a partial index on `plan_strategy WHERE NOT NULL`.
-- **Calibration methodology (slice 5e):** documented in [`hierarchical-planner-plan.md`](hierarchical-planner-plan.md) — 4 audit SQL queries, tuning targets, threshold-tuning notes, weekly→monthly cadence, calibration-report template under `docs/reports/planner-calibration-<date>.md`.
+- **Calibration methodology (slice 5e):** 4 audit SQL queries (classifier accuracy, estimate accuracy, heuristic leakage, per-phase cost), tuning targets, threshold-tuning notes for `HEURISTIC_FAST_PATH_CHAR_CAP` / `DOMAIN_EXPLOSIVE` / `MULTI_FEATURE_PHRASES`, weekly→monthly audit cadence. (The standalone plan doc was archived in the 2026-04-26 cleanup pass now that all 5 slices are shipped on the branch.)
 
 ## 0b. 2026-04-23 refresh — v2.6.1 Waves 1-6 (merged to `dev` + `main` + deployed to `dev.executespec.ai`)
 
@@ -59,7 +59,7 @@ Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-
 
 ## 0. 2026-04-16 refresh — Validation v3 (in progress)
 
-This architecture document describes the V2 pipeline as it ships on `dev` today. A 5-pillar rewrite of the validation layer is in progress — Pillar 1 (planner requirement graph) is open as PR #21. The full plan lives at [`.claude/plans/immutable-painting-platypus.md`](../.claude/plans/immutable-painting-platypus.md). Tracked behind the feature flag `validation.v3-strict` (default OFF in prod).
+This architecture document describes the V2 pipeline as it ships on `dev` today. A 5-pillar rewrite of the validation layer is in progress — Pillar 1 (planner requirement graph) is open as PR #21. The full plan lives at `.claude/plans/immutable-painting-platypus.md`. Tracked behind the feature flag `validation.v3-strict` (default OFF in prod).
 
 **Pillar 1 — planner requirement graph (v2.5.11, open)**
 
@@ -83,7 +83,7 @@ The planner emits a structured requirement graph alongside the task list:
 > **Canonical current architecture:** [`CLAUDE.md`](../CLAUDE.md).
 > **Open gaps:** [`docs/plans/partial-work.md`](plans/partial-work.md) §3 (consolidated 2026-04-25 from the original `harness-v2-remaining-work.md`).
 > **Pilot v3.0 (commit `6bbfde9b`):** project workspace layer added on top of V2 — see
-> [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md). Key additions: dual-scope
+> `docs/plans/pilot-v3-plan.md`. Key additions: dual-scope
 > `ProjectRepo` registry, multi-repo workspace clone + per-repo PR creation,
 > per-repo `ProjectCodeMap` + project-wide `ProjectArchitectureDoc` with SHA-based
 > staleness, pre-plan `FeatureAssessmentService` (heuristic by default; LLM-backed
@@ -628,7 +628,7 @@ graph TB
 
 ## 5. Security Architecture
 
-> Full requirements: [docs/requirements/security-guardrails.md](requirements/security-guardrails.md)
+> Full requirements: docs/requirements/security-guardrails.md
 
 8-layer defense-in-depth model. No single layer failing results in full compromise.
 
@@ -1243,6 +1243,6 @@ Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GC
 - **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `OutlinePlannerAgent` as `{{REFERENCE_DOCS}}` (was `PlannerAgentV2` until slice 5b deletion) and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
 - **Architecture diff** — frontend renders an LCS line diff of `architecture.md` vN vs vN-1.
 - **Auto-push** — `project.runs.auto-push` flipped ON via V96/V97. Every successful project-scoped V2 run runs `pushToGitHubIfConfigured()` automatically.
-- **Memory budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8K → 12K. Vector spill-over for snapshots > 12K is on the backlog (see [`docs/plans/open-work-2026-04-18.md`](plans/open-work-2026-04-18.md) §D2).
+- **Memory budget** — `ProjectMemoryProvider.MAX_MEMORY_TOKENS` 8K → 12K. Vector spill-over for snapshots > 12K is on the backlog.
 - **Schema** — V95 (`pgvector` + `project_document` + `project_document_chunk` with `vector(1536)` + ivfflat cosine), V96 + V97 (auto-push flag).
 - **New dependency** — Apache Tika 2.9.2 (`tika-core` + `tika-parsers-standard-package`).

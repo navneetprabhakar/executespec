@@ -1,1 +1,0 @@
-{"id":"3ad2524d-7819-48d3-820d-7dca864d9685","orgId":"511aa951-73e4-4202-b566-25ae9da56a40","name":"ProjectViewE2E-20260414-215635","description":"E2E test fixture","status":"ACTIVE","aiProvider":"OPENAI","createdAt":"2026-04-14T16:26:36.185593Z","branchNamingPattern":"executespec/{runId}/{description}","targetBranch":"main","defaultReviewers":null}
