@@ -25,9 +25,9 @@ import java.time.Duration;
  *
  * <p>Lifecycle:
  * <pre>
- *   PipelineHarness.executeRunAsync()           → runKeyStore.put(runId, keys)
+ *   V2RunOrchestrator.executeRunAsync()           → runKeyStore.put(runId, keys)
  *   [agents run normally — L1 hit for every call]
- *   PipelineHarness.runBackgroundValidation finally → runKeyStore.remove(runId)
+ *   V2RunOrchestrator.runBackgroundValidation finally → runKeyStore.remove(runId)
  * </pre>
  */
 @Service

@@ -2,7 +2,7 @@ package com.navneet.executespec.integration;
 
 /**
  * Normalised inbound event produced by every InboundAdapter.
- * Carries everything PipelineHarness needs to submit a run.
+ * Carries everything the run orchestrator needs to submit a run.
  */
 public record IntegrationEvent(
     String sourceType,          // "JIRA" | "CONFLUENCE" | "SERVICENOW" | "PAGERDUTY"

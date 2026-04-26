@@ -20,7 +20,7 @@ import static java.util.stream.Collectors.toMap;
  * Listens to pipeline events and notifies external source systems.
  *
  * <p>This component owns the <em>outbound</em> side of integrations only.
- * It has no dependency on {@link IntegrationManager} or {@code PipelineHarness} —
+ * It has no dependency on {@link IntegrationManager} or the V2 run orchestrator —
  * it purely reacts to Spring events and delegates to the appropriate
  * {@link OutboundAdapter}.
  *

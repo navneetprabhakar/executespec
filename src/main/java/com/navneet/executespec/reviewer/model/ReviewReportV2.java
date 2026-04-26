@@ -49,7 +49,7 @@ public class ReviewReportV2 {
 
     /**
      * Maps V2 verdict to V1-style recommendation string for backward compatibility.
-     * Used by ApprovalGate and PipelineHarness REWORK checks during migration.
+     * Legacy compat path; no live caller as of V2 cutover.
      */
     public String getRecommendationCompat() {
         if (verdict == null) return "MERGE";

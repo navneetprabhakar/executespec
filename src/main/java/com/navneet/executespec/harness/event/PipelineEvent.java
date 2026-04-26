@@ -12,7 +12,7 @@ import java.util.List;
  *
  * <p>Listeners use {@code @EventListener} (optionally with {@code @Async})
  * to react to specific transitions without being directly wired into
- * {@link com.navneet.executespec.harness.PipelineHarness}.
+ * the V2 run orchestrator.
  */
 public sealed interface PipelineEvent {
 
@@ -41,7 +41,7 @@ public sealed interface PipelineEvent {
 
     /**
      * Recovery service requests a fresh restart of a run.
-     * PipelineHarness handles this event by calling {@code submitRun}.
+     * V2RunOrchestrator handles this event by calling {@code submitRun}.
      */
     record RestartRun(
             String originalRunId,
