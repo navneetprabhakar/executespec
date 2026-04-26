@@ -66,6 +66,8 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **`pricing/`** — PricingTable, FeasibilityEstimator
 - **`integrations/`** — IntegrationCard, IntegrationLogo
 - **`shared/`** — AnimatedCounter, EmptyState, GlassPanel, GlowDot, MarkdownContent, SkeletonLoader, StatusBadge, Toast, ViewModeToggle, ResponsiveModal (v2.5.12 hardened), **Button** (v2.5.12 cva primitive), **Checkbox** (v2.5.12), **Radio** (v2.5.12), **Tooltip** (v2.6.1 + Plan 1 #4 — `wrap` + `maxWidthClass` props for multi-line definitions), **Glossary** (Plan 1 #4 — wraps any term with hover/focus tooltip carrying the definition from `lib/glossary.ts`; falls through cleanly when term unknown)
+
+> **Per-seat TEAM UI restored (on `feature/product-split-prep`, NOT yet merged):** `PlanCard.tsx` regains its per-seat picker for TEAM (2-20 seats); `OrgAdminDashboard.tsx` regains its TEAM seats panel + `handleSeatsAdjust` handler; tier union types in `lib/api.ts` / `useViewMode.ts` / `TierBadge.tsx` re-expand to `'FREE' \| 'PRO' \| 'TEAM' \| 'MAX' \| 'ENTERPRISE'`; `adjustOrgSeats` helper restored in `lib/api.ts`. Plus 11 tier-string flips across `QuotaUsageBar` / `Header` / `Sidebar` / `ViewModeToggle` / `NewRunModal` / `ProviderModelSelector` / `UsageBadge` / `SettingsPage` / `BillingPage` / `OrgSettingsPage` / `ProjectsListPage` reverse V141's `'MAX'` → `'TEAM'` rename. Surface mapping (TEAM → Build, MAX → Vibe) policed by backend `TierProductSurfaceMapper`; frontend reads it via the `/api/billing/plans` payload (no client-side enforcement yet).
 - **`ui/`** — LockedFeature, UpgradeModal
 - **`auth/`** — Auth-related UI components
 
