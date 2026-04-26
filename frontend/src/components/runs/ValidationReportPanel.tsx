@@ -5,6 +5,7 @@ import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import ScoreCard from './ScoreCard';
 import ScoreRing from './ScoreRing';
 import SignalBreakdown from './SignalBreakdown';
+import RunStamp from '@/components/project/RunStamp';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
@@ -16,6 +17,17 @@ interface ValidationReportPanelProps {
    *  narrative (e.g. "CLEAN_WITH_INTERMEDIATE_WARNINGS", "TESTS_FAILED:2_OF_7").
    *  Passed in from the parent which reads RunSummary. */
   statusReason?: string | null;
+  /** v2.6.4 — RunStamp metadata. When provided, the expanded panel renders a
+   *  shareable 1-line stamp + share-link / embed button at the bottom (per
+   *  UX & Wireframe Report §6.3 #3). All fields optional — the stamp omits
+   *  anything missing rather than rendering em-dashes. */
+  stampMeta?: {
+    runStartedAt?: string | null;
+    runCompletedAt?: string | null;
+    tasksTotal?: number | null;
+    tasksComplete?: number | null;
+    provider?: string | null;
+  };
 }
 
 /**
@@ -92,7 +104,7 @@ function prettyCheckName(raw: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-export default function ValidationReportPanel({ runId, status, statusReason }: ValidationReportPanelProps) {
+export default function ValidationReportPanel({ runId, status, statusReason, stampMeta }: ValidationReportPanelProps) {
   const [report, setReport] = useState<ValidationReportData | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [sharing, setSharing] = useState(false);
@@ -471,6 +483,30 @@ export default function ValidationReportPanel({ runId, status, statusReason }: V
                     </span>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* v2.6.4 — RunStamp: shareable 1-line stamp + copy/share/embed.
+                Per UX & Wireframe Report §6.3 #3 — every COMPLETE run produces
+                a free distribution loop. Only render when we have stamp meta
+                AND the run is in a terminal state worth bragging about. */}
+            {(status === 'COMPLETE' || status === 'PARTIAL') && stampMeta && (
+              <div className="pt-2 border-t border-[var(--border-default)]">
+                <h4 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary mb-1.5">
+                  Share this run
+                </h4>
+                <RunStamp
+                  runId={runId}
+                  durationMs={
+                    stampMeta.runStartedAt && stampMeta.runCompletedAt
+                      ? new Date(stampMeta.runCompletedAt).getTime() - new Date(stampMeta.runStartedAt).getTime()
+                      : null
+                  }
+                  verifiedScore={report.verifiedScore ?? report.accuracyScore ?? null}
+                  tasksTotal={stampMeta.tasksTotal ?? null}
+                  tasksComplete={stampMeta.tasksComplete ?? null}
+                  provider={stampMeta.provider ?? null}
+                />
               </div>
             )}
           </div>
