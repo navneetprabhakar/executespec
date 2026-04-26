@@ -5,6 +5,7 @@ import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import ScoreCard from './ScoreCard';
 import ScoreRing from './ScoreRing';
 import SignalBreakdown from './SignalBreakdown';
+import VerdictPill from './VerdictPill';
 import RunStamp from '@/components/project/RunStamp';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
@@ -253,17 +254,29 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
         }
         <Shield className={cn('h-3.5 w-3.5 flex-shrink-0', resultCfg.shieldCls)} />
         <span className="text-xs font-medium text-primary">Validation Report</span>
-        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-sm border font-medium', resultCfg.cls)}>
+        {/* Plan 1 (this-week #3): verdict leads, numeric score is secondary
+            disclosure. The {resultCfg.label} chip kept for back-compat
+            (CLEAN/FIXED/UNRESOLVED palette is familiar) but visually demoted. */}
+        <VerdictPill
+          size="lg"
+          finalBuildPassed={report.finalBuildPassed}
+          testsPassed={report.testsPassed}
+          testsTotal={report.testsTotal}
+          reviewerVerdict={report.reviewerVerdict}
+          verifiedScore={report.verifiedScore}
+          statusReason={statusReason}
+        />
+        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-sm border font-medium opacity-70', resultCfg.cls)}>
           {resultCfg.label}
         </span>
         {primaryScore != null && (
           <span
-            className={cn('text-xs font-mono px-2 py-0.5 rounded-sm border tabular-nums font-medium', primaryScoreCls)}
+            className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded-sm border tabular-nums opacity-70', primaryScoreCls)}
             title={primaryLabel === 'Verified'
               ? 'Deterministic score: build + tests + reviewer verdict (v2.5.10)'
               : 'LLM-estimated spec coverage (legacy pre-V106)'}
           >
-            <span className="opacity-70 mr-1">{primaryLabel === 'Verified' ? 'Ver' : 'Acc'}</span>
+            <span className="opacity-70 mr-0.5">{primaryLabel === 'Verified' ? 'Ver' : 'Acc'}</span>
             {primaryScore}<span className="opacity-60">/100</span>
           </span>
         )}
