@@ -166,6 +166,31 @@ public class Org {
     @Column(name = "confluence_api_token")
     private String confluenceApiToken;
 
+    // ── V127 (Wave 3) — SSO/SAML on the org ─────────────────────────────────
+    /** null | "GOOGLE_OIDC" | "OKTA_SAML" | "AZURE_AD_SAML" */
+    @Column(name = "sso_provider", length = 32)
+    private String ssoProvider;
+
+    /** When true, password login is rejected — SSO required for org members. */
+    @Column(name = "sso_enforced", nullable = false)
+    @Builder.Default
+    private boolean ssoEnforced = false;
+
+    @Column(name = "sso_metadata_url", length = 1024)
+    private String ssoMetadataUrl;
+
+    /** Email-domain → SSO mapping ("acme.com" → use this org's SSO). */
+    @Column(name = "sso_domain")
+    private String ssoDomain;
+
+    // ── V127 (Wave 3) — GitHub App installation ─────────────────────────────
+    /** Numeric installation id from GitHub App install webhook. */
+    @Column(name = "github_installation_id")
+    private Long githubInstallationId;
+
+    @Column(name = "github_installed_at")
+    private Instant githubInstalledAt;
+
     @Column(name = "created_by_user_id", nullable = false)
     private String createdByUserId;
 
