@@ -39,8 +39,21 @@ public class UserActivationEvent {
     @Builder.Default
     private Instant occurredAt = Instant.now();
 
-    /** JSON-encoded properties forwarded to PostHog. Nullable. */
+    /** JSON-encoded properties forwarded to PostHog. Nullable.
+     *
+     * <p>{@code @JdbcTypeCode(SqlTypes.JSON)} is required so Hibernate binds the
+     * String as a JSONB parameter (PGobject under the hood) instead of the
+     * default VARCHAR. PostgreSQL refuses the implicit VARCHAR→JSONB coercion
+     * with {@code ERROR: column "properties_json" is of type jsonb but expression
+     * is of type character varying}. {@code columnDefinition = "jsonb"} alone
+     * only affects DDL generation, not runtime binding — the missing JdbcTypeCode
+     * was why every activation-event insert was failing silently from
+     * 2026-04-22 (V125 ship date) through 2026-04-26 (this fix). Pattern
+     * matches every other jsonb column in the codebase (PipelineRun.planOutlineJson,
+     * Project.repoIds, ContractVersion.payload, etc).
+     */
     @Column(name = "properties_json", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
     private String propertiesJson;
 
     @Data

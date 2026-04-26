@@ -110,7 +110,3 @@ export function readSignupAttribution(): {
   }
 }
 
-/** For tests + diagnostics. */
-export function isAnalyticsEnabled(): boolean {
-  return client !== null;
-}

@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap;
  * Tests only execute when BOTH the preview is running AND tests are compiled.
  *
  * <p>Uses Spring events + in-memory coordination state per run.
- * No internal timeout — the report-generation safety cap in PipelineHarness
+ * No internal timeout — the report-generation safety cap in V2RunOrchestrator
  * (10 min on the CompletableFuture) is the single timeout authority.
  * Call {@link #cancelIfPending(String)} before report generation to release
  * runs whose preview never started.
@@ -103,7 +103,7 @@ public class TestPreviewCoordinator {
         }
 
         // Start preview now that tests are ready — ensures full TTL for test execution.
-        // The 10-minute CompletableFuture timeout in PipelineHarness.generateValidationReport()
+        // The 10-minute CompletableFuture timeout in V2RunOrchestrator.generateValidationReport()
         // is the safety net if preview startup takes too long.
         startPreviewForTests(event.runId());
         // Don't call tryExecute() here — onPreviewReady() will trigger it when preview is live
@@ -115,7 +115,7 @@ public class TestPreviewCoordinator {
      * avoiding the race condition where preview expires before tests finish.
      */
     private void startPreviewForTests(String runId) {
-        // Check if a preview is already running (auto-started by PipelineHarness after COMPLETE).
+        // Check if a preview is already running (auto-started by V2RunOrchestrator after COMPLETE).
         // If so, reuse it instead of starting a duplicate.
         var existingSession = previewService().getStatus(runId);
         if (existingSession != null && existingSession.status() == PreviewStatus.RUNNING) {
@@ -211,7 +211,7 @@ public class TestPreviewCoordinator {
 
     /**
      * Cancel pending test execution for a run if preview never started.
-     * Called by PipelineHarness before report generation so the CompletableFuture
+     * Called by V2RunOrchestrator before report generation so the CompletableFuture
      * is completed immediately (with an empty summary) instead of blocking for
      * the 10-minute safety timeout.
      *

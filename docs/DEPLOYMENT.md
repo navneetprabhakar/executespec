@@ -49,6 +49,8 @@ For the full per-version description of every migration, see `JAVADOC.md §21.1 
 | V128 | provider_recommendation_log + smart-routing feature flags (Wave 4) |
 | V129 | startup_program_application + 14-day MAX trial columns + free-tier teammate flag (Wave 5) |
 | V130 | Hierarchical planner — in progress on `feature/hierarchical-planner`, not yet on `main` |
+| V131–V139 | Enterprise readiness (folder + activity + contracts + standards + ADR + invariants + export + notification prefs) — `feature/enterprise-readiness-eval`, not yet on `main` |
+| V140–V142 | Tier-cap alignment, MAX→TEAM rename, dead-flag drop (`codegen.react_native.enabled`, `pricing.persona-first`) — `feature/enterprise-readiness-eval`, not yet on `main` |
 
 > Operational note: `application.yml` sets `spring.flyway.out-of-order=true` + `ignore-migration-patterns: repeatable:missing,versioned:missing` so boot tolerates the V119 orphan in `flyway_schema_history` (left over from the preview-engine repo split).
 

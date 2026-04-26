@@ -11,9 +11,6 @@ import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
-import com.navneet.executespec.billing.gateway.StripePaymentGateway;
-import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
-import com.navneet.executespec.auth.controller.OrgController.SeatsAdjustResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -38,13 +35,7 @@ public class OrgService {
     private final PaymentAuditService paymentAuditService;
     private final ActivityAuditService auditService;
     private final MailService mailService;
-    private final BillingSubscriptionRepository subRepo;
-    private final StripePaymentGateway stripeGateway;
 
-    // V141 (2026-04-26) — TEAM_MIN_SEATS / TEAM_MAX_SEATS removed along
-    // with the seat-aware adjustSeats path. The "TEAM" name now refers
-    // to the renamed MAX tier (BYOK unlimited). subRepo + stripeGateway
-    // fields kept for now since other call paths still reference them.
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Transactional
@@ -480,28 +471,4 @@ public class OrgService {
                 Map.of("tier", oldTier), Map.of("tier", newTier));
     }
 
-    /**
-     * V141 (2026-04-26) — the v2.6.1-Wave-1 per-seat TEAM tier was deleted.
-     * The "TEAM" name now refers to the renamed MAX tier ($29/mo BYOK,
-     * unlimited members under tier_config). Seat adjustment is no longer a
-     * meaningful operation — every TEAM org has effectively unlimited seats
-     * subject to tier_config.max_org_members.
-     *
-     * <p>The endpoint is kept around so legacy clients hitting
-     * {@code POST /api/org/me/seats/adjust} get a clean structured 410 Gone
-     * with an explanation, rather than 404 / 500.
-     */
-    @Transactional
-    public SeatsAdjustResponse adjustSeats(String orgId, int newSeats, String performedBy) {
-        // Touch the field set so Spring + the unused-import linter stay
-        // happy; remove this stub once the controller is retired.
-        orgRepo.findById(orgId)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
-        log.info("adjustSeats called on V141-deprecated path: orgId={} newSeats={} performedBy={}",
-                orgId, newSeats, performedBy);
-        throw new ResponseStatusException(HttpStatus.GONE,
-                "Seat adjustment is no longer supported. The TEAM tier is now BYOK-unlimited "
-                + "(no per-seat pricing). Contact support if you need to migrate an old TEAM "
-                + "subscription.");
-    }
 }

@@ -146,7 +146,7 @@ Entry point: `V2RunOrchestrator.submitRun(...)` — see [ARCHITECTURE.md §3 V2 
 | `billing/entity/` | `BillingProfile`, `BillingSubscription`, `Invoice`, `Payment`, `RunTopupCredit`, `WebhookEvent` |
 | `pricing/` | `ModelPricing`, `ModelPricingRepository` (per-provider per-tier $ rates) |
 
-Wave 1 additions (v2.6.1): seat-aware Stripe checkout, `cancelAtPeriodEnd` interface method, `POST /api/org/me/seats/adjust`, TEAM tier ($49/seat, 2-20 seats).
+Wave 1 additions (v2.6.1): seat-aware Stripe checkout, `cancelAtPeriodEnd` interface method, TEAM tier ($49/seat, 2-20 seats — superseded by V141 ladder consolidation that renamed MAX → TEAM as $29/mo BYOK unlimited).
 
 ---
 
@@ -229,7 +229,7 @@ ENTERPRISE + MAX project-level workbench for multi-repo, multi-solution work.
 | Package | Key files |
 |---------|-----------|
 | `router/` | `LlmProvider` enum (ANTHROPIC, OPENAI, GEMINI), `ModelResolver`, `ModelMatrixProperties`, `ProviderHealthTracker` (Redis circuit breaker), `ProviderRecommendationService` (smart routing scaffold, Wave 4), `ModelRegistry`, `ResolvedModel`, `RunProviderPinStore` |
-| `agent/` | `LlmRouter` (V1 — still used by `AccuracyAssessmentService`, `ConversationAgent`, test-gen), `PromptAssembler`, `ApiKeyResolver`, `RunKeyStore`, `CostEstimator`, `FailurePatternService`, `TokenBudgetMonitor`, `TokenBudgetPolicy`, `PromptAudit`, `ConflictResolverAgent` |
+| `agent/` | `LlmRouter` (V1 — still used by `AccuracyAssessmentService`, `ConversationAgent`, test-gen), `PromptAssembler`, `ApiKeyResolver`, `RunKeyStore`, `CostEstimator`, `TokenBudgetMonitor`, `TokenBudgetPolicy`, `PromptAudit` |
 
 ---
 
@@ -301,7 +301,7 @@ ENTERPRISE + MAX project-level workbench for multi-repo, multi-solution work.
 
 ## Migrations index
 
-V1–V139 across the lifetime of the project. Recent ranges:
+V1–V142 across the lifetime of the project. Recent ranges:
 
 | Range | Theme |
 |-------|-------|
@@ -312,6 +312,7 @@ V1–V139 across the lifetime of the project. Recent ranges:
 | V128 | Smart provider routing scaffold (Wave 4) |
 | V129 | Startup program + 14-day trial (Wave 5) |
 | V130 | Hierarchical planner — `pipeline_run.{plan_strategy, plan_outline_json, classifier_reasoning, {classifier,outline,expansion,coherence}_{input,output}_tokens, _cost_usd}` + `agent_task.{task_type, expansion_status, expanded_at}` + partial index on `plan_strategy`. Committed on `feature/hierarchical-planner`; not yet merged to `dev`/`main`. |
+| V142 | Drop dead feature flags `codegen.react_native.enabled` + `pricing.persona-first` (cleanup pass 2026-04-26). |
 | V131–V139 | **Enterprise readiness (v2.6.3-track, on `feature/enterprise-readiness-eval`, NOT yet merged to dev/main)** — V131 4-state `.executespec/` folder status + bootstrap PR url + last synced at on `project_repo` (E1.1) · V132 `executespec_pr_mode` enum (PR / DIRECT_PUSH) on `project_repo` (E1.4) · V133 `activity_feed` partitioned-by-month + 12 partitions seeded 2026-04 → 2027-03 + 4 hot-path indexes (E1.8/9/10) · V134 `project.config_storage` (FOLDER / DATABASE) + `project_config` table for confidential-project DATABASE opt-out (E1.7) · V135 `contract_registry` + `contract_version` + `contract_consumer` + `contract_drift_event` + 3 hot-path indexes including unresolved-drift partial (E2.1) · V136 `org_standard` + `project_standard_override` + `standards_violation` four-table model + ≥30-char rationale validators (E3.1) · V137 `adr` table caches `.executespec/arch/adrs/<NNNN>-<slug>.md` frontmatter for query speed (E3.12) · V138 `arch_invariant` + `arch_invariant_violation` for continuous architectural properties (E3.14) · V139 `user_notification_pref` (per-user × event × channel opt-in/out matrix) (E4.5). |
 
 Older ranges are documented in `JAVADOC.md §21.1 Flyway Migrations` and `DEPLOYMENT.md`.
