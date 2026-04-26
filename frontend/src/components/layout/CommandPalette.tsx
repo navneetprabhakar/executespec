@@ -7,11 +7,15 @@ import { useState } from 'react';
 import NewRunModal from '@/components/runs/NewRunModal';
 
 const NAV_COMMANDS = [
-  { label: 'Go to Runs',        path: '/',             icon: LayoutDashboard },
-  { label: 'Go to Dashboard',   path: '/dashboard',    icon: BarChart3 },
-  { label: 'Go to Pricing',     path: '/pricing',      icon: DollarSign },
-  { label: 'Go to Integrations',path: '/integrations', icon: Plug },
-  { label: 'Go to Settings',    path: '/settings',     icon: Settings },
+  // Phase 1.1 #16 — copy-only "Missions" rename (URL paths unchanged).
+  { label: 'Go to Missions',     path: '/',              icon: LayoutDashboard },
+  { label: 'Go to Projects',     path: '/projects',      icon: BarChart3 },
+  { label: 'Go to Plans',        path: '/plans',         icon: DollarSign },
+  { label: 'Go to Pricing',      path: '/pricing',       icon: DollarSign },
+  { label: 'Go to Integrations', path: '/integrations',  icon: Plug },
+  { label: 'Go to Invoices',     path: '/invoices',      icon: DollarSign },
+  { label: 'Go to Settings',     path: '/settings',      icon: Settings },
+  { label: 'Go to Org settings', path: '/org/settings',  icon: Settings },
 ];
 
 export default function CommandPalette() {
