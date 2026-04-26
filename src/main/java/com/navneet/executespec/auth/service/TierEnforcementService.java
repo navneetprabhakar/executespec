@@ -4,14 +4,17 @@ import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
+import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.repository.TierConfigRepository;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import com.navneet.executespec.billing.service.RunTopupService;
 import com.navneet.executespec.harness.event.QuotaEvent;
+import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -46,17 +49,22 @@ public class TierEnforcementService {
     private final RunTopupService runTopupService;
     private final BillingSubscriptionRepository subscriptionRepo;
     private final ApplicationEventPublisher eventPublisher;
+    private final ProjectRepository projectRepo;
+    private final ProjectRepoLinkRepository projectRepoLinkRepo;
 
     /** Quota utilisation at which we emit a one-shot warning notification. */
     private static final double QUOTA_WARNING_THRESHOLD = 0.80;
 
     /** Safe fallback limits if tier_config rows are missing. */
-    private static final int FALLBACK_FREE = 3;   // lifetime limit
-    private static final int FALLBACK_PRO  = 50;
+    /** V140 — matches tier_config.FREE.monthly_run_limit; only used when DB lookup fails. */
+    private static final int FALLBACK_FREE = 5;
+    /** V140 — matches tier_config.PRO.monthly_run_limit (was 50, now 20 per the website). */
+    private static final int FALLBACK_PRO  = 20;
     /** v2.6.0 — TEAM stores credits PER SEAT; effective limit = seats × 50 computed in {@link #effectiveOrgLimit}. */
     private static final int FALLBACK_TEAM_PER_SEAT = 50;
     private static final int FALLBACK_MAX  = -1;  // unlimited
-    private static final int FALLBACK_ENT  = 5000;
+    /** V140 — ENTERPRISE is unlimited per the website ("Unlimited (fair use)"). */
+    private static final int FALLBACK_ENT  = -1;
 
     /** Default per-run cost budgets (USD). */
     private static final double DEFAULT_FREE_COST_BUDGET = 3.0;
@@ -209,6 +217,91 @@ public class TierEnforcementService {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS,
                     "Apply limit reached (" + run.getApplySuggestionCount() + "/" + limit + "). Create a fresh run instead.");
         }
+    }
+
+    /**
+     * V140 — Assert the caller can create another project under {@code orgId}.
+     *
+     * <p>Resolution order: SUPER_ADMIN bypass; otherwise look up the
+     * effective tier (org tier if {@code orgId} is non-null, else
+     * user.tier) and read {@code tier_config.max_projects_per_org}. If
+     * the limit is non-negative and the org's current ACTIVE project
+     * count meets or exceeds it, throws 403 with an upgrade hint.
+     *
+     * <p>Throws 401 if the user is unknown.
+     */
+    public void assertCanCreateProject(String userId, String orgId) {
+        AppUser user = userRepo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
+
+        String tier = resolveTierForLimitCheck(user, orgId);
+        int limit = tierConfigRepo.findById(tier)
+                .map(TierConfig::getMaxProjectsPerOrg)
+                .orElse(-1);
+        if (limit < 0) return; // unlimited
+
+        // Project.org_id is non-nullable in the schema, so org-level count
+        // is the only meaningful scope. If orgId is null we conservatively
+        // skip enforcement (the create call will fail at persist anyway).
+        if (orgId == null) return;
+        long current = projectRepo.countByOrgIdAndStatus(orgId, "ACTIVE");
+
+        if (current >= limit) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Tier " + tier + " allows " + limit + " project" + (limit == 1 ? "" : "s")
+                            + " per org. Upgrade to MAX for 10 or ENTERPRISE for unlimited.");
+        }
+    }
+
+    /**
+     * V140 — Assert the caller can link another repo to {@code projectId}.
+     *
+     * <p>Resolution order: SUPER_ADMIN bypass; otherwise look up the
+     * effective tier (project's org tier if the project has an org, else
+     * user.tier) and read {@code tier_config.max_repos_per_project}. If
+     * the limit is non-negative and the project already has that many
+     * (or more) repo links, throws 403 with an upgrade hint.
+     *
+     * <p>Throws 401 if the user is unknown, 404 if the project is unknown.
+     */
+    public void assertCanLinkRepoToProject(String userId, String projectId) {
+        AppUser user = userRepo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.UNAUTHORIZED, "User not found"));
+
+        if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
+
+        Project project = projectRepo.findById(projectId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+
+        String tier = resolveTierForLimitCheck(user, project.getOrgId());
+        int limit = tierConfigRepo.findById(tier)
+                .map(TierConfig::getMaxReposPerProject)
+                .orElse(-1);
+        if (limit < 0) return; // unlimited
+
+        long current = projectRepoLinkRepo.countByProjectId(projectId);
+        if (current >= limit) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Tier " + tier + " allows " + limit + " repo" + (limit == 1 ? "" : "s")
+                            + " per project. Upgrade to MAX for 10 or ENTERPRISE for unlimited.");
+        }
+    }
+
+    /**
+     * Resolves the effective tier used by the new project / repo limit
+     * checks. Org tier wins when {@code orgId} is non-null; otherwise the
+     * caller's user tier applies (this is the FREE-solo path).
+     */
+    private String resolveTierForLimitCheck(AppUser user, String orgId) {
+        if (orgId != null) {
+            Org org = orgRepo.findById(orgId).orElse(null);
+            if (org != null && org.getTier() != null) {
+                return org.getTier().toUpperCase();
+            }
+        }
+        return user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
     }
 
     /**
@@ -403,7 +496,7 @@ public class TierEnforcementService {
         if ("FREE".equals(tier)) {
             if (user.getPersonalRunCount() >= limit) {
                 throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                        "You've used all " + limit + " free runs. Upgrade to Pro for 10 runs/month or MAX for unlimited BYOK.");
+                        "You've used all " + limit + " free runs. Upgrade to Pro for 20 credits/month or MAX for unlimited BYOK.");
             }
             return;
         }
