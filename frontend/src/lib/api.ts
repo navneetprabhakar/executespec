@@ -2367,9 +2367,3 @@ export const compactProjectChat = (projectId: string) =>
     { method: 'POST' },
   );
 
-// Assessment approval (R4)
-export const approveAssessment = (runId: string, constraints?: string[]) =>
-  req<void>(`/runs/${runId}/approve-assessment`, {
-    method: 'POST',
-    body: JSON.stringify({ constraints: constraints ?? [] }),
-  });
