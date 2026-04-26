@@ -49,11 +49,13 @@ export default function PlansPage() {
       const currency = p.baseAmountInr > 0 ? 'INR' : 'USD';
       byTier[p.tier][currency] = p;
     }
-    // v2.6.0 — tier order: PRO (hidden via backend lifecycle filter for new
-    // buyers, still shown to existing PRO subscribers as CURRENT), TEAM,
-    // then MAX. The /api/billing/plans endpoint already filters HIDDEN rows
-    // so TEAM launch day PRO disappears automatically.
-    const tierOrder = ['PRO', 'TEAM', 'MAX'];
+    // Phase 1.1 #9: PRO is hidden from new buyers entirely (the backend
+    // lifecycle filter on /api/billing/plans already excludes PRO when
+    // lifecycle_state=HIDDEN; this list omits it as defense-in-depth).
+    // Grandfathered PRO subscribers reach their plan via /legacy/billing.
+    // New buyers see TEAM (Build surface, $49/seat) and MAX (Vibe surface,
+    // $29/mo BYOK) only.
+    const tierOrder = ['TEAM', 'MAX'];
     return tierOrder
       .filter(t => byTier[t])
       .map(t => byTier[t][showInr ? 'INR' : 'USD'])

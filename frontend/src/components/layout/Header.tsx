@@ -6,7 +6,6 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { ACTIVE_STATUSES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
-import ViewModeToggle from '@/components/shared/ViewModeToggle';
 import NotificationBell from './NotificationBell';
 
 // v2.5.14 (Phase 1.4) — dynamic breadcrumb. Previous header hard-coded
@@ -78,8 +77,12 @@ export default function Header() {
         )}
       </div>
 
-      {/* View mode toggle — visible on all breakpoints, uses shorter "Proj" label at mobile */}
-      <ViewModeToggle />
+      {/* Phase 1.1 #8: view-mode toggle retired from the header — surface
+          will be domain-driven in Phase 2 (app.executespec.ai vs.
+          build.executespec.ai). Tier defaults pre-split: paid users
+          land in 'pro' mode, free users in 'vibe'. The component is
+          retained in the codebase for the OrgProjectsPage Dashboard
+          button (still useful as an explicit override). */}
 
       {/* Spacer */}
       <div className="flex-1" />
