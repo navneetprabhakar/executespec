@@ -57,7 +57,9 @@ export const NAV_ITEMS: {
   superAdminOnly?: boolean;
   requiredPermission?: string;
 }[] = [
-  { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
+  // Phase 1.1 #16 — "Mission" as primary noun in user-visible copy.
+  // URL paths + DTO keys keep "run" — copy-only rename per the plan.
+  { path: '/',             label: 'Missions',     icon: 'LayoutDashboard', adminOnly: false },
   // v2.5.14 Phase 3.1 — exec summary for Business Owner persona.
   // Gated behind canViewCostBreakdown (PRO/MAX/ENTERPRISE) — FREE can't see
   // the spend aggregate because that's a paid-tier analytics feature.
