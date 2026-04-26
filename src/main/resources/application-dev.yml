@@ -135,7 +135,18 @@ app:
   jwt:
     secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://dev.executespec.ai}
+    # Plan 1 (this-week #5): include staging clones of the future surface
+    # subdomains so a Phase-2 dev rollout doesn't need a config push.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://dev.executespec.ai,https://app.dev.executespec.ai,https://build.dev.executespec.ai}
+  product-routing:
+    # Phase 1 dev: the existing dev.* host is logically the executespec
+    # (B2B) surface. The vibe origin lands on a not-yet-deployed staging
+    # subdomain — wired now so OAuthSurfaceResolver works the day the
+    # consumer surface boots, no config change needed.
+    app-origin: ${APP_SURFACE_ORIGIN:https://app.dev.executespec.ai}
+    build-origin: ${BUILD_SURFACE_ORIGIN:https://dev.executespec.ai}
+    app-return-url: ${APP_SURFACE_RETURN_URL:https://app.dev.executespec.ai/auth/callback}
+    build-return-url: ${BUILD_SURFACE_RETURN_URL:https://dev.executespec.ai/auth/callback}
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 razorpay:
