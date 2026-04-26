@@ -56,8 +56,8 @@ public class TierEnforcementService {
     private static final double QUOTA_WARNING_THRESHOLD = 0.80;
 
     /** Safe fallback limits if tier_config rows are missing. */
-    /** V140 — matches tier_config.FREE.monthly_run_limit; only used when DB lookup fails. */
-    private static final int FALLBACK_FREE = 5;
+    /** V145 (Phase 1.3 #33 — loosened) — matches tier_config.FREE.monthly_run_limit. */
+    private static final int FALLBACK_FREE = 10;
     /** V140 — matches tier_config.PRO.monthly_run_limit (was 50, now 20 per the website). */
     private static final int FALLBACK_PRO  = 20;
     /** v2.6.0 — TEAM stores credits PER SEAT; effective limit = seats × 50 computed in {@link #effectiveOrgLimit}. */
