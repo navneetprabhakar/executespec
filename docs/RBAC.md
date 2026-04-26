@@ -85,7 +85,6 @@ Legacy: `STARTER` maps to `FREE` in auth system.
 | **TierLifecycleController** (v2.6.1 Wave 1) | `GET /api/admin/tiers` | `SUPER_ADMIN` |
 | | `PUT /api/admin/tiers/{tierId}/lifecycle` | `SUPER_ADMIN` |
 | | `PUT /api/admin/billing-plans/{id}/lifecycle` | `SUPER_ADMIN` |
-| **OrgController** (v2.6.1 Wave 1) | `POST /api/org/me/seats/adjust` | `ORG_ADMIN` or `SUPER_ADMIN` (TEAM tier only; rejects reducing below active-member count with 422) |
 | **OnboardingController** (v2.6.1 Wave 2) | `GET /api/onboarding/sample-specs`, `POST /pick-sample`, `GET /sandbox-status` | `authenticated` |
 | **AdminReconciliationController** | `POST /api/admin/executions/reconcile` | `SUPER_ADMIN` (operational cleanup for stuck `ExecutionRun` rows) |
 
@@ -132,7 +131,7 @@ Resolved by `TierPermissionService.resolve(user)`. Priority: SUPER_ADMIN > FINAN
 | API key requirement | System keys | System keys | System keys | Own keys required | Org policy |
 | Monthly counter reset zone | Asia/Kolkata 00:00 IST on 1st (`MonthlyRunCounterResetJob`) | Billing cycle | Billing cycle | — | — |
 
-**Seat enforcement (TEAM only):** `InvitationService` returns 402 Payment Required when active members + pending invites would exceed `org.seat_count`. Adjusting via `POST /api/org/me/seats/adjust` rejects reductions below the active-member count.
+**Seat enforcement (TEAM only):** `InvitationService` returns 402 Payment Required when active members + pending invites would exceed `org.seat_count`.
 
 ---
 
