@@ -46,7 +46,10 @@ public class RunCompletionNotifier {
             }
 
             String title = "Run complete: " + pickTitle(run);
-            String body = run.getRunSummary() != null ? run.getRunSummary() : "Your spec has been executed successfully.";
+            // Phase 1.3 #31 — notification body upgrade. Lead with the four
+            // signals the user actually cares about (verdict + cost +
+            // duration + PR link if any), then the run summary as fallback.
+            String body = buildRichBody(run, event.runId());
 
             notificationService.create(run.getCreatedByUserId(), type, title, body, link);
             log.debug("[Run {}] Created {} notification for user {}", event.runId(), type, run.getCreatedByUserId());
@@ -162,6 +165,37 @@ public class RunCompletionNotifier {
             log.warn("[User {}] Failed to create quota-warning notification: {}",
                     event.userId(), e.getMessage());
         }
+    }
+
+    /**
+     * Phase 1.3 #31 — rich notification body. "$0.42 · 4m12s" + summary.
+     * Verified-score segment skipped here because verifiedScore lives on
+     * the validation_report row (async, may not exist when this fires);
+     * the StatusBadge / VerdictPill in the UI surface verdict elsewhere.
+     */
+    private String buildRichBody(PipelineRun run, String runId) {
+        StringBuilder parts = new StringBuilder();
+        Double cost = run.getActualCostUsd();
+        if (cost != null && cost > 0) {
+            parts.append(String.format("$%.2f", cost));
+        }
+        if (run.getStartedAt() != null && run.getCompletedAt() != null) {
+            long secs = java.time.Duration.between(run.getStartedAt(), run.getCompletedAt()).getSeconds();
+            if (secs > 0) {
+                if (parts.length() > 0) parts.append(" · ");
+                if (secs < 60) parts.append(secs).append("s");
+                else parts.append(secs / 60).append("m").append(String.format("%02ds", secs % 60));
+            }
+        }
+        String summary = run.getRunSummary();
+        if (summary != null && !summary.isBlank()) {
+            if (parts.length() > 0) parts.append("\n");
+            parts.append(truncate(summary, 280));
+        }
+        if (parts.length() == 0) {
+            return "Your spec has been executed successfully.";
+        }
+        return parts.toString();
     }
 
     private static String truncate(String s, int maxLen) {
