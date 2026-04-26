@@ -414,6 +414,18 @@ export const getRuns = (params?: { status?: string; projectId?: string; scope?: 
 export const archiveRun = (runId: string) =>
   req<{ message: string }>(`/runs/${runId}/archive`, { method: 'POST' });
 
+/**
+ * Phase 1.3 #35 — fork a teammate's run. Creates a new run owned by the
+ * caller with the source's spec / repo / provider settings copied.
+ * Optional `overrides.userRequest` lets the user tweak the spec before
+ * the fork lands; otherwise it's an exact copy of the source spec.
+ */
+export const forkRun = (runId: string, overrides?: { userRequest?: string; executionMode?: string }) =>
+  req<RunSummary>(`/runs/${runId}/fork`, {
+    method: 'POST',
+    body: JSON.stringify(overrides ?? {}),
+  });
+
 export const getRun = (id: string) =>
   req<RunDetail>(`/runs/${id}`);
 

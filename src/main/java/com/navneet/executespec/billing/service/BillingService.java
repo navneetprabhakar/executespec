@@ -851,6 +851,29 @@ public class BillingService {
             });
         }
 
+        // Phase 2 wiring — stamp org.product_id from the new tier so the V143
+        // discriminator is set when an org first subscribes. TEAM/ENTERPRISE
+        // → executespec (Build); MAX/PRO/FREE → vibe (Vibe). Read tier from
+        // the looked-up plan rather than the org row (org.tier may not have
+        // been bumped yet on first subscribe).
+        if ("ORG".equals(billingEntityType) && !billingEntityId.isBlank() && !planId.isBlank()) {
+            java.util.UUID planUuid;
+            try { planUuid = java.util.UUID.fromString(planId); }
+            catch (IllegalArgumentException e) { planUuid = null; }
+            if (planUuid != null) planRepo.findById(planUuid).ifPresent(plan -> {
+                String surface = com.navneet.executespec.auth.service.TierProductSurfaceMapper
+                    .defaultSurfaceFor(plan.getTier());
+                orgRepo.findById(billingEntityId).ifPresent(org -> {
+                    if (org.getProductId() == null || !surface.equals(org.getProductId())) {
+                        org.setProductId(surface);
+                        orgRepo.save(org);
+                        log.info("Org product_id stamped from tier: orgId={}, tier={}, surface={}",
+                                org.getId(), plan.getTier(), surface);
+                    }
+                });
+            });
+        }
+
         // Find subscription by gateway subscription ID
         BillingSubscription sub = subRepo.findByGatewaySubscriptionId(stripeSubscriptionId).orElse(null);
         if (sub == null) {
