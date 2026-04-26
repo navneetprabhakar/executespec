@@ -42,18 +42,46 @@ public record PlannedTaskV2(
          *  Post-parse validation guarantees every declared requirement is covered by
          *  at least one task and every entry here references a real requirement.
          *  Empty on legacy plans and when the v3 flag is off. */
-        List<String> meetsRequirements) {
+        List<String> meetsRequirements,
+        /** v2.6.2-track slice 3 — LEAF (terminal task, executor runs as-is) vs EPIC
+         *  (expand into subtasks via {@code TaskExpanderAgent} recursion, depth ≤ 2).
+         *  Default LEAF for backward-compatibility with slice 1+2 plans (which
+         *  predate the field). EPIC is only emitted by skeleton-mode outlines on
+         *  LARGE/LEGACY classifications. */
+        TaskType taskType) {
 
     public PlannedTaskV2 {
         if (id == null || id.isBlank()) throw new IllegalArgumentException("id required");
         if (title == null || title.isBlank()) throw new IllegalArgumentException("title required");
-        if (description == null || description.isBlank()) throw new IllegalArgumentException("description required");
+        // v2.6.2 slice 3 — skeleton-mode outlines emit blank descriptions; the
+        // expander fills them later. Allow blank but never null so downstream
+        // .replace() / .contains() calls don't NPE.
+        if (description == null) description = "";
         if (complexity == null) complexity = Complexity.MEDIUM;
         if (touchesFiles == null) touchesFiles = List.of();
         if (dependsOn == null) dependsOn = List.of();
         if (hardConstraints == null) hardConstraints = List.of();
         if (meetsRequirements == null) meetsRequirements = List.of();
+        if (taskType == null) taskType = TaskType.LEAF;
     }
 
     public enum Complexity { LOW, MEDIUM, HIGH }
+
+    /**
+     * Slice-3 task shape marker. EPIC tasks emit further subtasks via
+     * {@code TaskExpanderAgent} (recursive). LEAF tasks ship straight to the
+     * executor.
+     */
+    public enum TaskType { LEAF, EPIC }
+
+    /**
+     * True when the task body still needs an expansion pass — i.e. the planner
+     * emitted a skeleton in slice-3 LARGE mode and {@code description}/
+     * {@code hardConstraints}/{@code meetsRequirements} are still blank.
+     */
+    public boolean isSkeleton() {
+        return (description == null || description.isBlank())
+                && (hardConstraints == null || hardConstraints.isEmpty())
+                && (meetsRequirements == null || meetsRequirements.isEmpty());
+    }
 }

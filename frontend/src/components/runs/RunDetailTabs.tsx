@@ -424,16 +424,32 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
   const [liveTokens, setLiveTokens] = useState<{ input: number; output: number } | null>(null);
   useEffect(() => {
     let cancelled = false;
-    getLiveCost(run.runId)
-      .then((res) => {
-        if (cancelled) return;
-        setLiveCost(res.costUsd);
-        if (typeof res.inputTokens === 'number' && typeof res.outputTokens === 'number') {
-          setLiveTokens({ input: res.inputTokens, output: res.outputTokens });
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const fetchCost = () => {
+      getLiveCost(run.runId)
+        .then((res) => {
+          if (cancelled) return;
+          setLiveCost(res.costUsd);
+          if (typeof res.inputTokens === 'number' && typeof res.outputTokens === 'number') {
+            setLiveTokens({ input: res.inputTokens, output: res.outputTokens });
+          }
+        })
+        .catch(() => {});
+    };
+    fetchCost();
+    // v2.6.1 — poll while non-terminal. Without this the chip showed the
+    // mount-time snapshot for the entire worker phase (status doesn't flip
+    // between PLANNING → WORKING → REVIEWING for cost accumulation, but the
+    // accumulator updates on every LLM call).
+    const isTerminal = run.status === 'COMPLETE' || run.status === 'FAILED'
+      || run.status === 'CANCELLED' || run.status === 'PARTIAL';
+    if (isTerminal) {
+      return () => { cancelled = true; };
+    }
+    const interval = setInterval(fetchCost, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, [run.runId, run.status]);
 
   // ── Project tagging ──────────────────────────────────────────────────
@@ -787,6 +803,12 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
               </p>
             </div>
           </div>
+
+          {/* v2.6.2-track — hierarchical-planner per-phase cost breakdown.
+              Only renders when planStrategy is set (the run actually used the
+              new pipeline) and at least one phase has tokens. Pure
+              additive — falls back silently for legacy runs. */}
+          <PlannerPhaseBreakdown run={run} />
         </div>
       )}
 
@@ -1963,6 +1985,57 @@ function RunPrList({ run }: { run: RunDetail }) {
           {legacyUrl.replace('https://github.com/', '').replace('https://bitbucket.org/', '')}
         </a>
       ) : null}
+    </div>
+  );
+}
+
+/**
+ * v2.6.2-track — hierarchical-planner per-phase cost breakdown for the
+ * RunDetail Overview tab. Renders nothing when the run didn't use the
+ * hierarchical pipeline (planStrategy null) or when no phase has tokens
+ * recorded yet — keeps legacy runs free of empty rows.
+ */
+function PlannerPhaseBreakdown({ run }: { run: RunDetail }) {
+  if (!run.planStrategy) return null;
+  type Row = { label: string; cost: number | null | undefined; inTok: number | null | undefined; outTok: number | null | undefined };
+  const rows: Row[] = [
+    { label: 'Classifier', cost: run.classifierCostUsd, inTok: run.classifierInputTokens, outTok: run.classifierOutputTokens },
+    { label: 'Outline',    cost: run.outlineCostUsd,    inTok: run.outlineInputTokens,    outTok: run.outlineOutputTokens },
+    { label: 'Expansion',  cost: run.expansionCostUsd,  inTok: run.expansionInputTokens,  outTok: run.expansionOutputTokens },
+    { label: 'Coherence',  cost: run.coherenceCostUsd,  inTok: run.coherenceInputTokens,  outTok: run.coherenceOutputTokens },
+  ];
+  const populated = rows.filter((r) => (r.cost ?? 0) > 0 || (r.inTok ?? 0) > 0 || (r.outTok ?? 0) > 0);
+  if (populated.length === 0) return null;
+
+  const totalCost = populated.reduce((acc, r) => acc + (r.cost ?? 0), 0);
+  const fmtCost = (v: number | null | undefined) => (v == null || v === 0 ? '—' : `$${v.toFixed(4)}`);
+  const fmtTok = (v: number | null | undefined) => (v == null || v === 0 ? '—' : v.toLocaleString());
+
+  return (
+    <div className="mt-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] uppercase tracking-wide text-muted">
+          Planner phases <span className="text-secondary normal-case tracking-normal">· {run.planStrategy}</span>
+        </p>
+        <p className="text-[11px] font-mono text-secondary">
+          phase total {fmtCost(totalCost)}
+        </p>
+      </div>
+      {run.classifierReasoning && (
+        <p className="text-[10.5px] text-muted italic mb-2 leading-snug">
+          {run.classifierReasoning}
+        </p>
+      )}
+      <div className="space-y-1">
+        {populated.map((r) => (
+          <div key={r.label} className="grid grid-cols-[5.5rem_1fr_1fr_1fr] gap-2 text-[11px] font-mono">
+            <span className="text-secondary">{r.label}</span>
+            <span className="text-muted">{fmtCost(r.cost)}</span>
+            <span className="text-muted">in {fmtTok(r.inTok)}</span>
+            <span className="text-muted">out {fmtTok(r.outTok)}</span>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

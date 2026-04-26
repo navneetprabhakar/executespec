@@ -24,6 +24,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.server.ResponseStatusException;
@@ -56,6 +57,7 @@ public class ProjectLaunchController {
     // ── Launches list ─────────────────────────────────────────────────────
 
     @GetMapping("/api/projects/{projectId}/launches")
+    @Transactional(readOnly = true)
     public ResponseEntity<Page<ExecutionRunDto>> listLaunches(
             @PathVariable String projectId,
             @RequestParam(defaultValue = "0") int page,
@@ -82,6 +84,7 @@ public class ProjectLaunchController {
             String createdAt) {}
 
     @GetMapping("/api/projects/{projectId}/prs")
+    @Transactional(readOnly = true)
     public ResponseEntity<List<PrRollupEntry>> projectPrs(
             @PathVariable String projectId,
             @AuthenticationPrincipal AppUserDetails principal) {
@@ -136,6 +139,7 @@ public class ProjectLaunchController {
             int recentPrMerged) {}
 
     @GetMapping("/api/projects/{projectId}/overview")
+    @Transactional(readOnly = true)
     public ResponseEntity<ProjectOverview> overview(
             @PathVariable String projectId,
             @AuthenticationPrincipal AppUserDetails principal) {

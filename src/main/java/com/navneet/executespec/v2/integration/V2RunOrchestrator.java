@@ -31,7 +31,14 @@ import com.navneet.executespec.v2.cost.V2RunCostTracker;
 import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.PlanV2;
 import com.navneet.executespec.v2.agent.PlannedTaskV2;
-import com.navneet.executespec.v2.agent.PlannerAgentV2;
+import com.navneet.executespec.v2.agent.ClassificationResult;
+import com.navneet.executespec.v2.agent.CoherencePlannerAgent;
+import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
+import com.navneet.executespec.v2.agent.PlanStrategy;
+import com.navneet.executespec.v2.agent.PlanStrategyCircuitBreaker;
+import com.navneet.executespec.v2.agent.PlannedTaskV2;
+import com.navneet.executespec.v2.agent.SmartClassifierAgent;
+import com.navneet.executespec.v2.agent.TaskExpanderAgent;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
 import com.navneet.executespec.v2.agent.SpecClassifier;
 import com.navneet.executespec.project.entity.ProjectRepo;
@@ -54,6 +61,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.List;
 import java.nio.file.Path;
 import java.time.Instant;
@@ -107,7 +115,11 @@ public class V2RunOrchestrator {
 
     private final PipelineRunRepository runRepo;
     private final AgentTaskRepository taskRepo;
-    private final PlannerAgentV2 planner;
+    private final OutlinePlannerAgent outlinePlanner;
+    private final TaskExpanderAgent taskExpander;
+    private final CoherencePlannerAgent coherencePlanner;
+    private final PlanStrategyCircuitBreaker planStrategyBreaker;
+    private final SmartClassifierAgent smartClassifier;
     private final SequentialExecutorV2 executor;
     private final ReviewerAgentV3 reviewer;
     private final V2Metrics metrics;
@@ -262,8 +274,10 @@ public class V2RunOrchestrator {
             try {
                 com.navneet.executespec.router.LlmProvider p =
                         com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());
+                // v2.6.2 slice 5b — agent name is now OutlinePlannerAgent;
+                // PlannerAgentV2 was deleted along with the legacy single-phase planner.
                 plannerDbModel = modelResolver.resolve(
-                        "PlannerAgentV2", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
+                        "OutlinePlannerAgent", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
                 reviewerDbModel = modelResolver.resolve(
                         "ReviewerAgentV3", p, com.navneet.executespec.router.AgentTier.PLANNING).getModel();
             } catch (Exception ex) {
@@ -464,6 +478,15 @@ public class V2RunOrchestrator {
                 Classification autoClassification = SpecClassifier.classify(userRequest);
                 log.info("V2 run={} spec classified as {} (len={})",
                         runId, autoClassification, userRequest == null ? 0 : userRequest.length());
+
+                // v2.6.2 — Smart classifier (hierarchical-planner phase 0). Verdict
+                // drives downstream routing in slice 2: SMALL/MEDIUM go through the
+                // OutlinePlannerAgent (32k cap, full plan in one call); SINGLE_SHOT,
+                // LARGE, LEGACY, and the null-on-failure case all stay on the legacy
+                // PlannerAgentV2. Cost flows through V2RunCostTracker so it auto-
+                // aggregates into the run total; per-phase columns get the diff.
+                PlanStrategy planStrategy = runClassifierShadow(
+                        runId, runRow, userRequest, projectId, selectedRepoIds, provider);
                 String projectMemory = projectId != null
                         ? projectMemoryProvider.buildPlannerContext(projectId)
                         : "";
@@ -505,7 +528,7 @@ public class V2RunOrchestrator {
                 } else {
                     summary = "empty scratch workspace (V2 harness)";
                 }
-                plan = planner.plan(PlannerRequestV2.builder()
+                PlannerRequestV2 plannerReq = PlannerRequestV2.builder()
                         .spec(userRequest)
                         .classification(autoClassification)
                         .provider(provider)
@@ -517,7 +540,64 @@ public class V2RunOrchestrator {
                         .referenceDocs(referenceDocs)
                         .tddMode(tddMode)
                         .prReviewComments(null)
-                        .build());
+                        .build();
+
+                // v2.6.2 slice 3 — strategy-driven routing with auto-degrade
+                // when a strategy's circuit breaker is open.
+                //   SMALL / MEDIUM → outline planner (FULL_PLAN mode, single call).
+                //   LARGE          → outline planner (SKELETON_ONLY) → parallel
+                //                    expansion → coherence pass.
+                //   LEGACY         → defer to slice 4 — recursive depth-2
+                //                    expansion isn't built yet, so degrade to LARGE.
+                //   SINGLE_SHOT / null / classifier failure → legacy planner.
+                PlanStrategy effective = planStrategy == null
+                        ? null
+                        : planStrategyBreaker.degradeIfOpen(
+                                planStrategy == PlanStrategy.LEGACY ? PlanStrategy.LARGE : planStrategy);
+                if (effective != planStrategy && effective != null) {
+                    log.warn("V2 run={} circuit breaker degraded {} → {}", runId, planStrategy, effective);
+                }
+
+                // Slice 4 — LEGACY classifications now drive depth-2 recursive
+                // expansion in the LARGE pipeline. The classifier verdict
+                // (pre-degrade) tells us whether to recurse on EPIC tasks; the
+                // breaker still degrades to LARGE for capacity reasons but the
+                // intent (and the recursion) is preserved.
+                boolean legacyRecursion = planStrategy == PlanStrategy.LEGACY;
+
+                if (effective == PlanStrategy.SMALL || effective == PlanStrategy.MEDIUM) {
+                    try {
+                        plan = runOutlinePhase(runId, plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
+                        planStrategyBreaker.recordSuccess(effective);
+                    } catch (Exception outlineEx) {
+                        planStrategyBreaker.recordFailure(effective);
+                        log.warn("V2 run={} outline planner ({}) failed → SINGLE_SHOT fallback",
+                                runId, effective);
+                        plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+                    }
+                } else if (effective == PlanStrategy.LARGE) {
+                    try {
+                        plan = runLargePipeline(runId, plannerReq, rootCtx, legacyRecursion);
+                        planStrategyBreaker.recordSuccess(PlanStrategy.LARGE);
+                    } catch (Exception largeEx) {
+                        planStrategyBreaker.recordFailure(PlanStrategy.LARGE);
+                        log.warn("V2 run={} LARGE pipeline failed → SINGLE_SHOT fallback: {}",
+                                runId, largeEx.getMessage());
+                        plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+                    }
+                } else if (effective == PlanStrategy.SINGLE_SHOT) {
+                    // v2.6.2 slice 5b — heuristic-fast-path classification.
+                    // No LLM planner call; synthesise a one-task plan from the
+                    // spec verbatim. Migrated from the deleted PlannerAgentV2.
+                    plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+                } else {
+                    // Classifier failed (effective == null) or returned an
+                    // unhandled value. Treat as SINGLE_SHOT — same shape as
+                    // the legacy synthesised path, no LLM cost beyond the
+                    // optional title summarizer.
+                    log.warn("V2 run={} no usable strategy verdict → synthesised SINGLE_SHOT plan", runId);
+                    plan = outlinePlanner.synthesizeSingleShot(plannerReq);
+                }
             } catch (Exception e) {
                 log.error("V2RunOrchestrator run={} planner failed", runId, e);
                 terminate(runId, "FAILED", "planner: " + shortMsg(e), startedAt);
@@ -785,6 +865,20 @@ public class V2RunOrchestrator {
                     .title(task.title())
                     .complexity(task.complexity().name())
                     .status("PENDING")
+                    // v2.6.2 slice 5d — record the planner-shape metadata so
+                    // StartupRunResumerV2 can tell EXPANDED vs PENDING tasks
+                    // apart on resume + a future auto-replay pass can skip
+                    // tasks already filled in.
+                    .taskType(task.taskType() == null ? "LEAF" : task.taskType().name())
+                    // EXPANDED for full-bodied tasks (slices 1-2 + LEGACY's
+                    // recursive children) and post-expansion LARGE tasks.
+                    // Skeleton-only tasks pre-expansion would be PENDING here —
+                    // but persistTasks runs after the LARGE pipeline has
+                    // already stitched bodies in, so all rows reach this point
+                    // with full descriptions. Distinction matters for future
+                    // resume: a row written EXPANDED never needs a re-expand.
+                    .expansionStatus(task.isSkeleton() ? "PENDING" : "EXPANDED")
+                    .expandedAt(task.isSkeleton() ? null : java.time.Instant.now())
                     .build();
             try {
                 row.setTaskJson(objectMapper.writeValueAsString(task));
@@ -1434,7 +1528,16 @@ public class V2RunOrchestrator {
         java.util.List<String> complexities = plan.tasks().stream()
                 .map(t -> t.complexity() == null ? "MEDIUM" : t.complexity().name())
                 .toList();
-        V2RunCostTracker.Estimate est = costTracker.estimateRunTierAware(provider, complexities);
+        // v2.6.2 slice 5 — pull the persisted plan strategy from the run row so
+        // the estimate reflects the actual hierarchical-pipeline phase costs
+        // (classifier + outline + expansion + coherence) instead of the legacy
+        // single-phase shape. Falls back to null = legacy estimate when the
+        // classifier hadn't run yet (classifier failure / pre-slice-1 row).
+        PlanStrategy strategy = runRepo.findById(runId)
+                .map(PipelineRun::getPlanStrategy)
+                .map(PlanStrategy::fromStringSafe)
+                .orElse(null);
+        V2RunCostTracker.Estimate est = costTracker.estimateRunTierAware(provider, complexities, strategy);
         runRepo.findById(runId).ifPresent(r -> {
             r.setCostEstimateLow(est.lowUsd());
             r.setCostEstimateHigh(est.highUsd());
@@ -1442,8 +1545,9 @@ public class V2RunOrchestrator {
             r.setHardCapUsd(est.hardCapUsd());
             runRepo.save(r);
         });
-        log.info("V2RunOrchestrator run={} estimate low=${} high=${} credits={} cap=${} tasks={}",
-                runId, String.format("%.4f", est.lowUsd()), String.format("%.4f", est.highUsd()),
+        log.info("V2RunOrchestrator run={} estimate strategy={} low=${} high=${} credits={} cap=${} tasks={}",
+                runId, strategy, String.format("%.4f", est.lowUsd()),
+                String.format("%.4f", est.highUsd()),
                 est.credits(), String.format("%.2f", est.hardCapUsd()), est.taskCount());
     }
 
@@ -1767,6 +1871,478 @@ public class V2RunOrchestrator {
         if (fullName == null) return "repo";
         int slash = fullName.lastIndexOf('/');
         return slash < 0 ? fullName : fullName.substring(slash + 1);
+    }
+
+    /**
+     * v2.6.2 — hierarchical-planner phase 0. Runs the smart classifier and
+     * persists the verdict + per-phase token cost on the run row. Returns the
+     * resolved {@link PlanStrategy} so the orchestrator can route SMALL/MEDIUM
+     * specs to {@link OutlinePlannerAgent} (slice 2) and SINGLE_SHOT/LARGE/LEGACY
+     * to {@link PlannerAgentV2}. Returns null when the classifier failed
+     * outright — the caller should treat that as the legacy path
+     * (PlannerAgentV2 handles every classification).
+     *
+     * <p>Cost note: the classifier's LLM call (when it fires) flows through
+     * {@link LlmRouterV2} → {@link V2RunCostTracker#record}, so it auto-aggregates
+     * into the run's grand totals. We diff the per-run snapshot before and after
+     * the classifier call to attribute the slice to the new
+     * {@code classifier_*} columns. Any future cost reads on the run total
+     * already include this — no separate reconciliation needed.
+     *
+     * <p>Failures are swallowed: classifier outage must never block planning.
+     */
+    private PlanStrategy runClassifierShadow(
+            String runId, PipelineRun runRow, String userRequest,
+            String projectId, List<UUID> selectedRepoIds, String provider
+    ) {
+        try {
+            // Repo full names — best effort. Skip lookup if not multi-repo.
+            List<String> repoNames = new ArrayList<>();
+            if (projectId != null && selectedRepoIds != null && !selectedRepoIds.isEmpty()) {
+                try {
+                    List<ProjectRepo> repos = projectRepoService.resolveForRun(projectId, selectedRepoIds);
+                    for (ProjectRepo r : repos) {
+                        if (r.getGithubRepoFullName() != null) repoNames.add(r.getGithubRepoFullName());
+                    }
+                } catch (Exception ignored) { /* fall through with empty list */ }
+            }
+
+            // Project type — Project entity doesn't carry one yet (slice 1
+            // skips this signal). Future slices will plumb it through from
+            // detected_stack on linked repos.
+            String projectType = null;
+
+            // Project memory snippet — short tail of last 3 ledger entries.
+            String projectMemorySnippet = null;
+            if (projectId != null) {
+                try {
+                    String full = projectMemoryProvider.buildPlannerContext(projectId);
+                    if (full != null && !full.isBlank()) {
+                        // Cap at ~600 chars so the classifier prompt stays compact.
+                        projectMemorySnippet = full.length() > 600
+                                ? full.substring(full.length() - 600)
+                                : full;
+                    }
+                } catch (Exception ignored) { /* leave null */ }
+            }
+
+            com.navneet.executespec.router.LlmProvider providerEnum;
+            try {
+                providerEnum = com.navneet.executespec.router.LlmProvider.valueOf(
+                        provider == null ? "OPENAI" : provider.toUpperCase());
+            } catch (Exception e) {
+                providerEnum = com.navneet.executespec.router.LlmProvider.OPENAI;
+            }
+
+            V2RunCostTracker.Snapshot before = costTracker.snapshot(runId);
+            ClassificationResult result = smartClassifier.classify(
+                    userRequest, repoNames, projectId, projectType, providerEnum, projectMemorySnippet);
+            V2RunCostTracker.Snapshot after = costTracker.snapshot(runId);
+
+            long classifierIn = Math.max(0, after.inputTokens() - before.inputTokens());
+            long classifierOut = Math.max(0, after.outputTokens() - before.outputTokens());
+            double classifierCost = Math.max(0.0, after.costUsd() - before.costUsd());
+
+            log.info("V2 run={} smart classifier → {} (source={}, est tasks={}, repos={}, in/out={}/{}, ${})",
+                    runId, result.strategy(), result.source(),
+                    result.estimatedTaskCount(), result.estimatedRepoTouchCount(),
+                    classifierIn, classifierOut,
+                    String.format("%.6f", classifierCost));
+
+            // Persist verdict + per-phase cost on the run row. Use a fresh load
+            // so we don't overwrite columns that other writers may have touched
+            // (initialisation log, codemap summary, etc.).
+            try {
+                PipelineRun fresh = runRepo.findById(runId).orElse(null);
+                if (fresh != null) {
+                    fresh.setPlanStrategy(result.strategy().name());
+                    fresh.setClassifierReasoning(result.reasoning());
+                    fresh.setClassifierInputTokens(classifierIn);
+                    fresh.setClassifierOutputTokens(classifierOut);
+                    fresh.setClassifierCostUsd(classifierCost);
+                    runRepo.save(fresh);
+                }
+            } catch (Exception persistEx) {
+                log.warn("V2 run={} smart classifier persist failed (non-fatal): {}",
+                        runId, persistEx.getMessage());
+            }
+            return result.strategy();
+        } catch (Exception e) {
+            log.warn("V2 run={} smart classifier shadow run failed (non-fatal): {}",
+                    runId, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * v2.6.2 — hierarchical-planner phase 1. Snapshots per-run cost before
+     * + after the {@link OutlinePlannerAgent} call, attributes the diff to
+     * {@code pipeline_run.outline_*} columns + persists the plan JSON to
+     * {@code plan_outline_json}. Failures bubble up so the orchestrator can
+     * fall back to the legacy planner.
+     */
+    private PlanV2 runOutlinePhase(String runId, PlannerRequestV2 req,
+                                    OutlinePlannerAgent.Mode mode) {
+        V2RunCostTracker.Snapshot before = costTracker.snapshot(runId);
+        try {
+            PlanV2 plan = outlinePlanner.plan(req, mode);
+            V2RunCostTracker.Snapshot after = costTracker.snapshot(runId);
+
+            long inTok = Math.max(0, after.inputTokens() - before.inputTokens());
+            long outTok = Math.max(0, after.outputTokens() - before.outputTokens());
+            double cost = Math.max(0.0, after.costUsd() - before.costUsd());
+
+            log.info("V2 run={} outline planner [{}] → {} tasks, in/out={}/{}, ${}",
+                    runId, mode, plan.tasks().size(), inTok, outTok,
+                    String.format("%.6f", cost));
+
+            try {
+                PipelineRun fresh = runRepo.findById(runId).orElse(null);
+                if (fresh != null) {
+                    try {
+                        fresh.setPlanOutlineJson(objectMapper.writeValueAsString(plan));
+                    } catch (Exception serEx) {
+                        log.warn("V2 run={} plan_outline_json serialisation failed: {}",
+                                runId, serEx.getMessage());
+                    }
+                    fresh.setOutlineInputTokens(inTok);
+                    fresh.setOutlineOutputTokens(outTok);
+                    fresh.setOutlineCostUsd(cost);
+                    runRepo.save(fresh);
+                }
+            } catch (Exception persistEx) {
+                log.warn("V2 run={} outline persist failed (non-fatal): {}",
+                        runId, persistEx.getMessage());
+            }
+            return plan;
+        } catch (Exception e) {
+            log.warn("V2 run={} outline planner failed: {} — bubbling up for fallback",
+                    runId, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * v2.6.2 slice 3 — LARGE pipeline. Drives:
+     * <ol>
+     *   <li>Phase 1: outline planner in SKELETON_ONLY mode (id/title/complexity/
+     *       repos/dependsOn/type only).</li>
+     *   <li>Phase 2: parallel expansion of every LEAF task via
+     *       {@link TaskExpanderAgent}. Bounded concurrency via the existing
+     *       pipeline pool. EPIC tasks are NOT recursed yet — slice 4 brings
+     *       depth-2 expansion; for slice 3 they're treated as LEAFs.</li>
+     *   <li>Phase 3: coherence pass via {@link CoherencePlannerAgent} + apply
+     *       any patches.</li>
+     * </ol>
+     *
+     * <p>Per-phase cost is diff'd from {@link V2RunCostTracker#snapshot} and
+     * persisted to the matching {@code pipeline_run.{outline,expansion,coherence}_*}
+     * columns. Run total auto-aggregates via the tracker's accumulator.
+     */
+    private PlanV2 runLargePipeline(String runId, PlannerRequestV2 req, ExecutionContext rootCtx,
+                                     boolean enableEpicRecursion) {
+        // ── Phase 1: skeleton outline ─────────────────────────────────────
+        PlanV2 skeleton = runOutlinePhase(runId, req, OutlinePlannerAgent.Mode.SKELETON_ONLY);
+        if (skeleton.tasks() == null || skeleton.tasks().isEmpty()) {
+            throw new IllegalStateException("LARGE outline returned 0 skeleton tasks");
+        }
+
+        // ── Phase 2: parallel expansion ──────────────────────────────────
+        // For LEAF tasks: a single TaskExpanderAgent call fills the body.
+        // For EPIC tasks under LEGACY recursion (slice 4): recurse via
+        // OutlinePlannerAgent (skeleton-mode) to get child skeletons, then
+        // expand each child as a LEAF in parallel. Children inherit the
+        // parent's id as a prefix (T3 → T3.1, T3.2, …). Without LEGACY
+        // recursion, EPIC tasks are treated identically to LEAF tasks (slice 3
+        // behaviour) — the worker either handles the breadth or the planner
+        // declared EPIC mistakenly.
+        V2RunCostTracker.Snapshot beforeExpand = costTracker.snapshot(runId);
+        long expansionStart = System.currentTimeMillis();
+        List<PlannedTaskV2> tasksToExpand = skeleton.tasks();
+        // Per-skeleton-id → list of resulting LEAF tasks (1 for LEAF, N for
+        // recursively-expanded EPIC).
+        java.util.concurrent.ConcurrentMap<String, List<PlannedTaskV2>> expanded =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        java.util.concurrent.ConcurrentMap<String, Throwable> expansionFailures =
+                new java.util.concurrent.ConcurrentHashMap<>();
+
+        List<java.util.concurrent.CompletableFuture<Void>> futures = new ArrayList<>();
+        for (PlannedTaskV2 t : tasksToExpand) {
+            futures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    if (enableEpicRecursion && t.taskType() == PlannedTaskV2.TaskType.EPIC) {
+                        List<PlannedTaskV2> children = expandEpic(runId, t, skeleton, req, rootCtx);
+                        expanded.put(t.id(), children);
+                    } else {
+                        ExecutionContext taskCtx = new ExecutionContext(
+                                runId, "_expand_" + t.id(), rootCtx.workspaceRoot());
+                        PlannedTaskV2 full = taskExpander.expand(t, skeleton, req, taskCtx);
+                        expanded.put(t.id(), List.of(full));
+                    }
+                } catch (Throwable ex) {
+                    log.warn("V2 run={} task expansion failed for {}: {}",
+                            runId, t.id(), ex.getMessage());
+                    expansionFailures.put(t.id(), ex);
+                    // Fall back to a LEAF carrying just the title-derived
+                    // description so the pipeline can still progress.
+                    expanded.put(t.id(), List.of(PlannedTaskV2.builder()
+                            .id(t.id())
+                            .title(t.title())
+                            .description("Implement: " + t.title()
+                                    + " (expansion failed; worker will figure it out)")
+                            .complexity(t.complexity())
+                            .touchesFiles(t.touchesFiles())
+                            .dependsOn(t.dependsOn())
+                            .hardConstraints(List.of())
+                            .meetsRequirements(List.of())
+                            .taskType(PlannedTaskV2.TaskType.LEAF)
+                            .build()));
+                }
+            }, pool));
+        }
+        try {
+            java.util.concurrent.CompletableFuture
+                    .allOf(futures.toArray(new java.util.concurrent.CompletableFuture[0]))
+                    .get(20, java.util.concurrent.TimeUnit.MINUTES);
+        } catch (Exception expandWaitEx) {
+            throw new IllegalStateException(
+                    "LARGE expansion phase exceeded 20-minute timeout: "
+                            + expandWaitEx.getMessage(), expandWaitEx);
+        }
+
+        // Stitch expanded bodies back onto the plan in original order. EPIC
+        // entries are replaced by their N child LEAFs in-place.
+        List<PlannedTaskV2> assembledTasks = new ArrayList<>(tasksToExpand.size());
+        for (PlannedTaskV2 sk : tasksToExpand) {
+            List<PlannedTaskV2> result = expanded.get(sk.id());
+            if (result == null || result.isEmpty()) {
+                assembledTasks.add(sk);
+            } else {
+                assembledTasks.addAll(result);
+            }
+        }
+        PlanV2 assembled = PlanV2.builder()
+                .planTitle(skeleton.planTitle())
+                .planSummary(skeleton.planSummary())
+                .projectType(skeleton.projectType())
+                .buildCommand(skeleton.buildCommand())
+                .smokeTestStrategy(skeleton.smokeTestStrategy())
+                .runtimeSurface(skeleton.runtimeSurface())
+                .tasks(assembledTasks)
+                .classification(skeleton.classification())
+                .requirements(skeleton.requirements())
+                .build();
+
+        V2RunCostTracker.Snapshot afterExpand = costTracker.snapshot(runId);
+        long expandIn = Math.max(0, afterExpand.inputTokens() - beforeExpand.inputTokens());
+        long expandOut = Math.max(0, afterExpand.outputTokens() - beforeExpand.outputTokens());
+        double expandCost = Math.max(0.0, afterExpand.costUsd() - beforeExpand.costUsd());
+        log.info("V2 run={} expansion: {} tasks, {} failures, wall={}ms, in/out={}/{}, ${}",
+                runId, assembledTasks.size(), expansionFailures.size(),
+                System.currentTimeMillis() - expansionStart,
+                expandIn, expandOut, String.format("%.6f", expandCost));
+
+        // ── Phase 3: coherence ───────────────────────────────────────────
+        V2RunCostTracker.Snapshot beforeCoherence = costTracker.snapshot(runId);
+        ExecutionContext coherenceCtx = new ExecutionContext(
+                runId, "_coherence_", rootCtx.workspaceRoot());
+        CoherencePlannerAgent.PatchResult patchResult;
+        try {
+            patchResult = coherencePlanner.patchIfNeeded(assembled, req, coherenceCtx);
+        } catch (Exception coherenceEx) {
+            log.warn("V2 run={} coherence pass failed (non-fatal — using unpatched plan): {}",
+                    runId, coherenceEx.getMessage());
+            patchResult = new CoherencePlannerAgent.PatchResult(assembled, 0, List.of());
+        }
+        V2RunCostTracker.Snapshot afterCoherence = costTracker.snapshot(runId);
+        long cohIn = Math.max(0, afterCoherence.inputTokens() - beforeCoherence.inputTokens());
+        long cohOut = Math.max(0, afterCoherence.outputTokens() - beforeCoherence.outputTokens());
+        double cohCost = Math.max(0.0, afterCoherence.costUsd() - beforeCoherence.costUsd());
+
+        log.info("V2 run={} coherence: {} patches applied, in/out={}/{}, ${}",
+                runId, patchResult.patchesApplied(), cohIn, cohOut,
+                String.format("%.6f", cohCost));
+
+        // ── Persist per-phase costs + final plan ─────────────────────────
+        try {
+            PipelineRun fresh = runRepo.findById(runId).orElse(null);
+            if (fresh != null) {
+                fresh.setExpansionInputTokens(expandIn);
+                fresh.setExpansionOutputTokens(expandOut);
+                fresh.setExpansionCostUsd(expandCost);
+                fresh.setCoherenceInputTokens(cohIn);
+                fresh.setCoherenceOutputTokens(cohOut);
+                fresh.setCoherenceCostUsd(cohCost);
+                try {
+                    fresh.setPlanOutlineJson(objectMapper.writeValueAsString(patchResult.patchedPlan()));
+                } catch (Exception serEx) {
+                    log.warn("V2 run={} plan_outline_json (post-expand) serialisation failed: {}",
+                            runId, serEx.getMessage());
+                }
+                runRepo.save(fresh);
+            }
+        } catch (Exception persistEx) {
+            log.warn("V2 run={} expansion/coherence persist failed (non-fatal): {}",
+                    runId, persistEx.getMessage());
+        }
+
+        return patchResult.patchedPlan();
+    }
+
+    /**
+     * v2.6.2 slice 4 — depth-2 recursive expansion for an EPIC skeleton task.
+     * The orchestrator detects EPICs after the top-level skeleton outline,
+     * makes a focused sub-outline call ({@link OutlinePlannerAgent.Mode#SKELETON_ONLY})
+     * for just this epic, then expands each sub-skeleton as a LEAF in
+     * parallel. Sub-task IDs are prefixed with the parent's id (e.g. T3 →
+     * T3.1, T3.2, …) so the assembled plan keeps stable references for
+     * downstream {@code dependsOn} resolution.
+     *
+     * <p>Recursion stops at depth 2: if a child of an EPIC also comes back
+     * marked EPIC, it's coerced to LEAF and expanded normally. We prevent
+     * runaway planning trees from a hallucinating outline planner.
+     */
+    private List<PlannedTaskV2> expandEpic(String runId, PlannedTaskV2 epic, PlanV2 parentPlan,
+                                            PlannerRequestV2 parentReq, ExecutionContext rootCtx) {
+        log.info("V2 run={} expandEpic {} → recursing", runId, epic.id());
+
+        String subSpec = "Sub-task: " + epic.title();
+        if (epic.description() != null && !epic.description().isBlank()) {
+            subSpec += "\n\nFurther context: " + epic.description();
+        }
+        // Add parent-plan summary so the sub-planner knows the broader scope.
+        if (parentPlan.planSummary() != null && !parentPlan.planSummary().isBlank()) {
+            subSpec += "\n\nParent plan: " + parentPlan.planSummary();
+        }
+
+        PlannerRequestV2 subReq = PlannerRequestV2.builder()
+                .spec(subSpec)
+                // MEDIUM caps sub-tasks at 4 (per Classification.maxTasks); a
+                // sub-outline that overflows is almost always a sign the
+                // planner mistakenly marked something EPIC that should have
+                // been LEAF. Better to truncate than blow the budget.
+                .classification(Classification.MEDIUM)
+                .provider(parentReq.provider())
+                .model(parentReq.model())
+                .context(parentReq.context())
+                .workspaceSummary(parentReq.workspaceSummary())
+                .projectMemory(parentReq.projectMemory())
+                .projectBrief(parentReq.projectBrief())
+                .referenceDocs(parentReq.referenceDocs())
+                .tddMode(parentReq.tddMode())
+                .build();
+
+        PlanV2 subSkeleton;
+        try {
+            subSkeleton = outlinePlanner.plan(subReq, OutlinePlannerAgent.Mode.SKELETON_ONLY);
+        } catch (Exception subOutlineEx) {
+            log.warn("V2 run={} sub-outline for EPIC {} failed — falling back to single LEAF expansion: {}",
+                    runId, epic.id(), subOutlineEx.getMessage());
+            return List.of(coerceToLeafFallback(epic));
+        }
+
+        List<PlannedTaskV2> children = subSkeleton.tasks();
+        if (children == null || children.isEmpty()) {
+            log.warn("V2 run={} sub-outline for EPIC {} returned 0 children — coercing to single LEAF",
+                    runId, epic.id());
+            return List.of(coerceToLeafFallback(epic));
+        }
+
+        // Re-id with parent prefix and force LEAF (depth cap).
+        List<PlannedTaskV2> reIdChildren = new ArrayList<>(children.size());
+        for (int i = 0; i < children.size(); i++) {
+            PlannedTaskV2 c = children.get(i);
+            String childId = epic.id() + "." + (i + 1);
+            reIdChildren.add(PlannedTaskV2.builder()
+                    .id(childId)
+                    .title(c.title())
+                    .description(c.description())
+                    .complexity(c.complexity() == null ? PlannedTaskV2.Complexity.MEDIUM : c.complexity())
+                    .touchesFiles(c.touchesFiles())
+                    .dependsOn(c.dependsOn())
+                    .hardConstraints(c.hardConstraints())
+                    .meetsRequirements(c.meetsRequirements())
+                    .taskType(PlannedTaskV2.TaskType.LEAF) // depth cap: no further recursion
+                    .build());
+        }
+
+        // Build a sub-plan view for the expander prompt so siblings cross-reference correctly.
+        PlanV2 subPlanForContext = PlanV2.builder()
+                .planTitle(parentPlan.planTitle())
+                .planSummary(parentPlan.planSummary())
+                .projectType(parentPlan.projectType())
+                .buildCommand(parentPlan.buildCommand())
+                .smokeTestStrategy(parentPlan.smokeTestStrategy())
+                .runtimeSurface(parentPlan.runtimeSurface())
+                .tasks(reIdChildren)
+                .classification(parentPlan.classification())
+                .requirements(parentPlan.requirements())
+                .build();
+
+        // Expand each child in parallel. Reuses the same pipeline pool — bounded
+        // concurrency means we won't thrash the LLM provider even on big EPICs.
+        java.util.concurrent.ConcurrentMap<String, PlannedTaskV2> bodied =
+                new java.util.concurrent.ConcurrentHashMap<>();
+        List<java.util.concurrent.CompletableFuture<Void>> subFutures = new ArrayList<>();
+        for (PlannedTaskV2 child : reIdChildren) {
+            subFutures.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                try {
+                    ExecutionContext childCtx = new ExecutionContext(
+                            runId, "_expand_" + child.id(), rootCtx.workspaceRoot());
+                    bodied.put(child.id(),
+                            taskExpander.expand(child, subPlanForContext, parentReq, childCtx));
+                } catch (Throwable ex) {
+                    log.warn("V2 run={} sub-task expansion failed for {}: {}",
+                            runId, child.id(), ex.getMessage());
+                    bodied.put(child.id(), PlannedTaskV2.builder()
+                            .id(child.id())
+                            .title(child.title())
+                            .description("Implement: " + child.title()
+                                    + " (sub-expansion failed; worker will figure it out)")
+                            .complexity(child.complexity())
+                            .touchesFiles(child.touchesFiles())
+                            .dependsOn(child.dependsOn())
+                            .hardConstraints(List.of())
+                            .meetsRequirements(List.of())
+                            .taskType(PlannedTaskV2.TaskType.LEAF)
+                            .build());
+                }
+            }, pool));
+        }
+        try {
+            java.util.concurrent.CompletableFuture
+                    .allOf(subFutures.toArray(new java.util.concurrent.CompletableFuture[0]))
+                    .get(10, java.util.concurrent.TimeUnit.MINUTES);
+        } catch (Exception subExpandEx) {
+            log.warn("V2 run={} sub-expansion for EPIC {} hit timeout/error — using whatever completed: {}",
+                    runId, epic.id(), subExpandEx.getMessage());
+        }
+
+        // Stitch sub-children in input order.
+        List<PlannedTaskV2> result = new ArrayList<>(reIdChildren.size());
+        for (PlannedTaskV2 c : reIdChildren) {
+            result.add(bodied.getOrDefault(c.id(), c));
+        }
+        log.info("V2 run={} expandEpic {} → {} LEAF children", runId, epic.id(), result.size());
+        return result;
+    }
+
+    /** Fallback when sub-outline fails: collapse the EPIC into a single LEAF
+     *  carrying the title + description so the worker still sees the work. */
+    private static PlannedTaskV2 coerceToLeafFallback(PlannedTaskV2 epic) {
+        return PlannedTaskV2.builder()
+                .id(epic.id())
+                .title(epic.title())
+                .description(epic.description() == null || epic.description().isBlank()
+                        ? "Implement: " + epic.title() + " (sub-outline failed; treat as a single task)"
+                        : epic.description())
+                .complexity(epic.complexity() == null ? PlannedTaskV2.Complexity.HIGH : epic.complexity())
+                .touchesFiles(epic.touchesFiles())
+                .dependsOn(epic.dependsOn())
+                .hardConstraints(epic.hardConstraints())
+                .meetsRequirements(epic.meetsRequirements())
+                .taskType(PlannedTaskV2.TaskType.LEAF)
+                .build();
     }
 
     private static String shortMsg(Exception e) {

@@ -58,6 +58,142 @@ public class ProjectChatService {
     }
 
     /**
+     * v2.6.1 — wipe every persisted chat message for the project. Used when the
+     * assistant starts hallucinating from a long history and the user wants to
+     * start fresh. Project memory + architecture are NOT touched — those are
+     * what the new conversation will draw from.
+     *
+     * @return number of rows deleted
+     */
+    @Transactional
+    public int clearHistory(String projectId) {
+        if (projectId == null || projectId.isBlank()) return 0;
+        int deleted = chatRepo.deleteByProjectId(projectId);
+        log.info("ProjectChatService cleared {} chat messages for project={}", deleted, projectId);
+        return deleted;
+    }
+
+    /** Number of recent messages we keep verbatim during a compaction. */
+    private static final int COMPACT_KEEP_TAIL = 6;
+    /** Minimum total messages required for a compaction to do anything. */
+    private static final int COMPACT_MIN_TOTAL = COMPACT_KEEP_TAIL + 4;
+
+    public record CompactResult(int compactedFrom, int kept, int totalAfter) {}
+
+    /**
+     * v2.6.1 — compact older chat messages into a single ASSISTANT-role summary,
+     * keeping the most recent {@value #COMPACT_KEEP_TAIL} messages verbatim.
+     * Use when the conversation has grown past the planner's effective context
+     * window and answers start drifting. Project memory + architecture are
+     * untouched; only the chat log is rewritten.
+     *
+     * <p>No-op when the conversation has fewer than {@value #COMPACT_MIN_TOTAL}
+     * messages — there's nothing meaningful to compact yet, so the caller gets
+     * a 409 (handled in the controller) rather than wasting an LLM call.
+     */
+    @Transactional
+    public CompactResult compactHistory(String projectId) {
+        if (projectId == null || projectId.isBlank()) {
+            throw new IllegalArgumentException("projectId required");
+        }
+        Project project = projectRepo.findById(projectId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
+
+        List<ProjectChatMessage> messages = chatRepo.findByProjectIdOrderByCreatedAtAsc(projectId);
+        if (messages.size() < COMPACT_MIN_TOTAL) {
+            throw new IllegalStateException(
+                    "Not enough history to compact (need ≥ " + COMPACT_MIN_TOTAL
+                    + ", have " + messages.size() + ")");
+        }
+
+        int splitAt = messages.size() - COMPACT_KEEP_TAIL;
+        List<ProjectChatMessage> toCompact = messages.subList(0, splitAt);
+        List<ProjectChatMessage> toKeep = messages.subList(splitAt, messages.size());
+
+        StringBuilder transcript = new StringBuilder();
+        for (ProjectChatMessage m : toCompact) {
+            transcript.append(m.getRole()).append(": ").append(m.getContent()).append("\n\n");
+        }
+
+        String system =
+                "You are summarising the early portion of a project chat so the assistant " +
+                "can keep the conversation grounded without re-reading every message.\n\n" +
+                "Rules:\n" +
+                "- Output a single ASSISTANT-voice summary in 2-4 paragraphs of natural prose.\n" +
+                "- Lead with WHAT WAS DECIDED (concrete features, libraries, file paths, names).\n" +
+                "- Then WHAT WAS RULED OUT and why.\n" +
+                "- Then OPEN QUESTIONS the user has flagged but not resolved.\n" +
+                "- Preserve every concrete identifier (endpoint paths, table names, env vars, " +
+                "  file paths, library names). These are the anchors future answers will cite.\n" +
+                "- Drop chit-chat, restatement, and meta-commentary.\n" +
+                "- Begin with a single line marker: '[Summary of earlier conversation]' so the " +
+                "  user can see at a glance which message is the compaction.";
+
+        LlmProvider provider = project.getAiProvider() != null
+                ? project.getAiProvider() : LlmProvider.OPENAI;
+
+        String summary;
+        try {
+            ResolvedModel resolved = modelResolver.resolve(
+                    "ProjectChatCompactor", provider, AgentTier.LIGHTWEIGHT);
+            ExecutionContext ctx = new ExecutionContext(
+                    "chat-compact-" + projectId, "__project_chat_compact__",
+                    Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
+            ChatResponse resp = router.call(LlmRequestV2.builder()
+                    .provider(resolved.getActualProvider().name().toLowerCase())
+                    .model(resolved.getModel())
+                    .messages(List.of(
+                            new SystemMessage(system),
+                            new UserMessage("Transcript:\n\n" + transcript)))
+                    .context(ctx)
+                    .temperature(0.2)
+                    .maxTokens(1500)
+                    .toolsOverride(Collections.emptyList())
+                    .build());
+            String out = resp.getResult().getOutput().getText();
+            summary = (out == null || out.isBlank()) ? null : out.trim();
+        } catch (Exception e) {
+            log.warn("compactHistory LLM failed for project {}: {}", projectId, e.getMessage());
+            summary = null;
+        }
+
+        if (summary == null) {
+            // Deterministic fallback — concatenate first/last user messages so the
+            // summary still carries the strongest anchors when the LLM call dies.
+            StringBuilder fb = new StringBuilder("[Summary of earlier conversation]\n\n");
+            ProjectChatMessage firstUser = toCompact.stream()
+                    .filter(m -> "USER".equals(m.getRole())).findFirst().orElse(null);
+            ProjectChatMessage lastUser = null;
+            for (ProjectChatMessage m : toCompact) {
+                if ("USER".equals(m.getRole())) lastUser = m;
+            }
+            if (firstUser != null) fb.append("First ask: ").append(firstUser.getContent().trim()).append("\n\n");
+            if (lastUser != null && lastUser != firstUser) fb.append("Most recent ask: ").append(lastUser.getContent().trim()).append("\n\n");
+            fb.append("(LLM summary unavailable — showing first/last user asks for context.)");
+            summary = fb.toString();
+        }
+
+        // Atomic swap: delete the compacted range, insert one summary message,
+        // keep the tail untouched. All inside the @Transactional boundary so a
+        // crash mid-write doesn't leave the chat in a half-compacted state.
+        chatRepo.deleteAll(toCompact);
+        chatRepo.flush();
+        ProjectChatMessage summaryMsg = ProjectChatMessage.builder()
+                .projectId(projectId)
+                .orgId(project.getOrgId())
+                .userId(toCompact.get(toCompact.size() - 1).getUserId())
+                .role("ASSISTANT")
+                .content(summary)
+                .build();
+        chatRepo.save(summaryMsg);
+
+        int totalAfter = 1 + toKeep.size();
+        log.info("ProjectChatService compacted project={} compactedFrom={} kept={} totalAfter={}",
+                projectId, toCompact.size(), toKeep.size(), totalAfter);
+        return new CompactResult(toCompact.size(), toKeep.size(), totalAfter);
+    }
+
+    /**
      * Distils the project chat history into a single-paragraph execution spec
      * ready to submit as a new project run. Uses the LIGHTWEIGHT tier + falls
      * back to a deterministic concatenation if the LLM call errors.
@@ -93,7 +229,7 @@ public class ProjectChatService {
             LlmProvider provider = project.getAiProvider() != null
                     ? project.getAiProvider() : LlmProvider.OPENAI;
             ResolvedModel resolved = modelResolver.resolve(
-                    "ProjectChatCompiler", provider, AgentTier.LIGHTWEIGHT);
+                    "ProjectChatCompiler", provider, AgentTier.PLANNING);
             ExecutionContext ctx = new ExecutionContext(
                     "chat-compile-" + projectId, "__project_chat_compile__",
                     java.nio.file.Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());

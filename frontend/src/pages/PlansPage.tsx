@@ -49,11 +49,11 @@ export default function PlansPage() {
       const currency = p.baseAmountInr > 0 ? 'INR' : 'USD';
       byTier[p.tier][currency] = p;
     }
-    // v2.6.0 — tier order: PRO (hidden via backend lifecycle filter for new
-    // buyers, still shown to existing PRO subscribers as CURRENT), TEAM,
-    // then MAX. The /api/billing/plans endpoint already filters HIDDEN rows
-    // so TEAM launch day PRO disappears automatically.
-    const tierOrder = ['PRO', 'TEAM', 'MAX'];
+    // V141 (2026-04-26) — collapsed ladder. PRO is HIDDEN from new buyers
+    // via backend lifecycle filter (still shown to existing subscribers as
+    // CURRENT). TEAM is the renamed MAX tier ($29 BYOK unlimited). The old
+    // per-seat TEAM was deleted in V141.
+    const tierOrder = ['PRO', 'TEAM'];
     return tierOrder
       .filter(t => byTier[t])
       .map(t => byTier[t][showInr ? 'INR' : 'USD'])
@@ -191,7 +191,7 @@ export default function PlansPage() {
       {/* Key mode explainer */}
       <div className="mt-8 max-w-2xl mx-auto text-center text-sm text-muted space-y-2">
         <p><strong>Pro:</strong> Managed keys — we handle LLM infrastructure. Zero setup required.</p>
-        <p><strong>Max:</strong> Bring your own Anthropic/OpenAI keys. Unlimited runs, full control.</p>
+        <p><strong>Team:</strong> Bring your own Anthropic/OpenAI keys. Unlimited runs, full control.</p>
       </div>
 
       {/* Subscribing overlay */}

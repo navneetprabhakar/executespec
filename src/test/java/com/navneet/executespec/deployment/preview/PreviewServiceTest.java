@@ -210,12 +210,20 @@ class PreviewServiceTest {
             PreviewSession s1 = service.start(runId1, freeUser());
             assertThat(s1).isNotNull();
 
-            // Second preview — should fail (FREE = 1 max)
+            // Second preview — should fail (FREE = 1 max).
+            // service.start() above is a REAL call that drives the worker thread
+            // through several mock methods (dockerIgnore, generate, …). After a
+            // real call, Mockito's `when(mock.x()).thenReturn(y)` form can latch
+            // onto the wrong invocation in its last-call context, producing
+            // "WrongTypeOfReturnValue" errors that point at the most recent
+            // mock interaction instead of the line you wrote. Use the
+            // `doReturn(y).when(mock).x()` form here so stubbing isn't
+            // sensitive to whatever the worker thread happens to be doing.
             String runId2 = "run-2";
-            when(stateStore.findRun(runId2)).thenReturn(Optional.of(completedRun(runId2)));
+            doReturn(Optional.of(completedRun(runId2))).when(stateStore).findRun(runId2);
             Path ws2 = workspaceRoot.resolve(runId2);
             Files.createDirectories(ws2);
-            when(dockerfileGen.detect(ws2)).thenReturn(PreviewProjectType.NODE_FRONTEND);
+            doReturn(PreviewProjectType.NODE_FRONTEND).when(dockerfileGen).detect(ws2);
 
             try {
                 assertThatThrownBy(() -> service.start(runId2, freeUser()))

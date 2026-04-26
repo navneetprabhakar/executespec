@@ -67,13 +67,25 @@ public class ExecutionPlannerService {
     private final ProjectMemoryProvider memoryProvider;
     private final FileConflictDetector conflictDetector;
     private final SseBroadcaster broadcaster;
+    private final ExecutionRunCasUpdater runCas;
 
     @Async
     public void generatePlan(String executionRunId) {
         ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
         if (run == null) return;
-        run.setStatus("PLANNING");
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The
+        // long-running planner LLM call below (~30s) straddles concurrent
+        // writes (SSE update path, abort callback). The original code held
+        // the in-memory `run` reference across the whole call and saved it
+        // after parsePlan/persistPlan, OOMing when @Version had moved on
+        // and leaving the row wedged at PLANNING. Wrap each save through
+        // the CAS bean.
+        boolean markedPlanning = runCas.casUpdate(executionRunId, r -> r.setStatus("PLANNING"));
+        if (!markedPlanning) {
+            log.warn("generatePlan: failed to mark exec {} as PLANNING (stale row); aborting",
+                    executionRunId);
+            return;
+        }
         emit(run.getId(), ExecutionEventTypes.EXEC_PLANNING_STARTED, null);
 
         try {
@@ -123,8 +135,10 @@ public class ExecutionPlannerService {
             emit(run.getId(), ExecutionEventTypes.EXEC_PLAN_READY, null);
         } catch (Exception e) {
             log.error("ExecutionPlannerService run={} failed: {}", executionRunId, e.getMessage(), e);
-            run.setStatus("ABORTED");
-            runRepo.save(run);
+            // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. We're in
+            // the catch after a long LLM call; the in-memory `run` reference
+            // is definitely stale.
+            runCas.casUpdate(executionRunId, r -> r.setStatus("ABORTED"));
             emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
         }
     }
@@ -182,15 +196,31 @@ public class ExecutionPlannerService {
     }
 
     private void persistPlan(ExecutionRun run, ExecutionPlan plan) throws Exception {
-        run.setExecutionPlan(objectMapper.writeValueAsString(plan));
-        run.setTotalEstimatedTokens(plan.totalEstimatedTokens());
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The in-memory
+        // `run` reference here is stale by ~30s (the planner LLM call upstream
+        // in generatePlan straddles concurrent writes from the SSE / abort
+        // paths). Wrap the run save through CAS, then refetch a fresh entity
+        // to use as the FK reference for the new ExecutionSolution rows. The
+        // FK only needs the row id; using a stale entity for the
+        // @ManyToOne write is safe but using one for save() is not.
+        final String planJson = objectMapper.writeValueAsString(plan);
+        final long totalTok = plan.totalEstimatedTokens();
+        boolean ok = runCas.casUpdate(run.getId(), r -> {
+            r.setExecutionPlan(planJson);
+            r.setTotalEstimatedTokens(totalTok);
+        });
+        if (!ok) {
+            throw new IllegalStateException(
+                    "persistPlan: failed to persist plan for exec " + run.getId()
+                            + " (stale row after retries); aborting solution writes");
+        }
+        ExecutionRun freshRun = runRepo.findById(run.getId()).orElse(run);
 
         // Map sequenceNumber -> saved ExecutionSolution to wire dependency edges.
         Map<Integer, ExecutionSolution> bySeq = new java.util.HashMap<>();
         for (SolutionSpec spec : plan.solutions()) {
             ExecutionSolution sol = ExecutionSolution.builder()
-                    .executionRun(run)
+                    .executionRun(freshRun)
                     .sequenceNumber(spec.sequenceNumber())
                     .title(spec.title())
                     .description(spec.description())

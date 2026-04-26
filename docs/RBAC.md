@@ -1,6 +1,6 @@
 # ExecuteSpec RBAC Map
 
-> Last updated: 2026-04-09 (v1.5.1)
+> Last updated: 2026-04-25 (v2.6.1 — TEAM tier + 3-state lifecycle from Wave 1; LlmProvider rename to GEMINI from v2.6.0).
 
 ## Roles
 
@@ -26,16 +26,19 @@
 
 ---
 
-## Subscription Tiers
+## Subscription Tiers (v2.6.1)
 
-| Tier | Runs | Concurrent | Key Mode | Deploy | Org |
-|------|------|------------|----------|--------|-----|
-| `FREE` | 3 lifetime | 1 | Managed | Yes (3 max) | No |
-| `PRO` | 10/month | 2 | Managed | Yes | Yes |
-| `MAX` | Unlimited | 3 | BYOK (required) | Yes | Yes |
-| `ENTERPRISE` | Custom | Custom | BYOK/Managed | Yes | Yes |
+| Tier | Price | Runs (credits) | Seats | Key Mode | Lifecycle | Notes |
+|------|-------|----------------|-------|----------|-----------|-------|
+| `FREE` | $0 | 5/month, 1-credit specs only | 1 | Managed | LISTED | Lifetime quota gating; no HIGH-complexity plans |
+| `PRO` | $20/mo | 20/month | 1 | Managed | **HIDDEN** | Grandfathered from 2026-04-28 — existing subscribers untouched, hidden from new buyers (V122) |
+| `TEAM` | $49/seat/mo | 50/seat shared pool | 2-20 self-serve | Managed | LISTED | Wave 1 (v2.6.1) — seat-aware Stripe checkout, 180d retention |
+| `MAX` | $29/mo | Unlimited fair-use | 1 | BYOK (required) | LISTED | Own keys; 90d retention |
+| `ENTERPRISE` | Custom (from $1,500/mo) | Unlimited + SLA | Unlimited | BYOK/Managed | LISTED | Custom contract, audit log export, SSO + SCIM (future) |
 
 Legacy: `STARTER` maps to `FREE` in auth system.
+
+**Tier lifecycle states** (Wave 1, V121): `LISTED` (visible + buyable), `HIDDEN` (invisible to new buyers, existing subscribers untouched), `SUNSETTING` (scheduled for removal — gateway side-effects gated by `billing.lifecycle.sunsetting.enabled` feature flag, default OFF).
 
 ---
 
@@ -79,6 +82,12 @@ Legacy: `STARTER` maps to `FREE` in auth system.
 | | `POST /api/projects/{id}/archive` | `ORG_ADMIN` or `SUPER_ADMIN` |
 | | `POST /api/projects/{id}/members` | `ORG_ADMIN` or `SUPER_ADMIN` |
 | | `DELETE /api/projects/{id}/members/{uid}` | `ORG_ADMIN` or `SUPER_ADMIN` |
+| **TierLifecycleController** (v2.6.1 Wave 1) | `GET /api/admin/tiers` | `SUPER_ADMIN` |
+| | `PUT /api/admin/tiers/{tierId}/lifecycle` | `SUPER_ADMIN` |
+| | `PUT /api/admin/billing-plans/{id}/lifecycle` | `SUPER_ADMIN` |
+| **OrgController** (v2.6.1 Wave 1) | `POST /api/org/me/seats/adjust` | `ORG_ADMIN` or `SUPER_ADMIN` (TEAM tier only; rejects reducing below active-member count with 422) |
+| **OnboardingController** (v2.6.1 Wave 2) | `GET /api/onboarding/sample-specs`, `POST /pick-sample`, `GET /sandbox-status` | `authenticated` |
+| **AdminReconciliationController** | `POST /api/admin/executions/reconcile` | `SUPER_ADMIN` (operational cleanup for stuck `ExecutionRun` rows) |
 
 ---
 
@@ -114,13 +123,16 @@ Resolved by `TierPermissionService.resolve(user)`. Priority: SUPER_ADMIN > FINAN
 
 ## Tier Enforcement (TierEnforcementService)
 
-| Check | FREE | PRO | MAX | ENTERPRISE |
-|-------|------|-----|-----|------------|
-| Run submission | 3 lifetime | 10/month (billing cycle) | Unlimited | 5000/month or custom |
-| Complexity gate (HIGH plans) | Blocked | Allowed | Allowed | Allowed (with BYOK) |
-| Credit charge at approval | Yes (max 1 credit) | Yes (N credits) | Skip (BYOK) | Skip (BYOK) |
-| Cost budget ceiling | credits x $5 x 1.5 | credits x $5 x 1.5 | Unlimited | Unlimited |
-| API key requirement | System keys | System keys | Own keys required | Org policy |
+| Check | FREE | PRO (HIDDEN) | TEAM | MAX | ENTERPRISE |
+|-------|------|--------------|------|-----|------------|
+| Run submission | 5/month, 1-credit specs only | 20/month (billing cycle) | 50 credits/seat shared pool | Unlimited (fair-use) | Unlimited (custom) |
+| Complexity gate (HIGH plans) | Blocked | Allowed | Allowed | Allowed (with BYOK) | Allowed |
+| Credit charge at approval | Yes (max 1 credit) | Yes (N credits) | Yes (N credits, seat-pooled) | Skip (BYOK) | Skip (BYOK) |
+| Cost budget ceiling | credits x $5 x 1.5 | credits x $5 x 1.5 | credits x $5 x 1.5 | Unlimited | Unlimited |
+| API key requirement | System keys | System keys | System keys | Own keys required | Org policy |
+| Monthly counter reset zone | Asia/Kolkata 00:00 IST on 1st (`MonthlyRunCounterResetJob`) | Billing cycle | Billing cycle | — | — |
+
+**Seat enforcement (TEAM only):** `InvitationService` returns 402 Payment Required when active members + pending invites would exceed `org.seat_count`. Adjusting via `POST /api/org/me/seats/adjust` rejects reductions below the active-member count.
 
 ---
 
@@ -178,10 +190,10 @@ Resolved by `TierPermissionService.resolve(user)`. Priority: SUPER_ADMIN > FINAN
 | Internal ID | Display Label | Notes |
 |-------------|--------------|-------|
 | `anthropic` / `ANTHROPIC` | **Anthropic** | Claude models |
-| `google` / `GOOGLE` | **Gemini** | Gemini models (backend ID stays `google`) |
+| `gemini` / `GEMINI` | **Gemini** | Gemini models. Renamed from `google`/`GOOGLE` in v2.6.0 (V120 migration). `GOOGLE` is still accepted as a back-compat alias on `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider` input but is rewritten to `GEMINI` before persistence. |
 | `openai` / `OPENAI` | **OpenAI** | GPT models |
 
-Backend `ModelController.PROVIDER_LABELS` maps `"google"` to `"Gemini"`. Frontend displays `ProviderEntry.label` from API.
+YAML keys (`model-matrix.gemini`, `failover-order.gemini`, `model-pricing[].provider: gemini`, `provider-pool.GEMINI`) must match the canonical `GEMINI` spelling. Spring AI library keys (`spring.ai.google.genai.*`) and OAuth registration (`spring.security.oauth2.client.registration.google`) are deliberately untouched — those refer to Google the company, not the LLM provider rename. See `FailoverOrderEnumAlignmentTest` for the regression guard.
 
 ---
 

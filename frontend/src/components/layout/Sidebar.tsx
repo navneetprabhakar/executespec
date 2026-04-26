@@ -109,6 +109,8 @@ export default function Sidebar() {
           <button
             onClick={closeMobileDrawer}
             className="ml-auto min-h-[44px] min-w-[44px] flex items-center justify-center -mr-2 text-muted hover:text-primary"
+            aria-label="Close menu"
+            title="Close menu"
           >
             <X className="h-5 w-5" />
           </button>
@@ -117,6 +119,8 @@ export default function Sidebar() {
           <button
             onClick={() => setSidebarExpanded(!sidebarExpanded)}
             className="ml-auto text-muted hover:text-primary transition-colors"
+            aria-label={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
+            title={sidebarExpanded ? 'Collapse sidebar' : 'Expand sidebar'}
           >
             <ChevronLeft className={cn('h-4 w-4 transition-transform', !expanded && 'rotate-180')} />
           </button>
@@ -218,7 +222,7 @@ export default function Sidebar() {
       {/* Upgrade + Usage — hidden for SUPER_ADMIN since they bypass billing quotas */}
       {expanded && !isSuperAdmin && (
         <div className="px-3 py-2 border-t border-[var(--border-default)] space-y-2">
-          {tier && tier !== 'ENTERPRISE' && tier !== 'MAX' && (
+          {tier && tier !== 'ENTERPRISE' && tier !== 'TEAM' && (
             <button
               onClick={() => { navigate('/plans'); if (isMobile) closeMobileDrawer(); }}
               className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"
@@ -227,7 +231,7 @@ export default function Sidebar() {
               <span>Upgrade{tier === 'FREE' ? ' to Pro' : ''}</span>
             </button>
           )}
-          {tier && tier !== 'FREE' && tier !== 'MAX' && tier !== 'ENTERPRISE' && (
+          {tier && tier !== 'FREE' && tier !== 'TEAM' && tier !== 'ENTERPRISE' && (
             <button
               onClick={() => { navigate('/billing#topup'); if (isMobile) closeMobileDrawer(); }}
               className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"

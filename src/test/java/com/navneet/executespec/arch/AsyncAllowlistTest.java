@@ -111,7 +111,22 @@ class AsyncAllowlistTest {
             // no lazy JPA nav. Exceptions never propagate — analytics is a
             // side-effect, not a pre-condition. See
             // docs/plans/activation-instrumentation-plan.md.
-            "EventTrackingService#track"
+            "EventTrackingService#track",
+
+            // E1.9 — activity foundation. Takes primitive args (UUID, enum,
+            // String, Map<String,Object>); no JPA nav at all (the entity is
+            // built in-method from primitives and saved). Internal try/catch
+            // swallows any persist failure per the plan §1.9 non-blocking
+            // contract. See docs/plans/pending-enterprise-readiness-execution-eval.md
+            // §8 (E1.8/9/10 bundle).
+            "ActivityEventEmitter#emit",
+
+            // E1.5 — bootstrap PR flow. Loads ProjectRepo by id (no eager
+            // collection nav — it has no @OneToMany relations) and saves
+            // back primitive field updates. Outer try/catch wraps the whole
+            // method so async-thread crashes never go silent. See
+            // docs/plans/pending-enterprise-readiness-execution-eval.md §8 (E1.5).
+            "BootstrapService#bootstrapAsync"
     ));
 
     @Test

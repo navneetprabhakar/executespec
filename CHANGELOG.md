@@ -7,6 +7,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Added — Hierarchical planner (v2.6.2-track, on `feature/hierarchical-planner`)
+
+Replaces the legacy single-shot `PlannerAgentV2` with a 4-phase pipeline. Removes the 8192-token output cap that was failing on multi-repo / legacy specs. All 5 slices shipped on the branch; not yet merged to `dev`/`main`. Full design + slice status in [`docs/hierarchical-planner-plan.md`](docs/hierarchical-planner-plan.md).
+
+- **Phase 0 — `SmartClassifierAgent`** (LIGHTWEIGHT). Heuristic fast path for obvious tiny specs (≤150 chars, 1 repo, no domain-explosive verbs) returns SINGLE_SHOT in 0ms / $0; everything else hits an LLM verifier. Redis cache (1h TTL). Always-fall-back-to-heuristic on outage.
+- **Phase 1 — `OutlinePlannerAgent`** (PLANNING). `FULL_PLAN` mode (32k cap, single tool call) for SMALL/MEDIUM; `SKELETON_ONLY` mode (8k cap) for LARGE/LEGACY. New `submitOutline` tool. SINGLE_SHOT bypass via `synthesizeSingleShot` (migrated from deleted `PlannerAgentV2`).
+- **Phase 2 — `TaskExpanderAgent`** (WORKHORSE) + recursive `expandEpic`. N parallel `submitTaskDetail` calls fill LEAF skeleton bodies; LEGACY EPIC skeletons fan out via depth-2 sub-outline + parallel sub-expansion (T3 → T3.1, T3.2, …). 20-min phase wall timeout, per-task title-derived LEAF fallback.
+- **Phase 3 — `CoherencePlannerAgent`** (LIGHTWEIGHT). `patchPlan` tool with 5 patch kinds (requirement coverage, dependsOn add/remove, hardConstraint fix, multi-repo path move). Empty patches = clean plan.
+- **`PlanStrategyCircuitBreaker`** (Redis-backed). 5 consecutive failures → 1h open → ladder degrade `LEGACY → LARGE → MEDIUM → SMALL → legacy`.
+- **`PlannerOutputUtils`** static utility — `parsePlanFromArgs`, `validatePlan`, `salvagePlanFromText`, `warnIfConstraintsUnderpropagated`, `cleanTitle`, `resolveProviderForTitle`. Replaces the parse helpers that lived on the deleted `PlannerAgentV2`.
+- **Estimate re-tune.** `V2RunCostTracker.estimateRunTierAware(provider, complexities, strategy)` overload computes per-strategy phase costs. Wired into `V2RunOrchestrator.persistEstimate` so plan-approval modal reflects the actual pipeline shape.
+- **Dashboard surfacing.** `RunDetail` DTO + frontend `lib/api.ts` types gain `planStrategy`, `classifierReasoning`, plus the 4 phase cost groups. New `PlannerPhaseBreakdown` component on RunDetail Overview tab — renders only when `planStrategy` is set + ≥1 phase has tokens.
+- **Outline-checkpoint visibility.** `agent_task.{task_type, expansion_status, expanded_at}` written by `persistTasks`. `StartupRunResumerV2` failure message reports `expanded=N pending=M failed=K` for interrupted runs.
+- **Calibration methodology** in `hierarchical-planner-plan.md` — 4 audit SQL queries, tuning-targets table, threshold-tuning notes, weekly→monthly cadence, report template.
+- **Deletions:** `v2/agent/PlannerAgentV2.java`, `prompts/v2/planner.md`, `PlannerAgentV2: PLANNING` tier mapping, `PlannerAgentV2ValidationTest`. Root-level duplicate `CODEBASE_MAP.md` also deleted (consolidated into `docs/CODEMAP.md`).
+- **Migration V130** (additive only, all columns nullable): per-phase cost columns on `pipeline_run`, expansion-status columns on `agent_task`, partial index on `plan_strategy`.
+- **Open follow-up:** auto-replay re-trigger from persisted outline checkpoint on JVM restart (the one slice-5d gap).
+
+### Added — Project chat UX bundle (v2.6.1, live on `dev`)
+
+Commits `3cef1d90 → ddf9c498` on `dev` (deployed to `dev.executespec.ai`). Three logical fix-arcs in one working session.
+
+- **Connection-leak fix arc.** Apply-suggestion endpoint was holding a Hikari connection across a 25-iteration Sonnet worker loop because OSIV bound the EM to the Tomcat handler thread for the request's lifetime. Three commits: (1) async-dispatch `applySuggestion` via `CompletableFuture` on a dedicated 4-thread `applyExecutor` + `spring.mvc.async.request-timeout: 900000`; (2) `hibernate.connection.handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION`; (3) `spring.jpa.open-in-view: false` after auditing every lazy-walk site. Hikari leak-detection-threshold 60s → 90s with rationale comment.
+- **Project chat panel rebuild.** Layout: hardcoded `h-[600px]` → `h-full min-h-0`; `ProjectDashboardPage` main pane opts out of padding/overflow on the chat tab. Slim header (only when conversation exists) with **Compact** + **Reset** buttons. `Reset` clears history via `DELETE /api/projects/{id}/chat`; `Compact` summarises older N-tail messages into one ASSISTANT-voice `[Summary]` message and keeps the last 6 verbatim via `POST /api/projects/{id}/chat/compact`. Hover-revealed Copy/Check button below every message bubble (copies raw markdown for assistant replies). Launch-from-chat redirect changed `/runs/{id}` → `/projects/{id}/dashboard`. Per-launch branch input on the Launch modal.
+- **Tooltip primitive + Sidebar gaps.** New `frontend/src/components/shared/Tooltip.tsx` (CSS-only, 250ms delay, hover/focus reveal). `aria-label` + `title` added to Sidebar's mobile-close + desktop-collapse icon buttons.
+- **Planner + chat-compactor tier moves.** `RepoArchitectureGenerator`, `ArchitectureDocGenerator`, `ProjectChatCompiler` LIGHTWEIGHT/WORKHORSE → PLANNING (Anthropic Haiku missed cross-repo wiring + mangled spec compilation). New `ProjectChatCompactor: LIGHTWEIGHT`.
+
 ### Added — Security Guardrail Levels (P1–P5)
 
 Runtime-switchable security posture — `LOW | MEDIUM | HIGH`, default `LOW`. Flip via `PUT /api/feature-flags/security.guardrail_level`. See [`docs/plans/guardrail-levels-execution-plan.md`](docs/plans/guardrail-levels-execution-plan.md).

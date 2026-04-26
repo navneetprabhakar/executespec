@@ -30,8 +30,8 @@ export function UsageBadge() {
   // entirely so they don't see misleading "283/10 runs" red bars when their
   // backing billing plan is PRO but they're actually unlimited via role.
   if (user?.globalRole === 'SUPER_ADMIN') return null;
-  // Same for ENTERPRISE / MAX users — these tiers are unlimited by spec.
-  if (user?.tier === 'ENTERPRISE' || user?.tier === 'MAX') return null;
+  // V141 — same for ENTERPRISE / TEAM (renamed from MAX) — unlimited by spec.
+  if (user?.tier === 'ENTERPRISE' || user?.tier === 'TEAM') return null;
 
   if (!status) return null;
 

@@ -34,19 +34,49 @@ spring:
       idle-timeout: 120000           # 2 min — reclaim idle connections faster
       max-lifetime: 600000           # 10 min — rotate connections before DB-side timeouts
       validation-timeout: 3000       # 3s — quick validation for health checks
-      leak-detection-threshold: 60000 # 60s — log warning if connection held > 1 min
+      # v2.6.1 — bumped 60s → 90s. Async apply-suggestion dispatch (see
+      # RunConversationController.applyExecutor) means the worker loop no
+      # longer pins a connection, but short JPA reads inside the loop
+      # (runRepo.findById, etc.) can still brush up against 60s under p99
+      # slow-query conditions. 90s reduces false positives while still
+      # flagging real leaks early.
+      leak-detection-threshold: 90000
+  mvc:
+    async:
+      # v2.6.1 — 15 min. The apply-suggestion endpoint dispatches async
+      # (CompletableFuture) and the worker can burn up to ~25 iterations ×
+      # ~20 s/Sonnet call = ~8 min in the worst case. Default Tomcat
+      # async timeout (30 s) would cancel these before they finish.
+      request-timeout: 900000
   jpa:
-    # Keep the Hibernate session open for the full HTTP request. Required by the
-    # execution + project view controllers, which walk lazy collections
-    # (ExecutionSolution.dependencies, ExecutionRun proxies, etc.) in the
-    # response mapping layer. Tradeoff: DB connection held for the request's
-    # duration and potential for N+1 queries; acceptable given our traffic
-    # profile and already-amortised LLM call costs per request.
-    open-in-view: true
+    # v2.6.1 — OSIV flipped OFF after audit (2026-04-25). It was enabled in
+    # v2.5.1 to silence lazy-init crashes in execution + project view
+    # controllers, but a code-walk showed every concerning lazy walk is now
+    # covered by either entity-level FetchType.EAGER (ExecutionSolution
+    # dependencies + repoMappings) or @EntityGraph queries
+    # (ExecutionRunRepository.findListByProjectId / findDetailById +
+    # ExecutionSolutionRepository.findWith*) — and the DTO-walk endpoints
+    # in ProjectLaunchController are wrapped in @Transactional(readOnly=true).
+    # OSIV's session-scoped EM was the last reason connections were held
+    # across long async work (chat /apply); turning it off pairs with the
+    # connection.handling_mode change to release each connection at tx commit.
+    open-in-view: false
     database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: validate        # Hibernate only validates — Flyway manages all schema
     show-sql: false
+    properties:
+      hibernate:
+        connection:
+          # v2.6.1 — release the JDBC connection back to Hikari on every tx
+          # commit instead of holding it for the whole EM lifetime. Without
+          # this, OSIV's request-scoped session pins the connection from the
+          # first @Transactional read (e.g. guard.requireRunAccess → findRun)
+          # until the request completes — on async endpoints like
+          # /runs/{id}/apply that's the full worker loop (~1-8 min). Trade-off:
+          # lazy-loads outside an explicit tx re-acquire a connection per
+          # query (Hikari handles the churn fine at pool-size 30).
+          handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION
   flyway:
     enabled: true
     baseline-on-migrate: true   # Safe for existing databases
@@ -242,8 +272,11 @@ model-matrix:
 
   agent-tier-map:
     # V2 agents
-    PlannerAgentV2: PLANNING
+    OutlinePlannerAgent: PLANNING           # v2.6.2 hierarchical-planner phase 1
+    TaskExpanderAgent: WORKHORSE            # v2.6.2 hierarchical-planner phase 2 (parallel)
+    CoherencePlannerAgent: LIGHTWEIGHT      # v2.6.2 hierarchical-planner phase 3
     ReviewerAgentV3: PLANNING
+    SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
     WorkerAgentV2: WORKHORSE
     # Shared non-tool-calling agents (use LlmRouter)
     TestPlannerAgent: WORKHORSE
@@ -253,11 +286,12 @@ model-matrix:
     ContextAgent: LIGHTWEIGHT
     RunLedgerAgent: LIGHTWEIGHT
     RunTitleSummarizer: LIGHTWEIGHT
-    ProjectChatCompiler: LIGHTWEIGHT
+    ProjectChatCompiler: PLANNING
+    ProjectChatCompactor: LIGHTWEIGHT       # v2.6.1 — chat history compaction
     ProjectBriefService: LIGHTWEIGHT
-    # v2.5.12 — 3-step architecture pipeline
-    RepoArchitectureGenerator: LIGHTWEIGHT   # per-repo HLD+LLD from codemap
-    ArchitectureDocGenerator: WORKHORSE      # cross-repo synthesis from per-repo docs
+    # v2.5.12 — 3-step architecture pipeline (bumped to PLANNING v2.6.1 — Haiku/WORKHORSE missed cross-repo wiring and mangled spec compilation)
+    RepoArchitectureGenerator: PLANNING      # per-repo HLD+LLD from codemap
+    ArchitectureDocGenerator: PLANNING       # cross-repo synthesis from per-repo docs
     ProjectDocGeneratorService: WORKHORSE    # EXPLANATION / SETUP docs
     ConversationAgent: LIGHTWEIGHT
     PromptOptimiserAgent: WORKHORSE

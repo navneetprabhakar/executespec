@@ -1,54 +1,47 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-23 (v2.6.1 Waves 1-6 merged to dev + main + deployed to dev.executespec.ai; v2.6.0: UX v3 Graphite+Signal + pricing v3 + US-first pivot + PH launch kit; v2.5.x: earlier releases)
+> Last updated: 2026-04-26 (cleanup pass — removed `workspace/`, `workspace-test/`, `scripts/{e2e-matrix-logs,eval-runs,project-view-results,v2-eval-results}`, `docs/test-scenarios/`, `docs/reports/`. Truncated all run + project + contract + activity_feed rows in DB. Audited `docs/plans/` and removed 5 stale plans: `hierarchical-planner-plan.md` (all 5 slices shipped), `pending-enterprise-readiness-execution-eval.md` (4 phases shipped on branch), `open-work-2026-04-18.md` (stale 8-day audit), `pending-preview-control-plane-plan.md` + `preview-engine-rewrite.md` (preview-engine moved to its own repo, plans will be recreated there). `hierarchical-planner-plan.md` was first moved from `docs/` root into `docs/plans/` then archived alongside the others. Doc references scrubbed across CLAUDE.md / ARCHITECTURE.md / CODEMAP.md / document_map.md.).
 >
-> **v2.6.1 Wave 1 (2026-04-22 → 2026-04-28): TEAM tier + tier-lifecycle tooling shipped together (Option Z). See [docs/plans/team-tier-plan.md](plans/team-tier-plan.md) + [docs/plans/tier-lifecycle-plan.md](plans/tier-lifecycle-plan.md). PRO grandfathered to `HIDDEN` via V122 migration — existing subscribers unaffected. SUNSETTING gateway side-effects gated by `billing.lifecycle.sunsetting.enabled` feature flag (default OFF).**
+> **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Enterprise readiness (v2.6.3-track) **Phases E1+E2+E3+E4 (40 slices total) shipped on `feature/enterprise-readiness-eval`** (49+ commits ahead of `dev`, not yet merged); operational summary lives in [`CLAUDE.md`](../CLAUDE.md) under §Current State + §Recently Resolved. Hierarchical planner (v2.6.2-track) **all 5 slices shipped on `feature/hierarchical-planner`** (8 commits ahead of `dev`, not yet merged); operational summary in [`CLAUDE.md`](../CLAUDE.md) §0c (in `ARCHITECTURE.md`) and the v2/agent codemap row. Auto-replay re-trigger from outline checkpoint is the one remaining gap.
 >
-> **v2.6.0 docs to know about:**
-> - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — new single source of truth for every color in the app. Semantic palette (`--status-success/executing/waiting/partial/error/...`), graduated 4-band score palette, accent palette, radius/spacing scale, Tailwind mapping, chip patterns, MUST/MUST NOT rules. If you add a component, start here.
-> - [`docs/reports/session-handoff-2026-04-21.md`](reports/session-handoff-2026-04-21.md) — detailed handoff: commits landed, pricing v3 rationale (Option C over B), US-first pivot, Stripe prod default, blocking list for PH launch, deferred follow-ups (Stripe top-up wiring, country-aware routing, currency-gateway-map, Stripe refund path, Gemini token bloat fix, mobile accuracy floor, Bug #1c strict-provider bypass).
-> - [`docs/reports/launch-checklist-2026-04-21.md`](reports/launch-checklist-2026-04-21.md) — PH launch readiness tracker; website + press-kit + OG hero + screenshots.
-> - `website/tier-decision.md` / `website/pricing-analysis.md` / `website/product-hunt-launch.md` — external-facing source of truth for pricing + launch messaging.
->
-> **Persona roadmap docs (2026-04-22 session — 3 buyer personas × 4 tiers × PM lens → 6 waves of shipping):**
-> - [`docs/plans/persona-roadmap-2026-04-22.md`](plans/persona-roadmap-2026-04-22.md) — **master roadmap**. All persona × tier interventions, PM-view action items, 6-wave shipping calendar (Apr 28 → Jul 15), open decisions, non-goals. Start here.
-> - [`docs/plans/team-tier-plan.md`](plans/team-tier-plan.md) — Wave 1. TEAM tier at $49/seat (2-20 devs, 50 credits/seat shared pool) + bundled tier-lifecycle tooling (Option Z). Ships 2026-04-28 → 2026-05-06.
-> - [`docs/plans/tier-lifecycle-plan.md`](plans/tier-lifecycle-plan.md) — standalone reference for the 3-state (LISTED/HIDDEN/SUNSETTING) lifecycle machine. Used by team-tier launch to grandfather PRO; reusable for any future tier retirement.
-> - [`docs/plans/activation-instrumentation-plan.md`](plans/activation-instrumentation-plan.md) — Wave 2a. 6-event PostHog funnel (signup → project_created → spec_submitted → plan_approved → run_complete → pr_merged). Ships 2026-05-07 → 2026-05-20.
-> - [`docs/plans/ttfv-reduction-plan.md`](plans/ttfv-reduction-plan.md) — Wave 2b (parallel with activation). Sandbox project + pre-filled sample spec on signup; target median TTFV under 3 min. Ships 2026-05-07 → 2026-05-20.
-> - [`docs/plans/wave-3-sso-githubapp-procurement-plan.md`](plans/wave-3-sso-githubapp-procurement-plan.md) — **Wave 3** (schema + docs shipped 2026-04-23; controllers in follow-up). SSO/SAML on MAX, GitHub App install, team trial CTA, procurement one-pager. Ships 2026-05-21 → 2026-06-03.
-> - [`docs/plans/wave-4-landing-proof-routing-changelog-plan.md`](plans/wave-4-landing-proof-routing-changelog-plan.md) — **Wave 4** (scaffold shipped). `ProviderRecommendationService` skeleton + 2 A/B feature flags + live-demo hero + enterprise proof pack + changelog/status pages. Ships 2026-06-04 → 2026-06-17.
-> - [`docs/plans/vscode-extension-plan.md`](plans/vscode-extension-plan.md) — Wave 4 external-repo stub; `executespec-vscode` with device-code OAuth flow.
-> - [`docs/plans/wave-5-startup-and-polish-plan.md`](plans/wave-5-startup-and-polish-plan.md) — **Wave 5** (schema shipped). Startup program (50% off MAX for <20-employee companies) + 14-day MAX trial on signup + free-tier 2-teammate invites + progressive disclosure + BYOK credit meter + shareable report links on FREE. Ships 2026-06-18 → 2026-07-01.
-> - [`docs/plans/wave-6-cli-enterprise-depth-plan.md`](plans/wave-6-cli-enterprise-depth-plan.md) — **Wave 6** (docs shipped). ExecuteSpec CLI (external repo) + audit CSV export on ENTERPRISE + CSM/SLA docs + customer logos page. Ships 2026-07-02 → 2026-07-15.
-> - [`docs/plans/cli-plan.md`](plans/cli-plan.md) — Wave 6 external-repo stub; `executespec-cli` Node CLI with device-code OAuth.
-> - [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison + data-handling Q&A (Wave 3 deliverable).
-> - [`docs/enterprise-sla.md`](enterprise-sla.md) — ENTERPRISE-tier support SLA (P1-P4 definitions + 99.9% uptime credit schedule + CSM engagement) (Wave 6 deliverable).
-> - [`docs/plans/complimentary-pro-promo-2026-04-30-plan.md`](plans/complimentary-pro-promo-2026-04-30-plan.md) — founder thank-you promo for recent FREE signups; 30-day PRO upgrade. Executes 2026-04-30 (reminder scheduled).
->
->
-> **v2.5.12 docs to know about:**
-> - [`docs/test-scenarios/personas-journeys-and-cases.md`](test-scenarios/personas-journeys-and-cases.md) — 6 personas, 8 user journeys, ~55 test cases organised in 12 blocks, 10-minute smoke pack, persona × feature coverage matrix.
-> - [`docs/test-scenarios/persona-test-analysis-2026-04-18.md`](test-scenarios/persona-test-analysis-2026-04-18.md) — single-session smoke pass against local; covers what passed (3-step arch idempotency, Generate Docs end-to-end, regression markers from v2.5.12), what was deferred (full run lifecycle, OAuth, payments), 10 numbered gaps with severity + fix; system rating **7.4/10** across 11 dimensions.
-> - [`docs/test-scenarios/adversarial-test-report-2026-04-18.md`](test-scenarios/adversarial-test-report-2026-04-18.md) — unbiased adversarial pass (~85 probes) against the same local build; covers auth/RBAC/tier, all 3 LLM providers end-to-end, fuzz/SSRF/XSS/JWT-tampering, webhook signatures. 19 numbered findings including **1 CRITICAL IDOR cluster** across 12 project sub-resource endpoints. System rating **7.2/10** — drops 0.6 vs smoke pass because the IDOR finding wasn't surfaced earlier.
-> - [`docs/test-scenarios/e2e-all-features-test-plan.md`](test-scenarios/e2e-all-features-test-plan.md) — 17-section, ~50-scenario plan covering every user-facing surface (the system-perspective companion to the persona-perspective doc above).
->
-> **v2.5.x docs:**
-> - [`docs/project-user-journeys.md`](project-user-journeys.md) — end-to-end user journeys + workflow map for the project workbench (Setup → Launch → PR merge → continue building, docs upload, chat, etc.).
-> - [`docs/plans/project-codemap-arch-rag-plan.md`](plans/project-codemap-arch-rag-plan.md) — feature design (workspace layout, RAG invariants, phasing).
-> - [`docs/plans/project-codemap-arch-rag-execution.md`](plans/project-codemap-arch-rag-execution.md) — concrete per-phase implementation order.
-> - `docs/plans/project-codemap-rag-backlog.md` — **retired 2026-04-18**; Items 0 + 2 shipped; Items 1 + 3 captured in [`docs/plans/open-work-2026-04-18.md`](plans/open-work-2026-04-18.md) §D2 / §D3.
->
-> **Pilot-v3.0 docs to know about:**
-> - [`docs/plans/pilot-v3-plan.md`](plans/pilot-v3-plan.md) — full recap of
->   the project-workspace / multi-repo / codebase-intel / assessment /
->   scoring / PR-webhook / codemap-on-clone release.
-> - `USER_MANUAL.md` §13 — user-facing walkthrough for project-scoped runs.
-> - `frontend-api-usage.md` — new "Pilot v3.0 — Project workspace endpoints"
->   table lists every new endpoint with its frontend caller.
-> - `DEPLOYMENT.md` — ops additions: `GITHUB_WEBHOOK_SECRET`,
->   `assessment.llm.enabled` feature flag, `StackRefreshJob` cron.
+> **Codemap consolidation (2026-04-25):** the duplicate root-level `CODEBASE_MAP.md` was removed on `feature/hierarchical-planner`. `docs/CODEMAP.md` is now the only codemap; `README.md`'s docs table points there.
+
+## Plans folder structure (post-2026-04-26 cleanup)
+
+`docs/plans/` holds only the 5 plans that are still actively useful:
+
+| File | Type | What it is |
+|------|------|------------|
+| [`partial-work.md`](plans/partial-work.md) | consolidated | All 4 plans with partial implementations / pending follow-ups: Mobile (RN+Expo native-Android gap), Figma v2 (design-only), Harness V2 remaining work (Gap 1+2+3), and the PARTIAL-status removal proposal. |
+| [`pending-v2-batch-execution-plan.md`](plans/pending-v2-batch-execution-plan.md) | not started | Re-implement batch execution under V2 (V1 batch was deleted). Realtime-only today. |
+| [`pending-distributed-processing-plan.md`](plans/pending-distributed-processing-plan.md) | not started | Phase A NFS workspace + Phase B worker-lease pool. |
+| [`pending-vscode-extension-plan.md`](plans/pending-vscode-extension-plan.md) | not started | External-repo VS Code extension; device-code OAuth. |
+| [`pending-complimentary-pro-promo-2026-04-30-plan.md`](plans/pending-complimentary-pro-promo-2026-04-30-plan.md) | not started | Founder thank-you 30-day PRO upgrade for early FREE signups. |
+
+**Removed in 2026-04-26 cleanup:**
+- `hierarchical-planner-plan.md` — all 5 slices shipped on `feature/hierarchical-planner`. Operational truth lives in `CLAUDE.md` and `ARCHITECTURE.md`.
+- `pending-enterprise-readiness-execution-eval.md` — all 4 phases shipped on `feature/enterprise-readiness-eval`. Operational truth lives in `CLAUDE.md` §Current State + the new package summaries in `CODEMAP.md` + `ARCHITECTURE.md` §0d.
+- `open-work-2026-04-18.md` — stale 8-day audit referencing deleted plans; superseded by `partial-work.md`.
+- `pending-preview-control-plane-plan.md` + `preview-engine-rewrite.md` — preview pipeline moved to the separate [`preview-engine`](https://github.com/navneetprabhakar/preview-engine) repo; new plans will be authored there.
+
+## Recently shipped (kept here as breadcrumbs; full plans deleted)
+
+The following plans were merged + deployed and their plan files have been removed. Operational truth lives in [`CLAUDE.md`](../CLAUDE.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`PRD.md`](PRD.md).
+
+- **v2.6.3-track Enterprise Readiness** (4 phases, 40 slices, V131-V139) — `.executespec/` folder write contract + activity feed + cross-repo contracts + engineering standards + ADRs + arch invariants + notification preferences + project export. Shipped on `feature/enterprise-readiness-eval`, not yet merged.
+- **v2.6.2-track Hierarchical Planner** (5 slices, V130) — Phase 0 classifier + Phase 1 outline planner + Phase 2 parallel expander + Phase 3 coherence patcher. Shipped on `feature/hierarchical-planner`, not yet merged.
+- **v2.6.1 Waves 1-6** — TEAM tier + 3-state lifecycle + PostHog activation funnel + sandbox onboarding + SSO/GitHub App schema + smart-routing scaffold + startup program + 14-day MAX trial + enterprise SLA reference + CLI plan stub. Migrations V121–V129.
+- **v2.6.0** — UX v3 Graphite+Signal theme + LlmProvider GEMINI rename + pricing v3 ($1=1 credit per band) + US-first pivot + Stripe prod default. Migration V120.
+- **v2.5.x series** — RN+Expo codegen (V118), 3-step architecture pipeline + Generate Docs (V112–V115), validation v3 Pillar 1 (V106–V109), guardrail levels (P1–P5).
+
+## Reference docs (still authoritative)
+
+- [`docs/design/ui-tokens.md`](design/ui-tokens.md) — single source of truth for every color/radius/spacing token. Semantic palette, 4-band score palette, MUST/MUST NOT rules.
+- [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison.
+- [`docs/enterprise-sla.md`](enterprise-sla.md) — ENTERPRISE-tier P1–P4 SLA + 99.9% uptime credit schedule + CSM engagement.
+- [`docs/project-user-journeys.md`](project-user-journeys.md) — end-to-end user journeys for the project workbench.
+- [`docs/user-journeys.md`](user-journeys.md) — UI user journeys by tier.
 
 ---
 
@@ -87,70 +80,85 @@ Find the **type of change** you are making in the table below. Update every docu
 |------|-------------|-----------------|
 | `CLAUDE.md` | Session-start instructions, architecture summary, API contracts, key file locations, tech debt | Any change that affects the "working" list, architecture bullets, API table, or tech debt list. The most frequently updated doc. |
 | `ARCHITECTURE.md` | Deep-dive system design: packages, data flow, concurrency, security, billing, preview | Structural changes: new service, changed threading model, new infra component, DB schema overview |
+| `CODEMAP.md` | Per-package structural index of `src/main/java/com/navneet/executespec/` | Quick lookup of which package owns what; updated whenever a new top-level package is added |
 | `JAVADOC.md` | Class-level reference: method signatures, configuration properties, Flyway history, entity fields | Adding/changing a public method, adding a config property, adding a Flyway migration, changing a recovery service |
 | `WORKFLOWS.md` | End-to-end user journey flows (Mermaid diagrams) | Adding or changing a workflow a user initiates — new recovery flow, new gate, new billing step |
-| `CODE_GEN_ARCHITECTURE.md` | Agent code generation pipeline internals | Changes to WorkerAgent tool dispatch, SubtaskDecomposer, CompilerAgent, ReviewerAgentV2 |
-| `DEPLOYMENT.md` | GCP deploy runbook, CI/CD steps, Cloud Run config | Changes to deploy process, environment variables, Cloud Run flags |
-| `RBAC.md` | Role definitions, permission matrix | Changes to roles, org membership rules, tier permissions |
+| `DEPLOYMENT.md` | GCP deploy runbook, CI/CD steps, Cloud Run config, env vars | Changes to deploy process, environment variables, Cloud Run flags |
+| `RBAC.md` | Role definitions, permission matrix, tier enforcement | Changes to roles, org membership rules, tier permissions, tier limits |
 | `PRD.md` | Product requirements and feature specs | New product feature decisions |
 | `USER_MANUAL.md` | End-user-facing how-to guide | User-visible behaviour changes |
 | `frontend-api-usage.md` | Frontend API consumption patterns | New API endpoints consumed by frontend |
 | `openapi.yaml` | OpenAPI spec | New or changed REST endpoints |
-| `run-workflow-sequence.md` | Sequence diagram for run lifecycle | Pipeline lifecycle changes |
-| `requirements/*.md` | Feature-level requirements docs | Completing or changing a feature requirement |
+| `user-journeys.md` | UI user journeys by tier | Changes to navigation, tier-gated screens, new pages |
+| `project-user-journeys.md` | Project-workbench end-to-end journeys | Changes to project / launch / chat flows |
+| `enterprise-one-pager.md` | Procurement / IT / security one-pager | Tier table, security posture, data-handling Q&A changes |
+| `enterprise-sla.md` | ENTERPRISE-tier support SLA | P1–P4 definitions, uptime credit schedule changes |
+| `billing-workflows.html` | Rendered billing flow diagrams (subscribe, top-up, refund, webhook handling) | Billing / payment flow changes |
+| `design/ui-tokens.md` | Single source of truth for color/radius/spacing tokens | Adding a UI primitive, tweaking the palette, theme work |
 | `document_map.md` | This file | Adding a new doc, adding a new change type |
 
 ---
 
 ## Per-Package Quick Reference
 
+> Mirrors the actual top-level packages under `src/main/java/com/navneet/executespec/` as of 2026-04-25. See [`CODEMAP.md`](CODEMAP.md) for the full structural map.
+
 | Package | Primary Doc Sections |
 |---------|----------------------|
-| `harness/` | JAVADOC §8 Pipeline Harness; ARCHITECTURE §3.1; WORKFLOWS §2 |
-| `harness/PartialRunResumeService` | JAVADOC §19.7; WORKFLOWS §10 |
-| `agent/` | JAVADOC §5 Agent System; ARCHITECTURE §3.2 |
-| `agent/LlmRouter`, `router/` | JAVADOC §9 Model Routing; ARCHITECTURE §Model Matrix |
-| `deployment/preview/` | JAVADOC §16 Deployment and Preview; ARCHITECTURE §6.2 Preview System; WORKFLOWS §12 |
-| `deployment/preview/PreviewService` | JAVADOC §16.1; ARCHITECTURE §6.2 |
-| `state/` | JAVADOC §7 State Management |
-| `recovery/` | JAVADOC §19 Recovery System; WORKFLOWS §10 |
-| `auth/` | JAVADOC §10-11 Auth; ARCHITECTURE §5 Security |
-| `billing/` | JAVADOC §14-15 Billing; ARCHITECTURE §7 Billing |
+| `v2/` (V2 harness — agent/, batch/, chat/, context/, cost/, harness/, integration/, observability/, recovery/, reviewer/, smoketest/, test/, tool/) | JAVADOC §8 Pipeline Harness; ARCHITECTURE §3 V2 pipeline; CLAUDE.md V2 bullets; CODEMAP.md §V2 |
+| `agent/` (LlmRouter V1, PromptAssembler, ConversationAgent, CostEstimator) | JAVADOC §5 Agent System (V1 surface still used by chat/test-gen); CODEMAP.md §LLM router |
+| `analytics/` (UserActivationEvent + EventTrackingService + PostHogClient) | ARCHITECTURE §0b Wave 2; CLAUDE.md activation funnel bullet |
+| `api/` (RunMapper + advice/ + controller/ + dto/) | JAVADOC §17.x REST API Reference |
+| `apitests/` (ApiTestSuiteAgent) | JAVADOC §apitests |
+| `assessment/` (FeatureAssessmentService heuristic + LLM-gated) | ARCHITECTURE §pilot v3.0 (pre-plan assessment) |
+| `auth/` | JAVADOC §10–11 Auth; ARCHITECTURE §5 Security; RBAC.md |
+| `billing/` (incl. lifecycle/) | JAVADOC §14–15 Billing; ARCHITECTURE §7 Billing + §0b Wave 1; billing-workflows.html |
+| `codeintel/` | JAVADOC §codeintel; ARCHITECTURE §3-step arch pipeline (v2.5.12) |
+| `compliance/` (DataRetentionService — GDPR soft-delete) | JAVADOC §compliance; CLAUDE.md retention bullet |
 | `config/featureflag/` | JAVADOC §12 Feature Flags; ARCHITECTURE §7.2 |
-| `ratelimit/` | JAVADOC §13 Rate Limiting |
-| `batch/` | JAVADOC §8 (batch flow sub-sections); ARCHITECTURE pipeline bullet |
-| `testgen/` | JAVADOC §5.10 Test Generation Agents; WORKFLOWS §2 (background validation) |
-| `report/` | JAVADOC §17.10 Validation Report Endpoints |
-| `integration/` | JAVADOC §17.11-17.12; WORKFLOWS §7-8 |
-| `security/` | JAVADOC §25 Security Architecture |
+| `contact/` (public contact form) | JAVADOC §contact controller |
+| `context/` (legacy V1 ContextAgent) | JAVADOC §context (legacy) |
+| `crypto/` (KMS / encryption-at-rest) | ARCHITECTURE §5 Security |
+| `deployment/`, `deployment/preview/` | JAVADOC §16; ARCHITECTURE §6.2; WORKFLOWS §12 |
 | `eval/` | JAVADOC §24 Eval Framework |
-| `frontend/src/components/runs/` | `frontend-api-usage.md`; WORKFLOWS if new workflow surface |
-| `frontend/src/lib/api.ts` | `frontend-api-usage.md` |
+| `execution/` (Execution View) | ARCHITECTURE §execution view (v2.3.0) |
+| `harness/` (V1 — workspace, GateStore, design-system) | JAVADOC §8 (legacy V1 surface kept); ARCHITECTURE §V2 reuses these primitives |
+| `integration/` (slack, jira, confluence, bitbucket, pagerduty, servicenow, scm) | JAVADOC §17.11–17.12; WORKFLOWS §7–8 |
+| `memory/` | ARCHITECTURE §project memory (v2.2.0) |
+| `notification/` | JAVADOC §notification; CLAUDE.md notification bullet |
+| `onboarding/` | ARCHITECTURE §0b Wave 2 (sandbox); USER_MANUAL §v2.6.1 onboarding |
+| `optimiser/` | JAVADOC §optimiser |
+| `pricing/` | JAVADOC §pricing; ARCHITECTURE §0a v3 pricing |
+| `project/` (incl. dashboard/, estimation/, pr/, rag/, scores/, techdebt/, template/, workspace/) | JAVADOC §project; ARCHITECTURE §pilot v3.0; project-user-journeys.md |
+| `ratelimit/` | JAVADOC §13 Rate Limiting |
+| `repo/` (GitHubRepoService, BitbucketRepoService, ScmProvider) | JAVADOC §repo (SCM clients) |
+| `report/` | JAVADOC §17.10 Validation Report Endpoints |
+| `reviewer/` (V1 surface — V2 uses v2/reviewer/) | JAVADOC §reviewer (legacy) |
+| `router/` (LlmProvider enum, ModelResolver, ProviderHealthTracker, ProviderRecommendationService) | JAVADOC §9 Model Routing; ARCHITECTURE §Model Matrix |
+| `run/` | JAVADOC §run controllers |
+| `saga/` | JAVADOC §saga |
+| `scoring/` | JAVADOC §scoring; ARCHITECTURE §6-dimension scoring |
+| `security/` (incl. guardrail/) | JAVADOC §25 Security Architecture |
+| `sse/` | JAVADOC §SSE channel (RunEvent, ExecutionEventTypes) |
+| `state/` | JAVADOC §7 State Management |
+| `tenant/` | JAVADOC §tenant isolation |
+| `testgen/` | JAVADOC §5.10 Test Generation Agents; WORKFLOWS §2 |
+| `tool/` (V1 GitTool, etc.) | JAVADOC §tool (legacy V1 surface) |
+| `validator/` (CodeValidator + execution/gate/language/prompt subpackages) | JAVADOC §validator |
+| `frontend/src/` | frontend-api-usage.md; user-journeys.md; project-user-journeys.md |
 | `frontend/src/tokens.css` + `tailwind.config.ts` | [`docs/design/ui-tokens.md`](design/ui-tokens.md) |
-| `frontend/src/stores/useUiStore.ts` (theme slice) | USER_MANUAL §v2.6.0 quick links + `docs/design/ui-tokens.md` |
-| `frontend/src/pages/ExecSummaryPage.tsx` | USER_MANUAL §v2.6.0; CLAUDE.md §Key File Locations (v2.6.0 UX v3 row) |
-| `website/` | `docs/reports/session-handoff-2026-04-21.md` + `docs/reports/launch-checklist-2026-04-21.md` (external launch-facing assets) |
-| `src/main/resources/db/migration/` | JAVADOC §21.1 Flyway Migrations; CLAUDE.md Flyway note |
-| `src/main/resources/application.yml` | JAVADOC §20 Configuration Reference; CLAUDE.md env vars |
+| `src/main/resources/db/migration/` | JAVADOC §21.1 Flyway Migrations; CLAUDE.md Flyway note; DEPLOYMENT.md migration ranges |
+| `src/main/resources/application.yml` | JAVADOC §20 Configuration Reference; CLAUDE.md env vars; DEPLOYMENT.md env-var section |
 | `src/main/resources/prompts/` | JAVADOC §5.x (per agent); CLAUDE.md Prompt architecture bullet |
-
----
-
-## Reliability & Recovery Subsystem (Consolidated)
-
-All three reliability mechanisms introduced in the sidecar-console-reliability-fixes PR:
-
-| Mechanism | File | Doc Section |
-|-----------|------|-------------|
-| PlannerAgent retry | `harness/PipelineHarness.java` | JAVADOC §8.1; ARCHITECTURE §8 Concurrency |
-| PARTIAL auto-resume | `harness/PartialRunResumeService.java` | JAVADOC §19.7; WORKFLOWS §10 |
-| Task max-retries | `application.yml` → `concurrency.task-max-retries` | JAVADOC §20.2 |
+| `src/main/resources/sample-specs/` | ARCHITECTURE §0b Wave 2 (sandbox onboarding); USER_MANUAL §v2.6.1 |
+| `src/main/resources/templates/email/` + `templates/report/` | JAVADOC §email templates; ARCHITECTURE §0a UX v3 (palette swap) |
 
 ---
 
 ## Rules for Keeping This File Current
 
 1. When you add a new document to `docs/`, add it to the **Document Index** table.
-2. When you add a new package under `src/main/java/`, add it to the **Per-Package Quick Reference**.
+2. When you add a new package under `src/main/java/`, add it to the **Per-Package Quick Reference** AND to `CODEMAP.md`.
 3. When you introduce a new class of change (e.g., "WebSocket endpoint"), add a row to the **Change-to-Document Matrix**.
-4. This file itself does **not** need updating for routine bugfixes or config tweaks — only for structural additions.
+4. When a plan ships and you delete its plan file, remove the link here too.
+5. This file itself does **not** need updating for routine bugfixes or config tweaks — only for structural additions.
