@@ -13,8 +13,7 @@ function CreateOrgForm({ onCreated }: { onCreated: () => void }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // V141 — MAX renamed to TEAM.
-  const canCreate = ['ENTERPRISE', 'TEAM', 'PRO'].includes(user?.tier ?? '') || user?.globalRole === 'SUPER_ADMIN';
+  const canCreate = ['ENTERPRISE', 'MAX', 'PRO'].includes(user?.tier ?? '') || user?.globalRole === 'SUPER_ADMIN';
 
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();

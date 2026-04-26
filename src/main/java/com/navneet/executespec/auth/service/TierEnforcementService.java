@@ -60,10 +60,9 @@ public class TierEnforcementService {
     private static final int FALLBACK_FREE = 5;
     /** V140 — matches tier_config.PRO.monthly_run_limit (was 50, now 20 per the website). */
     private static final int FALLBACK_PRO  = 20;
-    /** V141 (2026-04-26) — TEAM is the renamed MAX tier ($29/mo BYOK unlimited). The
-     *  v2.6.1-Wave-1 per-seat "TEAM" tier was deleted in V141 along with this constant's
-     *  predecessor (FALLBACK_TEAM_PER_SEAT). */
-    private static final int FALLBACK_TEAM = -1;  // unlimited
+    /** v2.6.0 — TEAM stores credits PER SEAT; effective limit = seats × 50 computed in {@link #effectiveOrgLimit}. */
+    private static final int FALLBACK_TEAM_PER_SEAT = 50;
+    private static final int FALLBACK_MAX  = -1;  // unlimited
     /** V140 — ENTERPRISE is unlimited per the website ("Unlimited (fair use)"). */
     private static final int FALLBACK_ENT  = -1;
 
@@ -252,7 +251,7 @@ public class TierEnforcementService {
         if (current >= limit) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Tier " + tier + " allows " + limit + " project" + (limit == 1 ? "" : "s")
-                            + " per org. Upgrade to TEAM for 10 or ENTERPRISE for unlimited.");
+                            + " per org. Upgrade to MAX for 10 or ENTERPRISE for unlimited.");
         }
     }
 
@@ -286,7 +285,7 @@ public class TierEnforcementService {
         if (current >= limit) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
                     "Tier " + tier + " allows " + limit + " repo" + (limit == 1 ? "" : "s")
-                            + " per project. Upgrade to TEAM for 10 or ENTERPRISE for unlimited.");
+                            + " per project. Upgrade to MAX for 10 or ENTERPRISE for unlimited.");
         }
     }
 
@@ -336,16 +335,17 @@ public class TierEnforcementService {
             hasByok = false; // standalone users don't have org-level BYOK
         }
 
-        // V141 — TEAM (renamed from MAX), PRO and ENTERPRISE with BYOK are always allowed
-        if ("TEAM".equals(effectiveTier)) return;
+        // MAX, TEAM, PRO and ENTERPRISE with BYOK are always allowed
+        if ("MAX".equals(effectiveTier)) return;
         if ("ENTERPRISE".equals(effectiveTier) && hasByok) return;
+        if ("TEAM".equals(effectiveTier)) return;  // v2.6.0 — TEAM unlocks high-complexity
         if ("PRO".equals(effectiveTier)) return;
 
         // FREE tier or ENTERPRISE without BYOK — block high-complexity plans
         log.info("[TierEnforcement] Blocking high-complexity plan for user {} (tier={}, byok={})",
                 userId, effectiveTier, hasByok);
         throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                "This plan has high overall complexity and requires a paid tier (Pro, Team) or BYOK (Bring Your Own Keys) setup. " +
+                "This plan has high overall complexity and requires a paid tier (Pro, Team, Max) or BYOK (Bring Your Own Keys) setup. " +
                 "Upgrade your plan or configure your own API keys to run complex plans.");
     }
 
@@ -458,13 +458,23 @@ public class TierEnforcementService {
         // (handled at the billing layer), not run quota enforcement.
         String effectiveTier = org.getTier() != null ? org.getTier() : "FREE";
 
-        // V141 — TEAM (renamed from MAX) and Enterprise with own keys = unlimited.
-        // The v2.6.1-Wave-1 per-seat TEAM tier was deleted in V141.
-        if ("TEAM".equals(effectiveTier)) return -1;
+        // MAX and Enterprise with own keys = unlimited
+        if ("MAX".equals(effectiveTier)) return -1;
         if ("ENTERPRISE".equals(effectiveTier) && org.isApiKeysProvided()) return -1;
 
         // Per-org override
         if (org.getMonthlyRunLimitOverride() != null) return org.getMonthlyRunLimitOverride();
+
+        // v2.6.0 — TEAM tier: per-seat limit × seat count. 50 credits/seat is
+        // the shared pool. tier_config.monthly_run_limit for TEAM stores the
+        // PER-SEAT value; we multiply by org.seatCount here to get the
+        // effective shared pool.
+        if ("TEAM".equals(effectiveTier)) {
+            int perSeat = getMonthlyLimit("TEAM");
+            if (perSeat < 0) return -1; // defensive — if someone sets TEAM tier_config to -1 (unlimited)
+            int seats = Math.max(1, org.getSeatCount());
+            return perSeat * seats;
+        }
 
         // Tier default from DB
         return getMonthlyLimit(effectiveTier);
@@ -486,7 +496,7 @@ public class TierEnforcementService {
         if ("FREE".equals(tier)) {
             if (user.getPersonalRunCount() >= limit) {
                 throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
-                        "You've used all " + limit + " free runs. Upgrade to Pro for 20 credits/month or Team for unlimited BYOK.");
+                        "You've used all " + limit + " free runs. Upgrade to Pro for 20 credits/month or MAX for unlimited BYOK.");
             }
             return;
         }
@@ -526,7 +536,8 @@ public class TierEnforcementService {
                 .map(TierConfig::getMonthlyRunLimit)
                 .orElseGet(() -> switch (tier.toUpperCase()) {
                     case "ENTERPRISE" -> FALLBACK_ENT;
-                    case "TEAM"       -> FALLBACK_TEAM;  // V141 — renamed from MAX
+                    case "MAX"        -> FALLBACK_MAX;
+                    case "TEAM"       -> FALLBACK_TEAM_PER_SEAT;
                     case "PRO"        -> FALLBACK_PRO;
                     default           -> FALLBACK_FREE;
                 });
@@ -644,8 +655,8 @@ public class TierEnforcementService {
     public double resolveRunCostBudget(String tier, boolean hasByok) {
         final String effectiveTier = (tier != null) ? tier.toUpperCase() : "FREE";
 
-        // V141 — TEAM (renamed from MAX), ENTERPRISE, and PRO+BYOK users have no per-run cost limit
-        if ("TEAM".equals(effectiveTier)) return -1;
+        // MAX, ENTERPRISE, and PRO+BYOK users have no per-run cost limit
+        if ("MAX".equals(effectiveTier)) return -1;
         if ("ENTERPRISE".equals(effectiveTier)) return -1;
         if ("PRO".equals(effectiveTier) && hasByok) return -1;
 

@@ -301,7 +301,7 @@ public record RunEvent(
             case "PRO" -> "Run stopped — $" + String.format("%.0f", budgetUsd) +
                     " cost limit reached. Add your own API keys (BYOK) for unlimited runs.";
             default -> "Run stopped — $" + String.format("%.0f", budgetUsd) +
-                    " cost limit reached. Upgrade to Pro for 10 runs/month or Team for unlimited BYOK.";
+                    " cost limit reached. Upgrade to Pro for 10 runs/month or MAX for unlimited BYOK.";
         };
         return new RunEvent("BUDGET_EXCEEDED", runId, null,
                 tier + "|" + String.format("%.2f", budgetUsd) + "|" + message, Instant.now());

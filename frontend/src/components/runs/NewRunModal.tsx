@@ -551,12 +551,12 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               </>
             )}
 
-            {/* V141 — BYOK warning for TEAM tier (renamed from MAX) without API keys */}
-            {user?.tier === 'TEAM' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
+            {/* BYOK warning for MAX tier without API keys */}
+            {user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
               <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-amber/10 border border-accent-amber/30 text-sm text-secondary">
                 <AlertCircle className="h-4 w-4 text-accent-amber flex-shrink-0 mt-0.5" />
                 <span>
-                  Team plan requires your own API keys.{' '}
+                  Max plan requires your own API keys.{' '}
                   <a href="/settings#ai-keys" className="text-accent-blue underline">Add keys in Settings</a> before launching a run.
                 </span>
               </div>
@@ -573,7 +573,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               size="lg"
               fullWidth
               loading={launching}
-              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'TEAM' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
+              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
             >
               {!launching && <Rocket className="h-4 w-4" />}
               {launching ? 'Launching...' : 'Launch Run'}
