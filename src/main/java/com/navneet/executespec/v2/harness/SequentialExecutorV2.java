@@ -403,6 +403,21 @@ public class SequentialExecutorV2 {
         // iterations: the worker has to readFile / searchFiles the real repo
         // before it can write, so 2× the fresh-scratch cap is the default.
         if (projectRun) maxIter *= 2;
+        // 2026-04-26 cost-control: OpenAI is markedly chattier per iter than
+        // Anthropic (Spring AI re-ships the FULL conversation history on
+        // every tool call, no prompt cache; observed 1.45M input tokens on
+        // the HIGH library spec vs Anthropic's 132K for the same spec). Cap
+        // OpenAI at 70% of the default iteration budget so we bail on stuck
+        // worker loops sooner. Quality impact: worker still has 35 iters for
+        // a non-project HIGH task (was 75) — empirically enough for the
+        // library spec which finished 4/4 tasks in the prior eval. If runs
+        // start hitting iteration-limit cleanly we'll revisit; the bigger
+        // win (sliding-window or summary-compress on the conversation
+        // history) is tracked as a follow-up under
+        // docs/plans/openai-conversation-compression.md (TBD).
+        if (runProvider != null && "openai".equalsIgnoreCase(runProvider)) {
+            maxIter = (int) Math.ceil(maxIter * 0.70);
+        }
         try {
             // v2.5.13 — enum + V2 strings now agree ("gemini"/"anthropic"/"openai")
             LlmProvider p = runProvider == null
