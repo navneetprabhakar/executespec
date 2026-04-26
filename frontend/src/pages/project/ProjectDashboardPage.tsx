@@ -8,6 +8,9 @@ import ArchitectureViewer from '@/components/project/ArchitectureViewer';
 import ProjectPrList from '@/components/project/ProjectPrList';
 import ProjectScoreTrend from '@/components/project/ProjectScoreTrend';
 import WorkspaceHealthPanel from '@/components/project/WorkspaceHealthPanel';
+import ContractCoveragePanel from '@/components/project/ContractCoveragePanel';
+import StandardsCompliancePanel from '@/components/project/StandardsCompliancePanel';
+import ActivityTab from '@/components/project/ActivityTab';
 import GeneratedDocsPanel from '@/components/project/GeneratedDocsPanel';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import TechDebtPanel from '@/components/project/TechDebtPanel';
@@ -24,15 +27,12 @@ import type { TaskSummary } from '@/types/project';
 import type { ContinueOnPrConfig } from '@/types/execution';
 import type { RunDetail } from '@/lib/api';
 
-type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'docs' | 'memory' | 'chat' | 'team';
+type TabKey = 'overview' | 'launches' | 'prs' | 'tasks' | 'repos' | 'architecture' | 'docs' | 'memory' | 'activity' | 'chat' | 'team';
 
-// v2.5.14 Phase 2.4 — tab IA restructured from 10 flat tabs to 5 top-level
-// groups. Underlying content is preserved; users who rely on Memory or Docs
-// still get there in 1 click (same click cost as today) but the first tier
-// only shows meaningful categories so non-engineers aren't overwhelmed.
-// Chat is a first-class top-level tab (next to Settings) — it's a separate
-// mode of interaction, not a knowledge artefact.
-type TabGroup = 'overview' | 'work' | 'knowledge' | 'settings' | 'chat';
+// E4.3 — IA expanded from 5 → 6 top-level groups (Activity inserted between
+// Knowledge and Settings per plan §3.6). Tab IDs stay string-based so
+// existing deep links keep working; the only mutation is the addition.
+type TabGroup = 'overview' | 'work' | 'knowledge' | 'activity' | 'settings' | 'chat';
 
 const TAB_GROUPS: { key: TabGroup; label: string; children: { key: TabKey; label: string }[] }[] = [
   { key: 'overview',  label: 'Overview',  children: [{ key: 'overview', label: 'Overview' }] },
@@ -46,6 +46,8 @@ const TAB_GROUPS: { key: TabGroup; label: string; children: { key: TabKey; label
       { key: 'docs', label: 'Docs' },
       { key: 'memory', label: 'Memory' },
   ]},
+  // E4.3 — single new top-level group; tab key 'activity' is the only mutation
+  { key: 'activity',  label: 'Activity',  children: [{ key: 'activity', label: 'Activity' }] },
   { key: 'settings',  label: 'Settings',  children: [
       { key: 'repos', label: 'Repos' },
       { key: 'team', label: 'Team' },
@@ -135,7 +137,7 @@ export default function ProjectDashboardPage() {
     if (!projectId) return null;
     switch (tab) {
       case 'overview':
-        return <OverviewContent projectId={projectId} dashboard={dashboard} scoreTrend={scoreTrend} project={project} onProjectUpdate={setProject} />;
+        return <OverviewContent projectId={projectId} dashboard={dashboard} scoreTrend={scoreTrend} project={project} onProjectUpdate={setProject} repos={repos ?? []} />;
       case 'launches':
         return <ProjectLaunchesList projectId={projectId} />;
       case 'prs':
@@ -158,6 +160,8 @@ export default function ProjectDashboardPage() {
         return <ProjectDocumentsPanel projectId={projectId} />;
       case 'memory':
         return <ProjectMemoryPanel projectId={projectId} />;
+      case 'activity':
+        return projectId ? <ActivityTab projectId={projectId} /> : null;
       case 'chat':
         return <ProjectChatPanel projectId={projectId} />;
       case 'team':
@@ -326,7 +330,15 @@ export default function ProjectDashboardPage() {
             />
           </aside>
         )}
-        <main className="flex-1 min-w-0 overflow-y-auto p-3 sm:p-4">
+        <main
+          className={cn(
+            'flex-1 min-w-0 min-h-0',
+            // Chat owns its own internal scroll + pinned input — give it the
+            // raw pane with no padding/overflow so dimensions line up with
+            // the surrounding layout.
+            tab === 'chat' ? 'flex flex-col' : 'overflow-y-auto p-3 sm:p-4',
+          )}
+        >
           {currentContent}
         </main>
       </div>
@@ -335,8 +347,8 @@ export default function ProjectDashboardPage() {
 }
 
 function OverviewContent({
-  projectId, dashboard, scoreTrend, project, onProjectUpdate,
-}: { projectId?: string; dashboard: any; scoreTrend: any; project: api.ProjectDto | null; onProjectUpdate: (p: api.ProjectDto) => void }) {
+  projectId, dashboard, scoreTrend, project, onProjectUpdate, repos,
+}: { projectId?: string; dashboard: any; scoreTrend: any; project: api.ProjectDto | null; onProjectUpdate: (p: api.ProjectDto) => void; repos: any[] }) {
   const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
   return (
     <div className="space-y-4 max-w-3xl">
@@ -344,7 +356,24 @@ function OverviewContent({
       {projectId && <ProjectSummaryPanel projectId={projectId} />}
       {projectId && <GeneratedDocsPanel projectId={projectId} />}
       {projectId && <WorkspaceHealthPanel projectId={projectId} />}
+      {/* E2.4 — one ContractCoveragePanel per linked repo (UX-preserved:
+          same per-repo card pattern as the WorkspaceHealthPanel above). */}
+      {projectId && repos.length > 0 && (
+        <div className="space-y-2">
+          {repos.map((r: any) => (
+            <ContractCoveragePanel
+              key={r.id ?? r.repoId}
+              projectId={projectId}
+              repoId={r.id ?? r.repoId}
+              repoFullName={r.githubRepoFullName ?? r.repoName}
+            />
+          ))}
+        </div>
+      )}
       {projectId && <TechDebtPanel projectId={projectId} />}
+      {projectId && project?.orgId && (
+        <StandardsCompliancePanel projectId={projectId} orgId={project.orgId} />
+      )}
       <div className="space-y-2">
         <h3 className="text-xs font-medium text-secondary">Recent submissions</h3>
         <ExecutionsPanel tasks={tasks} />

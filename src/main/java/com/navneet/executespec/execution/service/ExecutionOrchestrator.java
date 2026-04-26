@@ -20,6 +20,7 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -53,6 +54,7 @@ public class ExecutionOrchestrator {
     private final com.navneet.executespec.repo.GitHubRepoService gitHub;
     private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
     private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
+    private final ExecutionRunCasUpdater runCas;
 
     // ── Creation ───────────────────────────────────────────────────────────
 
@@ -148,30 +150,54 @@ public class ExecutionOrchestrator {
 
     @Async
     public void triggerAnalysis(String executionRunId) {
-        ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
-        if (run == null) return;
-        run.setStatus("ANALYSING");
-        runRepo.save(run);
-        emit(run.getId(), ExecutionEventTypes.EXEC_UNIFIED_ARCH_STARTED, null);
+        // 2026-04-26 hotfix — extends the prior @Version retry pattern
+        // (applyTerminalStatus / executeApprovedPlan, see hotfix branch
+        // feature/fix-execution-orchestrator-stale-state-2026-04-25) to the
+        // analysis path. Reproducible with 3 parallel /api/executions/{id}/
+        // analyse calls in the project eval (2026-04-26 session): the
+        // long-running archService.generate(...) call straddles concurrent
+        // writes to the same execution_run row (SSE update, project-level
+        // analyse callback). The original code held a stale `run` reference
+        // for the entire generate call and saved it twice — both saves
+        // OptimisticLockExceptions, leaving the run wedged at ANALYSING.
+        // Fix: every save goes through ExecutionRunCasUpdater (shared bean,
+        // promoted from this class on 2026-04-26), which refetches the row
+        // + applies a mutator + retries up to 3 times on stale.
+        ExecutionRun snapshot = runRepo.findById(executionRunId).orElse(null);
+        if (snapshot == null) return;
+        String projectId = snapshot.getProjectId();
+        String createdBy = snapshot.getCreatedBy();
+
+        boolean markedAnalysing = runCas.casUpdate(executionRunId, r -> r.setStatus("ANALYSING"));
+        if (!markedAnalysing) {
+            log.warn("triggerAnalysis: failed to mark exec {} as ANALYSING (stale row); aborting", executionRunId);
+            return;
+        }
+        emit(executionRunId, ExecutionEventTypes.EXEC_UNIFIED_ARCH_STARTED, null);
 
         try {
             // Delegate to the pilot v3.0 architecture service which already
             // handles per-repo codemap generation + unified doc synthesis.
             // Pass the creator's PAT so private repo trees resolve (system
             // GITHUB_PAT env isn't always scoped on user repos).
-            String pat = appUserRepo.findById(run.getCreatedBy())
+            String pat = appUserRepo.findById(createdBy)
                     .map(u -> u.getGithubPat())
                     .orElse(null);
-            ProjectArchitectureDoc doc = archService.generate(run.getProjectId(), null, pat);
-            run.setUnifiedArchDoc(doc == null ? null : doc.getContent());
-            run.setStatus("ARCH_REVIEW");
-            runRepo.save(run);
-            emit(run.getId(), ExecutionEventTypes.EXEC_ANALYSIS_COMPLETE, null);
+            ProjectArchitectureDoc doc = archService.generate(projectId, null, pat);
+            String docContent = doc == null ? null : doc.getContent();
+            boolean markedArchReview = runCas.casUpdate(executionRunId, r -> {
+                r.setUnifiedArchDoc(docContent);
+                r.setStatus("ARCH_REVIEW");
+            });
+            if (markedArchReview) {
+                emit(executionRunId, ExecutionEventTypes.EXEC_ANALYSIS_COMPLETE, null);
+            } else {
+                log.warn("triggerAnalysis: failed to mark exec {} as ARCH_REVIEW (stale row); arch doc not persisted on exec row but project_architecture_doc was written by archService.generate", executionRunId);
+            }
         } catch (Exception e) {
-            log.error("analysis failed for exec {}: {}", run.getId(), e.getMessage(), e);
-            run.setStatus("ABORTED");
-            runRepo.save(run);
-            emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
+            log.error("analysis failed for exec {}: {}", executionRunId, e.getMessage(), e);
+            runCas.casUpdate(executionRunId, r -> r.setStatus("ABORTED"));
+            emit(executionRunId, ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
         }
     }
 
@@ -191,10 +217,18 @@ public class ExecutionOrchestrator {
 
     @Async
     public void approvePlanAndExecute(String executionRunId) {
-        ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
-        if (run == null) return;
-        run.setPlanApprovedAt(Instant.now());
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The find-then-
+        // save window here is tight, but @Async runs on a fresh thread with
+        // OSIV off; concurrent writers from the SSE update path or from a
+        // sibling /api/executions/{id}/abort call can bump @Version between
+        // findById and save, which OOMs the request because no
+        // @RestControllerAdvice catches async exceptions.
+        Instant approvedAt = Instant.now();
+        boolean ok = runCas.casUpdate(executionRunId, r -> r.setPlanApprovedAt(approvedAt));
+        if (!ok) {
+            log.warn("approvePlanAndExecute: failed to record plan approval for exec {} (stale row); proceeding to execute regardless",
+                    executionRunId);
+        }
         executeApprovedPlan(executionRunId);
     }
 
@@ -202,8 +236,16 @@ public class ExecutionOrchestrator {
     public void executeApprovedPlan(String executionRunId) {
         ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
         if (run == null) return;
-        run.setStatus("EXECUTING");
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The save below
+        // races with the SSE update path + with abort/cancel callers; the
+        // long solution-dispatch loop downstream then operates on a stale `run`
+        // that already failed save here.
+        boolean markedExecuting = runCas.casUpdate(executionRunId, r -> r.setStatus("EXECUTING"));
+        if (!markedExecuting) {
+            log.warn("executeApprovedPlan: failed to mark exec {} as EXECUTING (stale row); aborting dispatch",
+                    executionRunId);
+            return;
+        }
         emit(run.getId(), ExecutionEventTypes.EXEC_STARTED, null);
 
         // Eager-fetch dependencies so SolutionDependencyResolver can walk the Set
@@ -216,8 +258,10 @@ public class ExecutionOrchestrator {
             layers = depResolver.resolveExecutionOrder(all);
         } catch (IllegalStateException e) {
             log.error("exec {} has cyclic deps: {}", executionRunId, e.getMessage());
-            run.setStatus("ABORTED");
-            runRepo.save(run);
+            // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The cyclic-
+            // deps path is reachable AFTER the EXECUTING save, so the in-memory
+            // `run` reference is stale by this point.
+            runCas.casUpdate(executionRunId, r -> r.setStatus("ABORTED"));
             emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
             return;
         }
@@ -275,9 +319,60 @@ public class ExecutionOrchestrator {
             log.info("Skipping PR creation for continue-on-PR execution {}", executionRunId);
         }
 
-        run.setStatus("COMPLETE");
-        runRepo.save(run);
-        emit(run.getId(), ExecutionEventTypes.EXEC_COMPLETE, null);
+        // Backlog fix (extends the triggerAnalysis hotfix on
+        // feature/fix-execution-orchestrator-stale-state-2026-04-25 to the
+        // executeApprovedPlan path): the in-memory `run` reference here is
+        // STALE — the long-running solution-dispatch loop above (potentially
+        // many minutes) lets concurrent writes to this row bump @Version.
+        // CAS-style re-fetch + retry so the @Async thread doesn't crash on
+        // ObjectOptimisticLockingFailureException (no @RestControllerAdvice
+        // catches async exceptions).
+        boolean ok = applyTerminalStatus(executionRunId, "COMPLETE");
+        if (!ok) {
+            log.warn("executeApprovedPlan: terminal COMPLETE for exec {} could not be applied",
+                    executionRunId);
+            return;
+        }
+        emit(executionRunId, ExecutionEventTypes.EXEC_COMPLETE, null);
+    }
+
+    /**
+     * Backlog — same retry shape as the triggerAnalysis hotfix. Up to 3
+     * attempts with 50ms × attempt back-off; refuses to trample a parallel
+     * terminal write (caller-driven cancel may have set ABORTED).
+     */
+    /* package */ boolean applyTerminalStatus(String runId, String newStatus) {
+        int attempts = 0;
+        while (attempts < 3) {
+            attempts++;
+            try {
+                ExecutionRun fresh = runRepo.findById(runId).orElse(null);
+                if (fresh == null) return false;
+                if ("ABORTED".equals(fresh.getStatus()) || "COMPLETE".equals(fresh.getStatus())) {
+                    log.info("applyTerminalStatus: exec {} already terminal at {}; skipping {}",
+                            runId, fresh.getStatus(), newStatus);
+                    return true;
+                }
+                fresh.setStatus(newStatus);
+                runRepo.save(fresh);
+                return true;
+            } catch (ObjectOptimisticLockingFailureException ole) {
+                if (attempts >= 3) {
+                    log.error("applyTerminalStatus: optimistic-lock retry exhausted for exec {} → {} after {} attempts",
+                            runId, newStatus, attempts);
+                    return false;
+                }
+                log.info("applyTerminalStatus: optimistic-lock conflict on exec {} → {} attempt {}/3; refetching",
+                        runId, newStatus, attempts);
+                try {
+                    Thread.sleep(50L * attempts);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -295,8 +390,18 @@ public class ExecutionOrchestrator {
      * {@code status:"FAILED"} payloads with a deep-link the user can act on.
      */
     public void abortExecution(ExecutionRun run) {
-        run.setStatus("ABORTED");
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The `run`
+        // parameter is loaded by the controller (request thread, OSIV off);
+        // by the time the abort reaches this save, a parallel @Async writer
+        // (executeApprovedPlan, triggerAnalysis, accumulateExecutionRunTotals)
+        // may have already bumped @Version. Without CAS the abort throws
+        // OptimisticLockException, the row never flips to ABORTED, and the
+        // user's cancel button silently fails.
+        boolean ok = runCas.casUpdate(run.getId(), r -> r.setStatus("ABORTED"));
+        if (!ok) {
+            log.warn("abortExecution: failed to mark exec {} as ABORTED (stale row); proceeding with cleanup",
+                    run.getId());
+        }
         emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, null);
         cancelActiveV2Runs(run);
         runCompensations(run);

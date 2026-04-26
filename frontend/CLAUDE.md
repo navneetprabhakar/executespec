@@ -1,6 +1,18 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-04-18 (v2.5.12 — design-system primitives + GeneratedDocsPanel + EstimateChip + per-repo arch endpoint; v2.5.10: StatusBadge tooltip + SignalBreakdown)
+> Last updated: 2026-04-25 (v2.6.1 chat UX bundle on dev — live cost polling + Project Chat compact/reset/copy + Launch redirect + branch picker + Tooltip primitive + Sidebar tooltip gaps; v2.5.12: design-system primitives + GeneratedDocsPanel; v2.5.10: StatusBadge tooltip + SignalBreakdown)
+>
+> **v2.6.1 (project-chat UX bundle, commit `ddf9c498` on dev):**
+> - **Live cost polling on RunDetail Overview tab** (`RunDetailTabs.tsx`): the `liveCost`/`liveTokens` `useEffect` now polls `/runs/{id}/cost` every 5s while the run is non-terminal. Was firing once on mount + only re-firing on `run.status` change, so the cost chip stayed frozen at mount-time snapshot through the entire WORKING phase. The polling interval is cleared on unmount or status flip to terminal.
+> - **Project Chat panel rebuild** (`ProjectChatPanel.tsx`):
+>   - Layout fix: hardcoded `h-[600px]` → `h-full min-h-0`. `ProjectDashboardPage` main pane now opts out of padding/overflow on the chat tab so the panel fills the pane without double-scroll.
+>   - Slim header (only when `messages.length > 0`) with **Compact** + **Reset** buttons grouped on the right. Reset clears history (`DELETE /api/projects/{id}/chat`); Compact summarises older N-tail messages into one ASSISTANT-voice `[Summary]` message and keeps the last 6 verbatim (`POST /api/projects/{id}/chat/compact`, returns 409 if <10 messages).
+>   - Hover-revealed `Copy` / `Check` button below every bubble — copies the raw markdown source for assistant replies (so code blocks paste cleanly elsewhere). Confirmation flips to `Copied` for 1.5s.
+>   - **Launch-from-chat redirect**: was navigating to `/runs/{runId}` (route doesn't exist in current router → fell through to landing page). Now routes to `/projects/{projectId}/dashboard` with `state.launchedRunId` for downstream use.
+>   - **Per-launch branch input** on the Launch modal — applied to every selected repo. Use cases: re-launch on a PR branch to address review comments, or stack a staged launch onto an in-progress branch.
+> - **Tooltip primitive** (`src/components/shared/Tooltip.tsx`, NEW): CSS-only, 250ms delay, hover/focus reveal, hide on leave/blur, `text` falsy → renders children unchanged. Available for migration off native `title=""` to a styled tooltip.
+> - **Sidebar tooltip gaps** (`Sidebar.tsx`): mobile-close (X icon) and desktop-collapse (ChevronLeft icon) buttons were missing both `aria-label` and `title`. Patched. (Audit found these were the only icon-only chrome that lacked tooltips — every other icon-only button in the chat panel, ProjectMemoryPanel, ArchitectureViewer, NotificationPanel, RunDetailTabs already had `title=""` or visible text.)
+> - New API helpers in `lib/api.ts`: `clearProjectChat(projectId)`, `compactProjectChat(projectId)`.
 >
 > **v2.5.12 (design primitives + Generate Docs UI + per-repo arch hooks):** new shared primitives in `src/components/shared/`:
 > - `Button.tsx` — `class-variance-authority` (cva) variants (primary/secondary/tertiary/ghost/danger/success) × sizes (sm/md/lg/icon) + loading state with spinner.

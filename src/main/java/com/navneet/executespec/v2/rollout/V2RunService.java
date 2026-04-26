@@ -2,7 +2,8 @@ package com.navneet.executespec.v2.rollout;
 
 import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.PlanV2;
-import com.navneet.executespec.v2.agent.PlannerAgentV2;
+import com.navneet.executespec.v2.agent.Classification;
+import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
 import com.navneet.executespec.v2.agent.PlannerRequestV2;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
@@ -42,7 +43,7 @@ import java.util.concurrent.ThreadFactory;
 public class V2RunService {
 
     private final V2RunRegistry registry;
-    private final PlannerAgentV2 planner;
+    private final OutlinePlannerAgent planner;
     private final SequentialExecutorV2 executor;
     private final ReviewerAgentV3 reviewer;
     private final V2Metrics metrics;
@@ -103,17 +104,22 @@ public class V2RunService {
                     run.runId(), "__root__", workspace.toRealPath());
 
             // ── 1. Plan ─────────────────────────────────────────────────────
-            run.transition(V2Run.Status.PLANNING, "calling PlannerAgentV2");
+            run.transition(V2Run.Status.PLANNING, "calling OutlinePlannerAgent");
             PlanV2 plan;
             try {
-                plan = planner.plan(PlannerRequestV2.builder()
+                PlannerRequestV2 plannerReq = PlannerRequestV2.builder()
                         .spec(req.spec())
                         .classification(req.classification())
                         .provider(req.provider())
                         .model(req.model())
                         .context(runCtx)
                         .workspaceSummary(req.workspaceSummary())
-                        .build());
+                        .build();
+                // v2.6.2 slice 5b — SINGLE_SHOT bypass via the synthesised
+                // path; everything else through OutlinePlannerAgent FULL_PLAN.
+                plan = (req.classification() == Classification.SINGLE_SHOT)
+                        ? planner.synthesizeSingleShot(plannerReq)
+                        : planner.plan(plannerReq, OutlinePlannerAgent.Mode.FULL_PLAN);
             } catch (Exception planErr) {
                 log.error("V2RunService run={} planner failed", run.runId(), planErr);
                 run.setFailureMessage("planner: " + planErr.getMessage());

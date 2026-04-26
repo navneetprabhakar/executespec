@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Project chat endpoints (v2.4.0). Gated to ENTERPRISE + MAX via the
+ * Project chat endpoints (v2.4.0). Gated to ENTERPRISE + TEAM via the
  * {@link TierConfig#isExecutionViewEnabled()} tier flag, matching the rest of the
  * project-shell premium surface.
  */
@@ -69,6 +69,39 @@ public class ProjectChatController {
         return ResponseEntity.ok(java.util.Map.of("spec", spec));
     }
 
+    /**
+     * v2.6.1 — clear all persisted chat messages for the project. Use when
+     * a long history starts dragging answers off-context. Project memory +
+     * architecture are preserved.
+     */
+    @DeleteMapping
+    public ResponseEntity<java.util.Map<String, Integer>> clear(
+            @AuthenticationPrincipal AppUserDetails principal,
+            @PathVariable String projectId) {
+        requireChatAccess(principal, projectId);
+        int deleted = chatService.clearHistory(projectId);
+        return ResponseEntity.ok(java.util.Map.of("deleted", deleted));
+    }
+
+    /**
+     * v2.6.1 — compact older messages into a single summary while keeping the
+     * recent tail verbatim. Use when the chat is too long to keep coherent
+     * answers. 409 if the conversation is too short to need compaction.
+     */
+    @PostMapping("/compact")
+    public ResponseEntity<ProjectChatService.CompactResult> compact(
+            @AuthenticationPrincipal AppUserDetails principal,
+            @PathVariable String projectId) {
+        requireChatAccess(principal, projectId);
+        try {
+            return ResponseEntity.ok(chatService.compactHistory(projectId));
+        } catch (IllegalStateException e) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+        } catch (IllegalArgumentException e) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
+        }
+    }
+
     private AppUser requireChatAccess(AppUserDetails principal, String projectId) {
         if (principal == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED);
         AppUser user = principal.getUser();
@@ -87,7 +120,7 @@ public class ProjectChatController {
                 .orElse(false);
         if (!allowed) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Project chat requires ENTERPRISE or MAX tier");
+                    "Project chat requires ENTERPRISE or TEAM tier");
         }
         return user;
     }

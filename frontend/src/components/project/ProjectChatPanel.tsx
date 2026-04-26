@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { MessageSquare, Send, Loader2, Layers, GitBranch, Bug, Rocket, X } from 'lucide-react';
+import { MessageSquare, Send, Loader2, Layers, GitBranch, Bug, Rocket, X, RotateCcw, Copy, Check, Archive } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import * as api from '@/lib/api';
-import { req } from '@/lib/api';
+import { req, clearProjectChat, compactProjectChat } from '@/lib/api';
 import type { ProjectRepoLink } from '@/types/project';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { cn } from '@/lib/utils';
@@ -42,9 +42,72 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [launchOpen, setLaunchOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [compacting, setCompacting] = useState(false);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
+
+  const handleCopy = async (messageId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedId(messageId);
+      if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+      copyResetTimer.current = setTimeout(() => setCopiedId(null), 1500);
+    } catch {
+      // navigator.clipboard can reject under non-secure contexts — silently
+      // ignore; the user just won't see the "Copied" confirmation.
+    }
+  };
+
+  useEffect(() => () => {
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+  }, []);
+
+  const handleResetHistory = async () => {
+    if (resetting) return;
+    const confirmed = window.confirm(
+      'Reset chat history? This deletes every message in this conversation. ' +
+      'Project memory + architecture are kept — only the chat transcript is cleared.',
+    );
+    if (!confirmed) return;
+    setResetting(true);
+    setError(null);
+    try {
+      await clearProjectChat(projectId);
+      setMessages([]);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Reset failed');
+    } finally {
+      setResetting(false);
+    }
+  };
+
+  const handleCompact = async () => {
+    if (compacting) return;
+    setCompacting(true);
+    setError(null);
+    try {
+      const result = await compactProjectChat(projectId);
+      // Refetch instead of reconstructing client-side — the server is the
+      // source of truth for the new summary message + message ids.
+      const refreshed = await req<ChatMessage[]>(`/projects/${projectId}/chat`);
+      setMessages(refreshed);
+      // Surface a brief confirmation via the existing error slot (it doubles
+      // as a status banner for transient flows; the styling is intentionally
+      // neutral when the message starts with "Compacted".
+      setError(`Compacted ${result.compactedFrom} earlier message${result.compactedFrom === 1 ? '' : 's'} into a summary · ${result.totalAfter} now in conversation`);
+      setTimeout(() => {
+        setError((curr) => (curr && curr.startsWith('Compacted') ? null : curr));
+      }, 4000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Compact failed');
+    } finally {
+      setCompacting(false);
+    }
+  };
 
   useEffect(() => {
     setLoading(true);
@@ -97,9 +160,55 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
   const hasConversation = messages.length > 0;
 
   return (
-    <div className="flex flex-col h-[600px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)]">
+    <div className="flex flex-col h-full min-h-0 bg-[var(--gray-100)]">
+      {/* Slim header — only when conversation exists, so the empty state stays clean */}
+      {hasConversation && (
+        <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-default)] flex-shrink-0">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium text-secondary">
+            <MessageSquare className="h-3 w-3 text-accent-blue" />
+            Project Chat
+            <span className="text-muted">· {messages.length} message{messages.length === 1 ? '' : 's'}</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={handleCompact}
+              disabled={compacting || resetting || sending || messages.length < 10}
+              className={cn(
+                'inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm transition-colors',
+                'border border-[var(--border-default)] text-muted hover:text-accent-blue hover:border-accent-blue/40',
+                (compacting || resetting || sending || messages.length < 10) && 'opacity-40 cursor-not-allowed',
+              )}
+              title={
+                messages.length < 10
+                  ? 'Compact unavailable — need at least 10 messages of history.'
+                  : 'Summarise earlier messages into one note while keeping the recent tail. Use this when answers start drifting.'
+              }
+            >
+              {compacting
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <Archive className="h-3 w-3" />}
+              Compact
+            </button>
+            <button
+              onClick={handleResetHistory}
+              disabled={resetting || compacting || sending}
+              className={cn(
+                'inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm transition-colors',
+                'border border-[var(--border-default)] text-muted hover:text-accent-red hover:border-accent-red/40',
+                (resetting || compacting || sending) && 'opacity-40 cursor-not-allowed',
+              )}
+              title="Clear chat history (project memory + architecture are preserved)"
+            >
+              {resetting
+                ? <Loader2 className="h-3 w-3 animate-spin" />
+                : <RotateCcw className="h-3 w-3" />}
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
       {/* Scrollable message list */}
-      <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
         {loading && (
           <div className="flex items-center gap-2 text-xs text-muted">
             <Loader2 className="h-3 w-3 animate-spin" />
@@ -138,25 +247,49 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
           </div>
         )}
 
-        {messages.map((m, i) => (
-          <motion.div
-            key={m.id ?? i}
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.2 }}
-            className={cn('flex', m.role === 'USER' ? 'justify-end' : 'justify-start')}
-          >
-            {m.role === 'USER' ? (
-              <div className="max-w-[85%] rounded-sm rounded-br-sm px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary">
-                <p className="whitespace-pre-wrap break-words">{m.content}</p>
-              </div>
-            ) : (
-              <div className="max-w-[90%] rounded-sm rounded-bl-sm px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary">
-                <MarkdownContent content={m.content} compact />
-              </div>
-            )}
-          </motion.div>
-        ))}
+        {messages.map((m, i) => {
+          const messageKey = m.id ?? `idx-${i}`;
+          const isCopied = copiedId === messageKey;
+          return (
+            <motion.div
+              key={messageKey}
+              initial={{ opacity: 0, y: 6 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.2 }}
+              className={cn(
+                'group flex flex-col gap-1',
+                m.role === 'USER' ? 'items-end' : 'items-start',
+              )}
+            >
+              {m.role === 'USER' ? (
+                <div className="max-w-[85%] rounded-sm rounded-br-sm px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary">
+                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                </div>
+              ) : (
+                <div className="max-w-[90%] rounded-sm rounded-bl-sm px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary">
+                  <MarkdownContent content={m.content} compact />
+                </div>
+              )}
+              <button
+                onClick={() => handleCopy(messageKey, m.content)}
+                className={cn(
+                  'inline-flex items-center gap-1 text-[10.5px] px-1.5 py-0.5 rounded-sm transition-all',
+                  'text-muted hover:text-secondary',
+                  // Stays visible while showing the "Copied" confirmation;
+                  // otherwise reveals on hover/focus-within of the message.
+                  isCopied
+                    ? 'opacity-100 text-accent-blue'
+                    : 'opacity-0 group-hover:opacity-100 focus:opacity-100',
+                )}
+                title="Copy message"
+                aria-label={isCopied ? 'Copied' : 'Copy message'}
+              >
+                {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {isCopied ? 'Copied' : 'Copy'}
+              </button>
+            </motion.div>
+          );
+        })}
 
         {sending && (
           <div className="flex justify-start">
@@ -188,7 +321,11 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
           onClose={() => setLaunchOpen(false)}
           onLaunched={(runId) => {
             setLaunchOpen(false);
-            navigate(`/runs/${runId}`);
+            // Land on the project dashboard so the user sees the new run in
+            // context (recent submissions on the Overview tab) instead of
+            // bouncing to a standalone /runs/{id} route that doesn't exist
+            // in the current router and falls through to the landing page.
+            navigate(`/projects/${projectId}/dashboard`, { state: { launchedRunId: runId } });
           }}
         />
       )}
@@ -257,6 +394,7 @@ function LaunchFromChatModal({
   const [compiling, setCompiling] = useState(true);
   const [repos, setRepos] = useState<ProjectRepoLink[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [branch, setBranch] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -295,7 +433,7 @@ function LaunchFromChatModal({
       const repoUrl = repos
         .find((l) => l.repo.id === ids[0])
         ?.repo.githubRepoFullName;
-      const body = {
+      const body: Record<string, unknown> = {
         userRequest: spec.trim(),
         source: 'GITHUB_EXISTING',
         repoMode: 'EXISTING',
@@ -305,6 +443,8 @@ function LaunchFromChatModal({
         projectId,
         selectedRepoIds: ids,
       };
+      const trimmedBranch = branch.trim();
+      if (trimmedBranch) body.branch = trimmedBranch;
       const res = await req<{ runId?: string; id?: string }>('/runs', {
         method: 'POST',
         body: JSON.stringify(body),
@@ -354,6 +494,23 @@ function LaunchFromChatModal({
                 rows={7}
                 className="w-full text-sm font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-1.5 focus:outline-none focus:border-accent-blue resize-y"
               />
+            </div>
+
+            <div>
+              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
+                Branch <span className="normal-case tracking-normal text-muted">(optional — leave blank for each repo's default)</span>
+              </label>
+              <input
+                type="text"
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder="main"
+                title="Re-launch on an existing branch (e.g. the PR branch you want to address review comments on, or a feature branch you're staging changes onto). Applied to every selected repo."
+                className="w-full text-sm font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted px-2 py-1.5 focus:outline-none focus:border-accent-blue"
+              />
+              <p className="text-[10.5px] text-muted mt-1">
+                Use cases — addressing PR review comments (paste the PR branch), or stacking a staged launch on an in-progress branch.
+              </p>
             </div>
 
             <div>

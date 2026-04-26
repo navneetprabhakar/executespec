@@ -216,8 +216,37 @@ public class V2RunCostTracker {
      * price at PLANNING tier rates (e.g. Sonnet / gpt-5.4), LOW/MEDIUM at
      * WORKHORSE/LIGHTWEIGHT rates (Haiku / gpt-5.4-mini). Reflects the real dispatch
      * done by {@code SequentialExecutorV2}.
+     *
+     * <p>v2.6.2 slice 5 — convenience overload that defaults to a null strategy
+     * (legacy single-phase planner shape). New callers should pass an explicit
+     * {@link com.navneet.executespec.v2.agent.PlanStrategy} so the estimate
+     * accounts for hierarchical-pipeline phase costs.
      */
     public Estimate estimateRunTierAware(String provider, java.util.List<String> taskComplexities) {
+        return estimateRunTierAware(provider, taskComplexities, null);
+    }
+
+    /**
+     * v2.6.2 slice 5 — strategy-aware estimate. Adds the per-strategy hierarchical-
+     * planner phase costs on top of the worker cost:
+     *
+     * <pre>
+     *   SINGLE_SHOT — workers only (heuristic-fast-path bypasses every LLM call)
+     *   SMALL       — classifier (LIGHTWEIGHT) + outline (PLANNING, FULL_PLAN) + workers
+     *   MEDIUM      — classifier + outline + coherence (LIGHTWEIGHT) + workers
+     *   LARGE       — classifier + outline (SKELETON) + N expansion (WORKHORSE)
+     *                 + coherence + workers
+     *   LEGACY      — same as LARGE plus a sub-outline + sub-expansion fan-out per
+     *                 expected EPIC task (depth-2 cap, ~25% of skeletons assumed EPIC)
+     * </pre>
+     *
+     * Per-phase token bands are coarse but match the configured agent maxTokens and
+     * what live runs have actually burned. They are intentionally pessimistic on the
+     * high side so {@code costEstimateHigh} doesn't undercount; the silent hard cap
+     * is computed off the buffered midpoint.
+     */
+    public Estimate estimateRunTierAware(String provider, java.util.List<String> taskComplexities,
+                                          com.navneet.executespec.v2.agent.PlanStrategy strategy) {
         // v2.5.13 — enum is now GEMINI (was GOOGLE); "gemini" input → "GEMINI" enum
         // value. Keep the null + uppercase guards so callers can pass any case.
         String matrixProvider = provider == null ? "OPENAI" : provider.toUpperCase();
@@ -228,12 +257,7 @@ public class V2RunCostTracker {
             return estimateRun(provider, null, taskComplexities);  // fallback
         }
 
-        // Planner + reviewer run at PLANNING tier in V2.
-        ResolvedModel planning = modelResolver.resolve("PlannerAgent", p, AgentTier.PLANNING);
-        double[] planningRates = rates(planning.getActualProvider().name().toLowerCase(), planning.getModel());
-        double overheadCost = (OVERHEAD_INPUT_TOKENS / 1_000_000.0) * planningRates[0]
-                + (OVERHEAD_OUTPUT_TOKENS / 1_000_000.0) * planningRates[1];
-
+        // ── Worker cost (per-task, tier-aware). Same logic for every strategy. ──
         double workerCost = 0.0;
         int totalTasks = 0;
         if (taskComplexities != null) {
@@ -251,12 +275,100 @@ public class V2RunCostTracker {
             }
         }
 
-        double low  = workerCost + overheadCost;
+        // ── Planning-phase overhead, strategy-shaped. ─────────────────────
+        double planningPhaseCost = computePlanningPhaseCost(p, strategy, totalTasks);
+
+        double low  = workerCost + planningPhaseCost;
         double high = low * HIGH_MULTIPLIER;
         double buffered = (low + high) / 2.0 * 1.10;
         int credits = Math.max(1, (int) Math.ceil(buffered / USD_PER_CREDIT));
         double hardCap = credits * USD_PER_CREDIT;
         return new Estimate(low, high, credits, hardCap, totalTasks);
+    }
+
+    // ── Strategy-aware planning-phase cost ─────────────────────────────────
+    // Token bands per agent (input / output) — pessimistic on the high side.
+
+    /** SmartClassifierAgent: LIGHTWEIGHT, ~prompt + spec + repo context. Skip when
+     *  heuristic fast path catches the spec (estimated ~30% of SMALL traffic). */
+    private static final int[] CLASSIFIER_TOKENS = { 1_500, 200 };
+    /** OutlinePlannerAgent FULL_PLAN: PLANNING, full plan in one call. */
+    private static final int[] OUTLINE_FULL_TOKENS = { 8_000, 6_000 };
+    /** OutlinePlannerAgent SKELETON_ONLY: PLANNING, skeleton-only, smaller output. */
+    private static final int[] OUTLINE_SKELETON_TOKENS = { 8_000, 2_500 };
+    /** TaskExpanderAgent (per task): WORKHORSE, ~plan context + skeleton + body. */
+    private static final int[] EXPANDER_PER_TASK_TOKENS = { 3_500, 1_500 };
+    /** CoherencePlannerAgent: LIGHTWEIGHT, ~assembled plan + small patch list. */
+    private static final int[] COHERENCE_TOKENS = { 5_000, 800 };
+    /** Per-EPIC sub-outline cost (LEGACY only) — same shape as a SKELETON outline. */
+    private static final int[] SUB_OUTLINE_TOKENS = { 4_000, 1_500 };
+    /** Fraction of LEGACY skeletons we assume will be EPIC (drives sub-outline + sub-expand cost). */
+    private static final double LEGACY_EPIC_RATIO = 0.25;
+    /** Children-per-EPIC assumption (Classification.MEDIUM caps at 4). */
+    private static final int LEGACY_CHILDREN_PER_EPIC = 3;
+
+    private double computePlanningPhaseCost(LlmProvider p,
+                                              com.navneet.executespec.v2.agent.PlanStrategy strategy,
+                                              int totalTasks) {
+        // Pre-resolved per-tier rates for this provider.
+        double[] lightweightRates = ratesForTier(p, AgentTier.LIGHTWEIGHT);
+        double[] workhorseRates  = ratesForTier(p, AgentTier.WORKHORSE);
+        double[] planningRates   = ratesForTier(p, AgentTier.PLANNING);
+
+        if (strategy == null) {
+            // Legacy single-phase planner shape — preserves slice-1-and-earlier
+            // estimates for SINGLE_SHOT/legacy fallbacks.
+            return cost(OVERHEAD_INPUT_TOKENS, OVERHEAD_OUTPUT_TOKENS, planningRates);
+        }
+        return switch (strategy) {
+            // SINGLE_SHOT bypasses the LLM entirely (heuristic fast path) — no
+            // phase overhead beyond the synthesised plan + workers.
+            case SINGLE_SHOT -> 0.0;
+            // SMALL: classifier (LIGHTWEIGHT) + outline FULL_PLAN (PLANNING). No coherence.
+            case SMALL -> cost(CLASSIFIER_TOKENS, lightweightRates)
+                    + cost(OUTLINE_FULL_TOKENS, planningRates);
+            // MEDIUM: classifier + outline FULL_PLAN + coherence.
+            case MEDIUM -> cost(CLASSIFIER_TOKENS, lightweightRates)
+                    + cost(OUTLINE_FULL_TOKENS, planningRates)
+                    + cost(COHERENCE_TOKENS, lightweightRates);
+            // LARGE: classifier + outline SKELETON + N parallel expanders + coherence.
+            case LARGE -> cost(CLASSIFIER_TOKENS, lightweightRates)
+                    + cost(OUTLINE_SKELETON_TOKENS, planningRates)
+                    + totalTasks * cost(EXPANDER_PER_TASK_TOKENS, workhorseRates)
+                    + cost(COHERENCE_TOKENS, lightweightRates);
+            // LEGACY: LARGE shape + per-EPIC sub-outline + sub-expansion fan-out.
+            // Assume LEGACY_EPIC_RATIO of skeletons are EPIC, each spawning
+            // LEGACY_CHILDREN_PER_EPIC sub-LEAFs.
+            case LEGACY -> {
+                double base = cost(CLASSIFIER_TOKENS, lightweightRates)
+                        + cost(OUTLINE_SKELETON_TOKENS, planningRates)
+                        + totalTasks * cost(EXPANDER_PER_TASK_TOKENS, workhorseRates)
+                        + cost(COHERENCE_TOKENS, lightweightRates);
+                int epicCount = (int) Math.ceil(totalTasks * LEGACY_EPIC_RATIO);
+                int extraChildren = epicCount * LEGACY_CHILDREN_PER_EPIC;
+                yield base
+                        + epicCount * cost(SUB_OUTLINE_TOKENS, planningRates)
+                        + extraChildren * cost(EXPANDER_PER_TASK_TOKENS, workhorseRates);
+            }
+        };
+    }
+
+    private double[] ratesForTier(LlmProvider p, AgentTier tier) {
+        try {
+            ResolvedModel rm = modelResolver.resolve("WorkerAgent", p, tier);
+            return rates(rm.getActualProvider().name().toLowerCase(), rm.getModel());
+        } catch (Exception e) {
+            return new double[] { 0.0, 0.0 };
+        }
+    }
+
+    private static double cost(int[] band, double[] rates) {
+        return (band[0] / 1_000_000.0) * rates[0] + (band[1] / 1_000_000.0) * rates[1];
+    }
+
+    private static double cost(int inputTokens, int outputTokens, double[] rates) {
+        return (inputTokens / 1_000_000.0) * rates[0]
+                + (outputTokens / 1_000_000.0) * rates[1];
     }
 
     private double[] rates(String providerLower, String model) {

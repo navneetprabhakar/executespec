@@ -41,6 +41,11 @@ import java.util.concurrent.TimeUnit;
  * Workspace-level concurrency is the caller's responsibility — if two Applies
  * fire on the same run, git may throw dirty-index errors; that's acceptable
  * for now since the UI only surfaces one button at a time.
+ *
+ * <p>Intentionally NOT annotated {@code @Transactional}. Callers dispatch
+ * async (see {@code RunConversationController.applyExecutor}) and the inner
+ * JPA calls manage their own short tx scope — wrapping this 25-iteration loop
+ * in an outer tx would pin a Hikari connection for the entire worker run.
  */
 @Slf4j
 @Service

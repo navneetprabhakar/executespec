@@ -190,6 +190,43 @@ public class PipelineRun {
     @Column(name = "ai_provider", length = 20)
     private String aiProvider = "OPENAI";
 
+    // ── Hierarchical Planner (v2.6.2 — V130) ─────────────────────────────────
+    /**
+     * Strategy chosen by {@code SmartClassifierAgent}: SINGLE_SHOT | SMALL |
+     * MEDIUM | LARGE | LEGACY. Drives which planner phases run downstream.
+     * Null on runs created before slice 1 of the hierarchical rollout.
+     */
+    @Column(name = "plan_strategy", length = 32)
+    private String planStrategy;
+
+    /** JSON outline emitted by {@code OutlinePlannerAgent} (slice 2+). */
+    @Column(name = "plan_outline_json", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    private String planOutlineJson;
+
+    /**
+     * One-line classifier rationale, persisted for offline calibration
+     * (heuristic-verdict vs LLM-verdict vs final outcome).
+     */
+    @Column(name = "classifier_reasoning", columnDefinition = "TEXT")
+    private String classifierReasoning;
+
+    @Column(name = "classifier_input_tokens")  private Long classifierInputTokens;
+    @Column(name = "classifier_output_tokens") private Long classifierOutputTokens;
+    @Column(name = "classifier_cost_usd")      private Double classifierCostUsd;
+
+    @Column(name = "outline_input_tokens")  private Long outlineInputTokens;
+    @Column(name = "outline_output_tokens") private Long outlineOutputTokens;
+    @Column(name = "outline_cost_usd")      private Double outlineCostUsd;
+
+    @Column(name = "expansion_input_tokens")  private Long expansionInputTokens;
+    @Column(name = "expansion_output_tokens") private Long expansionOutputTokens;
+    @Column(name = "expansion_cost_usd")      private Double expansionCostUsd;
+
+    @Column(name = "coherence_input_tokens")  private Long coherenceInputTokens;
+    @Column(name = "coherence_output_tokens") private Long coherenceOutputTokens;
+    @Column(name = "coherence_cost_usd")      private Double coherenceCostUsd;
+
     public com.navneet.executespec.router.LlmProvider getAiProviderEnum() {
         try { return com.navneet.executespec.router.LlmProvider.valueOf(aiProvider); }
         catch (Exception e) { return com.navneet.executespec.router.LlmProvider.OPENAI; }
