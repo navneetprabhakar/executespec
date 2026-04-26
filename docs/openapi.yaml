@@ -11,8 +11,7 @@ info:
     `model-matrix` / `failover-order` use `gemini`.
 
     v2.6.1 (2026-04-23) — persona roadmap Waves 1-6. Wave 1 adds TEAM tier +
-    3-state tier lifecycle (`/api/admin/tiers`, `/api/org/me/seats/adjust`) +
-    seat-aware Stripe checkout. Wave 2 adds onboarding sandbox + sample specs
+    3-state tier lifecycle (`/api/admin/tiers`). Wave 2 adds onboarding sandbox + sample specs
     (`/api/onboarding/*`) and a 6-event activation funnel (PostHog). Waves 3-6
     land schema + docs for SSO, team-trial, startup program, and provider
     smart-routing; full UI surfaces follow post-launch.
@@ -2946,38 +2945,6 @@ paths:
                 properties:
                   id: { type: string, format: uuid }
                   status: { type: string, enum: [PENDING, APPROVED, REJECTED] }
-
-  # ──────────────────────────────────────────────────
-  # ORG SEATS (Wave 1)
-  # ──────────────────────────────────────────────────
-  /org/me/seats/adjust:
-    post:
-      tags: [Organization]
-      summary: Adjust seat count for a TEAM org
-      description: |
-        TEAM tier only. `newSeats` must be within `[2,20]` and ≥ `activeMemberCount`.
-        The backend eagerly syncs the local `org.seat_count` column and pushes the
-        new quantity to Stripe via `SubscriptionItem.update` with `CREATE_PRORATIONS`.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [newSeats]
-              properties:
-                newSeats: { type: integer, minimum: 2, maximum: 20 }
-      responses:
-        '200':
-          description: Updated org
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/OrgDto'
-        '400':
-          description: Invalid seat count (below activeMemberCount, outside [2,20], or non-TEAM tier)
-        '402':
-          description: Stripe payment required (sync rejected)
 
 # ──────────────────────────────────────────────────
 # COMPONENTS
