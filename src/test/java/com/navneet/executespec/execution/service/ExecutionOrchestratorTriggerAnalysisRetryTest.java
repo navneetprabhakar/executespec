@@ -11,7 +11,6 @@ import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.v2.integration.V2RunOrchestrator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.beans.factory.ObjectProvider;
@@ -55,8 +54,21 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
     @Mock V2RunOrchestrator v2Orchestrator;
     @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
     @Mock ObjectProvider<com.navneet.executespec.folder.BootstrapService> bootstrapServiceProvider;
+    // Use a real ExecutionRunCasUpdater wired to the runRepo mock so CAS
+    // semantics (refetch + retry on optimistic lock) exercise the same
+    // findById/save sequences the test assertions count.
+    ExecutionRunCasUpdater runCas;
 
-    @InjectMocks ExecutionOrchestrator orchestrator;
+    ExecutionOrchestrator orchestrator;
+
+    @org.junit.jupiter.api.BeforeEach
+    void wireOrchestrator() {
+        runCas = new ExecutionRunCasUpdater(runRepo);
+        orchestrator = new ExecutionOrchestrator(
+                runRepo, solutionRepo, archService, projectRepoRepo, projectRepoService,
+                appUserRepo, depResolver, solutionExecService, branchService, broadcaster,
+                gitHub, v2Orchestrator, prRecordRepo, runCas);
+    }
 
     @Test
     void happyPath_savesAnalysingThenArchReview_withSingleAttemptEach() {
