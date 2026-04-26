@@ -35,6 +35,8 @@ public class ProjectRepoService {
     private final StackDetector stackDetector;
     private final GitHubRepoService gitHub;
     private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
+    /** V140 — gate per-tier repos-per-project cap on link + create-and-link. */
+    private final com.navneet.executespec.auth.service.TierEnforcementService tierEnforcement;
     /** Lazy to break potential circular wiring on startup. */
     private final org.springframework.beans.factory.ObjectProvider<
             com.navneet.executespec.codeintel.ProjectArchitectureService> archServiceProvider;
@@ -201,6 +203,9 @@ public class ProjectRepoService {
             String projectId, UUID repoId, String callerUserId, String callerOrgId) {
 
         Project project = requireProjectAccess(projectId, callerUserId, callerOrgId);
+        // V140 — block before further work when the project is at its
+        // tier repos-per-project cap.
+        tierEnforcement.assertCanLinkRepoToProject(callerUserId, projectId);
         ProjectRepo repo = repoRepo.findById(repoId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
 
@@ -311,6 +316,9 @@ public class ProjectRepoService {
             String callerUserId,
             String callerOrgId) {
         Project project = requireProjectAccess(projectId, callerUserId, callerOrgId);
+        // V140 — block before any GitHub side-effect when the project is
+        // at its tier repos-per-project cap.
+        tierEnforcement.assertCanLinkRepoToProject(callerUserId, projectId);
 
         String cloneUrl = gitHub.createRepo(
                 description, name, "public".equals(visibility) ? "public" : "private",

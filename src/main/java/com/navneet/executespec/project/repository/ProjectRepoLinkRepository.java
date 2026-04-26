@@ -18,4 +18,10 @@ public interface ProjectRepoLinkRepository extends JpaRepository<ProjectRepoLink
     boolean existsByRepoId(UUID repoId);
 
     void deleteByProjectIdAndRepoId(String projectId, UUID repoId);
+
+    /**
+     * V140 — used by {@code TierEnforcementService.assertCanLinkRepoToProject}
+     * to enforce per-tier repos-per-project caps.
+     */
+    long countByProjectId(String projectId);
 }

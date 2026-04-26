@@ -36,9 +36,13 @@ public class ProjectService {
     private final AppUserRepository userRepo;
     private final ActivityAuditService auditService;
     private final EventTrackingService eventTracking;
+    private final TierEnforcementService tierEnforcement;
 
     @Transactional
     public ProjectDto createProject(String orgId, String createdBy, CreateProjectRequest req) {
+        // V140 — block before save when the org is at its tier project cap.
+        tierEnforcement.assertCanCreateProject(createdBy, orgId);
+
         LlmProvider provider = LlmProvider.ANTHROPIC;
         if (req.aiProvider() != null) {
             try { provider = LlmProvider.valueOf(req.aiProvider().toUpperCase()); }
