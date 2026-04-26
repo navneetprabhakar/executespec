@@ -105,7 +105,7 @@ export default function InvoicesPage() {
                 const s = v == null ? '' : String(v);
                 return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
               };
-              const rows = filtered.map((inv) => headers.map((h) => escape((inv as Record<string, unknown>)[h])).join(','));
+              const rows = filtered.map((inv) => headers.map((h) => escape((inv as unknown as Record<string, unknown>)[h])).join(','));
               const csv = headers.join(',') + '\n' + rows.join('\n');
               const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
               const url = URL.createObjectURL(blob);
