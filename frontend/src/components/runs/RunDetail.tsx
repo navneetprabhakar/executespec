@@ -709,7 +709,18 @@ export default function RunDetail() {
           {/* Reports + Tabs — scroll is handled by the outer container so the
               title bar + status icons scroll together as one surface. */}
           <div>
-            <MobileCollapsibleReports runId={activeRun.runId} status={activeRun.status} statusReason={activeRun.statusReason ?? null} />
+            <MobileCollapsibleReports
+              runId={activeRun.runId}
+              status={activeRun.status}
+              statusReason={activeRun.statusReason ?? null}
+              stampMeta={{
+                runStartedAt: activeRun.startedAt,
+                runCompletedAt: activeRun.completedAt,
+                tasksTotal: activeRun.tasks?.length ?? null,
+                tasksComplete: activeRun.tasks?.filter((t: any) => t.status === 'COMPLETE').length ?? null,
+                provider: (activeRun as any).aiProvider ?? null,
+              }}
+            />
             <RunDetailTabs />
           </div>
           </>
@@ -816,7 +827,20 @@ function finalBuildPassed(run: { reviewJson?: string | null }): boolean {
   }
 }
 
-function MobileCollapsibleReports({ runId, status, statusReason }: { runId: string; status: string; statusReason?: string | null }) {
+interface MobileCollapsibleReportsProps {
+  runId: string;
+  status: string;
+  statusReason?: string | null;
+  stampMeta?: {
+    runStartedAt?: string | null;
+    runCompletedAt?: string | null;
+    tasksTotal?: number | null;
+    tasksComplete?: number | null;
+    provider?: string | null;
+  };
+}
+
+function MobileCollapsibleReports({ runId, status, statusReason, stampMeta }: MobileCollapsibleReportsProps) {
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(true);
 
@@ -825,7 +849,7 @@ function MobileCollapsibleReports({ runId, status, statusReason }: { runId: stri
     return (
       <>
         <TestProgressTracker runId={runId} status={status} />
-        <ValidationReportPanel runId={runId} status={status} statusReason={statusReason} />
+        <ValidationReportPanel runId={runId} status={status} statusReason={statusReason} stampMeta={stampMeta} />
         <TestReportPanel runId={runId} status={status} />
       </>
     );
@@ -843,7 +867,7 @@ function MobileCollapsibleReports({ runId, status, statusReason }: { runId: stri
       {!collapsed && (
         <div className="max-h-[30vh] overflow-y-auto">
           <TestProgressTracker runId={runId} status={status} />
-          <ValidationReportPanel runId={runId} status={status} statusReason={statusReason} />
+          <ValidationReportPanel runId={runId} status={status} statusReason={statusReason} stampMeta={stampMeta} />
           <TestReportPanel runId={runId} status={status} />
         </div>
       )}

@@ -222,8 +222,21 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
       {/* Code — workspace files, lazy-loaded on expand */}
       <CodePanel run={run} />
 
-      {/* Validation report — reuses the full panel used in the Runs tab */}
-      <ValidationReportPanel runId={run.runId} status={run.status} statusReason={run.statusReason ?? null} />
+      {/* Validation report — reuses the full panel used in the Runs tab.
+          v2.6.4 — pass stampMeta so the expanded report renders the
+          shareable RunStamp (1-line summary + share-link + embed). */}
+      <ValidationReportPanel
+        runId={run.runId}
+        status={run.status}
+        statusReason={run.statusReason ?? null}
+        stampMeta={{
+          runStartedAt: run.startedAt,
+          runCompletedAt: run.completedAt,
+          tasksTotal: run.tasks?.length ?? null,
+          tasksComplete: run.tasks?.filter((t: any) => t.status === 'COMPLETE').length ?? null,
+          provider: (run as any).aiProvider ?? null,
+        }}
+      />
     </div>
   );
 }

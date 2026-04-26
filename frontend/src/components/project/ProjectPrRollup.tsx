@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronRight, ExternalLink, Loader2, MessageSquareReply, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, ExternalLink, FileCode2, Loader2, MessageSquareReply, RefreshCw } from 'lucide-react';
 import { executionApi } from '@/lib/execution-api';
 import type { ContinueOnPrConfig, PrRollupEntry } from '@/types/execution';
 import { fetchPrReviewComments, getPullRequestSnapshot, refreshProjectPrs, type PullRequestSnapshot } from '@/lib/api';
@@ -218,7 +218,47 @@ function PrRow({ pr, projectId, onAddressReview }: {
   );
 }
 
+/**
+ * v2.6.4 user-feedback fix #2 — Per-file sidebar inside the expanded PR.
+ *
+ * The backend snapshot returns one big `diffPreview` blob with every file's
+ * patch concatenated. We split it on `diff --git a/<x> b/<y>` boundaries
+ * so the preview can show a GitHub-style left rail (filename + ±LoC) on
+ * the left + the per-file diff on the right.
+ *
+ * Click a filename → that file's diff scrolls into view (anchor scroll).
+ */
+interface FileDiff {
+  filename: string;
+  additions: number;
+  deletions: number;
+  patch: string;
+}
+
+function splitDiffByFile(diffText: string): FileDiff[] {
+  if (!diffText) return [];
+  // `diff --git a/<filename> b/<filename>` is the file boundary marker
+  // produced by `git diff` and GitHub's patch endpoint. We split on that
+  // and then extract the right-hand filename from the marker.
+  const parts = diffText.split(/(?=^diff --git )/m).filter((p) => p.trim());
+  return parts.map((patch) => {
+    const headerMatch = patch.match(/^diff --git a\/(.+?) b\/(.+?)\s*$/m);
+    const filename = headerMatch ? headerMatch[2] : '(unknown)';
+    let additions = 0;
+    let deletions = 0;
+    const lines = patch.split('\n');
+    for (const ln of lines) {
+      if (ln.startsWith('+') && !ln.startsWith('+++')) additions++;
+      else if (ln.startsWith('-') && !ln.startsWith('---')) deletions++;
+    }
+    return { filename, additions, deletions, patch };
+  });
+}
+
 function PrPreview({ snap }: { snap: PullRequestSnapshot }) {
+  const files = useMemo(() => splitDiffByFile(snap.diffPreview || ''), [snap.diffPreview]);
+  const [selected, setSelected] = useState<number | null>(files.length > 0 ? 0 : null);
+
   return (
     <div className="space-y-2">
       {snap.title && (
@@ -235,7 +275,65 @@ function PrPreview({ snap }: { snap: PullRequestSnapshot }) {
           {snap.body}
         </pre>
       )}
-      {snap.diffPreview && <DiffView diff={snap.diffPreview} />}
+
+      {/* GitHub-style 2-pane: file rail (left) + selected file diff (right).
+          Phones (<sm=640px): single column, file rail above the diff with
+          its own scroll cap so it doesn't push the diff offscreen.
+          Tablet+ (sm=640px+): side-by-side 220px rail + flexible diff.
+          Falls back to the legacy single-blob DiffView when the diff
+          couldn't be split (e.g. backend returned a non-git format). */}
+      {files.length > 1 && selected != null ? (
+        <div className="grid grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] gap-2">
+          <aside className="border border-[var(--border-default)] rounded-sm bg-[var(--gray-200)] max-h-80 overflow-y-auto">
+            <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-muted border-b border-[var(--border-default)]">
+              Files ({files.length})
+            </div>
+            <ul>
+              {files.map((f, i) => (
+                <li key={i}>
+                  <button
+                    onClick={() => setSelected(i)}
+                    className={cn(
+                      'w-full text-left px-2 py-1 text-[11px] flex items-center gap-1.5 transition-colors',
+                      i === selected
+                        ? 'bg-accent-blue/10 text-accent-blue border-l-2 border-accent-blue'
+                        : 'text-secondary hover:bg-[var(--gray-100)] border-l-2 border-transparent',
+                    )}
+                    title={f.filename}
+                  >
+                    <FileCode2 className="h-3 w-3 flex-shrink-0" />
+                    <span className="truncate flex-1 font-mono">
+                      {shortenPath(f.filename)}
+                    </span>
+                    <span className="font-mono text-[10px] tabular-nums whitespace-nowrap">
+                      <span className="text-status-success">+{f.additions}</span>
+                      <span className="text-accent-red ml-0.5">−{f.deletions}</span>
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </aside>
+          <div className="min-w-0">
+            <div className="px-2 py-1 text-[10px] font-mono text-muted truncate">
+              {files[selected].filename}
+            </div>
+            <DiffView diff={files[selected].patch} />
+          </div>
+        </div>
+      ) : (
+        snap.diffPreview && <DiffView diff={snap.diffPreview} />
+      )}
     </div>
   );
+}
+
+/**
+ * Truncate `src/main/java/com/.../Foo.java` to `…/Foo.java` style for the
+ * narrow rail. Keep the basename + parent dir when possible.
+ */
+function shortenPath(p: string): string {
+  const segments = p.split('/');
+  if (segments.length <= 2) return p;
+  return `…/${segments[segments.length - 2]}/${segments[segments.length - 1]}`;
 }
