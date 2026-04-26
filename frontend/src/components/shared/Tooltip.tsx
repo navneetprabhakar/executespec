@@ -12,6 +12,10 @@ interface TooltipProps {
   delay?: number;
   /** Optional className applied to the trigger wrapper (a `<span>`). */
   className?: string;
+  /** Allow the tooltip to wrap onto multiple lines. Default: false (single-line nowrap). */
+  wrap?: boolean;
+  /** Max width when `wrap` is true. Default: 16rem. */
+  maxWidthClass?: string;
 }
 
 /**
@@ -33,6 +37,8 @@ export function Tooltip({
   side = 'top',
   delay = 250,
   className,
+  wrap = false,
+  maxWidthClass = 'max-w-64',
 }: TooltipProps) {
   const [open, setOpen] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -68,7 +74,8 @@ export function Tooltip({
         <span
           role="tooltip"
           className={cn(
-            'absolute z-50 px-2 py-1 text-[11px] font-medium whitespace-nowrap pointer-events-none',
+            'absolute z-50 px-2 py-1 text-[11px] font-medium pointer-events-none',
+            wrap ? `${maxWidthClass} leading-snug whitespace-normal` : 'whitespace-nowrap',
             'rounded-sm border border-[var(--border-default)] bg-[var(--gray-400)] text-primary shadow-md',
             'animate-in fade-in-0 zoom-in-95 duration-100',
             side === 'top' && 'bottom-full left-1/2 -translate-x-1/2 mb-1.5',
