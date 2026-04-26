@@ -101,12 +101,13 @@ export default function PulseTab({
       {/* v2.6.4 user-feedback fix #1 — Pulse uses the full pane (was
           max-w-3xl ≈ 768px, looked tiny on wide monitors). 12-col grid
           gives the hero row LastRun cols 1-8 + ScoreRing cols 9-12 on
-          lg+; collapses to a single column on md and below. */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-        <div className="lg:col-span-8 min-w-0">
+          md+ (tablet 768px and wider); collapses to a single column on
+          phones (<768px) so the ScoreRing isn't squeezed. */}
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-8 min-w-0">
           <LastRunCard task={lastRun} report={report} onOpenRun={() => onOpenRun(lastRun.runId)} />
         </div>
-        <div className="lg:col-span-4">
+        <div className="md:col-span-4">
           <ScoreCardCompact score={heroScore} report={report} />
         </div>
       </div>

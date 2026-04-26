@@ -277,10 +277,13 @@ function PrPreview({ snap }: { snap: PullRequestSnapshot }) {
       )}
 
       {/* GitHub-style 2-pane: file rail (left) + selected file diff (right).
-          Falls back to the legacy single-blob DiffView when the diff couldn't
-          be split (e.g. backend returned a non-git format). */}
+          Phones (<sm=640px): single column, file rail above the diff with
+          its own scroll cap so it doesn't push the diff offscreen.
+          Tablet+ (sm=640px+): side-by-side 220px rail + flexible diff.
+          Falls back to the legacy single-blob DiffView when the diff
+          couldn't be split (e.g. backend returned a non-git format). */}
       {files.length > 1 && selected != null ? (
-        <div className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-2">
+        <div className="grid grid-cols-1 sm:grid-cols-[180px_minmax(0,1fr)] md:grid-cols-[220px_minmax(0,1fr)] gap-2">
           <aside className="border border-[var(--border-default)] rounded-sm bg-[var(--gray-200)] max-h-80 overflow-y-auto">
             <div className="px-2 py-1 text-[10px] font-mono uppercase tracking-wider text-muted border-b border-[var(--border-default)]">
               Files ({files.length})
