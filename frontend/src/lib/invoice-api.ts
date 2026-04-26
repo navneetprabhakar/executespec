@@ -123,15 +123,6 @@ export const getInvoiceDetail = (id: string) =>
 export const getAllInvoices = (page = 0, size = 20) =>
   req<Page<Invoice>>(`/admin/invoices?page=${page}&size=${size}`);
 
-export const issueCreditNote = (invoiceId: string, amountPaise: number, reason: string) =>
-  req<Invoice>(`/admin/invoices/${invoiceId}/credit-note`, {
-    method: 'POST',
-    body: JSON.stringify({ amountPaise, reason }),
-  });
-
-export const voidInvoice = (invoiceId: string) =>
-  req<Invoice>(`/admin/invoices/${invoiceId}/void`, { method: 'POST' });
-
 export const resendInvoice = (invoiceId: string) =>
   req<void>(`/admin/invoices/${invoiceId}/send`, { method: 'POST' });
 
