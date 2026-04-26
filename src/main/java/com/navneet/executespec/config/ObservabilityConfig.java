@@ -19,7 +19,7 @@ import org.springframework.context.annotation.Configuration;
  *   <li>Registers {@link TenantContextThreadLocalAccessor} and
  *       {@link WorkspaceContextThreadLocalAccessor} so that tenant/workspace context
  *       auto-propagates across virtual threads spawned by
- *       {@code SequentialTaskExecutor} and {@code PipelineHarness}</li>
+ *       {@code SequentialExecutorV2} and {@code V2RunOrchestrator}</li>
  *   <li>Enables {@code @Observed} annotation support via {@link ObservedAspect}</li>
  * </ul>
  */

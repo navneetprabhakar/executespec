@@ -26,7 +26,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
 /**
- * SCM push orchestration extracted from V1 {@code PipelineHarness}.
+ * SCM push orchestration. Originally extracted from the V1 pipeline; now
+ * called from the V2 run orchestrator's post-merge path.
  *
  * <p>Decides between Bitbucket and GitHub based on credentials present on the
  * run / user, creates a feature branch (or new repo), pushes the workspace,
