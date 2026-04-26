@@ -4,8 +4,7 @@ import { useAuthStore } from '../stores/useAuthStore';
 import { updateViewMode as apiUpdateViewMode } from '../lib/api';
 
 type ViewMode = 'vibe' | 'pro' | 'project';
-// V141 (2026-04-26) — MAX renamed to TEAM; old per-seat TEAM dropped.
-type Tier = 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+type Tier = 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
 
 export function useViewMode() {
   const uiViewMode = useUiStore((s) => s.viewMode);
@@ -45,7 +44,7 @@ export function useViewMode() {
   const isVibe = viewMode === 'vibe';
   const isPro = viewMode === 'pro';
   const isProject = viewMode === 'project';
-  const canUseProjectMode = tier === 'ENTERPRISE' || tier === 'TEAM';
+  const canUseProjectMode = tier === 'ENTERPRISE' || tier === 'MAX';
 
   return {
     viewMode,
@@ -72,7 +71,7 @@ export function useViewMode() {
 
     // ── Tier-gated flags ────────────────────────────────────────────────────
     canUseIntegrations: tier !== 'FREE',
-    canUseOwnKeys: tier === 'ENTERPRISE' || tier === 'TEAM',
+    canUseOwnKeys: tier === 'ENTERPRISE' || tier === 'MAX',
     canCreateOrg: tier !== 'FREE',
 
     // ── Default run flags for Vibe mode ─────────────────────────────────────

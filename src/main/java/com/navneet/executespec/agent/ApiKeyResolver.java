@@ -102,12 +102,11 @@ public class ApiKeyResolver {
     public void validateKeyAvailability(String userId) {
         ResolvedKeys keys = resolve(userId);
 
-        // V141 — TEAM tier (renamed from MAX) is always BYOK — enforce API keys
-        // even for individual users (no org).
+        // MAX tier is always BYOK — enforce API keys even for individual users (no org)
         boolean isByokTier = false;
         if (userId != null) {
             AppUser user = userRepo.findById(userId).orElse(null);
-            if (user != null && "TEAM".equalsIgnoreCase(user.getTier())) {
+            if (user != null && "MAX".equalsIgnoreCase(user.getTier())) {
                 isByokTier = true;
             }
         }
@@ -121,7 +120,7 @@ public class ApiKeyResolver {
 
         if (!hasAny) {
             String msg = isByokTier
-                    ? "The Team plan requires your own API keys (BYOK). " +
+                    ? "The Max plan requires your own API keys (BYOK). " +
                       "Add at least one API key in Settings → AI Provider Keys before running specs."
                     : "Your org is in OWN_KEYS mode but no API keys are configured for any enabled provider. " +
                       "Add keys in Settings → AI Keys, or ask an admin to change the key source mode.";

@@ -222,7 +222,7 @@ export default function Sidebar() {
       {/* Upgrade + Usage — hidden for SUPER_ADMIN since they bypass billing quotas */}
       {expanded && !isSuperAdmin && (
         <div className="px-3 py-2 border-t border-[var(--border-default)] space-y-2">
-          {tier && tier !== 'ENTERPRISE' && tier !== 'TEAM' && (
+          {tier && tier !== 'ENTERPRISE' && tier !== 'MAX' && (
             <button
               onClick={() => { navigate('/plans'); if (isMobile) closeMobileDrawer(); }}
               className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"
@@ -231,7 +231,7 @@ export default function Sidebar() {
               <span>Upgrade{tier === 'FREE' ? ' to Pro' : ''}</span>
             </button>
           )}
-          {tier && tier !== 'FREE' && tier !== 'TEAM' && tier !== 'ENTERPRISE' && (
+          {tier && tier !== 'FREE' && tier !== 'MAX' && tier !== 'ENTERPRISE' && (
             <button
               onClick={() => { navigate('/billing#topup'); if (isMobile) closeMobileDrawer(); }}
               className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"

@@ -231,11 +231,10 @@ public class TierPermissionService {
         int used = user.getPersonalRunCount();
         int maxApply = resolveMaxApplySuggestions(tier);
         int maxPreviews = resolveMaxPreviewStarts(tier);
-        // V141 — TEAM (renamed from MAX) and ENTERPRISE require BYOK
-        boolean isTeamOrEnterprise = "TEAM".equals(tier) || "ENTERPRISE".equals(tier);
+        boolean isMaxOrEnterprise = "MAX".equals(tier) || "ENTERPRISE".equals(tier);
 
         return new TierPermissions(
-                isTeamOrEnterprise, // canManageAiKeys — TEAM/ENTERPRISE need BYOK
+                isMaxOrEnterprise, // canManageAiKeys — MAX/ENTERPRISE need BYOK
                 false, // canViewPricing
                 false, // canManageIntegrations
                 true,  // canViewMetrics — unlocked for all tiers

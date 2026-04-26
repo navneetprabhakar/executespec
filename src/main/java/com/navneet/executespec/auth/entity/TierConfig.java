@@ -12,11 +12,7 @@ import java.time.Instant;
 
 /**
  * Global tier configuration — run quotas editable by super admin at runtime.
- * One row per tier: FREE, PRO, TEAM, ENTERPRISE.
- *
- * V141 (2026-04-26): the v2.6.1-Wave-1 per-seat TEAM tier was deleted and the
- * MAX tier was renamed to TEAM. Net post-rename ladder: FREE → PRO (HIDDEN
- * from new buyers) → TEAM ($29/mo BYOK unlimited) → ENTERPRISE.
+ * One row per tier: FREE, PRO, TEAM, MAX, ENTERPRISE.
  *
  * v2.6.0 adds {@code lifecycleState} ({@link com.navneet.executespec.billing.lifecycle.LifecycleState})
  * so any tier can be hidden from new buyers without forcing churn on existing
@@ -98,8 +94,7 @@ public class TierConfig {
     /**
      * v2.6.3 (V140) — max number of projects an org on this tier may own.
      * -1 = unlimited. Source of truth: website/index.html (FREE=1, PRO=2,
-     * TEAM=10, ENTERPRISE=-1) — V141 reshaped the ladder so the renamed
-     * TEAM (ex-MAX) keeps the 10/10 caps. Enforced by
+     * TEAM=5, MAX=10, ENTERPRISE=-1). Enforced by
      * {@link com.navneet.executespec.auth.service.TierEnforcementService#assertCanCreateProject}.
      */
     @Column(name = "max_projects_per_org", nullable = false)
@@ -108,8 +103,7 @@ public class TierConfig {
     /**
      * v2.6.3 (V140) — max number of repos that may be linked to a single
      * project on this tier. -1 = unlimited. Source of truth:
-     * website/index.html (FREE=1, PRO=2, TEAM=10, ENTERPRISE=-1) — V141
-     * reshaped the ladder so the renamed TEAM (ex-MAX) keeps the 10/10 caps.
+     * website/index.html (FREE=1, PRO=2, TEAM=5, MAX=10, ENTERPRISE=-1).
      * Enforced by
      * {@link com.navneet.executespec.auth.service.TierEnforcementService#assertCanLinkRepoToProject}.
      */

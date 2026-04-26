@@ -57,7 +57,7 @@ export default function ViewModeToggle() {
         disabled={!canUseProjectMode}
         title={canUseProjectMode
             ? 'Multi-repo projects workspace'
-            : 'Project mode requires ENTERPRISE or TEAM tier'}
+            : 'Project mode requires ENTERPRISE or MAX tier'}
         className={cn(
             base,
             viewMode === 'project' ? activeCls : idleCls,
