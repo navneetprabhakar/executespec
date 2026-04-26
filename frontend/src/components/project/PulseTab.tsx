@@ -82,7 +82,7 @@ export default function PulseTab({
 
   if (!lastRun) {
     return (
-      <div className="space-y-4 max-w-3xl">
+      <div className="space-y-4 w-full">
         <EmptyState
           icon={Rocket}
           title="No runs yet"
@@ -97,14 +97,21 @@ export default function PulseTab({
   const heroScore = verified ?? accuracy;
 
   return (
-    <div className="space-y-3 max-w-3xl">
-      {/* Hero row — last run details (left) + verified score (right) */}
-      <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_auto] gap-3">
-        <LastRunCard task={lastRun} report={report} onOpenRun={() => onOpenRun(lastRun.runId)} />
-        <ScoreCardCompact score={heroScore} report={report} />
+    <div className="space-y-3 w-full">
+      {/* v2.6.4 user-feedback fix #1 — Pulse uses the full pane (was
+          max-w-3xl ≈ 768px, looked tiny on wide monitors). 12-col grid
+          gives the hero row LastRun cols 1-8 + ScoreRing cols 9-12 on
+          lg+; collapses to a single column on md and below. */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+        <div className="lg:col-span-8 min-w-0">
+          <LastRunCard task={lastRun} report={report} onOpenRun={() => onOpenRun(lastRun.runId)} />
+        </div>
+        <div className="lg:col-span-4">
+          <ScoreCardCompact score={heroScore} report={report} />
+        </div>
       </div>
 
-      {/* Health & activity row — short summaries with "drill in" links */}
+      {/* Health & activity row — full-width 2-col split on md+ */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         <HealthCard projectId={projectId} onOpenCode={() => onSwitchTab('code')} />
         <ActivityCard
