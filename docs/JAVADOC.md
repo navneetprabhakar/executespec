@@ -31,8 +31,16 @@
 
 > **⚠️ Historical reference — V1 architecture.**
 > This document describes the original V1 harness (`PipelineHarness`, `WorkerAgent`,
-> `CompilerAgent`, `ReviewerAgentV2`, `batch/*`). V1 is frozen pending deletion
-> per [docs/plans/deprecation-removal-plan.md](plans/deprecation-removal-plan.md).
+> `CompilerAgent`, `ReviewerAgentV2`, `batch/*`) — all deleted on 2026-04-13. The
+> `deprecation-removal-plan.md` doc was removed in the 2026-04-26 cleanup pass; the
+> deletion has shipped, so the plan is no longer needed.
+>
+> **Additional 2026-04-26 dead-code-cleanup-pass-1 deletions (not yet scrubbed from
+> the body of this file):** `agent/FailurePatternService.java`,
+> `agent/ConflictResolverAgent.java`, `config/ModelConstants.java`,
+> `agent/CostEstimator.estimateWithCredits` (both overloads). References to those
+> in §Merge Resolution / §Agent Tier Assignments / §Model Matrix below are
+> historical and no longer reflect runtime code.
 >
 > **Canonical architecture lives in [CLAUDE.md](../CLAUDE.md).** Start there for
 > current V2 internals (`V2RunOrchestrator`, `OutlinePlannerAgent` /
