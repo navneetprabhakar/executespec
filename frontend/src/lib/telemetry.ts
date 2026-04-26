@@ -3,7 +3,6 @@ import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
 import { ZoneContextManager } from '@opentelemetry/context-zone';
 import { Resource } from '@opentelemetry/resources';
 import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
-import { trace, SpanStatusCode } from '@opentelemetry/api';
 
 /**
  * Initialize OpenTelemetry browser telemetry.
@@ -44,25 +43,3 @@ export function initTelemetry() {
   console.debug('[OTel] Browser telemetry initialized');
 }
 
-/**
- * Create a custom span for SSE connection lifecycle tracking.
- * Call when SSE connects, and end the span when it disconnects.
- */
-export function createSseSpan(runId: string) {
-  const tracer = trace.getTracer('executespec-ui');
-  const span = tracer.startSpan('sse.connection', {
-    attributes: {
-      'sse.run_id': runId,
-    },
-  });
-  return {
-    end: () => span.end(),
-    error: (err: string) => {
-      span.setStatus({ code: SpanStatusCode.ERROR, message: err });
-      span.end();
-    },
-    reconnect: () => {
-      span.addEvent('sse.reconnect');
-    },
-  };
-}

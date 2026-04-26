@@ -4,7 +4,7 @@
 > Tiers (v2.6.1): **FREE → PRO (HIDDEN — grandfathered) → TEAM → MAX → ENTERPRISE**. RBAC roles (SUPER_ADMIN, ORG_ADMIN, FINANCE, DEVELOPER) are orthogonal to tier.
 >
 > **v2.6.x additions:**
-> - **TEAM tier (Wave 1, v2.6.1):** $49/seat/mo, 2-20 seats, 50 credits/seat shared pool. Self-serve seat picker on `/plans`. Adjust seats via `/billing` → "Manage seats" (calls `POST /api/org/me/seats/adjust`). PRO grandfathered to HIDDEN — existing subscribers untouched, hidden from new buyers.
+> - **TEAM tier (Wave 1, v2.6.1):** $49/seat/mo, 2-20 seats, 50 credits/seat shared pool. Self-serve seat picker on `/plans`. PRO grandfathered to HIDDEN — existing subscribers untouched, hidden from new buyers.
 > - **Sandbox onboarding (Wave 2, v2.6.1):** new `/welcome` page after first signup. 3 sample specs (web-api, frontend, cli) provision a sandbox project + pre-filled spec — target median TTFV under 3 minutes. `FirstRunCelebration` component fires on first complete run.
 > - **Theme toggle (v2.6.0):** Sun/Moon `ThemeToggle` button in header — toggles `<html data-theme="light|dark">` with `localStorage` persistence.
 > - **Exec summary page (v2.6.0):** new `/exec` route (Business Owner / PgM persona view). MTD spend, success rate, needs-attention count, spend-by-project bars, cross-project awaiting-approval digest. Gated behind `canViewCostBreakdown` (PRO/MAX/ENTERPRISE → FREE sees upgrade wall).

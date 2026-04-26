@@ -62,7 +62,7 @@ import static com.navneet.executespec.config.CustomMetricsConfig.*;
  * Shared multi-provider LLM router used by non-tool-calling agents
  * (AccuracyAssessmentService, TestPlannerAgent, TestWorkerAgent,
  * TestReportGenerator, ApiTestSuiteAgent, ConversationAgent, ContextAgent,
- * ValidationReportGenerator, ConflictResolverAgent, PromptOptimiserAgent,
+ * ValidationReportGenerator, PromptOptimiserAgent,
  * eval stack).
  *
  * <p>V2 tool-calling agents use {@code LlmRouterV2} in {@code com.navneet.executespec.v2.agent}.
@@ -82,7 +82,7 @@ public class LlmRouter {
             .maximumSize(1000)
             .build();
 
-    /** Per-run user tier cache — populated by PipelineHarness at run start. FREE tier forces gpt-5.4-mini. TTL 6h, max 1000. */
+    /** Per-run user tier cache — populated by V2RunOrchestrator at run start. FREE tier forces gpt-5.4-mini. TTL 6h, max 1000. */
     private final Cache<String, String> runUserTierCache = Caffeine.newBuilder()
             .expireAfterWrite(Duration.ofHours(6))
             .maximumSize(1000)
@@ -114,7 +114,7 @@ public class LlmRouter {
      * <p>The V2 path already routes around this via {@code OpenAiNativeToolClient}.
      * V1 has 17+ live callers (ExecutionPlannerService, ArchitectureDocGenerator,
      * RepoArchitectureGenerator, ProjectDocGeneratorService, MemoryCompactionService,
-     * RunLedgerAgent, ConflictResolverAgent, ConversationAgent, PromptOptimiserAgent,
+     * RunLedgerAgent, ConversationAgent, PromptOptimiserAgent,
      * RunTitleSummarizer, ConversationController, ProjectBriefService,
      * ValidationReportGenerator, AccuracyAssessmentService, TestPlannerAgent,
      * TestWorkerAgent, TestReportGenerator) — patching the router central is
@@ -842,7 +842,7 @@ public class LlmRouter {
 
     // ── FREE tier model lock ──────────────────────────────────────────────────
 
-    /** Register the user's subscription tier for a run. Called by PipelineHarness at run start. */
+    /** Register the user's subscription tier for a run. Called by V2RunOrchestrator at run start. */
     
     public void setRunUserTier(String runId, String userTier) {
         if (runId != null && userTier != null) {

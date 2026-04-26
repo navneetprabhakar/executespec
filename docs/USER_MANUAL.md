@@ -26,7 +26,6 @@
 >
 > **Waves 4-6 (schema + docs live; services + frontend in roadmap windows):**
 > - **Smart provider routing** — `ProviderRecommendationService` heuristic (project type → provider); gated by `provider.smart-routing.enabled` (OFF).
-> - **Persona-first pricing A/B** — `pricing.persona-first` flag wired; alternate layout ships in Wave 4.
 > - **Startup program** — 50% off MAX for 12 months for <20-employee companies; application table + schema live.
 > - **14-day MAX trial** on signup — `trial_tier/trial_started_at/trial_ends_at` columns live.
 > - **Free-org teammates** — `app_user.can_invite_teammates` flag; `/api/org/free-team` endpoint in Wave 5.

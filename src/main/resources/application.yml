@@ -282,7 +282,6 @@ model-matrix:
     TestPlannerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
     ApiTestSuiteAgent: WORKHORSE
-    ConflictResolverAgent: WORKHORSE
     ContextAgent: LIGHTWEIGHT
     RunLedgerAgent: LIGHTWEIGHT
     RunTitleSummarizer: LIGHTWEIGHT
