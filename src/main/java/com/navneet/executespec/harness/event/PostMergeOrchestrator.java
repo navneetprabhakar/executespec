@@ -14,9 +14,8 @@ import org.springframework.stereotype.Component;
  * Listens for {@link PipelineEvent.MergeCompleted} and runs all non-fatal
  * post-merge agents in parallel virtual threads.
  *
- * <p>This class replaces the direct agent calls that were previously embedded
- * in {@link com.navneet.executespec.harness.PipelineHarness}, decoupling the
- * core pipeline from its optional post-processing concerns.
+ * <p>Decouples the V2 run orchestrator from optional post-merge processing
+ * (context, optimiser, API tests, preview).
  */
 @Slf4j
 @Component

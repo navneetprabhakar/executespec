@@ -2,7 +2,9 @@
 
 Core pipeline orchestration layer. Manages run lifecycle from submission to completion.
 
-## Key Files
+> **Note (2026-04-13):** `PipelineHarness` and the V1 batch path have been deleted. The live pipeline is `v2/integration/V2RunOrchestrator`. The V1 descriptions below are kept as historical reference only — see root `CLAUDE.md` "V2 pipeline" section for current behaviour.
+
+## Key Files (V1 historical — deleted)
 - `PipelineHarness.java` — Main orchestrator. Runs async pipeline: plan → approve → work → compile → merge → **COMPLETE** → auto-preview → background validation (review → test gen → test exec → report). Writes `.agent-context/project.json` with planner-declared project type in `initAgentContext()`.
 - `SequentialTaskExecutor.java` — Executes tasks in tiered parallel groups via WorkerAgent. Model resolved from matrix via ModelResolver. Validation deferred to review phase.
 - `WorkspaceInitService.java` — Creates fresh git repo for each run. Writes `.gitignore`, `.gitattributes`.

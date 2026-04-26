@@ -79,8 +79,9 @@ import java.util.concurrent.ThreadFactory;
  *
  * <p>{@link RunController} consults {@link com.navneet.executespec.v2.rollout.HarnessVersionResolver}
  * on each {@code POST /api/runs}; when the flag resolves to V2, this orchestrator takes over.
- * Mirrors the signature of {@code PipelineHarness.submitRun(...)} so the controller's call
- * site needs only an if/else swap.
+ * The {@code submitRun(...)} signature originally mirrored V1's
+ * {@code PipelineHarness.submitRun(...)} (since deleted) so the controller's
+ * call site needed only an if/else swap during the V1 → V2 cutover.
  *
  * <p>Writes to V1's {@code pipeline_run} and {@code agent_task} tables so the existing UI
  * keeps working unchanged — {@code GET /api/runs/{id}} returns V2 runs as V1-shaped JSON.
@@ -198,8 +199,8 @@ public class V2RunOrchestrator {
      * Submit a new run through V2. Returns a freshly-persisted {@link PipelineRun} with
      * status {@code PLANNING}; the async pipeline thread continues in the background.
      *
-     * <p>Signature mirrors {@code PipelineHarness.submitRun(...)} so the V1 controller
-     * can delegate with zero argument transformation.
+     * <p>Signature originally mirrored V1's {@code PipelineHarness.submitRun(...)}
+     * (since deleted) so the controller could delegate with zero argument transformation.
      */
     public PipelineRun submitRun(String userRequest, String source, String repoUrl, String repoMode,
                                   String githubPat, String githubOwner, boolean skipApproval,

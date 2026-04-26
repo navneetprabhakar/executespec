@@ -49,11 +49,6 @@ export const PIPELINE_STEPS = [
   'REVIEWING', 'COMPLETE',
 ];
 
-export const BATCH_PIPELINE_STEPS = [
-  'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'QUEUED_BATCH',
-  'IN_PROGRESS_BATCH', 'BATCH_COMPLETE', 'REVIEWING', 'COMPLETE',
-];
-
 export const NAV_ITEMS: {
   path: string;
   label: string;

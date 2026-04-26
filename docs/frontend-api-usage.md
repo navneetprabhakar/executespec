@@ -6,7 +6,6 @@
 ## v2.6.1 additions (Waves 1-6)
 
 **Wave 1 — TEAM tier + 3-state lifecycle**
-- **`adjustOrgSeats(newSeats)`** → `POST /api/org/me/seats/adjust` body `{newSeats}` → `OrgDto`. Used by `OrgAdminDashboard`'s Seats panel on TEAM orgs. Rejects values outside `[2,20]`, below `activeMemberCount`, or non-TEAM tier with 400.
 - **`fetchTiersLifecycle()`** → `GET /api/admin/tiers` → `{tiers: TierLifecycleRow[]}`. Used by the new `TierLifecyclePage` under `/admin/tiers`. Each row includes `tier`, `lifecycleState` (`LISTED|HIDDEN|SUNSETTING`), `sunsettingStartedAt`, `sunsettingEndsAt`, `hiddenSinceTs`, `metadataJson`.
 - **`updateTierLifecycle(tier, body)`** → `PUT /api/admin/tiers/{tier}` body `{state, reason?, observationDays?}`. SUNSETTING transitions require a 14-day `HIDDEN` observation window — backend enforces 409 if not met.
 - **Billing subscribe seats param** — `subscribe(planId, gateway, successUrl, cancelUrl, seats?)` now accepts an optional `seats` (2-20). Stripe path threads it through `/billing/subscribe` → `SubscriptionUpdateParams` → Checkout Session line_items quantity.
@@ -285,7 +284,6 @@
 | `getOrgInvitations()` | GET | `/org/me/invitations` | | `OrgInvitation[]` |
 | `resendInvitation(id)` | POST | `/org/me/invitations/{id}/resend` | | `{message}` |
 | `acceptInvite(token)` | POST | `/org/accept-invite?token=` | | `{message}` |
-| `adjustOrgSeats(newSeats)` | POST | `/org/me/seats/adjust` | `{newSeats}` | `OrgDto` |
 | `requestTeamTrial(body)` | POST | `/org/trial-request` | `{orgId, contactEmail, intendedSeats, notes?}` | `{id, status}` |
 
 ### Projects (lines 1057-1078)
@@ -523,9 +521,6 @@ No API calls. UI state (sidebar, modals).
 - `getProjects()` -- populate project filter
 - `archiveRun(runId)` -- archive from list
 
-#### `src/components/runs/TechBadges.tsx`
-- `resolveTechStack()` from `techDetect.ts` (no API call; resolves from local data)
-
 #### `src/components/runs/VibeProgressNarrative.tsx`
 - `mapEventToNarrative()` from `vibeNarrative.ts` (no API call; maps SSE events)
 
@@ -571,10 +566,6 @@ No API calls. UI state (sidebar, modals).
 - **Pre-populate:** Loads historical `getMessages(runId)` on mount
 - **Refetch triggers** (via `RUN_STATUS` payload): `COMPLETE`, `FAILED`, `CANCELLED`, `PAUSED`, `AWAITING_APPROVAL`, `AWAITING_MERGE`, `COMPILING`, `MERGING`, `PARTIAL`
 - **Additional refetch triggers:** `TASK_STATUS`, `GATE_OPENED`, `COMPLETE`, `RUN_RESTARTED`, `BUDGET_EXCEEDED`
-
-#### `src/lib/telemetry.ts`
-- **SSE span tracking:** `createSseSpan(runId)` creates OpenTelemetry spans for SSE connection lifecycle (connect, reconnect, error, end)
-- **Requires:** `VITE_OTEL_ENDPOINT` env var (disabled by default)
 
 ---
 
