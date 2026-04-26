@@ -1,5 +1,6 @@
 import type { ValidationReportData } from '@/lib/api';
 import VerdictPill from './VerdictPill';
+import { Glossary } from '@/components/shared/Glossary';
 
 type Dim = { label: string; value: number | null | undefined };
 
@@ -108,7 +109,7 @@ export default function ScoreCard({ report }: { report: ValidationReportData }) 
       </div>
       {allDimsEqualAnchor && (
         <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-[var(--border-default)]">
-          Dimensions match the verified score because the reviewer found no issues.
+          Dimensions match the <Glossary term="verified score">verified score</Glossary> because the <Glossary term="wiring pass">reviewer</Glossary> found no issues.
           Each bar is <code>anchor − issue penalty</code>; zero penalties means every bar equals the anchor.
         </p>
       )}

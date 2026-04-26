@@ -51,6 +51,11 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     definition:
       'A second reviewer pass that checks every new file is actually imported / registered / called somewhere. Catches "code that compiles but is unreachable" — Express routes not mounted, Spring beans not component-scanned, Rust mods not declared.',
   },
+  mission: {
+    display: 'mission',
+    definition:
+      'The unit of work ExecuteSpec ships against your codebase. One mission = plan → execute → review → preview → PR. Internally still called a "run" in URLs and DTOs (Phase 1.1 #16 is a copy-only rename).',
+  },
 };
 
 /** Look up a glossary entry, case-insensitive. */
