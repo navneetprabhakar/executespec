@@ -54,6 +54,7 @@ public class ExecutionOrchestrator {
     private final com.navneet.executespec.repo.GitHubRepoService gitHub;
     private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
     private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
+    private final ExecutionRunCasUpdater runCas;
 
     // ── Creation ───────────────────────────────────────────────────────────
 
@@ -159,14 +160,15 @@ public class ExecutionOrchestrator {
         // analyse callback). The original code held a stale `run` reference
         // for the entire generate call and saved it twice — both saves
         // OptimisticLockExceptions, leaving the run wedged at ANALYSING.
-        // Fix: every save goes through casUpdateRun, which refetches the
-        // row + applies a mutator + retries up to 3 times on stale.
+        // Fix: every save goes through ExecutionRunCasUpdater (shared bean,
+        // promoted from this class on 2026-04-26), which refetches the row
+        // + applies a mutator + retries up to 3 times on stale.
         ExecutionRun snapshot = runRepo.findById(executionRunId).orElse(null);
         if (snapshot == null) return;
         String projectId = snapshot.getProjectId();
         String createdBy = snapshot.getCreatedBy();
 
-        boolean markedAnalysing = casUpdateRun(executionRunId, r -> r.setStatus("ANALYSING"));
+        boolean markedAnalysing = runCas.casUpdate(executionRunId, r -> r.setStatus("ANALYSING"));
         if (!markedAnalysing) {
             log.warn("triggerAnalysis: failed to mark exec {} as ANALYSING (stale row); aborting", executionRunId);
             return;
@@ -183,7 +185,7 @@ public class ExecutionOrchestrator {
                     .orElse(null);
             ProjectArchitectureDoc doc = archService.generate(projectId, null, pat);
             String docContent = doc == null ? null : doc.getContent();
-            boolean markedArchReview = casUpdateRun(executionRunId, r -> {
+            boolean markedArchReview = runCas.casUpdate(executionRunId, r -> {
                 r.setUnifiedArchDoc(docContent);
                 r.setStatus("ARCH_REVIEW");
             });
@@ -194,47 +196,9 @@ public class ExecutionOrchestrator {
             }
         } catch (Exception e) {
             log.error("analysis failed for exec {}: {}", executionRunId, e.getMessage(), e);
-            casUpdateRun(executionRunId, r -> r.setStatus("ABORTED"));
+            runCas.casUpdate(executionRunId, r -> r.setStatus("ABORTED"));
             emit(executionRunId, ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
         }
-    }
-
-    /**
-     * CAS-style update for an {@link ExecutionRun}. Refetches the latest row,
-     * applies the mutator, saves; retries up to 3 times on
-     * {@link ObjectOptimisticLockingFailureException} with 50ms × attempt
-     * back-off. Keeps long-running async paths (analysis, plan execution)
-     * resilient to concurrent writes from SSE / event listeners / sibling
-     * cron jobs that bump @Version mid-flight. Returns false when the row
-     * vanishes or all retries fail.
-     */
-    private boolean casUpdateRun(String runId, java.util.function.Consumer<ExecutionRun> mutator) {
-        int attempts = 0;
-        while (attempts < 3) {
-            attempts++;
-            try {
-                ExecutionRun fresh = runRepo.findById(runId).orElse(null);
-                if (fresh == null) return false;
-                mutator.accept(fresh);
-                runRepo.save(fresh);
-                return true;
-            } catch (ObjectOptimisticLockingFailureException ole) {
-                if (attempts >= 3) {
-                    log.error("casUpdateRun: optimistic-lock retry exhausted for exec {} after {} attempts",
-                            runId, attempts);
-                    return false;
-                }
-                log.info("casUpdateRun: optimistic-lock conflict on exec {} attempt {}/3; refetching",
-                        runId, attempts);
-                try {
-                    Thread.sleep(50L * attempts);
-                } catch (InterruptedException ie) {
-                    Thread.currentThread().interrupt();
-                    return false;
-                }
-            }
-        }
-        return false;
     }
 
     // ── Phase 3: arch approval ────────────────────────────────────────────
@@ -253,10 +217,18 @@ public class ExecutionOrchestrator {
 
     @Async
     public void approvePlanAndExecute(String executionRunId) {
-        ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
-        if (run == null) return;
-        run.setPlanApprovedAt(Instant.now());
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The find-then-
+        // save window here is tight, but @Async runs on a fresh thread with
+        // OSIV off; concurrent writers from the SSE update path or from a
+        // sibling /api/executions/{id}/abort call can bump @Version between
+        // findById and save, which OOMs the request because no
+        // @RestControllerAdvice catches async exceptions.
+        Instant approvedAt = Instant.now();
+        boolean ok = runCas.casUpdate(executionRunId, r -> r.setPlanApprovedAt(approvedAt));
+        if (!ok) {
+            log.warn("approvePlanAndExecute: failed to record plan approval for exec {} (stale row); proceeding to execute regardless",
+                    executionRunId);
+        }
         executeApprovedPlan(executionRunId);
     }
 
@@ -264,8 +236,16 @@ public class ExecutionOrchestrator {
     public void executeApprovedPlan(String executionRunId) {
         ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
         if (run == null) return;
-        run.setStatus("EXECUTING");
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The save below
+        // races with the SSE update path + with abort/cancel callers; the
+        // long solution-dispatch loop downstream then operates on a stale `run`
+        // that already failed save here.
+        boolean markedExecuting = runCas.casUpdate(executionRunId, r -> r.setStatus("EXECUTING"));
+        if (!markedExecuting) {
+            log.warn("executeApprovedPlan: failed to mark exec {} as EXECUTING (stale row); aborting dispatch",
+                    executionRunId);
+            return;
+        }
         emit(run.getId(), ExecutionEventTypes.EXEC_STARTED, null);
 
         // Eager-fetch dependencies so SolutionDependencyResolver can walk the Set
@@ -278,8 +258,10 @@ public class ExecutionOrchestrator {
             layers = depResolver.resolveExecutionOrder(all);
         } catch (IllegalStateException e) {
             log.error("exec {} has cyclic deps: {}", executionRunId, e.getMessage());
-            run.setStatus("ABORTED");
-            runRepo.save(run);
+            // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The cyclic-
+            // deps path is reachable AFTER the EXECUTING save, so the in-memory
+            // `run` reference is stale by this point.
+            runCas.casUpdate(executionRunId, r -> r.setStatus("ABORTED"));
             emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
             return;
         }
@@ -408,8 +390,18 @@ public class ExecutionOrchestrator {
      * {@code status:"FAILED"} payloads with a deep-link the user can act on.
      */
     public void abortExecution(ExecutionRun run) {
-        run.setStatus("ABORTED");
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The `run`
+        // parameter is loaded by the controller (request thread, OSIV off);
+        // by the time the abort reaches this save, a parallel @Async writer
+        // (executeApprovedPlan, triggerAnalysis, accumulateExecutionRunTotals)
+        // may have already bumped @Version. Without CAS the abort throws
+        // OptimisticLockException, the row never flips to ABORTED, and the
+        // user's cancel button silently fails.
+        boolean ok = runCas.casUpdate(run.getId(), r -> r.setStatus("ABORTED"));
+        if (!ok) {
+            log.warn("abortExecution: failed to mark exec {} as ABORTED (stale row); proceeding with cleanup",
+                    run.getId());
+        }
         emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, null);
         cancelActiveV2Runs(run);
         runCompensations(run);

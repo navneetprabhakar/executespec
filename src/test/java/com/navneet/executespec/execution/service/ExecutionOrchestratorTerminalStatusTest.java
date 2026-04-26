@@ -4,7 +4,6 @@ import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.InjectMocks;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
@@ -44,8 +43,21 @@ class ExecutionOrchestratorTerminalStatusTest {
     @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
     @Mock org.springframework.beans.factory.ObjectProvider<com.navneet.executespec.folder.BootstrapService>
             bootstrapServiceProvider;
+    // ExecutionRunCasUpdater isn't exercised by applyTerminalStatus (which has
+    // its own self-contained retry helper) but is required by the orchestrator
+    // constructor.
+    ExecutionRunCasUpdater runCas;
 
-    @InjectMocks ExecutionOrchestrator orchestrator;
+    ExecutionOrchestrator orchestrator;
+
+    @org.junit.jupiter.api.BeforeEach
+    void wireOrchestrator() {
+        runCas = new ExecutionRunCasUpdater(runRepo);
+        orchestrator = new ExecutionOrchestrator(
+                runRepo, solutionRepo, archService, projectRepoRepo, projectRepoService,
+                appUserRepo, depResolver, solutionExecService, branchService, broadcaster,
+                gitHub, v2Orchestrator, prRecordRepo, runCas);
+    }
 
     @Test
     void happyPath_appliesStatusOnFirstAttempt() {
