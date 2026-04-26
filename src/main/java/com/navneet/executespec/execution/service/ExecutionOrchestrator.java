@@ -149,31 +149,92 @@ public class ExecutionOrchestrator {
 
     @Async
     public void triggerAnalysis(String executionRunId) {
-        ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
-        if (run == null) return;
-        run.setStatus("ANALYSING");
-        runRepo.save(run);
-        emit(run.getId(), ExecutionEventTypes.EXEC_UNIFIED_ARCH_STARTED, null);
+        // 2026-04-26 hotfix — extends the prior @Version retry pattern
+        // (applyTerminalStatus / executeApprovedPlan, see hotfix branch
+        // feature/fix-execution-orchestrator-stale-state-2026-04-25) to the
+        // analysis path. Reproducible with 3 parallel /api/executions/{id}/
+        // analyse calls in the project eval (2026-04-26 session): the
+        // long-running archService.generate(...) call straddles concurrent
+        // writes to the same execution_run row (SSE update, project-level
+        // analyse callback). The original code held a stale `run` reference
+        // for the entire generate call and saved it twice — both saves
+        // OptimisticLockExceptions, leaving the run wedged at ANALYSING.
+        // Fix: every save goes through casUpdateRun, which refetches the
+        // row + applies a mutator + retries up to 3 times on stale.
+        ExecutionRun snapshot = runRepo.findById(executionRunId).orElse(null);
+        if (snapshot == null) return;
+        String projectId = snapshot.getProjectId();
+        String createdBy = snapshot.getCreatedBy();
+
+        boolean markedAnalysing = casUpdateRun(executionRunId, r -> r.setStatus("ANALYSING"));
+        if (!markedAnalysing) {
+            log.warn("triggerAnalysis: failed to mark exec {} as ANALYSING (stale row); aborting", executionRunId);
+            return;
+        }
+        emit(executionRunId, ExecutionEventTypes.EXEC_UNIFIED_ARCH_STARTED, null);
 
         try {
             // Delegate to the pilot v3.0 architecture service which already
             // handles per-repo codemap generation + unified doc synthesis.
             // Pass the creator's PAT so private repo trees resolve (system
             // GITHUB_PAT env isn't always scoped on user repos).
-            String pat = appUserRepo.findById(run.getCreatedBy())
+            String pat = appUserRepo.findById(createdBy)
                     .map(u -> u.getGithubPat())
                     .orElse(null);
-            ProjectArchitectureDoc doc = archService.generate(run.getProjectId(), null, pat);
-            run.setUnifiedArchDoc(doc == null ? null : doc.getContent());
-            run.setStatus("ARCH_REVIEW");
-            runRepo.save(run);
-            emit(run.getId(), ExecutionEventTypes.EXEC_ANALYSIS_COMPLETE, null);
+            ProjectArchitectureDoc doc = archService.generate(projectId, null, pat);
+            String docContent = doc == null ? null : doc.getContent();
+            boolean markedArchReview = casUpdateRun(executionRunId, r -> {
+                r.setUnifiedArchDoc(docContent);
+                r.setStatus("ARCH_REVIEW");
+            });
+            if (markedArchReview) {
+                emit(executionRunId, ExecutionEventTypes.EXEC_ANALYSIS_COMPLETE, null);
+            } else {
+                log.warn("triggerAnalysis: failed to mark exec {} as ARCH_REVIEW (stale row); arch doc not persisted on exec row but project_architecture_doc was written by archService.generate", executionRunId);
+            }
         } catch (Exception e) {
-            log.error("analysis failed for exec {}: {}", run.getId(), e.getMessage(), e);
-            run.setStatus("ABORTED");
-            runRepo.save(run);
-            emit(run.getId(), ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
+            log.error("analysis failed for exec {}: {}", executionRunId, e.getMessage(), e);
+            casUpdateRun(executionRunId, r -> r.setStatus("ABORTED"));
+            emit(executionRunId, ExecutionEventTypes.EXEC_ABORTED, e.getMessage());
         }
+    }
+
+    /**
+     * CAS-style update for an {@link ExecutionRun}. Refetches the latest row,
+     * applies the mutator, saves; retries up to 3 times on
+     * {@link ObjectOptimisticLockingFailureException} with 50ms × attempt
+     * back-off. Keeps long-running async paths (analysis, plan execution)
+     * resilient to concurrent writes from SSE / event listeners / sibling
+     * cron jobs that bump @Version mid-flight. Returns false when the row
+     * vanishes or all retries fail.
+     */
+    private boolean casUpdateRun(String runId, java.util.function.Consumer<ExecutionRun> mutator) {
+        int attempts = 0;
+        while (attempts < 3) {
+            attempts++;
+            try {
+                ExecutionRun fresh = runRepo.findById(runId).orElse(null);
+                if (fresh == null) return false;
+                mutator.accept(fresh);
+                runRepo.save(fresh);
+                return true;
+            } catch (ObjectOptimisticLockingFailureException ole) {
+                if (attempts >= 3) {
+                    log.error("casUpdateRun: optimistic-lock retry exhausted for exec {} after {} attempts",
+                            runId, attempts);
+                    return false;
+                }
+                log.info("casUpdateRun: optimistic-lock conflict on exec {} attempt {}/3; refetching",
+                        runId, attempts);
+                try {
+                    Thread.sleep(50L * attempts);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
+        }
+        return false;
     }
 
     // ── Phase 3: arch approval ────────────────────────────────────────────
