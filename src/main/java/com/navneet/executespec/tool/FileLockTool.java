@@ -106,7 +106,7 @@ public class FileLockTool {
     }
 
     /**
-     * Pre-claims a list of files for a task. Used by PipelineHarness to enforce
+     * Pre-claims a list of files for a task. Used by V2RunOrchestrator to enforce
      * planner-declared file ownership before workers start.
      */
     @Transactional
