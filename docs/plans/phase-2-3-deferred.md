@@ -107,3 +107,28 @@ goal" → "schema, primitives, policy, and call-site stubs are in place; Phase 2
 is mostly DNS + frontend restructure + ops orchestration, not new code." The
 unrelated TEAM tier reinstatement (V141 → V144) sits cleanly on top because
 it touched policy, not code paths.
+
+## 2026-04-26 update — deferred-items batch (round 2)
+
+Picked off another tier of deferred items after the initial pass:
+
+| Item | Disposition |
+|---|---|
+| #34 Card-grid template picker | **Done** — new `frontend/src/components/execution/TemplateGrid.tsx` 2-3 column card layout for spec template selection in surfaces with horizontal room (NewRunModal, EmptyProjectLanding, project Launch). The compact dropdown TemplatePicker stays for tight surfaces. |
+| #35 Fork-a-teammate's-run | **Done** — `POST /api/runs/{runId}/fork` + `forkRun()` lib helper. Inherits source spec/repo/provider; quota gates apply to forker. Visibility piggybacks on RunAccessGuard. |
+| #32 Annual billing plans | **Done** — V146 introduces TEAM/MAX Yearly INR + USD billing_plan rows with 17% discount. annual_discount_pct stamped on every TEAM/MAX row so /plans toggle can render savings. Stripe annual price IDs deferred to ops. |
+| Phase 2 — BillingService stamps org.product_id at subscribe | **Done** — handleStripeCheckoutCompleted resolves plan tier and writes via TierProductSurfaceMapper. Idempotent. |
+| Phase 2 — Stripe metadata per product | **Done** — `product` metadata field added to checkout session params. Webhook handlers can route by surface even before org row reflects new tier. |
+| Phase 2 — ProductSurfaceContext static accessor | **Done** — exposes `currentSurface()` to services/repos without plumbing HttpServletRequest. Per-callsite migration of `findByUserId` → `findByUserIdAndProductId` is intentional and incremental (auto-rewrite would break server-to-server jobs). |
+| Phase 3 — SLA + Status page docs | **Done** — `docs/status-page.md` companion to `docs/enterprise-sla.md`. Component table, severity matrix, subscription mechanics, incident-authoring flow. |
+| Phase 3 — ⌘K Command palette | **Already shipped** — `frontend/src/components/layout/CommandPalette.tsx` (cmdk-based) was pre-shipped. Just synced its labels to the "Missions" rename + added 4 missing routes (Plans, Invoices, Org settings, Projects). |
+
+Still deferred:
+
+| Item | Reason |
+|---|---|
+| #27 Persistent project workspace lightweight on Pro | Tier-gated UI variant — needs surface-split decisions about which subset of project workbench Vibe wants. Code-doable in a separate PR once Phase 2 lands. |
+| #29 Simplified architecture viewer on Pro | Same — needs surface split to define "simplified". |
+| #30 Conversational refinement as default input | Needs A/B data on activation lift before flipping the default; no harness ready to A/B yet. |
+| Phase 2 — repository method wiring (`findByUserIdAndProductId` etc.) | Foundation (filter + accessor) in place; per-repo migration is incremental and best done callsite-by-callsite with tests, not as a mass auto-rewrite. |
+| All Phase 3 multi-month items in original list | Unchanged — external dependencies (legal for SOC2, infra service decisions, GTM for marketplace) put these out of code-only scope. |
