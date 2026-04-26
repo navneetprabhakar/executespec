@@ -64,6 +64,7 @@ public class SolutionExecutionService {
     private final AppUserRepository appUserRepo;
     private final SseBroadcaster broadcaster;
     private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
+    private final ExecutionRunCasUpdater runCas;
 
     public void executeSolution(ExecutionSolution solution, ExecutionRun run) {
         // Entry-point marker: either first attempt or retry.
@@ -345,8 +346,19 @@ public class SolutionExecutionService {
         jiraSync.updateTicket(run, solution,
                 "Solution failed (" + phase + "): " + reason, "Blocked");
 
-        fresh.setStatus("PAUSED");
-        runRepo.save(fresh);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The PAUSED
+        // save races with parallel solution completions in sibling layers
+        // (executeApprovedPlan dispatches each layer in parallel). The
+        // mutator re-checks the terminal-state guard so an abort that
+        // landed between findById and save still wins.
+        runCas.casUpdate(run.getId(), r -> {
+            String s = r.getStatus() == null ? "" : r.getStatus().toUpperCase();
+            if ("ABORTED".equals(s) || "CANCELLED".equals(s)
+                    || "COMPLETE".equals(s) || "FAILED".equals(s)) {
+                return; // honour the terminal write that beat us here
+            }
+            r.setStatus("PAUSED");
+        });
         emit(run.getId(), ExecutionEventTypes.EXEC_SOLUTION_FAILED, solution.getId());
         emit(run.getId(), ExecutionEventTypes.EXEC_PAUSED_FOR_DECISION, solution.getId());
     }
@@ -411,8 +423,11 @@ public class SolutionExecutionService {
 
     private void resume(ExecutionRun run) {
         if (run == null) return;
-        run.setStatus("EXECUTING");
-        runRepo.save(run);
+        // 2026-04-26 hotfix — covered by ExecutionRunCasUpdater. Caller
+        // (processDecision / signalManualFixDone) passes a `run` reference
+        // they loaded from the DB before applying their own JIRA sync calls;
+        // by the time this resume hits, @Version may have moved on.
+        runCas.casUpdate(run.getId(), r -> r.setStatus("EXECUTING"));
         emit(run.getId(), ExecutionEventTypes.EXEC_RESUMED, null);
     }
 
@@ -442,26 +457,32 @@ public class SolutionExecutionService {
      * parent ExecutionRun's totals. Re-reads the run row to avoid stomping on
      * concurrent solution completions (parallel layers). Runs in its own tiny
      * transaction so the totals are visible even if the caller crashes later.
+     *
+     * <p>2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The previous
+     * implementation did its own findById + save dance and silently dropped
+     * the increment when @Version moved on between the two; parallel sibling
+     * layers completing within the same SSE tick lost their token + cost
+     * accumulation. The CAS bean's mutator runs the increment on every retry
+     * fetch so concurrent completers all converge.
      */
-    @org.springframework.transaction.annotation.Transactional
     protected void accumulateExecutionRunTotals(ExecutionRun run, ExecutionSolution solution) {
         try {
-            long solutionTokens = solution.getActualTokens() == null ? 0L : solution.getActualTokens();
-            java.math.BigDecimal solutionCost = solution.getCostUsd() == null
+            final long solutionTokens = solution.getActualTokens() == null ? 0L : solution.getActualTokens();
+            final java.math.BigDecimal solutionCost = solution.getCostUsd() == null
                     ? java.math.BigDecimal.ZERO : solution.getCostUsd();
             if (solutionTokens == 0L && solutionCost.signum() == 0) return;
 
-            ExecutionRun fresh = runRepo.findById(run.getId()).orElse(null);
-            if (fresh == null) return;
-            long prevTokens = fresh.getTotalActualTokens() == null ? 0L : fresh.getTotalActualTokens();
-            java.math.BigDecimal prevCost = fresh.getTotalCostUsd() == null
-                    ? java.math.BigDecimal.ZERO : fresh.getTotalCostUsd();
-            fresh.setTotalActualTokens(prevTokens + solutionTokens);
-            fresh.setTotalCostUsd(prevCost.add(solutionCost));
-            runRepo.save(fresh);
-            log.info("ExecutionRun {} totals bumped: tokens +{} → {}, cost +{} → {}",
-                    run.getId(), solutionTokens, fresh.getTotalActualTokens(),
-                    solutionCost, fresh.getTotalCostUsd());
+            boolean ok = runCas.casUpdate(run.getId(), r -> {
+                long prevTokens = r.getTotalActualTokens() == null ? 0L : r.getTotalActualTokens();
+                java.math.BigDecimal prevCost = r.getTotalCostUsd() == null
+                        ? java.math.BigDecimal.ZERO : r.getTotalCostUsd();
+                r.setTotalActualTokens(prevTokens + solutionTokens);
+                r.setTotalCostUsd(prevCost.add(solutionCost));
+            });
+            if (!ok) {
+                log.warn("Failed to accumulate totals for exec {} solution {} (CAS exhausted)",
+                        run.getId(), solution.getId());
+            }
         } catch (Exception e) {
             log.warn("Failed to accumulate totals for exec {} solution {}: {}",
                     run.getId(), solution.getId(), e.getMessage());

@@ -46,6 +46,20 @@ public class ProjectArchitectureService {
     private final com.navneet.executespec.project.workspace.ProjectWorkspaceWarmer workspaceWarmer;
     private final ProjectBriefService briefService;
     private final ObjectMapper objectMapper;
+    /** E1.2 — also publish each per-repo codemap to the customer's
+     *  .executespec/arch/codemap.md (PR by default; DIRECT_PUSH when
+     *  project_repo.executespec_pr_mode = DIRECT_PUSH). Lazy via
+     *  ObjectProvider so admin tooling + tests that don't need the
+     *  publish path can wire ProjectArchitectureService without
+     *  pulling in the writer chain. */
+    private final org.springframework.beans.factory.ObjectProvider<
+            com.navneet.executespec.folder.ExecutespecFolderWriter> folderWriterProvider;
+    /** E1.2 — emits CODEMAP_REGENERATED on the activity feed each time a
+     *  per-repo codemap is published to .executespec/. ObjectProvider keeps
+     *  this optional so codemap generation can run without the activity
+     *  pipeline (e.g. unit tests that don't load the activity package). */
+    private final org.springframework.beans.factory.ObjectProvider<
+            com.navneet.executespec.activity.ActivityEventEmitter> activityEmitterProvider;
 
     /**
      * Regenerate codemaps for every linked repo, then synthesise a fresh
@@ -167,6 +181,9 @@ public class ProjectArchitectureService {
 
         persistToWorkspace(projectId, codeMaps, repoArchDocs, repoFullNames, combined.markdown());
         workspaceWarmer.warmDiskCache(projectId);
+        // E1.2 — also publish each per-repo codemap to .executespec/arch/codemap.md
+        // on the customer repo. Best-effort: never fails the regen flow.
+        publishCodemapsToCustomerRepos(projectId, codeMaps, repoFullNames, patOverride);
         return doc;
     }
 
@@ -313,6 +330,91 @@ public class ProjectArchitectureService {
     private static String repoShortName(String full) {
         String s = full.contains("/") ? full.substring(full.indexOf('/') + 1) : full;
         return s.replaceAll("[^A-Za-z0-9._-]", "-");
+    }
+
+    /**
+     * E1.2 — mirror each per-repo codemap to {@code .executespec/arch/codemap.md}
+     * on the corresponding customer repo. Open via PR by default; the per-repo
+     * {@code executespec_pr_mode} flag (V132) lets a customer opt into
+     * DIRECT_PUSH for trusted high-frequency writes.
+     *
+     * <p>This is the "real refactor" called for in plan §1.7 — but done as a
+     * dual-write rather than a hard cutover. The DB cache + local workspace
+     * write continue (so the planner has fresh context immediately); the
+     * customer-visible {@code .executespec/} mirror is best-effort and lags
+     * by one PR-merge cycle. A future "exclusive customer-repo authority"
+     * follow-up can drop the local workspace write once every linked repo
+     * has bootstrapped.
+     *
+     * <p>Failures here never fail the codemap regen flow — codemap is the
+     * planner's primary input and must always be persisted to the DB.
+     */
+    void publishCodemapsToCustomerRepos(String projectId,
+                                        List<ProjectCodeMap> codeMaps,
+                                        List<String> repoFullNames,
+                                        String patOverride) {
+        com.navneet.executespec.folder.ExecutespecFolderWriter writer =
+                folderWriterProvider.getIfAvailable();
+        if (writer == null) {
+            log.debug("[{}] ExecutespecFolderWriter not on classpath; skipping codemap publish", projectId);
+            return;
+        }
+        String projectName = projectRepository.findById(projectId)
+                .map(Project::getName)
+                .orElse(null);
+        String slug = com.navneet.executespec.folder.BootstrapService.slugify(projectName);
+        com.navneet.executespec.activity.ActivityEventEmitter emitter =
+                activityEmitterProvider.getIfAvailable();
+
+        for (int i = 0; i < codeMaps.size(); i++) {
+            ProjectCodeMap cm = codeMaps.get(i);
+            ProjectRepo repo = repoRepo.findById(cm.getRepoId()).orElse(null);
+            if (repo == null) continue;
+            String fullName = i < repoFullNames.size()
+                    ? repoFullNames.get(i)
+                    : repo.getGithubRepoFullName();
+            try {
+                java.util.Optional<com.navneet.executespec.folder.ExecutespecFolderWriter.PullRequestInfo> result =
+                        writer.writeFiles(
+                                repo,
+                                slug,
+                                java.util.Map.of(".executespec/arch/codemap.md", cm.getContent()),
+                                "ExecuteSpec: codemap regeneration for " + fullName + " v" + cm.getVersion(),
+                                "Auto-generated codemap update from ExecuteSpec.\n\n"
+                                        + "Triggered by: project architecture regen.\n"
+                                        + "Generated from SHA: " + shortSha(cm.getGeneratedFromSha()) + "\n\n"
+                                        + "If you'd rather these updates skip the PR step entirely, "
+                                        + "ask a project admin to flip this repo's "
+                                        + "`executespec_pr_mode` to `DIRECT_PUSH`.",
+                                patOverride);
+                if (result.isEmpty()) {
+                    log.warn("[{}] codemap publish to {} returned empty (writer logs the cause)",
+                            projectId, fullName);
+                    continue;
+                }
+                if (emitter != null) {
+                    emitter.emit(
+                            tryParseUuid(projectId),
+                            com.navneet.executespec.activity.ActivityEventType.CODEMAP_REGENERATED,
+                            null,                       // codemap regen is system-initiated
+                            "REPO", repo.getId().toString(),
+                            "Codemap published to " + fullName + " (v" + cm.getVersion()
+                                    + ", " + (result.get().openedNewPr() ? "PR" : "direct push") + ")",
+                            java.util.Map.of(
+                                    "repoFullName", fullName,
+                                    "codemapVersion", cm.getVersion(),
+                                    "openedNewPr", result.get().openedNewPr(),
+                                    "prUrl", result.get().prUrl() == null ? "" : result.get().prUrl()));
+                }
+            } catch (Exception ex) {
+                log.warn("[{}] codemap publish to {} failed: {}", projectId, fullName, ex.getMessage());
+            }
+        }
+    }
+
+    private static UUID tryParseUuid(String s) {
+        try { return s == null ? null : UUID.fromString(s); }
+        catch (IllegalArgumentException ex) { return null; }
     }
 
     /** Latest per-repo architecture doc (for reads + the Sync re-run path). */

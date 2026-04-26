@@ -1,33 +1,36 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: 2026-04-25 (plan-doc cleanup: 12 done plans deleted, 4 partial plans consolidated into `partial-work.md`, 5 not-started plans renamed `pending-*`. Document Index + Per-Package Quick Reference also expanded to cover the 9 packages and 4 doc files that were missing — `api/`, `apitests/`, `assessment/`, `compliance/`, `contact/`, `context/`, `crypto/`, `repo/`, `validator/` + `billing-workflows.html`, `design/ui-tokens.md`, `test-scenarios/`, `reports/`).
+> Last updated: 2026-04-26 (cleanup pass — removed `workspace/`, `workspace-test/`, `scripts/{e2e-matrix-logs,eval-runs,project-view-results,v2-eval-results}`, `docs/test-scenarios/`, `docs/reports/`. Truncated all run + project + contract + activity_feed rows in DB. Audited `docs/plans/` and removed 5 stale plans: `hierarchical-planner-plan.md` (all 5 slices shipped), `pending-enterprise-readiness-execution-eval.md` (4 phases shipped on branch), `open-work-2026-04-18.md` (stale 8-day audit), `pending-preview-control-plane-plan.md` + `preview-engine-rewrite.md` (preview-engine moved to its own repo, plans will be recreated there). `hierarchical-planner-plan.md` was first moved from `docs/` root into `docs/plans/` then archived alongside the others. Doc references scrubbed across CLAUDE.md / ARCHITECTURE.md / CODEMAP.md / document_map.md.).
 >
-> **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Hierarchical planner (v2.6.2-track) **all 5 slices shipped on `feature/hierarchical-planner`** (8 commits ahead of `dev`, not yet merged) — full design + slice status in [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md). Auto-replay re-trigger from outline checkpoint is the one remaining slice-5d gap.
+> **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Enterprise readiness (v2.6.3-track) **Phases E1+E2+E3+E4 (40 slices total) shipped on `feature/enterprise-readiness-eval`** (49+ commits ahead of `dev`, not yet merged); operational summary lives in [`CLAUDE.md`](../CLAUDE.md) under §Current State + §Recently Resolved. Hierarchical planner (v2.6.2-track) **all 5 slices shipped on `feature/hierarchical-planner`** (8 commits ahead of `dev`, not yet merged); operational summary in [`CLAUDE.md`](../CLAUDE.md) §0c (in `ARCHITECTURE.md`) and the v2/agent codemap row. Auto-replay re-trigger from outline checkpoint is the one remaining gap.
 >
 > **Codemap consolidation (2026-04-25):** the duplicate root-level `CODEBASE_MAP.md` was removed on `feature/hierarchical-planner`. `docs/CODEMAP.md` is now the only codemap; `README.md`'s docs table points there.
 
-## Plans folder structure (post-cleanup)
+## Plans folder structure (post-2026-04-26 cleanup)
 
-After the 2026-04-25 cleanup, `docs/plans/` holds only what is actively useful:
+`docs/plans/` holds only the 5 plans that are still actively useful:
 
 | File | Type | What it is |
 |------|------|------------|
 | [`partial-work.md`](plans/partial-work.md) | consolidated | All 4 plans with partial implementations / pending follow-ups: Mobile (RN+Expo native-Android gap), Figma v2 (design-only), Harness V2 remaining work (Gap 1+2+3), and the PARTIAL-status removal proposal. |
-| [`open-work-2026-04-18.md`](plans/open-work-2026-04-18.md) | audit | Consolidated audit/backlog from a 2026-04-18 testing pass. Cross-cuts H1–H5, M1–M5, D1–D3, L1–L6 priority buckets. Reference doc, not a shippable plan. |
-| [`preview-engine-rewrite.md`](plans/preview-engine-rewrite.md) | reference | Decision doc for the preview-engine repo split. Implementation lives in the separate `preview-engine` repo. |
 | [`pending-v2-batch-execution-plan.md`](plans/pending-v2-batch-execution-plan.md) | not started | Re-implement batch execution under V2 (V1 batch was deleted). Realtime-only today. |
-| [`pending-preview-control-plane-plan.md`](plans/pending-preview-control-plane-plan.md) | not started | gRPC control-plane topology for preview scheduling. |
 | [`pending-distributed-processing-plan.md`](plans/pending-distributed-processing-plan.md) | not started | Phase A NFS workspace + Phase B worker-lease pool. |
 | [`pending-vscode-extension-plan.md`](plans/pending-vscode-extension-plan.md) | not started | External-repo VS Code extension; device-code OAuth. |
 | [`pending-complimentary-pro-promo-2026-04-30-plan.md`](plans/pending-complimentary-pro-promo-2026-04-30-plan.md) | not started | Founder thank-you 30-day PRO upgrade for early FREE signups. |
 
-**Top-level (shipped on `feature/hierarchical-planner`, awaiting dev merge):** [`docs/hierarchical-planner-plan.md`](hierarchical-planner-plan.md) — v2.6.2-track. All 4 phases live on the branch: SmartClassifierAgent (Phase 0) + OutlinePlannerAgent (Phase 1, FULL_PLAN + SKELETON_ONLY) + TaskExpanderAgent (Phase 2 parallel + LEGACY recursive depth-2) + CoherencePlannerAgent (Phase 3). PlanStrategyCircuitBreaker, PlannerOutputUtils, V130 migration, per-strategy estimateRun re-tune, dashboard surfacing — all committed. Open follow-up: full auto-replay re-trigger.
+**Removed in 2026-04-26 cleanup:**
+- `hierarchical-planner-plan.md` — all 5 slices shipped on `feature/hierarchical-planner`. Operational truth lives in `CLAUDE.md` and `ARCHITECTURE.md`.
+- `pending-enterprise-readiness-execution-eval.md` — all 4 phases shipped on `feature/enterprise-readiness-eval`. Operational truth lives in `CLAUDE.md` §Current State + the new package summaries in `CODEMAP.md` + `ARCHITECTURE.md` §0d.
+- `open-work-2026-04-18.md` — stale 8-day audit referencing deleted plans; superseded by `partial-work.md`.
+- `pending-preview-control-plane-plan.md` + `preview-engine-rewrite.md` — preview pipeline moved to the separate [`preview-engine`](https://github.com/navneetprabhakar/preview-engine) repo; new plans will be authored there.
 
 ## Recently shipped (kept here as breadcrumbs; full plans deleted)
 
 The following plans were merged + deployed and their plan files have been removed. Operational truth lives in [`CLAUDE.md`](../CLAUDE.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`PRD.md`](PRD.md).
 
+- **v2.6.3-track Enterprise Readiness** (4 phases, 40 slices, V131-V139) — `.executespec/` folder write contract + activity feed + cross-repo contracts + engineering standards + ADRs + arch invariants + notification preferences + project export. Shipped on `feature/enterprise-readiness-eval`, not yet merged.
+- **v2.6.2-track Hierarchical Planner** (5 slices, V130) — Phase 0 classifier + Phase 1 outline planner + Phase 2 parallel expander + Phase 3 coherence patcher. Shipped on `feature/hierarchical-planner`, not yet merged.
 - **v2.6.1 Waves 1-6** — TEAM tier + 3-state lifecycle + PostHog activation funnel + sandbox onboarding + SSO/GitHub App schema + smart-routing scaffold + startup program + 14-day MAX trial + enterprise SLA reference + CLI plan stub. Migrations V121–V129.
 - **v2.6.0** — UX v3 Graphite+Signal theme + LlmProvider GEMINI rename + pricing v3 ($1=1 credit per band) + US-first pivot + Stripe prod default. Migration V120.
 - **v2.5.x series** — RN+Expo codegen (V118), 3-step architecture pipeline + Generate Docs (V112–V115), validation v3 Pillar 1 (V106–V109), guardrail levels (P1–P5).
@@ -37,12 +40,8 @@ The following plans were merged + deployed and their plan files have been remove
 - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — single source of truth for every color/radius/spacing token. Semantic palette, 4-band score palette, MUST/MUST NOT rules.
 - [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison.
 - [`docs/enterprise-sla.md`](enterprise-sla.md) — ENTERPRISE-tier P1–P4 SLA + 99.9% uptime credit schedule + CSM engagement.
-- [`docs/test-scenarios/personas-journeys-and-cases.md`](test-scenarios/personas-journeys-and-cases.md) — 6 personas, 8 journeys, ~55 test cases.
-- [`docs/test-scenarios/persona-test-analysis-2026-04-18.md`](test-scenarios/persona-test-analysis-2026-04-18.md) — single-session smoke pass; system rating 7.4/10.
-- [`docs/test-scenarios/adversarial-test-report-2026-04-18.md`](test-scenarios/adversarial-test-report-2026-04-18.md) — adversarial pass (~85 probes); 19 numbered findings including a CRITICAL IDOR cluster.
-- [`docs/test-scenarios/e2e-all-features-test-plan.md`](test-scenarios/e2e-all-features-test-plan.md) — 17-section E2E plan.
 - [`docs/project-user-journeys.md`](project-user-journeys.md) — end-to-end user journeys for the project workbench.
-- [`docs/reports/`](reports/) — historical session handoffs + launch checklists.
+- [`docs/user-journeys.md`](user-journeys.md) — UI user journeys by tier.
 
 ---
 
@@ -94,11 +93,8 @@ Find the **type of change** you are making in the table below. Update every docu
 | `project-user-journeys.md` | Project-workbench end-to-end journeys | Changes to project / launch / chat flows |
 | `enterprise-one-pager.md` | Procurement / IT / security one-pager | Tier table, security posture, data-handling Q&A changes |
 | `enterprise-sla.md` | ENTERPRISE-tier support SLA | P1–P4 definitions, uptime credit schedule changes |
-| `hierarchical-planner-plan.md` | Design + slice status for v2.6.2 hierarchical planner (all 5 slices shipped on the branch) | Whenever a slice ships on `feature/hierarchical-planner`, when auto-replay re-trigger lands, when the branch merges to `dev`/`main` |
 | `billing-workflows.html` | Rendered billing flow diagrams (subscribe, top-up, refund, webhook handling) | Billing / payment flow changes |
 | `design/ui-tokens.md` | Single source of truth for color/radius/spacing tokens | Adding a UI primitive, tweaking the palette, theme work |
-| `test-scenarios/` | Persona + adversarial + E2E test plans + post-merge retest | New persona / coverage matrix updates; persona regression sweeps |
-| `reports/` | Historical session handoffs, eval results, launch checklists, persona reports | Append-only — new reports are added, prior ones not edited |
 | `document_map.md` | This file | Adding a new doc, adding a new change type |
 
 ---

@@ -871,7 +871,8 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
+  // V141 (2026-04-26) — MAX renamed to TEAM; old per-seat TEAM dropped.
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;
@@ -2028,6 +2029,155 @@ export interface WorkspaceHealthReport {
 }
 export const getWorkspaceHealth = (projectId: string) =>
   req<WorkspaceHealthReport>(`/projects/${projectId}/workspace-health`);
+
+// E2.3 — contract coverage panel (UX-preserved: drives ContractCoveragePanel.tsx
+// which reuses the WorkspaceHealthPanel layout + 4-band semantic tokens).
+export type ContractType =
+  | 'OPENAPI' | 'PROTO' | 'GRAPHQL' | 'JSON_SCHEMA' | 'ASYNCAPI' | 'EVENT_SCHEMA';
+export type DetectorStatus = 'SCANNED' | 'FAILED' | 'SKIPPED';
+export interface DetectorSummary {
+  detector: string;
+  type: ContractType;
+  status: DetectorStatus;
+  contractIds: string[];
+  failureReason?: string | null;
+}
+export interface KnownGap {
+  category: string;
+  explanation: string;
+  actionable: string;
+}
+export interface ContractCoverageResponse {
+  projectId: string;
+  repoId: string;
+  githubRepoFullName: string;
+  scans: DetectorSummary[];
+  knownGaps: KnownGap[];
+}
+export const getContractCoverage = (projectId: string, repoId: string) =>
+  req<ContractCoverageResponse>(
+    `/projects/${projectId}/repos/${repoId}/contract-coverage`);
+export const rescanContractCoverage = (projectId: string, repoId: string) =>
+  req<ContractCoverageResponse>(
+    `/projects/${projectId}/repos/${repoId}/contract-coverage/rescan`,
+    { method: 'POST' });
+
+// E2.8 — contract drift detection
+export interface DriftCheckResult {
+  contractId: string;
+  hasDrift: boolean;
+  summary: string;
+  eventId?: string | null;
+}
+export const checkContractDrift = (projectId: string, contractId: string) =>
+  req<DriftCheckResult>(
+    `/projects/${projectId}/contracts/${contractId}/check-drift`,
+    { method: 'POST' });
+export const checkRepoDrift = (projectId: string, repoId: string) =>
+  req<DriftCheckResult[]>(
+    `/projects/${projectId}/repos/${repoId}/check-drift`,
+    { method: 'POST' });
+export const checkProjectDrift = (projectId: string) =>
+  req<DriftCheckResult[]>(
+    `/projects/${projectId}/check-drift`,
+    { method: 'POST' });
+export const refreshContractFromSource = (projectId: string, contractId: string) =>
+  req<{ prUrl: string; branchName: string }>(
+    `/projects/${projectId}/contracts/${contractId}/refresh-from-source`,
+    { method: 'POST' });
+export const dismissContractDrift = (
+  projectId: string, contractId: string, rationale: string,
+) =>
+  req<{ dismissedCount: number }>(
+    `/projects/${projectId}/contracts/${contractId}/dismiss-drift`,
+    { method: 'POST', body: JSON.stringify({ rationale }) });
+
+// E3.16 — standards compliance report
+export interface StandardEntry {
+  id: string;
+  severity: 'BLOCKING' | 'WARNING' | 'ADVISORY';
+  source: 'ORG' | 'PROJECT';
+  overridden: boolean;
+  originalSeverity: string;
+  orgLevelLocked: boolean;
+  enforcementType: string;
+  description: string;
+}
+export interface ViolationEntry {
+  id: string;
+  standardId: string;
+  enforcementType: string;
+  severity: string;
+  summary: string;
+  detectedAt: string;
+  overrideApplied: boolean;
+}
+export interface OverrideEntry {
+  id: string;
+  standardId: string;
+  overrideType: string;
+  newSeverity?: string | null;
+  rationale: string;
+  createdByUserId?: string | null;
+  createdAt?: string | null;
+}
+export interface ComplianceReport {
+  projectId: string;
+  orgId: string;
+  sinceDays: number;
+  standards: StandardEntry[];
+  recentViolations: ViolationEntry[];
+  persistentOverrides: OverrideEntry[];
+}
+export const getStandardsReport = (projectId: string, orgId: string, sinceDays = 30) =>
+  req<ComplianceReport>(
+    `/projects/${projectId}/standards/report?orgId=${encodeURIComponent(orgId)}&sinceDays=${sinceDays}`);
+
+// E4.1 — activity feed
+export interface ActivityEntry {
+  id: string;
+  occurredAt: string;
+  actorUserId?: string | null;
+  actorType: 'USER' | 'SYSTEM';
+  eventType: string;
+  tier: 'HIGH_SIGNAL' | 'ADMIN_TOGGLE' | 'AUDIT_ONLY';
+  targetType?: string | null;
+  targetId?: string | null;
+  summary: string;
+  payload?: string | null;
+  schemaVersion: number;
+}
+export interface ActivityPage {
+  projectId: string;
+  from: string;
+  to: string;
+  entries: ActivityEntry[];
+  hasMore: boolean;
+}
+export const getActivityFeed = (
+  projectId: string,
+  opts: {
+    sinceDays?: number;
+    eventTypes?: string[];
+    actorId?: string;
+    targetType?: string;
+    targetId?: string;
+    includeAdminEvents?: boolean;
+    limit?: number;
+  } = {},
+) => {
+  const params = new URLSearchParams();
+  if (opts.sinceDays != null) params.set('sinceDays', String(opts.sinceDays));
+  if (opts.eventTypes && opts.eventTypes.length)
+    opts.eventTypes.forEach((t) => params.append('eventTypes', t));
+  if (opts.actorId) params.set('actorId', opts.actorId);
+  if (opts.targetType) params.set('targetType', opts.targetType);
+  if (opts.targetId) params.set('targetId', opts.targetId);
+  if (opts.includeAdminEvents) params.set('includeAdminEvents', 'true');
+  if (opts.limit != null) params.set('limit', String(opts.limit));
+  const qs = params.toString() ? `?${params.toString()}` : '';
+  return req<ActivityPage>(`/projects/${projectId}/activity${qs}`);
+};
 
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>

@@ -149,7 +149,7 @@
         "name": "Does ExecuteSpec support Bring Your Own Keys (BYOK)?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. The Max tier ($29/mo + BYOK) is built entirely around BYOK. You plug in your own Anthropic, OpenAI, or Gemini API keys, get unlimited runs with zero API markup, and pay providers directly. The Pro tier ($20/mo) uses managed keys — we pay the LLM costs — with 20 credits per month where $1 = 1 credit. Credits scale with complexity: LOW/MEDIUM specs are 1 credit, HIGH specs are 4 credits, mobile (RN + Expo) specs are 2 credits. Top-up credits use the same rate ($1 = 1 credit)."
+          "text": "Yes. The Team tier ($29/mo + BYOK) is built entirely around BYOK. You plug in your own Anthropic, OpenAI, or Gemini API keys, get unlimited runs with zero API markup, and pay providers directly. The Pro tier ($20/mo) uses managed keys — we pay the LLM costs — with 20 credits per month where $1 = 1 credit. Credits scale with complexity: LOW/MEDIUM specs are 1 credit, HIGH specs are 4 credits, mobile (RN + Expo) specs are 2 credits. Top-up credits use the same rate ($1 = 1 credit)."
         }
       }, {
         "@type": "Question",
@@ -337,7 +337,7 @@
         },
         {
           "@type": "Offer",
-          "name": "Max",
+          "name": "Team",
           "description": "Unlimited runs (fair use) with BYOK (zero API markup), 10 projects with 10 repos each, tech-debt panel, project memory, project chat, workspace health detection, permanent Cloud Run deployments, Slack channel routing.",
           "price": "29",
           "priceCurrency": "USD",
@@ -354,7 +354,7 @@
         {
           "@type": "Offer",
           "name": "Enterprise",
-          "description": "Everything in Max plus unlimited projects + repos, Execution View (multi-repo multi-solution launches), cross-repo handover, org-wide spec templates, JIRA + Confluence inbound, ServiceNow + PagerDuty, SSO/SAML + RBAC + audit trail, dedicated Slack + custom SLA, signed DPA.",
+          "description": "Everything in Team plus unlimited projects + repos, Execution View (multi-repo multi-solution launches), cross-repo handover, org-wide spec templates, JIRA + Confluence inbound, ServiceNow + PagerDuty, SSO/SAML + RBAC + audit trail, dedicated Slack + custom SLA, signed DPA.",
           "price": "0",
           "priceCurrency": "USD",
           "availability": "https://schema.org/InStock",
@@ -409,7 +409,7 @@
         {
           "@type": "DefinedTerm",
           "name": "Project workspace",
-          "description": "A per-project container that links one or more GitHub repos, maintains per-repo codemaps, a combined architecture document, a tech-debt panel, a project memory ledger, and RAG-powered project chat. Available on Pro, Max, and Enterprise tiers.",
+          "description": "A per-project container that links one or more GitHub repos, maintains per-repo codemaps, a combined architecture document, a tech-debt panel, a project memory ledger, and RAG-powered project chat. Available on Pro, Team, and Enterprise tiers.",
           "inDefinedTermSet": "https://executespec.ai/#glossary"
         },
         {
@@ -427,7 +427,7 @@
         {
           "@type": "DefinedTerm",
           "name": "BYOK",
-          "description": "Bring Your Own Keys. ExecuteSpec's Max tier ($29/month + BYOK) and Enterprise tier let customers plug in their own Anthropic, OpenAI, or Gemini API keys. ExecuteSpec adds zero markup to provider costs; customers pay the provider directly.",
+          "description": "Bring Your Own Keys. ExecuteSpec's Team tier ($29/month + BYOK) and Enterprise tier let customers plug in their own Anthropic, OpenAI, or Gemini API keys. ExecuteSpec adds zero markup to provider costs; customers pay the provider directly.",
           "inDefinedTermSet": "https://executespec.ai/#glossary"
         },
         {
@@ -926,37 +926,37 @@
                 <span class="section-label mono" style="color: var(--blue);">Project Workspace</span>
                 <span class="section-label mono" style="color: var(--green); border: 1px solid var(--green); padding: 4px 12px; border-radius: 20px; margin-left: 12px;">Included on every paid tier</span>
                 <h2 class="h2" style="margin-top: 16px;">Your codebase, made AI-shaped.</h2>
-                <p class="subtitle" style="margin: 0 auto;">Most AI coding tools stare at the file you pasted in. ExecuteSpec understands the whole project — multiple repos, architecture, past work, tech debt — so every run builds on what's already there. Available on Pro, Max, and Enterprise; Free gets a read-only demo project to see the shape.</p>
+                <p class="subtitle" style="margin: 0 auto;">Most AI coding tools stare at the file you pasted in. ExecuteSpec understands the whole project — multiple repos, architecture, past work, tech debt — so every run builds on what's already there. Available on Pro, Team, and Enterprise; Free gets a read-only demo project to see the shape.</p>
             </div>
 
             <div class="feature-grid" style="margin-top: 40px;">
                 <div class="feature-card">
-                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; TEAM &middot; ENTERPRISE</div>
                     <h3>Link multiple repos</h3>
                     <p>One project, many repos. Org-scope repos (shared across the team) or user-scope (your side-projects). Each repo gets its own codemap; the project gets a combined architecture doc that stays in sync via GitHub webhooks.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; TEAM &middot; ENTERPRISE</div>
                     <h3>Architecture as a living doc</h3>
                     <p>3-step pipeline: per-repo codemap → per-repo HLD+LLD → combined project arch. Idempotent by SHA, so re-running when nothing changed costs nothing. Diff any two versions line-by-line with source-file changes from GitHub's compare API.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; TEAM &middot; ENTERPRISE</div>
                     <h3>Verified score trend</h3>
                     <p>Dashboard charts your project's 6-dimension score trend over time (code quality, test coverage, architecture, security, performance, design compliance). Watch quality actually move — not a vibe-check.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">MAX &middot; ENTERPRISE</div>
+                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">TEAM &middot; ENTERPRISE</div>
                     <h3>Tech-debt panel + hotspots</h3>
                     <p>Issues-by-category (LOGIC / SECURITY / PERFORMANCE / DESIGN) with severity chips, top-5 file hotspots, and a 30-day dimension trend chart. No extra LLM calls — derived from your existing validation reports.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">MAX &middot; ENTERPRISE</div>
+                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">TEAM &middot; ENTERPRISE</div>
                     <h3>Project memory, compacted</h3>
                     <p>Every completed run appends a caveman-English digest to the project ledger. Every 10 runs, the ledger is re-summarised into a bounded snapshot — so planner context stays small no matter how old your project gets.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">MAX &middot; ENTERPRISE</div>
+                    <div class="mono" style="color: var(--orange); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">TEAM &middot; ENTERPRISE</div>
                     <h3>Project chat</h3>
                     <p>Ask questions about your project's architecture, past decisions, or uploaded PRDs. Chat indexes your codemaps, arch docs, and any Tika-extractable documents (PDF, Confluence exports, markdown).</p>
                 </div>
@@ -966,9 +966,9 @@
                     <p>Multi-repo, multi-solution launches. Decompose a feature across repos, track cross-repo handovers, open coordinated PRs per repo with cross-links. Backend, frontend, and infra move together.</p>
                 </div>
                 <div class="feature-card">
-                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; MAX &middot; ENTERPRISE</div>
+                    <div class="mono" style="color: var(--blue-light); font-size: 0.75rem; margin-bottom: 8px; letter-spacing: 0.08em;">PRO &middot; TEAM &middot; ENTERPRISE</div>
                     <h3>Spec templates</h3>
-                    <p>Save what works as a template: project-scoped on Pro/Max, or org-wide on Enterprise. Pick a template from the launch screen and customise in place. Stop re-typing the same "here's our coding style" preamble for every run.</p>
+                    <p>Save what works as a template: project-scoped on Pro/Team, or org-wide on Enterprise. Pick a template from the launch screen and customise in place. Stop re-typing the same "here's our coding style" preamble for every run.</p>
                 </div>
             </div>
 
@@ -977,7 +977,7 @@
                 <div style="display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; font-size: 0.9rem;">
                     <div><strong style="color: var(--text-muted);">Free</strong> &middot; 1 demo project (read-only)</div>
                     <div><strong style="color: var(--blue-light);">Pro</strong> &middot; 2 projects &middot; 2 repos each</div>
-                    <div><strong style="color: var(--orange);">Max</strong> &middot; 10 projects &middot; 10 repos each</div>
+                    <div><strong style="color: var(--orange);">Team</strong> &middot; 10 projects &middot; 10 repos each</div>
                     <div><strong style="color: var(--purple);">Enterprise</strong> &middot; Unlimited + Execution View</div>
                 </div>
             </div>
@@ -1138,7 +1138,7 @@
                         <div class="tour-mock">
                             <div class="tm-proj-head">
                                 <div>
-                                    <div class="tm-eyebrow">Project · Max tier</div>
+                                    <div class="tm-eyebrow">Project · Team tier</div>
                                     <h4 class="tm-title">checkout-api</h4>
                                 </div>
                                 <div class="tm-proj-meta">
@@ -1399,9 +1399,9 @@
                     <a href="https://dev.executespec.ai" class="btn bg-gradient-blue" target="_blank">Get Pro</a>
                 </div>
 
-                <!-- Max -->
+                <!-- Team (renamed from Max in V141) -->
                 <div class="price-card" style="border-top: 3px solid var(--orange);">
-                    <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Max</h3>
+                    <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Team</h3>
                     <p class="text-muted">Unlimited. Your keys. Your margins.</p>
                     <div class="price-amount"><span class="sym">$</span><span class="amt" data-usd="29" data-inr="2499">29</span><span>/mo + BYOK</span></div>
                     <ul class="feature-list" style="margin-bottom: 32px; flex-grow: 1;">
@@ -1418,7 +1418,7 @@
                         <li><span class="check-icon">✓</span> <div>Slack Channels + Routing Rules</div></li>
                         <li><span class="check-icon">✓</span> <div>Priority Email Support</div></li>
                     </ul>
-                    <a href="https://dev.executespec.ai" class="btn btn-white" target="_blank">Get Max</a>
+                    <a href="https://dev.executespec.ai" class="btn btn-white" target="_blank">Get Team</a>
                 </div>
 
                 <!-- Enterprise -->
@@ -1427,7 +1427,7 @@
                     <p class="text-muted">For teams running specs across a whole codebase.</p>
                     <div class="price-amount" style="font-size: 2rem;">Custom</div>
                     <ul class="feature-list" style="margin-bottom: 32px; flex-grow: 1;">
-                        <li><span class="check-icon">✓</span> <div><strong>Everything in Max</strong></div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Everything in Team</strong></div></li>
                         <li><span class="check-icon">✓</span> <div><strong>Unlimited Projects + Repos</strong></div></li>
                         <li><span class="check-icon">✓</span> <div><strong>Execution View</strong> <span style="color: var(--text-muted);">(multi-repo, multi-solution launches)</span></div></li>
                         <li><span class="check-icon">✓</span> <div>Cross-Repo Handover + Dependency Graph</div></li>
@@ -1545,7 +1545,7 @@
                         </tr>
                         <tr>
                             <td>BYOK (bring your own keys)</td>
-                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — Max + Enterprise, zero markup</td>
+                            <td class="is-us"><span class="compare-yes">✓ Yes</span> — Team + Enterprise, zero markup</td>
                             <td><span class="compare-partial">Partial</span> — limited</td>
                             <td><span class="compare-yes">✓ Yes</span></td>
                             <td><span class="compare-no">—</span></td>
@@ -1679,7 +1679,7 @@
                 <details class="faq-item">
                     <summary>Does ExecuteSpec support Bring Your Own Keys (BYOK)?</summary>
                     <div class="faq-answer">
-                        Yes. The Max tier ($29/mo + BYOK) is built entirely around BYOK — you plug in your own Anthropic, OpenAI, or Gemini API keys, get unlimited runs (fair use), and pay providers directly with zero markup from us. The Pro tier ($20/mo) uses managed keys where we pay the LLM costs: you get 20 credits per month where <strong>$1 = 1 credit</strong>. Credits scale with spec complexity — LOW/MEDIUM specs cost 1 credit, HIGH (large multi-component) specs cost 4 credits, mobile (React Native + Expo) specs cost 2 credits. The credit count is shown at plan approval before any work starts, and top-up credits use the exact same rate as the subscription.
+                        Yes. The Team tier ($29/mo + BYOK) is built entirely around BYOK — you plug in your own Anthropic, OpenAI, or Gemini API keys, get unlimited runs (fair use), and pay providers directly with zero markup from us. The Pro tier ($20/mo) uses managed keys where we pay the LLM costs: you get 20 credits per month where <strong>$1 = 1 credit</strong>. Credits scale with spec complexity — LOW/MEDIUM specs cost 1 credit, HIGH (large multi-component) specs cost 4 credits, mobile (React Native + Expo) specs cost 2 credits. The credit count is shown at plan approval before any work starts, and top-up credits use the exact same rate as the subscription.
                     </div>
                 </details>
                 <details class="faq-item">
@@ -1801,10 +1801,10 @@
                 </div>
                 <div class="legal-section">
                     <h3>4. Fair Use Policy</h3>
-                    <p>The Max tier includes unlimited runs subject to this fair use policy. "Unlimited" means reasonable, individual use of the platform for software development purposes. The following guidelines apply:</p>
+                    <p>The Team tier includes unlimited runs subject to this fair use policy. "Unlimited" means reasonable, individual use of the platform for software development purposes. The following guidelines apply:</p>
                     <ul>
                         <li><strong>Soft cap:</strong> Up to 500 runs per calendar month is considered normal usage. If your usage consistently exceeds this threshold, we may contact you to discuss your needs or recommend the Enterprise tier.</li>
-                        <li><strong>Concurrent runs:</strong> Max tier accounts may run up to 3 concurrent pipeline executions. Additional runs are queued automatically.</li>
+                        <li><strong>Concurrent runs:</strong> Team tier accounts may run up to 3 concurrent pipeline executions. Additional runs are queued automatically.</li>
                         <li><strong>Prohibited usage:</strong> Automated or scripted submission of runs (e.g., via API without human initiation), bulk generation for resale, and load-testing the platform are not permitted under the fair use policy.</li>
                         <li><strong>Enforcement:</strong> If we determine that usage is excessive, abusive, or intended to circumvent the spirit of the fair use policy, we will notify you and work with you to find a solution. We will not suspend your account without prior notice except in cases of clear abuse.</li>
                     </ul>
@@ -1824,7 +1824,7 @@
                 </div>
                 <div class="legal-section">
                     <h3>8. Payment Terms</h3>
-                    <p>ExecuteSpec offers Prototype (Free), Pro, Max, and Enterprise subscription tiers. Paid subscriptions are billed monthly through Razorpay. If you cancel a paid subscription, your access continues until the end of the current billing period, at which point your account reverts to the Prototype (Free) tier. Run top-up credits are non-refundable once purchased. We may change pricing with 30 days' notice.</p>
+                    <p>ExecuteSpec offers Prototype (Free), Pro, Team, and Enterprise subscription tiers. Paid subscriptions are billed monthly through Razorpay. If you cancel a paid subscription, your access continues until the end of the current billing period, at which point your account reverts to the Prototype (Free) tier. Run top-up credits are non-refundable once purchased. We may change pricing with 30 days' notice.</p>
                 </div>
                 <div class="legal-section">
                     <h3>9. Limitation of Liability</h3>
@@ -1897,7 +1897,7 @@
                         </thead>
                         <tbody>
                             <tr><td>Prototype (Free)</td><td>30 days</td></tr>
-                            <tr><td>Pro / Max</td><td>90 days</td></tr>
+                            <tr><td>Pro / Team</td><td>90 days</td></tr>
                             <tr><td>Enterprise</td><td>Unlimited</td></tr>
                         </tbody>
                     </table>

@@ -96,7 +96,7 @@ public class GlobalPreviewLimiter {
     private int limitForTier(String tier) {
         if (tier == null) return FREE_LIMIT;
         return switch (tier.toUpperCase()) {
-            case "ENTERPRISE", "MAX" -> ENTERPRISE_LIMIT;
+            case "ENTERPRISE", "TEAM" -> ENTERPRISE_LIMIT;  // V141 — TEAM renamed from MAX
             case "PRO" -> PRO_LIMIT;
             default -> FREE_LIMIT;
         };

@@ -21,10 +21,13 @@ import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 import org.springframework.ai.tool.ToolCallback;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpStatusCode;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.HttpClientErrorException;
+import org.springframework.web.client.HttpServerErrorException;
 
 import java.net.http.HttpClient;
 import java.time.Duration;
@@ -68,7 +71,17 @@ public class GeminiNativeToolClient {
 
     private static final String DEFAULT_BASE_URL = "https://generativelanguage.googleapis.com";
     private static final Duration CONNECT_TIMEOUT = Duration.ofSeconds(10);
-    private static final Duration READ_TIMEOUT = Duration.ofSeconds(120);
+    // 2026-04-26 hardening — was 120s. The HIGH-band Gemini run on
+    // 2026-04-26 timed out at 25min after producing only 3.6K tokens; the
+    // upstream Spring AI RetryTemplate happily waited 3 × 120s on each
+    // stalled call, then re-tried, accumulating ~6 min/call across the
+    // worker loop. 60s + the 429-aware retry loop below fail fast on a
+    // stalled call instead of letting the eval timeout fire.
+    private static final Duration READ_TIMEOUT = Duration.ofSeconds(60);
+    /** Max retries on HTTP 429 (rate limit) before bailing — observed in the
+     *  2026-04-26 eval run. Each retry sleeps RATE_LIMIT_BACKOFF_MS × attempt. */
+    private static final int RATE_LIMIT_RETRIES = 3;
+    private static final long RATE_LIMIT_BACKOFF_MS = 2000L;
 
     private final ObjectMapper objectMapper;
 
@@ -120,12 +133,7 @@ public class GeminiNativeToolClient {
         JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
         factory.setReadTimeout(READ_TIMEOUT);
         RestClient client = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
-        JsonNode response = client.post()
-                .uri(uri)
-                .contentType(MediaType.APPLICATION_JSON)
-                .body(body)
-                .retrieve()
-                .body(JsonNode.class);
+        JsonNode response = postWithRateLimitRetry(client, uri, body);
         if (response == null) throw new IllegalStateException("Gemini returned empty response body");
         // DEBUG: raw request+response logging to diagnose empty-response issues. Temporary.
         try {
@@ -135,6 +143,64 @@ public class GeminiNativeToolClient {
                     truncate(objectMapper.writeValueAsString(response), 2000));
         } catch (Exception ignored) { }
         return parseResponse(response, request.model());
+    }
+
+    /**
+     * POST to Gemini with explicit 429-aware retry. Distinguishes:
+     * <ul>
+     *   <li><b>429 Too Many Requests</b> — rate limit. Retry up to
+     *       {@link #RATE_LIMIT_RETRIES} with linear back-off
+     *       ({@link #RATE_LIMIT_BACKOFF_MS} × attempt). If the response
+     *       includes a {@code Retry-After} header, honour it (capped at
+     *       30s to avoid pathological waits).</li>
+     *   <li><b>Other 4xx</b> — propagate immediately (validation /
+     *       safety / auth — no point retrying).</li>
+     *   <li><b>5xx / network</b> — propagate to the upstream Spring
+     *       RetryTemplate (caller decides backoff strategy).</li>
+     * </ul>
+     * 2026-04-26 hardening for the HIGH-band Gemini stall.
+     */
+    private JsonNode postWithRateLimitRetry(RestClient client, String uri, ObjectNode body) {
+        int attempts = 0;
+        while (true) {
+            attempts++;
+            try {
+                return client.post()
+                        .uri(uri)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body(body)
+                        .retrieve()
+                        .body(JsonNode.class);
+            } catch (HttpClientErrorException.TooManyRequests e) {
+                if (attempts > RATE_LIMIT_RETRIES) {
+                    log.error("Gemini 429 retry exhausted after {} attempts: {}",
+                            attempts, e.getStatusText());
+                    throw e;
+                }
+                long sleepMs = computeBackoff(e, attempts);
+                log.info("Gemini 429 attempt {}/{} — sleeping {}ms then retrying",
+                        attempts, RATE_LIMIT_RETRIES, sleepMs);
+                try {
+                    Thread.sleep(sleepMs);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new RuntimeException("Gemini retry interrupted", ie);
+                }
+            }
+        }
+    }
+
+    private long computeBackoff(HttpClientErrorException.TooManyRequests e, int attempt) {
+        // Honour Retry-After if present (seconds form is the common one for Gemini).
+        String retryAfter = e.getResponseHeaders() == null
+                ? null : e.getResponseHeaders().getFirst("Retry-After");
+        if (retryAfter != null && !retryAfter.isBlank()) {
+            try {
+                long s = Long.parseLong(retryAfter.trim());
+                return Math.min(30_000L, Math.max(500L, s * 1000L));
+            } catch (NumberFormatException ignored) { /* fall through to linear back-off */ }
+        }
+        return RATE_LIMIT_BACKOFF_MS * attempt;
     }
 
     private static String truncate(String s, int max) {
