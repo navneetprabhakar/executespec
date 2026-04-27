@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { TrendingUp, DollarSign, CheckCircle2, AlertTriangle, Rocket, Trophy, Clock, Lock, ArrowUpRight } from 'lucide-react';
 import PageShell from '@/components/shared/PageShell';
@@ -8,6 +8,7 @@ import StatusBadge from '@/components/shared/StatusBadge';
 import { relativeTime } from '@/lib/utils';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useRunStore } from '@/stores/useRunStore';
 
 /**
  * v2.5.14 Phase 3.1 — Executive summary page for Business Owner / Exec persona.
@@ -30,6 +31,20 @@ export default function ExecSummaryPage() {
   const permissions = useTierPermissions();
   const userTier = useAuthStore((s) => s.user?.tier ?? 'FREE');
   const navigate = useNavigate();
+  const setRunStatusFilter = useRunStore((s) => s.setStatusFilter);
+
+  // M-046 — anchors for in-page scroll-to drill-downs.
+  const spendSectionRef = useRef<HTMLElement | null>(null);
+  const attentionSectionRef = useRef<HTMLElement | null>(null);
+
+  // M-046 — drill from a KPI tile into the relevant filtered surface.
+  const drillToFilteredRuns = (status: string) => {
+    setRunStatusFilter(status);
+    navigate('/');
+  };
+  const scrollTo = (el: HTMLElement | null) => {
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
   // v2.5.14 — gated on canViewCostBreakdown which is PRO+ only. FREE users
   // see an upgrade wall instead of the aggregated spend view.
   const canView = permissions ? permissions.canViewCostBreakdown : false;
@@ -109,17 +124,55 @@ export default function ExecSummaryPage() {
       ) : (
         <div className="space-y-6">
 
-          {/* Top-line KPIs */}
+          {/* Top-line KPIs — M-046: each tile drills into a filtered view. */}
           <section className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
-            <KpiCard label="Spend (MTD)"    value={`$${stats.mtdSpend.toFixed(2)}`} icon={<DollarSign className="h-3.5 w-3.5" />} accent="text-accent-blue" />
-            <KpiCard label="Runs completed" value={String(stats.completedRuns)}     icon={<CheckCircle2 className="h-3.5 w-3.5" />} accent="text-status-success" />
-            <KpiCard label="Success rate"   value={`${stats.successRate}%`}           icon={<TrendingUp className="h-3.5 w-3.5" />} accent={stats.successRate >= 80 ? 'text-status-success' : stats.successRate >= 60 ? 'text-status-waiting' : 'text-status-error'} />
-            <KpiCard label="Active projects" value={String(projects.filter((p) => p.status === 'ACTIVE').length)} icon={<Rocket className="h-3.5 w-3.5" />} />
-            <KpiCard label="Needs attention" value={String(stats.attentionCount)}     icon={<AlertTriangle className="h-3.5 w-3.5" />} accent={stats.attentionCount > 0 ? 'text-status-error' : 'text-muted'} />
+            <KpiCard
+              label="Spend (MTD)"
+              value={`$${stats.mtdSpend.toFixed(2)}`}
+              icon={<DollarSign className="h-3.5 w-3.5" />}
+              accent="text-accent-blue"
+              onClick={() => scrollTo(spendSectionRef.current)}
+              hint="Show spend by project"
+            />
+            <KpiCard
+              label="Runs completed"
+              value={String(stats.completedRuns)}
+              icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+              accent="text-status-success"
+              onClick={() => drillToFilteredRuns('COMPLETE')}
+              hint="View completed missions"
+            />
+            <KpiCard
+              label="Success rate"
+              value={`${stats.successRate}%`}
+              icon={<TrendingUp className="h-3.5 w-3.5" />}
+              accent={stats.successRate >= 80 ? 'text-status-success' : stats.successRate >= 60 ? 'text-status-waiting' : 'text-status-error'}
+              onClick={() => drillToFilteredRuns('ALL')}
+              hint="View every mission to recompute success rate"
+            />
+            <KpiCard
+              label="Active projects"
+              value={String(projects.filter((p) => p.status === 'ACTIVE').length)}
+              icon={<Rocket className="h-3.5 w-3.5" />}
+              onClick={() => navigate('/projects')}
+              hint="Open the projects list"
+            />
+            <KpiCard
+              label="Needs attention"
+              value={String(stats.attentionCount)}
+              icon={<AlertTriangle className="h-3.5 w-3.5" />}
+              accent={stats.attentionCount > 0 ? 'text-status-error' : 'text-muted'}
+              onClick={
+                stats.attentionCount > 0
+                  ? () => scrollTo(attentionSectionRef.current)
+                  : undefined
+              }
+              hint={stats.attentionCount > 0 ? 'Show failed runs from the last 7 days' : 'No failures in the last 7 days'}
+            />
           </section>
 
           {/* Spend by project */}
-          <section>
+          <section ref={spendSectionRef}>
             <h2 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2">Spend by project (MTD)</h2>
             {stats.perProjectSpend.length === 0 ? (
               <p className="text-xs text-muted italic">No spend this month yet.</p>
@@ -214,7 +267,7 @@ export default function ExecSummaryPage() {
               )}
             </div>
 
-            <div>
+            <div ref={attentionSectionRef as any}>
               <h2 className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
                 <AlertTriangle className="h-3 w-3 text-status-error" /> Needs attention
               </h2>
@@ -250,15 +303,37 @@ export default function ExecSummaryPage() {
   );
 }
 
-function KpiCard({ label, value, icon, accent }: { label: string; value: string; icon: React.ReactNode; accent?: string }) {
+function KpiCard({
+  label, value, icon, accent, onClick, hint,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+  accent?: string;
+  /** M-046 — drill-down handler. When provided, the card becomes a button. */
+  onClick?: () => void;
+  /** Tooltip + a11y hint shown on hover/focus. */
+  hint?: string;
+}) {
+  const interactive = !!onClick;
+  const Tag: any = interactive ? 'button' : 'div';
+  const interactiveCls = interactive
+    ? 'cursor-pointer text-left hover:border-accent-blue/40 hover:bg-[var(--gray-200)] transition-colors focus:outline-none focus:ring-1 focus:ring-accent-blue'
+    : '';
   return (
-    <div className="rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2.5">
+    <Tag
+      type={interactive ? 'button' : undefined}
+      onClick={onClick}
+      title={hint}
+      aria-label={hint ? `${label}: ${value}. ${hint}` : undefined}
+      className={`rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2.5 ${interactiveCls}`}
+    >
       <div className="flex items-center gap-1.5 text-[11px] font-medium text-muted uppercase tracking-wide">
         <span className={accent ?? 'text-muted'}>{icon}</span>
         {label}
       </div>
       <div className={`text-xl font-semibold tabular-nums mt-1 ${accent ?? 'text-primary'}`}>{value}</div>
-    </div>
+    </Tag>
   );
 }
 
