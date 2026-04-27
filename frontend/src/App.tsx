@@ -64,6 +64,7 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 import V3Shell from '@/v3/components/V3Shell';
 import V3HomePlaceholder from '@/v3/pages/V3HomePlaceholder';
 import V3ProjectHome from '@/v3/pages/V3ProjectHome';
+import V3RunDetail from '@/v3/pages/V3RunDetail';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -134,6 +135,8 @@ export default function App() {
         <Route path="home" element={<V3HomePlaceholder />} />
         {/* R-120 — chat-shaped project home (the dominant screen). */}
         <Route path="p/:slug" element={<V3ProjectHome />} />
+        {/* R-130 — PR-shaped run detail. */}
+        <Route path="p/:slug/r/:runShort" element={<V3RunDetail />} />
       </Route>
 
       {/* ── Protected app routes ── */}
