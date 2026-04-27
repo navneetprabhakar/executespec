@@ -310,7 +310,12 @@ export default function OrgAdminDashboard() {
                     </thead>
                     <tbody>
                       {sortedMembers.map(m => (
-                        <tr key={m.userId} className="border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors">
+                        <tr
+                          key={m.userId}
+                          onClick={() => navigate(`/team/${m.userId}`)}
+                          className="border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors cursor-pointer"
+                          title="Open per-member dashboard"
+                        >
                           <td className="py-2 px-2 text-primary">{m.firstName} {m.lastName}</td>
                           <td className="py-2 px-2 text-secondary">{m.email}</td>
                           <td className="py-2 px-2 text-right text-primary font-mono">{m.runCount}</td>

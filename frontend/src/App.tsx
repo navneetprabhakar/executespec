@@ -35,6 +35,7 @@ import ExecutionViewPage from '@/pages/execution/ExecutionViewPage';
 import AdminPage from '@/pages/admin/AdminPage';
 import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
 import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
+import TeamMemberDashboard from '@/pages/admin/TeamMemberDashboard';
 import PricingManager from '@/pages/admin/PricingManager';
 import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
 
@@ -175,6 +176,8 @@ export default function App() {
           {/* Admin */}
           <Route path="admin" element={<AdminPage />} />
           <Route path="admin/analytics" element={<OrgAdminDashboard />} />
+          {/* M-022 (Wave 3) — per-team-member dashboard for ORG_ADMIN. */}
+          <Route path="team/:userId" element={<TeamMemberDashboard />} />
           <Route path="admin/pricing" element={<PricingManager />} />
           <Route path="admin/feature-flags" element={<FeatureFlagsPage />} />
           <Route path="admin/tiers" element={<TierLifecyclePage />} />
