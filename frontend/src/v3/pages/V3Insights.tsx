@@ -134,6 +134,7 @@ export default function V3Insights() {
         <>
           {/* ── Tiles ─────────────────────────────────────────────────── */}
           <div
+            className="v3-insights-tiles"
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',

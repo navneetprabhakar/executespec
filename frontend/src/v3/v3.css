@@ -130,6 +130,52 @@
   .v3-main {
     padding: var(--v3-pad-4) var(--v3-pad-3);
   }
+
+  /* R-170 — TopBar: shrink the project switcher trigger so the
+     Search button + avatar always remain on-screen. */
+  .v3-topbar {
+    height: 52px;
+    padding: 0 var(--v3-pad-3);
+  }
+  .v3-topbar__brand {
+    font-size: var(--v3-fs-caption);
+  }
+  .v3-topbar__brand-mark {
+    width: 24px;
+    height: 24px;
+  }
+  .v3-topbar__placeholder {
+    display: none;
+  }
+
+  /* R-170 — Run-detail two-pane layout collapses to single column;
+     V3RunDetail.tsx already has a 768px breakpoint inline, this
+     rule extends it to v3-rundetail-grid below 640. */
+  .v3-rundetail-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* R-170 — Insights tile grid: 2-up at narrow width instead of
+     auto-fit (avoids 1-tile-wide rendering when one tile's value is
+     long). */
+  .v3-insights-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* R-170 — billing 3-tier card grid renders one column instead of
+     squeezed-3-up at 390px. Bumps minmax floor so each card breathes. */
+  .v3-pricing-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* R-170 — when an iOS user taps the composer, raise it above the
+   bottom edge so the keyboard doesn't cover it. The browser handles
+   most of this via `position: sticky` already; this rule just bumps
+   the textarea min-height on focus so the user sees they have room
+   to type. */
+.v3-root textarea:focus {
+  min-height: 80px;
 }
 
 /* Generic placeholder so first-paint pages have something honest. */

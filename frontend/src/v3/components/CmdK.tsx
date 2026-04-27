@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useUiStore } from '@/stores/useUiStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useV3Ui } from '../stores/useV3Ui';
+import { GLOSSARY } from '../lib/glossary';
 
 /**
  * R-103 — command palette skeleton.
@@ -73,15 +74,32 @@ export default function CmdK() {
     });
   }, [navigate, theme, toggleTheme, logout, user]);
 
+  // R-153 — `?` mode renders glossary terms instead of actions.
+  const isGlossaryMode = query.startsWith('?');
+
   // Filter actions by query (action-mode prefix `>` is optional —
   // strip it then fuzzy-substring match).
   const filtered = useMemo(() => {
+    if (isGlossaryMode) return actions; // unused in glossary mode
     let q = query;
     if (q.startsWith('>')) q = q.slice(1).trim();
     const needle = q.trim().toLowerCase();
     if (!needle) return actions;
     return actions.filter((a) => a.label.toLowerCase().includes(needle));
-  }, [query, actions]);
+  }, [query, actions, isGlossaryMode]);
+
+  const glossaryEntries = useMemo(() => {
+    if (!isGlossaryMode) return [];
+    const needle = query.slice(1).trim().toLowerCase();
+    const entries = Object.entries(GLOSSARY);
+    if (!needle) return entries;
+    return entries.filter(
+      ([key, e]) =>
+        key.toLowerCase().includes(needle) ||
+        e.term.toLowerCase().includes(needle) ||
+        e.definition.toLowerCase().includes(needle)
+    );
+  }, [query, isGlossaryMode]);
 
   // Global hotkey
   useEffect(() => {
@@ -91,6 +109,17 @@ export default function CmdK() {
         e.preventDefault();
         toggleCmdK();
       }
+      // R-153 — `?` opens the palette in glossary mode (when not
+      // already focused inside an input).
+      const target = e.target as HTMLElement | null;
+      const inField =
+        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+      if (e.key === '?' && !isMod && !inField && !open) {
+        e.preventDefault();
+        openCmdK();
+        // Pre-fill `?` so the palette opens directly in glossary mode.
+        setTimeout(() => setQuery('?'), 0);
+      }
       if (e.key === 'Escape' && open) {
         e.preventDefault();
         closeCmdK();
@@ -98,7 +127,7 @@ export default function CmdK() {
     }
     document.addEventListener('keydown', handler);
     return () => document.removeEventListener('keydown', handler);
-  }, [open, toggleCmdK, closeCmdK]);
+  }, [open, toggleCmdK, closeCmdK, openCmdK]);
 
   useEffect(() => {
     if (open) {
@@ -185,6 +214,76 @@ export default function CmdK() {
             }}
           />
         </div>
+        {isGlossaryMode ? (
+          <ul
+            role="list"
+            aria-label="Glossary"
+            style={{
+              flex: 1,
+              margin: 0,
+              padding: 6,
+              overflowY: 'auto',
+              listStyle: 'none',
+            }}
+          >
+            {glossaryEntries.length === 0 && (
+              <li
+                style={{
+                  padding: '16px 14px',
+                  color: 'var(--v3-text-subtle)',
+                  fontSize: 12,
+                  textAlign: 'center',
+                }}
+              >
+                No glossary entries match. Try clearing the search.
+              </li>
+            )}
+            {glossaryEntries.map(([key, entry]) => (
+              <li
+                key={key}
+                style={{
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  borderBottom: '1px dashed var(--v3-border)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 12.5,
+                    fontWeight: 600,
+                    color: 'var(--v3-text)',
+                    marginBottom: 2,
+                  }}
+                >
+                  {entry.term}
+                </div>
+                <div
+                  style={{
+                    fontSize: 11.5,
+                    color: 'var(--v3-text-muted)',
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {entry.definition}
+                </div>
+                {entry.href && (
+                  <a
+                    href={entry.href}
+                    style={{
+                      display: 'inline-block',
+                      marginTop: 4,
+                      fontSize: 11,
+                      color: 'var(--v3-brand)',
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Learn more →
+                  </a>
+                )}
+              </li>
+            ))}
+          </ul>
+        ) : (
         <ul
           role="listbox"
           aria-label="Command results"
@@ -205,7 +304,7 @@ export default function CmdK() {
                 textAlign: 'center',
               }}
             >
-              No matches. Type <code>&gt;</code> to see all actions.
+              No matches. Type <code>&gt;</code> to see all actions, <code>?</code> for glossary.
             </li>
           )}
           {filtered.map((a, idx) => (
@@ -245,6 +344,7 @@ export default function CmdK() {
             </li>
           ))}
         </ul>
+        )}
         <div
           style={{
             display: 'flex',
@@ -255,7 +355,11 @@ export default function CmdK() {
             fontSize: 11,
           }}
         >
-          <span>↑↓ navigate · Enter select · Esc close</span>
+          <span>
+            {isGlossaryMode
+              ? 'Esc close · clear ? to return to actions'
+              : '↑↓ navigate · Enter select · Esc close · ? glossary'}
+          </span>
           <span>⌘K</span>
         </div>
       </div>
