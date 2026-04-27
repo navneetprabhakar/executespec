@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, FolderGit2, Rocket, MoreHorizontal } from 'lucide-react';
+import { ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus } from 'lucide-react';
 import { useProjectStore } from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
@@ -12,6 +12,7 @@ import StatusBadge from '@/components/shared/StatusBadge';
 import PulseTab from '@/components/project/PulseTab';
 import CodeTab, { type CodeSubTab } from '@/components/project/CodeTab';
 import EmptyProjectLanding from '@/components/project/EmptyProjectLanding';
+import ProjectRepoManager from '@/components/project/ProjectRepoManager';
 import MoreDrawer, { useDrawerState, type DrawerPanel } from '@/components/project/MoreDrawer';
 import { cn } from '@/lib/utils';
 import type { TaskSummary } from '@/types/project';
@@ -45,7 +46,11 @@ import type { RunDetail } from '@/lib/api';
  * panels (PulseTab "Show all activity" link, EmptyProjectLanding "Link a
  * repo" link).
  */
-type TabKey = 'pulse' | 'runs' | 'code' | 'chat';
+// v2.7.2 — Repos promoted from Code → Repos sub-tab to a top-level Project
+// tab. Differentiates the Project surface from the legacy generic shell
+// (the actual frontend/build/* Vite split is documented as a follow-up in
+// docs/plans/pending-project-surface-vite-split.md).
+type TabKey = 'pulse' | 'repos' | 'runs' | 'code' | 'chat';
 type RunsSubTab = 'launches' | 'prs' | 'detail';
 
 function legacyTabToNew(legacy: string | null): { tab: TabKey; sub?: RunsSubTab; codeSub?: CodeSubTab; drawer?: DrawerPanel } {
@@ -61,7 +66,8 @@ function legacyTabToNew(legacy: string | null): { tab: TabKey; sub?: RunsSubTab;
     case 'architecture':
       return { tab: 'code', codeSub: 'architecture' };
     case 'repos':
-      return { tab: 'code', codeSub: 'repos' };
+      // v2.7.2: Repos is now top-level, no codeSub needed.
+      return { tab: 'repos' };
     case 'chat':
       return { tab: 'chat' };
     case 'docs':
@@ -79,6 +85,7 @@ function legacyTabToNew(legacy: string | null): { tab: TabKey; sub?: RunsSubTab;
 
 const TAB_LABELS: { key: TabKey; label: string }[] = [
   { key: 'pulse', label: 'Pulse' },
+  { key: 'repos', label: 'Repos' },
   { key: 'runs',  label: 'Runs' },
   { key: 'code',  label: 'Code' },
   { key: 'chat',  label: 'Chat' },
@@ -178,6 +185,24 @@ export default function ProjectDashboardPage() {
     setTab(t);
   };
 
+  /**
+   * v2.7.2 — single entry point for "open the AddRepoModal". Used by:
+   *   - EmptyProjectLanding's "Link a repo" button (#1)
+   *   - the project header "Repos" chip (#2a)
+   *   - the Pulse-tab "Add repository" banner when repoCount===0 (#2b)
+   *
+   * After v2.7.2 promoted Repos to a top-level tab, this just switches
+   * tab and dispatches the global event ProjectRepoManager listens for.
+   * The 50ms defer waits for ProjectRepoManager's mount + window-listener
+   * registration; without it the event fires into the void.
+   */
+  const openAddRepoFlow = () => {
+    setTab('repos');
+    setTimeout(() => {
+      window.dispatchEvent(new Event('open-add-repo-modal'));
+    }, 50);
+  };
+
   const openDrawer = (panel: DrawerPanel) => {
     drawer.setPanel(panel);
     drawer.setOpen(true);
@@ -244,6 +269,24 @@ export default function ProjectDashboardPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {/* v2.7.2 — first-class Repos chip. Always visible; amber-tinted
+                when zero repos so users see the linkage gap before they
+                discover it via a failed Launch. Click opens AddRepoModal
+                directly via the shared openAddRepoFlow. */}
+            <button
+              onClick={openAddRepoFlow}
+              aria-label={repoCount === 0 ? 'Link your first repository' : `Manage ${repoCount} linked repository${repoCount === 1 ? '' : 'ies'}`}
+              title={repoCount === 0 ? 'No repos linked — click to add one' : `${repoCount} linked. Click to add another.`}
+              className={cn(
+                'inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border transition-colors',
+                repoCount === 0
+                  ? 'border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
+                  : 'border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40',
+              )}
+            >
+              {repoCount === 0 ? <Plus className="h-3.5 w-3.5" /> : <FolderGit2 className="h-3.5 w-3.5" />}
+              <span>Repos · {repoCount}</span>
+            </button>
             <NewExecutionButton projectId={projectId} repoCount={repoCount} />
             <button
               onClick={() => openDrawer('settings')}
@@ -342,21 +385,7 @@ export default function ProjectDashboardPage() {
               <EmptyProjectLanding
                 projectId={projectId}
                 repoCount={repoCount}
-                onLinkRepo={() => {
-                  // v2.7.1 fix: switch to Code → Repos sub-tab AND ask
-                  // ProjectRepoManager (which lives 2 levels deep) to pop
-                  // the AddRepoModal via a global event. The legacy onClick
-                  // sent users to the Settings drawer which has no repo
-                  // surface — see EmptyProjectLanding for the back-compat
-                  // fallback that still fires when no callback is provided.
-                  setTab('code');
-                  setCodeSub('repos');
-                  // Defer the dispatch a tick so ProjectRepoManager has
-                  // mounted and registered its window listener.
-                  setTimeout(() => {
-                    window.dispatchEvent(new Event('open-add-repo-modal'));
-                  }, 50);
-                }}
+                onLinkRepo={openAddRepoFlow}
               />
             ) : (
               <PulseTab
@@ -365,9 +394,11 @@ export default function ProjectDashboardPage() {
                 recentPrs={recentPrs}
                 onOpenRun={onOpenRun}
                 onSwitchTab={onSwitchTab}
+                onLinkRepo={repoCount === 0 ? openAddRepoFlow : undefined}
               />
             )
           )}
+          {tab === 'repos' && <ProjectRepoManager projectId={projectId} />}
           {tab === 'runs' && runsSub === 'launches' && (
             <ProjectLaunchesList projectId={projectId} />
           )}
