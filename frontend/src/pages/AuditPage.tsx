@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate } from 'react-router-dom';
-import { ChevronLeft, ChevronRight, Filter, RefreshCw } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Filter, RefreshCw, Activity as ActivityIcon } from 'lucide-react';
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
@@ -161,11 +161,11 @@ export default function AuditPage() {
 
   return (
     <PageShell
-      eyebrow="Audit"
+      eyebrow="Governance"
       eyebrowTone="warm"
-      title="Every change, time-stamped."
-      accent="Every"
-      description="Forensic history of every action across your workspace."
+      title="Audit & activity, time-stamped."
+      accent="activity"
+      description="Forensic audit log (every billing/identity/admin change) plus per-project activity feed (every run, PR, contract, ADR event) — both surfaces, one page. Per parked decision #4."
       hero
       actions={
         <button
@@ -393,6 +393,153 @@ export default function AuditPage() {
           </div>
         )}
       </div>
+
+      {/* M-013 (Wave 2) — V133 activity_feed surface alongside the V22
+          audit log. Both tables stay in the DB (parked decision #4) but
+          live at the same URL so users have one mental model. */}
+      <ProjectActivityPanel />
     </PageShell>
+  );
+}
+
+// ── Project activity feed (V133) ─────────────────────────────────────────
+
+function ProjectActivityPanel() {
+  const [projectId, setProjectId] = useState('');
+  const [appliedProjectId, setAppliedProjectId] = useState('');
+  const [includeAdmin, setIncludeAdmin] = useState(false);
+  const [sinceDays, setSinceDays] = useState(7);
+  const [page, setPage] = useState<api.ActivityPage | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchActivity = useCallback(async () => {
+    if (!appliedProjectId) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const result = await api.getActivityFeed(appliedProjectId, {
+        sinceDays,
+        includeAdminEvents: includeAdmin,
+        limit: 100,
+      });
+      setPage(result);
+    } catch (e: any) {
+      setError(e?.message ?? 'Failed to load activity');
+      setPage(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [appliedProjectId, sinceDays, includeAdmin]);
+
+  useEffect(() => { fetchActivity(); }, [fetchActivity]);
+
+  const entries = page?.entries ?? [];
+  const tierColor = useMemo(() => (tier: string) => {
+    if (tier === 'HIGH_SIGNAL') return 'bg-accent-blue/20 text-accent-blue';
+    if (tier === 'ADMIN_TOGGLE') return 'bg-accent-amber/20 text-accent-amber';
+    return 'bg-[var(--gray-200)] text-secondary';
+  }, []);
+
+  return (
+    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 space-y-3">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <ActivityIcon className="h-4 w-4 text-secondary" />
+          <h3 className="text-sm font-medium text-primary">Project activity feed</h3>
+        </div>
+        <p className="text-[11px] text-muted">
+          V133 surface · per-project · run / PR / contract / ADR events
+        </p>
+      </div>
+
+      <form
+        onSubmit={(e) => { e.preventDefault(); setAppliedProjectId(projectId.trim()); }}
+        className="flex items-end gap-3 flex-wrap"
+      >
+        <div className="space-y-1 flex-1 min-w-[240px]">
+          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Project ID</label>
+          <input
+            type="text"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+            placeholder="b3a2c1d4-…"
+            className="block w-full px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue font-mono"
+          />
+        </div>
+        <div className="space-y-1">
+          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Window</label>
+          <select
+            value={sinceDays}
+            onChange={(e) => setSinceDays(Number(e.target.value))}
+            className="block w-full px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+          >
+            <option value={1}>Last 24h</option>
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={90}>Last 90 days</option>
+          </select>
+        </div>
+        <label className="flex items-center gap-2 text-xs text-secondary cursor-pointer pb-1.5">
+          <input
+            type="checkbox"
+            checked={includeAdmin}
+            onChange={(e) => setIncludeAdmin(e.target.checked)}
+            className="accent-accent-blue"
+          />
+          <span>Include admin-tier events</span>
+        </label>
+        <button
+          type="submit"
+          disabled={!projectId.trim() || loading}
+          className="rounded-md bg-accent-blue px-3 py-1.5 text-xs font-medium text-primary hover:bg-accent-blue/80 disabled:opacity-50"
+        >
+          {loading ? 'Loading…' : 'Load activity'}
+        </button>
+      </form>
+
+      {error && (
+        <div className="rounded-sm bg-status-error/10 border border-status-error/30 px-3 py-2 text-xs text-status-error">
+          {error}
+        </div>
+      )}
+
+      {appliedProjectId && entries.length === 0 && !loading && !error && (
+        <p className="text-xs text-muted py-6 text-center">No activity for this project in the chosen window.</p>
+      )}
+
+      {entries.length > 0 && (
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="text-left text-muted">
+                <th className="px-2 py-2 font-medium">Time</th>
+                <th className="px-2 py-2 font-medium">Event</th>
+                <th className="px-2 py-2 font-medium">Tier</th>
+                <th className="px-2 py-2 font-medium">Target</th>
+                <th className="px-2 py-2 font-medium">Summary</th>
+              </tr>
+            </thead>
+            <tbody>
+              {entries.map((e) => (
+                <tr key={e.id} className="border-t border-[var(--border-default)]">
+                  <td className="px-2 py-2 text-muted whitespace-nowrap">{formatTime(e.occurredAt)}</td>
+                  <td className="px-2 py-2 text-primary font-mono">{e.eventType}</td>
+                  <td className="px-2 py-2">
+                    <span className={cn('inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wider', tierColor(e.tier))}>
+                      {e.tier === 'HIGH_SIGNAL' ? 'High' : e.tier === 'ADMIN_TOGGLE' ? 'Admin' : 'Audit'}
+                    </span>
+                  </td>
+                  <td className="px-2 py-2 text-secondary font-mono">
+                    {e.targetType ?? '—'}{e.targetId ? ` · ${e.targetId.slice(0, 8)}…` : ''}
+                  </td>
+                  <td className="px-2 py-2 text-secondary">{e.summary}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
   );
 }
