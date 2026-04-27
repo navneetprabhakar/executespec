@@ -1,17 +1,17 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, PieChart, Pie, Cell, Legend
 } from 'recharts';
-import { Activity, TrendingUp, Clock, DollarSign, Users } from 'lucide-react';
+import { Activity, TrendingUp, Clock, DollarSign, Users, UserCheck } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import MetricCard from '@/components/dashboard/MetricCard';
 import { useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import {
   getAnalyticsUsage, getAnalyticsMembers, getAnalyticsBilling,
-  getMyOrg,
-  type UsageMetrics, type MemberUsage, type BillingOverviewData
+  getMyOrg, adjustOrgSeats,
+  type UsageMetrics, type MemberUsage, type BillingOverviewData, type OrgDto
 } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -24,6 +24,7 @@ const PERIODS = [
 const CHART_COLORS = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#6366F1', '#14B8A6'];
 
 export default function OrgAdminDashboard() {
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore(selectIsOrgAdmin);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
@@ -32,7 +33,14 @@ export default function OrgAdminDashboard() {
   const [usage, setUsage] = useState<UsageMetrics | null>(null);
   const [members, setMembers] = useState<MemberUsage[]>([]);
   const [billing, setBilling] = useState<BillingOverviewData | null>(null);
-  // V141 — orgDto + seat-adjust state removed along with the seat panel.
+  const [orgDto, setOrgDto] = useState<OrgDto | null>(null);
+  const [seatsDraft, setSeatsDraft] = useState<number>(1);
+  const [seatsBusy, setSeatsBusy] = useState(false);
+  const [seatsMsg, setSeatsMsg] = useState<string | null>(null);
+  const [seatsError, setSeatsError] = useState<string | null>(null);
+  // M-002 — first-seat-purchase on-ramp: pre-pick a seat count for the
+  // /plans?tier=team CTA when the org isn't on TEAM yet.
+  const [onrampSeats, setOnrampSeats] = useState<number>(3);
   const [loading, setLoading] = useState(true);
   const [sortCol, setSortCol] = useState<'runCount' | 'successRate' | 'lastRunDate'>('runCount');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -55,7 +63,9 @@ export default function OrgAdminDashboard() {
         const m = await getAnalyticsMembers(entityId, period);
         setMembers(m);
         try {
-          await getMyOrg();
+          const dto = await getMyOrg();
+          setOrgDto(dto);
+          setSeatsDraft(dto?.seatCount ?? 1);
         } catch (e) {
           console.warn('Org fetch failed', e);
         }
@@ -67,7 +77,22 @@ export default function OrgAdminDashboard() {
     }
   }, [entityType, entityId, period]);
 
-  // V141 — handleSeatsAdjust removed along with the seat panel.
+  const handleSeatsAdjust = async () => {
+    setSeatsBusy(true);
+    setSeatsError(null);
+    setSeatsMsg(null);
+    try {
+      const result = await adjustOrgSeats(seatsDraft);
+      setSeatsMsg(result.message);
+      setOrgDto((prev) => prev ? { ...prev, seatCount: result.newSeats } : prev);
+    } catch (e: any) {
+      setSeatsError(e?.message ?? 'Seat adjustment failed');
+      // reset draft to server value on error
+      setSeatsDraft(orgDto?.seatCount ?? 1);
+    } finally {
+      setSeatsBusy(false);
+    }
+  };
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -285,7 +310,12 @@ export default function OrgAdminDashboard() {
                     </thead>
                     <tbody>
                       {sortedMembers.map(m => (
-                        <tr key={m.userId} className="border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors">
+                        <tr
+                          key={m.userId}
+                          onClick={() => navigate(`/team/${m.userId}`)}
+                          className="border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors cursor-pointer"
+                          title="Open per-member dashboard"
+                        >
                           <td className="py-2 px-2 text-primary">{m.firstName} {m.lastName}</td>
                           <td className="py-2 px-2 text-secondary">{m.email}</td>
                           <td className="py-2 px-2 text-right text-primary font-mono">{m.runCount}</td>
@@ -312,10 +342,117 @@ export default function OrgAdminDashboard() {
             </GlassPanel>
           )}
 
-          {/* V141 (2026-04-26) — TEAM seat management panel removed.
-              The v2.6.1-Wave-1 per-seat TEAM tier was deleted; the new
-              "TEAM" name refers to the renamed MAX tier (BYOK unlimited,
-              single-seat). Seat adjustment endpoint returns 410 Gone. */}
+          {/* Row 4.4: First-seat-purchase on-ramp (M-002, Wave 1).
+              Renders for ORG admins on a non-TEAM tier (excluding ENTERPRISE
+              which is sales-managed). Replaces the dead "+seat 402" path:
+              instead of a hard error, the buyer lands on /plans with the
+              TEAM tier pre-selected and their chosen seat count carried
+              over. */}
+          {entityType === 'ORG' && orgDto && (orgDto.tier === 'FREE' || orgDto.tier === 'PRO' || orgDto.tier === 'MAX') && (
+            <GlassPanel className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <UserCheck className="h-4 w-4 text-secondary" />
+                <p className="text-xs text-muted font-medium uppercase tracking-wider">
+                  Add team seats
+                </p>
+              </div>
+              <p className="text-sm text-secondary mb-3">
+                Your org is on the <span className="font-semibold text-primary">{orgDto.tier}</span> plan.
+                Team seats unlock a shared credit pool, member management, and per-seat billing.
+                Start the Team plan to begin adding seats.
+              </p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="text-xs text-muted font-mono uppercase tracking-wide">
+                  Seats
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  max={20}
+                  value={onrampSeats}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n)) setOnrampSeats(Math.max(2, Math.min(20, n)));
+                  }}
+                  className="w-20 px-2 py-1 bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+                />
+                <button
+                  onClick={() => navigate(`/plans?tier=team&seats=${onrampSeats}&from=admin`)}
+                  className="px-3 py-1.5 bg-accent-blue text-primary text-xs font-medium rounded-sm hover:bg-accent-blue-hover"
+                >
+                  Continue to checkout →
+                </button>
+                <span className="text-[11px] text-muted">
+                  2-20 (larger → Enterprise)
+                </span>
+              </div>
+            </GlassPanel>
+          )}
+
+          {/* Row 4.5: TEAM seat management (v2.6.0) */}
+          {entityType === 'ORG' && orgDto?.tier === 'TEAM' && (
+            <GlassPanel className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <UserCheck className="h-4 w-4 text-secondary" />
+                <p className="text-xs text-muted font-medium uppercase tracking-wider">
+                  Team seats
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+                <div>
+                  <p className="text-[10px] text-muted uppercase tracking-wider">Active members</p>
+                  <p className="text-xl font-semibold text-primary mt-0.5">
+                    {members.length} <span className="text-sm text-muted">of {orgDto.seatCount ?? 1} seats</span>
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted uppercase tracking-wider">Credits pool</p>
+                  <p className="text-xl font-semibold text-primary mt-0.5">
+                    {(orgDto.seatCount ?? 1) * 50} <span className="text-sm text-muted">credits/mo</span>
+                  </p>
+                </div>
+                <div>
+                  <p className="text-[10px] text-muted uppercase tracking-wider">Usage this period</p>
+                  <p className="text-xl font-semibold text-primary mt-0.5">
+                    {orgDto.monthlyRunCount} <span className="text-sm text-muted">/ {(orgDto.seatCount ?? 1) * 50}</span>
+                  </p>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="text-xs text-muted font-mono uppercase tracking-wide">
+                  Adjust seats
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  max={20}
+                  value={seatsDraft}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n)) setSeatsDraft(Math.max(2, Math.min(20, n)));
+                  }}
+                  className="w-20 px-2 py-1 bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+                  disabled={seatsBusy}
+                />
+                <button
+                  onClick={handleSeatsAdjust}
+                  disabled={seatsBusy || seatsDraft === (orgDto.seatCount ?? 1)}
+                  className="px-3 py-1.5 bg-accent-blue text-primary text-xs font-medium rounded-sm hover:bg-accent-blue-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {seatsBusy ? 'Updating…' : 'Apply'}
+                </button>
+                <span className="text-[11px] text-muted">
+                  2-20 (larger → Enterprise) &middot; prorated on Stripe
+                </span>
+              </div>
+              {seatsMsg && (
+                <p className="mt-3 text-xs text-status-success">{seatsMsg}</p>
+              )}
+              {seatsError && (
+                <p className="mt-3 text-xs text-status-error">{seatsError}</p>
+              )}
+            </GlassPanel>
+          )}
 
           {/* Row 5: Billing overview */}
           {billing && (

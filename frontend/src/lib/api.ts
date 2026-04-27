@@ -414,6 +414,18 @@ export const getRuns = (params?: { status?: string; projectId?: string; scope?: 
 export const archiveRun = (runId: string) =>
   req<{ message: string }>(`/runs/${runId}/archive`, { method: 'POST' });
 
+/**
+ * Phase 1.3 #35 — fork a teammate's run. Creates a new run owned by the
+ * caller with the source's spec / repo / provider settings copied.
+ * Optional `overrides.userRequest` lets the user tweak the spec before
+ * the fork lands; otherwise it's an exact copy of the source spec.
+ */
+export const forkRun = (runId: string, overrides?: { userRequest?: string; executionMode?: string }) =>
+  req<RunSummary>(`/runs/${runId}/fork`, {
+    method: 'POST',
+    body: JSON.stringify(overrides ?? {}),
+  });
+
 export const getRun = (id: string) =>
   req<RunDetail>(`/runs/${id}`);
 
@@ -871,8 +883,7 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  // V141 (2026-04-26) — MAX renamed to TEAM; old per-seat TEAM dropped.
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;
@@ -1052,6 +1063,30 @@ export const validateGitHub = (pat: string) =>
     body: JSON.stringify({ pat }),
   });
 
+/** Phase 1.2 #24 — Tests a BYOK AI provider key by pinging the provider's models endpoint. */
+export const validateAiKey = (provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', apiKey: string) =>
+  req<ValidationResult>('/auth/settings/ai-keys/validate', {
+    method: 'POST',
+    body: JSON.stringify({ provider, apiKey }),
+  });
+
+/** M-005 (Wave 1) — GitHub App install URL + status. Org-admin gated. */
+export interface GitHubAppStatus {
+  installed: boolean;
+  installationId: string;
+  installedAt: string;
+}
+export interface GitHubAppInstallUrl {
+  installUrl: string;
+  appName: string;
+}
+export const getGitHubAppStatus = () =>
+  req<GitHubAppStatus>('/auth/github-app/status');
+export const getGitHubAppInstallUrl = () =>
+  req<GitHubAppInstallUrl>('/auth/github-app/install-url');
+export const uninstallGitHubApp = () =>
+  req<void>('/auth/github-app/install', { method: 'DELETE' });
+
 /** Tests JIRA credentials by calling the JIRA REST API. */
 export const validateJira = (baseUrl: string, email: string, apiToken: string) =>
   req<ValidationResult>('/auth/settings/jira/validate', {
@@ -1126,6 +1161,14 @@ export const createOrg = (body: { name: string; domains: string[]; adminEmail: s
 export const updateOrg = (body: { name?: string; domains?: string[] }) =>
   req<OrgDto>('/org/me', { method: 'PUT', body: JSON.stringify(body) });
 
+// v2.6.0 — TEAM tier seat management
+export interface SeatsAdjustResponse {
+  previousSeats: number;
+  newSeats: number;
+  activeMembers: number;
+  message: string;
+}
+
 // v2.6.0 — tier lifecycle (admin-only)
 export type LifecycleState = 'LISTED' | 'HIDDEN' | 'SUNSETTING';
 
@@ -1155,6 +1198,18 @@ export const updateTierLifecycle = (tier: string, body: TierLifecycleUpdateReque
   req<unknown>(`/admin/tiers/${tier}/lifecycle`, {
     method: 'PUT',
     body: JSON.stringify(body),
+  });
+
+/**
+ * Adjust seat count on the caller's TEAM-tier org (ORG_ADMIN / SUPER_ADMIN).
+ * Pushes new quantity to Stripe (prorated) and syncs org.seat_count locally.
+ * Rejects reducing below current active member count (400).
+ * Range: 2-20 (self-serve).
+ */
+export const adjustOrgSeats = (newSeats: number) =>
+  req<SeatsAdjustResponse>('/org/me/seats/adjust', {
+    method: 'POST',
+    body: JSON.stringify({ newSeats }),
   });
 
 /** Saves org-wide AI provider API keys (ORG_ADMIN only). Pass empty string to clear. */
@@ -1284,6 +1339,46 @@ export const adminUpdateUserTier = (id: string, tier: string) =>
   req<AuthUser>(`/admin/users/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
 export const adminUpdateUserRole = (id: string, role: string) =>
   req<AuthUser>(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
+
+// M-010 (Wave 2) — emergency halt-all-runs button on AdminPage.
+export interface HaltAllRunsResult {
+  haltedCount: number;
+  haltedRunIds: string[];
+  reason: string;
+}
+export const haltAllActiveRuns = (reason?: string) =>
+  req<HaltAllRunsResult>('/admin/runs/halt-all', {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+
+// M-019 (Wave 3) + M-042 (Backlog) — activity_audit hash-chain verifier.
+export interface AuditChainBreak {
+  rowId: string;
+  chainSeq: number;
+  reason: string;
+}
+export interface AuditChainVerifyReport {
+  totalChained: number;
+  verified: number;
+  clean: boolean;
+  firstBreak: AuditChainBreak | null;
+}
+export const verifyAuditChain = () =>
+  req<AuditChainVerifyReport>('/admin/audit-chain/verify');
+
+// M-049 (Backlog) — activation funnel headline counts (V125 ledger).
+export interface ActivationStageCounts {
+  total: number;
+  windowed: number;
+}
+export interface ActivationFunnelReport {
+  windowDays: number;
+  windowStart: string;
+  stages: Record<string, ActivationStageCounts>;
+}
+export const getActivationFunnel = (sinceDays = 30) =>
+  req<ActivationFunnelReport>(`/admin/activation-funnel?sinceDays=${sinceDays}`);
 
 export const adminListOrgs = () => req<OrgDto[]>('/admin/orgs');
 export const adminUpdateOrgTier = (id: string, tier: string) =>
@@ -1820,6 +1915,59 @@ export const markNotificationRead = (id: string) =>
 export const markAllNotificationsRead = () =>
   req<void>('/notifications/read-all', { method: 'POST' });
 
+// ── Notification preferences (M-003 Wave 2) ─────────────────────────────────
+
+export interface NotificationPrefRow {
+  eventType: string;       // canonical ActivityEventType name
+  tier: 'HIGH_SIGNAL' | 'ADMIN_TOGGLE';
+  channel: 'IN_APP' | 'EMAIL';
+  enabled: boolean;        // effective (override → override; else default)
+  defaultEnabled: boolean;
+  override: boolean;       // true if the user has an explicit row
+}
+
+export const getNotificationPreferences = () =>
+  req<NotificationPrefRow[]>('/notifications/preferences');
+
+export const updateNotificationPreference = (
+  eventType: string,
+  channel: 'IN_APP' | 'EMAIL',
+  enabled: boolean,
+) =>
+  req<NotificationPrefRow>('/notifications/preferences', {
+    method: 'PUT',
+    body: JSON.stringify({ eventType, channel, enabled }),
+  });
+
+// ── SSO config (M-004 Wave 2) ───────────────────────────────────────────────
+
+export type SsoProvider = 'GOOGLE_OIDC' | 'OKTA_SAML' | 'AZURE_AD_SAML';
+
+export interface SsoConfig {
+  provider: SsoProvider | null;
+  enforced: boolean;
+  metadataUrl: string | null;
+  domain: string | null;
+  configured: boolean;
+}
+
+export const getSsoConfig = () =>
+  req<SsoConfig>('/auth/sso/config');
+
+export const updateSsoConfig = (body: Partial<{
+  provider: SsoProvider | null;
+  enforced: boolean;
+  metadataUrl: string | null;
+  domain: string | null;
+}>) =>
+  req<SsoConfig>('/auth/sso/config', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const clearSsoConfig = () =>
+  req<void>('/auth/sso/config', { method: 'DELETE' });
+
 // ── SSE ────────────────────────────────────────────────────────────────────
 
 /** Fetch a short-lived scoped SSE token for a specific run. */
@@ -2159,6 +2307,90 @@ export const getActivityFeed = (
   return req<ActivityPage>(`/projects/${projectId}/activity${qs}`);
 };
 
+// M-014 (Wave 2) — Architecture Decision Records (V137)
+export interface AdrSummary {
+  id: string;
+  adrIdInRepo: number;
+  title: string;
+  status: string;          // PROPOSED | ACCEPTED | DEPRECATED | SUPERSEDED
+  decisionDate: string | null;
+  repoId: string | null;
+  filePath: string | null;
+}
+
+export interface AdrDetail extends AdrSummary {
+  deciders: string | null;
+  supersedes: string | null;
+  supersededBy: string | null;
+  relatedAdrs: string | null;
+  relatedStandards: string | null;
+  tags: string | null;
+  body: string | null;
+}
+
+export const listProjectAdrs = (projectId: string, acceptedOnly = false) =>
+  req<AdrSummary[]>(`/projects/${projectId}/adrs${acceptedOnly ? '?acceptedOnly=true' : ''}`);
+
+export const getProjectAdr = (projectId: string, id: string) =>
+  req<AdrDetail>(`/projects/${projectId}/adrs/${id}`);
+
+// M-015 (Wave 2) — V138 architectural invariants
+export interface InvariantSummary {
+  id: string;
+  invariantId: string;       // human-readable id from invariants.yaml
+  status: string;            // ACTIVE | RETIRED
+  invariantYaml: string;
+  createdAt: string;
+}
+
+export interface InvariantViolation {
+  id: string;
+  invariantUuid: string | null;
+  detectedAt: string;
+  phase: string;             // PLAN | ARCH_REGEN
+  detail: string | null;     // jsonb body
+}
+
+export const listProjectInvariants = (projectId: string) =>
+  req<InvariantSummary[]>(`/projects/${projectId}/invariants`);
+
+export const listProjectInvariantViolations = (projectId: string) =>
+  req<InvariantViolation[]>(`/projects/${projectId}/invariants/violations`);
+
+// M-024 (Wave 2) — org-level standards CRUD
+export interface OrgStandardDto {
+  id: string;
+  standardId: string;
+  standardYaml: string;
+  orgLevelLocked: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrgStandardUpsert {
+  standardId?: string;
+  standardYaml?: string;
+  orgLevelLocked?: boolean;
+}
+
+export const listOrgStandards = (orgId: string) =>
+  req<OrgStandardDto[]>(`/orgs/${orgId}/standards`);
+
+export const createOrgStandard = (orgId: string, body: OrgStandardUpsert) =>
+  req<OrgStandardDto>(`/orgs/${orgId}/standards`, {
+    method: 'POST', body: JSON.stringify(body),
+  });
+
+export const updateOrgStandard = (orgId: string, standardId: string, body: OrgStandardUpsert) =>
+  req<OrgStandardDto>(`/orgs/${orgId}/standards/${encodeURIComponent(standardId)}`, {
+    method: 'PUT', body: JSON.stringify(body),
+  });
+
+export const deleteOrgStandard = (orgId: string, standardId: string) =>
+  req<void>(`/orgs/${orgId}/standards/${encodeURIComponent(standardId)}`, {
+    method: 'DELETE',
+  });
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
@@ -2367,9 +2599,3 @@ export const compactProjectChat = (projectId: string) =>
     { method: 'POST' },
   );
 
-// Assessment approval (R4)
-export const approveAssessment = (runId: string, constraints?: string[]) =>
-  req<void>(`/runs/${runId}/approve-assessment`, {
-    method: 'POST',
-    body: JSON.stringify({ constraints: constraints ?? [] }),
-  });

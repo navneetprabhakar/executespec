@@ -1,15 +1,19 @@
 /**
- * SignalBreakdown — v2.5.10.
+ * SignalBreakdown — v2.5.10 (verdict-leading sweep, Plan 1 #3).
  *
- * Compact horizontal chip summarising the 5 authoritative signals that feed
- * the run's verified score + status reason:
+ * Compact horizontal chip summarising the THREE concrete signals that feed
+ * the run's verdict:
  *
- *   Build ✓ · Tests 73/73 · Reviewer CLEAN · Verified 92 · Est. 97
+ *   Build ✓ · Tests 73/73 · Reviewer CLEAN
  *
- * Designed to sit next to or below the StatusBadge so users can see WHY a run
- * is labelled COMPLETE / PARTIAL without drilling into the full report.
- * Each segment is coloured independently so a green Build next to a red Tests
- * is legible at a glance.
+ * The numeric Verified + Est segments were removed in the verdict-pill
+ * sweep — they collapse into VerdictPill's Shippable/Needs review/Blocked
+ * decision (still surfaced via ScoreCard + Show-details disclosure).
+ * `verifiedScore` + `accuracyScore` props remain on the public API so
+ * existing callers don't break, but are now ignored.
+ *
+ * Each segment is coloured independently so a green Build next to a red
+ * Tests is legible at a glance.
  *
  * All fields are optional — pre-v2.5.10 validation reports just won't have
  * them, in which case the respective segment is hidden.
@@ -19,8 +23,9 @@ interface SignalBreakdownProps {
   testsPassed?: number | null;
   testsTotal?: number | null;
   reviewerVerdict?: 'CLEAN' | 'FIXED_ISSUES' | 'UNRESOLVED_ISSUES' | 'REVIEW_FAILED' | null;
+  /** Retained for callsite compatibility — collapsed into VerdictPill. */
   verifiedScore?: number | null;
-  /** LLM accuracy score — shown as secondary "Est." segment. */
+  /** Retained for callsite compatibility — collapsed into VerdictPill. */
   accuracyScore?: number | null;
   className?: string;
 }
@@ -59,30 +64,20 @@ function verdictTone(v: SignalBreakdownProps['reviewerVerdict']): Tone {
   }
 }
 
-function scoreTone(score?: number | null): Tone {
-  if (score == null) return 'muted';
-  if (score >= 85) return 'green';
-  if (score >= 70) return 'amber';
-  return 'red';
-}
-
 export default function SignalBreakdown({
   finalBuildPassed,
   testsPassed,
   testsTotal,
   reviewerVerdict,
-  verifiedScore,
-  accuracyScore,
+  verifiedScore: _verifiedScore,
+  accuracyScore: _accuracyScore,
   className,
 }: SignalBreakdownProps) {
-  // Hide the chip entirely on runs that have none of the signals — otherwise
-  // pre-v2.5.10 runs would show an empty ghost.
+  // Hide the chip entirely on runs that have none of the (now 3) signals.
   const hasAny =
     finalBuildPassed != null ||
     testsTotal != null ||
-    reviewerVerdict != null ||
-    verifiedScore != null ||
-    accuracyScore != null;
+    reviewerVerdict != null;
   if (!hasAny) return null;
 
   return (
@@ -122,20 +117,6 @@ export default function SignalBreakdown({
           tone={verdictTone(reviewerVerdict)}
           label={`Reviewer ${reviewerVerdict.replace(/_/g, ' ')}`}
           title={`ReviewerAgentV3 verdict: ${reviewerVerdict}`}
-        />
-      )}
-      {verifiedScore != null && (
-        <Segment
-          tone={scoreTone(verifiedScore)}
-          label={`Verified ${verifiedScore}`}
-          title="Deterministic score from build + tests + reviewer verdict (v2.5.10)"
-        />
-      )}
-      {accuracyScore != null && (
-        <Segment
-          tone="muted"
-          label={`Est. ${accuracyScore}`}
-          title="LLM-estimated spec coverage from file tree + source snippets (secondary signal)"
         />
       )}
     </div>

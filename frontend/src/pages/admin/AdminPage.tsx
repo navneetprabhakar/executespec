@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download, Layers } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download, Layers, AlertOctagon, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
@@ -31,6 +31,54 @@ function AdminPageInner() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('users');
   const { addToast } = useUiStore();
+  // M-010 — halt-all-runs busy + last-result state for the emergency button.
+  const [haltBusy, setHaltBusy] = useState(false);
+
+  // M-042 — audit-chain verifier state for the SUPER_ADMIN button.
+  const [verifyBusy, setVerifyBusy] = useState(false);
+
+  const handleVerifyChain = async () => {
+    setVerifyBusy(true);
+    try {
+      const r = await api.verifyAuditChain();
+      if (r.clean) {
+        addToast({
+          type: 'success',
+          message: `Audit chain clean — ${r.totalChained} row(s) verified.`,
+        });
+      } else {
+        addToast({
+          type: 'error',
+          message: `Audit chain BREAK at seq ${r.firstBreak?.chainSeq}: ${r.firstBreak?.reason}`,
+        });
+      }
+    } catch (e: any) {
+      addToast({ type: 'error', message: e?.message ?? 'Verify failed' });
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
+
+  const handleHaltAll = async () => {
+    const reason = window.prompt(
+      'Halt every non-terminal run on the platform?\n\nProvide a short reason (logged on each run + audit feed). Leave blank to use the per-run default.'
+    );
+    // null == user cancelled the prompt; '' == user clicked OK with no text
+    if (reason === null) return;
+    if (!confirm('This will CANCEL every active run. Continue?')) return;
+    setHaltBusy(true);
+    try {
+      const result = await api.haltAllActiveRuns(reason || undefined);
+      addToast({
+        type: 'success',
+        message: `${result.haltedCount} active run${result.haltedCount === 1 ? '' : 's'} cancelled.`,
+      });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e?.message ?? 'Halt-all failed' });
+    } finally {
+      setHaltBusy(false);
+    }
+  };
 
   // ── Users state ───────────────────────────────────────────────────────────
   const [users, setUsers] = useState<api.AuthUser[]>([]);
@@ -283,6 +331,30 @@ function AdminPageInner() {
           >
             <Layers className="h-3.5 w-3.5" />
             Tier lifecycle
+          </button>
+          {/* M-042 (Backlog) — verify the V147 activity_audit hash chain
+              on demand. Carmen (compliance persona) clicks this to
+              confirm no row was tampered with since the last walk. */}
+          <button
+            onClick={handleVerifyChain}
+            disabled={verifyBusy}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors disabled:opacity-50"
+            title="Walk the activity_audit hash chain (V147) and report the first break, if any"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" />
+            {verifyBusy ? 'Verifying…' : 'Verify audit chain'}
+          </button>
+          {/* M-010 (Wave 2) — emergency halt-all-runs control. Visible from
+              every tab so an oncall SUPER_ADMIN can stop the platform
+              cold during an incident. */}
+          <button
+            onClick={handleHaltAll}
+            disabled={haltBusy}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-status-error hover:text-status-error bg-status-error/10 hover:bg-status-error/20 rounded-md border border-status-error/30 transition-colors disabled:opacity-50"
+            title="Cancel every non-terminal run on the platform"
+          >
+            <AlertOctagon className="h-3.5 w-3.5" />
+            {haltBusy ? 'Halting…' : 'Halt all runs'}
           </button>
         </div>
       </div>
@@ -857,6 +929,9 @@ function AdminPageInner() {
                 </div>
               </div>
             </div>
+
+            {/* M-049 (Backlog) — activation funnel headline counts. */}
+            <ActivationFunnelPanel />
           </div>
         )}
 
@@ -1043,6 +1118,95 @@ function AdminPageInner() {
           onClose={() => setGrantTarget(null)}
           onSuccess={() => { grantTarget.type === 'user' ? loadUsers() : loadOrgs(); }}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * M-049 (Backlog) — activation funnel headline counts.
+ *
+ * Renders the 6-step funnel as a stacked-bar visual (no chart lib —
+ * the existing tokens give us enough for a bar/percent display).
+ * Each row shows the cumulative count, the window-scoped count, and
+ * the conversion rate vs the previous step. Drives Sara's "are
+ * sandbox users converting?" question without bouncing to PostHog.
+ */
+function ActivationFunnelPanel() {
+  const [data, setData] = useState<api.ActivationFunnelReport | null>(null);
+  const [period, setPeriod] = useState(30);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = (days: number) => {
+    setLoading(true);
+    setError(null);
+    api.getActivationFunnel(days)
+      .then(setData)
+      .catch((e) => setError(e?.message ?? 'Failed to load funnel'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(period); }, [period]);
+
+  // 6-step ordering matches the EventName enum on the backend.
+  const ORDER = ['SIGNUP', 'PROJECT_CREATED', 'SPEC_SUBMITTED', 'PLAN_APPROVED', 'RUN_COMPLETE', 'PR_MERGED'];
+
+  const max = data
+    ? Math.max(1, ...ORDER.map((k) => data.stages[k]?.total ?? 0))
+    : 1;
+
+  return (
+    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 space-y-3">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-medium text-primary">Activation funnel</h3>
+          <p className="text-xs text-muted mt-0.5">
+            6-step first-time-event ledger (V125). Window counts cover the last N days; PostHog has the cohort + time-to-event analytics.
+          </p>
+        </div>
+        <select
+          value={period}
+          onChange={(e) => setPeriod(Number(e.target.value))}
+          className="text-xs px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary"
+        >
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+          <option value={365}>Last year</option>
+        </select>
+      </div>
+
+      {loading && !data && <p className="text-xs text-muted">Loading…</p>}
+      {error && <p className="text-xs text-status-error">{error}</p>}
+
+      {data && (
+        <ul className="space-y-1.5">
+          {ORDER.map((stage, idx) => {
+            const counts = data.stages[stage] ?? { total: 0, windowed: 0 };
+            const prev = idx === 0 ? null : data.stages[ORDER[idx - 1]];
+            const conv = prev && prev.total > 0
+              ? Math.round((counts.total / prev.total) * 100)
+              : null;
+            const widthPct = Math.max(2, (counts.total / max) * 100);
+            return (
+              <li key={stage} className="grid grid-cols-[160px_1fr_60px_56px] items-center gap-2 text-xs">
+                <span className="font-mono text-secondary truncate">{stage}</span>
+                <div className="h-3 rounded-sm bg-[var(--gray-300)] overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-accent-blue to-accent-planner"
+                    style={{ width: `${widthPct}%` }}
+                  />
+                </div>
+                <span className="text-right text-primary font-mono tabular-nums">
+                  {counts.total} <span className="text-[10px] text-muted">({counts.windowed})</span>
+                </span>
+                <span className="text-right text-muted text-[10px]">
+                  {conv != null ? `${conv}% from prev` : ''}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );

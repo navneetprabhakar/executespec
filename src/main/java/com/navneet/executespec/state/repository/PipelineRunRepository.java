@@ -50,6 +50,10 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
 
     Page<PipelineRun> findByStatusOrderByStartedAtDesc(String status, Pageable pageable);
 
+    /** M-017 (DSAR) — every run a user authored, newest first.
+     *  Capped by Pageable to keep the export response sane. */
+    Page<PipelineRun> findByCreatedByUserIdOrderByStartedAtDesc(String userId, Pageable pageable);
+
     long countByStatus(String status);
 
     @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r")
@@ -87,6 +91,13 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
             "WHERE r.createdByUserId = :userId AND r.startedAt >= :since")
     Double sumActualCostByUserAndSince(@Param("userId") String userId,
                                         @Param("since") Instant since);
+
+    /** M-033 — per-project LLM $ spent since a cutoff (drives the
+     *  per-project monthly spend cap enforcement at plan-approval time). */
+    @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r "
+            + "WHERE r.projectId = :projectId AND r.startedAt >= :since")
+    Double sumActualCostByProjectAndSince(@Param("projectId") String projectId,
+                                           @Param("since") Instant since);
 
     /** v2.5.8 — per-org LLM $ spent in a billing period (admin / FinOps dashboards). */
     @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r " +

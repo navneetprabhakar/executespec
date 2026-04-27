@@ -1,15 +1,12 @@
 interface Props {
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE' | string;
+  tier: 'FREE' | 'PRO' | 'MAX' | 'ENTERPRISE' | string;
   small?: boolean;
 }
 
-// V141 (2026-04-26) — MAX renamed to TEAM. The old per-seat TEAM tier
-// was deleted in the same migration, so TEAM here is the BYOK-unlimited
-// tier (formerly MAX).
 const TIER_STYLES: Record<string, string> = {
   FREE: 'bg-[var(--gray-400)] text-secondary',
   PRO: 'bg-purple-900/60 text-accent-blue border border-purple-700',
-  TEAM: 'bg-status-success/60 text-status-success border border-status-success',
+  MAX: 'bg-status-success/60 text-status-success border border-status-success',
   ENTERPRISE: 'bg-status-waiting/60 text-status-waiting border border-status-waiting',
 };
 

@@ -49,4 +49,25 @@ public class ActivityAudit {
     @Column(name = "created_at", nullable = false)
     @Builder.Default
     private Instant createdAt = Instant.now();
+
+    // ── M-019 (Wave 3) — append-only hash chain (V147) ─────────────────────
+
+    /** SHA-256 hex of the previous chained row's row_hash; '0'×64 for
+     *  the genesis row. Null on pre-V147 historical rows.
+     *  V151 widens the V147 CHAR(64) column to VARCHAR(64) so the
+     *  Hibernate schema validator stays happy. */
+    @Column(name = "prev_hash", length = 64)
+    private String prevHash;
+
+    /** SHA-256 hex of (prev_hash || canonical_row_content). Null on
+     *  pre-V147 historical rows. Verifier walks the chain by recomputing.
+     *  Same V151 widen as prev_hash above. */
+    @Column(name = "row_hash", length = 64)
+    private String rowHash;
+
+    /** Strictly-monotonic sequence assigned at write time (V147
+     *  Postgres sequence). Drives the verifier's deterministic walk
+     *  order — independent of createdAt to avoid ties under load. */
+    @Column(name = "chain_seq")
+    private Long chainSeq;
 }

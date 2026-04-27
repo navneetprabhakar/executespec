@@ -47,6 +47,16 @@ spring:
     password: ${POSTGRES_PASSWORD:postgres}
   flyway:
     out-of-order: true   # Safety net: v2 branch added V68 after V69-V73 were applied on some envs
+
+server:
+  # The GCE LB / Caddy in front of the JVM terminates TLS and forwards
+  # X-Forwarded-Proto: https. Without this, Spring sees every request as
+  # http and rebuilds absolute URLs (e.g. RedirectView Location headers,
+  # OAuth client redirect_uri when {baseUrl} is used) with the wrong
+  # scheme. `framework` uses Spring's ForwardedHeaderFilter — safer than
+  # `native` (Tomcat RemoteIpValve) because it composes with the security
+  # filter chain ordering we already have.
+  forward-headers-strategy: framework
   ai:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
@@ -135,7 +145,18 @@ app:
   jwt:
     secret: ${JWT_SECRET:executespec-dev-secret-key-must-be-at-least-256-bits-long-for-HS256}
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://dev.executespec.ai}
+    # Plan 1 (this-week #5): include staging clones of the future surface
+    # subdomains so a Phase-2 dev rollout doesn't need a config push.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://dev.executespec.ai,https://app.dev.executespec.ai,https://build.dev.executespec.ai}
+  product-routing:
+    # Phase 1 dev: the existing dev.* host is logically the executespec
+    # (B2B) surface. The vibe origin lands on a not-yet-deployed staging
+    # subdomain — wired now so OAuthSurfaceResolver works the day the
+    # consumer surface boots, no config change needed.
+    app-origin: ${APP_SURFACE_ORIGIN:https://app.dev.executespec.ai}
+    build-origin: ${BUILD_SURFACE_ORIGIN:https://dev.executespec.ai}
+    app-return-url: ${APP_SURFACE_RETURN_URL:https://app.dev.executespec.ai/auth/callback}
+    build-return-url: ${BUILD_SURFACE_RETURN_URL:https://dev.executespec.ai/auth/callback}
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 razorpay:

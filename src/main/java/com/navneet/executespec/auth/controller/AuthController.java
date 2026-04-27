@@ -302,7 +302,49 @@ public class AuthController {
     record ValidateBitbucketRequest(String username, String appPassword, String workspace, String repoSlug) {}
     record ValidateJiraRequest(String baseUrl, String email, String apiToken) {}
     record ValidateConfluenceRequest(String baseUrl, String email, String apiToken) {}
+    record ValidateAiKeyRequest(String provider, String apiKey) {}
     record ValidationResult(boolean valid, String message) {}
+
+    /**
+     * Phase 1.2 #24 — BYOK Test buttons. Pings the named provider with the
+     * supplied key and surfaces the provider's verbatim error if the key
+     * is invalid. Mirrors the GitHub PAT validate pattern.
+     *
+     * <p>Provider → endpoint:
+     * <ul>
+     *   <li>OPENAI    → {@code GET https://api.openai.com/v1/models}</li>
+     *   <li>ANTHROPIC → {@code GET https://api.anthropic.com/v1/models}
+     *       (requires {@code anthropic-version} header)</li>
+     *   <li>GEMINI    → {@code GET https://generativelanguage.googleapis.com/v1beta/models?key=...}</li>
+     * </ul>
+     */
+    @PostMapping("/settings/ai-keys/validate")
+    public ResponseEntity<ValidationResult> validateAiKey(@RequestBody ValidateAiKeyRequest req) {
+        if (req.provider() == null || req.provider().isBlank() || req.apiKey() == null || req.apiKey().isBlank()) {
+            return ResponseEntity.ok(new ValidationResult(false, "Provider and API key are required"));
+        }
+        String provider = req.provider().toUpperCase();
+        String key = req.apiKey().strip();
+        return switch (provider) {
+            case "OPENAI" -> validateExternalConnection(
+                "https://api.openai.com/v1/models",
+                Map.of("Authorization", "Bearer " + key),
+                "OpenAI key is valid",
+                "OpenAI rejected the key (status %d) — check it's an active sk-... key with model access");
+            case "ANTHROPIC" -> validateExternalConnection(
+                "https://api.anthropic.com/v1/models",
+                Map.of("x-api-key", key, "anthropic-version", "2023-06-01"),
+                "Anthropic key is valid",
+                "Anthropic rejected the key (status %d) — check it's an active sk-ant-... key with model access");
+            case "GEMINI", "GOOGLE" -> validateExternalConnection(
+                "https://generativelanguage.googleapis.com/v1beta/models?key=" + key,
+                Map.of(),
+                "Gemini key is valid",
+                "Gemini rejected the key (status %d) — check it's an active AI Studio key");
+            default -> ResponseEntity.ok(new ValidationResult(false,
+                "Unknown provider — supported: OPENAI, ANTHROPIC, GEMINI"));
+        };
+    }
 
     @PostMapping("/settings/github/validate")
     public ResponseEntity<ValidationResult> validateGitHub(@RequestBody ValidateGitHubRequest req) {

@@ -46,6 +46,13 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+
+server:
+  # The prod LB terminates TLS and forwards X-Forwarded-Proto: https.
+  # Without this, Spring sees every request as http and rebuilds absolute
+  # URLs (RedirectView Location headers, OAuth client {baseUrl}) with the
+  # wrong scheme. `framework` uses Spring's ForwardedHeaderFilter.
+  forward-headers-strategy: framework
   ai:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
@@ -134,7 +141,19 @@ app:
   jwt:
     secret: ${JWT_SECRET:executespec-prod-secret-MUST-BE-OVERRIDDEN-via-env-var}
   cors:
-    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://executespec.ai}
+    # Plan 1 (this-week #5): pre-emptive Phase-2 surface allow-list. Both
+    # subdomains are listed by default so the eventual frontend split
+    # doesn't need a config push — just a DNS + deploy. Ops can still
+    # override via the env var to lock down to one origin.
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:https://executespec.ai,https://www.executespec.ai,https://app.executespec.ai,https://build.executespec.ai}
+  product-routing:
+    # Read by OAuthSurfaceResolver to map Origin → surface and back to the
+    # post-login return URL. Kept env-overridable so a brand swap (e.g.
+    # vibedev.ai for the consumer surface) is a one-line config change.
+    app-origin: ${APP_SURFACE_ORIGIN:https://app.executespec.ai}
+    build-origin: ${BUILD_SURFACE_ORIGIN:https://build.executespec.ai}
+    app-return-url: ${APP_SURFACE_RETURN_URL:https://app.executespec.ai/auth/callback}
+    build-return-url: ${BUILD_SURFACE_RETURN_URL:https://build.executespec.ai/auth/callback}
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 # 2026-04-21 — US-first launch. Stripe is the prod default gateway for USD traffic.

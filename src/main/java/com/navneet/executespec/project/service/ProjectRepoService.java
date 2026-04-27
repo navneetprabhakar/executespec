@@ -37,6 +37,8 @@ public class ProjectRepoService {
     private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
     /** V140 — gate per-tier repos-per-project cap on link + create-and-link. */
     private final com.navneet.executespec.auth.service.TierEnforcementService tierEnforcement;
+    /** M-039 (Wave 3) — repo allowlist enforcement. */
+    private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
     /** Lazy to break potential circular wiring on startup. */
     private final org.springframework.beans.factory.ObjectProvider<
             com.navneet.executespec.codeintel.ProjectArchitectureService> archServiceProvider;
@@ -209,6 +211,20 @@ public class ProjectRepoService {
         ProjectRepo repo = repoRepo.findById(repoId)
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Repo not found"));
 
+        // M-039 (Wave 3) — owner allowlist check. ProjectRepo.githubRepoFullName
+        // is "owner/repo"; we extract the owner segment. SUPER_ADMIN bypass
+        // is handled inside the guard.
+        if (project.getOrgId() != null && repo.getGithubRepoFullName() != null) {
+            String owner = repo.getGithubRepoFullName().contains("/")
+                    ? repo.getGithubRepoFullName().substring(0, repo.getGithubRepoFullName().indexOf('/'))
+                    : repo.getGithubRepoFullName();
+            // Caller principal isn't on this signature; pass null so the
+            // SUPER_ADMIN bypass is intentionally NOT available on this path
+            // (callers rarely run as super-admin in the project flow). If
+            // we need that bypass later, thread AppUserDetails through.
+            governanceGuard.assertRepoOwnerAllowed(project.getOrgId(), owner, null);
+        }
+
         // Eligibility rule: ORG repo must belong to the project's org; USER repo
         // must be owned by the caller (no cross-user linking for now).
         if (repo.getScope() == ProjectRepo.Scope.ORG) {
@@ -319,6 +335,11 @@ public class ProjectRepoService {
         // V140 — block before any GitHub side-effect when the project is
         // at its tier repos-per-project cap.
         tierEnforcement.assertCanLinkRepoToProject(callerUserId, projectId);
+        // M-039 (Wave 3) — owner allowlist check before GitHub call.
+        // Caller principal not threaded through this signature so SUPER_ADMIN
+        // bypass intentionally not available; ORG_ADMIN can update the
+        // allowlist instead.
+        governanceGuard.assertRepoOwnerAllowed(project.getOrgId(), githubOwner, null);
 
         String cloneUrl = gitHub.createRepo(
                 description, name, "public".equals(visibility) ? "public" : "private",

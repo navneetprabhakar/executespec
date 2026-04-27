@@ -4,8 +4,11 @@ import com.navneet.executespec.activity.ActivityEventType;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.util.EnumSet;
+import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 
@@ -32,6 +35,36 @@ public class NotificationPrefService {
         if (existing.isPresent()) return existing.get().isEnabled();
         // No row → default
         return NotificationPrefDefaults.defaultEnabled(type, channel);
+    }
+
+    /** All explicit override rows for a user — the matrix UI seeds itself
+     *  from this so checkbox state reflects what the DB actually says
+     *  vs. what the defaults would do. */
+    public List<UserNotificationPref> listOverrides(String userId) {
+        if (userId == null) return List.of();
+        return prefRepo.findByUserId(userId);
+    }
+
+    /** Idempotent upsert — used by the Settings UI when a user toggles
+     *  a checkbox. Writes a row regardless of whether the new value
+     *  matches the default, so the UI always knows the user's intent
+     *  (and so a future default change doesn't silently flip a user's
+     *  expressed preference). */
+    @Transactional
+    public UserNotificationPref setPreference(String userId, ActivityEventType type, Channel channel, boolean enabled) {
+        if (userId == null || type == null || channel == null) {
+            throw new IllegalArgumentException("userId, type, and channel are required");
+        }
+        UserNotificationPref row = prefRepo
+                .findByUserIdAndEventTypeAndChannel(userId, type.name(), channel.name())
+                .orElseGet(() -> UserNotificationPref.builder()
+                        .userId(userId)
+                        .eventType(type.name())
+                        .channel(channel.name())
+                        .build());
+        row.setEnabled(enabled);
+        row.setUpdatedAt(Instant.now());
+        return prefRepo.save(row);
     }
 
     public enum Channel { IN_APP, EMAIL }

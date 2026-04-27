@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useReducer } from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import { useUiStore } from '@/stores/useUiStore';
+import { Glossary } from '@/components/shared/Glossary';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsSuperAdmin, selectIsOrgAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
@@ -2029,7 +2030,10 @@ function PlannerPhaseBreakdown({ run }: { run: RunDetail }) {
       <div className="space-y-1">
         {populated.map((r) => (
           <div key={r.label} className="grid grid-cols-[5.5rem_1fr_1fr_1fr] gap-2 text-[11px] font-mono">
-            <span className="text-secondary">{r.label}</span>
+            {/* M-006 (Wave 1) — wrap "Classifier" with Glossary so the tooltip explains the phase. */}
+            <span className="text-secondary">
+              {r.label === 'Classifier' ? <Glossary term="classifier">Classifier</Glossary> : r.label}
+            </span>
             <span className="text-muted">{fmtCost(r.cost)}</span>
             <span className="text-muted">in {fmtTok(r.inTok)}</span>
             <span className="text-muted">out {fmtTok(r.outTok)}</span>

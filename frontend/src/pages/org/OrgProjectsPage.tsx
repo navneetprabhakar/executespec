@@ -598,11 +598,16 @@ export default function OrgProjectsPage() {
       {!loading && (
         <>
           {active.length === 0 && archived.length === 0 && (
-            <div className="text-center py-12">
-              <FolderOpen className="h-10 w-10 text-[var(--text-muted)] mx-auto mb-3" />
-              <p className="text-secondary font-medium">No projects yet</p>
-              <p className="text-muted text-sm mt-1">
-                {isAdmin ? 'Create your first project above.' : 'Your org admin hasn\'t created any projects yet.'}
+            <div className="text-center py-16">
+              {/* Phase 1.1 #12 — empty-state hero pattern (B2B sweep). */}
+              <FolderOpen className="h-12 w-12 text-[var(--text-muted)] mx-auto mb-3" />
+              <p className="text-base font-semibold text-primary">
+                {isAdmin ? 'Ship your first project' : 'No projects yet'}
+              </p>
+              <p className="text-sm text-muted mt-1.5 max-w-md mx-auto">
+                {isAdmin
+                  ? 'A project bundles a spec, the repo it targets, and every run that ships against it. Pick a starter template above or create a blank one.'
+                  : 'Your org admin hasn\'t created any projects yet — ping them to set up the first one.'}
               </p>
             </div>
           )}

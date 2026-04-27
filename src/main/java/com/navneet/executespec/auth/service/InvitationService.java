@@ -3,6 +3,7 @@ package com.navneet.executespec.auth.service;
 import com.navneet.executespec.auth.dto.InviteRequest;
 import com.navneet.executespec.auth.entity.*;
 import com.navneet.executespec.auth.repository.*;
+import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -87,10 +88,19 @@ public class InvitationService {
                     "Upgrade to ENTERPRISE for unlimited members.");
         }
 
-        // V141 (2026-04-26) — the v2.6.1-Wave-1 per-seat TEAM seat-cap path
-        // was removed here. The "TEAM" name now refers to the renamed MAX
-        // tier ($29/mo BYOK, unlimited members under tier_config). The
-        // generic max_org_members cap above already covers it.
+        // ── TEAM seat-cap check (v2.6.0) ─────────────────────────────────────
+        // For TEAM tier orgs, the hard cap on members is the number of paid
+        // seats on the active subscription — not the tier_config.max_org_members
+        // value. Exceeding seats returns 402 Payment Required so the frontend
+        // can show a "buy more seats" CTA (distinct from 403 "upgrade tier").
+        if ("TEAM".equals(org.getTier())) {
+            int seatLimit = resolveTeamSeatLimit(orgId, org.getSeatCount());
+            if (orgMemberRepo.countByOrgId(orgId) >= seatLimit) {
+                throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                        "Organization has reached its seat limit (" + seatLimit + " seats). " +
+                        "Add more seats in the Team admin dashboard to invite additional members.");
+            }
+        }
 
         String token = UUID.randomUUID().toString().replace("-", "");
         boolean domainMatches = domainMatches(email, org.getDomainPatterns());
@@ -423,8 +433,28 @@ public class InvitationService {
                 .orElse(-1);
     }
 
-    // V141 (2026-04-26) — resolveTeamSeatLimit deleted along with the
-    // per-seat TEAM seat-cap path. The "TEAM" name now refers to the
-    // renamed MAX tier (BYOK unlimited members). subRepo + BillingSubscription
-    // import retained in case future code needs them.
+    /**
+     * v2.6.0 — resolve the seat limit for a TEAM-tier org.
+     *
+     * <p>Priority order:
+     * <ol>
+     *   <li>Active TEAM {@link BillingSubscription}'s {@code totalSeats} — the
+     *       source of truth, synced from Stripe webhook</li>
+     *   <li>{@code org.seat_count} column — fallback when the subscription
+     *       hasn't webhooked through yet (race between checkout success +
+     *       webhook delivery)</li>
+     *   <li>Conservative default of 2 — minimum TEAM size</li>
+     * </ol>
+     */
+    private int resolveTeamSeatLimit(String orgId, int orgSeatCount) {
+        BillingSubscription teamSub = subRepo.findActiveByTier("TEAM").stream()
+                .filter(s -> orgId.equals(s.getOrgId()))
+                .findFirst()
+                .orElse(null);
+        if (teamSub != null && teamSub.getTotalSeats() > 0) {
+            return teamSub.getTotalSeats();
+        }
+        if (orgSeatCount > 0) return orgSeatCount;
+        return 2; // conservative minimum
+    }
 }

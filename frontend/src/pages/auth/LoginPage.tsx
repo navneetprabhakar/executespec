@@ -3,6 +3,28 @@ import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-do
 import { Eye, EyeOff, ShieldCheck, Zap, GitBranch, CheckCircle2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 
+/**
+ * M-047 (Backlog) — pick the surface to send to the backend's OAuth
+ * init bridge. Reads from a query param first (so deep links can pin
+ * the surface, e.g. /login?surface=executespec from a B2B landing
+ * page), then falls back to the host-driven detection.
+ *
+ * Pre-Phase-2 the host detection is a no-op (single-host
+ * api.executespec.ai); post-Phase-2 it'll route from
+ * app.executespec.ai → 'vibe' and build.executespec.ai → 'executespec'.
+ */
+function currentSurface(): string {
+  if (typeof window === 'undefined') return 'executespec';
+  const fromQuery = new URLSearchParams(window.location.search).get('surface');
+  if (fromQuery === 'vibe' || fromQuery === 'executespec') return fromQuery;
+  const host = window.location.hostname;
+  if (host.startsWith('app.')) return 'vibe';
+  if (host.startsWith('build.')) return 'executespec';
+  // Pre-split default: keep B2B surface so existing links keep landing
+  // on the dashboard they came from.
+  return 'executespec';
+}
+
 const OAUTH_ERROR_MESSAGES: Record<string, string> = {
   oauth_email_conflict: 'This email is already registered with a different login method.',
   oauth_failed: 'OAuth login failed. Please try again.',
@@ -52,12 +74,19 @@ export default function LoginPage() {
         <p className="mt-1 text-sm text-muted">Sign in to ship a spec.</p>
       </div>
 
-      {/* OAuth */}
+      {/* OAuth — M-047 (Backlog): route through /api/auth/oauth2/init so the
+          backend stashes the surface (vibe vs executespec) and the
+          OAuthSuccessHandler can redirect post-login to the right
+          frontend domain. The init bridge resolves surface from the
+          query param, then from Origin/Referer, then from the
+          OAuthSurfaceResolver's session fallback. Pre-Phase-2 it's a
+          no-op redirect (same /oauth2/authorization/{provider} target),
+          so this wire is forward-compatible without ops work. */}
       <div className="space-y-2.5">
-        <OAuthButton href="/api/auth/oauth2/authorize/google" provider="google">
+        <OAuthButton href={`/api/auth/oauth2/init?provider=google&surface=${encodeURIComponent(currentSurface())}`} provider="google">
           Continue with Google
         </OAuthButton>
-        <OAuthButton href="/api/auth/oauth2/authorize/github" provider="github">
+        <OAuthButton href={`/api/auth/oauth2/init?provider=github&surface=${encodeURIComponent(currentSurface())}`} provider="github">
           Continue with GitHub
         </OAuthButton>
       </div>

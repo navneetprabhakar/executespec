@@ -94,6 +94,36 @@ export default function InvoicesPage() {
               {f === 'all' ? 'All' : typeLabel(f)}
             </button>
           ))}
+          {/* Phase 1.2 #20 — Erin blocker (assessment B-9): export the
+              currently-filtered invoice list as CSV for AP / accounting.
+              Client-side blob download — no backend endpoint needed; the
+              data was already loaded for the table render. */}
+          <button
+            onClick={() => {
+              const headers = ['invoiceNumber', 'invoiceDate', 'invoiceType', 'description', 'totalAmount', 'status'];
+              const escape = (v: unknown) => {
+                const s = v == null ? '' : String(v);
+                return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+              };
+              const rows = filtered.map((inv) => headers.map((h) => escape((inv as unknown as Record<string, unknown>)[h])).join(','));
+              const csv = headers.join(',') + '\n' + rows.join('\n');
+              const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement('a');
+              a.href = url;
+              a.download = `invoices-${new Date().toISOString().slice(0, 10)}.csv`;
+              document.body.appendChild(a);
+              a.click();
+              document.body.removeChild(a);
+              URL.revokeObjectURL(url);
+            }}
+            disabled={filtered.length === 0}
+            className="rounded-md px-3 py-1.5 text-xs font-medium border border-[var(--border-default)] text-muted hover:text-primary hover:border-[var(--border-hover)] inline-flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed"
+            title="Download the visible invoice list as CSV"
+          >
+            <Download className="h-3 w-3" />
+            CSV
+          </button>
         </div>
       }
     >
@@ -120,7 +150,13 @@ export default function InvoicesPage() {
                 </tr>
               ) : filtered.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-muted">No invoices found</td>
+                  {/* Phase 1.1 #12 — empty-state hero pattern (B2B sweep). */}
+                  <td colSpan={7} className="px-4 py-10 text-center">
+                    <p className="text-sm font-medium text-secondary">No invoices match these filters</p>
+                    <p className="text-xs text-muted mt-1">
+                      New invoices appear after a subscription, top-up, or per-run charge. Try widening the date range or clearing filters.
+                    </p>
+                  </td>
                 </tr>
               ) : (
                 filtered.map((inv) => (
@@ -175,7 +211,13 @@ export default function InvoicesPage() {
           {loading ? (
             <li className="px-4 py-8 text-center text-muted text-sm">Loading...</li>
           ) : filtered.length === 0 ? (
-            <li className="px-4 py-8 text-center text-muted text-sm">No invoices found</li>
+            <li className="px-4 py-10 text-center">
+              {/* Phase 1.1 #12 — empty-state hero (mobile). */}
+              <p className="text-sm font-medium text-secondary">No invoices match these filters</p>
+              <p className="text-xs text-muted mt-1">
+                New invoices appear after a subscription, top-up, or per-run charge.
+              </p>
+            </li>
           ) : (
             filtered.map((inv) => (
               <li key={inv.id} className="px-4 py-3 space-y-2">

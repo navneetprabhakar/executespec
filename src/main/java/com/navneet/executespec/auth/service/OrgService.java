@@ -11,6 +11,10 @@ import com.navneet.executespec.auth.entity.OrgMember;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.gateway.StripePaymentGateway;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.auth.controller.OrgController.SeatsAdjustResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -35,7 +39,12 @@ public class OrgService {
     private final PaymentAuditService paymentAuditService;
     private final ActivityAuditService auditService;
     private final MailService mailService;
+    private final BillingSubscriptionRepository subRepo;
+    private final StripePaymentGateway stripeGateway;
 
+    /** TEAM tier self-serve seat range. Orgs above this go to ENTERPRISE. */
+    private static final int TEAM_MIN_SEATS = 2;
+    private static final int TEAM_MAX_SEATS = 20;
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Transactional
@@ -45,7 +54,7 @@ public class OrgService {
 
         if ("FREE".equals(creator.getTier())) {
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Only paid tiers (Pro, Team, Enterprise) can create an org");
+                    "Only paid tiers (Pro, Team, Max, Enterprise) can create an org");
         }
         if (creator.getOrgId() != null) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
@@ -463,6 +472,16 @@ public class OrgService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
         String oldTier = org.getTier();
         org.setTier(newTier);
+        // M-030 (Wave 3) — keep org.product_id consistent with tier so the
+        // V143 surface discriminator drifts with admin tier changes (BillingService
+        // already does this for webhook-driven tier flips). TierProductSurfaceMapper
+        // is the single source of truth: TEAM/ENTERPRISE → executespec; FREE/PRO/MAX → vibe.
+        String surface = TierProductSurfaceMapper.defaultSurfaceFor(newTier);
+        if (org.getProductId() == null || !surface.equals(org.getProductId())) {
+            log.info("[M-030] Org product_id flip on admin tier change: orgId={} oldTier={} newTier={} surface={}",
+                    orgId, oldTier, newTier, surface);
+            org.setProductId(surface);
+        }
         org.setUpdatedAt(Instant.now());
         orgRepo.save(org);
         paymentAuditService.record("ORG", orgId, "PLAN_UPGRADED", oldTier, newTier, performedBy, null);
@@ -471,4 +490,95 @@ public class OrgService {
                 Map.of("tier", oldTier), Map.of("tier", newTier));
     }
 
+    /**
+     * v2.6.0 — adjust seats on a TEAM-tier org. Pushes to Stripe (prorated),
+     * writes {@code BillingSubscription.totalSeats} + {@code Org.seat_count}
+     * locally so the UI reflects the new count immediately; the webhook
+     * arriving later is idempotent.
+     *
+     * <p>Validates:
+     * <ul>
+     *   <li>{@code newSeats ∈ [TEAM_MIN_SEATS, TEAM_MAX_SEATS]} (2-20)</li>
+     *   <li>New seats is not below current active member count</li>
+     *   <li>Org is on TEAM tier and has an active subscription</li>
+     * </ul>
+     */
+    @Transactional
+    public SeatsAdjustResponse adjustSeats(String orgId, int newSeats, String performedBy) {
+        Org org = orgRepo.findById(orgId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+
+        if (!"TEAM".equals(org.getTier())) {
+            throw new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                    "Seat adjustment is only available for TEAM tier. Upgrade first.");
+        }
+        if (newSeats < TEAM_MIN_SEATS || newSeats > TEAM_MAX_SEATS) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "newSeats must be between " + TEAM_MIN_SEATS + " and " + TEAM_MAX_SEATS
+                    + ". Contact sales for larger orgs.");
+        }
+
+        int activeMembers = (int) orgMemberRepo.countByOrgId(orgId);
+        if (newSeats < activeMembers) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST,
+                    "Cannot reduce seats to " + newSeats + " — org has " + activeMembers
+                    + " active members. Remove members first, then reduce seats.");
+        }
+
+        int previousSeats = org.getSeatCount();
+        if (previousSeats == newSeats) {
+            return new SeatsAdjustResponse(previousSeats, newSeats, activeMembers,
+                    "No change — org already has " + newSeats + " seats.");
+        }
+
+        // Find the active TEAM subscription + push seat quantity to the gateway.
+        BillingSubscription teamSub = subRepo.findActiveByTier("TEAM").stream()
+                .filter(s -> orgId.equals(s.getOrgId()))
+                .findFirst()
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.PAYMENT_REQUIRED,
+                        "No active TEAM subscription found for this org. Complete checkout first."));
+
+        String gatewayName = teamSub.getPaymentGateway() != null
+                ? teamSub.getPaymentGateway() : teamSub.getGateway();
+        if ("stripe".equalsIgnoreCase(gatewayName) && teamSub.getGatewaySubscriptionId() != null) {
+            stripeGateway.updateSubscriptionQuantity(teamSub.getGatewaySubscriptionId(), newSeats);
+        } else if ("razorpay".equalsIgnoreCase(gatewayName)) {
+            // M-011 (Wave 3) — Razorpay's subscription model doesn't support
+            // mid-cycle quantity changes the way Stripe does. Surface a 501
+            // pointing the admin at the manual workflow rather than silently
+            // diverging the org-side seat_count from the actual billing.
+            log.warn("[M-011] Razorpay seat adjust requested but unsupported in-band — "
+                    + "org={} gatewaySub={} requestedSeats={} → 501 with manual-flow pointer",
+                    orgId, teamSub.getGatewaySubscriptionId(), newSeats);
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
+                "Razorpay subscriptions don't support mid-cycle seat changes. "
+                    + "Email billing@executespec.ai with your org id (" + orgId + ") "
+                    + "and the new seat count (" + newSeats + "); ops will issue a "
+                    + "plan-swap at your next billing cycle. See docs/payment-history.md "
+                    + "for the full workflow.");
+        } else {
+            log.warn("Seat adjust: unknown gateway '{}' for org {} — gateway push skipped.",
+                    gatewayName, orgId);
+        }
+
+        // Write locally — webhook will arrive later and be idempotent.
+        teamSub.setTotalSeats(newSeats);
+        subRepo.save(teamSub);
+
+        org.setSeatCount(newSeats);
+        org.setUpdatedAt(Instant.now());
+        orgRepo.save(org);
+
+        auditOrgEvent("ORG_SEATS_ADJUSTED", "ORG", orgId, orgId, performedBy,
+                Map.of("seats", previousSeats),
+                Map.of("seats", newSeats, "activeMembers", activeMembers));
+
+        log.info("Org seats adjusted: orgId={} {}→{} activeMembers={} by userId={}",
+                orgId, previousSeats, newSeats, activeMembers, performedBy);
+
+        String message = newSeats > previousSeats
+                ? "Added " + (newSeats - previousSeats) + " seat(s). You can now invite up to " + newSeats + " members."
+                : "Reduced to " + newSeats + " seat(s). Prorated credit will appear on your next invoice.";
+        return new SeatsAdjustResponse(previousSeats, newSeats, activeMembers, message);
+    }
 }
