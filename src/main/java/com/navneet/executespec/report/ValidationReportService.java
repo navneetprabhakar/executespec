@@ -600,13 +600,21 @@ public class ValidationReportService {
      * time. Unlike the LLM accuracy score this cannot hallucinate — every input
      * is a hard fact observed by the pipeline.
      *
-     * Formula:
+     * Formula (R-132, greenfield §4.5):
      *   base          = 40
      *   buildBonus    = finalBuildPassed == TRUE ? 20 : 0   (null treated as not-passed)
-     *   testBonus     = testsTotal>0 ? round(20 * testsPassed/testsTotal) : 10   (neutral when no tests)
+     *   testBonus     = testsTotal>0 ? round(20 * testsPassed/testsTotal) : 0    (no test credit when no tests)
      *   verdictBonus  = CLEAN=20, FIXED_ISSUES=15, UNRESOLVED_ISSUES=5, REVIEW_FAILED=0, null=10
      *   penalty       = unfixedCriticalCount * 5
      *   score         = clamp(0, 100, base + buildBonus + testBonus + verdictBonus - penalty)
+     *
+     * R-132 fix: previously `testBonus = 10` when `testsTotal == 0`, awarding a
+     * "neutral" 10 points to runs that had no test coverage at all. The strict
+     * UX review (2026-04-27) caught run e48399bf surfacing `verifiedScore=65`
+     * with `accuracyScore=5` and zero tests — reputational risk. The score now
+     * earns zero on the test axis when no tests exist; the v3 UI also gates
+     * the headline display on `testsTotal>0` so a "Verified N" badge can't
+     * vouch for un-tested code.
      */
     int computeVerifiedScore(Boolean finalBuildPassed, int testsPassed, int testsTotal,
                              String reviewerVerdictName, int unfixedCriticalCount) {
@@ -614,7 +622,7 @@ public class ValidationReportService {
         int buildBonus = Boolean.TRUE.equals(finalBuildPassed) ? 20 : 0;
         int testBonus = (testsTotal > 0)
                 ? (int) Math.round(20.0 * testsPassed / testsTotal)
-                : 10;
+                : 0;
         int verdictBonus;
         if (reviewerVerdictName == null) {
             verdictBonus = 10;
