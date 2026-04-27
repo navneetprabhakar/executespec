@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { useProjectStore } from '@/stores/useProjectStore';
 import { useExecutionStore } from '@/stores/useExecutionStore';
 import { executionApi } from '@/lib/execution-api';
@@ -26,6 +26,7 @@ interface Props {
 const DEFAULT_TECH = 'node-backend';
 
 export default function ExecutionSetup({ projectId, onSubmitted, continueOnPr }: Props) {
+  const location = useLocation();
   const { repos, fetchRepos } = useProjectStore();
   const { createExecution, loading, error } = useExecutionStore();
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -41,6 +42,19 @@ export default function ExecutionSetup({ projectId, onSubmitted, continueOnPr }:
   const [scaffolds, setScaffolds] = useState<Scaffold[]>([]);
   const [ownerChecks, setOwnerChecks] = useState<Record<number, string>>({});
   const [showConfirm, setShowConfirm] = useState(false);
+
+  // M-023 (Wave 2) — pre-fill from a TemplateGrid pick on the project
+  // EmptyProjectLanding. Carries the requirement text via React Router
+  // state, applied once on mount.
+  useEffect(() => {
+    const tmpl = (location.state as { templateRequirement?: string } | null)?.templateRequirement;
+    if (tmpl && tmpl.trim()) {
+      setRequirement(tmpl);
+    }
+    // Intentionally not depending on `location.state` so re-renders don't
+    // overwrite typed-over edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Pre-fill from continue-on-PR config (Address Review flow).
   useEffect(() => {
