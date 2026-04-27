@@ -95,7 +95,7 @@ export default function AvatarMenu() {
   }
   items.push({ label: 'Integrations', onClick: () => navigate('/v3/integrations') });
   if (isOrgAdmin || isSuperAdmin) {
-    items.push({ label: 'Insights', onClick: () => navigate('/v3/home?dest=insights') });
+    items.push({ label: 'Insights', onClick: () => navigate('/v3/insights') });
   }
   items.push({ label: 'Help', onClick: () => navigate('/v3/home?dest=help') });
   items.push({
