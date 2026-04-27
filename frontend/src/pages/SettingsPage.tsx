@@ -11,6 +11,7 @@ import { useTierPermissions } from '@/hooks/useTierPermissions';
 import type { OrgDto } from '@/lib/api';
 import * as api from '@/lib/api';
 import { fetchBillingStatus, type BillingStatus } from '@/lib/billing-api';
+import NotificationPreferences from '@/components/settings/NotificationPreferences';
 
 // ── Generic expand/collapse card ──────────────────────────────────────────────
 
@@ -513,6 +514,9 @@ export default function SettingsPage() {
 
       {/* ── Key Source & Provider Policy (ORG_ADMIN only) ──────────────────── */}
       {isOrgAdmin && org && <OrgKeySourceCard org={org} onSaved={setOrg} />}
+
+      {/* ── Notification preferences (M-003 Wave 2) ────────────────────────── */}
+      <NotificationPreferences />
 
       {/* ── System Health (requires canViewMetrics) ────────────────────────── */}
       {permissions?.canViewMetrics && (

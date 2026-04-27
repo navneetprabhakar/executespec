@@ -1875,6 +1875,30 @@ export const markNotificationRead = (id: string) =>
 export const markAllNotificationsRead = () =>
   req<void>('/notifications/read-all', { method: 'POST' });
 
+// ── Notification preferences (M-003 Wave 2) ─────────────────────────────────
+
+export interface NotificationPrefRow {
+  eventType: string;       // canonical ActivityEventType name
+  tier: 'HIGH_SIGNAL' | 'ADMIN_TOGGLE';
+  channel: 'IN_APP' | 'EMAIL';
+  enabled: boolean;        // effective (override → override; else default)
+  defaultEnabled: boolean;
+  override: boolean;       // true if the user has an explicit row
+}
+
+export const getNotificationPreferences = () =>
+  req<NotificationPrefRow[]>('/notifications/preferences');
+
+export const updateNotificationPreference = (
+  eventType: string,
+  channel: 'IN_APP' | 'EMAIL',
+  enabled: boolean,
+) =>
+  req<NotificationPrefRow>('/notifications/preferences', {
+    method: 'PUT',
+    body: JSON.stringify({ eventType, channel, enabled }),
+  });
+
 // ── SSE ────────────────────────────────────────────────────────────────────
 
 /** Fetch a short-lived scoped SSE token for a specific run. */
