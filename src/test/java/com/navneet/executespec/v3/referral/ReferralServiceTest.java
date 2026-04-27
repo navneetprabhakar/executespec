@@ -2,6 +2,7 @@ package com.navneet.executespec.v3.referral;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.service.MailService;
 import com.navneet.executespec.v3.credit.LifetimeCreditService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,6 +23,7 @@ class ReferralServiceTest {
     private AppUserRepository userRepo;
     private ReferralInviteRepository inviteRepo;
     private LifetimeCreditService credit;
+    private MailService mail;
     private ReferralService svc;
 
     /** In-memory shim so the mock repo behaves like a real table for
@@ -33,7 +35,8 @@ class ReferralServiceTest {
         userRepo = mock(AppUserRepository.class);
         inviteRepo = mock(ReferralInviteRepository.class);
         credit = mock(LifetimeCreditService.class);
-        svc = new ReferralService(userRepo, inviteRepo, credit);
+        mail = mock(MailService.class);
+        svc = new ReferralService(userRepo, inviteRepo, credit, mail);
 
         store.clear();
         when(userRepo.save(any(AppUser.class))).thenAnswer(inv -> inv.getArgument(0));
