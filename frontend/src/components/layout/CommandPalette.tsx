@@ -47,7 +47,8 @@ export default function CommandPalette() {
                 <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-[var(--text-muted)] [&_[cmdk-group-heading]]:font-medium">
                   <CmdItem
                     icon={<Plus className="h-4 w-4" />}
-                    label="New Run"
+                    /* M-001 — copy-only Mission rename. */
+                    label="New mission"
                     onSelect={() => { setCommandPaletteOpen(false); setShowNewRun(true); }}
                   />
                   <CmdItem
