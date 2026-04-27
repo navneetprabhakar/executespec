@@ -164,6 +164,11 @@ export default function App() {
               route fell through. */}
           <Route path="projects/:projectId" element={<Navigate to="dashboard" replace />} />
           <Route path="projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
+          {/* M-034 (Wave 2) — deep-linkable URL for the project activity
+              feed. Opens the dashboard with ?drawer=activity pre-set so
+              the existing MoreDrawer ActivityTab full-page mount picks
+              up. Keeps the v2.6.4 IA cleanup intact (no new top tab). */}
+          <Route path="projects/:projectId/activity" element={<Navigate to="../dashboard?drawer=activity" replace relative="path" />} />
           <Route path="projects/:projectId/executions/new" element={<ExecutionViewPage />} />
           <Route path="projects/:projectId/executions/:executionId" element={<ExecutionViewPage />} />
 
