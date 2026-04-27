@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import V3TopBar from './V3TopBar';
+import CmdK from './CmdK';
 import '../v3.css';
 
 /**
@@ -35,6 +36,7 @@ export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean })
       <main className="v3-main">
         <Outlet />
       </main>
+      <CmdK />
     </div>
   );
 }
