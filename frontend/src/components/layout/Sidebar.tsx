@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom';
+import { NavLink, useLocation, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -34,6 +34,7 @@ export default function Sidebar() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const permissions = useTierPermissions();
   const navigate = useNavigate();
+  const location = useLocation();
 
   const projectFilter = useRunStore((s) => s.projectFilter);
   const setProjectFilter = useRunStore((s) => s.setProjectFilter);
@@ -77,14 +78,25 @@ export default function Sidebar() {
   );
 
   const handleProjectClick = (projectId: string) => {
-    if (projectFilter === projectId) {
-      setProjectFilter(null);
-    } else {
-      setProjectFilter(projectId);
-    }
-    navigate('/');
+    // v2.7.3 — clicking a sidebar project entry takes you straight to the
+    // project workbench (was: navigate to /, just toggle a runs-list filter
+    // — which was confusing because nothing told you it was a filter and
+    // there was no obvious path to the project's actual dashboard).
+    //
+    // We still set the runs filter so if the user later clicks Missions
+    // they see only this project's runs (preserves the legacy semantic).
+    setProjectFilter(projectId);
+    navigate(`/projects/${projectId}/dashboard`);
     if (isMobile) setMobileSidebarOpen(false);
   };
+
+  // Match `/projects/<id>/...` so the sidebar entry highlights when the
+  // user is on that project's dashboard (regardless of whether they got
+  // there via the sidebar or a direct URL / chip).
+  const activeProjectIdFromUrl = (() => {
+    const m = location.pathname.match(/^\/projects\/([^/]+)/);
+    return m ? m[1] : null;
+  })();
 
   const expanded = isMobile ? true : sidebarExpanded !== false;
 
@@ -190,11 +202,14 @@ export default function Sidebar() {
               </span>
             </NavLink>
             {projects.map((project) => {
-              const isActive = projectFilter === project.id;
+              // v2.7.3 — highlight by URL match (you're ON this project)
+              // OR by the runs-list filter (you last toggled this one).
+              const isActive = activeProjectIdFromUrl === project.id || projectFilter === project.id;
               return (
                 <button
                   key={project.id}
                   onClick={() => handleProjectClick(project.id)}
+                  title={`Open ${project.name} dashboard`}
                   className={cn(
                     'flex items-center h-8 w-full px-2.5 gap-2.5 rounded-md transition-colors text-left',
                     'hover:bg-[var(--gray-200)] group',
