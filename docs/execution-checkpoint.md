@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (after Wave 2 batch 2 — M-010 / M-013 / M-014)
+## State at checkpoint (after Wave 2 batch 3 — M-015 / M-023 / M-024)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `35080611` — `feat(adr): controller + project ADRs panel (M-014)` (about to push)
+**Last pushed commit:** `703bc874` — `feat(standards): org-level standards CRUD (M-024)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** Wave 2 IN PROGRESS — 6 of ~16 items done
+**Wave:** Wave 2 IN PROGRESS — 9 of ~16 items done
 
 ## Master list
 
@@ -33,7 +33,7 @@ Plus 2 housekeeping commits: `6699ddc2` (handoff note) + `ab487cfa` (checkpoint 
 
 ApiContractTest green after Wave 1 close.
 
-## Wave 2 — completed so far (6 of ~16)
+## Wave 2 — completed so far (9 of ~16)
 
 | M-ID | Title | Commit |
 |---|---|---|
@@ -43,20 +43,20 @@ ApiContractTest green after Wave 1 close.
 | M-010 | halt-all-active-runs SUPER_ADMIN tool (V2RunOrchestrator.haltAllActiveRuns + AdminPage button) | 36e83345 |
 | M-013 | Unified governance audit + activity page (V22 + V133 at /audit + /governance/audit alias) | 4ddc39cf |
 | M-014 | ADR controller + Project → Code → ADRs panel | 35080611 |
+| M-015 | Invariant controller + Project → Code → Invariants panel | 4f31c314 |
+| M-023 | TemplateGrid wired into EmptyProjectLanding + ExecutionSetup pre-fill plumbing | 61c925fa |
+| M-024 | OrgStandardController CRUD + OrgStandardsManager UI on /org/settings | 703bc874 |
 
-M-003 / M-004 / M-010 / M-014 require a backend restart to surface
-live data (current `:8081` is the pre-batch jar). All shells render
-gracefully until the next deploy.
+M-003 / M-004 / M-010 / M-014 / M-015 / M-024 all need a backend
+restart to surface live data on `:8081` (which still runs the
+pre-batch jar). Frontend shells render gracefully until the next deploy.
 
 ApiContractTest green throughout.
 
-## Wave 2 — remaining (~10 of ~16 items)
+## Wave 2 — remaining (~7 of ~16 items)
 
 In execution order:
 
-- **M-015** — Invariant controller + page. `ArchInvariant` + `InvariantChecker` exist; need REST + Project → Invariants tab.
-- **M-023** — TemplateGrid wire (sample-spec gallery on RunsNewLanding likely).
-- **M-024** — Standards CRUD UI. `StandardsOverrideController` exists; org-level standards CRUD missing.
 - **M-027** — BEST VALUE chip move on PlansPage (currently on MAX/Team — confirm which tier should wear it post-V144 ladder).
 - **M-028** — TEAM seats CTA from /admin (potentially redundant with M-002 — log+skip if so).
 - **M-034** — Project activity feed page. `GET /api/projects/{id}/activity` exists (V133); need a Project → Activity full feed.
@@ -72,6 +72,10 @@ M-011 (Razorpay seats), M-016 (SAML enforcement), M-017 (DSAR), M-018 (status pa
 ## Backlog (~16 items)
 
 M-021 (VerdictPill backfill), M-035 (multi-org), M-036 (custom roles), M-037 (SCIM), M-038 (audit retention UI), M-040 (per-team RBAC), M-041 (security questionnaire), M-042 (audit diff), M-047 (OAuth init wire), M-048 (conversational default), M-049 (activation funnel reads), M-050 (multi-tenant seed), M-052 (ENT floor — anchor "Contact sales" per parked #3), M-053-054 (notif body), M-055-058 (housekeeping), M-064-066 (nits)
+
+## Final pass (runs LAST — after every other M-item)
+
+- **M-067 — Doc-tree refresh from current code state.** Recreate root .md + every file under `docs/`. Reassess every `docs/plans/` file and either mark SHIPPED with live-code refs, mark SUPERSEDED-BY-XXX with a pointer, or rewrite as a still-pending plan matching post-execution reality. One commit per logical doc cluster. Effort: L. Source: user dispatch 2026-04-27. Reason it's last: docs can only be accurate after every other M-item lands; earlier passes would re-stale on the next batch.
 
 ## Authorized scope
 
