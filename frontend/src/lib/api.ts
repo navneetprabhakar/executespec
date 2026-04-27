@@ -2306,6 +2306,29 @@ export const listProjectAdrs = (projectId: string, acceptedOnly = false) =>
 export const getProjectAdr = (projectId: string, id: string) =>
   req<AdrDetail>(`/projects/${projectId}/adrs/${id}`);
 
+// M-015 (Wave 2) — V138 architectural invariants
+export interface InvariantSummary {
+  id: string;
+  invariantId: string;       // human-readable id from invariants.yaml
+  status: string;            // ACTIVE | RETIRED
+  invariantYaml: string;
+  createdAt: string;
+}
+
+export interface InvariantViolation {
+  id: string;
+  invariantUuid: string | null;
+  detectedAt: string;
+  phase: string;             // PLAN | ARCH_REGEN
+  detail: string | null;     // jsonb body
+}
+
+export const listProjectInvariants = (projectId: string) =>
+  req<InvariantSummary[]>(`/projects/${projectId}/invariants`);
+
+export const listProjectInvariantViolations = (projectId: string) =>
+  req<InvariantViolation[]>(`/projects/${projectId}/invariants/violations`);
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
