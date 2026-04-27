@@ -79,6 +79,11 @@ export default function RunsPage() {
 
   return (
     <div className="flex h-full overflow-hidden">
+      {/* M-064 (Backlog) — page-header h1 for a11y. The visible chrome
+          is the breadcrumb + the run-list panel; screen readers expect
+          a top-level heading on the route. sr-only keeps the layout
+          unchanged. */}
+      <h1 className="sr-only">Missions</h1>
       {/* Left panel — run list (collapsible, resizable).
           Mobile: full viewport width so the scope toggle + status filter can
           scroll horizontally inside the column instead of stretching the
