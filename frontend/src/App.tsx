@@ -63,6 +63,7 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 // touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
 import V3Shell from '@/v3/components/V3Shell';
 import V3HomePlaceholder from '@/v3/pages/V3HomePlaceholder';
+import V3ProjectHomePlaceholder from '@/v3/pages/V3ProjectHomePlaceholder';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -131,6 +132,9 @@ export default function App() {
       <Route path="/v3" element={<V3Shell />}>
         <Route index element={<Navigate to="home" replace />} />
         <Route path="home" element={<V3HomePlaceholder />} />
+        {/* R-124 — project route. Real project home is R-120; the
+            placeholder confirms slug routing works end-to-end. */}
+        <Route path="p/:slug" element={<V3ProjectHomePlaceholder />} />
       </Route>
 
       {/* ── Protected app routes ── */}

@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { useV3Ui } from '../stores/useV3Ui';
 import AvatarMenu from './AvatarMenu';
+import ProjectSwitcher from './ProjectSwitcher';
 
 /**
  * R-101 — top-bar shell.
@@ -21,9 +22,7 @@ export default function V3TopBar() {
         ExecuteSpec
       </Link>
       <div className="v3-topbar__center">
-        <span className="v3-topbar__placeholder" aria-hidden="true">
-          project switcher · R-124
-        </span>
+        <ProjectSwitcher />
       </div>
       <div className="v3-topbar__right">
         <button
