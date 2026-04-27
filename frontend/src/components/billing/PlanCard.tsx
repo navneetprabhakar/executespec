@@ -87,6 +87,12 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, ini
         </span>
       )}
 
+      {/* M-027 (Wave 2) — BEST VALUE chip currently fires on MAX (BYOK
+          $29 unlimited; pre-V144 ladder placement). Post-V144 the choice
+          is ambiguous — TEAM ($49/seat managed-key shared pool) is the
+          higher-ARPU upsell for orgs with 2+ engineers. Keeping on MAX
+          for now (lowest-cost-of-entry headline) until product confirms
+          which tier should wear the chip. Decision tracked in checkpoint. */}
       {isMax && !isCurrentPlan && (
         <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-status-success text-white text-xs font-semibold px-3 py-1 rounded-sm">
           BEST VALUE
