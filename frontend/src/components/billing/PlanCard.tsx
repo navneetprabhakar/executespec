@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BillingPlan } from '@/lib/billing-api';
 
 // v2.6.0 — TEAM sits between PRO and MAX. Fractional rank keeps existing
@@ -13,6 +13,11 @@ interface PlanCardProps {
   showInr: boolean;
   onSelect: (planId: string, seats?: number) => void;
   userTier?: string;
+  /** M-002 — when arriving from /admin?seats=N, pre-fill the TEAM seat picker. */
+  initialSeats?: number;
+  /** M-002 — highlight ring + scroll target when this card matches the
+   *  ?tier=... param. */
+  highlight?: boolean;
 }
 
 // v2.6.0 — TEAM self-serve seat range (must match backend OrgService).
@@ -20,14 +25,26 @@ const TEAM_MIN_SEATS = 2;
 const TEAM_MAX_SEATS = 20;
 const TEAM_DEFAULT_SEATS = 3;
 
-export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: PlanCardProps) {
+export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, initialSeats, highlight }: PlanCardProps) {
   const userRank = TIER_RANK[userTier ?? 'FREE'] ?? 0;
   const planRank = TIER_RANK[plan.tier] ?? 0;
   const isDowngrade = planRank < userRank;
   const isUpgrade = planRank > userRank;
 
   const isTeam = plan.tier === 'TEAM';
-  const [seats, setSeats] = useState(TEAM_DEFAULT_SEATS);
+  const seedSeats = isTeam && initialSeats
+    ? Math.max(TEAM_MIN_SEATS, Math.min(TEAM_MAX_SEATS, initialSeats))
+    : TEAM_DEFAULT_SEATS;
+  const [seats, setSeats] = useState(seedSeats);
+  const cardRef = useRef<HTMLDivElement | null>(null);
+
+  // M-002 — when the page is opened with ?tier=team and this card matches,
+  // scroll it into view + briefly flash a ring so the buyer lands on the
+  // exact card they came for (instead of the top of /plans).
+  useEffect(() => {
+    if (!highlight) return;
+    cardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [highlight]);
   const effectiveSeats = isTeam ? seats : 1;
 
   // TEAM price = per-seat × seats. Other tiers use base amount.
@@ -55,9 +72,11 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier }: P
     : plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Managed Keys';
 
   return (
-    <div className={`relative rounded-md border p-4 sm:p-6 flex flex-col ${
+    <div
+      ref={cardRef}
+      className={`relative rounded-md border p-4 sm:p-6 flex flex-col ${
       isMax ? 'border-status-success' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
-    } ${isCurrentPlan ? 'ring-2 ring-accent-blue' : ''}`}>
+    } ${isCurrentPlan ? 'ring-2 ring-accent-blue' : ''} ${highlight && !isCurrentPlan ? 'ring-2 ring-accent-blue' : ''}`}>
 
       {isPopular && (
         <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-accent-blue text-primary text-xs font-semibold px-3 py-1 rounded-sm">

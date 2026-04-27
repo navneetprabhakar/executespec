@@ -16,6 +16,16 @@ export default function PlansPage() {
   // surface the Pro plan inline so the buyer can manage their existing sub.
   const legacyView = searchParams.get('legacy') === '1';
 
+  // M-002 (Wave 1) — first-seat-purchase on-ramp. When the OrgAdmin's "+seat"
+  // CTA fires on a non-TEAM org, redirect lands here with
+  //   /plans?tier=team&seats=N&from=admin
+  // We highlight the matching plan card, pre-fill the seat picker to N, and
+  // surface a soft banner so the buyer knows where they came from.
+  const targetTier = (searchParams.get('tier') ?? '').toUpperCase();
+  const seatsParam = parseInt(searchParams.get('seats') ?? '', 10);
+  const targetSeats = Number.isFinite(seatsParam) && seatsParam >= 2 ? seatsParam : undefined;
+  const fromAdmin = searchParams.get('from') === 'admin';
+
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [loading, setLoading] = useState(true);
   // Default: USD for everyone except detected-IN locales (language or timezone).
@@ -146,6 +156,20 @@ export default function PlansPage() {
       accent="transparent"
       description="No credits to translate. No token markups. Every tier shows you what ExecuteSpec really is."
     >
+      {/* M-002 (Wave 1) — soft landing banner for the OrgAdmin "+seat"
+          on-ramp. Tells the buyer they came here from /admin to add seats and
+          confirms the seat count was carried across. */}
+      {fromAdmin && targetTier === 'TEAM' && (
+        <div className="mb-6 p-4 bg-status-success/10 border border-status-success/30 rounded-md text-sm">
+          <p className="font-medium text-primary mb-1">
+            Adding {targetSeats ?? 'team'} seats — start your Team plan to unlock seat management.
+          </p>
+          <p className="text-muted text-xs leading-relaxed">
+            We pre-selected the Team tier with {targetSeats ?? 'your chosen'} seats. Adjust below if needed, then continue to checkout.
+          </p>
+        </div>
+      )}
+
       {/* M-009 (Wave 1) — soft landing banner for grandfathered PRO subscribers
           arriving via /legacy/billing → /plans?legacy=1 redirect. */}
       {legacyView && (
@@ -216,6 +240,8 @@ export default function PlansPage() {
             showInr={showInr}
             onSelect={handleSelectPlan}
             userTier={user?.tier}
+            initialSeats={plan.tier === 'TEAM' ? targetSeats : undefined}
+            highlight={targetTier !== '' && plan.tier === targetTier}
           />
         ))}
       </div>
