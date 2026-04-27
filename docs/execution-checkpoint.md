@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Wave 3 → Backlog boundary)
+## State at checkpoint (Backlog batch 1 — M-047 / M-021 / M-038)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `444d8f46` — `feat(billing): TEAM-BYOK plan at $39/seat (M-051)` (about to push)
+**Last pushed commit:** `26aad86c` — `feat(audit): retention window now feature-flag-tunable (M-038)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Wave 3 CLOSED** — 14 of 14 items shipped. **Backlog STARTING.**
+**Wave:** **Backlog IN PROGRESS** — 3 of ~16 items shipped
 
 ## Master list
 
@@ -89,13 +89,22 @@ ApiContractTest green throughout.
 
 **WAVE 3 CLOSED — 14/14 items shipped.**
 
+## Backlog — completed so far (3 of ~16)
+
+| M-ID | Title | Commit |
+|---|---|---|
+| M-047 | LoginPage routes OAuth via /api/auth/oauth2/init?surface=… for Phase-2 surface stash | 0bc2a31f |
+| M-021 | VerdictPill backfill on InlineRunDetail header — closes the Plan-1 VerdictPill rollout | e6891cae |
+| M-038 | activity.retention.days flag-tunable + V150 seed — SUPER_ADMIN can adjust without deploy | 26aad86c |
+
 ## Backlog (~16 items)
 
 M-021 (VerdictPill backfill), M-035 (multi-org), M-036 (custom roles), M-037 (SCIM), M-038 (audit retention UI), M-040 (per-team RBAC), M-041 (security questionnaire), M-042 (audit diff), M-047 (OAuth init wire), M-048 (conversational default), M-049 (activation funnel reads), M-050 (multi-tenant seed), M-052 (ENT floor — anchor "Contact sales" per parked #3), M-053-054 (notif body), M-055-058 (housekeeping), M-064-066 (nits)
 
-## Final pass (runs LAST — after every other M-item)
+## Final pass (run in this exact order at the very end)
 
-- **M-067 — Doc-tree refresh from current code state.** Recreate root .md + every file under `docs/`. Reassess every `docs/plans/` file and either mark SHIPPED with live-code refs, mark SUPERSEDED-BY-XXX with a pointer, or rewrite as a still-pending plan matching post-execution reality. One commit per logical doc cluster. Effort: L. Source: user dispatch 2026-04-27. Reason it's last: docs can only be accurate after every other M-item lands; earlier passes would re-stale on the next batch.
+1. **M-067 — Doc-tree refresh from current code state.** Recreate root .md + every file under `docs/`. Reassess every `docs/plans/` file and either mark SHIPPED with live-code refs, mark SUPERSEDED-BY-XXX with a pointer, or rewrite as a still-pending plan matching post-execution reality. One commit per logical doc cluster. Effort: L. Source: user dispatch 2026-04-27. Reason it's last: docs can only be accurate after every other M-item lands.
+2. **M-068 — Final acceptance UX pass — all personas — consolidated PDF report.** AFTER M-067: cleanup any stale :8081/:5174 stack, restart both servers from `feature/v2.7-foundation`, then end-to-end test ALL personas (VIBE: Sara/Raj/Priya/Marcus/Theo · TEAM/ENT: Eric/Erin/Carmen/Dharma/Priya-2 + SUPER_ADMIN). Authenticate via the real login endpoint (admin@executespec.ai/Admin@1234 + provisioned non-admin test users). Tag findings `[browser]`/`[live-api]`/`[code-trace]` per the v2 fidelity standard. Screenshot every meaningful screen per (persona × mode × feature). Deliverables: `/tmp/executespec-final-acceptance-report.md` (severity-tagged punch-list, per-persona verdicts table, per-feature verdicts, "what changed since v2 assessment" appendix) + matching mobile PDF. Email to navneet.prabhakar007@gmail.com via Gmail SMTP. Effort: XL. Source: user dispatch 2026-04-27. Reason it's last-of-the-last: validates the entire shipped surface against every persona using the *post-execution* code + the *post-refresh* docs as ground truth.
 
 ## Authorized scope
 
