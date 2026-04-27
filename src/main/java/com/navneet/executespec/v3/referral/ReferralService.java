@@ -2,6 +2,7 @@ package com.navneet.executespec.v3.referral;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
+import com.navneet.executespec.auth.service.MailService;
 import com.navneet.executespec.v3.credit.LifetimeCreditService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -44,6 +45,10 @@ public class ReferralService {
     private final AppUserRepository userRepo;
     private final ReferralInviteRepository inviteRepo;
     private final LifetimeCreditService lifetimeCredit;
+    /** R-162 follow-up — send the magic-link signup email so an
+     *  invite is more than a recorded intent. Best-effort; @Async +
+     *  try/catch ensures email failures never block the invite write. */
+    private final MailService mailService;
 
     /** Recorded by the referrer (POST /api/v3/referrals/invite). */
     @Transactional
@@ -91,9 +96,22 @@ public class ReferralService {
         inviteRepo.save(invite);
         log.info("v3 referral invite recorded — referrer={} referee={} id={}",
                 referrerUserId, normalised, invite.getId());
-        // TODO(R-162 follow-up): trigger a signup-with-referrer-token
-        // email here once the v3 mail template lands. The token column
-        // is already populated and ready for use.
+
+        // R-162 follow-up — fire the magic-link signup email. Best-effort:
+        // a missing SMTP config or transient mail error must never abort
+        // the invite write (which the user has already paid the round-trip
+        // for). MailService methods are @Async so this returns immediately.
+        try {
+            String displayName = referrer.getFirstName();
+            if (displayName == null || displayName.isBlank()) {
+                displayName = referrer.getEmail();
+            }
+            mailService.sendV3ReferralInvite(normalised, displayName, invite.getToken());
+        } catch (Exception mailErr) {
+            log.warn("v3 referral email failed for invite={} — recorded but not delivered: {}",
+                    invite.getId(), mailErr.getMessage());
+        }
+
         return new InviteRecord(referrerUserId, normalised, invite.getCreatedAt(), InviteStatus.PENDING);
     }
 
