@@ -3,6 +3,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import RoleGuard from '@/components/auth/RoleGuard';
 import * as api from '@/lib/api';
 import SsoConfigCard from '@/components/settings/SsoConfigCard';
+import OrgStandardsManager from '@/components/settings/OrgStandardsManager';
 
 // ── Create Organization Form ───────────────────────────────────────────────
 
@@ -272,6 +273,12 @@ export default function OrgSettingsPage() {
         <div>
           <h2 className="text-lg font-semibold text-primary mb-3">Single sign-on</h2>
           <SsoConfigCard />
+        </div>
+
+        {/* Engineering standards CRUD (M-024 Wave 2) */}
+        <div>
+          <h2 className="text-lg font-semibold text-primary mb-3">Engineering standards</h2>
+          <OrgStandardsManager orgId={org.id} />
         </div>
 
         {/* Pending invitations */}

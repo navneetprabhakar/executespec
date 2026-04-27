@@ -2329,6 +2329,40 @@ export const listProjectInvariants = (projectId: string) =>
 export const listProjectInvariantViolations = (projectId: string) =>
   req<InvariantViolation[]>(`/projects/${projectId}/invariants/violations`);
 
+// M-024 (Wave 2) — org-level standards CRUD
+export interface OrgStandardDto {
+  id: string;
+  standardId: string;
+  standardYaml: string;
+  orgLevelLocked: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OrgStandardUpsert {
+  standardId?: string;
+  standardYaml?: string;
+  orgLevelLocked?: boolean;
+}
+
+export const listOrgStandards = (orgId: string) =>
+  req<OrgStandardDto[]>(`/orgs/${orgId}/standards`);
+
+export const createOrgStandard = (orgId: string, body: OrgStandardUpsert) =>
+  req<OrgStandardDto>(`/orgs/${orgId}/standards`, {
+    method: 'POST', body: JSON.stringify(body),
+  });
+
+export const updateOrgStandard = (orgId: string, standardId: string, body: OrgStandardUpsert) =>
+  req<OrgStandardDto>(`/orgs/${orgId}/standards/${encodeURIComponent(standardId)}`, {
+    method: 'PUT', body: JSON.stringify(body),
+  });
+
+export const deleteOrgStandard = (orgId: string, standardId: string) =>
+  req<void>(`/orgs/${orgId}/standards/${encodeURIComponent(standardId)}`, {
+    method: 'DELETE',
+  });
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
