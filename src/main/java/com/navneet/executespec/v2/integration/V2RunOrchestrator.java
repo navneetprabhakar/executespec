@@ -154,6 +154,15 @@ public class V2RunOrchestrator {
     private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
     /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
     private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
+
+    /**
+     * R-162 — referral hook. Wired here so that when a referee's first
+     * run reaches a successful terminal status, the inviting Free user
+     * gets +5 lifetime credits granted automatically. Idempotent on
+     * the service side (uses pending-invite presence as the once-only
+     * marker until V153 promotes it to a granted_at column).
+     */
+    private final com.navneet.executespec.v3.referral.ReferralService referralService;
     /** v2.5.8 — publishes PipelineEvent.RunCompleted/RunFailed so in-app
      *  notifications, quota refund, and workspace GCS upload listeners fire for
      *  V2 runs. Previously only V1 PipelineHarness published these events,
@@ -1220,6 +1229,21 @@ public class V2RunOrchestrator {
             if (cost.outputTokens() > persistedOut) r.setTotalOutputTokens(cost.outputTokens());
             runRepo.save(r);
             writeRunCostLog(r, cost);
+
+            // R-162 — referral grant hook. Fires only on successful
+            // terminal status (COMPLETE) AND only when the run owner
+            // is referenced by another user via app_user.referred_by_user_id.
+            // ReferralService.onRefereeFirstReadyRun is idempotent so a
+            // restart-mid-flight or a terminate-twice race can't double-credit.
+            if ("COMPLETE".equals(r.getStatus()) && r.getCreatedByUserId() != null) {
+                try {
+                    referralService.onRefereeFirstReadyRun(r.getCreatedByUserId());
+                } catch (Exception refErr) {
+                    // Never fail a terminate on the referral side-effect.
+                    log.warn("v3 referral hook failed for run={} owner={} — {}",
+                            runId, r.getCreatedByUserId(), refErr.getMessage());
+                }
+            }
         });
         broadcaster.emit(runId, RunEvent.runStatus(runId, finalStatus));
         broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));

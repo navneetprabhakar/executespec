@@ -8,6 +8,7 @@ import { useUiStore } from '@/stores/useUiStore';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { TIER_DISPLAY } from '../lib/terminology';
 import Pill from '../components/Pill';
+import { isV3OptedIn, setV3OptedIn } from '../lib/optIn';
 
 /**
  * R-140 — single-page settings stack.
@@ -132,6 +133,9 @@ export default function V3Settings() {
         </Row>
       </Card>
 
+      {/* ── v3 opt-in (R-180) ──────────────────────────────────────────── */}
+      <V3OptInCard />
+
       {/* ── Repos / integrations ────────────────────────────────────────── */}
       <Card title="Repos & integrations">
         <Row label="GitHub">
@@ -207,6 +211,51 @@ export default function V3Settings() {
         </div>
       )}
     </div>
+  );
+}
+
+// ─── R-180 — v3 opt-in card ─────────────────────────────────────────────────
+
+function V3OptInCard() {
+  const [optedIn, setOptedIn] = useState(isV3OptedIn());
+  function toggle() {
+    const next = !optedIn;
+    setV3OptedIn(next);
+    setOptedIn(next);
+  }
+  return (
+    <Card title="Try the new ExecuteSpec everywhere">
+      <Row label="Use v3 for v2 routes too">
+        <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
+          <Pill tone={optedIn ? 'ok' : 'neutral'} size="sm">
+            {optedIn ? 'On' : 'Off'}
+          </Pill>
+          <button
+            type="button"
+            onClick={toggle}
+            style={{
+              padding: '4px 10px',
+              fontSize: 11.5,
+              fontWeight: 600,
+              background: optedIn ? 'transparent' : 'var(--v3-brand)',
+              color: optedIn ? 'var(--v3-text-muted)' : '#0B0D10',
+              border: optedIn ? '1px solid var(--v3-border)' : 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            {optedIn ? 'Turn off' : 'Turn on'}
+          </button>
+        </span>
+      </Row>
+      <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--v3-text-subtle)', lineHeight: 1.55 }}>
+        When on, v2 routes (<code>/dashboard</code>, <code>/billing</code>, <code>/integrations</code>,{' '}
+        <code>/settings</code>, etc.) automatically redirect to their v3
+        equivalents. Old browser bookmarks and email links keep working.
+        Turn off any time to switch back.
+      </p>
+    </Card>
   );
 }
 

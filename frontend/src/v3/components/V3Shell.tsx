@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import V3TopBar from './V3TopBar';
 import CmdK from './CmdK';
 import { FreeCapToast, FreeCapBlockingModal } from './FreeCapNudge';
+import TourBanner from './TourBanner';
 import { useV3Ui } from '../stores/useV3Ui';
 import '../v3.css';
 
@@ -41,6 +42,7 @@ export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean })
   return (
     <div className="v3-root">
       {withTopBar && <V3TopBar />}
+      <TourBanner />
       <main className="v3-main">
         <Outlet />
       </main>
