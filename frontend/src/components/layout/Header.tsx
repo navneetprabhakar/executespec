@@ -21,7 +21,7 @@ function breadcrumbFromPath(pathname: string): { primary: string; secondary?: st
   if (pathname.startsWith('/deployments')) return { primary: 'Deployments' };
   if (pathname.startsWith('/invoices')) return { primary: 'Invoices' };
   if (pathname.startsWith('/accounting')) return { primary: 'Accounting' };
-  if (pathname.startsWith('/audit')) return { primary: 'Audit' };
+  if (pathname.startsWith('/audit') || pathname.startsWith('/governance/audit')) return { primary: 'Governance', secondary: 'Audit & activity' };
   if (pathname.startsWith('/admin')) return { primary: 'Admin' };
   if (pathname.startsWith('/executions/')) return { primary: 'Launches', secondary: 'Execution' };
   if (pathname.startsWith('/reports/shared/')) return { primary: 'Shared report' };

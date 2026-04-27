@@ -144,6 +144,11 @@ export default function App() {
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="audit" element={<AuditPage />} />
+          {/* M-013 (Wave 2) — canonical "governance" alias for the unified
+              audit + activity page. Per parked decision #4, V22 (admin
+              audit) and V133 (project activity) live in separate tables
+              but render at one URL. */}
+          <Route path="governance/audit" element={<AuditPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           {/* v2.5.14 Phase 3.1 — executive summary (business-owner persona). */}
