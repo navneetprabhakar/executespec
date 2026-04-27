@@ -23,8 +23,11 @@ class ActivityFeedRetentionJobTest {
     @BeforeEach
     void setUp() {
         jdbc = mock(JdbcTemplate.class);
-        job = new ActivityFeedRetentionJob(jdbc);
-        ReflectionTestUtils.setField(job, "retentionDays", 365);
+        // M-038 — constructor now takes FeatureFlagService too. Pass null;
+        // effectiveRetentionDays() handles the null branch and falls back
+        // to retentionDaysDefault.
+        job = new ActivityFeedRetentionJob(jdbc, null);
+        ReflectionTestUtils.setField(job, "retentionDaysDefault", 365);
         ReflectionTestUtils.setField(job, "dryRun", true);
     }
 

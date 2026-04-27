@@ -53,12 +53,15 @@ public class ActivityAudit {
     // ── M-019 (Wave 3) — append-only hash chain (V147) ─────────────────────
 
     /** SHA-256 hex of the previous chained row's row_hash; '0'×64 for
-     *  the genesis row. Null on pre-V147 historical rows. */
+     *  the genesis row. Null on pre-V147 historical rows.
+     *  V151 widens the V147 CHAR(64) column to VARCHAR(64) so the
+     *  Hibernate schema validator stays happy. */
     @Column(name = "prev_hash", length = 64)
     private String prevHash;
 
     /** SHA-256 hex of (prev_hash || canonical_row_content). Null on
-     *  pre-V147 historical rows. Verifier walks the chain by recomputing. */
+     *  pre-V147 historical rows. Verifier walks the chain by recomputing.
+     *  Same V151 widen as prev_hash above. */
     @Column(name = "row_hash", length = 64)
     private String rowHash;
 
