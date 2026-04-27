@@ -10,8 +10,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentMap;
+import java.util.UUID;
 
 /**
  * R-162 — referral mechanism for the v3 Free-tier growth loop.
@@ -26,42 +25,25 @@ import java.util.concurrent.ConcurrentMap;
  * Anti-fraud: stops invite-spam farms from harvesting credits via
  * accounts that never actually run anything.
  *
- * Wave-2 ships the SHAPE end-to-end:
- *   - recordInvite(referrer, email) stores the pending invite.
- *   - bindReferral(refereeUserId, refereeEmail) is called by the auth
- *     flow when a new account signs up; it stamps
- *     app_user.referred_by_user_id (V152 column) on the referee.
- *   - onRefereeFirstReadyRun(userId) is called by the run-completion
- *     hook (TODO wire-point in V2RunOrchestrator) to grant the +5
- *     credit to the referrer.
- *   - getInviteState(referrerId) returns the pending + accepted
- *     counts so the UI can show "3 invites pending, 2 accepted."
+ * Persistence (V153): all invites live in the {@code referral_invite}
+ * table. Wave-2 used an in-memory ConcurrentHashMap that lost state
+ * on JVM restart; that path was retired in this refactor.
  *
- * Wave-3 follow-ups (TODO comments below):
- *   - Promote the in-memory pendingInvites map to the
- *     `referral_invite` table once the email pipeline lands.
- *   - Send a real magic-link signup email to refereeEmail (today
- *     we just record the intent).
- *   - Persist accepted/granted counts so the UI survives JVM restart.
+ * Idempotency anchor: {@code referral_invite.granted_at}. The credit
+ * grant only fires on rows where {@code accepted_at IS NOT NULL AND
+ * granted_at IS NULL}.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class ReferralService {
 
-    private final AppUserRepository userRepo;
-    private final LifetimeCreditService lifetimeCredit;
+    /** Per-invite grant — see greenfield doc §7.5. */
+    public static final int INVITE_GRANT = 5;
 
-    /**
-     * In-memory pending-invite store, keyed by lower-cased referee
-     * email. Maps to the inviting user's id. Lives only for the JVM
-     * process — Wave 3 will persist.
-     *
-     * TODO(R-162 follow-up): promote to a `referral_invite` table
-     * with columns (id, referrer_user_id, referee_email, token,
-     * created_at, accepted_at, granted_at). Add Flyway V153.
-     */
-    private final ConcurrentMap<String, PendingInvite> pendingInvites = new ConcurrentHashMap<>();
+    private final AppUserRepository userRepo;
+    private final ReferralInviteRepository inviteRepo;
+    private final LifetimeCreditService lifetimeCredit;
 
     /** Recorded by the referrer (POST /api/v3/referrals/invite). */
     @Transactional
@@ -76,13 +58,13 @@ public class ReferralService {
         AppUser referrer = userRepo.findById(referrerUserId).orElseThrow(
                 () -> new IllegalArgumentException("referrer not found: " + referrerUserId));
 
-        // Block self-invite
+        // Block self-invite.
         if (referrer.getEmail() != null && referrer.getEmail().equalsIgnoreCase(normalised)) {
             throw new IllegalArgumentException("cannot invite yourself");
         }
 
-        // If the email already exists as a user — short-circuit; we don't
-        // re-credit existing users.
+        // Short-circuit when the referee already has an account — no
+        // re-credit, no row created.
         Optional<AppUser> existing = userRepo.findAll().stream()
                 .filter(u -> normalised.equalsIgnoreCase(u.getEmail()))
                 .findFirst();
@@ -91,51 +73,73 @@ public class ReferralService {
             return new InviteRecord(referrerUserId, normalised, Instant.now(), InviteStatus.ALREADY_EXISTS);
         }
 
-        PendingInvite invite = new PendingInvite(referrerUserId, normalised, Instant.now());
-        pendingInvites.put(normalised, invite);
-        log.info("v3 referral invite recorded — referrer={} referee={}", referrerUserId, normalised);
+        // Idempotency: if this referrer already invited this email,
+        // return the existing row rather than creating a duplicate.
+        Optional<ReferralInvite> dupe = inviteRepo.findByReferrerAndEmail(referrerUserId, normalised);
+        if (dupe.isPresent()) {
+            ReferralInvite r = dupe.get();
+            return new InviteRecord(r.getReferrerUserId(), r.getRefereeEmail(), r.getCreatedAt(), InviteStatus.PENDING);
+        }
+
+        ReferralInvite invite = ReferralInvite.builder()
+                .id(UUID.randomUUID().toString())
+                .referrerUserId(referrerUserId)
+                .refereeEmail(normalised)
+                .token(generateToken())
+                .createdAt(Instant.now())
+                .build();
+        inviteRepo.save(invite);
+        log.info("v3 referral invite recorded — referrer={} referee={} id={}",
+                referrerUserId, normalised, invite.getId());
         // TODO(R-162 follow-up): trigger a signup-with-referrer-token
-        // email here once the v3 mail template lands.
-        return new InviteRecord(referrerUserId, normalised, invite.createdAt(), InviteStatus.PENDING);
+        // email here once the v3 mail template lands. The token column
+        // is already populated and ready for use.
+        return new InviteRecord(referrerUserId, normalised, invite.getCreatedAt(), InviteStatus.PENDING);
     }
 
     /**
      * Called by the auth flow on new-user signup so the referee gets
-     * `app_user.referred_by_user_id` stamped. Idempotent — running it
-     * twice for the same user is a no-op after the first stamp.
+     * {@code app_user.referred_by_user_id} stamped + the matching
+     * {@code referral_invite} row's {@code accepted_at} set. Idempotent
+     * on the user row (won't overwrite an existing binding) and on the
+     * invite row (won't re-stamp accepted_at).
      */
     @Transactional
     public boolean bindReferral(String refereeUserId, String refereeEmail) {
         if (refereeUserId == null || refereeEmail == null) return false;
         String normalised = refereeEmail.trim().toLowerCase();
-        PendingInvite invite = pendingInvites.get(normalised);
-        if (invite == null) return false;
+
+        Optional<ReferralInvite> match = inviteRepo.findByRefereeEmailIgnoreCase(normalised);
+        if (match.isEmpty()) return false;
+        ReferralInvite invite = match.get();
 
         AppUser referee = userRepo.findById(refereeUserId).orElse(null);
         if (referee == null) return false;
         if (referee.getReferredByUserId() != null) {
-            // Already bound — don't overwrite.
+            // User row already bound — don't overwrite.
             return false;
         }
-        referee.setReferredByUserId(invite.referrerUserId());
+
+        referee.setReferredByUserId(invite.getReferrerUserId());
         userRepo.save(referee);
-        // We deliberately keep the pending-invite entry around until
-        // the credit is actually granted (in onRefereeFirstReadyRun)
-        // so the inviter's pending-count UI stays consistent.
-        log.info("v3 referral bound — referee {} → referrer {}", refereeUserId, invite.referrerUserId());
+
+        if (invite.getAcceptedAt() == null) {
+            invite.setAcceptedAt(Instant.now());
+            invite.setAcceptedByUserId(refereeUserId);
+            inviteRepo.save(invite);
+        }
+
+        log.info("v3 referral bound — referee {} → referrer {}", refereeUserId, invite.getReferrerUserId());
         return true;
     }
 
     /**
      * Called by the run-completion hook (terminal status === READY) on
      * the referee's first successful run. Grants +5 lifetime credits
-     * to the referrer and clears the pending-invite entry.
+     * to the referrer and stamps {@code granted_at} so the grant only
+     * fires once.
      *
-     * TODO(R-162 follow-up): this wire-point must be added to
-     * V2RunOrchestrator's terminal-status path. The hook reads
-     * app_user.referred_by_user_id; if non-null AND the referee has
-     * never had a granted-grant before, calls this method. A
-     * `granted_at` flag on app_user prevents double-credit.
+     * Wired into V2RunOrchestrator.terminate().
      */
     @Transactional
     public boolean onRefereeFirstReadyRun(String refereeUserId) {
@@ -143,30 +147,44 @@ public class ReferralService {
         if (referee == null || referee.getReferredByUserId() == null) return false;
         String referrerId = referee.getReferredByUserId();
 
-        // Idempotency: only fire once per referee. Today we use the
-        // pending-invite presence as the marker — Wave 3 promotes to
-        // a granted_at column.
-        if (referee.getEmail() != null) {
-            pendingInvites.remove(referee.getEmail().toLowerCase());
+        // Prefer the invite row keyed by accepted user-id (most precise).
+        // Fall back to email-keyed lookup for legacy rows that never
+        // got the user-id stamp.
+        Optional<ReferralInvite> match = inviteRepo.findUngrantedByAcceptedUser(refereeUserId);
+        if (match.isEmpty() && referee.getEmail() != null) {
+            match = inviteRepo.findByRefereeEmailIgnoreCase(referee.getEmail());
         }
+        if (match.isEmpty()) return false;
+        ReferralInvite invite = match.get();
+        if (invite.getGrantedAt() != null) {
+            // Already granted — idempotent no-op.
+            return false;
+        }
+
+        invite.setGrantedAt(Instant.now());
+        inviteRepo.save(invite);
+
         int newBalance = lifetimeCredit.grantInviteCredit(referrerId);
-        log.info("v3 referral granted — referrer={} new balance={}", referrerId, newBalance);
+        log.info("v3 referral granted — referrer={} new balance={} invite={}",
+                referrerId, newBalance, invite.getId());
         return true;
     }
 
     /** Read-only state for the inviter's UI. */
+    @Transactional(readOnly = true)
     public InviteState getInviteState(String referrerUserId) {
-        long pending = pendingInvites.values().stream()
-                .filter(i -> i.referrerUserId().equals(referrerUserId))
-                .count();
+        long pending = inviteRepo.findPendingByReferrer(referrerUserId).size();
         return new InviteState(referrerUserId, (int) pending);
     }
 
-    // ── DTOs / records ────────────────────────────────────────────────────────
+    private static String generateToken() {
+        // 24-byte URL-safe random — same shape as anonymous-trial session token.
+        return java.util.UUID.randomUUID().toString().replace("-", "");
+    }
+
+    // ── DTOs / records (unchanged from Wave 2 wire) ─────────────────────────
 
     public enum InviteStatus { PENDING, ALREADY_EXISTS }
-
-    public record PendingInvite(String referrerUserId, String refereeEmail, Instant createdAt) {}
 
     public record InviteRecord(String referrerUserId, String refereeEmail,
                                Instant createdAt, InviteStatus status) {}
