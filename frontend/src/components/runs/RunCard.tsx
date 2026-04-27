@@ -5,6 +5,23 @@ import { fmtTokens, relativeTime, truncate, describeRunStatus } from '@/lib/util
 import type { RunSummary } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import { useViewMode } from '@/hooks/useViewMode';
+import VerdictPill, { deriveVerdict } from '@/components/runs/VerdictPill';
+import { ACTIVE_STATUSES, GATE_STATUSES } from '@/lib/constants';
+
+// M-043 (Wave 2) — render VerdictPill on terminal rows. RunSummary
+// only carries statusReason from the verdict-pill input set; that's
+// enough for the decision tree's hard-block / yellow-light branches
+// (FINAL_BUILD_FAILED, ALL_TASKS_FAILED, REVIEWER_FAILED, etc.).
+// Pre-v2.5.10 runs without statusReason fall through to status-only
+// rendering — VerdictPill returns null and we render nothing.
+function isTerminal(status: string | undefined): boolean {
+  if (!status) return false;
+  if (ACTIVE_STATUSES.has(status)) return false;
+  if (GATE_STATUSES.has(status)) return false;
+  // Anything else (COMPLETE / FAILED / PARTIAL / CANCELLED / STUCK / QUEUED)
+  // is terminal-ish for VerdictPill purposes; QUEUED is filtered upstream.
+  return status !== 'QUEUED';
+}
 
 interface RunCardProps {
   run: RunSummary;
@@ -24,6 +41,12 @@ const cardVariants = {
 
 export default function RunCard({ run, isActive, onClick, index, compact }: RunCardProps) {
   const { isVibe } = useViewMode();
+
+  // Derive verdict once per render. Returns null for in-flight runs and
+  // pre-v2.5.10 terminals without statusReason.
+  const verdictResult = isTerminal(run.status)
+    ? deriveVerdict({ statusReason: run.statusReason ?? null })
+    : null;
 
   // ── Vibe mode: simplified card ────────────────────────────────────────────
   if (isVibe || compact) {
@@ -81,6 +104,14 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
           <div className="flex items-center gap-2 mb-0.5">
             <span className="font-mono text-xs text-muted">{run.runId.slice(0, 12)}</span>
             <span className="text-xs text-muted">{relativeTime(run.startedAt)}</span>
+            {/* M-043 — verdict pill leads on terminal rows so the user sees
+                "Shippable / Needs review / Blocked" before they click. */}
+            {verdictResult && (
+              <VerdictPill
+                size="sm"
+                statusReason={run.statusReason ?? null}
+              />
+            )}
             {run.approvedExecutionMode === 'BATCH' && (
               <span className="text-[9px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full leading-none">Batch</span>
             )}
