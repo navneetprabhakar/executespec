@@ -58,10 +58,19 @@ v2 routes / chrome / billing surface still work at every existing path.
 These are the items the action list called out as **post-cutover** or **separate roadmap items** — explicitly outside the 3-wave plan that's now complete:
 
 * **R-190 / R-191** Vibe deletion + Mission-vocabulary purge — only safe after the v2 surface is fully retired
-* **Real LLM dispatch for /api/v3/anonymous-runs** — gated behind `v3.anonymous-trial.real-dispatch` flag pending the abuse-classifier / Redis rate-limit / cost-cap design pass
 * **D-125 design-decision revisit** — user explicitly said "we will revisit again"; 4 questions parked as TODOs in `RepoAttachPopover.tsx`
-* **R-162 V153 migration** — promote in-memory pendingInvites to a `referral_invite` table; pair with a transactional email pipeline so invites become real magic links rather than just recorded intent
 * **Real Trust Pack PDF asset** — R-151 today alerts pointing to `security@executespec.ai`; the actual 4-page download lands when compliance kicks off
+
+### Post-Wave-3 follow-ups landed (2026-04-27)
+
+Two backlog items have been progressed in-place after the original Wave-3 closeout — both shipped on `feature/conversion-redesign`, three commits since `09c543a6`:
+
+* **R-162 V153 migration + email pipeline + signup binding** — `ReferralInvite` JPA entity over a new `referral_invite` table (V153) replaces the Wave-2 in-memory `ConcurrentHashMap`. `MailService.sendV3ReferralInvite` + Thymeleaf template `email/v3-referral-invite.html` send the magic-link signup email best-effort (mail failure WARNs but never aborts the invite write). `AuthService.register` + `findOrCreateFromOAuth` auto-call `ReferralService.bindReferral` on every new-user creation (idempotent + best-effort, matches by email so no token plumbing required). The referral chain is now end-to-end: invite → email → click → signup → bind → first run → credit grant.
+* **R-111 anti-abuse infrastructure** — promoted the in-memory rate-limit + session store to Redis under new `v3/anonrun/` package. `AnonymousRunRateLimiter` (Redis INCR-then-EXPIRE, 3/hour per IP), `AnonymousRunSessionStore` (Redis JSON, 24h TTL, idempotent `bindToUser`), `AbuseHeuristic` (prompt-injection + banned-topic pre-flight gate), `AnonymousRunDispatcher` interface (default = `StubAnonymousRunDispatcher`; real LLM impl is one `@Primary @Bean` away). New `V3SignupClaimController` exposes `POST /api/v3/auth/claim-anonymous-session` (authenticated); `V3Auth.tsx` captures `?ref` / `?anon` URL params, bridges them across the OAuth round-trip via sessionStorage, and fires the claim post-login. **The dispatch flag `v3.anonymous-trial.real-dispatch` remains default OFF** — the actual LLM dispatch impl still ships separately whenever ops signs off on the cost-tracking + per-call cost cap + outline-only prompt design.
+
+What's still genuinely outside this branch:
+
+* **Real LLM dispatch impl for /api/v3/anonymous-runs** — the scaffold is now production-ready (rate-limit + session + abuse heuristic + dispatcher seam), but the actual Anthropic LIGHTWEIGHT impl with hard $0.01 per-call cap + outline-only prompt + ops spend dashboard is the deferred slice. When ops wants to enable, register a `@Primary @Bean` implementing `AnonymousRunDispatcher`.
 
 None of these block the cutover (R-180's opt-in redirect path is the soft-rollout vehicle).
 
