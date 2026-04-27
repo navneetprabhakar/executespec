@@ -62,7 +62,9 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 // v3 (R-101+) — greenfield UX redesign, mounted under /v3/* without
 // touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
 import V3Shell from '@/v3/components/V3Shell';
-import V3HomePlaceholder from '@/v3/pages/V3HomePlaceholder';
+import V3HomeRedirect from '@/v3/pages/V3HomeRedirect';
+import V3Landing from '@/v3/pages/V3Landing';
+import V3Auth from '@/v3/pages/V3Auth';
 import V3ProjectHome from '@/v3/pages/V3ProjectHome';
 import V3RunDetail from '@/v3/pages/V3RunDetail';
 import V3Settings from '@/v3/pages/V3Settings';
@@ -133,12 +135,11 @@ export default function App() {
           /v3/landing, /v3/pricing, /v3/trust, /v3/auth). */}
       <Route path="/v3" element={<V3Shell />}>
         <Route index element={<Navigate to="home" replace />} />
-        <Route path="home" element={<V3HomePlaceholder />} />
-        {/* R-120 — chat-shaped project home (the dominant screen). */}
+        <Route path="home" element={<V3HomeRedirect />} />
+        <Route path="landing" element={<V3Landing />} />
+        <Route path="auth" element={<V3Auth />} />
         <Route path="p/:slug" element={<V3ProjectHome />} />
-        {/* R-130 — PR-shaped run detail. */}
         <Route path="p/:slug/r/:runShort" element={<V3RunDetail />} />
-        {/* R-140 — single-page settings stack. */}
         <Route path="settings" element={<V3Settings />} />
       </Route>
 
