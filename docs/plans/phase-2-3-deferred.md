@@ -6,6 +6,15 @@
 >
 > This document tracks what was NOT done in the auto-execute pass, why, and
 > when each item should be picked back up.
+>
+> **M-067 stamp (2026-04-27):** PARTIALLY SUPERSEDED. The Phase 1.x items
+> tracked here mostly shipped in the v2.7 Foundation batch (Wave 1 + 2 +
+> 3 + Backlog) — see `CHANGELOG.md` v2.7 entry for the per-M-* mapping.
+> Phase 2 (cookie-domain switch, surface-split execution, multi-org) and
+> Phase 3 (multi-month moats) deferral rationale below remains
+> authoritative. Per-item first-slice + owner-needed + trigger notes
+> for the still-pending Phase-2+ items now live in
+> [`../backlog-deferred-items.md`](../backlog-deferred-items.md).
 
 ## Summary
 

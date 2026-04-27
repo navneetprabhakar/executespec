@@ -7,6 +7,76 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### Added — v2.7 Foundation execution batch (on `feature/v2.7-foundation`)
+
+Multi-week M-* execution covering Wave 1 + Wave 2 + Wave 3 + Backlog.
+44 items shipped in code/docs across 4 waves; 13 closed-clean
+(dup/skip/defer/blocked); 2 final-pass items (M-067 doc-tree
+refresh + M-068 full UX acceptance) close the loop. Detail per
+wave below.
+
+#### Wave 1 — UX foundation + Plan-1 follow-through (8 items)
+- **M-009** `/legacy/billing` soft-landing banner for grandfathered PRO subscribers.
+- **M-026** Sidebar expanded by default for first-time users (localStorage).
+- **M-007** `/plans` Annual/Monthly toggle (V146 yearly rows already live).
+- **M-012** Project export endpoint `@PreAuthorize` ORG_ADMIN+.
+- **M-006** `<Glossary>` primitive applied across ResetWorkspaceSheet, RunDetailTabs (Classifier), ValidationReportPanel (Reviewer), ScoreCard helper.
+- **M-005** GitHub App install card on IntegrationsPage with Install/Uninstall/Refresh.
+- **M-002** First-seat-purchase on-ramp — admin "+seat" button now redirects non-TEAM orgs to `/plans?tier=team&seats=N&from=admin` instead of returning a 402.
+- **M-001** "Run" → "Mission" copy-only sweep (URL paths + DTOs unchanged per parked decision #5).
+
+#### Wave 2 — Phase-2 surface foundation + governance (15 shipped + 1 dup-skipped + 1 BLOCKED)
+- **M-003** NotificationPrefController + minimal Settings matrix (V139 schema reachable from UI).
+- **M-004** SSO config card on `/org/settings` (V127 schema reachable from UI).
+- **M-008** Inline Drawer wires on NewRunModal — "Add GitHub PAT" and "Add API keys" Drawers replace bounce-to-Settings.
+- **M-010** SUPER_ADMIN halt-all-active-runs tool (`POST /api/admin/runs/halt-all`).
+- **M-013** Unified governance audit + activity page (`/audit` + `/governance/audit` alias) — V22 + V133 surfaced together per parked decision #4.
+- **M-014** ADR controller (`/api/projects/{id}/adrs`) + Project → Code → ADRs panel.
+- **M-015** Invariant controller + Project → Code → Invariants panel.
+- **M-023** TemplateGrid wired into EmptyProjectLanding + ExecutionSetup pre-fill plumbing.
+- **M-024** OrgStandard CRUD controller + OrgStandardsManager UI on `/org/settings`.
+- **M-028 SHIPPED-DUPLICATE** under M-002 (no new commit).
+- **M-034** Deep-linkable `/projects/:id/activity` URL → opens dashboard with `?drawer=activity`.
+- **M-043** VerdictPill on terminal RunCard rows in the Missions list.
+- **M-044** `docs/payment-history.md` — unified Razorpay+Stripe operator + customer reference.
+- **M-045** TEAM seat-picker default 3 → 2 in PlanCard (parked decision #9).
+- **M-046** `/exec` KPI tile drill-downs (clickable buttons → filtered Missions list / projects / scroll-to sections).
+- **M-027 BLOCKED-PRODUCT-DECISION** — BEST VALUE chip placement annotated only (`PlanCard.tsx:90`); awaits product call (keep on MAX vs move to TEAM).
+
+#### Wave 3 — Enterprise readiness + plan-approval governance (14 shipped)
+- **M-018** `docs/status-page.md` finalised on Better Stack + 7-component setup runbook + canary-runner spec + Prometheus integration.
+- **M-019** Activity-audit append-only hash chain (V147 schema + `ActivityAuditService` chain triple writer + `GET /api/admin/audit-chain/verify`).
+- **M-022** Per-team-member dashboard at `/team/:userId` + drill-down link from OrgAdminDashboard members table.
+- **M-016** `SsoConfigController` lockout-prevention guard (409 when admin enforces SSO without first SSO-logging-in themselves) + `docs/sso-saml-wiring.md` spec.
+- **M-017** DSAR data-export endpoint (`GET /api/dsar/me` + `GET /api/dsar/users/{userId}` SUPER_ADMIN-act-on-behalf).
+- **M-020** `docs/dpa-flow.md` — operator runbook for DPA request → signature → activation.
+- **M-032 + M-033 + M-039** Governance trio: `GovernanceGuard` service + V148 schema (`org.require_admin_approval_above_usd` + `project.spend_cap_usd_monthly` + `org.allowed_github_owners`); wired into `RunController.approvePlan` + `ProjectRepoService.linkToProject`/`createAndLinkNewRepo`.
+- **M-011** Razorpay seat-adjust 501 with manual-flow pointer + `PaymentGateway.updateSubscriptionQuantity` contract.
+- **M-029 + M-031** `docs/stripe-price-ids-ops.md` + `docs/cookie-domain-switch.md` (ops-side runbooks).
+- **M-030** `OrgService.changeOrgTier` stamps `org.product_id` via `TierProductSurfaceMapper` on admin tier changes.
+- **M-051** V149 TEAM-BYOK plan ($39/seat / ₹3,199/seat) per parked decision #2.
+
+#### Backlog — code wins + nits + housekeeping (7 shipped + 4 logged-skipped + 8 documented-deferred)
+- **M-047** Surface-aware OAuth init wire on LoginPage — routes through `/api/auth/oauth2/init?surface=…`.
+- **M-021** VerdictPill backfill on InlineRunDetail header (closes the Plan-1 VerdictPill rollout).
+- **M-038** `activity.retention.days` flag-tunable + V150 seed — SUPER_ADMIN can adjust without deploy.
+- **M-042** "Verify audit chain" SUPER_ADMIN button on AdminPage header (surfaces V147/M-019 verifier).
+- **M-049** ActivationFunnelController + AdminPage Reports tab panel (period dropdown + stacked-bar visual on V125 ledger).
+- **M-053 + M-054** RunCompletionNotifier failure body now leads with cost/duration signals (mirrors completion path).
+- **M-056 + M-057 + M-064** Tour-helper cleanup + vite.config.ts env-var docs + sr-only `<h1>Missions</h1>`.
+- **Logged-and-skipped:** M-055 (user-owned migration resequencing), M-058 (defer to M-067 doc refresh), M-065 + M-066 (verified-shipped, no action).
+- **Documented-deferred:** [`docs/backlog-deferred-items.md`](docs/backlog-deferred-items.md) covers M-035 multi-org / M-036 custom roles / M-037 SCIM / M-040 per-team RBAC / M-041 security questionnaire / M-048 conversational A/B / M-050 multi-tenant seed / M-052 ENT floor pricing — each with first-slice + owner-needed + when-to-re-open.
+
+#### Migrations added in this batch
+- **V147** — `activity_audit` hash chain (M-019). 3 nullable columns (`prev_hash`, `row_hash`, `chain_seq`) + Postgres sequence + 2 partial indexes for the verifier walk.
+- **V148** — Governance caps (M-032 + M-033 + M-039). 3 columns: `project.spend_cap_usd_monthly`, `org.require_admin_approval_above_usd`, `org.allowed_github_owners`.
+- **V149** — TEAM-BYOK plan (M-051). 2 new `billing_plan` rows + 3 `billing_plan_limit` rows.
+- **V150** — Activity retention flag seed (M-038). 1 `feature_flag` row.
+
+#### New docs added in this batch
+- [`docs/backlog-deferred-items.md`](docs/backlog-deferred-items.md), [`docs/cookie-domain-switch.md`](docs/cookie-domain-switch.md), [`docs/dpa-flow.md`](docs/dpa-flow.md), [`docs/payment-history.md`](docs/payment-history.md), [`docs/sso-saml-wiring.md`](docs/sso-saml-wiring.md), [`docs/stripe-price-ids-ops.md`](docs/stripe-price-ids-ops.md), `docs/execution-checkpoint.md` (running execution log).
+- [`docs/status-page.md`](docs/status-page.md) extended with the M-018 Better Stack runbook.
+
 ### Added — Hierarchical planner (v2.6.2-track, on `feature/hierarchical-planner`)
 
 Replaces the legacy single-shot `PlannerAgentV2` with a 4-phase pipeline. Removes the 8192-token output cap that was failing on multi-repo / legacy specs. All 5 slices shipped on the branch; not yet merged to `dev`/`main`. Full design + slice status in [`docs/hierarchical-planner-plan.md`](docs/hierarchical-planner-plan.md).
