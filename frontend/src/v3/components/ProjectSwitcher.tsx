@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import { getProjects, type ProjectDto } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { PROVIDER_DISPLAY } from '../lib/terminology';
+import RepoAttachPopover from './RepoAttachPopover';
 
 /**
  * R-124 — top-bar project switcher.
@@ -22,6 +23,7 @@ export default function ProjectSwitcher() {
   const [query, setQuery] = useState('');
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [repoPopoverOpen, setRepoPopoverOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
@@ -296,8 +298,8 @@ export default function ProjectSwitcher() {
             <button
               type="button"
               onClick={() => {
-                navigate('/org/projects?new=1&newRepo=1');
                 setOpen(false);
+                setRepoPopoverOpen(true);
               }}
               style={{
                 padding: '8px 10px',
@@ -316,6 +318,12 @@ export default function ProjectSwitcher() {
           </div>
         </div>
       )}
+
+      {/* R-125 — repo-attach popover */}
+      <RepoAttachPopover
+        open={repoPopoverOpen}
+        onClose={() => setRepoPopoverOpen(false)}
+      />
     </div>
   );
 }
