@@ -50,10 +50,10 @@ export default function CmdK() {
     const all: Action[] = [
       { id: 'home', label: 'Go to home', hint: 'Home', run: () => navigate('/v3/home') },
       { id: 'settings', label: 'Open settings', hint: 'Account · keys · theme', run: () => navigate('/v3/settings') },
-      { id: 'billing', label: 'Open billing & plan', hint: 'Coming soon', run: () => navigate('/v3/home') },
+      { id: 'billing', label: 'Open billing & plan', hint: 'Plan · usage · pricing', run: () => navigate('/v3/billing') },
       { id: 'team', label: 'Open team', hint: 'Coming soon', run: () => navigate('/v3/home') },
       { id: 'integrations', label: 'Open integrations', hint: 'Coming soon', run: () => navigate('/v3/home') },
-      { id: 'pricing', label: 'View pricing', hint: 'Free · Pro · Team', run: () => navigate('/v3/home') },
+      { id: 'pricing', label: 'View pricing', hint: 'Free · Pro · Team', run: () => navigate('/v3/pricing') },
       { id: 'trust', label: 'View Trust & Security', hint: 'SOC 2 · DPA', run: () => navigate('/v3/home') },
       { id: 'help', label: 'Show keyboard shortcuts', hint: '?', run: () => navigate('/v3/home') },
       { id: 'theme', label: `Switch theme (currently ${theme})`, hint: 'Light · Dark', run: () => toggleTheme() },
