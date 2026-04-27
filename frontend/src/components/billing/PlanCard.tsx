@@ -21,9 +21,12 @@ interface PlanCardProps {
 }
 
 // v2.6.0 — TEAM self-serve seat range (must match backend OrgService).
+// M-045 (Wave 2) — default flipped 3 → 2 per parked decision #9 to match
+// `included_seats=2` on the V123/V144 billing_plan rows (so the picker
+// initial value matches what the buyer's first invoice will show).
 const TEAM_MIN_SEATS = 2;
 const TEAM_MAX_SEATS = 20;
-const TEAM_DEFAULT_SEATS = 3;
+const TEAM_DEFAULT_SEATS = 2;
 
 export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, initialSeats, highlight }: PlanCardProps) {
   const userRank = TIER_RANK[userTier ?? 'FREE'] ?? 0;
