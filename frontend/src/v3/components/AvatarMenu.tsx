@@ -91,9 +91,9 @@ export default function AvatarMenu() {
     { label: 'Billing & plan', onClick: () => navigate('/v3/billing') },
   ];
   if (user.tier && user.tier !== 'FREE') {
-    items.push({ label: 'Team', onClick: () => navigate('/v3/home?dest=team') });
+    items.push({ label: 'Team', onClick: () => navigate('/v3/team') });
   }
-  items.push({ label: 'Integrations', onClick: () => navigate('/v3/home?dest=integrations') });
+  items.push({ label: 'Integrations', onClick: () => navigate('/v3/integrations') });
   if (isOrgAdmin || isSuperAdmin) {
     items.push({ label: 'Insights', onClick: () => navigate('/v3/home?dest=insights') });
   }

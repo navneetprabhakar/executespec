@@ -70,6 +70,8 @@ import V3RunDetail from '@/v3/pages/V3RunDetail';
 import V3Settings from '@/v3/pages/V3Settings';
 import V3Billing from '@/v3/pages/V3Billing';
 import V3Pricing from '@/v3/pages/V3Pricing';
+import V3Integrations from '@/v3/pages/V3Integrations';
+import V3Team from '@/v3/pages/V3Team';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -145,6 +147,8 @@ export default function App() {
         <Route path="settings" element={<V3Settings />} />
         <Route path="billing" element={<V3Billing />} />
         <Route path="pricing" element={<V3Pricing />} />
+        <Route path="integrations" element={<V3Integrations />} />
+        <Route path="team" element={<V3Team />} />
       </Route>
 
       {/* ── Protected app routes ── */}
