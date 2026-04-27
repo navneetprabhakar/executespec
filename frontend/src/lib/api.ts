@@ -2279,6 +2279,33 @@ export const getActivityFeed = (
   return req<ActivityPage>(`/projects/${projectId}/activity${qs}`);
 };
 
+// M-014 (Wave 2) — Architecture Decision Records (V137)
+export interface AdrSummary {
+  id: string;
+  adrIdInRepo: number;
+  title: string;
+  status: string;          // PROPOSED | ACCEPTED | DEPRECATED | SUPERSEDED
+  decisionDate: string | null;
+  repoId: string | null;
+  filePath: string | null;
+}
+
+export interface AdrDetail extends AdrSummary {
+  deciders: string | null;
+  supersedes: string | null;
+  supersededBy: string | null;
+  relatedAdrs: string | null;
+  relatedStandards: string | null;
+  tags: string | null;
+  body: string | null;
+}
+
+export const listProjectAdrs = (projectId: string, acceptedOnly = false) =>
+  req<AdrSummary[]>(`/projects/${projectId}/adrs${acceptedOnly ? '?acceptedOnly=true' : ''}`);
+
+export const getProjectAdr = (projectId: string, id: string) =>
+  req<AdrDetail>(`/projects/${projectId}/adrs/${id}`);
+
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
   req<{ installed: boolean; reason?: string }>(
