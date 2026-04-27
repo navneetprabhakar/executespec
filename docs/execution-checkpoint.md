@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Wave 3 batch 2 — M-016 / M-017 / M-020)
+## State at checkpoint (Wave 3 batch 4 — M-011 / M-029 / M-031 + governance trio)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `f9298039` — `docs(legal): DPA request → signature → activation flow (M-020)` (about to push)
+**Last pushed commit:** `d34a8028` — `docs(billing+ops): Stripe price IDs + cookie domain switch (M-029 + M-031)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Wave 3 IN PROGRESS** — 6 of ~12 items shipped
+**Wave:** **Wave 3 IN PROGRESS** — 12 of ~14 items shipped
 
 ## Master list
 
@@ -81,10 +81,14 @@ ApiContractTest green throughout.
 | M-016 | SsoConfigController lockout-prevention guard + docs/sso-saml-wiring.md spec | e81b403c |
 | M-017 | DsarController + GET /api/dsar/me + GET /api/dsar/users/{userId} JSON export | 7da764db |
 | M-020 | docs/dpa-flow.md — operator runbook for DPA request → signature → activation | f9298039 |
+| M-032 + M-033 + M-039 | GovernanceGuard + V148 schema (plan-approval policy + per-project spend cap + repo allowlist) | dab08f7e |
+| M-011 | Razorpay seat-adjust 501 with manual-flow pointer + PaymentGateway.updateSubscriptionQuantity contract | 6cc38dac |
+| M-029 + M-031 | docs/stripe-price-ids-ops.md + docs/cookie-domain-switch.md (ops-side runbooks) | d34a8028 |
 
-## Wave 3 — remaining (~6 items)
+## Wave 3 — remaining (~2 items)
 
-M-011 (Razorpay seats — adjustSeats parity with Stripe), M-029 (Stripe price IDs — ops-only env-var doc), M-030 (ProductSurfaceFilter call-site wiring — Phase 2 surface split), M-031 (cookie domain switch — maintenance window), M-032 (plan-approval policy), M-033 (per-project spend cap), M-039 (repo allowlist), M-051 (TEAM-BYOK plan per parked #2)
+- **M-030** — ProductSurfaceFilter call-site wiring. Plan 1 #2 shipped the filter + tests; Phase 2 needs `org.product_id` write at subscribe-webhook time + per-write enforcement on the project/run create paths.
+- **M-051** — TEAM-BYOK plan ($39/seat). Per parked decision #2: ship in Wave 3. New billing_plan rows + tier-config update.
 
 ## Backlog (~16 items)
 
