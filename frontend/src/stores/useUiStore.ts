@@ -66,8 +66,22 @@ function initTheme(): Theme {
   return theme;
 }
 
+// M-026 (Wave 1) — first-time users land with sidebar expanded so they can
+// see the nav labels. Returning users get whatever they last set. Persistence
+// key: es:sidebarExpanded ('true' | 'false'); absent = first-time → default true.
+function initSidebarExpanded(): boolean {
+  try {
+    const saved = localStorage.getItem('es:sidebarExpanded');
+    if (saved === 'true') return true;
+    if (saved === 'false') return false;
+    return true; // first-time default
+  } catch {
+    return true;
+  }
+}
+
 export const useUiStore = create<UiStore>((set, get) => ({
-  sidebarExpanded: false,
+  sidebarExpanded: initSidebarExpanded(),
   mobileSidebarOpen: false,
   commandPaletteOpen: false,
   activeTab: 'overview',
@@ -85,7 +99,10 @@ export const useUiStore = create<UiStore>((set, get) => ({
     return 'pro';
   })(),
 
-  setSidebarExpanded: (v) => set({ sidebarExpanded: v }),
+  setSidebarExpanded: (v) => {
+    try { localStorage.setItem('es:sidebarExpanded', String(v)); } catch {}
+    set({ sidebarExpanded: v });
+  },
   setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
   setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
   setActiveTab: (t) => set({ activeTab: t }),
