@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Wave 1 → Wave 2 boundary)
+## State at checkpoint (after Wave 2 batch 1 — M-003 / M-004 / M-008)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `8efc35b0` — `feat(ux): mission rename copy-only sweep (M-001)`
+**Last pushed commit:** `c5c07dee` — `feat(ux): drawer wires for NewRunModal credential gates (M-008)` (NOT pushed yet — see end of file for what's pending push at checkpoint time)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** Wave 1 CLOSED · Wave 2 STARTING
+**Wave:** Wave 2 IN PROGRESS — 3 of ~16 items done
 
 ## Master list
 
@@ -29,30 +29,41 @@
 | M-002 | First-seat-purchase on-ramp (`/admin → /plans?tier=team&seats=N&from=admin`) | a443d398 |
 | M-001 | Mission rename copy-only sweep (Header / RunsPage / RunList / NewRunModal / RunDetail / lib/utils / CommandPalette / ProjectDashboardPage) | 8efc35b0 |
 
-Plus 2 housekeeping commits: `6699ddc2` (handoff note) + `ab487cfa` (checkpoint rename).
+Plus 2 housekeeping commits: `6699ddc2` (handoff note) + `ab487cfa` (checkpoint rename) + `3bc0ec5a` (post-Wave-1 checkpoint refresh).
 
 ApiContractTest green after Wave 1 close.
 
-## Wave 2 — remaining (~16 items, ~10 days)
+## Wave 2 — completed so far (3 of ~16)
+
+| M-ID | Title | Commit |
+|---|---|---|
+| M-003 | NotificationPrefController + minimal Settings matrix (Email/InApp × event-type) | 82774005 |
+| M-004 | SSO config card on /org/settings (provider + metadata URL + domain + enforced) | 9565498d |
+| M-008 | Inline Drawer wires (Add GitHub PAT + Add API keys) on NewRunModal | c5c07dee |
+
+Both M-003 and M-004 require a backend restart to surface live data
+(current `:8081` is the pre-batch jar). Frontend renders panel + form
+shell + handles 404 gracefully until the next deploy.
+
+ApiContractTest green throughout.
+
+## Wave 2 — remaining (~13 of ~16 items)
 
 In execution order:
 
-1. **M-003** — NotificationPrefController + minimal Settings page. V139 schema + `NotificationPrefService` already exist; need `@RestController` + Settings UI matrix (Email/InApp × event-type). Default UX: minimal toggle matrix per parked decision #7.
-2. **M-004** — SSO config UI. V127 schema + `SsoConfigController` exist; need a Settings → SSO panel for ORG_ADMIN to set sso_provider/metadata_url/domain/enforced.
-3. **M-008** — Drawer wires (NewRunModal "Add API key" + "Add GitHub PAT") per parked decision #8. Drawer primitive ships; needs the two embedded sites.
-4. **M-010** — halt-runs admin tool. SUPER_ADMIN endpoint to mark all non-terminal runs CANCELLED on demand (incident response).
-5. **M-013** — Unified `/governance/audit` page collapsing V22 (activity_audit) + V133 (activity_feed) into one filtered table per parked decision #4.
-6. **M-014** — ADR controller + page. `Adr` entity + `AdrFrontmatterParser` exist; need REST + Settings → ADRs panel.
-7. **M-015** — Invariant controller + page. `ArchInvariant` + `InvariantChecker` exist; need REST + Project → Invariants tab.
-8. **M-023** — TemplateGrid wire (where? sample-spec gallery on RunsNewLanding likely).
-9. **M-024** — Standards CRUD UI. `StandardsOverrideController` exists; org-level standards CRUD missing.
-10. **M-027** — BEST VALUE chip move on PlansPage (currently on MAX/Team — confirm which tier should wear it post-V144 ladder).
-11. **M-028** — TEAM seats CTA from /admin (potentially redundant with M-002 — log+skip if so).
-12. **M-034** — Project activity feed page. `GET /api/projects/{id}/activity` exists (V133); need a Project → Activity full feed.
-13. **M-043** — RunCard verdict pill (apply VerdictPill to RunCard rows in RunList).
-14. **M-044** — Payment-history doc (markdown only — explain Razorpay vs Stripe payment-history sources).
-15. **M-045** — Seat default 2 in PlanCard (TEAM_DEFAULT_SEATS 3 → 2 per parked decision #9).
-16. **M-046** — `/exec` drill-down (clickable KPI cards → filtered project list).
+- **M-010** — halt-runs admin tool. SUPER_ADMIN endpoint to mark all non-terminal runs CANCELLED on demand (incident response).
+- **M-013** — Unified `/governance/audit` page collapsing V22 (activity_audit) + V133 (activity_feed) into one filtered table per parked decision #4.
+- **M-014** — ADR controller + page. `Adr` entity + `AdrFrontmatterParser` exist; need REST + Settings → ADRs panel.
+- **M-015** — Invariant controller + page. `ArchInvariant` + `InvariantChecker` exist; need REST + Project → Invariants tab.
+- **M-023** — TemplateGrid wire (sample-spec gallery on RunsNewLanding likely).
+- **M-024** — Standards CRUD UI. `StandardsOverrideController` exists; org-level standards CRUD missing.
+- **M-027** — BEST VALUE chip move on PlansPage (currently on MAX/Team — confirm which tier should wear it post-V144 ladder).
+- **M-028** — TEAM seats CTA from /admin (potentially redundant with M-002 — log+skip if so).
+- **M-034** — Project activity feed page. `GET /api/projects/{id}/activity` exists (V133); need a Project → Activity full feed.
+- **M-043** — RunCard verdict pill (apply VerdictPill to RunCard rows in RunList).
+- **M-044** — Payment-history doc (markdown only — explain Razorpay vs Stripe payment-history sources).
+- **M-045** — Seat default 2 in PlanCard (TEAM_DEFAULT_SEATS 3 → 2 per parked decision #9).
+- **M-046** — `/exec` drill-down (clickable KPI cards → filtered project list).
 
 ## Wave 3 — remaining (~12 items, ~6 weeks)
 
