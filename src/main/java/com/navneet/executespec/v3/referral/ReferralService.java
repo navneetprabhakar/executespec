@@ -195,6 +195,35 @@ public class ReferralService {
         return new InviteState(referrerUserId, (int) pending);
     }
 
+    /**
+     * R-162 follow-up — magic-link landing lookup. Resolves an invite token
+     * to the inviter's display name + grant size so the V3Auth page can
+     * render "Priya invited you — +5 free runs waiting" instead of a cold
+     * sign-in form. Public-by-token (no auth) — the token IS the credential.
+     *
+     * <p>Returns {@link ReferralLookup#unknown()} for unknown / expired
+     * tokens so the frontend can fall back to a generic "you were invited"
+     * message rather than showing nothing or surfacing a 404. The token
+     * existing at all means an inviter recently made it; treating it as a
+     * generic warm landing is a safer UX than treating it as broken.
+     */
+    @Transactional(readOnly = true)
+    public ReferralLookup lookupByToken(String token) {
+        if (token == null || token.isBlank()) {
+            return ReferralLookup.unknown();
+        }
+        Optional<ReferralInvite> match = inviteRepo.findByToken(token);
+        if (match.isEmpty()) {
+            return ReferralLookup.unknown();
+        }
+        ReferralInvite invite = match.get();
+        AppUser referrer = userRepo.findById(invite.getReferrerUserId()).orElse(null);
+        String name = (referrer == null || referrer.getFirstName() == null || referrer.getFirstName().isBlank())
+                ? null
+                : referrer.getFirstName();
+        return new ReferralLookup(true, name, INVITE_GRANT, invite.getRefereeEmail());
+    }
+
     private static String generateToken() {
         // 24-byte URL-safe random — same shape as anonymous-trial session token.
         return java.util.UUID.randomUUID().toString().replace("-", "");
@@ -208,4 +237,17 @@ public class ReferralService {
                                Instant createdAt, InviteStatus status) {}
 
     public record InviteState(String referrerUserId, int pendingCount) {}
+
+    /**
+     * Magic-link landing payload. {@code valid=false} means we couldn't
+     * resolve the token but the frontend should still render a warm
+     * "you were invited" UX rather than treating the visitor like a
+     * stranger — see {@link #lookupByToken} for rationale.
+     */
+    public record ReferralLookup(boolean valid, String inviterFirstName,
+                                 int creditGrant, String refereeEmail) {
+        public static ReferralLookup unknown() {
+            return new ReferralLookup(false, null, INVITE_GRANT, null);
+        }
+    }
 }

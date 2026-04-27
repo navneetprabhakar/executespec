@@ -152,7 +152,7 @@ export default function V3Landing() {
             }}
           >
             <span style={{ fontSize: 11.5, color: 'var(--v3-text-subtle)' }}>
-              5 free runs · no credit card · ~60-second trial
+              Free preview · no card · ~60s · sign up to ship the code
             </span>
             <button
               type="submit"
@@ -176,7 +176,7 @@ export default function V3Landing() {
                 fontFamily: 'inherit',
               }}
             >
-              {submitting ? 'Submitting…' : 'Submit — free, no signup'}
+              {submitting ? 'Submitting…' : 'See what we’d build →'}
             </button>
           </div>
         </div>

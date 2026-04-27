@@ -26,4 +26,8 @@ public interface ReferralInviteRepository extends JpaRepository<ReferralInvite, 
 
     @Query("SELECT r FROM ReferralInvite r WHERE r.referrerUserId = :referrerId AND LOWER(r.refereeEmail) = LOWER(:email)")
     Optional<ReferralInvite> findByReferrerAndEmail(@Param("referrerId") String referrerId, @Param("email") String email);
+
+    /** R-162 magic-link landing — resolve a token to its invite row so the
+     *  V3Auth page can render inviter context. */
+    Optional<ReferralInvite> findByToken(String token);
 }

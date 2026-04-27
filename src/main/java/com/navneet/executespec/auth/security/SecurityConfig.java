@@ -148,6 +148,9 @@ public class SecurityConfig {
                         // until the anti-abuse story is locked in Wave 2.
                         .requestMatchers(HttpMethod.POST, "/api/v3/anonymous-runs").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/v3/anonymous-runs/*").permitAll()
+                        // R-162 magic-link landing — token IS the credential,
+                        // so the lookup is public by token.
+                        .requestMatchers(HttpMethod.GET, "/api/v3/referrals/lookup").permitAll()
                         // Static frontend assets (SPA)
                         .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
