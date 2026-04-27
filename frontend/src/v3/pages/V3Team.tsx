@@ -56,6 +56,15 @@ export default function V3Team() {
 
   const tier = (org?.tier ?? user?.tier ?? 'FREE').toUpperCase();
   const isFreeTier = tier === 'FREE';
+  const isAnonymous = !user;
+
+  // Anonymous visitors get the conversion-optimized preview surface — they
+  // can see what Team / Enterprise actually buys (seats, members, audit, SSO)
+  // BEFORE having to commit to signup. Procurement-evaluator personas (PgMs
+  // looping in their eng manager) cannot move forward without this.
+  if (isAnonymous) {
+    return <AnonymousTeamPreview />;
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
@@ -105,6 +114,269 @@ export default function V3Team() {
         </>
       )}
     </div>
+  );
+}
+
+// ─── Anonymous preview ──────────────────────────────────────────────────────
+// Conversion-fix #A1 — the procurement-evaluator persona (Priya in the
+// assessment) needs to see what Team/Enterprise buys BEFORE signup. The old
+// page rendered a single "Pro+ feature · Upgrade" card that was a wall;
+// this surface shows the four binding decisions her engineering manager
+// will ask about: seats, members + RBAC, audit log, SSO config.
+
+function AnonymousTeamPreview() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
+      <div>
+        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
+          Team
+        </h1>
+        <p style={{ fontSize: 12.5, color: 'var(--v3-text-muted)', margin: '6px 0 0', lineHeight: 1.55 }}>
+          What the Team and Enterprise tiers buy you. Nothing here is gated —
+          look first, sign up later.
+        </p>
+      </div>
+
+      {/* Top hero / split CTA */}
+      <section
+        style={{
+          background: 'linear-gradient(135deg, rgba(91,141,239,0.08), rgba(91,141,239,0.02))',
+          border: '1px solid rgba(91,141,239,0.32)',
+          borderRadius: 10,
+          padding: 18,
+        }}
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+            gap: 14,
+            alignItems: 'center',
+          }}
+        >
+          <div>
+            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: 'var(--v3-text)' }}>
+              Bring your engineering team in.
+            </h2>
+            <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
+              Per-seat collaboration, shared run pool, audit log, RBAC, SSO.
+              Free 14-day trial — no card. Procurement docs at <Link to="/v3/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/trust</Link>.
+            </p>
+          </div>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+            <a
+              href="mailto:enterprise@executespec.ai?subject=Demo%20request%20—%20Team%20tier"
+              style={{
+                padding: '8px 14px',
+                fontSize: 12.5,
+                fontWeight: 600,
+                background: 'var(--v3-brand)',
+                color: '#0B0D10',
+                border: 'none',
+                borderRadius: 6,
+                textDecoration: 'none',
+                fontFamily: 'inherit',
+              }}
+            >
+              Request a demo →
+            </a>
+            <Link
+              to="/v3/auth"
+              style={{
+                padding: '8px 14px',
+                fontSize: 12.5,
+                fontWeight: 600,
+                background: 'transparent',
+                color: 'var(--v3-text)',
+                border: '1px solid var(--v3-border-strong)',
+                borderRadius: 6,
+                textDecoration: 'none',
+                fontFamily: 'inherit',
+              }}
+            >
+              Start free trial →
+            </Link>
+          </div>
+        </div>
+      </section>
+
+      <PreviewSeatsCard />
+      <PreviewMembersCard />
+      <PreviewAuditCard />
+      <PreviewSsoCard />
+
+      {/* Bottom procurement-doc strip */}
+      <section
+        style={{
+          background: 'var(--v3-surface)',
+          border: '1px solid var(--v3-border)',
+          borderRadius: 10,
+          padding: 14,
+          fontSize: 12,
+          color: 'var(--v3-text-muted)',
+        }}
+      >
+        Procurement teams: SOC 2 (audit in progress), SAML/OIDC, EU sub-processor list,
+        DPA, audit-log retention 5 years — all at <Link to="/v3/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/trust</Link>.
+        Pricing at <Link to="/v3/pricing" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/pricing</Link>.
+      </section>
+    </div>
+  );
+}
+
+function PreviewCard({
+  badge,
+  title,
+  blurb,
+  children,
+}: {
+  badge: string;
+  title: string;
+  blurb: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      style={{
+        background: 'var(--v3-surface)',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 10,
+        padding: 16,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+        <Pill tone="brand" size="sm">{badge}</Pill>
+        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>{title}</h2>
+      </div>
+      <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
+        {blurb}
+      </p>
+      <div
+        style={{
+          background: 'var(--v3-bg)',
+          border: '1px dashed var(--v3-border)',
+          borderRadius: 8,
+          padding: 12,
+        }}
+      >
+        {children}
+      </div>
+    </section>
+  );
+}
+
+function PreviewSeatsCard() {
+  return (
+    <PreviewCard
+      badge="Team"
+      title="Seats and shared run pool"
+      blurb="Self-serve seat picker with month-over-month flex. Runs are pooled across the team — one heavy refactor doesn't burn through everyone's budget."
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+        <div>
+          <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)' }}>12 seats</div>
+          <div style={{ fontSize: 11.5, color: 'var(--v3-text-subtle)' }}>$29 BYOK / mo · unlimited runs · pooled</div>
+        </div>
+        <div style={{ display: 'flex', gap: 6 }}>
+          <Pill tone="neutral" size="sm">2 · 5 · 10 · 12 · 25 · 50 · 100</Pill>
+        </div>
+      </div>
+    </PreviewCard>
+  );
+}
+
+function PreviewMembersCard() {
+  const sample = [
+    { name: 'You', email: 'you@yourco.com', role: 'ORG_ADMIN' },
+    { name: 'Marcus T.', email: 'marcus@yourco.com', role: 'DEVELOPER' },
+    { name: 'Priya S.', email: 'priya@yourco.com', role: 'PROJECT_ADMIN' },
+    { name: 'Finance', email: 'finance@yourco.com', role: 'FINANCE' },
+  ];
+  return (
+    <PreviewCard
+      badge="RBAC"
+      title="Members and role-based access"
+      blurb="Five roles out of the box. Project-scoped access. Finance role sees invoices but not runs. SUPER_ADMIN reserved for emergency override."
+    >
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+        {sample.map((m, i) => (
+          <li
+            key={m.email}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '6px 0',
+              borderBottom: i < sample.length - 1 ? '1px dashed var(--v3-border)' : 'none',
+              fontSize: 12,
+            }}
+          >
+            <div>
+              <span style={{ color: 'var(--v3-text)', fontWeight: 500 }}>{m.name}</span>{' '}
+              <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>{m.email}</span>
+            </div>
+            <Pill tone={m.role === 'ORG_ADMIN' ? 'brand' : 'neutral'} size="sm">
+              {m.role.toLowerCase()}
+            </Pill>
+          </li>
+        ))}
+      </ul>
+    </PreviewCard>
+  );
+}
+
+function PreviewAuditCard() {
+  const sample = [
+    { actor: 'Marcus T.', event: 'submitted run · checkout-flow refactor', when: '2m ago' },
+    { actor: 'Priya S.', event: 'approved plan · OAuth migration', when: '14m ago' },
+    { actor: 'Marcus T.', event: 'merged PR · #2143 to main', when: '1h ago' },
+    { actor: 'Finance', event: 'exported invoice · INV-2026-04', when: 'yesterday' },
+  ];
+  return (
+    <PreviewCard
+      badge="Compliance"
+      title="Audit log — 5-year retention"
+      blurb="Every billing entity, plan approval, run, merge, export. Retained five years. Filter by actor, project, or event type. CSV export for compliance."
+    >
+      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+        {sample.map((row, i) => (
+          <li
+            key={i}
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              padding: '5px 0',
+              borderBottom: i < sample.length - 1 ? '1px dashed var(--v3-border)' : 'none',
+              fontSize: 11.5,
+            }}
+          >
+            <div>
+              <span style={{ color: 'var(--v3-text)', fontWeight: 500 }}>{row.actor}</span>{' '}
+              <span style={{ color: 'var(--v3-text-muted)' }}>{row.event}</span>
+            </div>
+            <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>{row.when}</span>
+          </li>
+        ))}
+      </ul>
+    </PreviewCard>
+  );
+}
+
+function PreviewSsoCard() {
+  return (
+    <PreviewCard
+      badge="Enterprise"
+      title="Single sign-on (SAML / OIDC)"
+      blurb="Okta, Auth0, Azure AD, Google Workspace, or any standards-compliant IdP. Domain-pinned email enforcement. MFA inherited from your IdP."
+    >
+      <div style={{ fontSize: 11.5, color: 'var(--v3-text-muted)', display: 'grid', gap: 4 }}>
+        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Provider:</span> <span style={{ color: 'var(--v3-text)' }}>Okta</span></div>
+        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Domain pinned:</span> <span style={{ color: 'var(--v3-text)' }}>yourco.com</span></div>
+        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Enforcement:</span> <span style={{ color: 'var(--v3-text)' }}>Required for new sign-ins</span></div>
+        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Status:</span> <Pill tone="ok" size="sm">Active</Pill></div>
+      </div>
+    </PreviewCard>
   );
 }
 
