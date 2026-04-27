@@ -56,6 +56,12 @@ export default function V3Team() {
 
   const tier = (org?.tier ?? user?.tier ?? 'FREE').toUpperCase();
   const isFreeTier = tier === 'FREE';
+  // Tier-coherence: PRO is single-developer (no seats), so the team
+  // surface must show a Pro→Team upsell — not the Free→Pro one. TEAM
+  // and ENTERPRISE are BYOK (unlimited via own keys) and that's the
+  // value-prop the Pro user needs to see, not "unlimited managed runs"
+  // (which Pro already has).
+  const isProTier = tier === 'PRO';
   const isAnonymous = !user;
 
   // Anonymous visitors get the conversion-optimized preview surface — they
@@ -101,13 +107,18 @@ export default function V3Team() {
 
       {/* ── Free tier — dedicated upsell card ─────────────────────────── */}
       {!loading && isFreeTier && (
-        <FreeTierUpsellCard onUpgrade={() => navigate('/v3/billing')} />
+        <FreeTierUpsellCard onUpgrade={() => navigate('/v3/pricing')} />
       )}
 
-      {/* ── Pro+ — full team surface ──────────────────────────────────── */}
-      {!loading && !isFreeTier && (
+      {/* ── Pro tier — different upsell (BYOK + collaboration framing) ── */}
+      {!loading && isProTier && (
+        <ProTierUpsellCard onUpgrade={() => navigate('/v3/pricing')} />
+      )}
+
+      {/* ── Team / Enterprise — full team surface ──────────────────────── */}
+      {!loading && !isFreeTier && !isProTier && (
         <>
-          <SeatsCard org={org} memberCount={members?.length ?? 0} />
+          <SeatsCard org={org} tier={tier} memberCount={members?.length ?? 0} />
           <MembersCard members={members ?? []} />
           <InviteCard />
           {tier === 'ENTERPRISE' && <SsoPanel />}
@@ -393,14 +404,17 @@ function FreeTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <Pill tone="info">Pro+ feature</Pill>
+        <Pill tone="info">Paid tiers</Pill>
         <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
           Upgrade to bring teammates in.
         </h2>
       </div>
       <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
-        Free is a one-developer plan. Pro adds unlimited runs and Team adds
-        per-seat collaboration with a shared run pool, audit log, and SSO.
+        Free is a one-developer plan. Pro ($20/mo) gives you unlimited managed
+        runs solo. Team ($39/seat) adds per-seat collaboration with shared
+        spec templates, audit log, SSO — and runs go through your own
+        Anthropic / OpenAI / Google keys (BYOK), so there's no per-run charge
+        from us beyond the seat fee.
       </p>
       <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
         <button
@@ -425,11 +439,69 @@ function FreeTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
   );
 }
 
+// ─── Pro → Team upsell ─────────────────────────────────────────────────────
+// Different framing than Free → Pro: Pro already has unlimited managed
+// runs, so the value-prop is collaboration + BYOK economics, not raw run
+// volume. Per the audit fix: Pro on /v3/team must not see the same Free
+// upsell card.
+
+function ProTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
+  return (
+    <section
+      style={{
+        background: 'var(--v3-surface)',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 10,
+        padding: 16,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <Pill tone="info">Team tier</Pill>
+        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+          Bring your team in. Bring your own keys.
+        </h2>
+      </div>
+      <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
+        Pro is a one-developer plan. Team ($39/seat, min 2) adds:
+      </p>
+      <ul style={{ margin: '8px 0 0 18px', padding: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.6 }}>
+        <li><strong style={{ color: 'var(--v3-text)' }}>BYOK runs</strong> — route through your own Anthropic / OpenAI / Google keys, no per-run charge from us</li>
+        <li><strong style={{ color: 'var(--v3-text)' }}>Per-seat collaboration</strong> — shared run history, shared spec templates</li>
+        <li><strong style={{ color: 'var(--v3-text)' }}>Org SSO</strong> (SAML / OIDC) and <strong style={{ color: 'var(--v3-text)' }}>audit log export</strong></li>
+        <li><strong style={{ color: 'var(--v3-text)' }}>Activity feed</strong> across every project in the org</li>
+      </ul>
+      <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+        <button
+          type="button"
+          onClick={onUpgrade}
+          style={{
+            padding: '6px 14px',
+            fontSize: 12.5,
+            fontWeight: 600,
+            background: 'var(--v3-brand)',
+            color: '#0B0D10',
+            border: 'none',
+            borderRadius: 6,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          See Team pricing →
+        </button>
+      </div>
+    </section>
+  );
+}
+
 // ─── Seats card ─────────────────────────────────────────────────────────────
 
-function SeatsCard({ org, memberCount }: { org: OrgDto | null; memberCount: number }) {
+function SeatsCard({ org, tier, memberCount }: { org: OrgDto | null; tier: string; memberCount: number }) {
   const seatCount = org?.seatCount ?? 0;
-  const isUnlimited = seatCount < 0;
+  // Tier-coherence: ENTERPRISE is always unlimited regardless of any
+  // org.seatCount value the backend persisted (some legacy orgs were
+  // seeded with seat_count=1 which is meaningless for Enterprise).
+  // TEAM honours the per-seat purchase (min 2, max 20).
+  const isUnlimited = tier === 'ENTERPRISE' || seatCount < 0;
   const used = Math.min(memberCount, seatCount > 0 ? seatCount : memberCount);
   return (
     <section

@@ -308,23 +308,25 @@ export default function SettingsPage() {
           {(() => {
             // v2.5.8 — billing is the source of truth; fall back to JWT tier when
             // the billing call hasn't returned yet (or the user has no subscription).
+            // Tier-coherence: 4-tier ladder (FREE / PRO / TEAM / ENTERPRISE).
+            // Legacy MAX was renamed to TEAM in V141 — checks updated to match.
             const planTier = billing?.plan?.tier ?? user?.tier ?? 'FREE';
             const planName = billing?.plan?.name
               ?? (planTier === 'ENTERPRISE' ? 'Enterprise Plan'
-                  : planTier === 'MAX' ? 'Max Plan'
+                  : planTier === 'TEAM' ? 'Team Plan'
                   : planTier === 'PRO' ? 'Pro Plan'
                   : 'Free Plan');
             const badge = planTier === 'ENTERPRISE' ? { cls: 'bg-accent-amber/20 text-accent-amber', letter: 'E' }
-              : planTier === 'MAX' ? { cls: 'bg-status-success/20 text-status-success', letter: 'M' }
+              : planTier === 'TEAM' ? { cls: 'bg-status-success/20 text-status-success', letter: 'T' }
               : planTier === 'PRO' ? { cls: 'bg-accent-blue/20 text-accent-blue', letter: 'P' }
               : { cls: 'bg-[var(--gray-400)] text-secondary', letter: 'F' };
             const subtitle = planTier === 'ENTERPRISE'
               ? 'Unlimited runs, priority support, dedicated infrastructure'
-              : planTier === 'MAX'
-              ? 'Unlimited runs, own API keys, 3 concurrent runs'
+              : planTier === 'TEAM'
+              ? 'BYOK + per-seat collaboration, audit log, SSO'
               : planTier === 'PRO'
-              ? '10 runs/month, 2 concurrent runs, managed keys'
-              : '5 runs/month, 1 concurrent run, basic features';
+              ? 'Unlimited managed runs for one developer'
+              : '5 lifetime runs · invite friends for +5 each';
             return (
               <>
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${badge.cls}`}>

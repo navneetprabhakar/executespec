@@ -67,8 +67,7 @@ export default function RunList() {
           className="flex items-center justify-center gap-2 mx-3 mt-3 mb-1 px-4 py-2.5 rounded-sm bg-accent-blue text-primary text-sm font-medium hover:bg-accent-blue/80 transition-colors"
         >
           <Plus className="h-4 w-4" />
-          {/* M-001 — copy-only Mission rename. */}
-          New mission
+          New run
         </button>
       )}
 
@@ -261,8 +260,7 @@ export default function RunList() {
             className="flex items-center justify-center gap-2 w-full px-4 py-2.5 rounded-md bg-accent-blue text-primary text-sm font-medium hover:bg-[var(--accent-blue-hover)] transition-colors"
           >
             <Plus className="h-4 w-4" />
-            {/* M-001 — copy-only Mission rename. */}
-            New mission
+            New run
           </button>
         </div>
       )}

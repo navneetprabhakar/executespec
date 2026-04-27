@@ -8,8 +8,8 @@ import RunsPage from '@/pages/RunsPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ExecSummaryPage from '@/pages/ExecSummaryPage';
 import PricingPage from '@/pages/PricingPage';
-import PlansPage from '@/pages/PlansPage';
-import BillingPage from '@/pages/BillingPage';
+// Tier-coherence: PlansPage + BillingPage no longer mounted — v2 routes
+// `/plans` + `/billing` redirect to /v3/pricing + /v3/billing.
 import IntegrationsPage from '@/pages/IntegrationsPage';
 import SettingsPage from '@/pages/SettingsPage';
 
@@ -174,16 +174,24 @@ export default function App() {
               PRO subscribers whose tier-state-changed email links here.
               Renders /plans with a query flag so the page can show a
               "your PRO plan still works" banner (non-blocking). */}
-          <Route path="legacy/billing" element={<Navigate to="/plans?legacy=1" replace />} />
+          {/* Tier-coherence: /plans is now a redirect; route legacy email
+              links straight to /v3/billing where grandfathered subscribers
+              can verify their plan + manage payment. */}
+          <Route path="legacy/billing" element={<Navigate to="/v3/billing" replace />} />
           {/* R-180 — v2 → v3 opt-in redirect gate. When localStorage
               flag `v3-opt-in` === '1', these routes Navigate to the
               v3 equivalent. Otherwise the v2 element renders unchanged.
               See frontend/src/v3/lib/optIn.ts for the full mapping. */}
           <Route index element={<V2OptInGate><RunsPage /></V2OptInGate>} />
           <Route path="dashboard" element={<V2OptInGate><DashboardPage /></V2OptInGate>} />
-          <Route path="pricing" element={<V2OptInGate><PricingPage /></V2OptInGate>} />
-          <Route path="plans" element={<V2OptInGate><PlansPage /></V2OptInGate>} />
-          <Route path="billing" element={<V2OptInGate><BillingPage /></V2OptInGate>} />
+          {/* Tier-coherence: /pricing was an admin tool (per-1M-token model
+              rates). Moved to /admin/model-rates. /plans + /billing both
+              redirect to /v3/pricing + /v3/billing — single source of truth
+              for tier display. */}
+          <Route path="pricing" element={<Navigate to="/v3/pricing" replace />} />
+          <Route path="plans" element={<Navigate to="/v3/pricing" replace />} />
+          <Route path="billing" element={<Navigate to="/v3/billing" replace />} />
+          <Route path="admin/model-rates" element={<PricingPage />} />
           <Route path="integrations" element={<V2OptInGate><IntegrationsPage /></V2OptInGate>} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="accounting" element={<AccountingPage />} />

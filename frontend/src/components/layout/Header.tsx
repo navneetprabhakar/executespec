@@ -26,9 +26,11 @@ function breadcrumbFromPath(pathname: string): { primary: string; secondary?: st
   if (pathname.startsWith('/executions/')) return { primary: 'Launches', secondary: 'Execution' };
   if (pathname.startsWith('/reports/shared/')) return { primary: 'Shared report' };
   if (pathname.startsWith('/exec')) return { primary: 'Exec summary' };
-  // M-001 (Wave 1) — copy-only "Run" → "Mission" rename. URLs + DTO keys
-  // keep "run" everywhere; only the user-facing label flips.
-  return { primary: 'Missions' };
+  // Tier-coherence: terminology unified to "Runs" across the app to match
+  // v3 surfaces, marketing, emails, and API DTOs (M-001 Mission rename
+  // reverted — the v2 tab tray, RunDetail page, and v3 chat already used
+  // "Run", so "Mission" was the outlier).
+  return { primary: 'Runs' };
 }
 
 function ThemeToggle() {
@@ -110,7 +112,7 @@ export default function Header() {
       {/* Upgrade pill — only for FREE/PRO users, hidden at mobile to free space */}
       {(user?.tier === 'FREE' || user?.tier === 'PRO') && (
         <Link
-          to="/plans"
+          to="/v3/pricing"
           className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-accent-blue/10 text-accent-blue text-xs font-medium hover:bg-accent-blue/20 transition-colors flex-shrink-0"
         >
           Upgrade
@@ -118,10 +120,13 @@ export default function Header() {
         </Link>
       )}
 
-      {/* Top-up pill — desktop only to keep mobile header lean */}
-      {user?.tier && user.tier !== 'FREE' && user.tier !== 'MAX' && user.tier !== 'ENTERPRISE' && (
+      {/* Top-up pill — desktop only to keep mobile header lean.
+          Tier-coherence: TEAM + ENTERPRISE are BYOK (unlimited via own
+          keys, no per-run charge from us), so they have no top-up
+          concept. Only PRO sees this. */}
+      {user?.tier === 'PRO' && (
         <Link
-          to="/billing#topup"
+          to="/v3/billing"
           className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-status-success/10 text-status-success text-xs font-medium hover:bg-status-success/20 transition-colors flex-shrink-0"
         >
           <Plus className="h-3 w-3" />

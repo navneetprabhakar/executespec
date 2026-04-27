@@ -28,7 +28,8 @@ interface Props {
 export default function ProviderModelSelector({ provider, model, onProviderChange, onModelChange }: Props) {
   const [providers, setProviders] = useState<ProviderEntry[]>([]);
   const user = useAuthStore((s) => s.user);
-  const isByokTier = user?.tier === 'MAX' || user?.tier === 'ENTERPRISE';
+  // Tier-coherence: BYOK is TEAM + ENTERPRISE (Pro is managed-keys).
+  const isByokTier = user?.tier === 'TEAM' || user?.tier === 'ENTERPRISE';
 
   useEffect(() => {
     getAvailableModels()

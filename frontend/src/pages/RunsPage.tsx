@@ -83,7 +83,7 @@ export default function RunsPage() {
           is the breadcrumb + the run-list panel; screen readers expect
           a top-level heading on the route. sr-only keeps the layout
           unchanged. */}
-      <h1 className="sr-only">Missions</h1>
+      <h1 className="sr-only">Runs</h1>
       {/* Left panel — run list (collapsible, resizable).
           Mobile: full viewport width so the scope toggle + status filter can
           scroll horizontally inside the column instead of stretching the
@@ -123,12 +123,10 @@ export default function RunsPage() {
                 <>
                   <Sparkles className="h-8 w-8 text-accent-blue/40" />
                   <p className="text-sm text-muted">What do you want to build?</p>
-                  {/* M-001 — copy-only Mission rename. */}
-                  <p className="text-xs text-muted">Select a mission or start a new one</p>
+                  <p className="text-xs text-muted">Select a run or start a new one</p>
                 </>
               ) : (
-                /* M-001 — copy-only Mission rename. */
-                <p className="text-sm text-muted">Select a mission to view details</p>
+                <p className="text-sm text-muted">Select a run to view details</p>
               )}
             </div>
           )}
