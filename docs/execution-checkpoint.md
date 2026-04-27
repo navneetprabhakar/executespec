@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (after Wave 2 batch 5 — M-034 / M-043 / M-044)
+## State at checkpoint (Wave 2 → Wave 3 boundary)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `f2fd1a3f` — `docs(billing): payment-history reference for Razorpay + Stripe (M-044)` (about to push)
+**Last pushed commit:** `235e77fa` — `feat(exec): clickable KPI tile drill-downs (M-046)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** Wave 2 IN PROGRESS — 14 of ~16 items closed (1 dup, 1 awaiting product call)
+**Wave:** **Wave 2 CLOSED** — 15 of 16 items shipped + 1 dup + 1 BLOCKED-PRODUCT-DECISION (M-027). **Wave 3 STARTING.**
 
 ## Master list
 
@@ -51,6 +51,7 @@ ApiContractTest green after Wave 1 close.
 | M-034 | Deep-linkable `/projects/:id/activity` URL → opens dashboard with `?drawer=activity` | a190a586 |
 | M-043 | VerdictPill on RunCard rows for terminal runs (statusReason-based) | 723425b8 |
 | M-044 | docs/payment-history.md — unified Razorpay+Stripe operator + customer reference | f2fd1a3f |
+| M-046 | /exec KPI tile drill-downs (clickable buttons → filtered Missions list / projects / scroll-to sections) | 235e77fa |
 
 **M-027 (BEST VALUE chip move) — annotated only (commit 7acbb6ef);
 needs product decision.** Two defensible placements: keep on MAX
@@ -64,12 +65,11 @@ pre-batch jar). Frontend shells render gracefully until the next deploy.
 
 ApiContractTest green throughout.
 
-## Wave 2 — remaining (2 active + 1 blocked)
+## Wave 2 — remaining (1 blocked, 0 active)
 
-In execution order:
+- **M-027** — BLOCKED-PRODUCT-DECISION (BEST VALUE chip placement). Annotation only at 7acbb6ef. Awaits user direction: keep on MAX ($29 BYOK lowest cost-of-entry) vs move to TEAM ($49/seat managed shared pool, higher ARPU).
 
-- **M-046** — `/exec` drill-down (clickable KPI cards → filtered project list).
-- **M-027** — BLOCKED-PRODUCT-DECISION (BEST VALUE chip placement). Annotation only at 7acbb6ef.
+**Wave 2 closed at 15/16. M-027 will be revisited once direction lands.**
 
 ## Wave 3 — remaining (~12 items, ~6 weeks)
 
