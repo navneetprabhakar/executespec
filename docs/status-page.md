@@ -6,10 +6,11 @@
 
 ## What "live" means
 
-A status page lives at **status.executespec.ai** (CNAME → Statuspage.io
-or Better Stack — provider TBD by ops). Every published incident maps
-to a component below; SLA credits in `enterprise-sla.md` reference
-component-level uptime measured here.
+A status page lives at **status.executespec.ai** (CNAME →
+**Better Stack** per parked decision #1 in
+[`docs/execution-checkpoint.md`](execution-checkpoint.md)). Every
+published incident maps to a component below; SLA credits in
+`enterprise-sla.md` reference component-level uptime measured here.
 
 ## Components
 
@@ -57,12 +58,120 @@ this status page, not subjective "felt slow" reports.
    Posted internally + linked from the resolved incident page (no
    customer auto-email — postmortems are pull, not push).
 
-## Status page provider — open decision
+## Status page provider — Better Stack (parked decision #1)
 
-Statuspage.io ($79/mo for the audience tier we'd start with) vs.
-Better Stack ($29/mo, more modern UI, supports component groups).
-Both expose the API we need. Pick whichever ops prefers; this doc
-doesn't lock the choice.
+Going with **Better Stack** at $29/mo — cheaper than Statuspage.io's
+$79/mo Audience tier, modern UI, native component groups, and
+Slack/email subscriptions out of the box. Provider swap is config-only
+should we ever need to revisit (a single Pingdom + status-page
+re-config day per the parked decision rationale).
+
+### Better Stack setup runbook (M-018)
+
+> Ops-side setup; this section captures the exact steps so the
+> first oncall doesn't have to re-derive them. Skip if Better Stack
+> is already provisioned.
+
+1. **Account creation** (one-time, billing admin only)
+   - Sign up at <https://betterstack.com/uptime> with the
+     `admin@executespec.ai` mailbox.
+   - Pick the **Team** plan ($29/mo) — covers up to 50 monitors,
+     unlimited subscribers, public status page, custom domain.
+   - Enable 2FA on the workspace (Better Stack supports TOTP +
+     WebAuthn).
+
+2. **Status page** at status.executespec.ai
+   - In Better Stack → **Status pages** → **Create status page**.
+   - Page title: "ExecuteSpec status".
+   - Slug: `executespec` (gives `executespec.betteruptime.com`
+     until the CNAME flips).
+   - Custom domain: `status.executespec.ai`. Add the suggested
+     DNS records to Cloudflare → CNAME `status` →
+     `*.betteruptime.com` (Better Stack issues a Let's Encrypt cert
+     automatically).
+   - Branding: upload the ExecuteSpec wordmark + favicon from
+     `website/press-kit/`. Use brand colour `#5B8DEF` (Signal Blue
+     per `docs/design/ui-tokens.md`).
+
+3. **Component groups** (mirror the table above)
+   - Create one **Component group** for each row in the Components
+     table: API · Realtime runs · Plan approval gate · Webhooks
+     (Stripe + Razorpay + GitHub) · Auth · Preview environments ·
+     GCP infrastructure.
+   - Inside each group, create one **Monitor** per probe target.
+
+4. **Monitors** (per group)
+   - **API** monitor: HTTP probe `https://api.executespec.ai/actuator/health`
+     every 60s from 3 regions (us-east, eu-west, ap-south). Expect
+     200 + body containing `UP|DEGRADED`. Alert after 1 failure;
+     escalate after 2.
+   - **Realtime runs** monitor: Heartbeat URL — receives a `POST` from
+     the canary-runner cron in our infra (separate from Better
+     Stack; see § Canary runner below). Expect a heartbeat every
+     15 minutes; alert after 30 minutes silent.
+   - **Plan approval gate** monitor: not directly probable; use a
+     Better Stack **Custom alert** that listens for a Prometheus
+     webhook posting (see § Prometheus integration).
+   - **Webhooks** monitor: Custom alert — Prometheus webhook on
+     `webhook_event` failure-rate metric.
+   - **Auth** monitor: HTTP probe
+     `https://api.executespec.ai/api/auth/health` (returns 200 if
+     OAuth providers are reachable). Same cadence as API.
+   - **Preview environments** monitor: Custom alert on
+     `executespec.preview.start` outcome counter.
+   - **GCP infrastructure** monitor: Better Stack's built-in GCP
+     status integration (Settings → Integrations → Google Cloud).
+
+5. **Subscriptions**
+   - Enable **email subscriptions** on the public page.
+   - Enable **Slack incoming webhook** mirror to `#executespec-status`
+     (Settings → Integrations → Slack).
+   - Enable **Atom/RSS feed** for customer-side scrapers.
+
+6. **Postmortem template**
+   - Better Stack → Settings → **Templates** → Add a
+     "Postmortem" template (markdown body) matching the structure
+     in § Authoring incidents.
+
+7. **Smoke check**
+   - Trigger a manual test incident: Better Stack → Incidents →
+     **Create incident** → component "API", severity "Investigating".
+     Confirm the status page renders the banner + the Slack mirror
+     fires + a subscriber test email arrives. Resolve immediately.
+
+### Canary runner
+
+The realtime-runs heartbeat needs an external scheduler. Use
+**Cloud Scheduler** in our GCP project (`us-east4`) firing every 15
+minutes:
+
+```
+HTTP target: https://api.executespec.ai/api/admin/canary/run
+Auth header: Bearer <CANARY_BEARER_TOKEN> (rotated quarterly)
+Frequency:   */15 * * * *
+```
+
+The endpoint kicks a LOW spec into V2RunOrchestrator on the anthropic
+provider, polls to terminal, and on success pings Better Stack's
+heartbeat URL.
+
+### Prometheus integration (for the metric-driven monitors)
+
+The metric-driven monitors (Plan approval gate, Webhooks, Preview
+environments) read off our local Prometheus stack at
+`prometheus.executespec.internal`. Better Stack supports
+**Alertmanager webhooks** — register Better Stack's webhook URL as
+a Prometheus AlertManager receiver, then declare per-metric alerts
+using the rules in § Components.
+
+### What this doc DOES NOT do
+
+- Doesn't create the Better Stack account (needs billing-admin
+  hands).
+- Doesn't write the canary-runner code (separate ticket; the spec
+  above is the contract).
+- Doesn't change the in-app health endpoints — they already
+  return the right thing for Better Stack to probe.
 
 ---
 
