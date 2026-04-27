@@ -97,6 +97,18 @@ public class SuperAdminController {
         return ResponseEntity.ok(adminReconciliationService.reconcileOrphans(staleMinutes));
     }
 
+    // ── Audit hash chain verifier (M-019) ─────────────────────────────────────
+
+    /**
+     * Walks the activity_audit chain (V147) and reports the first break,
+     * if any. Used by Carmen (compliance persona) to prove no row was
+     * tampered or deleted after the fact.
+     */
+    @GetMapping("/audit-chain/verify")
+    public ResponseEntity<ActivityAuditService.ChainVerifyReport> verifyAuditChain() {
+        return ResponseEntity.ok(auditService.verifyChain());
+    }
+
     // ── Halt all active runs (M-010) ──────────────────────────────────────────
 
     /**
