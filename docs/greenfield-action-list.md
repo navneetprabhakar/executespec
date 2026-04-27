@@ -132,6 +132,32 @@ R-IDs in the **100s** are greenfield-implementation items (this plan). The 0-99 
 **AC:** Run `e48399bf` (testsTotal=null) returns `verifiedScore` reflecting no test credit. Existing v2 `ScoreCard` already handles this via `verifiedScore=null` paths.
 **Deps:** —
 
+#### R-125 · Repo-attach popover (OAuth scope + repo-picker + auto-name) — High · M · Wave 2 · §4.3, §4.4, §4.7
+**Description:** The connective tissue between R-124 (project switcher surface) and the OAuth-scope-grant popover §4.3 promised. Today the "+ Connect a GitHub repo" item in R-124's switcher routes to v2's `OrgProjectsPage` as a placeholder — that's the cohabitation gap this R-### closes. Ships the **happy path only**:
+  1. Click "+ Connect a GitHub repo" → in-popover OAuth scope check (reuse v2's GitHub PAT path or trigger the GitHub-App install flow if no PAT).
+  2. Repo-picker list (consume existing `listGitHubRepos` from v2 `lib/api.ts`).
+  3. On select → auto-name new project after the repo (greenfield §4.3 implication) and `linkRepoToProject` via existing v2 endpoint.
+  4. Drop the user into `/v3/p/{newProjectId}` with the chat thread empty-state.
+
+Also wires the `[+ Attach a GitHub repo]` chip from §4.1 (anonymous landing) to the same popover when a session token exists, so an anonymous trial can be re-bound to a real repo on signup.
+
+**Decisions parked — revisit before shipping for production traffic:**
+* **Private repo with no GitHub App access** — fallback to PAT prompt in the popover, or push the user to `/v3/integrations` for org-wide install? Default: fallback to PAT prompt; TODO log entry for a follow-up that decides between the two.
+* **Mono-repo subdirectory selection** — design currently doesn't ask. Default: assume root; expose a `▾ Advanced` later.
+* **Repo-too-big quota / first-fetch limit** — no design decision yet. Default: no client-side gate; backend's existing clone-size limits apply.
+* **Per-run repo override beyond the composer's `[Attach repo: ▾]` chip** — design has the chip but no add-from-composer-flow. Default: chip stays project-level; "+ Connect a repo" is a separate explicit action.
+
+Each of these gets a TODO comment in the code referencing this section so they can't slip silently.
+
+**AC:**
+* Authed user opens project switcher → "+ Connect a GitHub repo" → popover shows their GitHub repos within 2s.
+* Pick a repo → new project created auto-named after the repo (e.g. `hostel-be-v3`) → drop into `/v3/p/{newId}`.
+* "+ Attach a GitHub repo" on `/v3/landing` opens the same popover when authed; same auto-name behaviour.
+* No navigation away from the current page during the flow.
+* TODO comments for the 4 deferred design questions present in `RepoAttachPopover.tsx`.
+
+**Deps:** R-124 (switcher surface) · R-104 (auth context) · existing v2 `listGitHubRepos` + `linkRepoToProject` API helpers.
+
 ---
 
 ### Section E — Settings, billing, team (avatar dropdown destinations)
@@ -322,7 +348,7 @@ Polish:
   R-170 Mobile responsive primitives
 ```
 
-**Wave 2 count:** 10 R-items.
+**Wave 2 count:** 11 R-items (added R-125 repo-attach popover after the user's "how does someone add a repo?" review surfaced the gap between R-124's switcher action and a real OAuth-scope-grant flow).
 
 ### Wave 3 — Migration + polish (target: 1 week after Wave 2)
 
