@@ -150,52 +150,34 @@ Configurable security headers (CSP, HSTS, X-Frame-Options) via `SecurityProperti
 
 ## Database Migrations
 
-75 Flyway migrations (V1–V75) run automatically on startup:
+150+ Flyway migrations (V1–V150 on `feature/v2.7-foundation`) run
+automatically on startup. The full per-migration index lives in
+[`docs/CODEMAP.md`](docs/CODEMAP.md) → §Database Migrations and
+the per-package `CLAUDE.md` files. Highlights:
 
-| Version | Description |
-|---------|-------------|
-| V1–V3 | Core schema, tenant_id, cost/cache fields |
-| V4–V7 | Auth schema, admin seed, tier config, password fix |
-| V8–V9 | GitHub settings, conversation history |
-| V10–V14 | AI provider keys, GCS, merge conflicts, key source mode |
-| V15–V16 | Model metrics, prompt audit |
-| V17–V20 | Auto-merge, integrations, Slack |
-| V21–V22 | Tier permissions, activity audit |
-| V23–V26 | Billing (plans, subscriptions, usage, top-up) |
-| V27–V29 | Apply suggestion, invoicing/GST, preview limits |
-| V32–V34 | Plan versions, validation report |
-| V35–V37 | Preview tracking, run title/summary, test generation |
-| V38–V44 | Calibration, report flags, project AI provider, UI style |
-| V45 | Widen plan_version columns |
-| V46 | Stripe + payment gateway support |
-| V47 | OAuth support (Google, GitHub login) |
-| V48–V50 | View mode, feature flags, free tier restrictions |
-| V51 | Force logout flag |
-| V52 | GitHub PR URL |
-| V53 | Archive run |
-| V54 | Stripe multi-currency |
-| V55 | Payment audit expansion |
-| V56 | Task completion notes |
-| V57 | In-app notifications table |
-| V58 | Subtask support (parentTaskId, subtaskIndex, subtaskTotal) |
-| V59 | Bitbucket SCM integration |
-| V60–V61 | Preview registry, cost-proportional credits, run_cost_log audit, batch execution |
-| V62–V65 | Design system, run cost budget, accuracy report schema |
-| V66–V71 | Test execution hardening, provider health tracking, eval framework, report sharing |
-| V72 | prompt_audit table + agent_task.prompt_hash column |
-| V73 | plan_effectiveness table |
-| V74 | accuracy_assessment results persistence |
-| V75 | plan_effectiveness indexes + additional metric columns |
+| Range | Theme |
+|-------|-------|
+| V1–V44 | Core schema, auth, billing, integrations, design system |
+| V45–V60 | Stripe gateway + OAuth + force-logout + cost-proportional credits |
+| V61–V90 | Batch execution + preview registry + accuracy reports + Pilot v3.0 (project workspace) |
+| V91–V120 | Project memory + assessment + plan-version tooling + Validation v3 + V120 LlmProvider GEMINI rename |
+| V121–V129 | v2.6.1 persona-roadmap waves (TEAM tier + activation funnel + SSO/GitHub-app schema + smart-routing scaffold + startup program) |
+| V130 | Hierarchical planner phase-0 schema (`feature/hierarchical-planner`) |
+| V131–V139 | Enterprise readiness (`feature/enterprise-readiness-eval`) — 4 phases (folder + activity + contracts + standards + ADR + invariants + notification prefs) |
+| V140–V146 | Tier-config alignment with website pricing + V141 ladder consolidation + V142 dead-flag drops + V143 product-split discriminator + V144 per-seat TEAM reinstatement + V145 FREE 5→10 + V146 annual billing plans |
+| V147–V150 | v2.7 Foundation batch — V147 audit-chain (M-019), V148 governance caps (M-032/033/039), V149 TEAM-BYOK plan (M-051), V150 retention flag seed (M-038) |
 
 ---
 
 ## Model Matrix
 
-| Agent Tier | Agents | Anthropic | Google | OpenAI |
+> Provider id is `gemini` post-V120 (was `google` until v2.5.13).
+
+| Agent Tier | Agents | Anthropic | Gemini | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2, AccuracyAssessmentService | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent + 4 more | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
-| LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| PLANNING | PlannerAgentV2, OutlinePlannerAgent, ReviewerAgentV3, AccuracyAssessmentService | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgentV2 (MEDIUM), TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent + 4 more | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | WorkerAgentV2 (LOW), SmartClassifierAgent, CoherencePlannerAgent, ConversationAgent, ContextAgent | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
 Default provider: **OpenAI** (user-selected per project). Health-based failover via Redis circuit breaker.
 

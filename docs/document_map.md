@@ -93,6 +93,14 @@ Find the **type of change** you are making in the table below. Update every docu
 | `project-user-journeys.md` | Project-workbench end-to-end journeys | Changes to project / launch / chat flows |
 | `enterprise-one-pager.md` | Procurement / IT / security one-pager | Tier table, security posture, data-handling Q&A changes |
 | `enterprise-sla.md` | ENTERPRISE-tier support SLA | P1–P4 definitions, uptime credit schedule changes |
+| `status-page.md` | Better Stack status-page operator runbook (M-018) | Provider swap, component changes, canary-runner contract |
+| `payment-history.md` | Razorpay + Stripe `payment_audit` runtime story (M-044) | Payment flow / webhook event subscriptions / gateway migration |
+| `dpa-flow.md` | DPA request → drafting → signature → activation runbook (M-020) | Sub-processor add/remove, template updates, signing-tool changes |
+| `sso-saml-wiring.md` | SAML wire-in spec + per-IdP setup notes + lockout-prevention guard rationale (M-016) | When SAML2 actually wires in, when adding a new IdP, when changing the lockout rules |
+| `stripe-price-ids-ops.md` | Stripe env-var checklist + setup runbook + operator gotchas (M-029) | Price-id ops changes, gateway flag flips, setup procedure changes |
+| `cookie-domain-switch.md` | Maintenance-window plan for the JWT cookie scope flip (M-031) | When the Phase-2 surface split actually executes |
+| `backlog-deferred-items.md` | First-slice + owner-needed + when-to-re-open per deferred Backlog item (M-035/036/037/040/041/048/050/052) | When picking up any of those items |
+| `execution-checkpoint.md` | Running execution log of the M-* batches on `feature/v2.7-foundation` | After every 3 items shipped + at every wave-boundary transition |
 | `billing-workflows.html` | Rendered billing flow diagrams (subscribe, top-up, refund, webhook handling) | Billing / payment flow changes |
 | `design/ui-tokens.md` | Single source of truth for color/radius/spacing tokens | Adding a UI primitive, tweaking the palette, theme work |
 | `document_map.md` | This file | Adding a new doc, adding a new change type |
@@ -122,6 +130,9 @@ Find the **type of change** you are making in the table below. Update every docu
 | `deployment/`, `deployment/preview/` | JAVADOC §16; ARCHITECTURE §6.2; WORKFLOWS §12 |
 | `eval/` | JAVADOC §24 Eval Framework |
 | `execution/` (Execution View) | ARCHITECTURE §execution view (v2.3.0) |
+| `governance/` (M-032/033/039 — `GovernanceGuard`) | CHANGELOG v2.7 / CODEMAP §v2.7 Foundation new packages |
+| `auth/dsar/` (M-017 — `DsarController`) | CHANGELOG v2.7 / CODEMAP §v2.7 Foundation new packages |
+| `auth/sso/` (M-016 — `SsoConfigController` lockout guard) | sso-saml-wiring.md |
 | `harness/` (V1 — workspace, GateStore, design-system) | JAVADOC §8 (legacy V1 surface kept); ARCHITECTURE §V2 reuses these primitives |
 | `integration/` (slack, jira, confluence, bitbucket, pagerduty, servicenow, scm) | JAVADOC §17.11–17.12; WORKFLOWS §7–8 |
 | `memory/` | ARCHITECTURE §project memory (v2.2.0) |

@@ -33,7 +33,8 @@ src/main/java/com/navneet/executespec/
 ├── apitests/                            # API test suite agent
 ├── arch/                                #   .invariants/ — architectural invariant checker (E3.14, v2.6.3-track)
 ├── assessment/                          # Pre-plan feature assessment
-├── auth/                                # JWT + OAuth2 + RBAC + tier permissions
+├── auth/                                # JWT + OAuth2 + RBAC + tier permissions  (subpkg dsar/ — DSAR data-export endpoint, M-017, Wave 3)
+│                                       #   sso/ — SsoConfigController + lockout-prevention guard (M-016, Wave 3)
 ├── billing/                             # Razorpay + Stripe + lifecycle (Wave 1)
 ├── codeintel/                           # Codemaps + architecture docs + Generate Docs
 ├── compliance/                          # Data retention / GDPR
@@ -47,6 +48,7 @@ src/main/java/com/navneet/executespec/
 ├── eval/                                # Model evaluation framework
 ├── execution/                           # Execution View (multi-repo, multi-solution)
 ├── folder/                              # .executespec/ folder write chokepoint + bootstrap (E1, v2.6.3-track)
+├── governance/                          # Plan-approval policy + project spend cap + repo allowlist (M-032/033/039, Wave 3)
 ├── harness/                             # V1 primitives reused by V2 (workspace, gates)
 ├── integration/                         # Slack, JIRA, Confluence, GitHub, Bitbucket, ScmProvider
 ├── memory/                              # Project memory + chat
@@ -96,6 +98,35 @@ The V2 pipeline is the only active path. V1 was deleted in deprecation P1–P6 (
 | `v2/chat/`, `v2/compiler/`, `v2/rollout/` | (auxiliary) | Internal helpers |
 
 Entry point: `V2RunOrchestrator.submitRun(...)` — see [ARCHITECTURE.md §3 V2 pipeline](ARCHITECTURE.md).
+
+---
+
+## v2.7 Foundation new packages (on `feature/v2.7-foundation`, NOT yet merged)
+
+| Package | Key files | Purpose |
+|---------|-----------|---------|
+| `governance/` | `GovernanceGuard` | M-032 + M-033 + M-039 — plan-approval cost-policy, per-project monthly spend cap, GitHub repo allowlist. Single service called from `RunController.approvePlan` + `ProjectRepoService.{linkToProject, createAndLinkNewRepo}`. Static helper `ownerAllowedBy(csv, owner)` for tests + direct callers. |
+| `auth/dsar/` | `DsarController` | M-017 — `GET /api/dsar/me` (caller self-service) + `GET /api/dsar/users/{userId}` (SUPER_ADMIN act-on-behalf). JSON export with sections `identity` / `payments` / `runs` / `notifications`. Live credentials redacted (we surface `has*Key` booleans instead). Right-to-be-forgotten deletion is a separate workflow. |
+| `analytics/` *(extended)* | `ActivationFunnelController` (existing: `EventTrackingService`, `UserActivationEvent`, `EventName`, `PostHogClient`) | M-049 — SUPER_ADMIN-gated `GET /api/admin/activation-funnel?sinceDays=N` returns total + windowed counts per stage in declaration order. Drives the AdminPage Reports-tab funnel panel. |
+| `notification/` *(extended)* | `RunCompletionNotifier` (rich-failure-body refresh) | M-053 + M-054 — failure notifications now mirror the completion path: `$0.42 · 4m12s` cost/duration prefix before the failure reason. Skips the prefix on early-stage failures so we don't render `$0.00 · 0s` noise. |
+| `auth/sso/` *(extended)* | `SsoConfigController` (lockout-prevention guard) | M-016 — `OFF→ENFORCED` transition blocked with 409 unless the calling admin's session is itself SSO-minted. Prevents the "first ENT customer locks the entire org out" foot-gun. Full SAML2 wire-in spec at `docs/sso-saml-wiring.md`. |
+| `adr/` *(extended)* | `AdrController` | M-014 — `GET /api/projects/{projectId}/adrs` + `/{id}` for the existing V137 frontmatter cache. Filters via `?acceptedOnly=true` to mirror the planner-injection set. |
+| `arch/invariants/` *(extended)* | `InvariantController` | M-015 — `GET /api/projects/{projectId}/invariants` + `/violations`. Project-scoped joins on the V138 violation rows. |
+| `standards/` *(extended)* | `OrgStandardController` | M-024 — full org-level standards CRUD. Was DB-only; now manageable from `/org/settings`. |
+| `activity/` *(extended)* | `ActivityFeedRetentionJob` (flag-tunable) | M-038 — `activity.retention.days` feature flag overrides the yml default; clamped [30, 3650]. |
+| `auth/service/` *(extended)* | `OrgService.changeOrgTier` (product-id stamp) + `ActivityAuditService.verifyChain` | M-030 — admin tier changes write `org.product_id` via `TierProductSurfaceMapper`. M-019 — append-only hash-chain writer + verifier (V147). |
+
+### v2.7 admin endpoints
+
+| Endpoint | M-ID | Purpose |
+|---|---|---|
+| `POST /api/admin/runs/halt-all` | M-010 | Cancel every non-terminal run (incident response). |
+| `GET  /api/admin/audit-chain/verify` | M-019 + M-042 | Walk the V147 hash chain + report first break. |
+| `GET  /api/admin/activation-funnel?sinceDays=N` | M-049 | Headline counts of the V125 6-step funnel. |
+| `GET  /api/dsar/me` / `GET /api/dsar/users/{userId}` | M-017 | DSAR JSON export. |
+| `GET/POST/PUT/DELETE /api/orgs/{orgId}/standards*` | M-024 | Org-level engineering standards CRUD. |
+| `GET  /api/projects/{id}/adrs` + `/{id}` | M-014 | ADR list/detail. |
+| `GET  /api/projects/{id}/invariants` + `/violations` | M-015 | Architectural invariants + recent violations. |
 
 ---
 
@@ -318,6 +349,10 @@ V1–V146 across the lifetime of the project. Recent ranges:
 | V145 | **Loosen FREE tier** (Phase 1.3 #33, on `feature/v2.7-foundation`). `tier_config.FREE.monthly_run_limit` 5 → 10 + description rewrite. `TierEnforcementService.FALLBACK_FREE` constant updated to match. Rationale: matches emergent.sh's free-tier ceiling so we can measure activation honestly without "credit card to try" friction. |
 | V144 | **Reinstate per-seat TEAM tier** (on `feature/v2.7-foundation`, not yet merged to `dev`/`main`). Reverses V141's tier consolidation paired with the code-side revert: un-renames TEAM → MAX in `tier_config` / `billing_plan` / `app_user.tier` / `org.tier` / `pipeline_run.user_tier` / `app_user.trial_tier`; re-inserts the per-seat TEAM tier_config (50 credits/seat, 20 max, LISTED) + 2 billing_plan rows (Team Monthly INR ₹3,999/seat + USD $49/seat, included_seats=2) + billing_plan_limit rows. `org.seat_count` (V123) untouched — V141 didn't drop it. Net post-V144 ladder: FREE / PRO (HIDDEN) / TEAM ($49/seat 2-20 seats, → Build surface) / MAX ($29/mo BYOK unlimited, → Vibe surface) / ENTERPRISE. Tier→surface policy enforced by new `TierProductSurfaceMapper`. |
 | V131–V139 | **Enterprise readiness (v2.6.3-track, on `feature/enterprise-readiness-eval`, NOT yet merged to dev/main)** — V131 4-state `.executespec/` folder status + bootstrap PR url + last synced at on `project_repo` (E1.1) · V132 `executespec_pr_mode` enum (PR / DIRECT_PUSH) on `project_repo` (E1.4) · V133 `activity_feed` partitioned-by-month + 12 partitions seeded 2026-04 → 2027-03 + 4 hot-path indexes (E1.8/9/10) · V134 `project.config_storage` (FOLDER / DATABASE) + `project_config` table for confidential-project DATABASE opt-out (E1.7) · V135 `contract_registry` + `contract_version` + `contract_consumer` + `contract_drift_event` + 3 hot-path indexes including unresolved-drift partial (E2.1) · V136 `org_standard` + `project_standard_override` + `standards_violation` four-table model + ≥30-char rationale validators (E3.1) · V137 `adr` table caches `.executespec/arch/adrs/<NNNN>-<slug>.md` frontmatter for query speed (E3.12) · V138 `arch_invariant` + `arch_invariant_violation` for continuous architectural properties (E3.14) · V139 `user_notification_pref` (per-user × event × channel opt-in/out matrix) (E4.5). |
+| V147 | **Activity-audit hash chain** (M-019, Wave 3, on `feature/v2.7-foundation`). 3 nullable columns on `activity_audit` (`prev_hash CHAR(64)` / `row_hash CHAR(64)` / `chain_seq BIGINT`) + Postgres sequence `activity_audit_chain_seq` + 2 partial indexes for the verifier walk. Each row hashes (prev_hash || canonical row contents); `ActivityAuditService.verifyChain()` walks the chain in seq order and returns the first break for SUPER_ADMIN forensic checks. Pre-V147 rows stay nullable (treated as "pre-chain prefix"). |
+| V148 | **Governance caps** (M-032 + M-033 + M-039, Wave 3). 3 nullable columns: `project.spend_cap_usd_monthly NUMERIC(10,2)` (per-project monthly LLM cap), `org.require_admin_approval_above_usd NUMERIC(10,2)` (USD threshold above which only ORG_ADMIN/BILLING_ADMIN/SUPER_ADMIN can approve a plan), `org.allowed_github_owners VARCHAR(1024)` (CSV repo-owner allowlist). Enforced by new `GovernanceGuard` service called from `RunController.approvePlan` + `ProjectRepoService.{linkToProject, createAndLinkNewRepo}`. |
+| V149 | **TEAM-BYOK plan** (M-051, Wave 3, parked decision #2). 2 new `billing_plan` rows ("Team Monthly INR (BYOK)" ₹3,199/seat + "Team Monthly USD (BYOK)" $39/seat) with `key_mode='BYOK'`. Same TEAM tier + same product_access set as the managed-key plans; the only differences are the BYOK flag + the lower per-seat price (closes margin risk on heavy users). 3 `billing_plan_limit` rows (RUNS unlimited, PROJECTS=5, STORAGE_MB=5120). Idempotent (NOT EXISTS guards). Annual TEAM-BYOK rows deferred until demand signal. |
+| V150 | **Activity retention flag seed** (M-038, Backlog). 1 `feature_flag` row: `activity.retention.days = 365`, PLATFORM scope. Read by `ActivityFeedRetentionJob.effectiveRetentionDays()` first; falls back to `activity.feed.retention.days` from application.yml. Clamped to [30, 3650] in code so a typo can't drop everything or hoard forever. SOC 2 / ISO 27001 customers can adjust without a deploy via the existing `/admin/feature-flags` UI. |
 
 Older ranges are documented in `JAVADOC.md §21.1 Flyway Migrations` and `DEPLOYMENT.md`.
 
