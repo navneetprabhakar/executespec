@@ -1,20 +1,19 @@
 /**
- * CodeTab — combines Architecture · Repos · Tech-Debt · Standards · Contracts
- * into a single "Code" surface so engineers don't have to stitch the picture
- * across 3 tabs (per UX & Wireframe Report 2026-04-26 §3.2 §5.3).
+ * CodeTab — Architecture · Health · Tech-Debt · Standards · Contracts · ADRs · Invariants.
+ *
+ * v2.7.2 — Repos was promoted out of this tab to a top-level Project
+ * tab so it's discoverable from the project header without clicking
+ * through Code first. The legacy {@code ?tab=repos} URL still works
+ * (ProjectDashboardPage's legacyTabToNew maps it to {@code tab:'repos'}).
  *
  * Layout:
  *   ┌── sub-tabs ────────────────────────────────────────────┐
- *   │  Architecture · Repos · Tech debt · Standards · Contracts
+ *   │  Architecture · Health · Tech debt · Standards ·       │
+ *   │  Contracts · ADRs · Invariants                         │
  *   └─────────────────────────────────────────────────────────┘
- *
- * Each sub-tab renders the existing panel — this is purely a re-organize,
- * not a rewrite, so existing functionality + a11y + 4-band tokens are all
- * preserved verbatim.
  */
 import { useState } from 'react';
 import ArchitectureViewer from './ArchitectureViewer';
-import ProjectRepoManager from './ProjectRepoManager';
 import TechDebtPanel from './TechDebtPanel';
 import StandardsCompliancePanel from './StandardsCompliancePanel';
 import ContractCoveragePanel from './ContractCoveragePanel';
@@ -23,11 +22,10 @@ import AdrPanel from './AdrPanel';
 import InvariantPanel from './InvariantPanel';
 import { cn } from '@/lib/utils';
 
-type CodeSubTab = 'architecture' | 'repos' | 'tech-debt' | 'standards' | 'contracts' | 'health' | 'adrs' | 'invariants';
+export type CodeSubTab = 'architecture' | 'tech-debt' | 'standards' | 'contracts' | 'health' | 'adrs' | 'invariants';
 
 const SUB_TABS: { key: CodeSubTab; label: string }[] = [
   { key: 'architecture', label: 'Architecture' },
-  { key: 'repos', label: 'Repos' },
   { key: 'health', label: 'Health' },
   { key: 'tech-debt', label: 'Tech debt' },
   { key: 'standards', label: 'Standards' },
@@ -41,10 +39,24 @@ interface CodeTabProps {
   orgId: string | null | undefined;
   repos: any[];
   initialSub?: CodeSubTab;
+  /**
+   * Controlled-mode override: when provided, the parent owns the sub-tab
+   * state and CodeTab re-renders whenever this changes (allowing deep-link
+   * targets like EmptyProjectLanding's "Link a repo" to switch the sub
+   * after mount, not only at mount). When omitted, falls back to the
+   * uncontrolled internal state seeded by {@link initialSub}.
+   */
+  sub?: CodeSubTab;
+  onSubChange?: (sub: CodeSubTab) => void;
 }
 
-export default function CodeTab({ projectId, orgId, repos, initialSub = 'architecture' }: CodeTabProps) {
-  const [sub, setSub] = useState<CodeSubTab>(initialSub);
+export default function CodeTab({ projectId, orgId, repos, initialSub = 'architecture', sub: controlledSub, onSubChange }: CodeTabProps) {
+  const [internalSub, setInternalSub] = useState<CodeSubTab>(initialSub);
+  const sub = controlledSub ?? internalSub;
+  const setSub = (next: CodeSubTab) => {
+    if (onSubChange) onSubChange(next);
+    else setInternalSub(next);
+  };
 
   return (
     <div className="space-y-3">
@@ -72,7 +84,6 @@ export default function CodeTab({ projectId, orgId, repos, initialSub = 'archite
         {sub === 'architecture' && (
           <ArchitectureViewer projectId={projectId} repoCount={repos.length} />
         )}
-        {sub === 'repos' && <ProjectRepoManager projectId={projectId} />}
         {sub === 'health' && <WorkspaceHealthPanel projectId={projectId} />}
         {sub === 'tech-debt' && <TechDebtPanel projectId={projectId} />}
         {sub === 'standards' && orgId && (
