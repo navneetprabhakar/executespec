@@ -76,6 +76,17 @@ spring:
           github:
             user-name-attribute: login
 
+# ── Server (Tomcat / forwarded headers) ──────────────────────────────────────
+# The GCE LB / Caddy in front of the JVM terminates TLS and forwards
+# X-Forwarded-Proto: https. Without this, Spring sees every request as
+# http and rebuilds absolute URLs (e.g. RedirectView Location headers,
+# OAuth client redirect_uri when {baseUrl} is used) with the wrong
+# scheme. `framework` uses Spring's ForwardedHeaderFilter — safer than
+# `native` (Tomcat RemoteIpValve) because it composes with the security
+# filter chain ordering we already have.
+server:
+  forward-headers-strategy: framework
+
 # ── Agent & GitHub ────────────────────────────────────────────────────────────
 agent:
   github:

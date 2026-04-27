@@ -24,7 +24,7 @@ import { ArrowRight, Activity, Heart } from 'lucide-react';
 import ScoreRing from '@/components/runs/ScoreRing';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
-import { Rocket } from 'lucide-react';
+import { Rocket, FolderGit2, Plus } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useEffect, useState } from 'react';
 import * as api from '@/lib/api';
@@ -37,6 +37,13 @@ interface PulseTabProps {
   recentPrs: PrSummary[];
   onOpenRun: (runId: string) => void;
   onSwitchTab: (tab: 'runs' | 'code') => void;
+  /**
+   * v2.7.2 — present only when the project has 0 linked repos. When set,
+   * Pulse renders an inline "Add repository" banner above the hero row
+   * so users with runs but no repos (e.g. all repos were unlinked) don't
+   * have to discover the new top-level Repos tab to fix it.
+   */
+  onLinkRepo?: () => void;
 }
 
 export default function PulseTab({
@@ -45,6 +52,7 @@ export default function PulseTab({
   recentPrs,
   onOpenRun,
   onSwitchTab,
+  onLinkRepo,
 }: PulseTabProps) {
   const lastRun = recentTasks[0] ?? null;
   const [report, setReport] = useState<api.ValidationReportData | null>(null);
@@ -98,6 +106,29 @@ export default function PulseTab({
 
   return (
     <div className="space-y-3 w-full">
+      {/* v2.7.2 — inline "no repos linked" banner. Renders only when the
+          parent passes onLinkRepo (which is only when repoCount === 0).
+          Click pops AddRepoModal directly via the shared openAddRepoFlow
+          plumbing in ProjectDashboardPage. */}
+      {onLinkRepo && (
+        <div className="rounded-md border border-status-waiting/40 bg-status-waiting/10 p-3 flex items-center gap-3">
+          <FolderGit2 className="h-4 w-4 text-status-waiting flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-medium text-primary">No repositories linked</div>
+            <div className="text-[11px] text-muted">
+              You have runs but no repos. Launches will be blocked until you link at least one.
+            </div>
+          </div>
+          <button
+            onClick={onLinkRepo}
+            className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-sm border border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            Add repository
+          </button>
+        </div>
+      )}
+
       {/* v2.6.4 user-feedback fix #1 — Pulse uses the full pane (was
           max-w-3xl ≈ 768px, looked tiny on wide monitors). 12-col grid
           gives the hero row LastRun cols 1-8 + ScoreRing cols 9-12 on

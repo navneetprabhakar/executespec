@@ -21,6 +21,15 @@ export default function ProjectRepoManager({ projectId }: { projectId: string })
     fetchRepos(projectId);
   }, [projectId, fetchRepos]);
 
+  // Listen for global open-add-repo-modal events so deep-link entry points
+  // (e.g. EmptyProjectLanding's "Link a repo" button) can pop the modal
+  // without prop-drilling through ProjectDashboardPage → CodeTab → here.
+  useEffect(() => {
+    const handler = () => setShowAdd(true);
+    window.addEventListener('open-add-repo-modal', handler);
+    return () => window.removeEventListener('open-add-repo-modal', handler);
+  }, []);
+
   const isOrgAdmin = useMemo(() => {
     const role = me?.orgRole;
     return role === 'ORG_ADMIN' || me?.globalRole === 'SUPER_ADMIN';
