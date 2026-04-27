@@ -72,6 +72,23 @@ public class SsoConfigController {
                 "Cannot enforce SSO without configuring a provider first.");
         }
 
+        // M-016 (Wave 3) — lockout-prevention guard. Enforcing SSO before
+        // the calling admin themselves has logged in via SSO is the most
+        // common foot-gun: it traps every member (including the admin)
+        // out of the org until they trigger a database fix. Block the
+        // transition with a 409 Conflict + an explainer instead of a
+        // sterile 400, so the UI can surface a "verify your own SSO
+        // login first" hint.
+        boolean transitionsToEnforced =
+                Boolean.TRUE.equals(body.enforced) && !org.isSsoEnforced();
+        if (transitionsToEnforced && !"SAML".equals(principal.getUser().getOauthProvider())
+                && !"SSO".equals(principal.getUser().getOauthProvider())) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Verify your own SSO login first. Sign out, sign back in via the "
+                    + "configured IdP, then re-attempt enforcement. This guard "
+                    + "prevents locking the entire org out of the platform.");
+        }
+
         if (body.provider != null) org.setSsoProvider(body.provider);
         if (body.enforced != null) org.setSsoEnforced(body.enforced);
         if (body.metadataUrl != null) org.setSsoMetadataUrl(body.metadataUrl);
