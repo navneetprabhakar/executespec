@@ -532,9 +532,23 @@ public class OrgService {
                 ? teamSub.getPaymentGateway() : teamSub.getGateway();
         if ("stripe".equalsIgnoreCase(gatewayName) && teamSub.getGatewaySubscriptionId() != null) {
             stripeGateway.updateSubscriptionQuantity(teamSub.getGatewaySubscriptionId(), newSeats);
+        } else if ("razorpay".equalsIgnoreCase(gatewayName)) {
+            // M-011 (Wave 3) — Razorpay's subscription model doesn't support
+            // mid-cycle quantity changes the way Stripe does. Surface a 501
+            // pointing the admin at the manual workflow rather than silently
+            // diverging the org-side seat_count from the actual billing.
+            log.warn("[M-011] Razorpay seat adjust requested but unsupported in-band — "
+                    + "org={} gatewaySub={} requestedSeats={} → 501 with manual-flow pointer",
+                    orgId, teamSub.getGatewaySubscriptionId(), newSeats);
+            throw new ResponseStatusException(HttpStatus.NOT_IMPLEMENTED,
+                "Razorpay subscriptions don't support mid-cycle seat changes. "
+                    + "Email billing@executespec.ai with your org id (" + orgId + ") "
+                    + "and the new seat count (" + newSeats + "); ops will issue a "
+                    + "plan-swap at your next billing cycle. See docs/payment-history.md "
+                    + "for the full workflow.");
         } else {
-            log.warn("Seat adjust: non-Stripe gateway '{}' for org {} — gateway push skipped. " +
-                    "Razorpay seat adjustment is not yet implemented.", gatewayName, orgId);
+            log.warn("Seat adjust: unknown gateway '{}' for org {} — gateway push skipped.",
+                    gatewayName, orgId);
         }
 
         // Write locally — webhook will arrive later and be idempotent.
