@@ -1899,6 +1899,35 @@ export const updateNotificationPreference = (
     body: JSON.stringify({ eventType, channel, enabled }),
   });
 
+// ── SSO config (M-004 Wave 2) ───────────────────────────────────────────────
+
+export type SsoProvider = 'GOOGLE_OIDC' | 'OKTA_SAML' | 'AZURE_AD_SAML';
+
+export interface SsoConfig {
+  provider: SsoProvider | null;
+  enforced: boolean;
+  metadataUrl: string | null;
+  domain: string | null;
+  configured: boolean;
+}
+
+export const getSsoConfig = () =>
+  req<SsoConfig>('/auth/sso/config');
+
+export const updateSsoConfig = (body: Partial<{
+  provider: SsoProvider | null;
+  enforced: boolean;
+  metadataUrl: string | null;
+  domain: string | null;
+}>) =>
+  req<SsoConfig>('/auth/sso/config', {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const clearSsoConfig = () =>
+  req<void>('/auth/sso/config', { method: 'DELETE' });
+
 // ── SSE ────────────────────────────────────────────────────────────────────
 
 /** Fetch a short-lived scoped SSE token for a specific run. */
