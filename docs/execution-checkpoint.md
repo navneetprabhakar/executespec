@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (after Wave 2 batch 4 — M-045 + M-027 annotated + M-028 dup-skipped)
+## State at checkpoint (after Wave 2 batch 5 — M-034 / M-043 / M-044)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `7acbb6ef` — `chore(plans): annotate M-027 BEST VALUE chip placement question` (about to push)
+**Last pushed commit:** `f2fd1a3f` — `docs(billing): payment-history reference for Razorpay + Stripe (M-044)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** Wave 2 IN PROGRESS — 11 of ~16 items closed (1 dup, 1 awaiting product call)
+**Wave:** Wave 2 IN PROGRESS — 14 of ~16 items closed (1 dup, 1 awaiting product call)
 
 ## Master list
 
@@ -48,6 +48,9 @@ ApiContractTest green after Wave 1 close.
 | M-024 | OrgStandardController CRUD + OrgStandardsManager UI on /org/settings | 703bc874 |
 | M-045 | TEAM_DEFAULT_SEATS 3 → 2 in PlanCard (parked decision #9) | f871169f |
 | M-028 | TEAM seats CTA from /admin — **SHIPPED-DUPLICATE** under M-002 (a443d398). Marked closed. | (a443d398) |
+| M-034 | Deep-linkable `/projects/:id/activity` URL → opens dashboard with `?drawer=activity` | a190a586 |
+| M-043 | VerdictPill on RunCard rows for terminal runs (statusReason-based) | 723425b8 |
+| M-044 | docs/payment-history.md — unified Razorpay+Stripe operator + customer reference | f2fd1a3f |
 
 **M-027 (BEST VALUE chip move) — annotated only (commit 7acbb6ef);
 needs product decision.** Two defensible placements: keep on MAX
@@ -61,13 +64,10 @@ pre-batch jar). Frontend shells render gracefully until the next deploy.
 
 ApiContractTest green throughout.
 
-## Wave 2 — remaining (~5 of ~16 items)
+## Wave 2 — remaining (2 active + 1 blocked)
 
 In execution order:
 
-- **M-034** — Project activity feed page. `GET /api/projects/{id}/activity` exists (V133); need a Project → Activity full feed (the Pulse-tab shows top 5; this is the "see all" deep view).
-- **M-043** — RunCard verdict pill (apply VerdictPill to RunCard rows in RunList).
-- **M-044** — Payment-history doc (markdown only — explain Razorpay vs Stripe payment-history sources).
 - **M-046** — `/exec` drill-down (clickable KPI cards → filtered project list).
 - **M-027** — BLOCKED-PRODUCT-DECISION (BEST VALUE chip placement). Annotation only at 7acbb6ef.
 
