@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Backlog batch 1 — M-047 / M-021 / M-038)
+## State at checkpoint (Backlog batch 2 — M-042 / M-049 / M-053 + M-054)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `26aad86c` — `feat(audit): retention window now feature-flag-tunable (M-038)` (about to push)
+**Last pushed commit:** `4441ed5d` — `feat(notifications): rich failure body + cost/duration signals (M-053 + M-054)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Backlog IN PROGRESS** — 3 of ~16 items shipped
+**Wave:** **Backlog IN PROGRESS** — 7 of ~16 items shipped
 
 ## Master list
 
@@ -96,6 +96,9 @@ ApiContractTest green throughout.
 | M-047 | LoginPage routes OAuth via /api/auth/oauth2/init?surface=… for Phase-2 surface stash | 0bc2a31f |
 | M-021 | VerdictPill backfill on InlineRunDetail header — closes the Plan-1 VerdictPill rollout | e6891cae |
 | M-038 | activity.retention.days flag-tunable + V150 seed — SUPER_ADMIN can adjust without deploy | 26aad86c |
+| M-042 | "Verify audit chain" SUPER_ADMIN button on AdminPage — surfaces V147/M-019 verifier | a706569e |
+| M-049 | ActivationFunnelController + AdminPage Reports tab panel (period dropdown + stacked-bar) | e80e3a9d |
+| M-053 + M-054 | RunCompletionNotifier failure body now leads with cost/duration signals (mirrors completion path) | 4441ed5d |
 
 ## Backlog (~16 items)
 
