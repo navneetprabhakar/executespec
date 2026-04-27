@@ -6,6 +6,7 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,7 +40,14 @@ public class ProjectExportController {
 
     private final ProjectExportService exportService;
 
+    /**
+     * M-012 (Wave 1): tightened from any-project-member to ORG_ADMIN+.
+     * Project export bundles the entire .executespec/ folder (standards,
+     * ADRs, invariants, contracts, activity feed) — Carmen / compliance
+     * concern flagged in the TEAM/ENT UX assessment.
+     */
     @PostMapping
+    @PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN','BILLING_ADMIN')")
     public ResponseEntity<byte[]> export(
             @PathVariable String projectId,
             Authentication auth) {

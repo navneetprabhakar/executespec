@@ -1070,6 +1070,23 @@ export const validateAiKey = (provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', apiKe
     body: JSON.stringify({ provider, apiKey }),
   });
 
+/** M-005 (Wave 1) — GitHub App install URL + status. Org-admin gated. */
+export interface GitHubAppStatus {
+  installed: boolean;
+  installationId: string;
+  installedAt: string;
+}
+export interface GitHubAppInstallUrl {
+  installUrl: string;
+  appName: string;
+}
+export const getGitHubAppStatus = () =>
+  req<GitHubAppStatus>('/auth/github-app/status');
+export const getGitHubAppInstallUrl = () =>
+  req<GitHubAppInstallUrl>('/auth/github-app/install-url');
+export const uninstallGitHubApp = () =>
+  req<void>('/auth/github-app/install', { method: 'DELETE' });
+
 /** Tests JIRA credentials by calling the JIRA REST API. */
 export const validateJira = (baseUrl: string, email: string, apiToken: string) =>
   req<ValidationResult>('/auth/settings/jira/validate', {
