@@ -87,7 +87,7 @@ export default function AvatarMenu() {
 
   // Logged-in: avatar dropdown
   const items: { label: string; onClick: () => void; subtle?: boolean }[] = [
-    { label: 'Account', onClick: () => navigate('/v3/home?dest=settings') },
+    { label: 'Account', onClick: () => navigate('/v3/settings') },
     { label: 'Billing & plan', onClick: () => navigate('/v3/home?dest=billing') },
   ];
   if (user.tier && user.tier !== 'FREE') {

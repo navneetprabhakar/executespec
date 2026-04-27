@@ -49,7 +49,7 @@ export default function CmdK() {
   const actions = useMemo<Action[]>(() => {
     const all: Action[] = [
       { id: 'home', label: 'Open project home', hint: '/v3/home', run: () => navigate('/v3/home') },
-      { id: 'settings', label: 'Open settings', hint: '/v3/settings · R-140', run: () => navigate('/v3/home') },
+      { id: 'settings', label: 'Open settings', hint: '/v3/settings', run: () => navigate('/v3/settings') },
       { id: 'billing', label: 'Open billing & plan', hint: '/v3/billing · R-141', run: () => navigate('/v3/home') },
       { id: 'team', label: 'Open team', hint: '/v3/team · R-143', run: () => navigate('/v3/home') },
       { id: 'integrations', label: 'Open integrations', hint: '/v3/integrations · R-144', run: () => navigate('/v3/home') },

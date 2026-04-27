@@ -65,6 +65,7 @@ import V3Shell from '@/v3/components/V3Shell';
 import V3HomePlaceholder from '@/v3/pages/V3HomePlaceholder';
 import V3ProjectHome from '@/v3/pages/V3ProjectHome';
 import V3RunDetail from '@/v3/pages/V3RunDetail';
+import V3Settings from '@/v3/pages/V3Settings';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -137,6 +138,8 @@ export default function App() {
         <Route path="p/:slug" element={<V3ProjectHome />} />
         {/* R-130 — PR-shaped run detail. */}
         <Route path="p/:slug/r/:runShort" element={<V3RunDetail />} />
+        {/* R-140 — single-page settings stack. */}
+        <Route path="settings" element={<V3Settings />} />
       </Route>
 
       {/* ── Protected app routes ── */}
