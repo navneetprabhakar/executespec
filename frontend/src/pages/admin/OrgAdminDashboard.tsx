@@ -348,7 +348,9 @@ export default function OrgAdminDashboard() {
               instead of a hard error, the buyer lands on /plans with the
               TEAM tier pre-selected and their chosen seat count carried
               over. */}
-          {entityType === 'ORG' && orgDto && (orgDto.tier === 'FREE' || orgDto.tier === 'PRO' || orgDto.tier === 'MAX') && (
+          {/* Tier-coherence: shown to FREE + PRO orgs (sub-Team tiers). TEAM
+              already has seats; ENTERPRISE is sales-managed. */}
+          {entityType === 'ORG' && orgDto && (orgDto.tier === 'FREE' || orgDto.tier === 'PRO') && (
             <GlassPanel className="p-4">
               <div className="flex items-center gap-2 mb-3">
                 <UserCheck className="h-4 w-4 text-secondary" />

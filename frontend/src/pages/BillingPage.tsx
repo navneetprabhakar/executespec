@@ -191,8 +191,9 @@ export default function BillingPage() {
         {(() => {
           const spent = status?.spentUsd ?? 0;
           const tier = status?.plan?.tier ?? 'FREE';
+          // Tier-coherence: MAX renamed to TEAM in V141.
           const softCap = tier === 'ENTERPRISE' ? 1000
-            : tier === 'MAX' ? 500
+            : tier === 'TEAM' ? 500
             : tier === 'PRO' ? 100
             : 10;
           const pct = (spent / softCap) * 100;
@@ -328,9 +329,9 @@ export default function BillingPage() {
           </div>
         )}
 
-        {/* Buy Extra Runs (hidden for MAX/ENTERPRISE — unlimited runs) */}
+        {/* Buy Extra Runs (hidden for TEAM/ENTERPRISE — BYOK + unlimited) */}
         <div id="topup" />
-        {packages.length > 0 && user?.tier !== 'MAX' && user?.tier !== 'ENTERPRISE' && (() => {
+        {packages.length > 0 && user?.tier !== 'TEAM' && user?.tier !== 'ENTERPRISE' && (() => {
           const filtered = packages.filter(p =>
             showInr ? (p.amountInr > 0 && p.amountUsd === 0) : (p.amountUsd > 0 && p.amountInr === 0),
           );

@@ -357,18 +357,9 @@ function ReceiptsSection({ ent }: { ent: V3Entitlements }) {
         >
           Past invoices →
         </Link>
-        <Link
-          to="/billing"
-          style={{
-            padding: '5px 12px',
-            border: '1px solid var(--v3-border)',
-            borderRadius: 6,
-            color: 'var(--v3-text)',
-            textDecoration: 'none',
-          }}
-        >
-          Billing profile (v2) →
-        </Link>
+        {/* Tier-coherence: "Billing profile (v2)" deep-link removed.
+            v2 /billing now redirects here. GST + accounting surface kept
+            below for India users. */}
         {showGst && (
           <Link
             to="/accounting"
