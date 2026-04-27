@@ -929,6 +929,9 @@ function AdminPageInner() {
                 </div>
               </div>
             </div>
+
+            {/* M-049 (Backlog) — activation funnel headline counts. */}
+            <ActivationFunnelPanel />
           </div>
         )}
 
@@ -1115,6 +1118,95 @@ function AdminPageInner() {
           onClose={() => setGrantTarget(null)}
           onSuccess={() => { grantTarget.type === 'user' ? loadUsers() : loadOrgs(); }}
         />
+      )}
+    </div>
+  );
+}
+
+/**
+ * M-049 (Backlog) — activation funnel headline counts.
+ *
+ * Renders the 6-step funnel as a stacked-bar visual (no chart lib —
+ * the existing tokens give us enough for a bar/percent display).
+ * Each row shows the cumulative count, the window-scoped count, and
+ * the conversion rate vs the previous step. Drives Sara's "are
+ * sandbox users converting?" question without bouncing to PostHog.
+ */
+function ActivationFunnelPanel() {
+  const [data, setData] = useState<api.ActivationFunnelReport | null>(null);
+  const [period, setPeriod] = useState(30);
+  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  const load = (days: number) => {
+    setLoading(true);
+    setError(null);
+    api.getActivationFunnel(days)
+      .then(setData)
+      .catch((e) => setError(e?.message ?? 'Failed to load funnel'))
+      .finally(() => setLoading(false));
+  };
+  useEffect(() => { load(period); }, [period]);
+
+  // 6-step ordering matches the EventName enum on the backend.
+  const ORDER = ['SIGNUP', 'PROJECT_CREATED', 'SPEC_SUBMITTED', 'PLAN_APPROVED', 'RUN_COMPLETE', 'PR_MERGED'];
+
+  const max = data
+    ? Math.max(1, ...ORDER.map((k) => data.stages[k]?.total ?? 0))
+    : 1;
+
+  return (
+    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 space-y-3">
+      <div className="flex items-baseline justify-between gap-3 flex-wrap">
+        <div>
+          <h3 className="text-sm font-medium text-primary">Activation funnel</h3>
+          <p className="text-xs text-muted mt-0.5">
+            6-step first-time-event ledger (V125). Window counts cover the last N days; PostHog has the cohort + time-to-event analytics.
+          </p>
+        </div>
+        <select
+          value={period}
+          onChange={(e) => setPeriod(Number(e.target.value))}
+          className="text-xs px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary"
+        >
+          <option value={7}>Last 7 days</option>
+          <option value={30}>Last 30 days</option>
+          <option value={90}>Last 90 days</option>
+          <option value={365}>Last year</option>
+        </select>
+      </div>
+
+      {loading && !data && <p className="text-xs text-muted">Loading…</p>}
+      {error && <p className="text-xs text-status-error">{error}</p>}
+
+      {data && (
+        <ul className="space-y-1.5">
+          {ORDER.map((stage, idx) => {
+            const counts = data.stages[stage] ?? { total: 0, windowed: 0 };
+            const prev = idx === 0 ? null : data.stages[ORDER[idx - 1]];
+            const conv = prev && prev.total > 0
+              ? Math.round((counts.total / prev.total) * 100)
+              : null;
+            const widthPct = Math.max(2, (counts.total / max) * 100);
+            return (
+              <li key={stage} className="grid grid-cols-[160px_1fr_60px_56px] items-center gap-2 text-xs">
+                <span className="font-mono text-secondary truncate">{stage}</span>
+                <div className="h-3 rounded-sm bg-[var(--gray-300)] overflow-hidden">
+                  <div
+                    className="h-full bg-gradient-to-r from-accent-blue to-accent-planner"
+                    style={{ width: `${widthPct}%` }}
+                  />
+                </div>
+                <span className="text-right text-primary font-mono tabular-nums">
+                  {counts.total} <span className="text-[10px] text-muted">({counts.windowed})</span>
+                </span>
+                <span className="text-right text-muted text-[10px]">
+                  {conv != null ? `${conv}% from prev` : ''}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       )}
     </div>
   );
