@@ -13,10 +13,12 @@ import org.springframework.web.bind.annotation.*;
 /**
  * R-162 — referral endpoint for v3 Free-tier growth loop.
  *
- * Wave 2 ships the recordInvite + getInviteState surface. The
- * "credit grant on referee's first ready run" hook is owned by
- * V2RunOrchestrator's terminal-status path; the wire-point is left
- * as a TODO in ReferralService.onRefereeFirstReadyRun.
+ * <p>Wave 2 shipped the recordInvite + getInviteState + lookup-by-token
+ * (R-162 follow-up) surface. The "credit grant on referee's first ready
+ * run" hook is owned by {@code V2RunOrchestrator.terminate()}, which
+ * delegates the conditional + idempotency contract to
+ * {@code ReferralCompletionHook} so the wire-point is unit-testable
+ * without exercising the orchestrator end-to-end.
  */
 @RestController
 @RequestMapping("/api/v3/referrals")

@@ -163,6 +163,10 @@ public class V2RunOrchestrator {
      * marker until V153 promotes it to a granted_at column).
      */
     private final com.navneet.executespec.v3.referral.ReferralService referralService;
+    /** R-162 — terminal-status referral hook. Logic extracted into a helper
+     *  so the wire-point is unit-testable without exercising the orchestrator
+     *  end-to-end (see {@link com.navneet.executespec.v3.referral.ReferralCompletionHook}). */
+    private final com.navneet.executespec.v3.referral.ReferralCompletionHook referralCompletionHook;
     /** v2.5.8 — publishes PipelineEvent.RunCompleted/RunFailed so in-app
      *  notifications, quota refund, and workspace GCS upload listeners fire for
      *  V2 runs. Previously only V1 PipelineHarness published these events,
@@ -1230,20 +1234,11 @@ public class V2RunOrchestrator {
             runRepo.save(r);
             writeRunCostLog(r, cost);
 
-            // R-162 — referral grant hook. Fires only on successful
-            // terminal status (COMPLETE) AND only when the run owner
-            // is referenced by another user via app_user.referred_by_user_id.
-            // ReferralService.onRefereeFirstReadyRun is idempotent so a
-            // restart-mid-flight or a terminate-twice race can't double-credit.
-            if ("COMPLETE".equals(r.getStatus()) && r.getCreatedByUserId() != null) {
-                try {
-                    referralService.onRefereeFirstReadyRun(r.getCreatedByUserId());
-                } catch (Exception refErr) {
-                    // Never fail a terminate on the referral side-effect.
-                    log.warn("v3 referral hook failed for run={} owner={} — {}",
-                            runId, r.getCreatedByUserId(), refErr.getMessage());
-                }
-            }
+            // R-162 — referral grant hook. Delegates to ReferralCompletionHook
+            // so the conditional + try/catch + idempotency contract lives in
+            // one testable place. Fires only on COMPLETE + non-null owner;
+            // ReferralService.onRefereeFirstReadyRun itself is idempotent.
+            referralCompletionHook.onTerminalStatus(runId, r.getStatus(), r.getCreatedByUserId());
         });
         broadcaster.emit(runId, RunEvent.runStatus(runId, finalStatus));
         broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
