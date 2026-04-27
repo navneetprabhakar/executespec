@@ -17,6 +17,7 @@ import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.v3.referral.ReferralService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -51,6 +52,7 @@ public class AuthService {
     private final BillingPlanRepository billingPlanRepo;
     private final BillingSubscriptionRepository billingSubscriptionRepo;
     private final EventTrackingService eventTracking;
+    private final ReferralService referralService;
 
     @Value("${app.mail.base-url:http://localhost:5173}")
     private String baseUrl;
@@ -82,6 +84,10 @@ public class AuthService {
 
         // Auto-create FREE billing subscription so usage checks pass
         createFreeSubscription(user.getId());
+
+        // R-162 — claim any pending referral invite addressed to this email.
+        // Best-effort: a missing or already-bound invite is a clean no-op.
+        tryBindReferral(user.getId(), user.getEmail());
 
         // Send verification email
         String token = createEmailToken(user.getId(), "EMAIL_VERIFICATION", 24);
@@ -342,6 +348,27 @@ public class AuthService {
         }
     }
 
+    /**
+     * R-162 — claim any pending {@code referral_invite} row addressed to a
+     * freshly-signed-up user's email. {@link ReferralService#bindReferral}
+     * is already idempotent (won't overwrite an existing binding, won't
+     * re-stamp acceptedAt), so calling this on every signup path is safe
+     * even when no invite exists. Wrapped in try/catch so a referral
+     * subsystem hiccup never blocks signup.
+     */
+    private void tryBindReferral(String userId, String email) {
+        if (userId == null || email == null) return;
+        try {
+            boolean bound = referralService.bindReferral(userId, email);
+            if (bound) {
+                log.info("v3 referral auto-bound on signup user={} email={}", userId, email);
+            }
+        } catch (Exception e) {
+            log.warn("v3 referral auto-bind failed user={} email={}: {}",
+                    userId, email, e.getMessage());
+        }
+    }
+
     // ── OAuth ─────────────────────────────────────────────────────────────────
 
     /**
@@ -407,6 +434,10 @@ public class AuthService {
 
         // Auto-create FREE billing subscription
         createFreeSubscription(user.getId());
+
+        // R-162 — claim any pending referral invite addressed to this email
+        // (OAuth new-user branch). Best-effort, idempotent.
+        tryBindReferral(user.getId(), user.getEmail());
 
         // Admin notification — fire-and-forget, same as email-signup path
         try {

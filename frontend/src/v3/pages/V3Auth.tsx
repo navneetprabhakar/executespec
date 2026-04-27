@@ -1,6 +1,13 @@
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/useAuthStore';
+
+/** Keys used to bridge ?ref / ?anon URL params across the OAuth round-trip
+ *  (the OAuth provider strips our query, so we stash → restore via
+ *  sessionStorage). After successful login, V3Auth's effect reads these
+ *  back, posts the claim to the backend, and clears them. */
+const REF_TOKEN_KEY = 'v3-ref-token';
+const ANON_TOKEN_KEY = 'v3-anon-token';
 
 /**
  * R-112 — "Save this run" sign-in.
@@ -20,6 +27,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
  */
 export default function V3Auth() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
   const login = useAuthStore((s) => s.login);
   const [email, setEmail] = useState('');
@@ -28,10 +36,21 @@ export default function V3Auth() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // If they were already signed in (e.g. via a stale session), skip
-  // straight to the v3 home rather than asking again.
+  // R-162 + R-111 — capture ?ref / ?anon from the URL on mount and stash
+  // them in sessionStorage so the OAuth round-trip (which drops the query)
+  // doesn't lose them. The post-login effect restores + claims them.
   useEffect(() => {
-    if (isAuthed) navigate('/v3/home');
+    const ref = searchParams.get('ref');
+    const anon = searchParams.get('anon');
+    if (ref) sessionStorage.setItem(REF_TOKEN_KEY, ref);
+    if (anon) sessionStorage.setItem(ANON_TOKEN_KEY, anon);
+  }, [searchParams]);
+
+  // If they were already signed in (e.g. via a stale session), claim any
+  // pending tokens then forward to the v3 home rather than asking again.
+  useEffect(() => {
+    if (!isAuthed) return;
+    void claimAndForward(navigate);
   }, [isAuthed, navigate]);
 
   const stashedSpec =
@@ -44,7 +63,10 @@ export default function V3Auth() {
     setError(null);
     try {
       await login(email.trim(), password);
-      navigate('/v3/home');
+      // The post-login effect handles the claim + redirect; calling
+      // claimAndForward inline here means the user doesn't see a flash
+      // of the V3Auth shell before redirect.
+      await claimAndForward(navigate);
     } catch (err) {
       setError((err as Error)?.message ?? 'Sign-in failed');
     } finally {
@@ -101,7 +123,7 @@ export default function V3Auth() {
         {/* OAuth — reuses existing v2 routes */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           <a
-            href="/api/auth/oauth2/authorize?provider=github&returnTo=/v3/home"
+            href="/api/auth/oauth2/authorize?provider=github&returnTo=/v3/auth"
             style={oauthButtonStyle('#24292e')}
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -110,7 +132,7 @@ export default function V3Auth() {
             Continue with GitHub
           </a>
           <a
-            href="/api/auth/oauth2/authorize?provider=google&returnTo=/v3/home"
+            href="/api/auth/oauth2/authorize?provider=google&returnTo=/v3/auth"
             style={oauthButtonStyle('#fff', '#1a1a1a')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
@@ -256,6 +278,39 @@ const inputStyle: React.CSSProperties = {
   outline: 'none',
   fontFamily: 'inherit',
 };
+
+/**
+ * Post-login: claim any anonymous-trial session token stashed in
+ * sessionStorage, then forward to /v3/home. The referral-side claim is
+ * automatic on the backend (AuthService.bindReferral fires inside
+ * register / findOrCreateFromOAuth via email match), so we only need a
+ * round-trip when there's an anonymous token to bind.
+ *
+ * Best-effort: a 401 / 5xx / network error never blocks the redirect —
+ * the user's primary intent is "sign in and keep going".
+ */
+async function claimAndForward(navigate: (to: string) => void) {
+  const anonToken = sessionStorage.getItem(ANON_TOKEN_KEY);
+  // Drop both keys regardless — referral side runs server-side, anon side
+  // we're about to call. This avoids a stale token surviving across logouts.
+  sessionStorage.removeItem(REF_TOKEN_KEY);
+  sessionStorage.removeItem(ANON_TOKEN_KEY);
+
+  if (anonToken) {
+    try {
+      await fetch('/api/v3/auth/claim-anonymous-session', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionToken: anonToken }),
+      });
+    } catch {
+      // Swallow — the redirect must not be blocked by a flaky call.
+    }
+  }
+
+  navigate('/v3/home');
+}
 
 function oauthButtonStyle(bg: string, color = '#fff'): React.CSSProperties {
   return {
