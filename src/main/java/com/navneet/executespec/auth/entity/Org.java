@@ -197,6 +197,22 @@ public class Org {
     @Column(name = "github_installed_at")
     private Instant githubInstalledAt;
 
+    // ── V148 (Wave 3) — governance caps (M-032 + M-039) ─────────────────────
+
+    /** M-032 — USD threshold above which a run plan can only be approved
+     *  by ORG_ADMIN/BILLING_ADMIN/SUPER_ADMIN. NULL = no elevated approval
+     *  required (any submitter can approve their own plan). Compared
+     *  against the buffered cost estimate at approval time. */
+    @Column(name = "require_admin_approval_above_usd", precision = 10, scale = 2)
+    private java.math.BigDecimal requireAdminApprovalAboveUsd;
+
+    /** M-039 — comma-separated GitHub-owner allowlist. Empty/NULL = open;
+     *  populated = ProjectRepoService rejects link/create attempts whose
+     *  owner is not in the list. Use for vendor/contractor scopes that
+     *  must stay inside a vetted GH org family. */
+    @Column(name = "allowed_github_owners", length = 1024)
+    private String allowedGithubOwners;
+
     @Column(name = "created_by_user_id", nullable = false)
     private String createdByUserId;
 
