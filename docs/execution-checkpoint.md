@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (after Wave 2 batch 1 — M-003 / M-004 / M-008)
+## State at checkpoint (after Wave 2 batch 2 — M-010 / M-013 / M-014)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `c5c07dee` — `feat(ux): drawer wires for NewRunModal credential gates (M-008)` (NOT pushed yet — see end of file for what's pending push at checkpoint time)
+**Last pushed commit:** `35080611` — `feat(adr): controller + project ADRs panel (M-014)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** Wave 2 IN PROGRESS — 3 of ~16 items done
+**Wave:** Wave 2 IN PROGRESS — 6 of ~16 items done
 
 ## Master list
 
@@ -33,27 +33,27 @@ Plus 2 housekeeping commits: `6699ddc2` (handoff note) + `ab487cfa` (checkpoint 
 
 ApiContractTest green after Wave 1 close.
 
-## Wave 2 — completed so far (3 of ~16)
+## Wave 2 — completed so far (6 of ~16)
 
 | M-ID | Title | Commit |
 |---|---|---|
 | M-003 | NotificationPrefController + minimal Settings matrix (Email/InApp × event-type) | 82774005 |
 | M-004 | SSO config card on /org/settings (provider + metadata URL + domain + enforced) | 9565498d |
 | M-008 | Inline Drawer wires (Add GitHub PAT + Add API keys) on NewRunModal | c5c07dee |
+| M-010 | halt-all-active-runs SUPER_ADMIN tool (V2RunOrchestrator.haltAllActiveRuns + AdminPage button) | 36e83345 |
+| M-013 | Unified governance audit + activity page (V22 + V133 at /audit + /governance/audit alias) | 4ddc39cf |
+| M-014 | ADR controller + Project → Code → ADRs panel | 35080611 |
 
-Both M-003 and M-004 require a backend restart to surface live data
-(current `:8081` is the pre-batch jar). Frontend renders panel + form
-shell + handles 404 gracefully until the next deploy.
+M-003 / M-004 / M-010 / M-014 require a backend restart to surface
+live data (current `:8081` is the pre-batch jar). All shells render
+gracefully until the next deploy.
 
 ApiContractTest green throughout.
 
-## Wave 2 — remaining (~13 of ~16 items)
+## Wave 2 — remaining (~10 of ~16 items)
 
 In execution order:
 
-- **M-010** — halt-runs admin tool. SUPER_ADMIN endpoint to mark all non-terminal runs CANCELLED on demand (incident response).
-- **M-013** — Unified `/governance/audit` page collapsing V22 (activity_audit) + V133 (activity_feed) into one filtered table per parked decision #4.
-- **M-014** — ADR controller + page. `Adr` entity + `AdrFrontmatterParser` exist; need REST + Settings → ADRs panel.
 - **M-015** — Invariant controller + page. `ArchInvariant` + `InvariantChecker` exist; need REST + Project → Invariants tab.
 - **M-023** — TemplateGrid wire (sample-spec gallery on RunsNewLanding likely).
 - **M-024** — Standards CRUD UI. `StandardsOverrideController` exists; org-level standards CRUD missing.
