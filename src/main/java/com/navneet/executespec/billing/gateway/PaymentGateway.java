@@ -62,4 +62,26 @@ public interface PaymentGateway {
      * Returns the gateway type identifier (e.g., "RAZORPAY", "STRIPE").
      */
     String gatewayType();
+
+    /**
+     * M-011 (Wave 3) — adjust the seat quantity on an existing subscription.
+     * Stripe overrides this with a native quantity-on-line-item update;
+     * Razorpay's subscription model doesn't support mid-cycle quantity
+     * changes the same way, so the default throws
+     * {@link UnsupportedOperationException} and the caller falls back to
+     * the manual workflow documented in {@code docs/payment-history.md}.
+     *
+     * <p>Stripe path: live, prorated, idempotent.
+     * <p>Razorpay path: returns false → OrgService surfaces a 501 with a
+     *    pointer to billing@executespec.ai for manual adjustment.
+     *
+     * @return true if the gateway natively applied the change, false if
+     *         the caller must follow the manual workflow.
+     */
+    default boolean updateSubscriptionQuantity(String gatewaySubscriptionId, long newQuantity) {
+        throw new UnsupportedOperationException(
+            "Seat-quantity update not supported by " + gatewayType()
+                + " for subscription " + gatewaySubscriptionId
+                + ". Use the manual seat-adjust workflow in docs/payment-history.md.");
+    }
 }

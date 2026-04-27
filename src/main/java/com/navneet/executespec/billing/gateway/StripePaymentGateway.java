@@ -173,7 +173,8 @@ public class StripePaymentGateway implements PaymentGateway {
      * @throws IllegalArgumentException when {@code newQuantity < 1}
      * @throws RuntimeException when the Stripe API call fails
      */
-    public void updateSubscriptionQuantity(String gatewaySubscriptionId, long newQuantity) {
+    @Override
+    public boolean updateSubscriptionQuantity(String gatewaySubscriptionId, long newQuantity) {
         if (newQuantity < 1) {
             throw new IllegalArgumentException("newQuantity must be >= 1, got " + newQuantity);
         }
@@ -195,6 +196,7 @@ public class StripePaymentGateway implements PaymentGateway {
                     .build());
             log.info("Stripe subscription quantity updated: subId={} itemId={} newQuantity={}",
                     gatewaySubscriptionId, itemId, newQuantity);
+            return true;
         } catch (StripeException e) {
             log.error("Failed to update Stripe subscription {} quantity to {}: {}",
                     gatewaySubscriptionId, newQuantity, e.getMessage(), e);
