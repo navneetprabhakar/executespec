@@ -472,6 +472,16 @@ public class OrgService {
                 .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
         String oldTier = org.getTier();
         org.setTier(newTier);
+        // M-030 (Wave 3) — keep org.product_id consistent with tier so the
+        // V143 surface discriminator drifts with admin tier changes (BillingService
+        // already does this for webhook-driven tier flips). TierProductSurfaceMapper
+        // is the single source of truth: TEAM/ENTERPRISE → executespec; FREE/PRO/MAX → vibe.
+        String surface = TierProductSurfaceMapper.defaultSurfaceFor(newTier);
+        if (org.getProductId() == null || !surface.equals(org.getProductId())) {
+            log.info("[M-030] Org product_id flip on admin tier change: orgId={} oldTier={} newTier={} surface={}",
+                    orgId, oldTier, newTier, surface);
+            org.setProductId(surface);
+        }
         org.setUpdatedAt(Instant.now());
         orgRepo.save(org);
         paymentAuditService.record("ORG", orgId, "PLAN_UPGRADED", oldTier, newTier, performedBy, null);
