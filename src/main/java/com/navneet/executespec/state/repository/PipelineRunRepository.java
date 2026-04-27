@@ -50,6 +50,10 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
 
     Page<PipelineRun> findByStatusOrderByStartedAtDesc(String status, Pageable pageable);
 
+    /** M-017 (DSAR) — every run a user authored, newest first.
+     *  Capped by Pageable to keep the export response sane. */
+    Page<PipelineRun> findByCreatedByUserIdOrderByStartedAtDesc(String userId, Pageable pageable);
+
     long countByStatus(String status);
 
     @Query("SELECT COALESCE(SUM(r.totalInputTokens), 0) FROM PipelineRun r")
