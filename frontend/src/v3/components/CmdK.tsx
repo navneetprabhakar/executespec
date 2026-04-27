@@ -54,7 +54,7 @@ export default function CmdK() {
       { id: 'team', label: 'Open team', hint: 'Members · seats · invites', run: () => navigate('/v3/team') },
       { id: 'integrations', label: 'Open integrations', hint: 'GitHub · Slack · Jira', run: () => navigate('/v3/integrations') },
       { id: 'pricing', label: 'View pricing', hint: 'Free · Pro · Team', run: () => navigate('/v3/pricing') },
-      { id: 'trust', label: 'View Trust & Security', hint: 'SOC 2 · DPA', run: () => navigate('/v3/home') },
+      { id: 'trust', label: 'View Trust & Security', hint: 'SOC 2 · DPA', run: () => navigate('/v3/trust') },
       { id: 'help', label: 'Show keyboard shortcuts', hint: '?', run: () => navigate('/v3/home') },
       { id: 'theme', label: `Switch theme (currently ${theme})`, hint: 'Light · Dark', run: () => toggleTheme() },
       { id: 'logout', label: 'Sign out', run: () => { void logout(); } },

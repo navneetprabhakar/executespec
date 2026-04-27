@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { getV3Entitlements, type V3Entitlements } from '../lib/api';
+import { getV3Entitlements, sendV3Referral, type V3Entitlements } from '../lib/api';
 import { useV3Ui } from '../stores/useV3Ui';
 import { trackV3, V3_EVENTS } from '../lib/events';
 
@@ -162,14 +162,22 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
     onClose();
   }
 
-  function onInvite(e: React.FormEvent) {
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
+  async function onInvite(e: React.FormEvent) {
     e.preventDefault();
     if (!inviteEmail.trim()) return;
-    // Real referral wire-up lands in R-162. For Wave-2-stage this is a
-    // happy-path optimistic local state; the matching backend call
-    // arrives with R-162.
-    trackV3('v3_referral_sent' as never, { email: inviteEmail });
-    setInviteSent(true);
+    setInviteError(null);
+    try {
+      const rec = await sendV3Referral(inviteEmail.trim());
+      trackV3(V3_EVENTS.REFERRAL_SENT, {
+        email: inviteEmail,
+        status: rec.status,
+      });
+      setInviteSent(true);
+    } catch (e) {
+      setInviteError((e as Error)?.message ?? 'Invite failed');
+    }
   }
 
   return (
@@ -251,43 +259,50 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
         </div>
 
         {!inviteSent ? (
-          <form onSubmit={onInvite} style={{ display: 'flex', gap: 6 }}>
-            <input
-              type="email"
-              autoComplete="email"
-              value={inviteEmail}
-              onChange={(e) => setInviteEmail(e.target.value)}
-              placeholder="friend@example.com"
-              style={{
-                flex: 1,
-                padding: '8px 10px',
-                background: 'var(--v3-bg)',
-                color: 'var(--v3-text)',
-                border: '1px solid var(--v3-border)',
-                borderRadius: 6,
-                fontSize: 12.5,
-                outline: 'none',
-                fontFamily: 'inherit',
-              }}
-            />
-            <button
-              type="submit"
-              disabled={!inviteEmail.trim()}
-              style={{
-                padding: '8px 14px',
-                background: inviteEmail.trim() ? 'var(--v3-surface-elevated)' : 'var(--v3-surface)',
-                color: inviteEmail.trim() ? 'var(--v3-text)' : 'var(--v3-text-subtle)',
-                border: '1px solid var(--v3-border)',
-                borderRadius: 6,
-                cursor: inviteEmail.trim() ? 'pointer' : 'not-allowed',
-                fontSize: 12.5,
-                fontWeight: 600,
-                fontFamily: 'inherit',
-              }}
-            >
-              Send
-            </button>
-          </form>
+          <>
+            <form onSubmit={onInvite} style={{ display: 'flex', gap: 6 }}>
+              <input
+                type="email"
+                autoComplete="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="friend@example.com"
+                style={{
+                  flex: 1,
+                  padding: '8px 10px',
+                  background: 'var(--v3-bg)',
+                  color: 'var(--v3-text)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 6,
+                  fontSize: 12.5,
+                  outline: 'none',
+                  fontFamily: 'inherit',
+                }}
+              />
+              <button
+                type="submit"
+                disabled={!inviteEmail.trim()}
+                style={{
+                  padding: '8px 14px',
+                  background: inviteEmail.trim() ? 'var(--v3-surface-elevated)' : 'var(--v3-surface)',
+                  color: inviteEmail.trim() ? 'var(--v3-text)' : 'var(--v3-text-subtle)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 6,
+                  cursor: inviteEmail.trim() ? 'pointer' : 'not-allowed',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  fontFamily: 'inherit',
+                }}
+              >
+                Send
+              </button>
+            </form>
+            {inviteError && (
+              <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--v3-error)' }}>
+                {inviteError}
+              </p>
+            )}
+          </>
         ) : (
           <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-success)' }}>
             ✓ Invite sent. You'll see +5 runs once they ship their first run.

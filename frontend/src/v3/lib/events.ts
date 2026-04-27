@@ -36,6 +36,7 @@ export const V3_EVENTS = {
   CMDK_OPENED: 'v3_cmdk_opened',
   CMDK_ACTION_RUN: 'v3_cmdk_action_run',
   PRICING_CTA_CLICKED: 'v3_pricing_cta_clicked',
+  REFERRAL_SENT: 'v3_referral_sent',
 } as const;
 
 export type V3EventName = (typeof V3_EVENTS)[keyof typeof V3_EVENTS];

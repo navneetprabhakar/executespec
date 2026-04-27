@@ -62,6 +62,28 @@ export interface V3Entitlements {
 export const getV3Entitlements = () =>
   v3Req<V3Entitlements>('/v3/entitlements');
 
+// ── Referrals (R-162) ───────────────────────────────────────────────────────
+
+export interface V3ReferralRecord {
+  referrerUserId: string;
+  refereeEmail: string;
+  createdAt: string;
+  status: 'PENDING' | 'ALREADY_EXISTS';
+}
+
+export interface V3InviteState {
+  referrerUserId: string;
+  pendingCount: number;
+}
+
+export const sendV3Referral = (email: string) =>
+  v3Req<V3ReferralRecord>('/v3/referrals/invite', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  });
+
+export const getV3InviteState = () => v3Req<V3InviteState>('/v3/referrals/state');
+
 // ── Anonymous trial (R-111) ─────────────────────────────────────────────────
 
 export interface AnonymousRunResponse {
