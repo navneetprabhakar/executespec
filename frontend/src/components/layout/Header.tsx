@@ -26,7 +26,9 @@ function breadcrumbFromPath(pathname: string): { primary: string; secondary?: st
   if (pathname.startsWith('/executions/')) return { primary: 'Launches', secondary: 'Execution' };
   if (pathname.startsWith('/reports/shared/')) return { primary: 'Shared report' };
   if (pathname.startsWith('/exec')) return { primary: 'Exec summary' };
-  return { primary: 'Runs' };
+  // M-001 (Wave 1) — copy-only "Run" → "Mission" rename. URLs + DTO keys
+  // keep "run" everywhere; only the user-facing label flips.
+  return { primary: 'Missions' };
 }
 
 function ThemeToggle() {

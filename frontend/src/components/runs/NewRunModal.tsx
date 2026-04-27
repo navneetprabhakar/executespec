@@ -267,7 +267,8 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
             </button>
           ) : (
             <div className="min-w-0 flex-1">
-              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-1">New run</div>
+              {/* M-001 — copy-only Mission rename. */}
+              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-1">New mission</div>
               <h2 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">
                 Write a spec. <span style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: 'italic', fontWeight: 400 }}>Ship</span> it.
               </h2>

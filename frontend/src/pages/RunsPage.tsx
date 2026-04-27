@@ -118,10 +118,12 @@ export default function RunsPage() {
                 <>
                   <Sparkles className="h-8 w-8 text-accent-blue/40" />
                   <p className="text-sm text-muted">What do you want to build?</p>
-                  <p className="text-xs text-muted">Select a run or start a new one</p>
+                  {/* M-001 — copy-only Mission rename. */}
+                  <p className="text-xs text-muted">Select a mission or start a new one</p>
                 </>
               ) : (
-                <p className="text-sm text-muted">Select a run to view details</p>
+                /* M-001 — copy-only Mission rename. */
+                <p className="text-sm text-muted">Select a mission to view details</p>
               )}
             </div>
           )}
