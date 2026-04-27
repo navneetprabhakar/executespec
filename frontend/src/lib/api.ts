@@ -1352,6 +1352,21 @@ export const haltAllActiveRuns = (reason?: string) =>
     body: JSON.stringify(reason ? { reason } : {}),
   });
 
+// M-019 (Wave 3) + M-042 (Backlog) — activity_audit hash-chain verifier.
+export interface AuditChainBreak {
+  rowId: string;
+  chainSeq: number;
+  reason: string;
+}
+export interface AuditChainVerifyReport {
+  totalChained: number;
+  verified: number;
+  clean: boolean;
+  firstBreak: AuditChainBreak | null;
+}
+export const verifyAuditChain = () =>
+  req<AuditChainVerifyReport>('/admin/audit-chain/verify');
+
 export const adminListOrgs = () => req<OrgDto[]>('/admin/orgs');
 export const adminUpdateOrgTier = (id: string, tier: string) =>
   req<OrgDto>(`/admin/orgs/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
