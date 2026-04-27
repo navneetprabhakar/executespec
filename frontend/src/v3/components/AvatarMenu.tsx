@@ -166,6 +166,32 @@ export default function AvatarMenu() {
             <div style={{ fontSize: 10.5, color: 'var(--v3-text-subtle)' }}>
               {user.email} · {user.tier ?? 'FREE'}
             </div>
+            {/* Conversion-fix #A3 — Pro is HIDDEN from new buyers (V122
+                lifecycle state) but existing Pro subscribers stay subscribed.
+                Without an explicit "you're grandfathered" signal, the silence
+                reads as "they pulled the rug" and triggers panic-cancel.
+                This pill makes Pro feel like a status, not an accident. */}
+            {user.tier === 'PRO' && (
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  marginTop: 6,
+                  padding: '3px 8px',
+                  background: 'rgba(91,141,239,0.10)',
+                  border: '1px solid rgba(91,141,239,0.32)',
+                  borderRadius: 4,
+                  fontSize: 10,
+                  fontWeight: 500,
+                  color: 'var(--v3-brand)',
+                }}
+                title="Pro tier is closed to new buyers. Your subscription is locked at this price for as long as you stay subscribed."
+              >
+                <span style={{ fontSize: 10 }}>🔒</span>
+                Pro · grandfathered · locked rate
+              </div>
+            )}
           </li>
           {items.map((item, idx) => (
             <li key={idx} role="none">

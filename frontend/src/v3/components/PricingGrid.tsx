@@ -98,23 +98,68 @@ export default function PricingGrid({
         ))}
       </div>
 
-      {/* Enterprise footer line */}
-      <p
+      {/* Enterprise card — conversion-fix #A2: was a single muted footer
+          line that Sarah-the-CTO scanned past. Now a full-width card with
+          equal visual weight to the 3 above + an explicit "Talk to sales"
+          CTA so the enterprise funnel doesn't dead-end on a mailto. */}
+      <div
         style={{
           marginTop: 18,
-          textAlign: 'center',
-          color: 'var(--v3-text-muted)',
-          fontSize: 12,
+          background: 'linear-gradient(135deg, rgba(91,141,239,0.08), rgba(91,141,239,0.02))',
+          border: '1px solid rgba(91,141,239,0.32)',
+          borderRadius: 12,
+          padding: 20,
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+          gap: 16,
+          alignItems: 'center',
         }}
       >
-        {ENTERPRISE_FOOTER.headline}{' '}
-        <Link
-          to={ENTERPRISE_FOOTER.ctaHref}
-          style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}
-        >
-          {ENTERPRISE_FOOTER.ctaLabel}
-        </Link>
-      </p>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Pill tone="brand" size="sm">Enterprise</Pill>
+            <span style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)' }}>Custom</span>
+          </div>
+          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
+            For 50+ engineers. SAML/OIDC SSO, SOC 2 evidence, signed DPA, dedicated infrastructure region, audit-log retention, custom MSA. Procurement docs at{' '}
+            <Link to="/v3/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/trust</Link>.
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <a
+            href="mailto:enterprise@executespec.ai?subject=Enterprise%20demo%20request"
+            style={{
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 600,
+              background: 'var(--v3-brand)',
+              color: '#0B0D10',
+              border: 'none',
+              borderRadius: 6,
+              textDecoration: 'none',
+              fontFamily: 'inherit',
+            }}
+          >
+            Talk to sales →
+          </a>
+          <Link
+            to={ENTERPRISE_FOOTER.ctaHref}
+            style={{
+              padding: '8px 16px',
+              fontSize: 13,
+              fontWeight: 500,
+              background: 'transparent',
+              color: 'var(--v3-text)',
+              border: '1px solid var(--v3-border-strong)',
+              borderRadius: 6,
+              textDecoration: 'none',
+              fontFamily: 'inherit',
+            }}
+          >
+            Trust + compliance →
+          </Link>
+        </div>
+      </div>
     </div>
   );
 }

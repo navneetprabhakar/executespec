@@ -162,6 +162,26 @@ export default function V3Trust() {
           >
             Contact security@executespec.ai
           </button>
+          {/* Conversion-fix #A2: enterprise-evaluator personas (Sarah-the-CTO)
+              convert via demo not mailto. Stays mailto-style for MVP — when
+              Calendly is set up, just swap the href. */}
+          <a
+            href="mailto:enterprise@executespec.ai?subject=Demo%20request%20—%20enterprise%20evaluation&body=Briefly%20describe%20your%20org%20size%2C%20use%20case%2C%20and%20preferred%20demo%20window."
+            style={{
+              padding: '8px 14px',
+              fontSize: 12.5,
+              fontWeight: 600,
+              background: 'rgba(91,141,239,0.12)',
+              color: 'var(--v3-brand)',
+              border: '1px solid rgba(91,141,239,0.36)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+              textDecoration: 'none',
+            }}
+          >
+            Book an enterprise demo →
+          </a>
         </div>
         <p style={{ margin: '12px 0 0', fontSize: 11, color: 'var(--v3-text-subtle)' }}>
           Need an MSA, custom DPA, or sub-processor list addition?{' '}
