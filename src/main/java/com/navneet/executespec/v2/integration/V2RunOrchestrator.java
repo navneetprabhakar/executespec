@@ -1035,6 +1035,49 @@ public class V2RunOrchestrator {
     }
 
     /**
+     * Non-terminal status set used by the halt-all admin tool (M-010).
+     * Cheaper to query than scanning every row; covers every status that
+     * {@link #isTerminal(String)} rejects.
+     */
+    static final List<String> NON_TERMINAL_STATUSES = List.of(
+            "QUEUED", "PLANNING", "AWAITING_APPROVAL", "WORKING", "REVIEWING"
+    );
+
+    /**
+     * M-010 (Wave 2) — halt every non-terminal run on the platform.
+     * Used by SUPER_ADMIN during incident response (e.g. provider outage,
+     * runaway cost, planner storm) to stop the bleeding without
+     * cancelling runs one-by-one. Idempotent: re-running on a clean
+     * platform is a no-op.
+     *
+     * @param reason short rationale persisted on each run's
+     *               {@code failureReason} (overrides the default "Cancelled
+     *               by user" message {@link #cancel(String)} would write).
+     *               If {@code null}/blank, the per-run default applies.
+     * @return list of run IDs that were transitioned to CANCELLED.
+     */
+    public List<String> haltAllActiveRuns(String reason) {
+        List<com.navneet.executespec.state.entity.PipelineRun> active =
+                runRepo.findByStatusIn(NON_TERMINAL_STATUSES);
+        List<String> halted = new java.util.ArrayList<>(active.size());
+        for (var run : active) {
+            String runId = run.getRunId();
+            // Stamp a custom reason BEFORE cancel() so cancel's own
+            // default doesn't overwrite the operator's message.
+            if (reason != null && !reason.isBlank() && run.getFailureReason() == null) {
+                run.setFailureReason("Halted by SUPER_ADMIN: " + reason);
+                runRepo.save(run);
+            }
+            if (cancel(runId)) {
+                halted.add(runId);
+            }
+        }
+        log.warn("V2RunOrchestrator HALT-ALL by SUPER_ADMIN: {} runs cancelled, reason={}",
+                halted.size(), reason == null ? "(none)" : reason);
+        return halted;
+    }
+
+    /**
      * Retry a single task within a terminal V2 run. Currently scoped to
      * re-invoking the worker loop against the saved task definition via
      * {@link SequentialExecutorV2}. Full replay (resume from saved iteration)

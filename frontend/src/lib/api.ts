@@ -1340,6 +1340,18 @@ export const adminUpdateUserTier = (id: string, tier: string) =>
 export const adminUpdateUserRole = (id: string, role: string) =>
   req<AuthUser>(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
 
+// M-010 (Wave 2) — emergency halt-all-runs button on AdminPage.
+export interface HaltAllRunsResult {
+  haltedCount: number;
+  haltedRunIds: string[];
+  reason: string;
+}
+export const haltAllActiveRuns = (reason?: string) =>
+  req<HaltAllRunsResult>('/admin/runs/halt-all', {
+    method: 'POST',
+    body: JSON.stringify(reason ? { reason } : {}),
+  });
+
 export const adminListOrgs = () => req<OrgDto[]>('/admin/orgs');
 export const adminUpdateOrgTier = (id: string, tier: string) =>
   req<OrgDto>(`/admin/orgs/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });

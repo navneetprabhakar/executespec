@@ -50,6 +50,7 @@ public class SuperAdminController {
     private final PromptAuditService promptAuditService;
     private final com.navneet.executespec.execution.service.AdminReconciliationService adminReconciliationService;
     private final com.navneet.executespec.security.guardrail.GuardrailLevelResolver guardrailLevelResolver;
+    private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2RunOrchestrator;
 
     // ── Guardrail level diagnostic (Plan 1 P1) ────────────────────────────────
 
@@ -94,6 +95,39 @@ public class SuperAdminController {
             staleMinutes = Math.max(1, n.longValue());
         }
         return ResponseEntity.ok(adminReconciliationService.reconcileOrphans(staleMinutes));
+    }
+
+    // ── Halt all active runs (M-010) ──────────────────────────────────────────
+
+    /**
+     * Cancels every non-terminal run on the platform — incident-response
+     * tool for SUPER_ADMINs (provider outage, runaway cost, planner storm,
+     * etc.). Idempotent: a clean platform returns an empty list.
+     *
+     * Body (optional): {@code {"reason": "OpenAI 5xx storm 2026-04-27"}}.
+     * If provided, the rationale is stamped on each run's failureReason
+     * field and surfaces on the run detail UI; if omitted the per-run
+     * default message ("Cancelled by user from status X") is used.
+     */
+    @PostMapping("/runs/halt-all")
+    public ResponseEntity<Map<String, Object>> haltAllActiveRuns(
+            @AuthenticationPrincipal AppUserDetails admin,
+            @RequestBody(required = false) Map<String, String> body) {
+        String reason = body == null ? null : body.get("reason");
+        var halted = v2RunOrchestrator.haltAllActiveRuns(reason);
+        auditService.record(ActivityAudit.builder()
+                .eventType("RUNS_HALTED_ALL")
+                .entityType("PLATFORM")
+                .entityId("v2-run-orchestrator")
+                .actorId(admin.getUser().getId())
+                .newValue("{\"haltedCount\":" + halted.size()
+                        + ",\"reason\":\"" + (reason == null ? "" : reason.replace("\"", "\\\"")) + "\"}")
+                .build());
+        return ResponseEntity.ok(Map.of(
+                "haltedCount", halted.size(),
+                "haltedRunIds", halted,
+                "reason", reason == null ? "" : reason
+        ));
     }
 
     // ── Prompt Versioning ─────────────────────────────────────────────────────
