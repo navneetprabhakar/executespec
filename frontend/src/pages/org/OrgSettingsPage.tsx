@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import RoleGuard from '@/components/auth/RoleGuard';
 import * as api from '@/lib/api';
+import SsoConfigCard from '@/components/settings/SsoConfigCard';
 
 // ── Create Organization Form ───────────────────────────────────────────────
 
@@ -265,6 +266,12 @@ export default function OrgSettingsPage() {
             </button>
           </form>
           {inviteMsg && <p className="mt-2 text-sm text-muted">{inviteMsg}</p>}
+        </div>
+
+        {/* SSO config (M-004 Wave 2) */}
+        <div>
+          <h2 className="text-lg font-semibold text-primary mb-3">Single sign-on</h2>
+          <SsoConfigCard />
         </div>
 
         {/* Pending invitations */}
