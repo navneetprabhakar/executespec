@@ -59,6 +59,11 @@ import DpaPage from '@/pages/DpaPage';
 import WelcomePage from '@/pages/onboarding/WelcomePage';
 import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 
+// v3 (R-101+) — greenfield UX redesign, mounted under /v3/* without
+// touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
+import V3Shell from '@/v3/components/V3Shell';
+import V3HomePlaceholder from '@/v3/pages/V3HomePlaceholder';
+
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
 import { initAnalytics, identify, page, reset as resetAnalytics } from '@/lib/analytics';
@@ -118,6 +123,15 @@ export default function App() {
       <Route path="/terms" element={<TermsPage />} />
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/dpa" element={<DpaPage />} />
+
+      {/* ── v3 greenfield surfaces (R-101+) ──
+          Mounted outside AppLayout so v3 owns its own chrome (no v2 sidebar,
+          no v2 header). Auth gating per-screen (some v3 routes are public:
+          /v3/landing, /v3/pricing, /v3/trust, /v3/auth). */}
+      <Route path="/v3" element={<V3Shell />}>
+        <Route index element={<Navigate to="home" replace />} />
+        <Route path="home" element={<V3HomePlaceholder />} />
+      </Route>
 
       {/* ── Protected app routes ── */}
       <Route element={<ProtectedRoute />}>
