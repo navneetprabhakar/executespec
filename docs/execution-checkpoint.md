@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Wave 3 batch 1 — M-018 / M-019 / M-022)
+## State at checkpoint (Wave 3 batch 2 — M-016 / M-017 / M-020)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `2d0ecf08` — `feat(admin): per-team-member dashboard at /team/:userId (M-022)` (about to push)
+**Last pushed commit:** `f9298039` — `docs(legal): DPA request → signature → activation flow (M-020)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Wave 3 IN PROGRESS** — 3 of ~12 items shipped
+**Wave:** **Wave 3 IN PROGRESS** — 6 of ~12 items shipped
 
 ## Master list
 
@@ -78,10 +78,13 @@ ApiContractTest green throughout.
 | M-018 | docs/status-page.md — Better Stack lock-in + 7-component setup runbook + canary-runner spec + Prometheus integration | 6032b45d |
 | M-019 | activity_audit hash chain (V147) — prev_hash/row_hash/chain_seq + verifier + GET /api/admin/audit-chain/verify | 78af28da |
 | M-022 | /team/:userId per-member dashboard + drill-down link from OrgAdminDashboard members table | 2d0ecf08 |
+| M-016 | SsoConfigController lockout-prevention guard + docs/sso-saml-wiring.md spec | e81b403c |
+| M-017 | DsarController + GET /api/dsar/me + GET /api/dsar/users/{userId} JSON export | 7da764db |
+| M-020 | docs/dpa-flow.md — operator runbook for DPA request → signature → activation | f9298039 |
 
-## Wave 3 — remaining (~9 items)
+## Wave 3 — remaining (~6 items)
 
-M-011 (Razorpay seats — adjustSeats parity with Stripe), M-016 (SAML enforcement — actual SAML2 handshake on top of M-004 schema), M-017 (DSAR), M-020 (DPA flow), M-029 (Stripe price IDs — ops-only env-var doc), M-030 (ProductSurfaceFilter call-site wiring — Phase 2 surface split), M-031 (cookie domain switch — maintenance window), M-032 (plan-approval policy), M-033 (per-project spend cap), M-039 (repo allowlist), M-051 (TEAM-BYOK plan per parked #2)
+M-011 (Razorpay seats — adjustSeats parity with Stripe), M-029 (Stripe price IDs — ops-only env-var doc), M-030 (ProductSurfaceFilter call-site wiring — Phase 2 surface split), M-031 (cookie domain switch — maintenance window), M-032 (plan-approval policy), M-033 (per-project spend cap), M-039 (repo allowlist), M-051 (TEAM-BYOK plan per parked #2)
 
 ## Backlog (~16 items)
 
