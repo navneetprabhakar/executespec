@@ -7,6 +7,7 @@ import ScoreRing from './ScoreRing';
 import SignalBreakdown from './SignalBreakdown';
 import VerdictPill from './VerdictPill';
 import RunStamp from '@/components/project/RunStamp';
+import { Glossary } from '@/components/shared/Glossary';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
 import { cn } from '@/lib/utils';
@@ -391,7 +392,10 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
                           ? 'border-status-waiting/30 bg-status-waiting/10'
                           : 'border-status-error/30 bg-status-error/10'
                     )}>
-                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">Reviewer</div>
+                      {/* M-006 (Wave 1) — Glossary on "Reviewer" → wiring-pass tooltip. */}
+                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">
+                        <Glossary term="wiring pass">Reviewer</Glossary>
+                      </div>
                       <div className="text-sm font-medium mt-0.5 text-primary">{report.reviewerVerdict.replace(/_/g, ' ')}</div>
                     </div>
                   )}

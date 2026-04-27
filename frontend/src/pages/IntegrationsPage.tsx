@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   ChevronDown, ChevronRight, HelpCircle, ExternalLink,
   Eye, EyeOff, CheckCircle, AlertCircle, Loader2, Settings2, Unplug,
-  Send, Hash, RefreshCw,
+  Send, Hash, RefreshCw, Github,
 } from 'lucide-react';
 import IntegrationLogo from '@/components/integrations/IntegrationLogo';
 import GlassPanel from '@/components/shared/GlassPanel';
@@ -637,6 +637,35 @@ export default function IntegrationsPage() {
   const [openGuides, setOpenGuides] = useState<Record<string, boolean>>({});
   const [configuring, setConfiguring] = useState<string | null>(null);
   const [slackStatus, setSlackStatus] = useState<SlackStatus | null>(null);
+  // M-005 (Wave 1) — GitHub App org-wide install card.
+  const [ghAppStatus, setGhAppStatus] = useState<api.GitHubAppStatus | null>(null);
+  const [ghAppBusy, setGhAppBusy] = useState(false);
+  const [ghAppMsg, setGhAppMsg] = useState<string | null>(null);
+  const refreshGhApp = useCallback(() => {
+    if (!user?.orgId) return;
+    api.getGitHubAppStatus().then(setGhAppStatus).catch(() => setGhAppStatus(null));
+  }, [user?.orgId]);
+  const handleGhAppInstall = async () => {
+    setGhAppBusy(true); setGhAppMsg(null);
+    try {
+      const r = await api.getGitHubAppInstallUrl();
+      window.open(r.installUrl, '_blank', 'noopener,noreferrer');
+      setGhAppMsg('Install opened in new tab. Click "Refresh status" after completing.');
+    } catch (e: unknown) {
+      setGhAppMsg(e instanceof Error ? e.message : 'Failed to fetch install URL');
+    } finally { setGhAppBusy(false); }
+  };
+  const handleGhAppUninstall = async () => {
+    if (!confirm('Uninstall the ExecuteSpec GitHub App for this org? You will also need to revoke from GitHub side.')) return;
+    setGhAppBusy(true); setGhAppMsg(null);
+    try {
+      await api.uninstallGitHubApp();
+      setGhAppMsg('Uninstalled locally. Remember to revoke on github.com/settings/installations.');
+      refreshGhApp();
+    } catch (e: unknown) {
+      setGhAppMsg(e instanceof Error ? e.message : 'Failed to uninstall');
+    } finally { setGhAppBusy(false); }
+  };
   // v2.5.8 — fetch public feature flags so Configure CTAs are gated when the
   // platform has turned off an integration. Without this, users clicking
   // Configure on Jira (with integrations.jira.enabled=false) hit silent 403s.
@@ -681,6 +710,7 @@ export default function IntegrationsPage() {
   useEffect(() => {
     api.getIntegrationStatus().then((r) => setEnabledSources(r.enabledSources)).catch(() => {});
     api.getIntegrationRuns().then(setRuns).catch(() => {});
+    refreshGhApp();
     if (user?.orgId) {
       api.getMyOrg().then(setOrg).catch(() => {});
       fetchSlackStatus();
@@ -751,6 +781,67 @@ export default function IntegrationsPage() {
             Create one from Org Settings.
           </p>
         </GlassPanel>
+      )}
+
+      {/* M-005 (Wave 1) — GitHub App org-wide install card. Backend endpoints
+          live; this is the first UI binding. ORG_ADMIN only. */}
+      {isAdmin && (
+        <section className="space-y-2">
+          <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted">
+            Org-wide GitHub App (recommended)
+          </h3>
+          <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-4">
+            <div className="flex items-start gap-3">
+              <Github className="h-5 w-5 text-secondary mt-0.5 flex-shrink-0" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-semibold text-primary">GitHub App (org-wide)</p>
+                  {ghAppStatus?.installed && (
+                    <span className="text-[10px] font-mono uppercase tracking-wide px-1.5 py-0.5 rounded border bg-status-success/10 text-status-success border-status-success/30">
+                      Installed
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-muted mt-1 leading-relaxed">
+                  Install ExecuteSpec as an org-wide GitHub App so every project in your org can act on shared repos without per-user PATs. Recommended over personal access tokens for team / enterprise setups.
+                </p>
+                {ghAppStatus?.installed && ghAppStatus.installedAt && (
+                  <p className="text-[11px] text-muted mt-1.5 font-mono">
+                    Installation #{ghAppStatus.installationId} · since {new Date(ghAppStatus.installedAt).toLocaleDateString()}
+                  </p>
+                )}
+                {ghAppMsg && (
+                  <p className="text-[11px] text-secondary mt-2">{ghAppMsg}</p>
+                )}
+                <div className="flex items-center gap-2 mt-3 flex-wrap">
+                  {!ghAppStatus?.installed ? (
+                    <button
+                      onClick={handleGhAppInstall}
+                      disabled={ghAppBusy}
+                      className="px-3 py-1.5 rounded-sm bg-accent-blue text-primary text-xs font-medium hover:bg-accent-blue/80 disabled:opacity-50"
+                    >
+                      {ghAppBusy ? 'Working…' : 'Install on GitHub'}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={handleGhAppUninstall}
+                      disabled={ghAppBusy}
+                      className="px-3 py-1.5 rounded-sm text-xs text-secondary hover:text-accent-red border border-[var(--border-default)] hover:border-status-error/40 disabled:opacity-50"
+                    >
+                      Uninstall
+                    </button>
+                  )}
+                  <button
+                    onClick={refreshGhApp}
+                    className="px-3 py-1.5 rounded-sm text-xs text-muted hover:text-primary border border-[var(--border-default)]"
+                  >
+                    Refresh status
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
       )}
 
       {/* Integration grid — grouped by category for faster scanning */}
