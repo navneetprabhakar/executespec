@@ -74,6 +74,8 @@ import V3Integrations from '@/v3/pages/V3Integrations';
 import V3Team from '@/v3/pages/V3Team';
 import V3Trust from '@/v3/pages/V3Trust';
 import V3Insights from '@/v3/pages/V3Insights';
+import V2OptInGate from '@/v3/components/V2OptInGate';
+import V3Changelog from '@/v3/pages/V3Changelog';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -153,6 +155,7 @@ export default function App() {
         <Route path="team" element={<V3Team />} />
         <Route path="trust" element={<V3Trust />} />
         <Route path="insights" element={<V3Insights />} />
+        <Route path="changelog" element={<V3Changelog />} />
       </Route>
 
       {/* ── Protected app routes ── */}
@@ -172,12 +175,16 @@ export default function App() {
               Renders /plans with a query flag so the page can show a
               "your PRO plan still works" banner (non-blocking). */}
           <Route path="legacy/billing" element={<Navigate to="/plans?legacy=1" replace />} />
-          <Route index element={<RunsPage />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="pricing" element={<PricingPage />} />
-          <Route path="plans" element={<PlansPage />} />
-          <Route path="billing" element={<BillingPage />} />
-          <Route path="integrations" element={<IntegrationsPage />} />
+          {/* R-180 — v2 → v3 opt-in redirect gate. When localStorage
+              flag `v3-opt-in` === '1', these routes Navigate to the
+              v3 equivalent. Otherwise the v2 element renders unchanged.
+              See frontend/src/v3/lib/optIn.ts for the full mapping. */}
+          <Route index element={<V2OptInGate><RunsPage /></V2OptInGate>} />
+          <Route path="dashboard" element={<V2OptInGate><DashboardPage /></V2OptInGate>} />
+          <Route path="pricing" element={<V2OptInGate><PricingPage /></V2OptInGate>} />
+          <Route path="plans" element={<V2OptInGate><PlansPage /></V2OptInGate>} />
+          <Route path="billing" element={<V2OptInGate><BillingPage /></V2OptInGate>} />
+          <Route path="integrations" element={<V2OptInGate><IntegrationsPage /></V2OptInGate>} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="audit" element={<AuditPage />} />
@@ -187,14 +194,14 @@ export default function App() {
               but render at one URL. */}
           <Route path="governance/audit" element={<AuditPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={<V2OptInGate><SettingsPage /></V2OptInGate>} />
           {/* v2.5.14 Phase 3.1 — executive summary (business-owner persona). */}
-          <Route path="exec" element={<ExecSummaryPage />} />
+          <Route path="exec" element={<V2OptInGate><ExecSummaryPage /></V2OptInGate>} />
 
           {/* Org pages */}
           <Route path="org/settings" element={<OrgSettingsPage />} />
           <Route path="org/projects" element={<OrgProjectsPage />} />
-          <Route path="projects" element={<ProjectsListPage />} />
+          <Route path="projects" element={<V2OptInGate><ProjectsListPage /></V2OptInGate>} />
           {/* v2.5.12 — fallback so /projects/:id (without /dashboard) resolves.
               The API side lists projects at /api/projects/{id}/dashboard; users
               were hitting /projects/{id} and seeing a blank page because the

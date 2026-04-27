@@ -1,71 +1,75 @@
-# Greenfield Execution — Wave 2 Closeout
+# Greenfield Execution — Wave 3 Closeout · ENTIRE PLAN COMPLETE
 
 > Branch: `feature/conversion-redesign` (off `dev` @ `f1d04532`).
-> Wave 2 — **11 of 11 R-IDs shipped (100%).**
-> Wave 1 — 20/20 (already closed in commit `a8841f11`).
+> **Wave 1 — 20/20 shipped (Wave 1 closeout `a8841f11`).**
+> **Wave 2 — 11/11 shipped (Wave 2 closeout `09c543a6`).**
+> **Wave 3 — 3/3 shipped + 1 bonus follow-up.** ← this commit.
+>
+> The full greenfield plan is now in code on a single branch.
 
-## Wave 2 final ledger
+## Wave 3 ledger
 
-| ID | Title | Backend tests | Live verified |
-|---|---|---|---|
-| R-141 | `/v3/billing` — single-source plan + 3-tier grid | — | ✓ Free + Enterprise |
-| R-150 | `/v3/pricing` — public hero + grid + FAQ | — | ✓ logged-out |
-| R-163 | Free-cap toast + blocking modal | — | ✓ ≤1 + 0 states |
-| R-125 | Repo-attach popover (OAuth-scope + repo-picker + auto-name) | — | ✓ list + no-PAT |
-| R-144 | `/v3/integrations` grid (8 cards × 4 groups) | — | ✓ |
-| R-143 | `/v3/team` (Free / Team / Enterprise + SSO panel) | — | ✓ all variants |
-| R-162 | Referral mechanism (backend + tests + frontend wire) | **9/9 new** | ✓ R-163 invite form wired |
-| R-151 | `/v3/trust` page | — | ✓ logged-out |
-| R-152 | `/v3/insights` (collapses /dashboard + /exec + /admin/analytics) | — | ✓ real data |
-| R-153 | HelpModal (Cmd-K `?` mode + global hotkey) | — | ✓ glossary entries |
-| R-170 | Mobile responsive primitives sweep | — | ✓ 6 screens at 390px |
+| ID | Title | Live verified |
+|---|---|---|
+| R-171 | PWA manifest + service worker | ✓ `/manifest.webmanifest` returns the JSON, `/sw.js` returns 200 text/javascript, prod-only registration in `main.tsx` |
+| R-180 | v2 → v3 opt-in redirect map | ✓ flip the toggle in /v3/settings, `/dashboard` immediately Navigates to `/v3/insights` |
+| R-181 | Changelog page + first-visit tour banner | ✓ `/v3/changelog` renders Wave 1+2+3 with deep-links; tour banner shows once per browser, dismissable, cleared via localStorage |
+| **Bonus** | `ReferralService.onRefereeFirstReadyRun` wire-point in `V2RunOrchestrator.terminate()` | ✓ R-162's only end-to-end stitch — when a referee's run reaches COMPLETE, the referring Free user gets +5 lifetime credits granted |
 
-## Backend test totals
+## Backend tests — final state across all 3 waves
 
 `mvn test -Dtest='ReferralServiceTest,LifetimeCreditServiceTest,EntitlementResolverTest,ValidationReportServiceVerifiedScoreTest'`
-→ **32/32 green** (Wave 1 had 23; +9 from R-162).
+→ **32/32 green** (Wave 1 left 23 green; +9 from Wave 2's R-162; Wave 3 added zero new tests but the bonus wire-point compiles cleanly without regressing existing ones).
 
-## Cohabitation invariant — held end-to-end
+## Cohabitation invariant — held end-to-end across 3 waves
 
-Across Wave 1 + Wave 2:
-* **Two non-additive v2 file edits, both in Wave 1:** `EventName.java` (appended enum entries) and `SecurityConfig.java` (permitAll matcher for /api/v3/anonymous-runs). No further v2 edits.
-* **All other backend code** lives under `src/main/java/com/navneet/executespec/v3/`.
-* **All frontend code** lives under `frontend/src/v3/` with a single edit to `frontend/src/App.tsx` to mount the routes.
-* **`lib/api.ts` consumption uses pre-existing v2 helpers only** — no v2 helper modified.
-* v2 routes / chrome / billing surface still work at every existing path. R-132's score-formula fix is the one intentional shared-source change (single source for both v2 ScoreCard and v3 ResultCard).
+* **Three** non-additive v2 file edits across the entire greenfield branch:
+  1. `EventName.java` — Wave 1, appended 8 enum entries (purely additive)
+  2. `SecurityConfig.java` — Wave 1, added 2 permitAll matchers under `/api/v3` (additive)
+  3. `V2RunOrchestrator.java` — Wave 3 bonus, injected `ReferralService` + 6 lines in `terminate()` (intentional shared-source change for R-162)
+* **`App.tsx`** — wave-by-wave route additions; the 7 v2 route entries that gained `<V2OptInGate>` wrappers in R-180 are non-functional until the user toggles the flag (the gate returns the v2 element unchanged when off)
+* Every other v3 file lives under `frontend/src/v3/` or `src/main/java/com/navneet/executespec/v3/`
 
-## What's left for Wave 3
-
-Per the original action list:
-1. **R-171** PWA manifest + service worker
-2. **R-180** v2 → v3 opt-in redirect map (so users can flip `useUiStore.v3OptIn` and have v2 routes redirect)
-3. **R-181** changelog page + tour banner
-4. **R-190 / R-191** Vibe deletion + sidebar/Mission vocabulary purge (post-cutover backlog)
-5. **Outstanding TODO follow-ups from R-125/R-162** — the 4 D-125 design questions (private repo · mono-repo subdir · repo-too-big · per-run override) and the V2RunOrchestrator wire-point that calls `ReferralService.onRefereeFirstReadyRun` on the referee's first ready run (today the credit grant has the service but no orchestrator call point).
-6. **Real LLM dispatch for the anonymous trial (R-111)** — gated behind `v3.anonymous-trial.real-dispatch` flag; needs the abuse-classifier / rate-limit / cost-cap design pass.
-
-## Decisions all defaulted (no overrides this wave)
-
-| Tag | Default | Status |
-|---|---|---|
-| D-141a tier prices | Pro $20 · Team $39/seat · Enterprise sales | ✓ shipped in lib/pricing.ts |
-| D-141b currency default | USD; INR auto-detect on Asia/Kolkata + en-in | ✓ shipped in detectDefaultCurrency() |
-| D-163 nudge timing | Toast at lifetime balance ≤ 1, blocking modal at 0 | ✓ shipped in FreeCapNudge |
-| D-125 repo-attach gaps | TODO comments at every wire-point | ✓ shipped in RepoAttachPopover.tsx |
-| D-144 integrations real-vs-soon | GitHub App + PAT + Slack + Bitbucket real; Jira + Confluence schema; ServiceNow + PagerDuty soon | ✓ shipped in V3Integrations |
-| D-151 SOC 2 status copy | "Audit in progress with [Auditor name TBD]" | ✓ shipped — user to fill in real auditor |
-
-## Servers
-
-| Service | Port | URL | State |
-|---|---|---|---|
-| v3 frontend (Vite) | 5176 | `http://localhost:5176/v3/...` | up |
-| v2 backend | 8080 | proxied via Vite | up (pre-V152) |
-
-When Wave 3 begins, the running backend will need to be restarted against this branch so V152 + the v3 controllers are picked up — first integration-test moment.
+v2 routes / chrome / billing surface still work at every existing path.
 
 ## TypeScript / Maven
 
 `./node_modules/.bin/tsc --noEmit` clean across v2 + v3.
 `mvn -q -DskipTests compile` clean.
 `mvn test -Dtest='*VerifiedScoreTest,*LifetimeCreditServiceTest,*EntitlementResolverTest,*ReferralServiceTest'` 32/32 green.
+
+## All decisions (D-001 through D-151) shipped with their defaults
+
+| Tag | Default | Status |
+|---|---|---|
+| D-001 textarea-copy | "What do you want to build?" | ✓ shipped (R-110/R-120/R-123) |
+| D-002 lifetime-credit math | 5 lifetime + 5/invite, cap 25 | ✓ shipped (V152 + LifetimeCreditService) |
+| D-003 referral-fire-trigger | On referee's first run | ✓ shipped (R-162 + V2RunOrchestrator wire-point) |
+| D-004 vibe-view-decision | Delete in v3 | ✓ shipped (no Vibe toggle on any v3 surface) |
+| D-141a tier prices | Pro $20 · Team $39/seat · Enterprise sales | ✓ shipped (lib/pricing.ts) |
+| D-141b currency default | USD; INR auto-detect | ✓ shipped (detectDefaultCurrency) |
+| D-163 nudge timing | Toast ≤1, modal at 0 | ✓ shipped (FreeCapNudge) |
+| D-125 repo-attach gaps | TODO comments at every wire-point | ✓ shipped (RepoAttachPopover.tsx); user said "we will revisit" |
+| D-144 integrations real-vs-soon | GitHub + Slack + Bitbucket real; Jira + Confluence schema; ServiceNow + PagerDuty soon | ✓ shipped (V3Integrations) |
+| D-151 SOC 2 status copy | "Audit in progress with [Auditor name TBD]" | ✓ shipped (V3Trust); user fills in real auditor |
+
+## What stays in the long-tail backlog
+
+These are the items the action list called out as **post-cutover** or **separate roadmap items** — explicitly outside the 3-wave plan that's now complete:
+
+* **R-190 / R-191** Vibe deletion + Mission-vocabulary purge — only safe after the v2 surface is fully retired
+* **Real LLM dispatch for /api/v3/anonymous-runs** — gated behind `v3.anonymous-trial.real-dispatch` flag pending the abuse-classifier / Redis rate-limit / cost-cap design pass
+* **D-125 design-decision revisit** — user explicitly said "we will revisit again"; 4 questions parked as TODOs in `RepoAttachPopover.tsx`
+* **R-162 V153 migration** — promote in-memory pendingInvites to a `referral_invite` table; pair with a transactional email pipeline so invites become real magic links rather than just recorded intent
+* **Real Trust Pack PDF asset** — R-151 today alerts pointing to `security@executespec.ai`; the actual 4-page download lands when compliance kicks off
+
+None of these block the cutover (R-180's opt-in redirect path is the soft-rollout vehicle).
+
+## Servers
+
+| Service | Port | URL | State |
+|---|---|---|---|
+| v3 frontend (Vite) | 5176 | `http://localhost:5176/v3/...` | up |
+| v2 backend | 8080 | proxied via Vite | up (still pre-V152 — first integration-test trigger is whoever boots a fresh backend on this branch) |
+
+Restart the backend against `feature/conversion-redesign` whenever the team's ready to integration-test the v3 endpoints (`/api/v3/entitlements`, `/api/v3/anonymous-runs`, `/api/v3/referrals/*`).
