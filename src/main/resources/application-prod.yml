@@ -46,6 +46,13 @@ spring:
     url: jdbc:postgresql://${POSTGRES_HOST:localhost}:${POSTGRES_PORT:5432}/${POSTGRES_DB:executespec}
     username: ${POSTGRES_USER:postgres}
     password: ${POSTGRES_PASSWORD:postgres}
+
+server:
+  # The prod LB terminates TLS and forwards X-Forwarded-Proto: https.
+  # Without this, Spring sees every request as http and rebuilds absolute
+  # URLs (RedirectView Location headers, OAuth client {baseUrl}) with the
+  # wrong scheme. `framework` uses Spring's ForwardedHeaderFilter.
+  forward-headers-strategy: framework
   ai:
     anthropic:
       api-key: ${ANTHROPIC_API_KEY:}
