@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { fetchPlans, subscribe, verifyPayment, type BillingPlan, type SubscriptionInitResult } from '@/lib/billing-api';
 import { PlanCard } from '@/components/billing/PlanCard';
 import { DisclaimerModal } from '@/components/billing/DisclaimerModal';
@@ -10,6 +10,11 @@ import PageShell from '@/components/shared/PageShell';
 export default function PlansPage() {
   const navigate = useNavigate();
   const { user } = useAuthStore();
+  const [searchParams] = useSearchParams();
+  // M-009 (Wave 1) — when arriving from /legacy/billing the redirect carries
+  // ?legacy=1. Show a soft banner explaining grandfathered Pro continues +
+  // surface the Pro plan inline so the buyer can manage their existing sub.
+  const legacyView = searchParams.get('legacy') === '1';
 
   const [plans, setPlans] = useState<BillingPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -24,6 +29,10 @@ export default function PlansPage() {
       return false; // default USD
     }
   });
+  // M-007 (Wave 1) — Annual/Monthly toggle. V146 added YEARLY billing_plan
+  // rows for TEAM + MAX with 17% discount. Default Monthly so existing buyer
+  // mental model is preserved; Annual is the upsell.
+  const [showAnnual, setShowAnnual] = useState(false);
 
   // Checkout flow state
   const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
@@ -40,22 +49,22 @@ export default function PlansPage() {
       .finally(() => setLoading(false));
   }, []);
 
-  // Group plans by tier, pick INR or USD variant based on currency toggle
+  // Group plans by tier, pick INR or USD + period variant based on toggles.
+  // M-007 (Wave 1) — period axis added: MONTHLY (default) or YEARLY (V146).
   const displayPlans = (() => {
+    const wantPeriod = showAnnual ? 'YEARLY' : 'MONTHLY';
     const byTier: Record<string, Record<string, BillingPlan>> = {};
     for (const p of plans) {
       if (p.tier === 'FREE' || !p.active) continue;
+      if (p.period && p.period !== wantPeriod && p.period !== 'NONE') continue;
       if (!byTier[p.tier]) byTier[p.tier] = {};
-      const currency = p.baseAmountInr > 0 ? 'INR' : 'USD';
+      const currency = p.baseAmountInr > 0 || p.perSeatInr > 0 ? 'INR' : 'USD';
       byTier[p.tier][currency] = p;
     }
-    // Phase 1.1 #9: PRO is hidden from new buyers entirely (the backend
-    // lifecycle filter on /api/billing/plans already excludes PRO when
-    // lifecycle_state=HIDDEN; this list omits it as defense-in-depth).
-    // Grandfathered PRO subscribers reach their plan via /legacy/billing.
-    // New buyers see TEAM (Build surface, $49/seat) and MAX (Vibe surface,
-    // $29/mo BYOK) only.
-    const tierOrder = ['TEAM', 'MAX'];
+    // Phase 1.1 #9: PRO is hidden from new buyers (lifecycle filter at backend).
+    // M-009 (Wave 1) — when ?legacy=1 arrives from /legacy/billing, show PRO
+    // inline so grandfathered subscribers can manage their existing plan.
+    const tierOrder = legacyView ? ['PRO', 'TEAM', 'MAX'] : ['TEAM', 'MAX'];
     return tierOrder
       .filter(t => byTier[t])
       .map(t => byTier[t][showInr ? 'INR' : 'USD'])
@@ -137,8 +146,20 @@ export default function PlansPage() {
       accent="transparent"
       description="No credits to translate. No token markups. Every tier shows you what ExecuteSpec really is."
     >
-      {/* Currency toggle */}
-      <div className="flex justify-center">
+      {/* M-009 (Wave 1) — soft landing banner for grandfathered PRO subscribers
+          arriving via /legacy/billing → /plans?legacy=1 redirect. */}
+      {legacyView && (
+        <div className="mb-6 p-4 bg-accent-blue/10 border border-accent-blue/30 rounded-md text-sm">
+          <p className="font-medium text-primary mb-1">Your Pro plan continues — same price, same features.</p>
+          <p className="text-muted text-xs leading-relaxed">
+            Pro is no longer offered to new buyers, but existing subscriptions renew untouched. Your current plan is shown below alongside our newer Team and Max tiers.
+            Need to manage billing details? Visit <a href="/billing" className="text-accent-blue underline">Billing</a>.
+          </p>
+        </div>
+      )}
+
+      {/* Toggle row — currency + period (M-007). */}
+      <div className="flex justify-center gap-3 flex-wrap">
         <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]">
           <button
             onClick={() => setShowInr(true)}
@@ -155,6 +176,25 @@ export default function PlansPage() {
             }`}
           >
             USD
+          </button>
+        </div>
+        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]">
+          <button
+            onClick={() => setShowAnnual(false)}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
+              !showAnnual ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
+            }`}
+          >
+            Monthly
+          </button>
+          <button
+            onClick={() => setShowAnnual(true)}
+            className={`px-4 py-1.5 rounded-md text-sm font-medium transition inline-flex items-center gap-1.5 ${
+              showAnnual ? 'bg-[var(--gray-300)] text-primary' : 'text-muted'
+            }`}
+          >
+            Annual
+            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-status-success/15 text-status-success border border-status-success/30">Save 17%</span>
           </button>
         </div>
       </div>
