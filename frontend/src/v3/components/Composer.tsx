@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createRun } from '@/lib/api';
 import { useV3ProjectStore } from '../stores/useV3ProjectStore';
+import { trackV3, V3_EVENTS } from '../lib/events';
 import {
   PROVIDER_DISPLAY,
   RUN_MODE_PLAN_REVIEW,
@@ -83,6 +84,14 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
         executionMode: mode === 'quick' ? 'PROTOTYPE' : 'PRODUCTION',
         aiProvider: provider,
         projectId,
+      });
+      // R-160 — every run submission counts; the backend dedupes the
+      // first-time vs repeat distinction via EventTrackingService.
+      trackV3(V3_EVENTS.REPEAT_RUN_SUBMITTED, {
+        projectId,
+        provider,
+        mode,
+        textLen: submittedText.length,
       });
       // Mark the planning bubble with the real runId so SSE updates can
       // morph it into a PlanCard / ResultCard.
@@ -316,7 +325,10 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
             <button
               key={sample}
               type="button"
-              onClick={() => setText(sample)}
+              onClick={() => {
+                setText(sample);
+                trackV3(V3_EVENTS.COMPOSER_SAMPLE_CHIP_CLICKED, { sample });
+              }}
               style={{
                 padding: '10px 12px',
                 background: 'var(--v3-surface)',
