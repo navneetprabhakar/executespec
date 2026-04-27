@@ -61,3 +61,33 @@ export interface V3Entitlements {
 /** R-142 — single-source entitlements read for the current user. */
 export const getV3Entitlements = () =>
   v3Req<V3Entitlements>('/v3/entitlements');
+
+// ── Anonymous trial (R-111) ─────────────────────────────────────────────────
+
+export interface AnonymousRunResponse {
+  sessionToken: string | null;
+  runId: string | null;
+  status: string | null;
+  message: string;
+  pollUrl: string | null;
+  error: string | null;
+}
+
+/** Submit an anonymous trial run from the v3 landing page. No JWT required.
+ *  When the v3.anonymous-trial.real-dispatch flag is OFF (Wave 1 default),
+ *  returns a stub — the UI flow is still testable end-to-end. */
+export const submitAnonymousRun = async (spec: string): Promise<AnonymousRunResponse> => {
+  const res = await fetch(BASE + '/v3/anonymous-runs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ spec }),
+  });
+  // 202 + 429 + 4xx all return the same shape; treat 5xx as a hard error.
+  if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
+  return res.json();
+};
+
+export const getAnonymousRunStatus = (sessionToken: string) =>
+  fetch(BASE + '/v3/anonymous-runs/' + encodeURIComponent(sessionToken)).then(
+    (r) => (r.status >= 500 ? Promise.reject(new Error(`HTTP ${r.status}`)) : r.json())
+  ) as Promise<AnonymousRunResponse>;

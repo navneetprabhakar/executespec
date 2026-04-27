@@ -48,18 +48,18 @@ export default function CmdK() {
   // /v3/home so nothing breaks (real targets wired by R-104+).
   const actions = useMemo<Action[]>(() => {
     const all: Action[] = [
-      { id: 'home', label: 'Open project home', hint: '/v3/home', run: () => navigate('/v3/home') },
-      { id: 'settings', label: 'Open settings', hint: '/v3/settings', run: () => navigate('/v3/settings') },
-      { id: 'billing', label: 'Open billing & plan', hint: '/v3/billing · R-141', run: () => navigate('/v3/home') },
-      { id: 'team', label: 'Open team', hint: '/v3/team · R-143', run: () => navigate('/v3/home') },
-      { id: 'integrations', label: 'Open integrations', hint: '/v3/integrations · R-144', run: () => navigate('/v3/home') },
-      { id: 'pricing', label: 'View pricing', hint: '/v3/pricing · R-150', run: () => navigate('/v3/home') },
-      { id: 'trust', label: 'View Trust & Security', hint: '/v3/trust · R-151', run: () => navigate('/v3/home') },
+      { id: 'home', label: 'Go to home', hint: 'Home', run: () => navigate('/v3/home') },
+      { id: 'settings', label: 'Open settings', hint: 'Account · keys · theme', run: () => navigate('/v3/settings') },
+      { id: 'billing', label: 'Open billing & plan', hint: 'Coming soon', run: () => navigate('/v3/home') },
+      { id: 'team', label: 'Open team', hint: 'Coming soon', run: () => navigate('/v3/home') },
+      { id: 'integrations', label: 'Open integrations', hint: 'Coming soon', run: () => navigate('/v3/home') },
+      { id: 'pricing', label: 'View pricing', hint: 'Free · Pro · Team', run: () => navigate('/v3/home') },
+      { id: 'trust', label: 'View Trust & Security', hint: 'SOC 2 · DPA', run: () => navigate('/v3/home') },
       { id: 'help', label: 'Show keyboard shortcuts', hint: '?', run: () => navigate('/v3/home') },
       { id: 'theme', label: `Switch theme (currently ${theme})`, hint: 'Light · Dark', run: () => toggleTheme() },
       { id: 'logout', label: 'Sign out', run: () => { void logout(); } },
       // Admin-only
-      { id: 'admin-tiers', label: 'Admin · Tier lifecycle', requireRole: 'SUPER_ADMIN', hint: 'R-152', run: () => navigate('/v3/home') },
+      { id: 'admin-tiers', label: 'Admin · Tier lifecycle', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
       { id: 'admin-flags', label: 'Admin · Feature flags', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
       { id: 'admin-audit', label: 'Admin · Audit log', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
       { id: 'admin-halt', label: 'Admin · Halt all runs (confirm required)', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
@@ -256,7 +256,7 @@ export default function CmdK() {
           }}
         >
           <span>↑↓ navigate · Enter select · Esc close</span>
-          <span>v3 · R-103</span>
+          <span>⌘K</span>
         </div>
       </div>
     </div>
