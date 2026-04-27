@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Wave 2 → Wave 3 boundary)
+## State at checkpoint (Wave 3 batch 1 — M-018 / M-019 / M-022)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `235e77fa` — `feat(exec): clickable KPI tile drill-downs (M-046)` (about to push)
+**Last pushed commit:** `2d0ecf08` — `feat(admin): per-team-member dashboard at /team/:userId (M-022)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Wave 2 CLOSED** — 15 of 16 items shipped + 1 dup + 1 BLOCKED-PRODUCT-DECISION (M-027). **Wave 3 STARTING.**
+**Wave:** **Wave 3 IN PROGRESS** — 3 of ~12 items shipped
 
 ## Master list
 
@@ -71,9 +71,17 @@ ApiContractTest green throughout.
 
 **Wave 2 closed at 15/16. M-027 will be revisited once direction lands.**
 
-## Wave 3 — remaining (~12 items, ~6 weeks)
+## Wave 3 — completed so far (3 of ~12)
 
-M-011 (Razorpay seats), M-016 (SAML enforcement), M-017 (DSAR), M-018 (status page — Better Stack per parked #1), M-019 (signed audit chain), M-020 (DPA flow), M-022 (per-team dashboard), M-029 (Stripe price IDs ops-only — flag), M-030 (ProductSurfaceFilter wiring), M-031 (cookie domain — needs maintenance window — flag), M-032 (plan-approval policy), M-033 (per-project spend cap), M-039 (repo allowlist), M-051 (TEAM-BYOK plan per parked #2)
+| M-ID | Title | Commit |
+|---|---|---|
+| M-018 | docs/status-page.md — Better Stack lock-in + 7-component setup runbook + canary-runner spec + Prometheus integration | 6032b45d |
+| M-019 | activity_audit hash chain (V147) — prev_hash/row_hash/chain_seq + verifier + GET /api/admin/audit-chain/verify | 78af28da |
+| M-022 | /team/:userId per-member dashboard + drill-down link from OrgAdminDashboard members table | 2d0ecf08 |
+
+## Wave 3 — remaining (~9 items)
+
+M-011 (Razorpay seats — adjustSeats parity with Stripe), M-016 (SAML enforcement — actual SAML2 handshake on top of M-004 schema), M-017 (DSAR), M-020 (DPA flow), M-029 (Stripe price IDs — ops-only env-var doc), M-030 (ProductSurfaceFilter call-site wiring — Phase 2 surface split), M-031 (cookie domain switch — maintenance window), M-032 (plan-approval policy), M-033 (per-project spend cap), M-039 (repo allowlist), M-051 (TEAM-BYOK plan per parked #2)
 
 ## Backlog (~16 items)
 
