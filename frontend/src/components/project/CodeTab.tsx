@@ -23,7 +23,7 @@ import AdrPanel from './AdrPanel';
 import InvariantPanel from './InvariantPanel';
 import { cn } from '@/lib/utils';
 
-type CodeSubTab = 'architecture' | 'repos' | 'tech-debt' | 'standards' | 'contracts' | 'health' | 'adrs' | 'invariants';
+export type CodeSubTab = 'architecture' | 'repos' | 'tech-debt' | 'standards' | 'contracts' | 'health' | 'adrs' | 'invariants';
 
 const SUB_TABS: { key: CodeSubTab; label: string }[] = [
   { key: 'architecture', label: 'Architecture' },
@@ -41,10 +41,24 @@ interface CodeTabProps {
   orgId: string | null | undefined;
   repos: any[];
   initialSub?: CodeSubTab;
+  /**
+   * Controlled-mode override: when provided, the parent owns the sub-tab
+   * state and CodeTab re-renders whenever this changes (allowing deep-link
+   * targets like EmptyProjectLanding's "Link a repo" to switch the sub
+   * after mount, not only at mount). When omitted, falls back to the
+   * uncontrolled internal state seeded by {@link initialSub}.
+   */
+  sub?: CodeSubTab;
+  onSubChange?: (sub: CodeSubTab) => void;
 }
 
-export default function CodeTab({ projectId, orgId, repos, initialSub = 'architecture' }: CodeTabProps) {
-  const [sub, setSub] = useState<CodeSubTab>(initialSub);
+export default function CodeTab({ projectId, orgId, repos, initialSub = 'architecture', sub: controlledSub, onSubChange }: CodeTabProps) {
+  const [internalSub, setInternalSub] = useState<CodeSubTab>(initialSub);
+  const sub = controlledSub ?? internalSub;
+  const setSub = (next: CodeSubTab) => {
+    if (onSubChange) onSubChange(next);
+    else setInternalSub(next);
+  };
 
   return (
     <div className="space-y-3">
