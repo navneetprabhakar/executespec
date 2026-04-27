@@ -25,8 +25,7 @@ export default function QuotaUsageBar({ used, limit, tier }: Props) {
     pct >= 70 ? 'bg-status-waiting' :
     'bg-accent-blue';
   // v2.5.12 — surface upgrade CTA when the user is approaching their cap.
-  // V141 — MAX renamed to TEAM.
-  const showUpgrade = pct >= 70 && tier !== 'ENTERPRISE' && tier !== 'TEAM';
+  const showUpgrade = pct >= 70 && tier !== 'ENTERPRISE' && tier !== 'MAX';
 
   return (
     <div className="flex items-center gap-3 text-xs">

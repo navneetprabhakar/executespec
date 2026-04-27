@@ -91,7 +91,16 @@ public class StripePaymentGateway implements PaymentGateway {
                     .putMetadata("billing_entity_id", entity.getId())
                     .putMetadata("billing_entity_type", entity.getEntityType())
                     .putMetadata("plan_id", planId)
-                    .putMetadata("seats", String.valueOf(seats));
+                    .putMetadata("seats", String.valueOf(seats))
+                    // Phase 2 wiring — Stripe metadata per product so webhook
+                    // handlers can route TEAM/ENTERPRISE → executespec (Build)
+                    // and MAX/PRO → vibe (Vibe). The product is derived from
+                    // the plan's tier via TierProductSurfaceMapper; if the
+                    // plan lookup fails (cold cache), default to executespec
+                    // to preserve today's single-surface behavior.
+                    .putMetadata("product",
+                        com.navneet.executespec.auth.service.TierProductSurfaceMapper
+                            .defaultSurfaceFor(resolveTierForPlan(planId)));
 
             // Attach existing Stripe customer if available
             if (entity.getStripeCustomerId() != null && !entity.getStripeCustomerId().isBlank()) {
@@ -164,7 +173,8 @@ public class StripePaymentGateway implements PaymentGateway {
      * @throws IllegalArgumentException when {@code newQuantity < 1}
      * @throws RuntimeException when the Stripe API call fails
      */
-    public void updateSubscriptionQuantity(String gatewaySubscriptionId, long newQuantity) {
+    @Override
+    public boolean updateSubscriptionQuantity(String gatewaySubscriptionId, long newQuantity) {
         if (newQuantity < 1) {
             throw new IllegalArgumentException("newQuantity must be >= 1, got " + newQuantity);
         }
@@ -186,6 +196,7 @@ public class StripePaymentGateway implements PaymentGateway {
                     .build());
             log.info("Stripe subscription quantity updated: subId={} itemId={} newQuantity={}",
                     gatewaySubscriptionId, itemId, newQuantity);
+            return true;
         } catch (StripeException e) {
             log.error("Failed to update Stripe subscription {} quantity to {}: {}",
                     gatewaySubscriptionId, newQuantity, e.getMessage(), e);
@@ -306,6 +317,30 @@ public class StripePaymentGateway implements PaymentGateway {
      *       call sites that don't map to any recognised tier.</li>
      * </ol>
      */
+    /**
+     * Phase 2 wiring helper — looks up the tier for a plan id so the
+     * Stripe metadata can stamp the correct surface. Returns null when
+     * the plan can't be resolved (caller will fall through to the
+     * executespec default in TierProductSurfaceMapper).
+     */
+    private String resolveTierForPlan(String planId) {
+        if (planId == null || planRepo == null) return null;
+        try {
+            java.util.UUID uuid = java.util.UUID.fromString(planId);
+            com.navneet.executespec.billing.entity.BillingPlan plan =
+                planRepo.findById(uuid).orElse(null);
+            return plan != null ? plan.getTier() : null;
+        } catch (IllegalArgumentException ignore) {
+            // legacy string planId — pattern match
+            String lower = planId.toLowerCase();
+            if (lower.contains("enterprise")) return "ENTERPRISE";
+            if (lower.contains("team")) return "TEAM";
+            if (lower.contains("max"))  return "MAX";
+            if (lower.contains("pro"))  return "PRO";
+            return null;
+        }
+    }
+
     private String resolvePriceId(String planId) {
         if (planId == null) return proPriceId;
 

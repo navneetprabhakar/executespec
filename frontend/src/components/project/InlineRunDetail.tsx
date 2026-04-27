@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, ExternalLink, Github, RefreshCw, Upload, Loa
 import { getFiles, pushToGitHub, syncRun, syncRunToOriginal, type RunDetail } from '@/lib/api';
 import ValidationReportPanel from '@/components/runs/ValidationReportPanel';
 import { CodeTab } from '@/components/runs/RunDetailTabs';
+import VerdictPill, { deriveVerdict } from '@/components/runs/VerdictPill';
 import { cn } from '@/lib/utils';
 
 const STATUS_COLOR: Record<string, string> = {
@@ -157,6 +158,18 @@ export default function InlineRunDetail({ run, onRefresh }: { run: RunDetail; on
         </div>
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
           <Stat label="Status" value={run.status} valueClass={STATUS_COLOR[run.status] ?? 'text-muted'} />
+          {/* M-021 (Backlog) — VerdictPill backfill on the inline run
+              detail header. Mirrors the RunCard treatment from M-043
+              and the ValidationReportPanel + ScoreCard from earlier
+              Plan-1 batches. Uses the same statusReason-only signal
+              set as RunCard (RunDetail carries the full signal set
+              but InlineRunDetail's header is a compact summary, and
+              consistency with the list view matters more than the
+              extra fidelity here). Renders nothing pre-v2.5.10 runs. */}
+          {(() => {
+            const v = deriveVerdict({ statusReason: run.statusReason ?? null });
+            return v ? <VerdictPill size="sm" statusReason={run.statusReason ?? null} /> : null;
+          })()}
           <Stat label="Tasks" value={`${completed}/${tasks.length}`} />
           {totalTokens > 0 && <Stat label="Tokens" value={totalTokens.toLocaleString()} />}
           {run.actualCostUsd != null && <Stat label="Cost" value={`$${run.actualCostUsd.toFixed(4)}`} />}

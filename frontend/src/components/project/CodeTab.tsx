@@ -19,9 +19,11 @@ import TechDebtPanel from './TechDebtPanel';
 import StandardsCompliancePanel from './StandardsCompliancePanel';
 import ContractCoveragePanel from './ContractCoveragePanel';
 import WorkspaceHealthPanel from './WorkspaceHealthPanel';
+import AdrPanel from './AdrPanel';
+import InvariantPanel from './InvariantPanel';
 import { cn } from '@/lib/utils';
 
-type CodeSubTab = 'architecture' | 'repos' | 'tech-debt' | 'standards' | 'contracts' | 'health';
+type CodeSubTab = 'architecture' | 'repos' | 'tech-debt' | 'standards' | 'contracts' | 'health' | 'adrs' | 'invariants';
 
 const SUB_TABS: { key: CodeSubTab; label: string }[] = [
   { key: 'architecture', label: 'Architecture' },
@@ -30,6 +32,8 @@ const SUB_TABS: { key: CodeSubTab; label: string }[] = [
   { key: 'tech-debt', label: 'Tech debt' },
   { key: 'standards', label: 'Standards' },
   { key: 'contracts', label: 'Contracts' },
+  { key: 'adrs', label: 'ADRs' },
+  { key: 'invariants', label: 'Invariants' },
 ];
 
 interface CodeTabProps {
@@ -97,6 +101,8 @@ export default function CodeTab({ projectId, orgId, repos, initialSub = 'archite
             </div>
           )
         )}
+        {sub === 'adrs' && <AdrPanel projectId={projectId} />}
+        {sub === 'invariants' && <InvariantPanel projectId={projectId} />}
       </div>
     </div>
   );

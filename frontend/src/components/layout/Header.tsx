@@ -6,7 +6,6 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { ACTIVE_STATUSES } from '@/lib/constants';
 import { cn } from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
-import ViewModeToggle from '@/components/shared/ViewModeToggle';
 import NotificationBell from './NotificationBell';
 
 // v2.5.14 (Phase 1.4) — dynamic breadcrumb. Previous header hard-coded
@@ -22,12 +21,14 @@ function breadcrumbFromPath(pathname: string): { primary: string; secondary?: st
   if (pathname.startsWith('/deployments')) return { primary: 'Deployments' };
   if (pathname.startsWith('/invoices')) return { primary: 'Invoices' };
   if (pathname.startsWith('/accounting')) return { primary: 'Accounting' };
-  if (pathname.startsWith('/audit')) return { primary: 'Audit' };
+  if (pathname.startsWith('/audit') || pathname.startsWith('/governance/audit')) return { primary: 'Governance', secondary: 'Audit & activity' };
   if (pathname.startsWith('/admin')) return { primary: 'Admin' };
   if (pathname.startsWith('/executions/')) return { primary: 'Launches', secondary: 'Execution' };
   if (pathname.startsWith('/reports/shared/')) return { primary: 'Shared report' };
   if (pathname.startsWith('/exec')) return { primary: 'Exec summary' };
-  return { primary: 'Runs' };
+  // M-001 (Wave 1) — copy-only "Run" → "Mission" rename. URLs + DTO keys
+  // keep "run" everywhere; only the user-facing label flips.
+  return { primary: 'Missions' };
 }
 
 function ThemeToggle() {
@@ -78,8 +79,12 @@ export default function Header() {
         )}
       </div>
 
-      {/* View mode toggle — visible on all breakpoints, uses shorter "Proj" label at mobile */}
-      <ViewModeToggle />
+      {/* Phase 1.1 #8: view-mode toggle retired from the header — surface
+          will be domain-driven in Phase 2 (app.executespec.ai vs.
+          build.executespec.ai). Tier defaults pre-split: paid users
+          land in 'pro' mode, free users in 'vibe'. The component is
+          retained in the codebase for the OrgProjectsPage Dashboard
+          button (still useful as an explicit override). */}
 
       {/* Spacer */}
       <div className="flex-1" />
@@ -114,7 +119,7 @@ export default function Header() {
       )}
 
       {/* Top-up pill — desktop only to keep mobile header lean */}
-      {user?.tier && user.tier !== 'FREE' && user.tier !== 'TEAM' && user.tier !== 'ENTERPRISE' && (
+      {user?.tier && user.tier !== 'FREE' && user.tier !== 'MAX' && user.tier !== 'ENTERPRISE' && (
         <Link
           to="/billing#topup"
           className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-status-success/10 text-status-success text-xs font-medium hover:bg-status-success/20 transition-colors flex-shrink-0"

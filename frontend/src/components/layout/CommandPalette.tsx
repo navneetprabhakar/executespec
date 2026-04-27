@@ -7,11 +7,15 @@ import { useState } from 'react';
 import NewRunModal from '@/components/runs/NewRunModal';
 
 const NAV_COMMANDS = [
-  { label: 'Go to Runs',        path: '/',             icon: LayoutDashboard },
-  { label: 'Go to Dashboard',   path: '/dashboard',    icon: BarChart3 },
-  { label: 'Go to Pricing',     path: '/pricing',      icon: DollarSign },
-  { label: 'Go to Integrations',path: '/integrations', icon: Plug },
-  { label: 'Go to Settings',    path: '/settings',     icon: Settings },
+  // Phase 1.1 #16 — copy-only "Missions" rename (URL paths unchanged).
+  { label: 'Go to Missions',     path: '/',              icon: LayoutDashboard },
+  { label: 'Go to Projects',     path: '/projects',      icon: BarChart3 },
+  { label: 'Go to Plans',        path: '/plans',         icon: DollarSign },
+  { label: 'Go to Pricing',      path: '/pricing',       icon: DollarSign },
+  { label: 'Go to Integrations', path: '/integrations',  icon: Plug },
+  { label: 'Go to Invoices',     path: '/invoices',      icon: DollarSign },
+  { label: 'Go to Settings',     path: '/settings',      icon: Settings },
+  { label: 'Go to Org settings', path: '/org/settings',  icon: Settings },
 ];
 
 export default function CommandPalette() {
@@ -43,7 +47,8 @@ export default function CommandPalette() {
                 <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-[var(--text-muted)] [&_[cmdk-group-heading]]:font-medium">
                   <CmdItem
                     icon={<Plus className="h-4 w-4" />}
-                    label="New Run"
+                    /* M-001 — copy-only Mission rename. */
+                    label="New mission"
                     onSelect={() => { setCommandPaletteOpen(false); setShowNewRun(true); }}
                   />
                   <CmdItem

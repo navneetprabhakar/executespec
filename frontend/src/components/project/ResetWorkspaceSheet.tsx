@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { getWorkspaceHealth, analyseProject, type RepoHealth } from '@/lib/api';
+import { Glossary } from '@/components/shared/Glossary';
 
 interface Props {
   projectId: string;
@@ -61,7 +62,7 @@ export default function ResetWorkspaceSheet({ projectId, onClose, onDone }: Prop
 
         <p className="text-xs text-muted">
           This will pull the latest origin HEAD for every linked repo and
-          regenerate codemaps + architecture. Next Launch will plan against
+          regenerate <Glossary term="codemap">codemaps</Glossary> + architecture. Next Launch will plan against
           that fresh state.
         </p>
 

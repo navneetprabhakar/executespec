@@ -12,6 +12,7 @@ import ProjectSelector from '@/components/auth/ProjectSelector';
 import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
 import ProviderModelSelector, { getPersistedSelection } from '@/components/runs/ProviderModelSelector';
+import { AddGitHubPatDrawer, AddApiKeysDrawer } from '@/components/runs/InlineCredentialDrawers';
 import { useViewMode } from '@/hooks/useViewMode';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import Button from '@/components/shared/Button';
@@ -66,6 +67,11 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
   const { isVibe, vibeRunDefaults } = useViewMode();
   const isMobile = useIsMobile();
   const navigate = useNavigate();
+
+  // M-008 — inline credential drawers so the user doesn't get bounced
+  // to /settings (and lose every typed field) just to add a PAT or key.
+  const [showPatDrawer, setShowPatDrawer] = useState(false);
+  const [showKeysDrawer, setShowKeysDrawer] = useState(false);
 
   // Reset state if initialConfig changes (though usually the modal is unmounted)
   useEffect(() => {
@@ -267,7 +273,8 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
             </button>
           ) : (
             <div className="min-w-0 flex-1">
-              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-1">New run</div>
+              {/* M-001 — copy-only Mission rename. */}
+              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-1">New mission</div>
               <h2 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">
                 Write a spec. <span style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: 'italic', fontWeight: 400 }}>Ship</span> it.
               </h2>
@@ -483,12 +490,18 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                       exit={{ height: 0, opacity: 0 }}
                       className="overflow-hidden space-y-3"
                     >
-                      {/* No-PAT warning */}
+                      {/* No-PAT warning + inline drawer (M-008). */}
                       {!user?.hasGithubPat && (
-                        <div className="flex items-center gap-1.5 text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-sm px-3 py-2">
+                        <div className="flex items-center gap-2 flex-wrap text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-sm px-3 py-2">
                           <AlertCircle className="h-3.5 w-3.5 flex-shrink-0" />
-                          No GitHub PAT configured. Add yours in&nbsp;
-                          <strong>Settings → GitHub Integration</strong>&nbsp;first.
+                          <span>No GitHub PAT configured.</span>
+                          <button
+                            type="button"
+                            onClick={() => setShowPatDrawer(true)}
+                            className="ml-auto rounded-sm bg-accent-amber/20 text-accent-amber px-2 py-0.5 font-semibold hover:bg-accent-amber/30 transition-colors"
+                          >
+                            Add it now
+                          </button>
                         </div>
                       )}
 
@@ -551,14 +564,20 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               </>
             )}
 
-            {/* V141 — BYOK warning for TEAM tier (renamed from MAX) without API keys */}
-            {user?.tier === 'TEAM' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
+            {/* BYOK warning for MAX tier without API keys + inline drawer (M-008). */}
+            {user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
               <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-amber/10 border border-accent-amber/30 text-sm text-secondary">
                 <AlertCircle className="h-4 w-4 text-accent-amber flex-shrink-0 mt-0.5" />
-                <span>
-                  Team plan requires your own API keys.{' '}
-                  <a href="/settings#ai-keys" className="text-accent-blue underline">Add keys in Settings</a> before launching a run.
+                <span className="flex-1">
+                  Max plan requires your own API keys.
                 </span>
+                <button
+                  type="button"
+                  onClick={() => setShowKeysDrawer(true)}
+                  className="rounded-sm bg-accent-amber/20 text-accent-amber px-2 py-0.5 text-xs font-semibold hover:bg-accent-amber/30 transition-colors flex-shrink-0"
+                >
+                  Add keys
+                </button>
               </div>
             )}
           </div>
@@ -573,7 +592,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               size="lg"
               fullWidth
               loading={launching}
-              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'TEAM' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
+              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
             >
               {!launching && <Rocket className="h-4 w-4" />}
               {launching ? 'Launching...' : 'Launch Run'}
@@ -685,6 +704,11 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
         currentTier={user?.tier || 'FREE'}
         {...upgradeInfo}
       />
+
+      {/* M-008 — inline credential drawers (kept above the modal so the
+          parent state stays alive). */}
+      <AddGitHubPatDrawer open={showPatDrawer} onClose={() => setShowPatDrawer(false)} />
+      <AddApiKeysDrawer open={showKeysDrawer} onClose={() => setShowKeysDrawer(false)} />
     </div>
   );
 }

@@ -71,6 +71,13 @@ public class Project {
     @Column(name = "github_owner")
     private String githubOwner;
 
+    /** M-033 (Wave 3) — per-project monthly spend cap in USD. NULL = no cap.
+     *  Enforced at plan-approval time: if (current MTD spend on this project +
+     *  the new run's buffered estimate) > cap, the approval returns 402 with
+     *  a "your project cap is X" hint. */
+    @Column(name = "spend_cap_usd_monthly", precision = 10, scale = 2)
+    private java.math.BigDecimal spendCapUsdMonthly;
+
     /** v2.6.2 (E1.7) — where this project's standards / scopes /
      *  detection-overrides config lives. NULL or FOLDER (default) keeps
      *  config in {@code .executespec/config/<project-slug>/} on the

@@ -11,6 +11,7 @@ import { useTierPermissions } from '@/hooks/useTierPermissions';
 import type { OrgDto } from '@/lib/api';
 import * as api from '@/lib/api';
 import { fetchBillingStatus, type BillingStatus } from '@/lib/billing-api';
+import NotificationPreferences from '@/components/settings/NotificationPreferences';
 
 // ── Generic expand/collapse card ──────────────────────────────────────────────
 
@@ -242,6 +243,28 @@ export default function SettingsPage() {
   const [aiSaving, setAiSaving] = useState(false);
   const [aiMsg, setAiMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
+  // Phase 1.2 #24 — BYOK Test buttons. One per provider; pings the
+  // provider before saving so users get a clear "key works" / "key
+  // rejected by OpenAI" signal instead of waiting for the next run
+  // to silently 401.
+  const [aiTestState, setAiTestState] = useState<Record<'OPENAI' | 'ANTHROPIC' | 'GEMINI', { busy: boolean; result?: { ok: boolean; text: string } }>>({
+    OPENAI: { busy: false }, ANTHROPIC: { busy: false }, GEMINI: { busy: false },
+  });
+  const handleTestAiKey = async (provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', key: string) => {
+    if (!key.trim()) {
+      setAiTestState((s) => ({ ...s, [provider]: { busy: false, result: { ok: false, text: 'Paste a key first.' } } }));
+      return;
+    }
+    setAiTestState((s) => ({ ...s, [provider]: { busy: true } }));
+    try {
+      const r = await api.validateAiKey(provider, key.trim());
+      setAiTestState((s) => ({ ...s, [provider]: { busy: false, result: { ok: r.valid, text: r.message } } }));
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'Test failed';
+      setAiTestState((s) => ({ ...s, [provider]: { busy: false, result: { ok: false, text: msg } } }));
+    }
+  };
+
   const handleSaveAiKeys = async (e: React.FormEvent) => {
     e.preventDefault();
     setAiSaving(true); setAiMsg(null);
@@ -286,19 +309,18 @@ export default function SettingsPage() {
             // v2.5.8 — billing is the source of truth; fall back to JWT tier when
             // the billing call hasn't returned yet (or the user has no subscription).
             const planTier = billing?.plan?.tier ?? user?.tier ?? 'FREE';
-            // V141 — MAX renamed to TEAM (BYOK unlimited).
             const planName = billing?.plan?.name
               ?? (planTier === 'ENTERPRISE' ? 'Enterprise Plan'
-                  : planTier === 'TEAM' ? 'Team Plan'
+                  : planTier === 'MAX' ? 'Max Plan'
                   : planTier === 'PRO' ? 'Pro Plan'
                   : 'Free Plan');
             const badge = planTier === 'ENTERPRISE' ? { cls: 'bg-accent-amber/20 text-accent-amber', letter: 'E' }
-              : planTier === 'TEAM' ? { cls: 'bg-status-success/20 text-status-success', letter: 'T' }
+              : planTier === 'MAX' ? { cls: 'bg-status-success/20 text-status-success', letter: 'M' }
               : planTier === 'PRO' ? { cls: 'bg-accent-blue/20 text-accent-blue', letter: 'P' }
               : { cls: 'bg-[var(--gray-400)] text-secondary', letter: 'F' };
             const subtitle = planTier === 'ENTERPRISE'
               ? 'Unlimited runs, priority support, dedicated infrastructure'
-              : planTier === 'TEAM'
+              : planTier === 'MAX'
               ? 'Unlimited runs, own API keys, 3 concurrent runs'
               : planTier === 'PRO'
               ? '10 runs/month, 2 concurrent runs, managed keys'
@@ -426,27 +448,46 @@ export default function SettingsPage() {
             Save with all fields empty to clear all keys.
           </p>
           <form onSubmit={handleSaveAiKeys} className="space-y-3">
-            <SecretField
-              label={`OpenAI API Key${user?.hasOpenAiKey ? ' ✓' : ''}`}
-              subLabel={user?.hasOpenAiKey ? '(leave blank to keep existing)' : undefined}
-              value={openAiKey}
-              onChange={setOpenAiKey}
-              placeholder={user?.hasOpenAiKey ? '••••••••••••••••••••• (saved)' : 'sk-…'}
-            />
-            <SecretField
-              label={`Anthropic API Key${user?.hasAnthropicKey ? ' ✓' : ''}`}
-              subLabel={user?.hasAnthropicKey ? '(leave blank to keep existing)' : undefined}
-              value={anthropicKey}
-              onChange={setAnthropicKey}
-              placeholder={user?.hasAnthropicKey ? '••••••••••••••••••••• (saved)' : 'sk-ant-…'}
-            />
-            <SecretField
-              label={`Gemini API Key${user?.hasGeminiKey ? ' ✓' : ''}`}
-              subLabel={user?.hasGeminiKey ? '(leave blank to keep existing)' : undefined}
-              value={geminiKey}
-              onChange={setGeminiKey}
-              placeholder={user?.hasGeminiKey ? '••••••••••••••••••••• (saved)' : 'AIza…'}
-            />
+            <div className="space-y-1">
+              <SecretField
+                label={`OpenAI API Key${user?.hasOpenAiKey ? ' ✓' : ''}`}
+                subLabel={user?.hasOpenAiKey ? '(leave blank to keep existing)' : undefined}
+                value={openAiKey}
+                onChange={setOpenAiKey}
+                placeholder={user?.hasOpenAiKey ? '••••••••••••••••••••• (saved)' : 'sk-…'}
+              />
+              {/* Phase 1.2 #24 — BYOK Test buttons. Pings the provider before save. */}
+              <AiKeyTestRow
+                provider="OPENAI" hasKey={!!user?.hasOpenAiKey} keyValue={openAiKey}
+                state={aiTestState.OPENAI} onTest={handleTestAiKey}
+              />
+            </div>
+            <div className="space-y-1">
+              <SecretField
+                label={`Anthropic API Key${user?.hasAnthropicKey ? ' ✓' : ''}`}
+                subLabel={user?.hasAnthropicKey ? '(leave blank to keep existing)' : undefined}
+                value={anthropicKey}
+                onChange={setAnthropicKey}
+                placeholder={user?.hasAnthropicKey ? '••••••••••••••••••••• (saved)' : 'sk-ant-…'}
+              />
+              <AiKeyTestRow
+                provider="ANTHROPIC" hasKey={!!user?.hasAnthropicKey} keyValue={anthropicKey}
+                state={aiTestState.ANTHROPIC} onTest={handleTestAiKey}
+              />
+            </div>
+            <div className="space-y-1">
+              <SecretField
+                label={`Gemini API Key${user?.hasGeminiKey ? ' ✓' : ''}`}
+                subLabel={user?.hasGeminiKey ? '(leave blank to keep existing)' : undefined}
+                value={geminiKey}
+                onChange={setGeminiKey}
+                placeholder={user?.hasGeminiKey ? '••••••••••••••••••••• (saved)' : 'AIza…'}
+              />
+              <AiKeyTestRow
+                provider="GEMINI" hasKey={!!user?.hasGeminiKey} keyValue={geminiKey}
+                state={aiTestState.GEMINI} onTest={handleTestAiKey}
+              />
+            </div>
             <SaveMessage msg={aiMsg} />
             <SaveBar
               saving={aiSaving}
@@ -473,6 +514,9 @@ export default function SettingsPage() {
 
       {/* ── Key Source & Provider Policy (ORG_ADMIN only) ──────────────────── */}
       {isOrgAdmin && org && <OrgKeySourceCard org={org} onSaved={setOrg} />}
+
+      {/* ── Notification preferences (M-003 Wave 2) ────────────────────────── */}
+      <NotificationPreferences />
 
       {/* ── System Health (requires canViewMetrics) ────────────────────────── */}
       {permissions?.canViewMetrics && (
@@ -727,5 +771,45 @@ function HealthCard({ icon, label, value, color }: { icon: React.ReactNode; labe
         <p className={`text-sm font-semibold ${color}`}>{value}</p>
       </div>
     </GlassPanel>
+  );
+}
+
+
+// Phase 1.2 #24 — Test button + result chip for a single BYOK provider.
+function AiKeyTestRow({
+  provider, hasKey, keyValue, state, onTest,
+}: {
+  provider: "OPENAI" | "ANTHROPIC" | "GEMINI";
+  hasKey: boolean;
+  keyValue: string;
+  state: { busy: boolean; result?: { ok: boolean; text: string } };
+  onTest: (provider: "OPENAI" | "ANTHROPIC" | "GEMINI", key: string) => void;
+}) {
+  const canTest = keyValue.trim().length > 0;
+  const reason = !canTest && hasKey
+    ? "Paste the key again to re-test (we never store it in plaintext)."
+    : !canTest
+      ? "Paste a key first."
+      : "";
+  return (
+    <div className="flex items-center gap-2 text-[11px]">
+      <button
+        type="button"
+        onClick={() => onTest(provider, keyValue)}
+        disabled={!canTest || state.busy}
+        title={reason}
+        className="px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary hover:border-[var(--border-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {state.busy ? "Testing…" : "Test key"}
+      </button>
+      {state.result && (
+        <span className={state.result.ok ? "text-status-success" : "text-status-error"}>
+          {state.result.ok ? "✓" : "✗"} {state.result.text}
+        </span>
+      )}
+      {!state.result && reason && (
+        <span className="text-muted italic">{reason}</span>
+      )}
+    </div>
   );
 }

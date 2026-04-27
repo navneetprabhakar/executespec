@@ -35,6 +35,7 @@ import ExecutionViewPage from '@/pages/execution/ExecutionViewPage';
 import AdminPage from '@/pages/admin/AdminPage';
 import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
 import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
+import TeamMemberDashboard from '@/pages/admin/TeamMemberDashboard';
 import PricingManager from '@/pages/admin/PricingManager';
 import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
 
@@ -125,7 +126,16 @@ export default function App() {
 
         {/* Wave 2.2 — sandbox → run-submit prefill landing (inside AppLayout for nav consistency) */}
         <Route element={<AppLayout />}>
-          <Route path="runs/new" element={<RunsNewLanding />} />
+          {/* Phase 1.1 #11: drop /runs/new as a top-level entry. RunsNewLanding
+              still exists for the post-sandbox prefill flow but the canonical
+              entry is now /projects (or /welcome for the empty state). */}
+          <Route path="runs/new" element={<Navigate to="/projects" replace />} />
+          <Route path="runs/new/sandbox" element={<RunsNewLanding />} />
+          {/* Phase 1.1 #9: /legacy/billing — soft landing for grandfathered
+              PRO subscribers whose tier-state-changed email links here.
+              Renders /plans with a query flag so the page can show a
+              "your PRO plan still works" banner (non-blocking). */}
+          <Route path="legacy/billing" element={<Navigate to="/plans?legacy=1" replace />} />
           <Route index element={<RunsPage />} />
           <Route path="dashboard" element={<DashboardPage />} />
           <Route path="pricing" element={<PricingPage />} />
@@ -135,6 +145,11 @@ export default function App() {
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="audit" element={<AuditPage />} />
+          {/* M-013 (Wave 2) — canonical "governance" alias for the unified
+              audit + activity page. Per parked decision #4, V22 (admin
+              audit) and V133 (project activity) live in separate tables
+              but render at one URL. */}
+          <Route path="governance/audit" element={<AuditPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
           <Route path="settings" element={<SettingsPage />} />
           {/* v2.5.14 Phase 3.1 — executive summary (business-owner persona). */}
@@ -150,12 +165,19 @@ export default function App() {
               route fell through. */}
           <Route path="projects/:projectId" element={<Navigate to="dashboard" replace />} />
           <Route path="projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
+          {/* M-034 (Wave 2) — deep-linkable URL for the project activity
+              feed. Opens the dashboard with ?drawer=activity pre-set so
+              the existing MoreDrawer ActivityTab full-page mount picks
+              up. Keeps the v2.6.4 IA cleanup intact (no new top tab). */}
+          <Route path="projects/:projectId/activity" element={<Navigate to="../dashboard?drawer=activity" replace relative="path" />} />
           <Route path="projects/:projectId/executions/new" element={<ExecutionViewPage />} />
           <Route path="projects/:projectId/executions/:executionId" element={<ExecutionViewPage />} />
 
           {/* Admin */}
           <Route path="admin" element={<AdminPage />} />
           <Route path="admin/analytics" element={<OrgAdminDashboard />} />
+          {/* M-022 (Wave 3) — per-team-member dashboard for ORG_ADMIN. */}
+          <Route path="team/:userId" element={<TeamMemberDashboard />} />
           <Route path="admin/pricing" element={<PricingManager />} />
           <Route path="admin/feature-flags" element={<FeatureFlagsPage />} />
           <Route path="admin/tiers" element={<TierLifecyclePage />} />

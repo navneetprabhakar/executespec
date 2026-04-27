@@ -41,12 +41,19 @@ public class ActivityFeedRetentionJob {
     private static final DateTimeFormatter SUFFIX = DateTimeFormatter.ofPattern("yyyy'm'MM");
 
     private final JdbcTemplate jdbc;
+    /** M-038 (Backlog) — retention window is now flag-driven so SUPER_ADMIN
+     *  can adjust without a deploy. Falls back to the application.yml
+     *  default. */
+    private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlags;
 
     @Value("${activity.feed.retention.days:365}")
-    private int retentionDays;
+    private int retentionDaysDefault;
 
     @Value("${activity.feed.retention.dry-run:true}")
     private boolean dryRun;
+
+    /** M-038 — feature-flag key surfaced in /admin/feature-flags. */
+    public static final String RETENTION_DAYS_FLAG = "activity.retention.days";
 
     @Scheduled(cron = "0 0 3 * * *")
     @SchedulerLock(name = "ActivityFeedRetentionJob", lockAtMostFor = "30m", lockAtLeastFor = "1m")
@@ -54,9 +61,20 @@ public class ActivityFeedRetentionJob {
         run(LocalDate.now());
     }
 
+    /** Effective retention window — flag overrides yml default. Clamped
+     *  to [30, 3650] (one month minimum, ten years maximum) so a typo
+     *  doesn't accidentally drop everything or hoard forever. */
+    int effectiveRetentionDays() {
+        int v = featureFlags == null
+                ? retentionDaysDefault
+                : featureFlags.getInt(RETENTION_DAYS_FLAG, retentionDaysDefault);
+        return Math.max(30, Math.min(3650, v));
+    }
+
     /** Test seam — pure, deterministic input. */
     int run(LocalDate today) {
         int dropped = 0;
+        int retentionDays = effectiveRetentionDays();
         YearMonth cutoff = YearMonth.from(today.minusDays(retentionDays));
         java.util.List<String> partitions;
         try {

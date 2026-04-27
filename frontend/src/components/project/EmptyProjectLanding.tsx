@@ -25,6 +25,7 @@ import { useNavigate } from 'react-router-dom';
 import { Rocket, FileText, ArrowRight, Sparkles } from 'lucide-react';
 import * as api from '@/lib/api';
 import { cn } from '@/lib/utils';
+import TemplateGrid from '@/components/execution/TemplateGrid';
 
 interface EmptyProjectLandingProps {
   projectId: string;
@@ -135,6 +136,22 @@ export default function EmptyProjectLanding({
             ))}
           </div>
         </div>
+      )}
+
+      {/* M-023 (Wave 2) — saved spec templates (project + org-shared) for
+          users who already have a library. Loads silently and renders
+          nothing when there are no templates yet, so cold projects keep
+          their clean empty-state. */}
+      {canLaunch && (
+        <TemplateGrid
+          projectId={projectId}
+          heading="Or start from a saved template"
+          onPick={(text) =>
+            navigate(`/projects/${projectId}/executions/new`, {
+              state: { templateRequirement: text },
+            })
+          }
+        />
       )}
 
       {/* Continue from share link */}

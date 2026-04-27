@@ -1,4 +1,6 @@
 import type { ValidationReportData } from '@/lib/api';
+import VerdictPill from './VerdictPill';
+import { Glossary } from '@/components/shared/Glossary';
 
 type Dim = { label: string; value: number | null | undefined };
 
@@ -73,17 +75,29 @@ export default function ScoreCard({ report }: { report: ValidationReportData }) 
 
   return (
     <div className="rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <h3 className="text-[10px] font-mono font-medium uppercase tracking-wider text-muted">Quality dimensions</h3>
+      {/* Plan 1 (this-week #3): verdict leads, numeric score sits beside it
+          as supporting detail rather than as the primary signal. */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-2">
+          <h3 className="text-[10px] font-mono font-medium uppercase tracking-wider text-muted">Quality dimensions</h3>
+          <VerdictPill
+            size="sm"
+            finalBuildPassed={report.finalBuildPassed}
+            testsPassed={report.testsPassed}
+            testsTotal={report.testsTotal}
+            reviewerVerdict={report.reviewerVerdict}
+            verifiedScore={report.verifiedScore}
+          />
+        </div>
         {overall != null && (
           <div className="flex items-baseline gap-2">
-            <span className={`text-lg font-semibold tabular-nums ${textColor(overall)}`}>{overall}</span>
-            <span className="text-[11px] font-normal text-muted">/ 100</span>
+            <span className={`text-base font-medium tabular-nums opacity-80 ${textColor(overall)}`}>{overall}</span>
+            <span className="text-[10px] font-normal text-muted">/ 100</span>
             {verified != null && llmScore != null && llmScore !== verified && (
               <span className="text-[10px] font-mono text-muted">· Est. {llmScore}</span>
             )}
             {verified == null && report.accuracyGrade && (
-              <span className="text-[11px] text-muted">· {report.accuracyGrade}</span>
+              <span className="text-[10px] text-muted">· {report.accuracyGrade}</span>
             )}
           </div>
         )}
@@ -95,7 +109,7 @@ export default function ScoreCard({ report }: { report: ValidationReportData }) 
       </div>
       {allDimsEqualAnchor && (
         <p className="text-[10px] text-muted leading-relaxed pt-1 border-t border-[var(--border-default)]">
-          Dimensions match the verified score because the reviewer found no issues.
+          Dimensions match the <Glossary term="verified score">verified score</Glossary> because the <Glossary term="wiring pass">reviewer</Glossary> found no issues.
           Each bar is <code>anchor − issue penalty</code>; zero penalties means every bar equals the anchor.
         </p>
       )}
