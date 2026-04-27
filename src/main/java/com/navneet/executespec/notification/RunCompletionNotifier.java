@@ -75,13 +75,49 @@ public class RunCompletionNotifier {
             }
 
             String title = "Run failed: " + pickTitle(run);
-            String body = event.reason() != null ? truncate(event.reason(), 500) : "The run could not be completed.";
+            // M-053 + M-054 (Backlog) — failure notifications get the same
+            // rich-body treatment as completions: lead with the cost/duration
+            // signals, then include the failure reason. Previously the body
+            // was just the reason string — useful but missing the "$0.42 ·
+            // 4m12s" signal that helps Sara/Raj/Marcus decide whether to
+            // retry immediately or batch the fix.
+            String body = buildRichFailureBody(run, event.reason());
 
             notificationService.create(run.getCreatedByUserId(), type, title, body, link);
             log.debug("[Run {}] Created {} notification for user {}", event.runId(), type, run.getCreatedByUserId());
         } catch (Exception e) {
             log.warn("[Run {}] Failed to create failure notification: {}", event.runId(), e.getMessage());
         }
+    }
+
+    /**
+     * M-053/M-054 — failure body mirroring buildRichBody: leading
+     * cost/duration signals, then the operator-friendly reason.
+     * Returns the bare reason if the run never started accumulating cost
+     * (early-stage failures) so we don't render "$0.00 · 0s" noise.
+     */
+    private String buildRichFailureBody(PipelineRun run, String reason) {
+        StringBuilder parts = new StringBuilder();
+        Double cost = run.getActualCostUsd();
+        if (cost != null && cost > 0) {
+            parts.append(String.format("$%.2f", cost));
+        }
+        if (run.getStartedAt() != null && run.getCompletedAt() != null) {
+            long secs = java.time.Duration.between(run.getStartedAt(), run.getCompletedAt()).getSeconds();
+            if (secs > 0) {
+                if (parts.length() > 0) parts.append(" · ");
+                if (secs < 60) parts.append(secs).append("s");
+                else parts.append(secs / 60).append("m").append(String.format("%02ds", secs % 60));
+            }
+        }
+        if (reason != null && !reason.isBlank()) {
+            if (parts.length() > 0) parts.append("\n");
+            parts.append(truncate(reason, 500));
+        }
+        if (parts.length() == 0) {
+            return "The run could not be completed.";
+        }
+        return parts.toString();
     }
 
     /**
