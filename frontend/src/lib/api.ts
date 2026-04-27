@@ -1367,6 +1367,19 @@ export interface AuditChainVerifyReport {
 export const verifyAuditChain = () =>
   req<AuditChainVerifyReport>('/admin/audit-chain/verify');
 
+// M-049 (Backlog) — activation funnel headline counts (V125 ledger).
+export interface ActivationStageCounts {
+  total: number;
+  windowed: number;
+}
+export interface ActivationFunnelReport {
+  windowDays: number;
+  windowStart: string;
+  stages: Record<string, ActivationStageCounts>;
+}
+export const getActivationFunnel = (sinceDays = 30) =>
+  req<ActivationFunnelReport>(`/admin/activation-funnel?sinceDays=${sinceDays}`);
+
 export const adminListOrgs = () => req<OrgDto[]>('/admin/orgs');
 export const adminUpdateOrgTier = (id: string, tier: string) =>
   req<OrgDto>(`/admin/orgs/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
