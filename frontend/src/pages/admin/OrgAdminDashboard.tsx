@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, PieChart, Pie, Cell, Legend
@@ -24,6 +24,7 @@ const PERIODS = [
 const CHART_COLORS = ['#8B5CF6', '#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#EC4899', '#6366F1', '#14B8A6'];
 
 export default function OrgAdminDashboard() {
+  const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore(selectIsOrgAdmin);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
@@ -37,6 +38,9 @@ export default function OrgAdminDashboard() {
   const [seatsBusy, setSeatsBusy] = useState(false);
   const [seatsMsg, setSeatsMsg] = useState<string | null>(null);
   const [seatsError, setSeatsError] = useState<string | null>(null);
+  // M-002 — first-seat-purchase on-ramp: pre-pick a seat count for the
+  // /plans?tier=team CTA when the org isn't on TEAM yet.
+  const [onrampSeats, setOnrampSeats] = useState<number>(3);
   const [loading, setLoading] = useState(true);
   const [sortCol, setSortCol] = useState<'runCount' | 'successRate' | 'lastRunDate'>('runCount');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
@@ -330,6 +334,53 @@ export default function OrgAdminDashboard() {
               ) : (
                 <p className="text-xs text-muted py-6 text-center">No member activity in this period</p>
               )}
+            </GlassPanel>
+          )}
+
+          {/* Row 4.4: First-seat-purchase on-ramp (M-002, Wave 1).
+              Renders for ORG admins on a non-TEAM tier (excluding ENTERPRISE
+              which is sales-managed). Replaces the dead "+seat 402" path:
+              instead of a hard error, the buyer lands on /plans with the
+              TEAM tier pre-selected and their chosen seat count carried
+              over. */}
+          {entityType === 'ORG' && orgDto && (orgDto.tier === 'FREE' || orgDto.tier === 'PRO' || orgDto.tier === 'MAX') && (
+            <GlassPanel className="p-4">
+              <div className="flex items-center gap-2 mb-3">
+                <UserCheck className="h-4 w-4 text-secondary" />
+                <p className="text-xs text-muted font-medium uppercase tracking-wider">
+                  Add team seats
+                </p>
+              </div>
+              <p className="text-sm text-secondary mb-3">
+                Your org is on the <span className="font-semibold text-primary">{orgDto.tier}</span> plan.
+                Team seats unlock a shared credit pool, member management, and per-seat billing.
+                Start the Team plan to begin adding seats.
+              </p>
+              <div className="flex items-center gap-3 flex-wrap">
+                <label className="text-xs text-muted font-mono uppercase tracking-wide">
+                  Seats
+                </label>
+                <input
+                  type="number"
+                  min={2}
+                  max={20}
+                  value={onrampSeats}
+                  onChange={(e) => {
+                    const n = parseInt(e.target.value, 10);
+                    if (!Number.isNaN(n)) setOnrampSeats(Math.max(2, Math.min(20, n)));
+                  }}
+                  className="w-20 px-2 py-1 bg-[var(--gray-200)] border border-[var(--border-default)] rounded-sm text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+                />
+                <button
+                  onClick={() => navigate(`/plans?tier=team&seats=${onrampSeats}&from=admin`)}
+                  className="px-3 py-1.5 bg-accent-blue text-primary text-xs font-medium rounded-sm hover:bg-accent-blue-hover"
+                >
+                  Continue to checkout →
+                </button>
+                <span className="text-[11px] text-muted">
+                  2-20 (larger → Enterprise)
+                </span>
+              </div>
             </GlassPanel>
           )}
 
