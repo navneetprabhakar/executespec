@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Final Pass A done — entering M-068)
+## State at checkpoint (M-068 DONE — full execution closed)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `5d425687` — `docs(M-067): doc-tree refresh from current code state` (about to push)
+**Last pushed commit:** `a88d41f7` — `fix(audit): V151 widens V147 CHAR(64) chain columns → VARCHAR(64) (M-068 boot fix)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Backlog CLOSED + Final Pass A (M-067) CLOSED** — doc-tree refreshed (CHANGELOG / README / CODEMAP / document_map / plans/README + phase-2-3-deferred stamp). **Final Pass B (M-068) STARTING — full UX acceptance + consolidated PDF.**
+**Wave:** **EVERYTHING CLOSED.** Wave 1 + 2 + 3 + Backlog + M-067 + M-068 all shipped. M-068 deliverables: 25-screen Playwright tour, 9-endpoint live probe, `/tmp/executespec-final-acceptance-report.md` (19 KB), `/tmp/executespec-final-acceptance-report.pdf` (3 MB with embedded screenshots), email delivered to `navneet.prabhakar007@gmail.com` via Gmail SMTP (sendmail returned `{}` = all recipients accepted).
 
 ## Master list
 
