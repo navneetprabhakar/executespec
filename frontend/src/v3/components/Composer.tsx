@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { createRun } from '@/lib/api';
 import { useV3ProjectStore } from '../stores/useV3ProjectStore';
+import { useV3Ui } from '../stores/useV3Ui';
 import { trackV3, V3_EVENTS } from '../lib/events';
 import {
   PROVIDER_DISPLAY,
@@ -46,6 +47,8 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pushBubble = useV3ProjectStore((s) => s.pushBubble);
+  const cap = useV3Ui((s) => s.cap);
+  const openCapModal = useV3Ui((s) => s.openCapModal);
 
   const placeholder = isEmpty
     ? 'What do you want to build? Describe it in plain English — we\'ll ship a draft PR you can merge.'
@@ -57,6 +60,13 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!canSubmit) return;
+    // R-163 — block submit when free-tier balance is exhausted; the
+    // shell's CapModalMount picks this up and renders the upgrade-or-
+    // invite modal. Paid tiers (isUnlimited) bypass the gate.
+    if (cap && !cap.isUnlimited && cap.tierKey === 'FREE' && cap.balance <= 0) {
+      openCapModal();
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
@@ -285,7 +295,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
                 color: 'var(--v3-text-subtle)',
               }}
             >
-              Branch · Figma · Confluence · JIRA · TDD options ship with R-130 polish.
+              Branch · Figma · Confluence · JIRA · TDD — more options coming soon.
             </div>
           </div>
         )}

@@ -1,60 +1,58 @@
-# Greenfield Execution — Wave 2 Kickoff
+# Greenfield Execution — Wave 2 Checkpoint #1
 
 > Branch: `feature/conversion-redesign` (off `dev` @ `f1d04532`).
-> Wave 1 — 20/20 R-IDs shipped (commit `a8841f11`).
-> **Wave 2 — 0/11 R-IDs in flight.** R-125 added mid-stream after the user's
-> "how does someone add a repo?" review surfaced the cohabitation gap.
+> Wave 2 — 3 of 11 R-IDs shipped (27%).
 
-## Wave 2 sequencing (the order this session executes)
+## Done in Wave 2 so far
 
-1. **R-141** `/v3/billing` — 3-tier card grid + usage + receipts (consumes R-142 entitlements; biggest unblocker for Maya/Devon/Amara)
-2. **R-150** `/v3/pricing` — public peer of billing (logged-out path)
-3. **R-163** Free-cap upgrade nudge modal (pairs with R-141)
-4. **R-125** Repo-attach popover (closes the v2-cohabitation gap surfaced in user review)
-5. **R-144** `/v3/integrations` grid (peer of R-125 — fallback path for "Connect a GitHub repo")
-6. **R-143** `/v3/team` — members + seats + invite + SSO panel
-7. **R-162** Referral mechanism (consumes V152 `referred_by_user_id`; pairs with R-163's invite path)
-8. **R-151** `/v3/trust` — procurement-grade Trust page (Amara unlock)
-9. **R-152** `/v3/insights` — collapsed analytics screen (Devon unlock)
-10. **R-153** HelpModal — Cmd-K `?` mode (extends R-103's palette)
-11. **R-170** Mobile responsive primitives sweep (last — needs every screen to exist)
+| ID | Title | Verified |
+|---|---|---|
+| R-141 | `/v3/billing` — single-source plan card + usage + 3-tier grid | ✓ live (Free + Enterprise states verified via stub against R-142 contract) |
+| R-150 | `/v3/pricing` — public hero + 3-card grid + FAQ | ✓ live (logged-out, USD/INR + Monthly/Annual toggles working) |
+| R-163 | `<FreeCapToast>` + `<FreeCapBlockingModal>` | ✓ live (toast at balance≤1, blocking modal at 0; Composer submit gated correctly) |
 
-## Decisions parked with defaults (user can override; auto-mode applies defaults)
+## Files touched
 
-| Tag | Where it lands | Default I'll use | Override route |
-|---|---|---|---|
-| **D-141a tier prices** | R-141 + R-150 | Pro=$20/mo, Team=$39/seat/mo, Enterprise=Talk to sales (greenfield §7.1) | Edit doc + restart wave |
-| **D-141b currency default** | R-141 + R-150 | USD; INR auto-detected for `Asia/Kolkata` / `en-in` | Same |
-| **D-163 nudge timing** | R-163 | Toast at lifetime balance ≤ 1; blocking modal at 0 | Same |
-| **D-125 repo-attach gaps** | R-125 | TODO comments in `RepoAttachPopover.tsx` for: (a) private-repo-no-access, (b) mono-repo subdir, (c) repo-too-big, (d) per-run override. Happy path ships; gaps revisited before prod traffic per user request | Same |
-| **D-151 SOC2 status copy** | R-151 | "Audit in progress with [Auditor name TBD]" placeholder; user fills in real auditor | Same |
-| **D-144 integrations real-vs-soon** | R-144 | Real today: GitHub App + GitHub PAT + Slack + Bitbucket. Schema-only: Jira + Confluence (link to v2). Coming soon: ServiceNow + PagerDuty | Same |
+* `frontend/src/v3/lib/pricing.ts` — single source of v3 pricing copy (PRO=$20, TEAM=$39/seat, ENTERPRISE=footer-only)
+* `frontend/src/v3/components/PricingGrid.tsx` — shared by /v3/billing + /v3/pricing
+* `frontend/src/v3/pages/V3Billing.tsx` — Plan card · Usage card · Pricing grid · Receipts
+* `frontend/src/v3/pages/V3Pricing.tsx` — Public hero + grid + 6-question FAQ
+* `frontend/src/v3/components/FreeCapNudge.tsx` — toast + modal + `useFreeCap` hook
+* `frontend/src/v3/stores/useV3Ui.ts` — extended with cap state + dismiss flag + modal-open flag
+* `frontend/src/v3/components/V3Shell.tsx` — mounts `<FreeCapToast>` + `<CapModalMount>`
+* `frontend/src/v3/components/Composer.tsx` — gates Submit on `cap.balance <= 0` (paid tiers bypass)
+* `frontend/src/v3/components/AvatarMenu.tsx` — Pricing → `/v3/pricing`, Billing → `/v3/billing`
+* `frontend/src/v3/components/CmdK.tsx` — billing + pricing destinations live
+* `frontend/src/v3/lib/events.ts` — `PRICING_CTA_CLICKED` event added
+* `frontend/src/App.tsx` — mounts `/v3/billing` + `/v3/pricing`
 
-## Wave 1 closeout (recap)
+## TypeScript / Maven
 
-* All 20 Wave-1 R-IDs live on `feature/conversion-redesign`
-* `tsc --noEmit` clean
-* `mvn test -Dtest='*VerifiedScoreTest,*LifetimeCreditServiceTest,*EntitlementResolverTest'` 23/23 green
-* Cohabitation invariant intact (only `EventName.java` + `SecurityConfig.java` got non-additive v2 edits)
+`./node_modules/.bin/tsc --noEmit` clean.
+No backend changes in this batch — backend tests untouched.
 
-## What's not in Wave 2
+## Live-test caveat (still in effect)
 
-* **R-171** PWA manifest + service worker — Wave 3
-* **R-180** v2 → v3 opt-in redirect map — Wave 3
-* **R-181** changelog page + tour banner — Wave 3
-* **R-190 / R-191** Vibe deletion + sidebar/Mission vocabulary purge — post-cutover backlog
-* **R-111 real LLM dispatch** for anonymous trial — schedule for Wave 2-end if there's bandwidth, else Wave 3 (anti-abuse design pass owed)
+Running 8080 backend is pre-V152. R-141 + R-163 both consume `/api/v3/entitlements`; we verified the success paths via `addInitScript` fetch stubs (Free + Enterprise + balance=1 + balance=0 cases). When the next backend restart picks up `feature/conversion-redesign`, the same UIs will run against real data with no code change.
+
+## Up next
+
+R-125 (repo-attach popover — closes the v2-cohabitation gap) → R-144 (`/v3/integrations` grid) → R-143 (`/v3/team`) → checkpoint #2.
+
+## Decisions still parked with defaults
+
+| Tag | Default | Status |
+|---|---|---|
+| D-141a tier prices | Pro $20 · Team $39/seat · Enterprise sales | ✓ shipped in `lib/pricing.ts` |
+| D-141b currency default | USD; INR auto-detect | ✓ shipped in `detectDefaultCurrency()` |
+| D-163 nudge timing | Toast ≤1, modal at 0 | ✓ shipped in `FreeCapNudge` |
+| D-125 repo-attach gaps | TODO comments for the 4 deferred design Qs | Pending implementation |
+| D-151 SOC2 status | "Audit in progress with [Auditor TBD]" placeholder | Pending |
+| D-144 integrations real-vs-soon | GitHub App + PAT + Slack + Bitbucket real; Jira/Confluence schema-only; ServiceNow/PagerDuty soon | Pending |
 
 ## Servers
 
 | Service | Port | URL | State |
 |---|---|---|---|
 | v3 frontend (Vite) | 5176 | `http://localhost:5176/v3/...` | up |
-| v2 backend (Spring Boot) | 8080 | proxied via Vite | up (pre-V152 — first R-141 dogfood will trigger restart) |
-| v2 backend (alt) | 8081 | direct | up |
-
-## TypeScript / Maven baseline at Wave-2 start
-
-`./node_modules/.bin/tsc --noEmit` clean.
-`mvn -q -DskipTests compile` clean.
-23/23 backend unit tests across 3 v3 test classes green.
+| v2 backend | 8080 | proxied via Vite | up (pre-V152) |

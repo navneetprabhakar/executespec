@@ -56,7 +56,7 @@ export default function AvatarMenu() {
     return (
       <div style={{ display: 'flex', gap: 6 }}>
         <Link
-          to="/v3/home?dest=pricing"
+          to="/v3/pricing"
           style={{
             color: 'var(--v3-text-muted)',
             fontSize: 12,
@@ -88,7 +88,7 @@ export default function AvatarMenu() {
   // Logged-in: avatar dropdown
   const items: { label: string; onClick: () => void; subtle?: boolean }[] = [
     { label: 'Account', onClick: () => navigate('/v3/settings') },
-    { label: 'Billing & plan', onClick: () => navigate('/v3/home?dest=billing') },
+    { label: 'Billing & plan', onClick: () => navigate('/v3/billing') },
   ];
   if (user.tier && user.tier !== 'FREE') {
     items.push({ label: 'Team', onClick: () => navigate('/v3/home?dest=team') });

@@ -2,6 +2,8 @@ import { Outlet } from 'react-router-dom';
 import { useEffect } from 'react';
 import V3TopBar from './V3TopBar';
 import CmdK from './CmdK';
+import { FreeCapToast, FreeCapBlockingModal } from './FreeCapNudge';
+import { useV3Ui } from '../stores/useV3Ui';
 import '../v3.css';
 
 /**
@@ -17,6 +19,12 @@ import '../v3.css';
  * in v3.css). The lock is set on mount + reset on unmount so navigating
  * back to a v2 route restores the user's preferred theme.
  */
+function CapModalMount() {
+  const open = useV3Ui((s) => s.capModalOpen);
+  const close = useV3Ui((s) => s.closeCapModal);
+  return <FreeCapBlockingModal open={open} onClose={close} />;
+}
+
 export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean }) {
   useEffect(() => {
     const root = document.documentElement;
@@ -37,6 +45,8 @@ export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean })
         <Outlet />
       </main>
       <CmdK />
+      <FreeCapToast />
+      <CapModalMount />
     </div>
   );
 }
