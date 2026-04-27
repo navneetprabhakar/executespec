@@ -30,11 +30,23 @@ import TemplateGrid from '@/components/execution/TemplateGrid';
 interface EmptyProjectLandingProps {
   projectId: string;
   repoCount: number;
+  /**
+   * Called when the user clicks "Link a repo" in the empty state. The parent
+   * (ProjectDashboardPage) is expected to switch to the Code → Repos sub-tab
+   * AND dispatch the {@code open-add-repo-modal} event so ProjectRepoManager
+   * pops the AddRepoModal.
+   *
+   * <p>If omitted (legacy callers), falls back to the pre-v2.7.1 behavior
+   * which incorrectly opened the Settings drawer — kept only so existing
+   * tests + storybook stories don't break before they're updated.
+   */
+  onLinkRepo?: () => void;
 }
 
 export default function EmptyProjectLanding({
   projectId,
   repoCount,
+  onLinkRepo,
 }: EmptyProjectLandingProps) {
   const navigate = useNavigate();
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
@@ -82,7 +94,14 @@ export default function EmptyProjectLanding({
         {!canLaunch && (
           <button
             onClick={() => {
-              // Defer to More drawer settings or scroll to repo manager
+              if (onLinkRepo) {
+                onLinkRepo();
+                return;
+              }
+              // Legacy fallback (pre-v2.7.1) — kept only so this component
+              // still has *some* behavior when rendered without the parent
+              // callback. The drawer-settings target is wrong (settings has
+              // no repo manager) but at least the URL changes.
               const url = new URL(window.location.href);
               url.searchParams.set('drawer', 'settings');
               window.history.replaceState(null, '', url.toString());

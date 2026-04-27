@@ -10,7 +10,7 @@ import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import StatusBadge from '@/components/shared/StatusBadge';
 import PulseTab from '@/components/project/PulseTab';
-import CodeTab from '@/components/project/CodeTab';
+import CodeTab, { type CodeSubTab } from '@/components/project/CodeTab';
 import EmptyProjectLanding from '@/components/project/EmptyProjectLanding';
 import MoreDrawer, { useDrawerState, type DrawerPanel } from '@/components/project/MoreDrawer';
 import { cn } from '@/lib/utils';
@@ -48,7 +48,7 @@ import type { RunDetail } from '@/lib/api';
 type TabKey = 'pulse' | 'runs' | 'code' | 'chat';
 type RunsSubTab = 'launches' | 'prs' | 'detail';
 
-function legacyTabToNew(legacy: string | null): { tab: TabKey; sub?: RunsSubTab; drawer?: DrawerPanel } {
+function legacyTabToNew(legacy: string | null): { tab: TabKey; sub?: RunsSubTab; codeSub?: CodeSubTab; drawer?: DrawerPanel } {
   switch (legacy) {
     case 'overview':
       return { tab: 'pulse' };
@@ -59,8 +59,9 @@ function legacyTabToNew(legacy: string | null): { tab: TabKey; sub?: RunsSubTab;
     case 'tasks':
       return { tab: 'runs', sub: 'detail' };
     case 'architecture':
+      return { tab: 'code', codeSub: 'architecture' };
     case 'repos':
-      return { tab: 'code' };
+      return { tab: 'code', codeSub: 'repos' };
     case 'chat':
       return { tab: 'chat' };
     case 'docs':
@@ -99,6 +100,7 @@ export default function ProjectDashboardPage() {
 
   const [tab, setTab] = useState<TabKey>(initial.tab);
   const [runsSub, setRunsSub] = useState<RunsSubTab>(initial.sub ?? 'launches');
+  const [codeSub, setCodeSub] = useState<CodeSubTab>(initial.codeSub ?? 'architecture');
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [projectLookup, setProjectLookup] = useState<'pending' | 'found' | 'missing'>('pending');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -337,7 +339,25 @@ export default function ProjectDashboardPage() {
         >
           {tab === 'pulse' && (
             noRuns && repoCount === 0 ? (
-              <EmptyProjectLanding projectId={projectId} repoCount={repoCount} />
+              <EmptyProjectLanding
+                projectId={projectId}
+                repoCount={repoCount}
+                onLinkRepo={() => {
+                  // v2.7.1 fix: switch to Code → Repos sub-tab AND ask
+                  // ProjectRepoManager (which lives 2 levels deep) to pop
+                  // the AddRepoModal via a global event. The legacy onClick
+                  // sent users to the Settings drawer which has no repo
+                  // surface — see EmptyProjectLanding for the back-compat
+                  // fallback that still fires when no callback is provided.
+                  setTab('code');
+                  setCodeSub('repos');
+                  // Defer the dispatch a tick so ProjectRepoManager has
+                  // mounted and registered its window listener.
+                  setTimeout(() => {
+                    window.dispatchEvent(new Event('open-add-repo-modal'));
+                  }, 50);
+                }}
+              />
             ) : (
               <PulseTab
                 projectId={projectId}
@@ -379,6 +399,8 @@ export default function ProjectDashboardPage() {
               projectId={projectId}
               orgId={project?.orgId}
               repos={repos ?? []}
+              sub={codeSub}
+              onSubChange={setCodeSub}
             />
           )}
           {tab === 'chat' && <ProjectChatPanel projectId={projectId} />}
