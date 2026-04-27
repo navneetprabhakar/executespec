@@ -25,6 +25,13 @@ const ANON_TOKEN_KEY = 'v3-anon-token';
  * the user lands on the v3 home (or the sandbox project home if
  * the spec was preserved).
  */
+type ReferralLookup = {
+  valid: boolean;
+  inviterFirstName: string | null;
+  creditGrant: number;
+  refereeEmail: string | null;
+};
+
 export default function V3Auth() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -35,6 +42,7 @@ export default function V3Auth() {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [referral, setReferral] = useState<ReferralLookup | null>(null);
 
   // R-162 + R-111 — capture ?ref / ?anon from the URL on mount and stash
   // them in sessionStorage so the OAuth round-trip (which drops the query)
@@ -46,6 +54,32 @@ export default function V3Auth() {
     if (anon) sessionStorage.setItem(ANON_TOKEN_KEY, anon);
   }, [searchParams]);
 
+  // R-162 — when a token is present (either fresh from URL or stashed
+  // mid-OAuth), look up the inviter so we can render referral-aware copy
+  // instead of treating the highest-trust visitor in the funnel like a
+  // stranger. Fail-soft: any error keeps the cold-signin UX.
+  useEffect(() => {
+    const token = searchParams.get('ref') || sessionStorage.getItem(REF_TOKEN_KEY);
+    if (!token) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(
+          `/api/v3/referrals/lookup?token=${encodeURIComponent(token)}`,
+          { credentials: 'omit' },
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as ReferralLookup;
+        if (!cancelled) setReferral(data);
+      } catch {
+        // Fail-soft — leave referral null, fall back to cold signin copy
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
+
   // If they were already signed in (e.g. via a stale session), claim any
   // pending tokens then forward to the v3 home rather than asking again.
   useEffect(() => {
@@ -55,6 +89,26 @@ export default function V3Auth() {
 
   const stashedSpec =
     typeof window !== 'undefined' ? sessionStorage.getItem('v3-anon-spec') : null;
+
+  // Referral context drives the heading + body copy. Three states:
+  //   1. Valid token + named inviter → "Welcome — Priya invited you."
+  //   2. Token present but invalid/anonymous → "You were invited."
+  //   3. No token → original "Save this run." UX.
+  const headingText = referral
+    ? referral.valid && referral.inviterFirstName
+      ? `Welcome — ${referral.inviterFirstName} invited you.`
+      : 'You were invited.'
+    : 'Save this run.';
+
+  const bodyText = referral
+    ? `+${referral.creditGrant} free runs are waiting${
+        referral.valid && referral.inviterFirstName
+          ? ` (and ${referral.inviterFirstName} gets +${referral.creditGrant} when you ship your first run).`
+          : '. No card required.'
+      }`
+    : stashedSpec
+      ? 'You just shipped a real PR — sign in to keep it.'
+      : 'Sign in to keep building. Free tier — no card required.';
 
   async function onPasswordSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -95,6 +149,30 @@ export default function V3Auth() {
           padding: 24,
         }}
       >
+        {referral && (
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '8px 12px',
+              background: 'rgba(91,141,239,0.10)',
+              border: '1px solid rgba(91,141,239,0.32)',
+              borderRadius: 6,
+              marginBottom: 14,
+              fontSize: 11.5,
+              color: 'var(--v3-brand)',
+              fontWeight: 500,
+            }}
+          >
+            <span style={{ fontSize: 14 }}>🎁</span>
+            <span>
+              {referral.valid && referral.inviterFirstName
+                ? `${referral.inviterFirstName} invited you to ExecuteSpec`
+                : 'You came in via a referral link'}
+            </span>
+          </div>
+        )}
         <h1
           style={{
             fontSize: 22,
@@ -104,7 +182,7 @@ export default function V3Auth() {
             textAlign: 'center',
           }}
         >
-          Save this run.
+          {headingText}
         </h1>
         <p
           style={{
@@ -115,9 +193,7 @@ export default function V3Auth() {
             lineHeight: 1.55,
           }}
         >
-          {stashedSpec
-            ? 'You just shipped a real PR — sign in to keep it.'
-            : 'Sign in to keep building. Free tier — no card required.'}
+          {bodyText}
         </p>
 
         {/* OAuth — reuses existing v2 routes */}

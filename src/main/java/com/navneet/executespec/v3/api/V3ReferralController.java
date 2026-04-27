@@ -46,6 +46,19 @@ public class V3ReferralController {
         return ResponseEntity.ok(service.getInviteState(userDetails.getUser().getId()));
     }
 
+    /**
+     * R-162 magic-link landing lookup. Public-by-token (no auth) — the token
+     * IS the credential. Used by V3Auth.tsx to render inviter context on
+     * <code>/v3/auth?ref=&lt;token&gt;</code>. Always returns 200 with
+     * {@code valid=false} on unknown tokens so the frontend can fall back
+     * to a generic "you were invited" UX rather than 404.
+     */
+    @GetMapping("/lookup")
+    public ResponseEntity<ReferralService.ReferralLookup> lookup(
+            @RequestParam("token") String token) {
+        return ResponseEntity.ok(service.lookupByToken(token));
+    }
+
     public record InviteRequest(
             @NotBlank @Email String email
     ) {}

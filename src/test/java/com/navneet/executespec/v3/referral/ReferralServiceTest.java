@@ -213,6 +213,51 @@ class ReferralServiceTest {
     }
 
     @Test
+    void lookup_by_token_returns_inviter_first_name_and_grant() {
+        AppUser alice = user("u1", "alice@test");
+        when(userRepo.findAll()).thenReturn(List.of());
+        // Wire token-based lookup on the mock repo
+        when(inviteRepo.findByToken(anyString())).thenAnswer(inv -> {
+            String token = inv.getArgument(0);
+            return store.values().stream()
+                    .filter(r -> token.equals(r.getToken()))
+                    .findFirst();
+        });
+
+        svc.recordInvite("u1", "bob@test");
+        ReferralInvite invite = store.values().iterator().next();
+
+        ReferralService.ReferralLookup lookup = svc.lookupByToken(invite.getToken());
+
+        assertTrue(lookup.valid());
+        assertEquals("X", lookup.inviterFirstName(), "first name from the AppUser builder fixture");
+        assertEquals(ReferralService.INVITE_GRANT, lookup.creditGrant());
+        assertEquals("bob@test", lookup.refereeEmail());
+    }
+
+    @Test
+    void lookup_by_unknown_token_returns_invalid_with_grant_intact() {
+        when(inviteRepo.findByToken(anyString())).thenReturn(Optional.empty());
+
+        ReferralService.ReferralLookup lookup = svc.lookupByToken("nonexistent");
+
+        assertFalse(lookup.valid());
+        assertNull(lookup.inviterFirstName());
+        assertEquals(ReferralService.INVITE_GRANT, lookup.creditGrant(),
+                "frontend still needs the grant size for the fallback warm copy");
+    }
+
+    @Test
+    void lookup_by_blank_or_null_token_returns_unknown_without_db_hit() {
+        ReferralService.ReferralLookup empty = svc.lookupByToken("");
+        ReferralService.ReferralLookup nul = svc.lookupByToken(null);
+
+        assertFalse(empty.valid());
+        assertFalse(nul.valid());
+        verify(inviteRepo, never()).findByToken(anyString());
+    }
+
+    @Test
     void invite_state_counts_only_caller_pending_invites() {
         user("u1", "alice@test");
         user("u3", "carol@test");
