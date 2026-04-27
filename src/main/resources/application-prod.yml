@@ -72,6 +72,14 @@ spring:
           github:
             user-name-attribute: login
 
+# ── Server (Tomcat / forwarded headers) ──────────────────────────────────────
+# The prod LB terminates TLS and forwards X-Forwarded-Proto: https. Without
+# this, Spring sees every request as http and rebuilds absolute URLs
+# (RedirectView Location headers, OAuth client {baseUrl}) with the wrong
+# scheme. `framework` uses Spring's ForwardedHeaderFilter.
+server:
+  forward-headers-strategy: framework
+
 # ── Agent (stricter concurrency for prod) ─────────────────────────────────────
 agent:
   concurrency:
