@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download, Layers } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download, Layers, AlertOctagon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
@@ -31,6 +31,29 @@ function AdminPageInner() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>('users');
   const { addToast } = useUiStore();
+  // M-010 — halt-all-runs busy + last-result state for the emergency button.
+  const [haltBusy, setHaltBusy] = useState(false);
+
+  const handleHaltAll = async () => {
+    const reason = window.prompt(
+      'Halt every non-terminal run on the platform?\n\nProvide a short reason (logged on each run + audit feed). Leave blank to use the per-run default.'
+    );
+    // null == user cancelled the prompt; '' == user clicked OK with no text
+    if (reason === null) return;
+    if (!confirm('This will CANCEL every active run. Continue?')) return;
+    setHaltBusy(true);
+    try {
+      const result = await api.haltAllActiveRuns(reason || undefined);
+      addToast({
+        type: 'success',
+        message: `${result.haltedCount} active run${result.haltedCount === 1 ? '' : 's'} cancelled.`,
+      });
+    } catch (e: any) {
+      addToast({ type: 'error', message: e?.message ?? 'Halt-all failed' });
+    } finally {
+      setHaltBusy(false);
+    }
+  };
 
   // ── Users state ───────────────────────────────────────────────────────────
   const [users, setUsers] = useState<api.AuthUser[]>([]);
@@ -283,6 +306,18 @@ function AdminPageInner() {
           >
             <Layers className="h-3.5 w-3.5" />
             Tier lifecycle
+          </button>
+          {/* M-010 (Wave 2) — emergency halt-all-runs control. Visible from
+              every tab so an oncall SUPER_ADMIN can stop the platform
+              cold during an incident. */}
+          <button
+            onClick={handleHaltAll}
+            disabled={haltBusy}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-status-error hover:text-status-error bg-status-error/10 hover:bg-status-error/20 rounded-md border border-status-error/30 transition-colors disabled:opacity-50"
+            title="Cancel every non-terminal run on the platform"
+          >
+            <AlertOctagon className="h-3.5 w-3.5" />
+            {haltBusy ? 'Halting…' : 'Halt all runs'}
           </button>
         </div>
       </div>
