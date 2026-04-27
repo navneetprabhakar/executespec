@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Backlog → Final Pass boundary)
+## State at checkpoint (Final Pass A done — entering M-068)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `1e804855` — `docs(backlog): consolidated deferral rationale (M-035/036/037/040/041/048/050/052)` (about to push)
+**Last pushed commit:** `5d425687` — `docs(M-067): doc-tree refresh from current code state` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Backlog CLOSED** — 7 shipped + 4 verify-only / log-skip + 8 documented-deferred. **Final Pass STARTING.**
+**Wave:** **Backlog CLOSED + Final Pass A (M-067) CLOSED** — doc-tree refreshed (CHANGELOG / README / CODEMAP / document_map / plans/README + phase-2-3-deferred stamp). **Final Pass B (M-068) STARTING — full UX acceptance + consolidated PDF.**
 
 ## Master list
 
