@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download, Layers, AlertOctagon } from 'lucide-react';
+import { Shield, Users, Building2, Settings2, GitMerge, ChevronDown, Check, X, RefreshCw, Infinity, Gift, Package, Plus, Pencil, Trash2, Mail, Flag, BarChart3, DollarSign, Receipt, Globe, Download, Layers, AlertOctagon, ShieldCheck } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
 import { cn } from '@/lib/utils';
@@ -33,6 +33,31 @@ function AdminPageInner() {
   const { addToast } = useUiStore();
   // M-010 — halt-all-runs busy + last-result state for the emergency button.
   const [haltBusy, setHaltBusy] = useState(false);
+
+  // M-042 — audit-chain verifier state for the SUPER_ADMIN button.
+  const [verifyBusy, setVerifyBusy] = useState(false);
+
+  const handleVerifyChain = async () => {
+    setVerifyBusy(true);
+    try {
+      const r = await api.verifyAuditChain();
+      if (r.clean) {
+        addToast({
+          type: 'success',
+          message: `Audit chain clean — ${r.totalChained} row(s) verified.`,
+        });
+      } else {
+        addToast({
+          type: 'error',
+          message: `Audit chain BREAK at seq ${r.firstBreak?.chainSeq}: ${r.firstBreak?.reason}`,
+        });
+      }
+    } catch (e: any) {
+      addToast({ type: 'error', message: e?.message ?? 'Verify failed' });
+    } finally {
+      setVerifyBusy(false);
+    }
+  };
 
   const handleHaltAll = async () => {
     const reason = window.prompt(
@@ -306,6 +331,18 @@ function AdminPageInner() {
           >
             <Layers className="h-3.5 w-3.5" />
             Tier lifecycle
+          </button>
+          {/* M-042 (Backlog) — verify the V147 activity_audit hash chain
+              on demand. Carmen (compliance persona) clicks this to
+              confirm no row was tampered with since the last walk. */}
+          <button
+            onClick={handleVerifyChain}
+            disabled={verifyBusy}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-secondary hover:text-primary bg-[var(--gray-200)] hover:bg-[var(--border-default)] rounded-md border border-[var(--border-default)] transition-colors disabled:opacity-50"
+            title="Walk the activity_audit hash chain (V147) and report the first break, if any"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" />
+            {verifyBusy ? 'Verifying…' : 'Verify audit chain'}
           </button>
           {/* M-010 (Wave 2) — emergency halt-all-runs control. Visible from
               every tab so an oncall SUPER_ADMIN can stop the platform
