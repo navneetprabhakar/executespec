@@ -67,6 +67,25 @@ public class AppUser {
     @Column(name = "run_count_reset_at")
     private Instant runCountResetAt;
 
+    /** R-161 (V152) — v3 Free-tier lifetime run credit balance. Decremented
+     *  by LifetimeCreditService on each Free-tier run; incremented by 5
+     *  on referral fulfilment (R-162). v2 surfaces ignore this column
+     *  entirely; v2 enforcement still uses personalRunCount + monthly
+     *  resets. Greenfield doc §7.5 / D-002. */
+    @Column(name = "lifetime_run_credit_balance", nullable = false)
+    @Builder.Default
+    private int lifetimeRunCreditBalance = 5;
+
+    @Column(name = "lifetime_run_credit_cap", nullable = false)
+    @Builder.Default
+    private int lifetimeRunCreditCap = 25;
+
+    /** R-161 — referrer's user id when this user signed up via a referral
+     *  link. Drives the +5-per-invite credit grant on the referee's
+     *  first successful run (D-003 default). */
+    @Column(name = "referred_by_user_id", length = 64)
+    private String referredByUserId;
+
     @Column(name = "last_login_at")
     private Instant lastLoginAt;
 
