@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (after Wave 2 batch 3 — M-015 / M-023 / M-024)
+## State at checkpoint (after Wave 2 batch 4 — M-045 + M-027 annotated + M-028 dup-skipped)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `703bc874` — `feat(standards): org-level standards CRUD (M-024)` (about to push)
+**Last pushed commit:** `7acbb6ef` — `chore(plans): annotate M-027 BEST VALUE chip placement question` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** Wave 2 IN PROGRESS — 9 of ~16 items done
+**Wave:** Wave 2 IN PROGRESS — 11 of ~16 items closed (1 dup, 1 awaiting product call)
 
 ## Master list
 
@@ -33,7 +33,7 @@ Plus 2 housekeeping commits: `6699ddc2` (handoff note) + `ab487cfa` (checkpoint 
 
 ApiContractTest green after Wave 1 close.
 
-## Wave 2 — completed so far (9 of ~16)
+## Wave 2 — completed so far (11 of ~16)
 
 | M-ID | Title | Commit |
 |---|---|---|
@@ -46,6 +46,14 @@ ApiContractTest green after Wave 1 close.
 | M-015 | Invariant controller + Project → Code → Invariants panel | 4f31c314 |
 | M-023 | TemplateGrid wired into EmptyProjectLanding + ExecutionSetup pre-fill plumbing | 61c925fa |
 | M-024 | OrgStandardController CRUD + OrgStandardsManager UI on /org/settings | 703bc874 |
+| M-045 | TEAM_DEFAULT_SEATS 3 → 2 in PlanCard (parked decision #9) | f871169f |
+| M-028 | TEAM seats CTA from /admin — **SHIPPED-DUPLICATE** under M-002 (a443d398). Marked closed. | (a443d398) |
+
+**M-027 (BEST VALUE chip move) — annotated only (commit 7acbb6ef);
+needs product decision.** Two defensible placements: keep on MAX
+($29 BYOK lowest-cost-of-entry) vs move to TEAM ($49/seat
+managed-key shared pool — higher ARPU upsell). Master list flagged
+this as ambiguous; requires user direction. Inline TODO added.
 
 M-003 / M-004 / M-010 / M-014 / M-015 / M-024 all need a backend
 restart to surface live data on `:8081` (which still runs the
@@ -53,17 +61,15 @@ pre-batch jar). Frontend shells render gracefully until the next deploy.
 
 ApiContractTest green throughout.
 
-## Wave 2 — remaining (~7 of ~16 items)
+## Wave 2 — remaining (~5 of ~16 items)
 
 In execution order:
 
-- **M-027** — BEST VALUE chip move on PlansPage (currently on MAX/Team — confirm which tier should wear it post-V144 ladder).
-- **M-028** — TEAM seats CTA from /admin (potentially redundant with M-002 — log+skip if so).
-- **M-034** — Project activity feed page. `GET /api/projects/{id}/activity` exists (V133); need a Project → Activity full feed.
+- **M-034** — Project activity feed page. `GET /api/projects/{id}/activity` exists (V133); need a Project → Activity full feed (the Pulse-tab shows top 5; this is the "see all" deep view).
 - **M-043** — RunCard verdict pill (apply VerdictPill to RunCard rows in RunList).
 - **M-044** — Payment-history doc (markdown only — explain Razorpay vs Stripe payment-history sources).
-- **M-045** — Seat default 2 in PlanCard (TEAM_DEFAULT_SEATS 3 → 2 per parked decision #9).
 - **M-046** — `/exec` drill-down (clickable KPI cards → filtered project list).
+- **M-027** — BLOCKED-PRODUCT-DECISION (BEST VALUE chip placement). Annotation only at 7acbb6ef.
 
 ## Wave 3 — remaining (~12 items, ~6 weeks)
 
