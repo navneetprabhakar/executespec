@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Backlog batch 2 — M-042 / M-049 / M-053 + M-054)
+## State at checkpoint (Backlog → Final Pass boundary)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `4441ed5d` — `feat(notifications): rich failure body + cost/duration signals (M-053 + M-054)` (about to push)
+**Last pushed commit:** `1e804855` — `docs(backlog): consolidated deferral rationale (M-035/036/037/040/041/048/050/052)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Backlog IN PROGRESS** — 7 of ~16 items shipped
+**Wave:** **Backlog CLOSED** — 7 shipped + 4 verify-only / log-skip + 8 documented-deferred. **Final Pass STARTING.**
 
 ## Master list
 
@@ -99,6 +99,11 @@ ApiContractTest green throughout.
 | M-042 | "Verify audit chain" SUPER_ADMIN button on AdminPage — surfaces V147/M-019 verifier | a706569e |
 | M-049 | ActivationFunnelController + AdminPage Reports tab panel (period dropdown + stacked-bar) | e80e3a9d |
 | M-053 + M-054 | RunCompletionNotifier failure body now leads with cost/duration signals (mirrors completion path) | 4441ed5d |
+| M-056 + M-057 + M-064 | Tour-helper cleanup + vite.config.ts env-var docs + sr-only Missions h1 | 3aa4a62c |
+| M-035 / M-036 / M-037 / M-040 / M-041 / M-048 / M-050 / M-052 | docs/backlog-deferred-items.md — first-slice + owner-needed + when-to-re-open per item | 1e804855 |
+| M-055, M-058, M-065, M-066 | LOG-AND-SKIP — see commit message of 3aa4a62c for the rationale per item | (no commit) |
+
+**BACKLOG CLOSED — 7 shipped + 4 logged-and-skipped + 8 documented-deferred = 19/19 items closed cleanly.**
 
 ## Backlog (~16 items)
 
