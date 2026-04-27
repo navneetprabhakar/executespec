@@ -4,13 +4,13 @@
 > Replaces `docs/wave1-progress-handoff.md` (which now redirects here).
 > Mirror at `/tmp/executespec-checkpoint.md` for fast in-session access.
 
-## State at checkpoint (Wave 3 batch 4 — M-011 / M-029 / M-031 + governance trio)
+## State at checkpoint (Wave 3 → Backlog boundary)
 
 **Branch:** `feature/v2.7-foundation` (no fork; push enabled)
-**Last pushed commit:** `d34a8028` — `docs(billing+ops): Stripe price IDs + cookie domain switch (M-029 + M-031)` (about to push)
+**Last pushed commit:** `444d8f46` — `feat(billing): TEAM-BYOK plan at $39/seat (M-051)` (about to push)
 **Tracking:** `origin/feature/v2.7-foundation`
 **Worktree path:** `/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf`
-**Wave:** **Wave 3 IN PROGRESS** — 12 of ~14 items shipped
+**Wave:** **Wave 3 CLOSED** — 14 of 14 items shipped. **Backlog STARTING.**
 
 ## Master list
 
@@ -84,11 +84,10 @@ ApiContractTest green throughout.
 | M-032 + M-033 + M-039 | GovernanceGuard + V148 schema (plan-approval policy + per-project spend cap + repo allowlist) | dab08f7e |
 | M-011 | Razorpay seat-adjust 501 with manual-flow pointer + PaymentGateway.updateSubscriptionQuantity contract | 6cc38dac |
 | M-029 + M-031 | docs/stripe-price-ids-ops.md + docs/cookie-domain-switch.md (ops-side runbooks) | d34a8028 |
+| M-030 | OrgService.changeOrgTier stamps org.product_id via TierProductSurfaceMapper on admin tier changes (BillingService Stripe path already did this for webhook-driven flips) | ac6ba11c |
+| M-051 | V149 TEAM-BYOK plan ($39/seat / ₹3,199/seat) per parked decision #2 | 444d8f46 |
 
-## Wave 3 — remaining (~2 items)
-
-- **M-030** — ProductSurfaceFilter call-site wiring. Plan 1 #2 shipped the filter + tests; Phase 2 needs `org.product_id` write at subscribe-webhook time + per-write enforcement on the project/run create paths.
-- **M-051** — TEAM-BYOK plan ($39/seat). Per parked decision #2: ship in Wave 3. New billing_plan rows + tier-config update.
+**WAVE 3 CLOSED — 14/14 items shipped.**
 
 ## Backlog (~16 items)
 
