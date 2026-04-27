@@ -92,6 +92,13 @@ public interface PipelineRunRepository extends JpaRepository<PipelineRun, String
     Double sumActualCostByUserAndSince(@Param("userId") String userId,
                                         @Param("since") Instant since);
 
+    /** M-033 — per-project LLM $ spent since a cutoff (drives the
+     *  per-project monthly spend cap enforcement at plan-approval time). */
+    @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r "
+            + "WHERE r.projectId = :projectId AND r.startedAt >= :since")
+    Double sumActualCostByProjectAndSince(@Param("projectId") String projectId,
+                                           @Param("since") Instant since);
+
     /** v2.5.8 — per-org LLM $ spent in a billing period (admin / FinOps dashboards). */
     @Query("SELECT COALESCE(SUM(r.actualCostUsd), 0.0) FROM PipelineRun r " +
             "WHERE r.orgId = :orgId AND r.startedAt >= :since")

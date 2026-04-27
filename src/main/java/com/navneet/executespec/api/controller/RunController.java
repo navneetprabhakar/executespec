@@ -66,6 +66,8 @@ public class RunController {
     private final RunVisibilitySpec runVisibilitySpec;
     private final RunAccessGuard guard;
     private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
+    /** M-032 + M-033 (Wave 3) — plan-approval governance guards. */
+    private final com.navneet.executespec.governance.GovernanceGuard governanceGuard;
     private final com.navneet.executespec.run.sync.RunSyncService runSyncService;
     private final com.navneet.executespec.state.repository.PlanVersionRepository planVersionRepo;
     private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
@@ -279,6 +281,16 @@ public class RunController {
                             req.creditsConfirmed() + ". Cost estimate may have changed — please review.");
                 }
             });
+        }
+
+        // M-032 + M-033 (Wave 3) — governance gates run before we ever
+        // signal the plan gate. Skip on rejection (req.approved == false).
+        if (req.approved()) {
+            double estUsd = approveRun.getCostEstimateHigh() != null
+                    ? approveRun.getCostEstimateHigh()
+                    : (approveRun.getHardCapUsd() != null ? approveRun.getHardCapUsd() : 0.0);
+            governanceGuard.assertCanApproveCost(approveRun.getOrgId(), estUsd, userDetails);
+            governanceGuard.assertProjectSpendCap(approveRun.getProjectId(), estUsd);
         }
 
         // Validate and persist execution mode choice
