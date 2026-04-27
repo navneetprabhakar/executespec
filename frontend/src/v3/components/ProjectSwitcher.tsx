@@ -28,9 +28,15 @@ export default function ProjectSwitcher() {
   const params = useParams<{ slug?: string }>();
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
 
-  // Fetch projects on first open + on auth state change.
+  // Fetch projects on mount when authed + on auth state change. Need
+  // them BEFORE the popover opens so the trigger button can show the
+  // current project name (not "Pick a project") when there's a slug
+  // in the URL.
   useEffect(() => {
-    if (!open || !isAuthed) return;
+    if (!isAuthed) {
+      setProjects(null);
+      return;
+    }
     let cancelled = false;
     getProjects()
       .then((list) => {
@@ -48,7 +54,7 @@ export default function ProjectSwitcher() {
     return () => {
       cancelled = true;
     };
-  }, [open, isAuthed]);
+  }, [isAuthed]);
 
   useEffect(() => {
     function onDoc(e: MouseEvent) {
