@@ -911,7 +911,10 @@
     <section class="hero">
         <div class="hero-bg"></div>
         <div class="container" style="max-width: 900px;">
-            <a href="https://dev.executespec.ai" target="_blank" style="text-decoration: none;"><span class="section-label mono" style="color: var(--yellow); border: 1px solid var(--yellow); padding: 4px 12px; border-radius: 20px;">Beta Live — Try Free →</span></a>
+            <!-- 2026-04-28: nudged the Beta Live pill lower so it doesn't
+                 crowd the top nav. Anchor is inline-block so margin-top
+                 applies inside the flex-centered .container. -->
+            <a href="https://dev.executespec.ai" target="_blank" style="text-decoration: none; display: inline-block; margin-top: 40px;"><span class="section-label mono" style="color: var(--yellow); border: 1px solid var(--yellow); padding: 4px 12px; border-radius: 20px;">Beta Live — Try Free →</span></a>
             <h1 class="h1" style="margin-top: 24px;">
                 ExecuteSpec ships <span class="text-gradient-orange">AI-written pull requests</span> you can actually merge — for one repo or for twenty.
             </h1>
