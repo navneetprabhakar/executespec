@@ -51,6 +51,12 @@ class AsyncAllowlistTest {
             "MailService#sendPasswordResetEmail",
             "MailService#sendTemporaryPasswordEmail",
             "MailService#sendOrgInviteEmail",
+            // R-162 (Wave 2) — referral magic-link email. Takes primitive String
+            // args (toEmail, referrerName, token); Thymeleaf render + SMTP send only;
+            // no JPA nav. Same safety profile as the other 18 MailService#send*
+            // entries. The allowlist drift was missed in the Wave 2 closeout — this
+            // entry catches it up.
+            "MailService#sendV3ReferralInvite",
             "MailService#sendEscalationToAdmin",
             "MailService#sendInviteRejectedEmail",
             "MailService#sendNewUserAlertToAdmin",
