@@ -187,7 +187,7 @@ function AnonymousTeamPreview() {
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <a
-              href="mailto:enterprise@executespec.ai?subject=Demo%20request%20—%20Team%20tier"
+              href="mailto:admin@executespec.ai?subject=Demo%20request%20—%20Team%20tier"
               style={{
                 padding: '8px 14px',
                 fontSize: 12.5,
@@ -720,7 +720,7 @@ function SsoPanel() {
       </p>
       <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         <a
-          href="mailto:enterprise@executespec.ai?subject=SSO%20config%20%E2%80%94%20%5Borg%20name%5D"
+          href="mailto:admin@executespec.ai?subject=SSO%20config%20%E2%80%94%20%5Borg%20name%5D"
           style={{
             padding: '5px 12px',
             fontSize: 12,

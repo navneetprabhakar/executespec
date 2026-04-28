@@ -38,7 +38,7 @@ export default function V3Trust() {
 
   function onContactSales() {
     trackV3(V3_EVENTS.ENTERPRISE_INQUIRY_SUBMITTED);
-    window.location.href = 'mailto:security@executespec.ai?subject=Enterprise%20vendor%20review';
+    window.location.href = 'mailto:admin@executespec.ai?subject=Enterprise%20vendor%20review';
   }
 
   return (
@@ -52,8 +52,8 @@ export default function V3Trust() {
           Everything procurement needs in one place. Last reviewed by our
           security team: 2026-04-27. Updates land as our compliance
           posture matures — you can also subscribe to changes via{' '}
-          <a href="mailto:security@executespec.ai" style={{ color: 'var(--v3-brand)' }}>
-            security@executespec.ai
+          <a href="mailto:admin@executespec.ai" style={{ color: 'var(--v3-brand)' }}>
+            admin@executespec.ai
           </a>
           .
         </p>
@@ -183,13 +183,13 @@ export default function V3Trust() {
               fontFamily: 'inherit',
             }}
           >
-            Contact security@executespec.ai
+            Contact admin@executespec.ai
           </button>
           {/* Conversion-fix #A2: enterprise-evaluator personas (Sarah-the-CTO)
               convert via demo not mailto. Stays mailto-style for MVP — when
               Calendly is set up, just swap the href. */}
           <a
-            href="mailto:enterprise@executespec.ai?subject=Demo%20request%20—%20enterprise%20evaluation&body=Briefly%20describe%20your%20org%20size%2C%20use%20case%2C%20and%20preferred%20demo%20window."
+            href="mailto:admin@executespec.ai?subject=Demo%20request%20—%20enterprise%20evaluation&body=Briefly%20describe%20your%20org%20size%2C%20use%20case%2C%20and%20preferred%20demo%20window."
             style={{
               padding: '8px 14px',
               fontSize: 12.5,

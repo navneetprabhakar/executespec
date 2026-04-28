@@ -6,7 +6,7 @@ _For Product Hunt launch, advertising, and press contacts. Last refreshed 2026-0
 
 - **Founder**: Navneet Prabhakar
 - **Email (press)**: `admin@executespec.ai`
-- **Email (sales / enterprise)**: `enterprise@executespec.ai`
+- **Email (sales / enterprise)**: `admin@executespec.ai`
 - **Email (support)**: `admin@executespec.ai`
 - **Website**: `https://executespec.ai`
 - **App**: `https://dev.executespec.ai`

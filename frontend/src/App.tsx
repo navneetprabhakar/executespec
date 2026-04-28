@@ -79,7 +79,6 @@ import V3Team from '@/v3/pages/V3Team';
 import V3Trust from '@/v3/pages/V3Trust';
 import V3Insights from '@/v3/pages/V3Insights';
 import V2OptInGate from '@/v3/components/V2OptInGate';
-import V3Changelog from '@/v3/pages/V3Changelog';
 // Selling-point #6 — public anonymized /exec snapshot for the
 // PgM/CFO conversion path. Public, no auth, share-link-able.
 import V3ExecDemo from '@/v3/pages/V3ExecDemo';
@@ -173,7 +172,10 @@ export default function App() {
         <Route path="team" element={<V3Team />} />
         <Route path="trust" element={<V3Trust />} />
         <Route path="insights" element={<V3Insights />} />
-        <Route path="changelog" element={<V3Changelog />} />
+        {/* /v3/changelog route removed 2026-04-28 (concern 3 — page
+            deleted; revisit later). Falls through to the SPA's catch-all
+            redirect at "/*" → "/", which now lands anon visitors on
+            /v3/landing. */}
         {/* Selling-point #6 — public exec snapshot. No auth required. */}
         <Route path="exec-demo" element={<V3ExecDemo />} />
       </Route>

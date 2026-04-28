@@ -137,7 +137,7 @@ export default function PricingGrid({
             is shorter even on the email path.
           */}
           <a
-            href="mailto:sales@executespec.ai?subject=Enterprise%20demo%20request%20%E2%80%94%20%5Borg%5D&body=Hi%20%E2%80%94%20I%27d%20like%20a%2030-min%20demo%20of%20ExecuteSpec%20Enterprise.%0A%0AOrg%3A%20%5Bcompany%20name%5D%0ATeam%20size%3A%20%5BN%20engineers%5D%0AWhat%20I%20want%20to%20validate%3A%20%5Bmerge-gate%20%2F%20multi-repo%20Execution%20View%20%2F%20SSO%20%2F%20audit%20%2F%20BYOK%5D%0ATime%20zone%3A%20%5Bzone%5D%0A%0AThanks!"
+            href="mailto:admin@executespec.ai?subject=Enterprise%20demo%20request%20%E2%80%94%20%5Borg%5D&body=Hi%20%E2%80%94%20I%27d%20like%20a%2030-min%20demo%20of%20ExecuteSpec%20Enterprise.%0A%0AOrg%3A%20%5Bcompany%20name%5D%0ATeam%20size%3A%20%5BN%20engineers%5D%0AWhat%20I%20want%20to%20validate%3A%20%5Bmerge-gate%20%2F%20multi-repo%20Execution%20View%20%2F%20SSO%20%2F%20audit%20%2F%20BYOK%5D%0ATime%20zone%3A%20%5Bzone%5D%0A%0AThanks!"
             style={{
               padding: '8px 16px',
               fontSize: 13,

@@ -812,7 +812,7 @@ function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
           ))}
         </div>
         <a
-          href="mailto:hello@executespec.ai?subject=Trusted-by%20logo%20—%20%5Borg%20name%5D&body=We%27d%20like%20our%20logo%20on%20your%20landing.%20Org%3A%20%5Bname%5D.%20Logo%20file%3A%20%5Bsvg%2Fpng%20attached%5D.%20Use%20approval%3A%20%5Bcontact%20%2B%20OK%5D."
+          href="mailto:admin@executespec.ai?subject=Trusted-by%20logo%20—%20%5Borg%20name%5D&body=We%27d%20like%20our%20logo%20on%20your%20landing.%20Org%3A%20%5Bname%5D.%20Logo%20file%3A%20%5Bsvg%2Fpng%20attached%5D.%20Use%20approval%3A%20%5Bcontact%20%2B%20OK%5D."
           style={{
             fontSize: 11,
             color: 'var(--v3-brand)',
@@ -949,11 +949,7 @@ function CompetitorTable() {
           textAlign: 'center',
         }}
       >
-        Want the long version? Read the{' '}
-        <Link to="/v3/changelog" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
-          changelog
-        </Link>{' '}
-        or check{' '}
+        Want the long version? Check{' '}
         <Link to="/v3/exec-demo" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
           live numbers
         </Link>

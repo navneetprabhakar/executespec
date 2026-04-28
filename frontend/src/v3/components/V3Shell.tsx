@@ -3,7 +3,6 @@ import { useEffect } from 'react';
 import V3TopBar from './V3TopBar';
 import CmdK from './CmdK';
 import { FreeCapToast, FreeCapBlockingModal } from './FreeCapNudge';
-import TourBanner from './TourBanner';
 import UpgradeNudge from './UpgradeNudge';
 import { useV3Ui } from '../stores/useV3Ui';
 import '../v3.css';
@@ -51,7 +50,11 @@ export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean })
   return (
     <div className="v3-root">
       {withTopBar && <V3TopBar />}
-      <TourBanner />
+      {/* TourBanner removed 2026-04-28 (concern 2 — "What's new" surface
+          paused; revisit later). The "/v3/changelog" page it linked to
+          was deleted in the same batch. To revive: re-import + restore
+          this mount, AND restore frontend/src/v3/components/TourBanner.tsx
+          + frontend/src/v3/pages/V3Changelog.tsx + the App.tsx route. */}
       {/* R-312 (Wave 7) — Pro→Team upgrade nudge above main, gated on
           PRO tier + ≥5 lifetime completed runs + not-dismissed. The
           component is render-cheap (returns null in 99% of cases). */}
