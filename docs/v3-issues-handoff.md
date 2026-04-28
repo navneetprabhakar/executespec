@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-Two batches shipped end-to-end this session:
+Three batches shipped end-to-end this session:
 
   1. **4-concern fix batch** (root-route + remove-What's-new + remove-
      changelog + email-sweep) — GH Action `25043079648` green at T+374s,
@@ -10,9 +10,25 @@ Two batches shipped end-to-end this session:
   2. **R-190 + R-191 post-cutover cleanup** — Vibe UI surface deleted +
      Mission/Specify vocabulary purged. GH Action `25047545954` green at
      T+382s.
+  3. **Hero-pill nudge + anon-submit redirect to /login** — BETA LIVE
+     pill repositioned 40px lower on the website hero; the `/v3/landing`
+     "See what we'd build" button now navigates straight to /login
+     (skipping the anonymous-trial UI panel) with the typed spec
+     stashed in sessionStorage for post-signup hydration. GH Action
+     `25050515826` green at T+354s, Cloudflare redeploy `52119ade`.
 
-`main` FF'd to dev after each. **`origin/dev` = `origin/main` =
-`6eee94fe`.** No work in flight; clean state for the next thread.
+Plus a debugged-not-fixed item:
+
+  4. **Failed run `c0fe9c62-bde8-4b0e-a29c-51ed90e5e7a7`** — root-caused
+     to JVM-restart kill at the exact moment of GH Action `25043079648`
+     deploy (Run died 08:51:19, Action's Deploy-JAR step at 08:51:18).
+     `failureReason` field already explained it; `StartupRunResumerV2`
+     did its job. Real fix is the deferred slice-5 auto-replay
+     (re-trigger `runLargePipeline.continueExpansion(...)` on boot,
+     skipping EXPANDED tasks) — see "Recent gotchas" below.
+
+`main` FF'd to dev after each batch. **`origin/dev` = `origin/main` =
+`9b0ff701`.** No work in flight; clean state for the next thread.
 
 ## Branch + worktree state
 
@@ -20,9 +36,9 @@ Two batches shipped end-to-end this session:
 |---|---|
 | Working branch | **`feature/v3-conversion`** |
 | Worktree path | **`/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/`** |
-| `origin/feature/v3-conversion` tip | **`6eee94fed32796bc71e1db485b0c52e5638b0a6a`** |
-| `origin/dev` tip | **`6eee94fed32796bc71e1db485b0c52e5638b0a6a`** ← matches feature |
-| `origin/main` tip | **`6eee94fed32796bc71e1db485b0c52e5638b0a6a`** ← matches dev (FF'd this turn) |
+| `origin/feature/v3-conversion` tip | **`9b0ff701d921133045899284d356ded712897a50`** |
+| `origin/dev` tip | **`9b0ff701d921133045899284d356ded712897a50`** ← matches feature |
+| `origin/main` tip | **`9b0ff701d921133045899284d356ded712897a50`** ← matches dev (FF'd this turn) |
 | Local commits ahead of origin | **0** |
 | Uncommitted edits | **none** (only `src/main/resources/static/trust-pack.pdf` untracked — Vite build artifact, ignore) |
 
@@ -79,6 +95,48 @@ Stage timing matched the prior run within ±10 s on every stage.
 | `localStorage.es:viewMode='vibe'` after authed page load | **normalized to 'pro'** ✅ |
 | `body.textContent` "Mission" hits on / (authed admin) | **0** ✅ |
 | Run cards show "Code generated" / "Run failed" copy | confirmed via screenshot ✅ |
+
+### Hero-pill nudge + anon-submit redirect (2026-04-28, single commit)
+
+| Item | Commit | Status |
+|---|---|---|
+| BETA LIVE pill on `executespec.ai` nudged 40px lower so it doesn't crowd the top nav | `9b0ff701` | ✅ shipped + verified live |
+| Anon `/v3/landing` "See what we'd build" submit now redirects to `/login` (skipping the anonymous-trial UI panel) | `9b0ff701` | ✅ shipped + verified live |
+
+**Item 1:** anchor wrapping the pill now has `display: inline-block; margin-top: 40px;` — the .hero is `display: flex; align-items: center` so margin-top on the first child of .container shifts the centered block downward as expected. Cloudflare worker re-deployed (`52119ade-4361-4362-99c5-d16790836c98`).
+
+**Item 2:** `V3Landing.tsx onSubmit` now stashes the typed spec to `sessionStorage.v3-anon-spec` + `navigate('/login', { state: { from: '/v3/landing' } })` — no `submitAnonymousRun()` call, no inline trial UI. Removed the `result` state + `AnonymousRunResponse` type import + `submitAnonymousRun` import + the ~40-line "Trial ready"/"Save this run — sign in" JSX block. The `/api/v3/anonymous-runs` endpoint + `AnonymousRunSession` backend stay live for the post-signup claim flow (the post-signup composer hydration reads `v3-anon-spec` from sessionStorage).
+
+### GH Action `25050515826` — final state (items 1 + 2)
+
+```
+status:        completed
+conclusion:    success
+total runtime: 354 s (5m54s)
+all 25 steps:  green (Slack success notify fired)
+```
+
+### Post-deploy verification (items 1 + 2) — every probe green
+
+| Probe | Result |
+|---|---|
+| `executespec.ai/` BETA LIVE pill bounding-rect top | **120px from viewport top** (was crowding the top-nav before) ✅ |
+| Anon `/v3/landing` submit click → final URL | **`/login`** ✅ |
+| `sessionStorage.v3-anon-spec` after redirect | **typed spec preserved** ✅ |
+| `/login` body text "Trial ready" | **gone** ✅ |
+| `/login` body text "Save this run" | **gone** ✅ |
+| `/login` body text "Sign in" | **present** (login form) ✅ |
+
+### Item 3 — Failed run `c0fe9c62-bde8-4b0e-a29c-51ed90e5e7a7` (debugged, not fixed)
+
+Root cause: the run was killed by a JVM restart at exactly 08:51:18-19 UTC — that's the cutover moment of GH Action `25043079648` (the morning's 4-concern deploy). Fields confirm:
+
+- `failureReason`: *"Interrupted during WORKING (JVM restart / deploy). … Auto-replay of the outline + per-task expansion is a slice-5 follow-up; for now please resubmit."*
+- Started 08:19:04, marked FAILED 08:51:19, exact match to the deploy's "Deploy JAR to GCE" step.
+- Per-task state at kill-time: T1 + T2 PARTIAL, T3 WORKING, T4-T10 PENDING (10 tasks total, all pre-expanded by the outline phase).
+- Cost actually spent: ~$0.18 (outline only). User charged 7 credits ($35) at plan-approval; refund expected via `RunQuotaRefundListener.onRunFailed` — recommend confirming the refund actually fired.
+
+The **deferred slice-5 auto-replay** (re-trigger `runLargePipeline.continueExpansion(...)` on JVM boot, skipping EXPANDED tasks) is the real fix. Until then, runs that catch a deploy mid-execution land FAILED with the proper failureReason + the user has to resubmit. Logged in the parked-list for the next thread.
 
 ### GH Action `25043079648` — final state
 
