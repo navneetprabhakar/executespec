@@ -59,7 +59,12 @@ export const PRICING_CARDS: PricingCard[] = [
     priceInr: 1700,
     priceUnit: '/ month',
     badge: 'Most popular',
-    subhead: 'Unlimited runs for one developer',
+    // R-314 (Wave 7) — F2 Solo Sam value-anchor. The previous subhead
+    // was clean but generic ("Unlimited runs for one developer"); this
+    // version names a Sam-shaped outcome ("a side-project shipping every
+    // week") that connects $20/mo to a recognisable life pattern, not
+    // a credit calculation.
+    subhead: 'Enough to keep a side-project shipping every week',
     bullets: [
       'Unlimited runs / month',
       'All providers (BYOK option)',

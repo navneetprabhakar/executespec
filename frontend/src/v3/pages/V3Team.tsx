@@ -34,6 +34,17 @@ export default function V3Team() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // R-315 (Wave 7) — gate org-data fetches on auth state. Pre-fix,
+    // anonymous visitors hitting /v3/team (e.g. via a shared link from
+    // Senior Priya to her tech-lead-pre-signup) saw 10 × 401 in their
+    // DevTools console. F1 G-FOLLOW-UP-1 / F2 §2 Senior Priya called
+    // it out as a perception problem at the exact wrong moment.
+    // The component still renders <AnonymousTeamPreview/> for unauthed
+    // users; this just stops the wasted fetches.
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
     setLoading(true);
     Promise.all([
@@ -52,7 +63,7 @@ export default function V3Team() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [user]);
 
   const tier = (org?.tier ?? user?.tier ?? 'FREE').toUpperCase();
   const isFreeTier = tier === 'FREE';
