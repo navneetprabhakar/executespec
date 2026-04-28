@@ -46,7 +46,12 @@ from email.mime.text import MIMEText
 from pathlib import Path
 
 # ── configuration ─────────────────────────────────────────────────────
-RECIPIENT = "navneet.prabhakar007@gmail.com"
+# 2026-04-28 — recipient swap per founder direction. Automated emails
+# (slice progress, audits, reports, deploy notifications) now go to
+# admin@executespec.ai; SMTP creds + sender unchanged (still the Gmail
+# app password from application-dev.yml, still sending FROM admin@…).
+# The company effectively sends to itself.
+RECIPIENT = "admin@executespec.ai"
 REPO_ROOT = Path(__file__).resolve().parent.parent
 LOCAL_YML = REPO_ROOT / "src" / "main" / "resources" / "application-local.yml"
 APP_YML = REPO_ROOT / "src" / "main" / "resources" / "application.yml"
