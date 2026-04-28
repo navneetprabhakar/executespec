@@ -320,14 +320,24 @@ export default function V3Landing() {
           the visitor what this strip will become without fabricating logos. */}
       <TrustedByStrip />
 
-      {/* Selling-point #3 — CSS-frame demo placeholder. Real video lands later;
-          this gives the page motion + a story for personas who skim. */}
-      <DemoAnimation />
+      {/* R-204 (Wave 4) — Hero-video slot. Real 30s capture (spec → plan →
+          build → PR) is a real-asset task that has to be recorded; until
+          then HeroVideoSlot wraps the existing CSS-frame DemoAnimation as
+          a fallback. When the .mp4 lands, drop it at `frontend/public/hero-demo.mp4`
+          + flip the prop — see HeroVideoSlot below. */}
+      <HeroVideoSlot />
 
       {/* Selling-point #7 — sample-run gallery (anonymized recent successful runs) */}
       {samples && samples.length > 0 && (
         <SampleRunGallery rows={samples} />
       )}
+
+      {/* R-203 (Wave 4) — competitor positioning table. The narrow line
+          ("ships PRs your team will merge") is more believable when paired
+          with what each competitor actually does well, not against a strawman.
+          Source: docs/strict-ux-thread-handoff.md + the matrix in
+          /tmp/executespec-selling-conversion-points.md. */}
+      <CompetitorTable />
 
       {/* Per-persona conversion CTAs — one card per buyer-type so each can
           self-route to the surface that closes their deal. */}
@@ -437,6 +447,58 @@ const DEMO_FRAMES = [
   { phase: 'Test',     line: '14/14 tests passed · reviewer verdict: CLEAN',            tone: '#7AD1C8' },
   { phase: 'PR opened', line: 'github.com/your-org/svc · #482 · ready for review',      tone: '#7AD1C8' },
 ];
+
+// ─── R-204 (Wave 4) — Hero-video slot ──────────────────────────────────────
+// Real 30-second hero video remains a real-asset task: someone has to
+// record an actual run (spec → plan → build → tests → PR-opened), edit
+// to ~30s, and drop the final .mp4 at `frontend/public/hero-demo.mp4`
+// + a poster JPG at `frontend/public/hero-demo-poster.jpg`. Until that
+// asset exists, this slot falls back to the CSS-frame DemoAnimation
+// shipped in 4fa8ed63 — it's not video, but it gives the page motion
+// + a phase-by-phase story for skim-readers in the meantime.
+//
+// To swap in the real video once the asset lands:
+//   1. Place `hero-demo.mp4` (~30s, ≤8 MB, MP4/H.264) in frontend/public/
+//   2. Place `hero-demo-poster.jpg` (1280×720, ≤200 KB) in frontend/public/
+//   3. Flip USE_REAL_VIDEO below to true (one-line change)
+//
+// The poster image is what shows before play — even when autoplay is
+// blocked (mobile data-saver, low-power mode, ad-blocker). Pick a frame
+// that conveys "PR opened" so the static state itself is compelling.
+
+const USE_REAL_VIDEO = false; // TODO(R-204): flip when hero-demo.mp4 ships
+
+function HeroVideoSlot() {
+  if (!USE_REAL_VIDEO) return <DemoAnimation />;
+  return (
+    <section
+      aria-label="What a run looks like (30s demo)"
+      style={{
+        margin: '20px auto 0',
+        maxWidth: 720,
+        width: '100%',
+      }}
+    >
+      <video
+        src="/hero-demo.mp4"
+        poster="/hero-demo-poster.jpg"
+        autoPlay
+        muted
+        loop
+        playsInline
+        controls={false}
+        style={{
+          width: '100%',
+          aspectRatio: '16 / 9',
+          borderRadius: 10,
+          border: '1px solid var(--v3-border-strong)',
+          display: 'block',
+          background: 'var(--v3-bg)',
+        }}
+      />
+    </section>
+  );
+}
 
 function DemoAnimation() {
   const [frame, setFrame] = useState(0);
@@ -675,6 +737,139 @@ function TrustedByStrip() {
           Add your logo →
         </a>
       </div>
+    </section>
+  );
+}
+
+// ─── R-203 (Wave 4) — Competitor positioning table ─────────────────────────
+// Four rows. Each row: competitor + what they win on + what ExecuteSpec
+// adds. Honest framing — we don't beat Cursor on completion latency or
+// Devin on autonomy mystique. We win on the merge step. The table makes
+// that explicit so visitors can self-select.
+
+const COMPETITOR_ROWS: { name: string; theyWin: string; weAdd: string }[] = [
+  {
+    name: 'Cursor',
+    theyWin: 'Completion latency · IDE-native edits · individual flow',
+    weAdd: 'Multi-file dispatch · multi-repo · validated PR with verified score',
+  },
+  {
+    name: 'Devin',
+    theyWin: 'Agent-autonomy story · enterprise mystique',
+    weAdd: 'You see + approve the plan before code is written · pricing transparency',
+  },
+  {
+    name: 'Bolt / v0 / Lovable',
+    theyWin: 'Instant prototype in their sandbox · live preview',
+    weAdd: 'Real PR to your existing repo · backend + multi-file · audit log',
+  },
+  {
+    name: 'GitHub Copilot Workspaces',
+    theyWin: 'Lives in GitHub UI · repo-graph access · Copilot bundle',
+    weAdd: 'Multi-repo · multi-provider · explicit plan-approval gate',
+  },
+];
+
+function CompetitorTable() {
+  return (
+    <section
+      aria-label="Competitor positioning"
+      style={{
+        margin: '24px auto 0',
+        maxWidth: 960,
+        width: '100%',
+      }}
+    >
+      <h2
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color: 'var(--v3-text)',
+          margin: '0 0 4px',
+          textAlign: 'center',
+        }}
+      >
+        Where we fit
+      </h2>
+      <p
+        style={{
+          fontSize: 12,
+          color: 'var(--v3-text-muted)',
+          margin: '0 0 14px',
+          textAlign: 'center',
+        }}
+      >
+        Each competitor optimises for an earlier phase of the SDLC. We optimise for the merge.
+      </p>
+      <div
+        role="table"
+        style={{
+          background: 'var(--v3-surface)',
+          border: '1px solid var(--v3-border)',
+          borderRadius: 10,
+          overflow: 'hidden',
+          fontSize: 12.5,
+        }}
+      >
+        {/* Header row */}
+        <div
+          role="row"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: '160px 1fr 1fr',
+            gap: 12,
+            padding: '10px 14px',
+            background: 'var(--v3-bg)',
+            borderBottom: '1px solid var(--v3-border)',
+            fontSize: 11,
+            color: 'var(--v3-text-subtle)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.6,
+            fontWeight: 600,
+          }}
+        >
+          <span>vs</span>
+          <span>They win on</span>
+          <span>What ExecuteSpec adds</span>
+        </div>
+        {COMPETITOR_ROWS.map((row, i) => (
+          <div
+            role="row"
+            key={row.name}
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '160px 1fr 1fr',
+              gap: 12,
+              padding: '12px 14px',
+              borderBottom:
+                i < COMPETITOR_ROWS.length - 1 ? '1px solid var(--v3-border)' : 'none',
+              alignItems: 'start',
+            }}
+          >
+            <span style={{ color: 'var(--v3-text)', fontWeight: 600 }}>{row.name}</span>
+            <span style={{ color: 'var(--v3-text-muted)', lineHeight: 1.5 }}>{row.theyWin}</span>
+            <span style={{ color: 'var(--v3-text)', lineHeight: 1.5 }}>{row.weAdd}</span>
+          </div>
+        ))}
+      </div>
+      <p
+        style={{
+          fontSize: 11,
+          color: 'var(--v3-text-subtle)',
+          margin: '8px 0 0',
+          textAlign: 'center',
+        }}
+      >
+        Want the long version? Read the{' '}
+        <Link to="/v3/changelog" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+          changelog
+        </Link>{' '}
+        or check{' '}
+        <Link to="/v3/exec-demo" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+          live numbers
+        </Link>
+        .
+      </p>
     </section>
   );
 }
