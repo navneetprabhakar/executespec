@@ -1,5 +1,15 @@
 # Product Hunt Launch Kit — ExecuteSpec
 
+> **⚠ NEEDS REFRESH (flagged 2026-04-28).** Hero/tagline copy + tier names in
+> this kit are pre-tier-coherence-fix. The new selling-point is
+> *"AI that ships pull requests your team will actually merge"* with
+> ~80% verified score as the proof. Tier names: FREE / PRO $20/mo /
+> TEAM $39/seat (was MAX $29) / ENTERPRISE. FAQ + ad copy below should be
+> rewritten before launch — the current v3 landing is the source of truth at
+> `frontend/src/v3/pages/V3Landing.tsx` and `website/index.html`.
+>
+> Launch checklist + Day -1/0/+1 cadence below still valid.
+
 _Branch: `feature/ux-overhaul-v1` · Prepared: 2026-04-21_
 
 Everything we need to hit "ship it" on Product Hunt. US-first framing since that's where our traffic is coming from.

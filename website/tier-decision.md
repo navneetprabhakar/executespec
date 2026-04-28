@@ -1,5 +1,17 @@
 # Tier Re-assessment — Project View & Platform Features
 
+> **⚠ HISTORICAL REFERENCE (superseded 2026-04-28).** The tier ladder has since
+> consolidated to **FREE / PRO / TEAM / ENTERPRISE** (V141 backend migration on
+> `feature/conversion-redesign`). The "MAX" tier referenced throughout this
+> document was renamed to **TEAM** and re-priced to **$39/seat/month
+> (minimum 2 seats)** with BYOK. The selling-point line is now
+> *"AI that ships pull requests your team will actually merge"* with a
+> ~80% verified score on real runs as the proof number. See `website/llms.txt`,
+> `website/index.html`, and `/v3/exec-demo` for current state.
+>
+> Original doc kept below for the analytical reasoning that produced the
+> ladder — pricing numbers and tier names are stale.
+
 _Last updated: 2026-04-21 (v3 — real eval + credit model locked)_
 _Decided as part of the UX overhaul on branch `feature/ux-overhaul-v1`._
 

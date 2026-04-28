@@ -1,5 +1,16 @@
 # ExecuteSpec — Complete UX Overhaul (honest v2)
 
+> **⚠ HISTORICAL REFERENCE (2026-04-28).** This UX review is from the
+> ux-overhaul-v1 era. A subsequent fresh-eyes audit on
+> `feature/conversion-redesign` (2026-04-27) found additional issues
+> — tier display contradictions, three pricing pages, internal-roadmap
+> copy leakage, terminology drift — all addressed in commits
+> `0a6c16b9` (tier coherence) + `4fa8ed63` (selling-point landing).
+> Current selling-point: *"AI that ships pull requests your team will
+> actually merge."* See `/tmp/executespec-fresh-ux-vs-competitors.md`
+> + `/tmp/executespec-selling-conversion-points.md` for the deltas
+> beyond what's documented here.
+
 _Branch: `feature/ux-overhaul-v1` · Date: 2026-04-21_
 _Supersedes the v1 report — fair call-out from you that v1 overclaimed. This one only scores what's **actually shipped** and visible._
 

@@ -868,19 +868,27 @@
         <div class="container" style="max-width: 900px;">
             <a href="https://dev.executespec.ai" target="_blank" style="text-decoration: none;"><span class="section-label mono" style="color: var(--yellow); border: 1px solid var(--yellow); padding: 4px 12px; border-radius: 20px;">Beta Live — Try Free →</span></a>
             <h1 class="h1" style="margin-top: 24px;">
-                Stop babysitting <br>
-                <span class="text-gradient-orange">your AI.</span>
+                AI that ships pull requests<br>
+                <span class="text-gradient-orange">your team will actually merge.</span>
             </h1>
             <p class="subtitle" style="margin: 24px auto 0;">
-                ExecuteSpec is the spec-driven coding platform with built-in CI/CD validation, agentic code reviews, and deterministic merge strategies. Don't prompt. Specify.
+                Plan, build, test, review, and open a PR — measured ~80% verified score on real runs. We let you see the score on every one of yours.
             </p>
             <div class="hero-buttons">
-                <a href="https://dev.executespec.ai" class="btn btn-primary" target="_blank">Try Free — 5 Runs</a>
-                <a href="#pricing" class="btn btn-ghost">View Pricing ↓</a>
+                <a href="https://dev.executespec.ai" class="btn btn-primary" target="_blank">Try Free — 5 Lifetime Runs</a>
+                <a href="https://dev.executespec.ai/v3/exec-demo" class="btn btn-ghost" target="_blank">See a team's last 30 days →</a>
             </div>
-            <!-- v2.5.14 — proof strip. Replace with real stats once we expose them. -->
+            <!-- Selling-point proof strip. Numbers backed by /api/v3/landing/stats
+                 (anonymized aggregate across the platform). -->
             <p style="margin-top:28px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
-                5 free runs · full project workspace · verified score · no credit card
+                ~80% verified ≥ 80 · plan-approval gate · BYOK on Team + Enterprise · no credit card
+            </p>
+            <!-- Per-persona conversion routing. Each link goes to the surface
+                 that closes that buyer-type's deal. -->
+            <p style="margin-top:18px;font-size:0.85rem;color:var(--text-muted);">
+                For <a href="#pricing" style="color:var(--blue-light);text-decoration:none;">teams</a>
+                · for <a href="https://dev.executespec.ai/v3/trust" style="color:var(--blue-light);text-decoration:none;" target="_blank">enterprise</a>
+                · for <a href="https://dev.executespec.ai/v3/exec-demo" style="color:var(--blue-light);text-decoration:none;" target="_blank">PgM / CFO</a>
             </p>
         </div>
     </section>
@@ -1662,6 +1670,12 @@
                     <summary>What is spec-driven coding?</summary>
                     <div class="faq-answer">
                         Spec-driven coding is a software development methodology where engineers write a structured specification—requirements, constraints, acceptance criteria—before any code is generated. Unlike prompt-based AI coding where you type informal instructions, spec-driven coding uses deterministic specifications to produce validated, testable code. ExecuteSpec is the first platform purpose-built for this workflow, combining specification parsing with an autonomous CI/CD validation chain that enforces Syntax, Type, Lint, and Unit Test gates on every generated task.
+                    </div>
+                </details>
+                <details class="faq-item">
+                    <summary>What does "AI that ships pull requests your team will actually merge" mean — what's the proof?</summary>
+                    <div class="faq-answer">
+                        Every run goes through the same validation pipeline: planner emits a structured plan → you approve it → executor writes the code → reviewer reads the diff → final build + test gate → PR opens with a 0-100 verified score on it. The verified score is computed from the build verdict, test pass-rate, reviewer verdict (CLEAN / FIXED / UNRESOLVED / FAILED), and adherence to the original spec. Across the platform, ~80% of submitted runs land at verified score ≥ 80. <a href="https://dev.executespec.ai/v3/exec-demo" target="_blank">See the live anonymized 30-day snapshot →</a>. Cursor, Devin, and v0 don't publish a comparable number because they don't have the validation surface to measure it.
                     </div>
                 </details>
                 <details class="faq-item">
