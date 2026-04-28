@@ -5,7 +5,8 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
 // Main app pages
 import RunsPage from '@/pages/RunsPage';
-import DashboardPage from '@/pages/DashboardPage';
+// R-201 (Wave 4) — DashboardPage import removed; /dashboard now hard-redirects to /v3/insights.
+// import DashboardPage from '@/pages/DashboardPage';
 import ExecSummaryPage from '@/pages/ExecSummaryPage';
 import PricingPage from '@/pages/PricingPage';
 // Tier-coherence: PlansPage + BillingPage no longer mounted — v2 routes
@@ -28,16 +29,19 @@ import OrgProjectsPage from '@/pages/org/OrgProjectsPage';
 
 // Project pages (pilot v3.0)
 import ProjectDashboardPage from '@/pages/project/ProjectDashboardPage';
-import ProjectsListPage from '@/pages/project/ProjectsListPage';
+// R-201 (Wave 4) — ProjectsListPage import removed; /projects now hard-redirects to /v3/home.
+// import ProjectsListPage from '@/pages/project/ProjectsListPage';
 import ExecutionViewPage from '@/pages/execution/ExecutionViewPage';
 
 // Admin pages
 import AdminPage from '@/pages/admin/AdminPage';
 import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
-import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
+// R-201 (Wave 4) — admin pages replaced with V3Placeholder until v3 admin
+// surface ships. Imports kept commented for fast restore once R-25x lands.
+// import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
 import TeamMemberDashboard from '@/pages/admin/TeamMemberDashboard';
-import PricingManager from '@/pages/admin/PricingManager';
-import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
+// import PricingManager from '@/pages/admin/PricingManager';
+// import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
 
 // Audit page
 import AuditPage from '@/pages/AuditPage';
@@ -79,6 +83,11 @@ import V3Changelog from '@/v3/pages/V3Changelog';
 // Selling-point #6 — public anonymized /exec snapshot for the
 // PgM/CFO conversion path. Public, no auth, share-link-able.
 import V3ExecDemo from '@/v3/pages/V3ExecDemo';
+// R-201 — Wave 4. "Coming to v3" placeholder for v2 admin routes whose
+// v3 equivalent hasn't shipped yet (per cohabitation invariant in
+// docs/strict-ux-thread-handoff.md §8 — surface-not-allowed renders
+// an evaluate-then-commit panel, not 404).
+import V3Placeholder from '@/v3/components/V3Placeholder';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -170,10 +179,12 @@ export default function App() {
 
         {/* Wave 2.2 — sandbox → run-submit prefill landing (inside AppLayout for nav consistency) */}
         <Route element={<AppLayout />}>
-          {/* Phase 1.1 #11: drop /runs/new as a top-level entry. RunsNewLanding
-              still exists for the post-sandbox prefill flow but the canonical
-              entry is now /projects (or /welcome for the empty state). */}
-          <Route path="runs/new" element={<Navigate to="/projects" replace />} />
+          {/* R-201 (Wave 4) — /runs/new used to chain through /projects which
+              then routed to v2 ProjectsListPage. Replaced with a hard-redirect
+              to /v3/landing — that's the single composer-first entry point
+              per the v3 redesign (greenfield doc §4.1 + §4.4). The chained
+              redirect was the "ghost route" symptom in the fresh-eyes audit. */}
+          <Route path="runs/new" element={<Navigate to="/v3/landing" replace />} />
           <Route path="runs/new/sandbox" element={<RunsNewLanding />} />
           {/* Phase 1.1 #9: /legacy/billing — soft landing for grandfathered
               PRO subscribers whose tier-state-changed email links here.
@@ -188,7 +199,12 @@ export default function App() {
               v3 equivalent. Otherwise the v2 element renders unchanged.
               See frontend/src/v3/lib/optIn.ts for the full mapping. */}
           <Route index element={<V2OptInGate><RunsPage /></V2OptInGate>} />
-          <Route path="dashboard" element={<V2OptInGate><DashboardPage /></V2OptInGate>} />
+          {/* R-201 (Wave 4) — /dashboard hard-redirects to /v3/insights (the
+              v3 dashboard equivalent). Kills the silent fall-through behaviour
+              the fresh-eyes audit identified; matches the V2OptInGate
+              redirect target in lib/optIn.ts so opt-in + non-opt-in users
+              now share one destination. */}
+          <Route path="dashboard" element={<Navigate to="/v3/insights" replace />} />
           {/* Tier-coherence: /pricing was an admin tool (per-1M-token model
               rates). Moved to /admin/model-rates. /plans + /billing both
               redirect to /v3/pricing + /v3/billing — single source of truth
@@ -214,7 +230,10 @@ export default function App() {
           {/* Org pages */}
           <Route path="org/settings" element={<OrgSettingsPage />} />
           <Route path="org/projects" element={<OrgProjectsPage />} />
-          <Route path="projects" element={<V2OptInGate><ProjectsListPage /></V2OptInGate>} />
+          {/* R-201 (Wave 4) — /projects hard-redirects to /v3/home (the v3
+              project surface; V3HomeRedirect picks the user's first project
+              or the empty-state composer). Matches lib/optIn.ts target. */}
+          <Route path="projects" element={<Navigate to="/v3/home" replace />} />
           {/* v2.5.12 — fallback so /projects/:id (without /dashboard) resolves.
               The API side lists projects at /api/projects/{id}/dashboard; users
               were hitting /projects/{id} and seeing a blank page because the
@@ -231,12 +250,27 @@ export default function App() {
 
           {/* Admin */}
           <Route path="admin" element={<AdminPage />} />
-          <Route path="admin/analytics" element={<OrgAdminDashboard />} />
+          {/* R-201 (Wave 4) — admin/analytics, admin/tiers, admin/pricing
+              had v2 components but the fresh-eyes audit observed silent
+              fall-through to /missions for users hitting them directly.
+              Until a v3 admin surface ships, render a "coming to v3" panel
+              with an Open-in-v2 escape hatch — the v2 component is still
+              reachable per the cohabitation invariant (handoff §8). */}
+          <Route
+            path="admin/analytics"
+            element={<V3Placeholder pageName="Org analytics" v2Fallback="/admin" v2RouteLabel="admin console" futureV3Route="/v3/insights" />}
+          />
           {/* M-022 (Wave 3) — per-team-member dashboard for ORG_ADMIN. */}
           <Route path="team/:userId" element={<TeamMemberDashboard />} />
-          <Route path="admin/pricing" element={<PricingManager />} />
+          <Route
+            path="admin/pricing"
+            element={<V3Placeholder pageName="Pricing manager" v2Fallback="/admin" v2RouteLabel="admin console" futureV3Route="/v3/pricing" />}
+          />
           <Route path="admin/feature-flags" element={<FeatureFlagsPage />} />
-          <Route path="admin/tiers" element={<TierLifecyclePage />} />
+          <Route
+            path="admin/tiers"
+            element={<V3Placeholder pageName="Tier lifecycle" v2Fallback="/admin" v2RouteLabel="admin console" futureV3Route="/v3/billing" />}
+          />
           <Route path="admin/*" element={<AdminPage />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />
