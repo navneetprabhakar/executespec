@@ -113,3 +113,51 @@ export const getAnonymousRunStatus = (sessionToken: string) =>
   fetch(BASE + '/v3/anonymous-runs/' + encodeURIComponent(sessionToken)).then(
     (r) => (r.status >= 500 ? Promise.reject(new Error(`HTTP ${r.status}`)) : r.json())
   ) as Promise<AnonymousRunResponse>;
+
+// ── Selling-point landing endpoints (anonymized, public, no auth) ───────────
+// Drive the public marketing surface: hero counter, sample-run gallery, and
+// the public /v3/exec-demo share page.
+
+export interface V3LandingStats {
+  specsThisWeek: number;
+  verifiedScorePercent: number | null;
+  totalRunsAllTime: number;
+}
+
+export const getV3LandingStats = () =>
+  fetch(BASE + '/v3/landing/stats').then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json() as Promise<V3LandingStats>;
+  });
+
+export interface V3SampleRun {
+  spec: string;
+  verdict: 'READY' | 'NEEDS_REVIEW' | 'FAILED';
+  verifiedScore: number | null;
+  filesGenerated: number | null;
+  durationMs: number | null;
+  prOpened: boolean;
+}
+
+export const getV3SampleRuns = () =>
+  fetch(BASE + '/v3/landing/sample-runs').then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json() as Promise<V3SampleRun[]>;
+  });
+
+export interface V3ExecSnapshot {
+  windowDays: number;
+  totalRuns: number;
+  successRatePercent: number | null;
+  totalSpendUsd: number | null;
+  activeProjects: number;
+  needsAttentionCount: number;
+  spendByProject: { anonymousName: string; runs: number; spendUsd: number | null }[];
+  topWins: { spec: string; verifiedScore: number | null; costUsd: number | null; when: string }[];
+}
+
+export const getV3ExecSnapshot = () =>
+  fetch(BASE + '/v3/public/exec-snapshot').then((r) => {
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    return r.json() as Promise<V3ExecSnapshot>;
+  });

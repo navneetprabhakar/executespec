@@ -76,6 +76,9 @@ import V3Trust from '@/v3/pages/V3Trust';
 import V3Insights from '@/v3/pages/V3Insights';
 import V2OptInGate from '@/v3/components/V2OptInGate';
 import V3Changelog from '@/v3/pages/V3Changelog';
+// Selling-point #6 — public anonymized /exec snapshot for the
+// PgM/CFO conversion path. Public, no auth, share-link-able.
+import V3ExecDemo from '@/v3/pages/V3ExecDemo';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -156,6 +159,8 @@ export default function App() {
         <Route path="trust" element={<V3Trust />} />
         <Route path="insights" element={<V3Insights />} />
         <Route path="changelog" element={<V3Changelog />} />
+        {/* Selling-point #6 — public exec snapshot. No auth required. */}
+        <Route path="exec-demo" element={<V3ExecDemo />} />
       </Route>
 
       {/* ── Protected app routes ── */}

@@ -127,9 +127,18 @@ export default function V3Settings() {
           <span>{user.tier === 'FREE' ? 'Anthropic (system credits)' : 'Project default'}</span>
         </Row>
         <Row label="BYOK">
-          <span style={{ color: 'var(--v3-text-subtle)' }}>
-            Bring-your-own-keys form lands with R-141 billing & plan.
-          </span>
+          {user.tier === 'TEAM' || user.tier === 'ENTERPRISE' ? (
+            <Link
+              to="/settings#api-keys"
+              style={{ color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none' }}
+            >
+              Manage your Anthropic / OpenAI / Google keys →
+            </Link>
+          ) : (
+            <span style={{ color: 'var(--v3-text-subtle)' }}>
+              Bring-your-own-keys is available on Team and Enterprise.
+            </span>
+          )}
         </Row>
       </Card>
 
@@ -149,20 +158,14 @@ export default function V3Settings() {
             Open v2 integrations →
           </Link>
         </Row>
-        <p
-          style={{
-            margin: '8px 0 0',
-            padding: '6px 10px',
-            background: 'var(--v3-bg)',
-            border: '1px solid var(--v3-border)',
-            borderRadius: 4,
-            fontSize: 11,
-            color: 'var(--v3-text-subtle)',
-          }}
-        >
-          v3 integrations grid (Slack, Bitbucket, Jira, Confluence) ships
-          with R-144 in Wave 2.
-        </p>
+        <Row label="More">
+          <Link
+            to="/v3/integrations"
+            style={{ color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none' }}
+          >
+            Slack · Bitbucket · Jira · Confluence →
+          </Link>
+        </Row>
       </Card>
 
       {/* ── Danger zone ─────────────────────────────────────────────────── */}
