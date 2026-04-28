@@ -1,27 +1,50 @@
 /* R-101 — v3 visual primitives.
  *
  * Scoped via .v3-root so v3 styles never leak into v2 screens during
- * cohabitation. Variables locked to the dark palette per the greenfield
- * §3 design spec (off-black background, Signal Blue accent, Mint
- * secondary, semantic functional palette). Light-mode v3 lands later
- * (Wave 3); this file pins dark for now.
+ * cohabitation. Variables originally locked to the dark palette per the
+ * greenfield §3 design spec.
+ *
+ * R-302 (Wave 6) — values now alias the design-system primitives layer
+ * (frontend/src/design-system/primitives.css). Token NAMES unchanged so
+ * no v3 component breaks; values flow from `--c-*`. Two real changes
+ * vs the previous literal palette:
+ *   • --v3-info was #5B8DEF (same as --v3-brand) → now var(--c-info)
+ *     #22D3EE — splits brand-blue from info-cyan per Wave 5 §E.2 user
+ *     decision. The brand stops feeling visual-noise when it isn't
+ *     also the info-state colour.
+ *   • Surface ladder shifted to alias --c-graphite-1/2/3 (was custom
+ *     #11151B/#161B22). Visual diff: --v3-surface deepens 3pt
+ *     (#11151B → #14171C, the v2/website value), --v3-surface-elevated
+ *     deepens 5pt (#161B22 → #1B1F26). v3 + v2 + website now share the
+ *     same surface ladder.
+ *   • Border ladder shifted similarly (--v3-border 1F242C → graphite-4
+ *     #242A33; --v3-border-strong 2A2F37 → graphite-5 #333B46).
+ *
+ * R-307 (Wave 6) — light-mode override block added below; the v3 shell's
+ * force-dark lock is removed in V3Shell.tsx so the [data-theme='light']
+ * cascade flows through to v3 surfaces.
  */
 
 .v3-root {
-  --v3-bg: #0B0D10;
-  --v3-surface: #11151B;
-  --v3-surface-elevated: #161B22;
-  --v3-border: #1F242C;
-  --v3-border-strong: #2A2F37;
-  --v3-text: #E8EAED;
-  --v3-text-muted: #94A3B8;
-  --v3-text-subtle: #5E6771;
-  --v3-brand: #5B8DEF;
-  --v3-brand-2: #7AD1C8;
-  --v3-success: #10B981;
-  --v3-warning: #F59E0B;
-  --v3-error: #EF4444;
-  --v3-info: #5B8DEF;
+  --v3-bg: var(--c-graphite-0);
+  --v3-surface: var(--c-graphite-2);            /* was #11151B — converged with v2/website */
+  --v3-surface-elevated: var(--c-graphite-3);   /* was #161B22 — converged */
+  --v3-border: var(--c-graphite-4);             /* was #1F242C */
+  --v3-border-strong: var(--c-graphite-5);      /* was #2A2F37 */
+  --v3-text: var(--c-ink-100);                  /* was #E8EAED — 4pt nudge */
+  --v3-text-muted: var(--c-ink-300);            /* was #94A3B8 — converged with v2 */
+  --v3-text-subtle: var(--c-ink-400);
+  --v3-brand: var(--c-signal-blue);
+  --v3-brand-2: var(--c-signal-teal);
+  --v3-success: var(--c-success);
+  --v3-warning: var(--c-warning);
+  --v3-error: var(--c-error);
+  --v3-info: var(--c-info);                     /* was #5B8DEF — split from brand per Wave-5 E.2 */
+
+  /* R-305 (Wave 6) — brand-pop gradient. ONE word per page max — applied
+   * to the italic accent in the V3Landing hero only. Cribbed from the
+   * website's text-gradient-orange, brought into the app per Wave-5 E.1. */
+  --v3-pop-grad: linear-gradient(to right, var(--c-pop-orange), var(--c-pop-amber));
 
   --v3-radius-sm: 4px;
   --v3-radius: 6px;
@@ -58,6 +81,33 @@
 .v3-root *::before,
 .v3-root *::after {
   box-sizing: border-box;
+}
+
+/* ── R-307 (Wave 6) — v3 light-mode override ────────────────────────────────
+ * Activated when [data-theme='light'] propagates from <html> (the v2
+ * useUiStore theme toggle already writes this attr). Mirrors v2's
+ * tokens.css light block — surface + border + text flip to the paper-*
+ * primitives; brand + semantic-state tokens stay calibrated for both
+ * backgrounds.
+ *
+ * Brand-pop gradient stays the orange→amber pair on both modes — orange
+ * on white still pops; the gradient was always meant to be theme-agnostic.
+ *
+ * Selector specificity: [data-theme='light'] .v3-root wins over .v3-root
+ * because of the extra attribute — so the original .v3-root rule above
+ * still defines dark defaults, this block only overrides what light needs.
+ */
+[data-theme='light'] .v3-root {
+  --v3-bg: var(--c-paper-0);
+  --v3-surface: var(--c-paper-1);
+  --v3-surface-elevated: var(--c-paper-2);
+  --v3-border: var(--c-paper-3);
+  --v3-border-strong: var(--c-paper-4);
+  --v3-text: var(--c-graphite-0);
+  --v3-text-muted: #6E7785;            /* between paper-4 and graphite-6 */
+  --v3-text-subtle: var(--c-graphite-6);
+  /* Brand + semantic-state + pop-grad inherit from .v3-root above —
+   * deliberately unchanged, calibrated for both backgrounds. */
 }
 
 /* TopBar */

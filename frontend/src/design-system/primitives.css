@@ -1,0 +1,74 @@
+/* ─────────────────────────────────────────────────────────────────────────
+ * ExecuteSpec — design-system primitives (Wave 6 R-300)
+ *
+ * Single source of truth for every raw color value used across
+ * `frontend/src/tokens.css` (v2 app), `frontend/src/v3/v3.css` (v3 app),
+ * and `website/index.html` (Cloudflare marketing). Each downstream
+ * surface aliases its semantic tokens (`--accent-blue`, `--v3-brand`,
+ * `--surface`, etc.) to one of the `--c-*` primitives below.
+ *
+ * Rules:
+ *   1. Primitives carry no semantic meaning — `--c-graphite-2` is a
+ *      colour, not a "card surface". The semantic layer in each app
+ *      decides what `--c-graphite-2` represents.
+ *   2. Adding or removing a primitive requires updating this file
+ *      and every consumer in the same commit. Never hardcode a hex
+ *      in a downstream stylesheet — alias from here.
+ *   3. Component-level styles must NEVER reference `--c-*` directly;
+ *      they import semantic tokens from `tokens.css` / `v3.css`.
+ *      Keeping the indirection one level deep means we can swap brand
+ *      blue everywhere by changing `--c-signal-blue` once.
+ *
+ * Briefing reference: see Wave 5 final dispatch §D.1.
+ * ──────────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* ── Surface ladder · graphite (dark default) · 7 steps ─────────────── */
+  --c-graphite-0: #0B0D10; /* page bg — was --geist-bg / --v3-bg / --bg */
+  --c-graphite-1: #11151B; /* lowest surface — was --v3-surface */
+  --c-graphite-2: #14171C; /* card — was --surface / --gray-100 */
+  --c-graphite-3: #1B1F26; /* card-elevated — was --surface-2 / --gray-200 */
+  --c-graphite-4: #242A33; /* border-default — was --surface-border / --gray-300 */
+  --c-graphite-5: #333B46; /* border-strong, hover — was --gray-400 */
+  --c-graphite-6: #4C5662; /* disabled fg — was --gray-500 */
+
+  /* ── Surface ladder · paper (light) · 5 steps ───────────────────────── */
+  --c-paper-0: #FAFAFB;    /* page bg */
+  --c-paper-1: #F3F4F6;    /* card */
+  --c-paper-2: #E7E9EE;    /* card-elevated */
+  --c-paper-3: #D8DCE3;    /* border */
+  --c-paper-4: #BFC6D0;    /* border-strong */
+
+  /* ── Text · ink scale ────────────────────────────────────────────────── */
+  --c-ink-100: #ECEEF2; /* primary */
+  --c-ink-200: #C9D1DB; /* secondary */
+  --c-ink-300: #8A94A6; /* muted */
+  --c-ink-400: #5E6771; /* subtle, captions */
+
+  /* ── Brand · Signal Blue + teal pair ─────────────────────────────────── */
+  /* The ONLY brand colours. Used for primary CTA + brand mark. Not for
+   * status, not for info, not for "active tab" — those have their own
+   * tokens. Keeps brand blue from going visual-noise. */
+  --c-signal-blue: #5B8DEF;
+  --c-signal-blue-hover: #7AA5F5;
+  --c-signal-teal: #7AD1C8;
+
+  /* ── Pop · orange→amber ──────────────────────────────────────────────── */
+  /* The brand-accent gradient. ONE word per page max — applied to the
+   * italic accent in the hero headline only. Cribbed from Cursor's
+   * "gradient-as-occasion" discipline (see briefing §C). */
+  --c-pop-orange: #F97316;
+  --c-pop-amber:  #FBBF24;
+
+  /* ── Semantic states · distinct hue per group ────────────────────────── */
+  /* Never aliased to brand. Stripe-style discipline: brand is brand,
+   * success/warning/error/info each get their own family. */
+  --c-success: #10B981; /* green */
+  --c-warning: #F59E0B; /* amber, distinct from --c-pop-amber by saturation */
+  --c-error:   #EF4444; /* red — v3 default; v2's softer #F26D6D was a drift */
+  --c-info:    #22D3EE; /* cyan-teal — distinct from brand blue per E.2 split */
+
+  /* ── Accent · for non-brand visual variety ───────────────────────────── */
+  --c-accent-purple: #A78BFA; /* harness, planner, thinking-state */
+  --c-accent-pink:   #EC4899; /* blocked status */
+}

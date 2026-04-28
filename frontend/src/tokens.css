@@ -30,56 +30,69 @@
 
 :root {
   /* ── Surface ladder (dark = default) ─────────────────────────────────── */
-  --geist-bg:           #0B0D10;   /* was #000 — cuts glare, creates depth */
-  --geist-bg-secondary: #14171C;   /* was #0a0a0a */
-  --gray-100:           #14171C;
-  --gray-200:           #1B1F26;
-  --gray-300:           #242A33;
-  --gray-400:           #333B46;
-  --gray-500:           #4C5662;
-  --gray-600:           #66707D;
-  --gray-700:           #8A94A6;   /* was #888 — lifts muted text past AA 7:1 */
-  --gray-800:           #AAB2BF;
-  --gray-900:           #C9D1DB;
-  --gray-1000:          #ECEEF2;
+  /* R-301 (Wave 6) — values now alias the primitive layer
+   * (frontend/src/design-system/primitives.css). Token NAMES are
+   * unchanged so no component breaks; only the right-hand side is
+   * sourced from `--c-*` primitives. Visual output is byte-identical
+   * to pre-Wave-6 except where briefing §C resolved drift:
+   *   • --gray-600 was #66707D → now #4C5662 alias of --c-graphite-6
+   *     (1-step shift up the ladder; the old #66707D value is preserved
+   *     under --status-queued where it actually mattered).
+   *   • --status-error was #F26D6D → now var(--c-error) #EF4444
+   *     (resolves v2/v3 red drift; v3's value wins per briefing §B).
+   *   • --accent-planner was #22D3EE → now var(--c-info) (same hex,
+   *     just sourced from the info primitive — splits brand from info
+   *     per Wave 5 §E.2 decision).
+   */
+  --geist-bg:           var(--c-graphite-0);
+  --geist-bg-secondary: var(--c-graphite-2);
+  --gray-100:           var(--c-graphite-2);
+  --gray-200:           var(--c-graphite-3);
+  --gray-300:           var(--c-graphite-4);
+  --gray-400:           var(--c-graphite-5);
+  --gray-500:           var(--c-graphite-6);
+  --gray-600:           var(--c-graphite-6);     /* was #66707D — collapsed onto graphite-6; rare consumer */
+  --gray-700:           var(--c-ink-300);        /* #8A94A6 */
+  --gray-800:           #AAB2BF;                 /* no primitive — used in 1 place; left literal */
+  --gray-900:           var(--c-ink-200);        /* #C9D1DB */
+  --gray-1000:          var(--c-ink-100);        /* #ECEEF2 */
 
   /* Borders */
-  --border-default:     #242A33;
-  --border-hover:       #333B46;
+  --border-default:     var(--c-graphite-4);
+  --border-hover:       var(--c-graphite-5);
 
   /* Text */
-  --text-primary:       #ECEEF2;
-  --text-secondary:     #C9D1DB;
-  --text-muted:         #8A94A6;
+  --text-primary:       var(--c-ink-100);
+  --text-secondary:     var(--c-ink-200);
+  --text-muted:         var(--c-ink-300);
 
   /* Accent — Signal palette */
-  --accent-blue:        #5B8DEF;   /* was Vercel #0070F3 */
-  --accent-blue-hover:  #7AA5F5;
-  --accent-harness:     #A78BFA;
-  --accent-planner:     #22D3EE;   /* teal — contrast with blue */
+  --accent-blue:        var(--c-signal-blue);
+  --accent-blue-hover:  var(--c-signal-blue-hover);
+  --accent-harness:     var(--c-accent-purple);  /* harness = the agent-orchestration purple tone */
+  --accent-planner:     var(--c-info);           /* planner = the info-cyan tone (split from brand blue per Wave-5 E.2) */
 
   /* Brand gradient (logo, primary CTAs, scorecard highlight) */
-  --brand-grad:         linear-gradient(135deg, #5B8DEF 0%, #7AD1C8 100%);
+  --brand-grad:         linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
 
-  /* Status — distinct color per semantic group.
-     v2.6.0 (UI polish v1): PARTIAL nudged from #F97316 orange (was reading as
-     red-adjacent on run-list chips) to #F5A524 — clearly amber/warning, not
-     fire-alarm. Runs that completed with warnings should feel like caution,
-     not emergency. */
-  --status-success:     #10B981;
-  --status-executing:   #5B8DEF;   /* was #3B82F6 — align with accent */
-  --status-thinking:    #A78BFA;
-  --status-waiting:     #F59E0B;
-  --status-partial:     #F5A524;   /* was #F97316 — softer amber, not red-adjacent */
-  --status-error:       #F26D6D;   /* slightly less aggressive red */
-  --status-blocked:     #EC4899;
-  --status-queued:      #66707D;
+  /* Status — distinct color per semantic group. v2.6.0 (UI polish v1):
+   * PARTIAL nudged from #F97316 → #F5A524 (softer amber, not red-adjacent).
+   * Wave-6 keeps #F5A524 literal because it's between --c-warning #F59E0B
+   * and --c-pop-amber #FBBF24 — needs its own slot if we promote it. */
+  --status-success:     var(--c-success);
+  --status-executing:   var(--c-signal-blue);    /* accidentally aligned to brand per E.2 — fine */
+  --status-thinking:    var(--c-accent-purple);
+  --status-waiting:     var(--c-warning);
+  --status-partial:     #F5A524;                 /* see comment above — uniquely positioned */
+  --status-error:       var(--c-error);          /* was #F26D6D — drift resolved to v3's #EF4444 */
+  --status-blocked:     var(--c-accent-pink);
+  --status-queued:      #66707D;                 /* historic literal; ~half-step between graphite-5 and ink-300 */
 
   /* Numeric neutral — money/tokens/stats. Was amber (collided with warning). */
-  --numeric-neutral:    #C9D1DB;
+  --numeric-neutral:    var(--c-ink-200);
 
   /* Legacy aliases */
-  --status-building:    #F59E0B;
+  --status-building:    var(--c-warning);
 
   /* Radius */
   --radius-sm:          4px;       /* was 2px — less crunchy */
@@ -142,32 +155,39 @@
  * ──────────────────────────────────────────────────────────────────────── */
 
 [data-theme='light'] {
-  --geist-bg:           #FAFAFB;
-  --geist-bg-secondary: #F3F4F6;
-  --gray-100:           #F3F4F6;
-  --gray-200:           #E7E9EE;
-  --gray-300:           #D8DCE3;
-  --gray-400:           #BFC6D0;
-  --gray-500:           #959EAB;
+  /* R-301 (Wave 6) — light-mode aliases use the paper-* primitives.
+   * The grays-mid-range (500/600/700/800) flip to graphite primitives
+   * because mid-grays read the same on both backgrounds. The two
+   * accent-darks (--accent-blue, --status-error, --status-waiting)
+   * stay literal here because primitives.css doesn't carry their
+   * darker variants — they're light-mode-only and only used in two
+   * places. */
+  --geist-bg:           var(--c-paper-0);
+  --geist-bg-secondary: var(--c-paper-1);
+  --gray-100:           var(--c-paper-1);
+  --gray-200:           var(--c-paper-2);
+  --gray-300:           var(--c-paper-3);
+  --gray-400:           var(--c-paper-4);
+  --gray-500:           #959EAB;                 /* between paper-4 and graphite-6, ladder-only */
   --gray-600:           #6E7785;
-  --gray-700:           #4C5662;
-  --gray-800:           #333B46;
-  --gray-900:           #1B1F26;
-  --gray-1000:          #0B0D10;
+  --gray-700:           var(--c-graphite-6);
+  --gray-800:           var(--c-graphite-5);
+  --gray-900:           var(--c-graphite-3);
+  --gray-1000:          var(--c-graphite-0);
 
-  --border-default:     #E1E5EB;
-  --border-hover:       #C9CFD8;
+  --border-default:     #E1E5EB;                 /* between paper-3 and paper-2; ladder-only */
+  --border-hover:       #C9CFD8;                 /* darker border-default */
 
-  --text-primary:       #0B0D10;
-  --text-secondary:     #333B46;
+  --text-primary:       var(--c-graphite-0);
+  --text-secondary:     var(--c-graphite-5);
   --text-muted:         #6E7785;
 
-  --accent-blue:        #2563EB;
+  --accent-blue:        #2563EB;                 /* light-mode-only deeper blue (AA on white) */
   --accent-blue-hover:  #1D4ED8;
 
-  --status-error:       #DC2626;
-  --status-waiting:     #D97706;
-  --numeric-neutral:    #4C5662;
+  --status-error:       #DC2626;                 /* light-mode-only deeper red */
+  --status-waiting:     #D97706;                 /* light-mode-only deeper amber */
+  --numeric-neutral:    var(--c-graphite-6);
 
   --elevation-1: 0 1px 2px 0 rgba(15,23,42,0.05);
   --elevation-2: 0 4px 12px 0 rgba(15,23,42,0.08);

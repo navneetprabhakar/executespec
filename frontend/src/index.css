@@ -1,3 +1,6 @@
+/* R-300 (Wave 6) — primitives must load BEFORE tokens.css so the
+   semantic layer can `var(--c-*)` reference them. */
+@import './design-system/primitives.css';
 @import './tokens.css';
 
 @tailwind base;
