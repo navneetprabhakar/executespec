@@ -51,10 +51,15 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     definition:
       'A second reviewer pass that checks every new file is actually imported / registered / called somewhere. Catches "code that compiles but is unreachable" — Express routes not mounted, Spring beans not component-scanned, Rust mods not declared.',
   },
-  mission: {
-    display: 'mission',
+  // R-191 (post-cutover) — the v1-era "mission" copy-rename of "run" was
+  // reverted. v3 vocabulary is "run" everywhere (URL, DTO, copy). This
+  // glossary entry is removed to keep lookupTerm("mission") returning
+  // undefined so any leftover stale link reads as "no glossary entry"
+  // rather than "see the historical mission rename".
+  run: {
+    display: 'run',
     definition:
-      'The unit of work ExecuteSpec ships against your codebase. One mission = plan → execute → review → preview → PR. Internally still called a "run" in URLs and DTOs (Phase 1.1 #16 is a copy-only rename).',
+      'The unit of work ExecuteSpec ships against your codebase. One run = plan → execute → review → preview → PR.',
   },
 };
 

@@ -182,10 +182,10 @@ function TeamMemberDashboardInner() {
 
         <GlassPanel className="p-4 lg:col-span-2">
           <h3 className="text-xs uppercase tracking-wider text-muted mb-2">
-            Recent missions ({runs.length})
+            Recent runs ({runs.length})
           </h3>
           {runs.length === 0 ? (
-            <p className="text-xs text-muted">No missions in the org-scoped window for this member.</p>
+            <p className="text-xs text-muted">No runs in the org-scoped window for this member.</p>
           ) : (
             <ul className="divide-y divide-[var(--border-default)]">
               {runs.slice(0, 10).map((r) => (

@@ -175,10 +175,17 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
 
         <div className="max-w-md space-y-6">
           <h1 className="text-3xl xl:text-4xl font-semibold text-primary leading-[1.1] tracking-tight">
-            Don't prompt. <span className="text-transparent bg-clip-text" style={{ backgroundImage: 'linear-gradient(90deg, #fb923c, #f59e0b)' }}>Specify.</span>
+            Sign in to ship a <span className="text-transparent bg-clip-text" style={{ backgroundImage: 'linear-gradient(90deg, #fb923c, #f59e0b)' }}>spec.</span>
           </h1>
+          {/* R-191 (post-cutover) — replaced "Don't prompt. Specify." +
+              the "spec-driven coding platform with autonomous CI/CD
+              validation" subtitle (v1-era jargon flagged by R-191) with
+              the v3-aligned "AI-written PRs you can actually merge"
+              framing. Hero gradient on "spec." preserved per the design
+              system's brand-pop-on-one-word treatment. */}
           <p className="text-base text-secondary leading-relaxed">
-            The spec-driven coding platform with autonomous CI/CD validation. Write a spec, get tested code you can actually ship.
+            ExecuteSpec ships AI-written pull requests you can actually merge —
+            for one repo or for twenty. Plan, build, test, review, open a PR.
           </p>
           <ul className="space-y-3 text-sm text-secondary">
             <Feature icon={<Zap className="h-4 w-4 text-accent-blue" />} title="Prototype in minutes">

@@ -83,8 +83,9 @@ export default function Sidebar() {
     // — which was confusing because nothing told you it was a filter and
     // there was no obvious path to the project's actual dashboard).
     //
-    // We still set the runs filter so if the user later clicks Missions
-    // they see only this project's runs (preserves the legacy semantic).
+    // We still set the runs filter so if the user later clicks Runs they
+    // see only this project's runs (preserves the navigate-by-project
+    // semantic from the legacy "Missions" rename, now reverted per R-191).
     setProjectFilter(projectId);
     navigate(`/projects/${projectId}/dashboard`);
     if (isMobile) setMobileSidebarOpen(false);

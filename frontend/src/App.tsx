@@ -260,10 +260,11 @@ export default function App() {
           <Route path="admin" element={<AdminPage />} />
           {/* R-201 (Wave 4) — admin/analytics, admin/tiers, admin/pricing
               had v2 components but the fresh-eyes audit observed silent
-              fall-through to /missions for users hitting them directly.
-              Until a v3 admin surface ships, render a "coming to v3" panel
-              with an Open-in-v2 escape hatch — the v2 component is still
-              reachable per the cohabitation invariant (handoff §8). */}
+              fall-through to / (the runs page) for users hitting them
+              directly. Until a v3 admin surface ships, render a "coming
+              to v3" panel with an Open-in-v2 escape hatch — the v2
+              component is still reachable per the cohabitation invariant
+              (handoff §8). */}
           <Route
             path="admin/analytics"
             element={<V3Placeholder pageName="Org analytics" v2Fallback="/admin" v2RouteLabel="admin console" futureV3Route="/v3/insights" />}
