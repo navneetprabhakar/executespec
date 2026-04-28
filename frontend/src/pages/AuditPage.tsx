@@ -4,8 +4,10 @@ import { ChevronLeft, ChevronRight, Filter, RefreshCw, Activity as ActivityIcon 
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
+import { ApiError } from '@/lib/api';
 import { cn } from '@/lib/utils';
 import PageShell from '@/components/shared/PageShell';
+import AccessDenied from '@/components/shared/AccessDenied';
 
 // ── Human-readable labels ────────────────────────────────────────────────
 
@@ -133,10 +135,16 @@ export default function AuditPage() {
   const [data, setData] = useState<api.AuditLogPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // R-311 (Wave 7) — track 403 separately so we can render the explicit
+  // AccessDenied frame instead of the generic toast that buries the
+  // role-explanation. F1 F-002: enterprise DEVELOPER on /audit was getting
+  // a "?"-headed page; this flips it to "Audit log requires org admin".
+  const [accessDenied, setAccessDenied] = useState(false);
 
   const fetchLogs = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setAccessDenied(false);
     try {
       const result = await api.getAuditLogs({
         orgScoped: !isSuperAdmin,
@@ -149,13 +157,29 @@ export default function AuditPage() {
       });
       setData(result);
     } catch (e: any) {
-      setError(e.message);
+      if (e instanceof ApiError && e.status === 403) {
+        setAccessDenied(true);
+      } else {
+        setError(e.message);
+      }
     } finally {
       setLoading(false);
     }
   }, [isSuperAdmin, entityFilter, eventFilter, fromDate, toDate, page]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  // R-311 — render AccessDenied component on 403 instead of letting the
+  // page render with empty data + a faceless error toast.
+  if (accessDenied) {
+    return (
+      <AccessDenied
+        feature="Audit log"
+        requiredRole="ORG_ADMIN"
+        backTo="/"
+      />
+    );
+  }
 
   const entries = data?.content ?? [];
 

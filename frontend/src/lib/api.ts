@@ -25,6 +25,24 @@ const STATUS_MESSAGES: Record<number, string> = {
 };
 
 /**
+ * R-311 (Wave 7) — typed API error so consumers can branch on status.
+ *
+ * The pre-existing pattern threw `new Error(friendlyMessage)` and lost
+ * the HTTP status. AuditPage / AccessDenied both need to render a
+ * specific "requires admin role" component on 403 instead of the
+ * generic toast. This subclass preserves the status while keeping the
+ * existing `e.message` shape for every existing call site.
+ */
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
+/**
  * Extracts a human-readable error message from a backend response.
  * Tries to parse JSON body for 'message' or 'error' fields,
  * falls back to known status messages, then to the raw body.
@@ -55,7 +73,7 @@ export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
-    throw new Error(parseErrorMessage(res.status, raw));
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
   }
   if (res.status === 204) return undefined as unknown as T;
   // Handle Spring returning 200 OK with an empty body (e.g. approve/merge endpoints)
@@ -72,7 +90,7 @@ async function reqText(url: string): Promise<string> {
   });
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
-    throw new Error(parseErrorMessage(res.status, raw));
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
   }
   return res.text();
 }
@@ -1813,7 +1831,7 @@ export const downloadValidationReportPdf = async (runId: string): Promise<void> 
   });
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
-    throw new Error(parseErrorMessage(res.status, raw));
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -1873,7 +1891,7 @@ export const adminExportPaymentAuditCsv = async () => {
   });
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
-    throw new Error(parseErrorMessage(res.status, raw));
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
@@ -2453,7 +2471,7 @@ export const downloadProjectDoc = async (
   });
   if (!res.ok) {
     const raw = await res.text().catch(() => res.statusText);
-    throw new Error(parseErrorMessage(res.status, raw));
+    throw new ApiError(res.status, parseErrorMessage(res.status, raw));
   }
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);

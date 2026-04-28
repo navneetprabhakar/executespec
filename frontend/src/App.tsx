@@ -83,6 +83,7 @@ import V3Changelog from '@/v3/pages/V3Changelog';
 // Selling-point #6 — public anonymized /exec snapshot for the
 // PgM/CFO conversion path. Public, no auth, share-link-able.
 import V3ExecDemo from '@/v3/pages/V3ExecDemo';
+import V3EmptyProject from '@/v3/pages/V3EmptyProject';
 // R-201 — Wave 4. "Coming to v3" placeholder for v2 admin routes whose
 // v3 equivalent hasn't shipped yet (per cohabitation invariant in
 // docs/strict-ux-thread-handoff.md §8 — surface-not-allowed renders
@@ -158,6 +159,11 @@ export default function App() {
         <Route path="home" element={<V3HomeRedirect />} />
         <Route path="landing" element={<V3Landing />} />
         <Route path="auth" element={<V3Auth />} />
+        {/* R-310 (Wave 7) — explicit empty-state route. MUST come before
+            the catch-all `p/:slug` so V3ProjectHome doesn't fire a 404 GET
+            on /api/projects/empty (the F1 e2e walk's biggest "is this
+            broken?" trigger). See docs/plans/wave-7-issue-list.md R-310. */}
+        <Route path="p/empty" element={<V3EmptyProject />} />
         <Route path="p/:slug" element={<V3ProjectHome />} />
         <Route path="p/:slug/r/:runShort" element={<V3RunDetail />} />
         <Route path="settings" element={<V3Settings />} />
