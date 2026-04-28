@@ -25,8 +25,11 @@
     <meta name="rating" content="General">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="format-detection" content="telephone=no">
-    <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
-    <meta name="theme-color" content="#0a0a0a">
+    <!-- R-303 (Wave 6) — both theme-color values now match --c-graphite-0
+         (#0B0D10) so the browser address-bar tint, the page background,
+         and the PWA manifest background all stop drifting. -->
+    <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
+    <meta name="theme-color" content="#0B0D10">
     <meta name="color-scheme" content="dark">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -458,25 +461,67 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=Instrument+Serif:ital@1&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
-        /* v2.5.14 — aligned with ExecuteSpec app Graphite + Signal palette.
-           Keeps hero orange→yellow gradient (brand equity) + serif italic;
-           everything else matches the product. */
+        /* R-303 (Wave 6) — every site colour now flows from the
+         * design-system primitive layer (mirrored from
+         * frontend/src/design-system/primitives.css). The website
+         * is a standalone Cloudflare Worker — it can't import the
+         * SPA's primitives.css — so the relevant primitives are
+         * inlined here verbatim. Keep this block in lock-step with
+         * the SPA primitives file: a colour change there must change
+         * here too.
+         *
+         * Three real value shifts vs pre-Wave-6:
+         *   • --red was #F26D6D → var(--c-error) #EF4444
+         *     (drift-resolved with v3 + v2 token files)
+         *   • --orange / --yellow promoted to --c-pop-orange /
+         *     --c-pop-amber semantically — same hex, but now
+         *     "brand-pop gradient pair" not just "two accent colours"
+         *   • All blacks below #0B0D10 (#000, #0a0a0a, #09090e, etc.)
+         *     elsewhere in the file — see body bg + footer — should
+         *     convert to var(--bg) (= --c-graphite-0) over time.
+         *     Wave 6 doesn't sweep them; tracking as residual debt.
+         */
         :root {
-            --bg: #0B0D10;
-            --surface: #14171C;
-            --surface-2: #1B1F26;
-            --surface-border: #242A33;
-            --text-main: #ECEEF2;
-            --text-muted: #8A94A6;
-            --text-secondary: #C9D1DB;
-            --blue: #5B8DEF;
-            --blue-light: #7AA5F5;
-            --purple: #A78BFA;
-            --orange: #F97316;
-            --yellow: #FBBF24;
-            --green: #10B981;
-            --red: #F26D6D;
-            --brand-grad: linear-gradient(135deg, #5B8DEF 0%, #7AD1C8 100%);
+            /* ── Inlined design-system primitives ────────────────── */
+            --c-graphite-0: #0B0D10;
+            --c-graphite-1: #11151B;
+            --c-graphite-2: #14171C;
+            --c-graphite-3: #1B1F26;
+            --c-graphite-4: #242A33;
+            --c-graphite-5: #333B46;
+            --c-graphite-6: #4C5662;
+            --c-ink-100: #ECEEF2;
+            --c-ink-200: #C9D1DB;
+            --c-ink-300: #8A94A6;
+            --c-ink-400: #5E6771;
+            --c-signal-blue: #5B8DEF;
+            --c-signal-blue-hover: #7AA5F5;
+            --c-signal-teal: #7AD1C8;
+            --c-pop-orange: #F97316;
+            --c-pop-amber: #FBBF24;
+            --c-success: #10B981;
+            --c-warning: #F59E0B;
+            --c-error: #EF4444;
+            --c-info: #22D3EE;
+            --c-accent-purple: #A78BFA;
+
+            /* ── Semantic layer (consumer-facing) ────────────────── */
+            --bg: var(--c-graphite-0);
+            --surface: var(--c-graphite-2);
+            --surface-2: var(--c-graphite-3);
+            --surface-border: var(--c-graphite-4);
+            --text-main: var(--c-ink-100);
+            --text-muted: var(--c-ink-300);
+            --text-secondary: var(--c-ink-200);
+            --blue: var(--c-signal-blue);
+            --blue-light: var(--c-signal-blue-hover);
+            --purple: var(--c-accent-purple);
+            --orange: var(--c-pop-orange);            /* brand-pop gradient start */
+            --yellow: var(--c-pop-amber);             /* brand-pop gradient end */
+            --green: var(--c-success);
+            --red: var(--c-error);                    /* was #F26D6D — drift-resolved to #EF4444 */
+            --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
+            --pop-grad: linear-gradient(to right, var(--c-pop-orange), var(--c-pop-amber));
             --font-body: 'DM Sans', sans-serif;
             --font-mono: 'JetBrains Mono', monospace;
             --font-serif: 'Instrument Serif', serif;
