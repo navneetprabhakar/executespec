@@ -6,9 +6,12 @@ import Pill from '../components/Pill';
  * R-151 — /v3/trust page (Amara unlock).
  *
  * Greenfield §4.13: bullet-dense, scannable, attachable to a vendor
- * risk packet in two clicks. SOC 2 status defaults to "Audit in
- * progress with [Auditor TBD]" placeholder per D-151 — user fills
- * in the real auditor name when audit kicks off.
+ * risk packet in two clicks. Wave 7 follow-up: SOC 2 status reads
+ * an honest "not yet certified" line — neither a fabricated ETA nor
+ * an unverified "audit in progress" claim — per founder direction
+ * "ignore SOC 2 for now". Founder swaps in real audit status,
+ * auditor name, and target attestation date when an engagement
+ * is formally underway.
  *
  * Public route. No auth required. Trust Pack PDF download fires the
  * trust_page_pdf_downloaded event for procurement-funnel attribution.
@@ -49,10 +52,12 @@ export default function V3Trust() {
 
       {/* Headline status */}
       <section style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        {/* R-319 (Wave 7) — chip copy now names the completion target so
-            InfoSec scanners reading the trust page see a date, not just
-            "in progress". F2 VP Eng Dana procurement-blocking gap. */}
-        <Pill tone="warn">SOC 2 Type II — completion Q3 2026</Pill>
+        {/* Wave 7 follow-up — SOC 2 chip removed pending real audit
+            status. Per founder direction "ignore SOC 2 for now"; we
+            don't ship a fabricated date or "audit in progress" claim
+            on the headline. The Audit & certifications row below
+            carries an honest "not yet" line for procurement scanners
+            who do need a signal there. */}
         <Pill tone="ok">TLS 1.3 in transit</Pill>
         <Pill tone="ok">AES-256 at rest</Pill>
         <Pill tone="brand">Data residency · us-east4</Pill>
@@ -60,17 +65,19 @@ export default function V3Trust() {
 
       {/* SOC 2 + audits */}
       <Section title="Audit & certifications">
-        {/* R-319 (Wave 7) — explicit Type II completion ETA + Type I
-            availability. Founder swaps the auditor name + the exact
-            month when the engagement letter is signed. F2 P-medium. */}
+        {/* Wave 7 follow-up — replaces the R-319 confident-ETA copy AND
+            the pre-R-319 "[Auditor TBD] · Anticipated Q3 2026" placeholder
+            with an honest "not yet" line. Founder will replace this with
+            the actual letter-of-engagement language when an audit is
+            formally underway — see docs/plans/wave-7-issue-list.md R-319. */}
         <Row label="SOC 2 Type II">
           <span>
-            <strong>Audit underway — completion targeted Q3 2026.</strong>{' '}
-            Letter of engagement and security questionnaire available
-            under NDA. Type I report available on request.
+            Not yet certified. We'll publish audit status, auditor name,
+            and target attestation date here once an engagement is formally
+            underway.
           </span>
         </Row>
-        <Row label="ISO 27001">Roadmap — paired with SOC 2 attestation.</Row>
+        <Row label="ISO 27001">Not yet — paired with future SOC 2 attestation.</Row>
         <Row label="HIPAA / FedRAMP">Not yet — contact us if you need either.</Row>
       </Section>
 
