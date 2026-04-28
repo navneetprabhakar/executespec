@@ -4,9 +4,11 @@ import {
   submitAnonymousRun,
   getV3LandingStats,
   getV3SampleRuns,
+  getV3ExecSnapshot,
   type AnonymousRunResponse,
   type V3LandingStats,
   type V3SampleRun,
+  type V3ExecSnapshot,
 } from '../lib/api';
 import { trackV3, V3_EVENTS } from '../lib/events';
 import Pill from '../components/Pill';
@@ -50,6 +52,9 @@ export default function V3Landing() {
   // rather than blocking the conversion path).
   const [stats, setStats] = useState<V3LandingStats | null>(null);
   const [samples, setSamples] = useState<V3SampleRun[] | null>(null);
+  // R-313 (Wave 7) — exec snapshot for the assertive proof line ("X PRs
+  // shipped in the last 30 days") that F2 ranked as P2 (unblocks Dana).
+  const [snapshot, setSnapshot] = useState<V3ExecSnapshot | null>(null);
   useEffect(() => {
     let cancelled = false;
     getV3LandingStats()
@@ -57,6 +62,9 @@ export default function V3Landing() {
       .catch(() => { /* hide block on failure */ });
     getV3SampleRuns()
       .then((rows) => { if (!cancelled) setSamples(rows); })
+      .catch(() => { /* hide block on failure */ });
+    getV3ExecSnapshot()
+      .then((snap) => { if (!cancelled) setSnapshot(snap); })
       .catch(() => { /* hide block on failure */ });
     return () => { cancelled = true; };
   }, []);
@@ -334,11 +342,12 @@ export default function V3Landing() {
         <VerifiedCounter stats={stats} />
       )}
 
-      {/* R-202 (Wave 4) — "Trusted by" logo strip. Placeholder slots until
-          we have real customer logos to ship; the "Add your logo here →"
-          tail-link is the social-proof acquisition CTA. Honest copy: tells
-          the visitor what this strip will become without fabricating logos. */}
-      <TrustedByStrip />
+      {/* R-202 (Wave 4) + R-313 (Wave 7) — "Trusted by" logo strip with
+          the assertive proof line F2 ranked as P2 (unblocks Dana). The
+          live ship-count from /v3/public/exec-snapshot rides above the
+          placeholder logo grid; if the snapshot fetch fails or returns
+          0 we fall back to the original honest placeholder copy. */}
+      <TrustedByStrip snapshot={snapshot} />
 
       {/* R-204 (Wave 4) — Hero-video slot. Real 30s capture (spec → plan →
           build → PR) is a real-asset task that has to be recorded; until
@@ -666,16 +675,27 @@ function SampleRunCard({ row }: { row: V3SampleRun }) {
   );
 }
 
-// ─── R-202 (Wave 4) — "Trusted by" logo strip ──────────────────────────────
+// ─── R-202 (Wave 4) + R-313 (Wave 7) — "Trusted by" logo strip ─────────────
 // Placeholder until real customer logos can be sourced. Honest framing: the
 // strip explains what it'll become rather than fabricating logos. The
 // "Add your logo here →" tail link routes to a brief 3-question form via
 // mailto: so the marketing team can get a real social-proof acquisition
 // pipeline going without waiting on a CRM build.
+//
+// R-313 (Wave 7) extension: when an exec snapshot is provided AND it
+// shows non-zero ship volume, render an assertive headline above the
+// logo grid ("X PRs shipped in the last N days · across Y projects").
+// F2 P2 — Dana-blocking proof gap. The number is real + live; the logos
+// remain placeholders until the founder swaps in real ones via the
+// existing "Add your logo here" mailto path.
 
-function TrustedByStrip() {
+function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
   // Slot count — sized for desktop 5-up, wraps to 3 then 2 on smaller widths.
   const slots = ['Your logo', 'Your logo', 'Your logo', 'Your logo', 'Your logo'];
+  // R-313 — show the assertive headline only when we actually have shipping
+  // volume to claim. Zero-volume pre-launch state still gets the honest
+  // placeholder strip; we don't fabricate "0 PRs shipped" as proof.
+  const hasShipVolume = !!snapshot && snapshot.totalRuns > 0;
   return (
     <section
       aria-label="Trusted by — placeholder"
@@ -689,6 +709,55 @@ function TrustedByStrip() {
         borderRadius: 10,
       }}
     >
+      {hasShipVolume && (
+        <div
+          style={{
+            textAlign: 'center',
+            marginBottom: 12,
+            paddingBottom: 12,
+            borderBottom: '1px dashed var(--v3-border)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 18,
+              fontWeight: 600,
+              color: 'var(--v3-text)',
+              lineHeight: 1.3,
+            }}
+          >
+            <span style={{
+              backgroundImage: 'var(--v3-pop-grad)',
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent',
+              WebkitTextFillColor: 'transparent',
+              fontFamily: "'Instrument Serif', Georgia, serif",
+              fontStyle: 'italic',
+              fontWeight: 500,
+              fontSize: 22,
+            }}>
+              {snapshot!.totalRuns.toLocaleString()}
+            </span>{' '}
+            PRs shipped in the last {snapshot!.windowDays} days
+          </div>
+          {snapshot!.activeProjects > 0 && (
+            <div
+              style={{
+                fontSize: 11.5,
+                color: 'var(--v3-text-subtle)',
+                marginTop: 4,
+                letterSpacing: 0.2,
+              }}
+            >
+              across {snapshot!.activeProjects.toLocaleString()} active project{snapshot!.activeProjects === 1 ? '' : 's'}
+              {snapshot!.successRatePercent !== null
+                ? ` · ${Math.round(snapshot!.successRatePercent)}% reviewer-CLEAN rate`
+                : ''}
+            </div>
+          )}
+        </div>
+      )}
       <div
         style={{
           display: 'flex',
