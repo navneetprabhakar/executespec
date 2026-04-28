@@ -28,10 +28,10 @@ const CATEGORY_VARS: Record<string, string> = {
   WIRING:       '--status-success',
 };
 function resolveVar(name: string | undefined): string {
-  if (!name) return '#66707D';
-  if (typeof window === 'undefined') return '#66707D';
+  if (!name) return 'var(--status-queued)';
+  if (typeof window === 'undefined') return 'var(--status-queued)';
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-  return v || '#66707D';
+  return v || 'var(--status-queued)';
 }
 const catColor = (k: string) => resolveVar(CATEGORY_VARS[k] ?? '--status-queued');
 const sevColor = (k: string) => resolveVar(SEVERITY_VARS[k] ?? '--status-queued');

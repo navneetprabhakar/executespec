@@ -199,7 +199,7 @@ export default function PlanCard({ runId, onApproved }: PlanCardProps) {
                 fontSize: 12.5,
                 fontWeight: 600,
                 background: 'var(--v3-brand)',
-                color: '#0B0D10',
+                color: 'var(--v3-text-on-brand)',
                 border: 'none',
                 borderRadius: 6,
                 cursor: submitting ? 'not-allowed' : 'pointer',

@@ -133,7 +133,7 @@ export default function PricingGrid({
               fontSize: 13,
               fontWeight: 600,
               background: 'var(--v3-brand)',
-              color: '#0B0D10',
+              color: 'var(--v3-text-on-brand)',
               border: 'none',
               borderRadius: 6,
               textDecoration: 'none',
@@ -211,7 +211,7 @@ function Card({
             transform: 'translateX(-50%)',
             padding: '2px 8px',
             background: 'var(--v3-brand)',
-            color: '#0B0D10',
+            color: 'var(--v3-text-on-brand)',
             fontSize: 10,
             fontWeight: 700,
             letterSpacing: 0.4,
@@ -310,7 +310,7 @@ function Card({
           color: isCurrent
             ? 'var(--v3-text-subtle)'
             : card.badge === 'Most popular'
-            ? '#0B0D10'
+            ? 'var(--v3-text-on-brand)'
             : 'var(--v3-text)',
           border: card.badge === 'Most popular'
             ? 'none'

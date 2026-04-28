@@ -237,7 +237,7 @@ export default function V3RunDetail() {
                   fontSize: 12,
                   fontWeight: 600,
                   background: 'var(--v3-brand)',
-                  color: '#0B0D10',
+                  color: 'var(--v3-text-on-brand)',
                   border: 'none',
                   borderRadius: 6,
                   cursor: 'pointer',

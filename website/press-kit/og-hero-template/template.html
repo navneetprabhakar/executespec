@@ -8,18 +8,49 @@
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Instrument+Serif:ital@0;1&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg: #0B0D10;
-    --surface: #14171C;
-    --surface-2: #1B1F26;
-    --surface-border: #242A33;
-    --text-main: #ECEEF2;
-    --text-muted: #8A94A6;
-    --text-secondary: #C9D1DB;
-    --blue: #5B8DEF;
-    --blue-light: #7AA5F5;
-    --purple: #A78BFA;
-    --yellow: #FBBF24;
-    --green: #17B169;
+    /* R-308 (Wave 6) — every OG hero colour now sourced from the
+     * design-system primitive layer (mirrored from
+     * frontend/src/design-system/primitives.css). The OG card is
+     * generated standalone via render.js + Playwright headless —
+     * can't @import the SPA primitives — so the relevant tokens
+     * are inlined here. Keep in lock-step with the SPA file.
+     *
+     * Three real value shifts vs pre-Wave-6 OG card:
+     *   • --green: #17B169 → var(--c-success) #10B981 (drift-resolved)
+     *   • Surface ladder converged with v2/v3/website (already matched)
+     *   • Brand-pop gradient pair (orange→amber) explicit, used for
+     *     the italic accent word "you can actually merge"
+     */
+
+    /* ── Inlined design-system primitives ────────────────────── */
+    --c-graphite-0: #0B0D10;
+    --c-graphite-2: #14171C;
+    --c-graphite-3: #1B1F26;
+    --c-graphite-4: #242A33;
+    --c-ink-100: #ECEEF2;
+    --c-ink-200: #C9D1DB;
+    --c-ink-300: #8A94A6;
+    --c-signal-blue: #5B8DEF;
+    --c-signal-blue-hover: #7AA5F5;
+    --c-signal-teal: #7AD1C8;
+    --c-pop-orange: #F97316;
+    --c-pop-amber: #FBBF24;
+    --c-success: #10B981;
+    --c-accent-purple: #A78BFA;
+
+    /* ── Semantic layer ──────────────────────────────────────── */
+    --bg: var(--c-graphite-0);
+    --surface: var(--c-graphite-2);
+    --surface-2: var(--c-graphite-3);
+    --surface-border: var(--c-graphite-4);
+    --text-main: var(--c-ink-100);
+    --text-muted: var(--c-ink-300);
+    --text-secondary: var(--c-ink-200);
+    --blue: var(--c-signal-blue);
+    --blue-light: var(--c-signal-blue-hover);
+    --purple: var(--c-accent-purple);
+    --yellow: var(--c-pop-amber);
+    --green: var(--c-success);                  /* was #17B169 — drift-resolved */
   }
   * { margin: 0; padding: 0; box-sizing: border-box; }
   html, body {
