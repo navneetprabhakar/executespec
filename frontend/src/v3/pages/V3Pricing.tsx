@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import PricingGrid from '../components/PricingGrid';
+import TcoEstimator from '../components/TcoEstimator';
 import { trackV3, V3_EVENTS } from '../lib/events';
 import type { TierKey } from '../lib/pricing';
 
@@ -74,6 +75,9 @@ export default function V3Pricing() {
 
       {/* ── 3-card grid ────────────────────────────────────────────────── */}
       <PricingGrid onPickTier={onPickTier} />
+
+      {/* ── R-317 (Wave 7) — TCO mini-calculator (F2 P3 — Dana) ──────── */}
+      <TcoEstimator />
 
       {/* ── FAQ ────────────────────────────────────────────────────────── */}
       <section
