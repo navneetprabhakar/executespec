@@ -421,8 +421,9 @@ export default function ProjectDashboardPage() {
                 onRefresh={() => selectedRunId ? loadRun(selectedRunId) : Promise.resolve()}
               />
             ) : (
-              /* M-001 — copy-only Mission rename. */
-              <div className="text-xs text-muted p-3">Select a mission on the left.</div>
+              /* R-191 (post-cutover) — Mission rename reverted; v3 vocabulary
+                 is "run" everywhere. */
+              <div className="text-xs text-muted p-3">Select a run on the left.</div>
             )
           )}
           {tab === 'code' && (

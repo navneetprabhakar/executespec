@@ -140,7 +140,7 @@ export default function ExecSummaryPage() {
               icon={<CheckCircle2 className="h-3.5 w-3.5" />}
               accent="text-status-success"
               onClick={() => drillToFilteredRuns('COMPLETE')}
-              hint="View completed missions"
+              hint="View completed runs"
             />
             <KpiCard
               label="Success rate"
@@ -148,7 +148,7 @@ export default function ExecSummaryPage() {
               icon={<TrendingUp className="h-3.5 w-3.5" />}
               accent={stats.successRate >= 80 ? 'text-status-success' : stats.successRate >= 60 ? 'text-status-waiting' : 'text-status-error'}
               onClick={() => drillToFilteredRuns('ALL')}
-              hint="View every mission to recompute success rate"
+              hint="View every run to recompute success rate"
             />
             <KpiCard
               label="Active projects"
