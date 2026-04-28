@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+// 2026-04-28 — submitAnonymousRun + AnonymousRunResponse type no longer
+// imported here. Submit now redirects straight to /login (with the typed
+// spec stashed in sessionStorage for post-signup composer hydration).
+// The /api/v3/anonymous-runs endpoint + the AnonymousRunSession backend
+// are still live for the post-signup claim flow.
 import {
-  submitAnonymousRun,
   getV3LandingStats,
   getV3SampleRuns,
   getV3ExecSnapshot,
-  type AnonymousRunResponse,
   type V3LandingStats,
   type V3SampleRun,
   type V3ExecSnapshot,
@@ -43,7 +46,9 @@ const SAMPLE_PROMPTS = [
 export default function V3Landing() {
   const [text, setText] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const [result, setResult] = useState<AnonymousRunResponse | null>(null);
+  // 2026-04-28 — `result` state + AnonymousRunResponse type removed. The
+  // submit handler now navigates to /login on first keystroke-then-submit
+  // so the trial UI never shows.
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
 
@@ -75,26 +80,17 @@ export default function V3Landing() {
     setSubmitting(true);
     setError(null);
     trackV3(V3_EVENTS.LANDING_TEXTAREA_SUBMIT, { textLen: text.length });
+    // 2026-04-28 — direct redirect to /login on anon submit. Previously the
+    // textarea triggered an anonymous-trial run + showed a "Save this run —
+    // sign in" panel; per founder direction we now skip the trial UI and
+    // route the visitor straight into auth, pre-stashing the typed spec so
+    // the post-signup handoff still rehydrates the composer.
     try {
-      const resp = await submitAnonymousRun(text.trim());
-      if (resp.error) {
-        setError(resp.message);
-        return;
-      }
-      setResult(resp);
-      // Pre-stash the spec so the post-auth handoff can rehydrate it
-      // into the project composer.
-      try {
-        sessionStorage.setItem('v3-anon-spec', text.trim());
-        if (resp.sessionToken) sessionStorage.setItem('v3-anon-session', resp.sessionToken);
-      } catch {
-        /* private mode — best-effort */
-      }
-    } catch (e) {
-      setError((e as Error)?.message ?? 'Something broke. Try again.');
-    } finally {
-      setSubmitting(false);
+      sessionStorage.setItem('v3-anon-spec', text.trim());
+    } catch {
+      /* private mode — best-effort */
     }
+    navigate('/login', { state: { from: '/v3/landing' } });
   }
 
   return (
@@ -184,7 +180,7 @@ export default function V3Landing() {
             placeholder='e.g. "Add a forgot-password flow to my Spring Boot app"'
             rows={4}
             aria-label="What do you want to build"
-            disabled={submitting || !!result}
+            disabled={submitting}
             style={{
               width: '100%',
               background: 'transparent',
@@ -216,7 +212,7 @@ export default function V3Landing() {
             </span>
             <button
               type="submit"
-              disabled={text.trim().length === 0 || submitting || !!result}
+              disabled={text.trim().length === 0 || submitting}
               style={{
                 padding: '8px 18px',
                 fontSize: 13,
@@ -242,82 +238,45 @@ export default function V3Landing() {
         </div>
 
         {/* Sample chips */}
-        {!result && (
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
-              gap: 8,
-              marginTop: 16,
-            }}
-          >
-            {SAMPLE_PROMPTS.map((p) => (
-              <button
-                key={p}
-                type="button"
-                onClick={() => {
-                  setText(p);
-                  trackV3(V3_EVENTS.COMPOSER_SAMPLE_CHIP_CLICKED, { sample: p });
-                }}
-                style={{
-                  padding: '10px 12px',
-                  background: 'var(--v3-surface)',
-                  color: 'var(--v3-text-muted)',
-                  border: '1px solid var(--v3-border)',
-                  borderRadius: 6,
-                  fontSize: 12.5,
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  fontFamily: 'inherit',
-                }}
-              >
-                {p}
-              </button>
-            ))}
-          </div>
-        )}
-
-        {/* Result */}
-        {result && (
-          <div
-            style={{
-              marginTop: 16,
-              background: 'var(--v3-surface)',
-              border: '1px solid var(--v3-border-strong)',
-              borderRadius: 8,
-              padding: 14,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <Pill tone={result.status === 'STUB_COMPLETE' ? 'warn' : 'info'} dot={result.status !== 'STUB_COMPLETE'}>
-                {result.status === 'STUB_COMPLETE' ? 'Trial ready' : 'Building'}
-              </Pill>
-              <span style={{ fontSize: 11, color: 'var(--v3-text-subtle)' }}>
-                · session {result.sessionToken?.slice(0, 8)}
-              </span>
-            </div>
-            <p style={{ fontSize: 13, color: 'var(--v3-text)', margin: '0 0 10px' }}>
-              {result.message}
-            </p>
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))',
+            gap: 8,
+            marginTop: 16,
+          }}
+        >
+          {SAMPLE_PROMPTS.map((p) => (
             <button
+              key={p}
               type="button"
-              onClick={() => navigate('/v3/auth')}
+              onClick={() => {
+                setText(p);
+                trackV3(V3_EVENTS.COMPOSER_SAMPLE_CHIP_CLICKED, { sample: p });
+              }}
               style={{
-                padding: '6px 14px',
-                fontSize: 13,
-                fontWeight: 600,
-                background: 'var(--v3-brand)',
-                color: 'var(--v3-text-on-brand)',
-                border: 'none',
+                padding: '10px 12px',
+                background: 'var(--v3-surface)',
+                color: 'var(--v3-text-muted)',
+                border: '1px solid var(--v3-border)',
                 borderRadius: 6,
+                fontSize: 12.5,
                 cursor: 'pointer',
+                textAlign: 'left',
                 fontFamily: 'inherit',
               }}
             >
-              Save this run — sign in
+              {p}
             </button>
-          </div>
-        )}
+          ))}
+        </div>
+
+        {/* 2026-04-28 — anonymous-trial result UI removed. Submit now redirects
+            straight to /login (with the typed spec stashed in sessionStorage
+            for post-signup composer hydration). The "Trial ready · session
+            xxx · Save this run — sign in" panel that used to render here is
+            gone — that flow was the leak between the textarea and the
+            conversion path. */}
 
         {error && (
           <div
