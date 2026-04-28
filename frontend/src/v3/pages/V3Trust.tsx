@@ -13,18 +13,27 @@ import Pill from '../components/Pill';
  * auditor name, and target attestation date when an engagement
  * is formally underway.
  *
+ * R-320 (Wave 8) — Trust Pack PDF now downloadable at /trust-pack.pdf.
+ * Generated from this page's content via Playwright headless (see
+ * /tmp/wave8-trust-pdf/build.mjs in the commit that introduced the
+ * asset). Re-render after any trust-page copy change to keep the
+ * PDF in sync with what's rendered live.
+ *
  * Public route. No auth required. Trust Pack PDF download fires the
  * trust_page_pdf_downloaded event for procurement-funnel attribution.
  */
 export default function V3Trust() {
   function onPdfDownload() {
+    // R-320 (Wave 8) — Trust Pack PDF now ships as a real download.
+    // The PDF at /trust-pack.pdf is rendered from the same content this
+    // page displays (see /tmp/wave8-trust-pdf/build.mjs in the commit
+    // that introduced this asset, or re-render any time via the
+    // generator script). No new claims; just the on-page text in a
+    // printable surface a procurement team can attach to a vendor-risk
+    // packet. Re-generate after any trust-page copy change to keep
+    // the PDF in sync with what's rendered live.
     trackV3(V3_EVENTS.TRUST_PAGE_PDF_DOWNLOADED);
-    // TODO(R-151 follow-up): when the real Trust Pack PDF lands,
-    // point this at /trust-pack.pdf in static assets.
-    alert(
-      'The Trust Pack PDF lands as a Wave-3 follow-up. Until then, ' +
-      'email security@executespec.ai with your vendor-risk template.'
-    );
+    window.open('/trust-pack.pdf', '_blank', 'noopener,noreferrer');
   }
 
   function onContactSales() {
