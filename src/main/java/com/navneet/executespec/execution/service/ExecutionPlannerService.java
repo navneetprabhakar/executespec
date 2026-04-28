@@ -148,7 +148,9 @@ public class ExecutionPlannerService {
         }
     }
 
-    private String buildCodemapsText(String projectId, java.util.Set<UUID> scopedRepoIds) {
+    /** Package-private for unit-test access — see
+     *  {@link com.navneet.executespec.execution.service.ExecutionPlannerCodemapFilterTest}. */
+    String buildCodemapsText(String projectId, java.util.Set<UUID> scopedRepoIds) {
         var maps = codeMapRepo.findByProjectId(projectId);
         if (maps.isEmpty()) return "(no codemaps)";
         // R-324 — when the user picked a subset of project repos at Launch
