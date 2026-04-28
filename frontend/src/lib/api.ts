@@ -931,7 +931,26 @@ export interface AuthUser {
   bitbucketWorkspace?: string | null;
   bitbucketRepoSlug?: string | null;
   // UI preference
-  viewMode?: 'vibe' | 'pro' | 'project';
+  // R-190 (post-cutover) — Vibe view-mode removed. Type narrowed to
+  // 'pro' | 'project'. Any persisted 'vibe' value from V48-era users is
+  // normalized to 'pro' at the parse boundary by `normalizeAuthUser` so
+  // existing rows stay readable without a backend migration. The backend
+  // column still accepts 'vibe' for write-compat (no V145 migration is
+  // shipped here per the explicit "frontend-normalize only" decision).
+  viewMode?: 'pro' | 'project';
+}
+
+/**
+ * R-190 (post-cutover) — coerce legacy `view_mode='vibe'` rows to 'pro'.
+ * Call this on every AuthUser DTO that crosses the API boundary so the
+ * narrowed `viewMode?: 'pro' | 'project'` type matches what the rest of
+ * the frontend ever sees.
+ */
+export function normalizeAuthUser<T extends { viewMode?: unknown }>(u: T): T {
+  if (u && (u as { viewMode?: unknown }).viewMode === 'vibe') {
+    return { ...u, viewMode: 'pro' as const };
+  }
+  return u;
 }
 
 export interface LoginResponse {
@@ -1065,8 +1084,10 @@ export const validateBitbucket = (username: string, appPassword: string, workspa
     body: JSON.stringify({ username, appPassword, workspace, repoSlug }),
   });
 
-/** Updates the user's UI view mode preference ('vibe' or 'pro'). */
-export const updateViewMode = (viewMode: 'vibe' | 'pro' | 'project') =>
+/** Updates the user's UI view mode preference. R-190 (post-cutover) —
+ *  the legacy 'vibe' option is gone; only 'pro' and 'project' are valid
+ *  client-side. Backend still accepts 'vibe' for back-compat. */
+export const updateViewMode = (viewMode: 'pro' | 'project') =>
   req<AuthUser>('/auth/settings/view-mode', {
     method: 'PUT',
     body: JSON.stringify({ viewMode }),

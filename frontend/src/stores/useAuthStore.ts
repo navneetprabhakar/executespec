@@ -30,7 +30,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   login: async (email, password) => {
     const resp = await api.authLogin({ email, password });
     localStorage.setItem('access_token', resp.accessToken);
-    set({ accessToken: resp.accessToken, user: resp.user, isAuthenticated: true });
+    // R-190 — normalize legacy 'vibe' viewMode at the parse boundary.
+    set({ accessToken: resp.accessToken, user: api.normalizeAuthUser(resp.user), isAuthenticated: true });
     // Load permissions after login
     api.getMyPermissions().then((p) => set({ permissions: p })).catch(() => {});
   },
@@ -50,7 +51,8 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     try {
       const resp = await api.authRefresh();
       localStorage.setItem('access_token', resp.accessToken);
-      set({ accessToken: resp.accessToken, user: resp.user, isAuthenticated: true });
+      // R-190 — normalize legacy 'vibe' viewMode at the parse boundary.
+      set({ accessToken: resp.accessToken, user: api.normalizeAuthUser(resp.user), isAuthenticated: true });
       return true;
     } catch {
       localStorage.removeItem('access_token');
@@ -67,7 +69,12 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
       if (!ok) return;
     }
     try {
-      const user = await api.authMe();
+      const rawUser = await api.authMe();
+      // R-190 (post-cutover) — coerce legacy `view_mode='vibe'` rows to 'pro'
+      // at the API parse boundary so the rest of the frontend never sees
+      // 'vibe'. This is the only place we need to normalize: every other
+      // user-shaped read flows through useAuthStore.user.
+      const user = api.normalizeAuthUser(rawUser);
       // 'project' is session-local — never a login default. If the server
       // has it persisted from an older session, reset to 'pro' immediately
       // so the toggle + view don't disagree.
@@ -76,7 +83,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
         api.updateViewMode('pro').catch(() => {});
       }
       set({ user, isAuthenticated: true });
-      if (user.viewMode) {
+      if (user.viewMode === 'pro' || user.viewMode === 'project') {
         useUiStore.getState().setViewMode(user.viewMode);
       }
       // Load tier permissions

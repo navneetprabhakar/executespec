@@ -13,17 +13,16 @@ import { RunTimeline } from '@/components/run/RunTimeline';
 import { useRunStore } from '@/stores/useRunStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { useSseStore } from '@/stores/useSseStore';
-import { useViewMode } from '@/hooks/useViewMode';
 import { downloadWorkspace, editRunPlan, pushToGitHub, pushToScm, updateGithubSettings, archiveRun, retryTask, getValidationReport, type ReviewReport, type ValidationReportData } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { cn, describeRunStatus } from '@/lib/utils';
 import { V2_LEGACY_UI } from '@/lib/constants';
-import VibeProgressNarrative from './VibeProgressNarrative';
+// R-190 (post-cutover) — VibeProgressNarrative deleted with the Vibe surface.
+// useViewMode no longer exposes isVibe; Pro layout is the only path now.
 
 export default function RunDetail() {
   const { activeRun, activeRunId, setActiveRunId, approveRun, cancelRun, createRun, pauseRun, resumeRun } = useRunStore();
   const { addToast, setActiveTab } = useUiStore();
-  const { isVibe } = useViewMode();
   const isMobile = useIsMobile();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
@@ -261,36 +260,9 @@ export default function RunDetail() {
           transition={{ type: 'spring', stiffness: 300, damping: 30 }}
           className="flex flex-col h-full overflow-y-auto bg-[var(--gray-100)] border-l border-[var(--border-default)]"
         >
-          {/* ── Vibe Mode: simplified view ──────────────────────────── */}
-          {isVibe ? (
-            <>
-              {/* Minimal header */}
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
-                <div className="flex items-center gap-2.5 min-w-0">
-                  <GlowDot status={activeRun.status} className="flex-shrink-0" />
-                  <div className="min-w-0">
-                    <p className="text-xs font-mono font-medium text-[var(--text-primary)] line-clamp-1">
-                      {activeRun.runTitle ?? activeRun.userRequest?.slice(0, 60) ?? 'Run'}
-                    </p>
-                    <StatusBadge status={activeRun.status} statusReason={activeRun.statusReason} />
-                  </div>
-                </div>
-                <button onClick={() => setActiveRunId(null)} className="text-muted hover:text-secondary flex-shrink-0 ml-2 p-1.5 -m-1">
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
-
-              {/* Narrative + summary */}
-              <div className="max-h-48 overflow-y-auto flex-shrink-0 border-b border-[var(--border-default)]">
-                <VibeProgressNarrative />
-              </div>
-
-              {/* Code + Preview tabs */}
-              <div className="flex-1 overflow-hidden">
-                <RunDetailTabs />
-              </div>
-            </>
-          ) : (
+          {/* R-190 (post-cutover) — Pro layout is the only path. The legacy
+              Vibe-mode branch (minimal header + VibeProgressNarrative + Code/
+              Preview tabs only) was deleted with the Vibe surface. */}
           <>
           {/* Mobile back button */}
           <button
@@ -724,7 +696,6 @@ export default function RunDetail() {
             <RunDetailTabs />
           </div>
           </>
-          )}
         </motion.div>
       )}
     </AnimatePresence>

@@ -26,7 +26,6 @@ import TaskTimeline from './TaskTimeline';
 import PreviewTab from './PreviewTab';
 import { PIPELINE_STEPS, V2_LEGACY_UI } from '@/lib/constants';
 import { useSseStore } from '@/stores/useSseStore';
-import { useViewMode } from '@/hooks/useViewMode';
 import { fmtTokens, relativeTime, cn } from '@/lib/utils';
 import {
   ChevronDown, ChevronRight,
@@ -108,7 +107,9 @@ export default function RunDetailTabs() {
     }
   }, [activeRun, refreshing, fetchRun, fetchRuns]);
 
-  const { isVibe } = useViewMode();
+  // R-190 (post-cutover) — useViewMode no longer exposes isVibe; the tab
+  // list always renders the full Pro set (with the Code+Preview-only Vibe
+  // subset deleted with the surface).
 
   if (!activeRun) return null;
 
@@ -126,13 +127,9 @@ export default function RunDetailTabs() {
   // the V2 ConversationAgent is wired.
   const chatTab = V2_LEGACY_UI.runConversation ? [{ value: 'chat', label: 'Chat' }] : [];
 
-  const VIBE_TABS = [
-    { value: 'code', label: 'Code' },
-    { value: 'preview', label: 'Preview' },
-    ...chatTab,
-  ];
-
-  const TABS = isVibe ? VIBE_TABS : [
+  // R-190 (post-cutover) — VIBE_TABS (Code + Preview only) deleted with
+  // the Vibe surface. TABS is now always the full Pro set.
+  const TABS = [
     ...BASE_TABS.filter(t => t.value !== 'log' || topLevelPermissions?.canViewLiveLog !== false),
     { value: 'preview', label: 'Preview' },
     ...chatTab,

@@ -4,7 +4,6 @@ import GlowDot from '@/components/shared/GlowDot';
 import { fmtTokens, relativeTime, truncate, describeRunStatus } from '@/lib/utils';
 import type { RunSummary } from '@/lib/api';
 import { cn } from '@/lib/utils';
-import { useViewMode } from '@/hooks/useViewMode';
 import VerdictPill, { deriveVerdict } from '@/components/runs/VerdictPill';
 import { ACTIVE_STATUSES, GATE_STATUSES } from '@/lib/constants';
 
@@ -40,7 +39,11 @@ const cardVariants = {
 };
 
 export default function RunCard({ run, isActive, onClick, index, compact }: RunCardProps) {
-  const { isVibe } = useViewMode();
+  // R-190 (post-cutover) — `isVibe` source removed. The simplified-card
+  // branch is now `compact`-only. RunList no longer passes compact=true
+  // anywhere (it used to be `compact={isVibe}`); the branch stays for
+  // explicit-compact callers and as the default sidebar-list rendering
+  // when the host wants the dense list shape.
 
   // Derive verdict once per render. Returns null for in-flight runs and
   // pre-v2.5.10 terminals without statusReason.
@@ -48,8 +51,8 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
     ? deriveVerdict({ statusReason: run.statusReason ?? null })
     : null;
 
-  // ── Vibe mode: simplified card ────────────────────────────────────────────
-  if (isVibe || compact) {
+  // ── Compact card (sidebar / dense list rendering) ─────────────────────────
+  if (compact) {
     return (
       <motion.button
         custom={index}
@@ -82,7 +85,7 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
     );
   }
 
-  // ── Pro mode: full card ───────────────────────────────────────────────────
+  // ── Default: full card (Pro layout) ──────────────────────────────────────
   return (
     <motion.button
       custom={index}

@@ -13,7 +13,6 @@ import { MarkdownContent } from '@/components/shared/MarkdownContent';
 import { UpgradeNudge } from '@/components/billing/UpgradeNudge';
 import ProviderModelSelector, { getPersistedSelection } from '@/components/runs/ProviderModelSelector';
 import { AddGitHubPatDrawer, AddApiKeysDrawer } from '@/components/runs/InlineCredentialDrawers';
-import { useViewMode } from '@/hooks/useViewMode';
 import { useIsMobile } from '@/hooks/useIsMobile';
 import Button from '@/components/shared/Button';
 import Checkbox from '@/components/shared/Checkbox';
@@ -64,7 +63,9 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
   const { createRun, setActiveRunId } = useRunStore();
   const { addToast } = useUiStore();
   const { user } = useAuthStore();
-  const { isVibe, vibeRunDefaults } = useViewMode();
+  // R-190 (post-cutover) — useViewMode no longer exposes isVibe / vibeRunDefaults;
+  // every submission is a Pro-mode submission. The Vibe-only PROTOTYPE +
+  // skipApproval + autoMerge defaults are gone with the surface.
   const isMobile = useIsMobile();
   const navigate = useNavigate();
 
@@ -200,9 +201,9 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
       const isPrototype = executionMode === 'PROTOTYPE';
       const runId = await createRun({
         userRequest: goal,
-        executionMode: isVibe ? 'PROTOTYPE' : executionMode,
-        skipApproval: isVibe ? vibeRunDefaults.skipApproval : isPrototype,
-        autoMerge: isVibe ? vibeRunDefaults.autoMerge : isPrototype,
+        executionMode,
+        skipApproval: isPrototype,
+        autoMerge: isPrototype,
         ...(model ? { modelName: model } : {}),
         ...(provider ? { aiProvider: provider } : {}),
         ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
@@ -422,9 +423,11 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               Build My Spec
             </button>
 
-            {/* ── Pro-only options (hidden in Vibe mode) ────────────────────── */}
-            {!isVibe && (
-              <>
+            {/* ── Run options ─────────────────────────────────────────────────
+                R-190 (post-cutover) — these were previously Pro-only (hidden
+                in Vibe mode); with Vibe gone they always render. The matching
+                `</>` + `)}` at the bottom of this block were removed in the
+                same change. */}
                 {/* Prototype Mode toggle — v2.5.13 colour fix.
                     Was orange (warning) for the default-on state, which read as
                     "danger" rather than "fast path". Switched to accent-blue so
@@ -560,8 +563,6 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                     </motion.div>
                   )}
                 </AnimatePresence>
-              </>
-            )}
 
             {/* BYOK warning for TEAM tier without API keys + inline drawer.
                 Tier-coherence: TEAM + ENTERPRISE are BYOK; if no keys are

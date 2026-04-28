@@ -82,11 +82,12 @@ export default function Header() {
       </div>
 
       {/* Phase 1.1 #8: view-mode toggle retired from the header — surface
-          will be domain-driven in Phase 2 (app.executespec.ai vs.
-          build.executespec.ai). Tier defaults pre-split: paid users
-          land in 'pro' mode, free users in 'vibe'. The component is
-          retained in the codebase for the OrgProjectsPage Dashboard
-          button (still useful as an explicit override). */}
+          is domain-driven (app.executespec.ai vs. build.executespec.ai).
+          R-190 (post-cutover): the legacy Vibe simplified mode was deleted;
+          ViewModeToggle now only switches between 'pro' (default) and
+          'project' (multi-repo). The component is retained in the codebase
+          for the OrgProjectsPage Dashboard button (still useful as an
+          explicit override). */}
 
       {/* Spacer */}
       <div className="flex-1" />

@@ -4,7 +4,7 @@
  *
  * Pattern stolen from emergent.sh's zero-state — but optimized for our
  * "ship verified code into a real repo" north star instead of theirs
- * ("vibe-code a demo in 10 minutes"):
+ * (the "10-minute throwaway demo" framing):
  *
  *   ┌────────────────────────────────────────┐
  *   │  Ship verified code from a spec.       │
