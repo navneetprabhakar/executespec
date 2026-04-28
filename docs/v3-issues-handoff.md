@@ -2,21 +2,27 @@
 
 ## TL;DR
 
-The previous thread shipped three batches end-to-end (4-concern fix
-batch + R-190/R-191 post-cutover cleanup + BETA LIVE pill nudge
-+ anon-submit /login redirect) and diagnosed one failed run.
+This thread shipped **Phase 1 Group A** (D-125 RepoAttachPopover
+finishings) end-to-end across 5 commits on
+`feature/v3-platform-expansion`.  R-321 → R-325 are all in.
+**Phase 1.5 (R-326 doc-tree refresh)** is in flight — Cluster A (root
+docs + this handoff) lands first; clusters B (docs/), C (docs/plans/),
+and D (per-package CLAUDE.md) come next per the per-cluster commit
+cadence the user requested.  **Phase 2** (agent builder → ready-mades
+→ use cases → CLI → plugins) is unchanged: audit-first, scope to user,
+execute on go.
 
-**A new branch `feature/v3-platform-expansion` is cut off `cc80c1c4`**
-for all queued work. Per founder direction: **no merge to dev unless
-explicitly told.** This means the GH Action `deploy.yml` will NOT
-auto-fire on every batch — work lands on the feature branch + sits
-there until the founder calls deploy.
+Per founder direction: **no merge to dev unless explicitly told.**
+The GH Action `deploy.yml` will NOT auto-fire on every batch — work
+lands on the feature branch + sits there until the founder calls
+deploy.
 
 `origin/dev` and `origin/main` stay aligned at `cc80c1c4` until then.
 
-This file is the new thread's entry point. Read top-to-bottom; queued
-work is in §3 (Group A: D-125) + §4 (future-scope: agent builder →
-ready-mades → use-cases → CLI → plugins) in that exact order.
+This file is the entry point for the next thread. Read top-to-bottom;
+queued work is in §3 (status of Group A — now SHIPPED) + §3.5
+(Phase 1.5 doc-refresh) + §4 (Phase 2 future-scope queue) in that
+exact order.
 
 ---
 
@@ -26,14 +32,15 @@ ready-mades → use-cases → CLI → plugins) in that exact order.
 
 | Field | Value |
 |---|---|
-| **Working branch (new thread)** | **`feature/v3-platform-expansion`** ← cut off `cc80c1c4` this turn |
-| Worktree path | **`/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/`** (already checked out on the new branch) |
-| Current branch HEAD | `cc80c1c4` (matches the parent at branch-cut time) |
-| `origin/feature/v3-platform-expansion` tip | (set by the handoff-doc commit pushed this turn — see §11 below) |
-| `origin/feature/v3-conversion` tip | `cc80c1c44dfc25074db6bac10a126ce44cc7318b` (frozen — last shipped batch's branch; do NOT add to it) |
+| **Working branch** | **`feature/v3-platform-expansion`** ← cut off `cc80c1c4` |
+| Worktree path | **`/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/`** |
+| Current branch HEAD (post Phase 1 Group A) | `6bf09fc3` (R-325 big-repo opt-in commit; pushed) |
+| `origin/feature/v3-platform-expansion` tip | `6bf09fc3` until the next push |
+| `origin/feature/v3-conversion` tip | `cc80c1c44dfc25074db6bac10a126ce44cc7318b` (frozen — do NOT add to it) |
 | `origin/dev` tip | `cc80c1c44dfc25074db6bac10a126ce44cc7318b` (matches the frozen `feature/v3-conversion`) |
 | `origin/main` tip | `cc80c1c44dfc25074db6bac10a126ce44cc7318b` (matches dev) |
-| Uncommitted edits at branch-cut | **none** (only `src/main/resources/static/trust-pack.pdf` untracked — Vite build artifact, regenerated on every `npm run build`; do not commit) |
+| Phase 1 Group A commit trail (this thread) | `dbfaa649` R-321/R-322/R-323 · `9e83ff05` R-324 ckpt 1 · `fe976dcd` R-324 ckpt 2 · `8e86599c` R-324 ckpt 3 · `6bf09fc3` R-325 |
+| Uncommitted edits | **none** between batches; only `src/main/resources/static/trust-pack.pdf` may appear untracked — Vite build artifact, do not commit |
 
 ### Deployed surfaces (frozen at `cc80c1c4` until founder calls deploy)
 
@@ -54,7 +61,9 @@ npm --prefix frontend run dev   # frontend (different terminal)
 
 ### Last known R-### used
 
-**`R-320`** (Wave 8 Trust Pack PDF). Next free: **`R-321`**. Use sequential R-3## IDs for new work below.
+**`R-326`** (Phase 1.5 doc-tree refresh, in flight at handoff time —
+Cluster A pushed; clusters B/C/D pending). Next free: **`R-327`**.
+Use sequential R-3## IDs for new work below.
 
 ---
 
@@ -75,74 +84,102 @@ npm --prefix frontend run dev   # frontend (different terminal)
 
 ---
 
-## 3 · Phase 1 — Group A queued (D-125 RepoAttachPopover, ALL APPROVED)
+## 3 · Phase 1 — Group A SHIPPED (D-125 RepoAttachPopover finishings)
 
-User approved every recommendation. Execute as a focused mini-wave on `feature/v3-platform-expansion`.
-
-### Suggested batching
+All five items shipped on `feature/v3-platform-expansion` between
+`a6f58d88` and `6bf09fc3` this thread.  Commit trail per item:
 
 ```
-Batch 1 (one quick mini-wave — mostly XS-S effort):
-  R-321 — Q1bc: PAT inline form + "ask your admin" copy-link in RepoAttachPopover
-  R-322 — Q2a:  .executespec/root.yml marker file detection (fall back to repo root)
-  R-323 — Q3a:  hard size threshold reject + helpful copy
+R-321 (Q1bc) — PAT inline form + "ask your admin" copy-link
+R-322 (Q2a)  — .executespec/root.yml marker file detection
+R-323 (Q3a)  — hard size threshold reject + helpful copy
+              ↓ Batch 1: dbfaa649
 
-Batch 2 (own mini-wave — M effort):
-  R-324 — Q4c:  finish the multi-repo project flow that V143/V144 half-shipped
+R-324 (Q4c)  — multi-repo project flow finish (3 checkpoints)
+              ↓ Ckpt 1 schema + planner scope:    9e83ff05
+              ↓ Ckpt 2 frontend "Attach another": fe976dcd
+              ↓ Ckpt 3 codemap-filter regression: 8e86599c
 
-Batch 3 (rides on R-324):
-  R-325 — Q3d:  "yes attach anyway" big-repo opt-in (per-run override)
+R-325 (Q3d)  — big-repo "Attach anyway" opt-in
+              ↓ 6bf09fc3
 ```
 
-### R-321 — Q1: Private repo, no org-level GitHub App access
+### Important audit correction
 
-| Field | Value |
+The pre-thread handoff claimed V143/V144 "half-shipped" the multi-repo
+flow. **That was wrong.** V143 is the product-split ENUM
+('vibe'/'executespec') + `app_user_product_access` join table; V144
+is per-seat TEAM tier reinstatement. Neither touches multi-repo.
+
+The actual multi-repo machinery was substantially built across the
+existing codebase (ExecutionSolution.repoMappings, V2RunOrchestrator
+multi-clone, ExecutionPlannerService per-repo decomposition); the gap
+was that `req.repoIds()` was being dropped on the floor by the
+orchestrator. R-324 added V155 `execution_run.selected_repo_ids` JSONB
+column + serializer + planner-side filter so the user's selection now
+actually drives planning.
+
+### What's now live in the popover
+
+| Surface | Behaviour |
 |---|---|
-| Source | `frontend/src/v3/components/RepoAttachPopover.tsx` docstring §1 + line 392 `TODO(D-125 #1)` |
-| Approved option | **(b) PAT inline form** + **(c) "ask your admin" copy-link**, both visible on a single "no access?" panel |
-| Deferred | (a) GitHub App org-install flow — needs the App registered first (external dep) |
-| Effort | XS (b) + XS (c) — both 1-2 hours total |
-| Acceptance | (a) When the popover detects the PAT-list returns 0 repos OR `user.hasGithubPat === false`, render a panel with two side-by-side affordances: a "Paste a PAT" form (inline; same behavior as Settings page; saves to `appUser.githubPat`) and an "Ask your admin to install" pre-filled mailto + a "Copy install link" button. (b) Both are dismissible; once a PAT is saved, the panel collapses. (c) The "(a) GitHub App install" path remains a TODO comment with a link to /v3/integrations as the fallback. |
-| Files likely touched | `RepoAttachPopover.tsx`, possibly a new `<NoRepoAccessPanel>` component if it gets large, `lib/api.ts` for the PAT save endpoint (already exists — `validateGithubPat` + `updateGithubPat`) |
+| No PAT panel | inline PAT input + Test/Save + ask-admin (mailto + copy-link) + tertiary `/v3/integrations` link |
+| Monorepo subdir | detected from `.executespec/root.yml` on attach + sync; chip on RepoCard shows `root: <subdir>` |
+| Repo size | hard reject above `executespec.repo.max-size-kb` (default 250 MB); the 413 message names the threshold + opt-in path |
+| Big-repo opt-in | "Attach anyway (counts more credits)" CTA on the size-gate error; persists `attached_anyway` + `size_kb` on the row; chip on RepoCard surfaces "big repo · counts more credits" |
+| Existing-project attach | new "+ Attach repo" button on V3ProjectHome pulse row; popover invokes `onAttached` → re-loads the project store in place |
 
-### R-322 — Q2: Mono-repo subdirectory
+### Deferred (intentionally) from R-321..R-325
 
-| Field | Value |
-|---|---|
-| Source | `RepoAttachPopover.tsx` line 174 `TODO(D-125 #2)` + docstring §2 |
-| Approved option | **(a) `.executespec/root.yml` marker file detection** + fall back to repo root |
-| Effort | S (~half-day) |
-| Acceptance | (a) On repo attach, the backend reads `.executespec/root.yml` from the default branch via GitHub Contents API. (b) If present, parses `root: <subdir>` field and uses that as the project root for codemap + clone operations. (c) If absent or unparseable, falls back to repo root (current behavior). (d) The marker is documented in the README + a comment on `ProjectRepo.subdir` (new column) explaining the convention. |
-| Files likely touched | New `Vxxx__project_repo_subdir.sql` migration adding `project_repo.subdir` column, `ProjectRepo.java` entity, `GitHubRepoService.java` to read the marker, `WorkspaceInitService.java` to use the subdir on clone, frontend `RepoCard.tsx` shows the subdir if non-null |
-| Dovetail | This pairs naturally with R-325 (sparse-checkout for big repos) |
+- **Q1 (a)** GitHub App org-install flow — needs the App registered first.
+- **Per-run credit surcharge formula** when any selected repo has
+  `attached_anyway=TRUE`. Tracked as a TODO in the cost-tracker code
+  path; should land alongside the next pricing pass.
 
-### R-323 — Q3: Repo-too-big quota gate
+> The per-item scope tables for R-321 → R-325 (the original
+> approval-time spec) lived here and have been retired now that the
+> work is shipped.  The commit messages on each commit hash above
+> capture the as-built scope; CLAUDE.md + USER_MANUAL.md +
+> per-package CLAUDE.md files capture the runtime contract.
 
-| Field | Value |
-|---|---|
-| Source | `RepoAttachPopover.tsx` docstring §3 |
-| Approved option | **(a) hard size limit + reject with helpful copy** NOW. **(d) "yes attach anyway" opt-in** layered on R-324 multi-repo work (deferred). |
-| Effort | XS (a) — read repo `size` from GitHub repo-meta API + reject if > threshold |
-| Acceptance | (a) On repo attach, if GitHub returns `repo.size_kb > 250_000` (250 MB clone equivalent), reject with copy: "This repo is too large for the platform's clone-time budget. Try attaching a smaller repo, or ping `admin@executespec.ai` to discuss large-repo support." (b) Threshold is config-tunable via `application.yml` `executespec.repo.max-size-kb`. (c) Per-tier overrides land later as part of R-325. |
-| Files likely touched | `GitHubRepoService.java` size check, `ProjectRepoService.java` reject path, `application.yml` config, frontend error rendering in `RepoAttachPopover.tsx` |
+---
 
-### R-324 — Q4: Finish multi-repo project flow (own mini-wave, M effort)
+## 3.5 · Phase 1.5 — R-326 doc-tree refresh (in flight)
 
-| Field | Value |
-|---|---|
-| Source | V143 (`product_split.sql`) + V144 (`reinstate_per_seat_team_tier.sql`) shipped half the schema; the UX completion was deferred. |
-| Approved option | **(c) finish the multi-repo project flow that V143/V144 already half-shipped** |
-| Effort | **M** — own mini-wave, expect per-3-checkpoint commit cadence |
-| Why high-leverage | Once it lands, **R-325 (per-run repo override) becomes free** (b) and (d) options from the original Q4 audit become trivial UI add-ons; the entire 2.4.0 multi-repo arc closes. |
-| Acceptance (audit-first) | New thread should audit V143 + V144 + the existing `ExecutionSolution` per-repo entity + `ExecutionRun.target_repos` array + the partial `MultiRepoExecutionService` (if exists) before scoping. Surface the audit + propose a wave plan. **Do not start the wave without user-confirmed scope.** |
+User directive 2026-04-28: "before starting Phase 2, update all
+documents in the project including docs/ and docs/plans/" so the
+written record matches the live code post-D-125 + post-Phase-1
+Group A.
 
-### R-325 — Q3 layer: "yes attach anyway" big-repo opt-in (rides on R-324)
+### Cluster cadence (one commit per cluster)
 
-| Field | Value |
-|---|---|
-| Approved option | **(d) big-repo opt-in toggle** — "Yes, attach anyway (will count more credits)" button |
-| Why deferred | The opt-in needs per-run cost-cap awareness which the multi-repo work in R-324 will provide (since multi-repo runs already have to negotiate per-repo cost). |
-| Acceptance | After R-324 lands: when R-323's threshold-reject fires, surface an opt-in button that bypasses the gate but adds a per-repo credit surcharge tracked in `RunCostLog`. |
+| Cluster | Scope | Status |
+|---|---|---|
+| **A** — Root + handoff | `/CLAUDE.md`, `/README.md`, `/CHANGELOG.md`, this handoff doc | shipped this commit |
+| **B** — `docs/` user-facing + architecture | ARCHITECTURE / CODEMAP / DEPLOYMENT / JAVADOC / PRD / RBAC / USER_MANUAL / WORKFLOWS / document_map / frontend-api-usage | next |
+| **C** — `docs/plans/` | classify every plan SHIPPED / SUPERSEDED / STILL-PENDING; rewrite stale "we will do X" claims | next |
+| **D** — per-package CLAUDE.md sweep | `frontend/CLAUDE.md`, `src/main/java/.../*/CLAUDE.md` | next |
+
+### Cluster A (this commit) — what changed
+
+- `README.md` line 3: "Premium feature: ENTERPRISE + MAX tiers" →
+  "ENTERPRISE + TEAM tiers" (V141 renamed MAX → TEAM on dev/main; the
+  per-seat TEAM + MAX co-existence only lives on the un-merged
+  `feature/product-split-prep` branch).
+- `CLAUDE.md` line 108: same MAX → TEAM rename note.
+- `docs/v3-issues-handoff.md`: full refresh — Phase 1 Group A marked
+  SHIPPED with commit trail; Phase 1.5 R-326 added as the new
+  in-flight section; per-question scope tables retired since the
+  approval-time spec is now obsolete.
+
+### Why the audit was tighter than expected
+
+The pre-R-326 audit found the documentation surface remarkably clean.
+The R-190 + R-191 cleanup pass already retired the user-facing Vibe-A
+/ Mission / "Don't prompt. Specify." vocabulary; the v2.7 changelog
+captured what landed; the README plans/index already classified every
+`docs/plans/` file accurately.  The remaining stale claims are the
+two MAX → TEAM tier-name drifts above, plus this handoff doc itself.
 
 ---
 
