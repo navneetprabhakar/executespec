@@ -1,7 +1,7 @@
 {
   "name": "ExecuteSpec",
   "short_name": "ExecuteSpec",
-  "description": "Spec-driven AI coding platform with multi-repo project workspaces, 0-100 verified scoring, and autonomous CI/CD validation.",
+  "description": "AI that ships pull requests your team will actually merge — for one repo or for twenty. Multi-repo project workspaces, plan-approval gate, and a Ready / Needs review / Failed verdict on every PR.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
@@ -45,7 +45,7 @@
       "sizes": "1200x630",
       "type": "image/png",
       "form_factor": "wide",
-      "label": "ExecuteSpec — Specify once. Ship verified code."
+      "label": "ExecuteSpec — AI that ships PRs your team will merge."
     }
   ],
   "shortcuts": [
