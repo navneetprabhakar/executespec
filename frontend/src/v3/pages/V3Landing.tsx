@@ -109,25 +109,26 @@ export default function V3Landing() {
             textAlign: 'center',
             margin: 0,
             lineHeight: 1.15,
-            maxWidth: 760,
+            maxWidth: 820,
           }}
         >
-          AI that ships pull requests
+          ExecuteSpec ships AI-written pull requests
           <br />
-          your team will actually merge.
+          you can actually merge — for one repo or for twenty.
         </h1>
         <p
           style={{
             fontSize: 15,
             color: 'var(--v3-text-muted)',
             textAlign: 'center',
-            maxWidth: 600,
+            maxWidth: 640,
             margin: 0,
             lineHeight: 1.55,
           }}
         >
-          Plan, build, test, review, and open a PR — measured 80% verified
-          score on real runs. We let you see the score on every one of yours.
+          Plan, build, test, review, open a PR. ~80% of real runs land Ready —
+          and you see the verdict (Ready / Needs review / Failed) on every one
+          of yours.
         </p>
       </section>
 
