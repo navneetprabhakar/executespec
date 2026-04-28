@@ -92,22 +92,36 @@ public class ProjectRepoService {
 
         String branch = req.defaultBranch() != null ? req.defaultBranch() : "main";
         String repoUrl = "https://github.com/" + req.githubRepoFullName();
-        // R-323 — hard size gate. Skipped when the threshold is set to
-        // -1 (escape hatch) or when GitHub didn't return a size we can
-        // trust (private repo + missing PAT, transient 5xx, etc.).
-        // R-325 will layer an opt-in bypass over this gate.
+        // R-323 — hard size gate (skipped when threshold = -1).
+        // R-325 — when the request opts in via {@code attachAnyway},
+        // the gate is bypassed and the attach proceeds; the actual size
+        // + the opt-in flag are persisted on the row so downstream cost
+        // calc can apply a credit surcharge to runs that touch this
+        // repo. The size lookup runs unconditionally so we always have
+        // a population baseline, regardless of opt-in path.
+        long observedSizeKb = -1L;
+        boolean attachAnywayRequested = Boolean.TRUE.equals(req.attachAnyway());
         if (repoMaxSizeKb > 0) {
-            long sizeKb = gitHub.getRepoSizeKb(repoUrl, null);
-            if (sizeKb > 0 && sizeKb > repoMaxSizeKb) {
+            observedSizeKb = gitHub.getRepoSizeKb(repoUrl, null);
+            boolean exceeds = observedSizeKb > 0 && observedSizeKb > repoMaxSizeKb;
+            if (exceeds && !attachAnywayRequested) {
                 long thresholdMb = repoMaxSizeKb / 1024;
-                long actualMb = sizeKb / 1024;
+                long actualMb = observedSizeKb / 1024;
                 throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
                         "This repo (≈" + actualMb + " MB) is larger than the platform's "
                                 + thresholdMb + " MB clone-time budget. "
-                                + "Try a smaller repo, or contact admin@executespec.ai "
-                                + "to discuss large-repo support.");
+                                + "Try a smaller repo, or attach anyway "
+                                + "(every run that touches it will count more credits), "
+                                + "or contact admin@executespec.ai to discuss large-repo support.");
+            }
+            if (exceeds) {
+                long actualMb = observedSizeKb / 1024;
+                log.info("[R-325] attachAnyway accepted for {} (~{} MB) — credit surcharge will apply",
+                        req.githubRepoFullName(), actualMb);
             }
         }
+        boolean attachedAnywayPersisted =
+                attachAnywayRequested && observedSizeKb > 0 && observedSizeKb > repoMaxSizeKb;
         // R-322 — read the .executespec/root.yml monorepo marker on attach
         // so monorepo customers get correct project-root behaviour without
         // a separate config step. NULL stays the default (repo root).
@@ -123,6 +137,12 @@ public class ProjectRepoService {
                 .detectedStack(stackDetector.detect(req.githubRepoFullName(), null))
                 .lastSyncedSha(gitHub.getBranchHeadSha(repoUrl, branch, null))
                 .subdir(subdir)
+                // R-325 — persist the observed size + opt-in flag so the
+                // credit-surcharge calc can run later. Negative observed
+                // size = "we couldn't measure it" → store NULL so the
+                // calc treats it as unknown rather than 0 KB.
+                .sizeKb(observedSizeKb > 0 ? observedSizeKb : null)
+                .attachedAnyway(attachedAnywayPersisted)
                 .build();
         repoRepo.save(entity);
 

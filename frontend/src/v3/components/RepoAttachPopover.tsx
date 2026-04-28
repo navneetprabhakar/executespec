@@ -122,6 +122,10 @@ export default function RepoAttachPopover({
   const [patTesting, setPatTesting] = useState(false);
   const [patMsg, setPatMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [installLinkCopied, setInstallLinkCopied] = useState(false);
+  // R-325 — track the repo the user just tried to attach so we can
+  // surface a single-click "Attach anyway" retry on size-gate
+  // rejection. Cleared on every retry / popover open.
+  const [oversizedRepo, setOversizedRepo] = useState<GitHubRemoteRepo | null>(null);
 
   // Load repos whenever the popover opens.
   useEffect(() => {
@@ -171,6 +175,7 @@ export default function RepoAttachPopover({
     setPatInput('');
     setPatMsg(null);
     setInstallLinkCopied(false);
+    setOversizedRepo(null);
   }, [open]);
 
   // Esc to close
@@ -246,17 +251,21 @@ export default function RepoAttachPopover({
     return repos.filter((r) => r.fullName.toLowerCase().includes(q));
   }, [repos, filter]);
 
-  async function onPick(repo: GitHubRemoteRepo) {
+  async function onPick(repo: GitHubRemoteRepo, attachAnyway = false) {
     setSelecting(repo.fullName);
     setPhase('attaching');
     setError(null);
+    if (!attachAnyway) setOversizedRepo(null);
     try {
       // Step 1 — register the repo with v3 (USER scope; ORG path can
-      // be added later when org-wide GitHub App is wired).
+      // be added later when org-wide GitHub App is wired). The
+      // attachAnyway flag (R-325) bypasses the backend size gate and
+      // marks the row so runs touching it count more credits.
       const created = await createRepo({
         scope: 'USER',
         githubRepoFullName: repo.fullName,
         defaultBranch: repo.defaultBranch,
+        attachAnyway,
       });
 
       let projectId = targetProjectId;
@@ -287,7 +296,17 @@ export default function RepoAttachPopover({
         navigate(`/v3/p/${projectId}`);
       }
     } catch (e) {
-      setError((e as Error)?.message ?? 'Attach failed');
+      const msg = (e as Error)?.message ?? 'Attach failed';
+      // R-325 — detect the backend's 413 size-gate copy and stash the
+      // repo so we can surface an "Attach anyway" CTA. The message
+      // contract is owned by ProjectRepoService.createRepo.
+      const looksLikeSizeGate =
+        msg.includes('larger than the platform') ||
+        msg.includes('clone-time budget');
+      if (looksLikeSizeGate && !attachAnyway) {
+        setOversizedRepo(repo);
+      }
+      setError(msg);
       setPhase('error');
     } finally {
       setSelecting(null);
@@ -730,37 +749,62 @@ export default function RepoAttachPopover({
               }}
             >
               {error ?? 'Something went wrong. Try again.'}
-              <button
-                type="button"
-                onClick={() => {
-                  setPhase('loading');
-                  // Re-trigger effect by toggling open prop is owned
-                  // by the parent — instead just retry the listing.
-                  listGitHubRepos()
-                    .then((list) => {
-                      setRepos(list ?? []);
-                      setPhase('list');
-                      setError(null);
-                    })
-                    .catch((e: Error) => {
-                      setError(e?.message ?? 'Failed');
-                      setPhase('error');
-                    });
-                }}
-                style={{
-                  marginTop: 8,
-                  padding: '4px 10px',
-                  background: 'transparent',
-                  color: 'var(--v3-text)',
-                  border: '1px solid var(--v3-border)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  fontFamily: 'inherit',
-                }}
-              >
-                Retry
-              </button>
+              <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {/* R-325 — opt-in CTA shown only when the most recent
+                    attach hit the size gate. One click re-submits the
+                    same repo with attachAnyway=true. */}
+                {oversizedRepo && (
+                  <button
+                    type="button"
+                    onClick={() => onPick(oversizedRepo, true)}
+                    title="Attach this repo despite its size. Runs touching it count more credits."
+                    style={{
+                      padding: '4px 10px',
+                      background: 'rgba(245,158,11,0.18)',
+                      color: '#FBBF24',
+                      border: '1px solid rgba(245,158,11,0.5)',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Attach anyway (counts more credits)
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhase('loading');
+                    setOversizedRepo(null);
+                    // Re-trigger effect by toggling open prop is owned
+                    // by the parent — instead just retry the listing.
+                    listGitHubRepos()
+                      .then((list) => {
+                        setRepos(list ?? []);
+                        setPhase('list');
+                        setError(null);
+                      })
+                      .catch((e: Error) => {
+                        setError(e?.message ?? 'Failed');
+                        setPhase('error');
+                      });
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    background: 'transparent',
+                    color: 'var(--v3-text)',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {oversizedRepo ? 'Pick a different repo' : 'Retry'}
+                </button>
+              </div>
             </div>
           )}
         </div>

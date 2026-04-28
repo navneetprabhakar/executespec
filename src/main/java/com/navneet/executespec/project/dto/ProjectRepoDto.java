@@ -18,6 +18,9 @@ public record ProjectRepoDto(
         boolean webhookInstalled,
         // R-322 — declared monorepo project root (null = repo root).
         String subdir,
+        // R-325 — repo size at attach time (KB) + big-repo opt-in flag.
+        Long sizeKb,
+        boolean attachedAnyway,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -34,6 +37,8 @@ public record ProjectRepoDto(
                 r.getDetectedStack(),
                 r.isWebhookInstalled(),
                 r.getSubdir(),
+                r.getSizeKb(),
+                r.isAttachedAnyway(),
                 r.getCreatedAt(),
                 r.getUpdatedAt()
         );

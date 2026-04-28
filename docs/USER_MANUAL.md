@@ -222,7 +222,10 @@ repo root (today's default), so single-package repos need no change.
 
 > **Repo size limit.** ExecuteSpec rejects repos larger than the
 > platform's clone-time budget (default 250 MB) at attach time. If you
-> need to attach a larger repo, contact `admin@executespec.ai`.
+> still need to attach a larger repo, click **Attach anyway** on the
+> rejection prompt — every run that touches that repo will count more
+> credits. For repos beyond the practical clone-time budget, contact
+> `admin@executespec.ai`.
 
 ### 3.5 Launching the Run
 
