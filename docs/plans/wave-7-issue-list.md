@@ -160,6 +160,7 @@
 | Personas | VP Eng Dana |
 | Acceptance | `/v3/trust` SOC 2 row reads: "SOC 2 Type II audit underway — completion targeted Q3 2026. Type I report available on request." |
 | Decision | **Yes** — actual ETA. Default if no answer = Q3 2026. |
+| **Status** | **WITHDRAWN 2026-04-28.** Founder directed "ignore SOC 2 for now". Ckpt 3 R-319 implementation reverted, AND the residual pre-R-319 placeholder ("Audit in progress with [Auditor TBD] · Anticipated attestation Q3 2026") also dropped — same fabrication concern in milder form. /v3/trust SOC 2 row now reads: "Not yet certified. We'll publish audit status, auditor name, and target attestation date here once an engagement is formally underway." SOC 2 chip removed from headline status row. Re-open this item when a real engagement is signed. |
 
 ---
 
