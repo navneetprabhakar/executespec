@@ -1,301 +1,392 @@
-# v3-issues handoff for fresh thread (post-shipped state · 2026-04-28)
+# v3-issues handoff for fresh thread (queued-work mode · 2026-04-28)
 
 ## TL;DR
 
-Three batches shipped end-to-end this session:
+The previous thread shipped three batches end-to-end (4-concern fix
+batch + R-190/R-191 post-cutover cleanup + BETA LIVE pill nudge
++ anon-submit /login redirect) and diagnosed one failed run.
 
-  1. **4-concern fix batch** (root-route + remove-What's-new + remove-
-     changelog + email-sweep) — GH Action `25043079648` green at T+374s,
-     Cloudflare redeploy `8c205e26`.
-  2. **R-190 + R-191 post-cutover cleanup** — Vibe UI surface deleted +
-     Mission/Specify vocabulary purged. GH Action `25047545954` green at
-     T+382s.
-  3. **Hero-pill nudge + anon-submit redirect to /login** — BETA LIVE
-     pill repositioned 40px lower on the website hero; the `/v3/landing`
-     "See what we'd build" button now navigates straight to /login
-     (skipping the anonymous-trial UI panel) with the typed spec
-     stashed in sessionStorage for post-signup hydration. GH Action
-     `25050515826` green at T+354s, Cloudflare redeploy `52119ade`.
+**A new branch `feature/v3-platform-expansion` is cut off `cc80c1c4`**
+for all queued work. Per founder direction: **no merge to dev unless
+explicitly told.** This means the GH Action `deploy.yml` will NOT
+auto-fire on every batch — work lands on the feature branch + sits
+there until the founder calls deploy.
 
-Plus a debugged-not-fixed item:
+`origin/dev` and `origin/main` stay aligned at `cc80c1c4` until then.
 
-  4. **Failed run `c0fe9c62-bde8-4b0e-a29c-51ed90e5e7a7`** — root-caused
-     to JVM-restart kill at the exact moment of GH Action `25043079648`
-     deploy (Run died 08:51:19, Action's Deploy-JAR step at 08:51:18).
-     `failureReason` field already explained it; `StartupRunResumerV2`
-     did its job. Real fix is the deferred slice-5 auto-replay
-     (re-trigger `runLargePipeline.continueExpansion(...)` on boot,
-     skipping EXPANDED tasks) — see "Recent gotchas" below.
+This file is the new thread's entry point. Read top-to-bottom; queued
+work is in §3 (Group A: D-125) + §4 (future-scope: agent builder →
+ready-mades → use-cases → CLI → plugins) in that exact order.
 
-`main` FF'd to dev after each batch. **`origin/dev` = `origin/main` =
-`9b0ff701`.** No work in flight; clean state for the next thread.
+---
 
-## Branch + worktree state
+## 1 · Current state
+
+### Branch + worktree
 
 | Field | Value |
 |---|---|
-| Working branch | **`feature/v3-conversion`** |
-| Worktree path | **`/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/`** |
-| `origin/feature/v3-conversion` tip | **`9b0ff701d921133045899284d356ded712897a50`** |
-| `origin/dev` tip | **`9b0ff701d921133045899284d356ded712897a50`** ← matches feature |
-| `origin/main` tip | **`9b0ff701d921133045899284d356ded712897a50`** ← matches dev (FF'd this turn) |
-| Local commits ahead of origin | **0** |
-| Uncommitted edits | **none** (only `src/main/resources/static/trust-pack.pdf` untracked — Vite build artifact, ignore) |
+| **Working branch (new thread)** | **`feature/v3-platform-expansion`** ← cut off `cc80c1c4` this turn |
+| Worktree path | **`/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/`** (already checked out on the new branch) |
+| Current branch HEAD | `cc80c1c4` (matches the parent at branch-cut time) |
+| `origin/feature/v3-platform-expansion` tip | (set by the handoff-doc commit pushed this turn — see §11 below) |
+| `origin/feature/v3-conversion` tip | `cc80c1c44dfc25074db6bac10a126ce44cc7318b` (frozen — last shipped batch's branch; do NOT add to it) |
+| `origin/dev` tip | `cc80c1c44dfc25074db6bac10a126ce44cc7318b` (matches the frozen `feature/v3-conversion`) |
+| `origin/main` tip | `cc80c1c44dfc25074db6bac10a126ce44cc7318b` (matches dev) |
+| Uncommitted edits at branch-cut | **none** (only `src/main/resources/static/trust-pack.pdf` untracked — Vite build artifact, regenerated on every `npm run build`; do not commit) |
 
-## What shipped this session
+### Deployed surfaces (frozen at `cc80c1c4` until founder calls deploy)
 
-### 4-concern batch (2026-04-28)
-
-| # | Concern | Commit | Status |
-|---|---|---|---|
-| 1 | Root route → `/v3/landing` for anon (funnel fix) | `12d59e18` | ✅ shipped + verified live |
-| 2 | Remove "What's new" surface (R-181 TourBanner) | `c260d3fc` (bundled) | ✅ shipped + verified live |
-| 3 | Remove `/v3/changelog` page | `c260d3fc` (bundled) | ✅ shipped + verified live |
-| 4 | Sweep visible emails → `admin@executespec.ai` | `c260d3fc` (bundled) | ✅ shipped + verified live (dev backend + Cloudflare) |
-| meta | Premature handoff doc (overwritten by this version) | `50024fb4` | superseded — this file replaces the staleness |
-
-### Earlier this turn (lock-the-rule chore)
-
-| Commit | Subject | Why |
+| Surface | URL | State |
 |---|---|---|
-| `6903173c` | `chore(scripts): redirect slice-email.py recipient to admin@executespec.ai` | Email-recipient rule lock — automated emails now go to `admin@executespec.ai`. Bundled into the same dev push. |
+| Backend dev | `https://dev.executespec.ai` | Healthy at `cc80c1c4`. Last deploy GH Action `25050515826` green at T+354s; `/actuator/health` returns `{"status":"UP"}`. **Will not auto-update from new-branch work.** |
+| Cloudflare prod | `https://executespec.ai` | Worker `square-bar-e1dc` version `bb2087de-beaa-48b6-934b-776bd4050987`. Standard grep gates all green: hero "AI-written pull requests" present, "for one repo or for twenty" present (3×), 0 stale jargon, only `admin@executespec.ai` email, theme color `#0B0D10`, 5 `/v3/` sitemap entries. **Will not auto-update from new-branch work.** Cloudflare deploys are manual via `wrangler deploy` from the worktree path. |
 
-### R-190 + R-191 post-cutover cleanup (2026-04-28)
+### Local stack — currently NOT up
 
-| # | Item | Commit | Status |
-|---|---|---|---|
-| R-190 | Remove Vibe UI surface (post-cutover; backend product-surface arch untouched) | `697e6fb8` | ✅ shipped + verified live |
-| R-191 | Purge Mission vocabulary + replace "Don't prompt. Specify." tagline | `6eee94fe` | ✅ shipped + verified live |
+The previous thread's local stack (Vite :5173 + JAR :8081 + static :8989) was killed earlier in the session. Bring it up if you need local QA:
 
-**R-190 scope (UI Vibe-A only):** deleted `Vibe*.tsx` + `lib/vibeNarrative.ts`; collapsed `'vibe' | 'pro' | 'project'` ViewMode union to `'pro' | 'project'`; dropped `isVibe` / `vibeRunDefaults` / `escalateToPro` helpers from `useViewMode`; collapsed `isVibe` branches across RunDetail / RunDetailTabs / RunCard / RunList / NewRunModal / RunsPage / DashboardPage; dropped Vibe button from ViewModeToggle; narrowed `lib/api.ts` AuthUser type + added `normalizeAuthUser()` to coerce legacy `view_mode='vibe'` rows to `'pro'` at the parse boundary (called from useAuthStore.login + refreshAccessToken + loadMe — no V145 SQL migration shipped per the explicit "frontend-normalize only" decision). Backend Vibe-B (V143 product_split ENUM, ProductSurfaceFilter, TierProductSurfaceMapper, OAuthSurfaceResolver) intentionally untouched.
-
-**R-191 scope:** `LoginPage.tsx` "Don't prompt. Specify." → "Sign in to ship a spec." + subtitle swapped to v3-aligned "AI-written pull requests…" hero copy. `SharedReportPage.tsx` footer "Don't prompt. Specify." → "AI-written pull requests you can actually merge." `glossary.ts` mission entry replaced with run entry. `ExecSummaryPage.tsx` / `TeamMemberDashboard.tsx` / `ProjectDashboardPage.tsx` "Mission(s)" copy → "Run(s)". Stale historical-context comments in Sidebar / App.tsx trimmed.
-
-### GH Action `25047545954` — final state (R-190 + R-191)
-
-```
-status:        completed
-conclusion:    success
-total runtime: 382 s (6m22s)
-all 25 steps:  green (Slack success notify fired)
+```bash
+cd /Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -Dspring-boot.run.profiles=local   # backend
+npm --prefix frontend run dev   # frontend (different terminal)
 ```
 
-Stage timing matched the prior run within ±10 s on every stage.
+### Last known R-### used
 
-### Post-deploy verification (R-190 + R-191) — every probe green
+**`R-320`** (Wave 8 Trust Pack PDF). Next free: **`R-321`**. Use sequential R-3## IDs for new work below.
 
-| Probe | Result |
-|---|---|
-| `/login` contains "Don't prompt" | **0** ✅ |
-| `/login` contains "Specify." | **0** ✅ |
-| `/login` contains "Sign in to ship a spec." | **present** ✅ |
-| `/login` contains verbatim hero "AI-written pull requests" | **present** ✅ |
-| ViewModeToggle "Vibe" button on header | **gone** ✅ (toggle is retired from the header anyway per Phase 1.1 #8) |
-| VibeProgressNarrative element on run detail | **gone** ✅ |
-| `localStorage.es:viewMode='vibe'` after authed page load | **normalized to 'pro'** ✅ |
-| `body.textContent` "Mission" hits on / (authed admin) | **0** ✅ |
-| Run cards show "Code generated" / "Run failed" copy | confirmed via screenshot ✅ |
+---
 
-### Hero-pill nudge + anon-submit redirect (2026-04-28, single commit)
+## 2 · Already-decided product calls (don't re-litigate)
 
-| Item | Commit | Status |
+| Decision | What | Source |
 |---|---|---|
-| BETA LIVE pill on `executespec.ai` nudged 40px lower so it doesn't crowd the top nav | `9b0ff701` | ✅ shipped + verified live |
-| Anon `/v3/landing` "See what we'd build" submit now redirects to `/login` (skipping the anonymous-trial UI panel) | `9b0ff701` | ✅ shipped + verified live |
+| Tier ladder | 4 tiers: Free / Pro $20/mo / Team $39/seat (min 2) / Enterprise Custom. **Don't reintroduce MAX.** | V141 + Wave 7 |
+| Pricing surface | Only `/v3/pricing` is customer-facing. `/admin/model-rates` is internal. | Wave 7 R-314 |
+| /login tagline | "Sign in to ship a spec." — **not** "Don't prompt. Specify." | R-191 |
+| Vibe UI surface | Deleted (R-190). Backend Vibe-B (V143 ENUM, ProductSurfaceFilter, etc.) intentionally untouched — separate decision required. |
+| "What's new" / changelog | Removed (TourBanner unmounted, V3Changelog page deleted). |
+| Anonymous-run real LLM dispatch flag | **Stays OFF** unless user explicitly says otherwise. Stub dispatcher serves anonymous trials. |
+| SOC 2 ETA copy | **Withdrawn** until a real audit engagement is signed (R-319). Trust page reads "Not yet certified." |
+| Email rules | All automated emails TO field = `admin@executespec.ai`. All visible website + in-app emails = `admin@executespec.ai`. SMTP creds: Gmail app password from `src/main/resources/application-dev.yml`. |
+| Anon `/v3/landing` submit | Redirects to `/login` directly (skipping anonymous-trial UI). Typed spec stashed in `sessionStorage.v3-anon-spec` for post-signup hydration. |
+| Root route `/` for anon | Lands on `/v3/landing` (not `/login`). Authed users keep prior behavior. |
 
-**Item 1:** anchor wrapping the pill now has `display: inline-block; margin-top: 40px;` — the .hero is `display: flex; align-items: center` so margin-top on the first child of .container shifts the centered block downward as expected. Cloudflare worker re-deployed (`52119ade-4361-4362-99c5-d16790836c98`).
+---
 
-**Item 2:** `V3Landing.tsx onSubmit` now stashes the typed spec to `sessionStorage.v3-anon-spec` + `navigate('/login', { state: { from: '/v3/landing' } })` — no `submitAnonymousRun()` call, no inline trial UI. Removed the `result` state + `AnonymousRunResponse` type import + `submitAnonymousRun` import + the ~40-line "Trial ready"/"Save this run — sign in" JSX block. The `/api/v3/anonymous-runs` endpoint + `AnonymousRunSession` backend stay live for the post-signup claim flow (the post-signup composer hydration reads `v3-anon-spec` from sessionStorage).
+## 3 · Phase 1 — Group A queued (D-125 RepoAttachPopover, ALL APPROVED)
 
-### GH Action `25050515826` — final state (items 1 + 2)
+User approved every recommendation. Execute as a focused mini-wave on `feature/v3-platform-expansion`.
+
+### Suggested batching
 
 ```
-status:        completed
-conclusion:    success
-total runtime: 354 s (5m54s)
-all 25 steps:  green (Slack success notify fired)
+Batch 1 (one quick mini-wave — mostly XS-S effort):
+  R-321 — Q1bc: PAT inline form + "ask your admin" copy-link in RepoAttachPopover
+  R-322 — Q2a:  .executespec/root.yml marker file detection (fall back to repo root)
+  R-323 — Q3a:  hard size threshold reject + helpful copy
+
+Batch 2 (own mini-wave — M effort):
+  R-324 — Q4c:  finish the multi-repo project flow that V143/V144 half-shipped
+
+Batch 3 (rides on R-324):
+  R-325 — Q3d:  "yes attach anyway" big-repo opt-in (per-run override)
 ```
 
-### Post-deploy verification (items 1 + 2) — every probe green
+### R-321 — Q1: Private repo, no org-level GitHub App access
 
-| Probe | Result |
+| Field | Value |
 |---|---|
-| `executespec.ai/` BETA LIVE pill bounding-rect top | **120px from viewport top** (was crowding the top-nav before) ✅ |
-| Anon `/v3/landing` submit click → final URL | **`/login`** ✅ |
-| `sessionStorage.v3-anon-spec` after redirect | **typed spec preserved** ✅ |
-| `/login` body text "Trial ready" | **gone** ✅ |
-| `/login` body text "Save this run" | **gone** ✅ |
-| `/login` body text "Sign in" | **present** (login form) ✅ |
+| Source | `frontend/src/v3/components/RepoAttachPopover.tsx` docstring §1 + line 392 `TODO(D-125 #1)` |
+| Approved option | **(b) PAT inline form** + **(c) "ask your admin" copy-link**, both visible on a single "no access?" panel |
+| Deferred | (a) GitHub App org-install flow — needs the App registered first (external dep) |
+| Effort | XS (b) + XS (c) — both 1-2 hours total |
+| Acceptance | (a) When the popover detects the PAT-list returns 0 repos OR `user.hasGithubPat === false`, render a panel with two side-by-side affordances: a "Paste a PAT" form (inline; same behavior as Settings page; saves to `appUser.githubPat`) and an "Ask your admin to install" pre-filled mailto + a "Copy install link" button. (b) Both are dismissible; once a PAT is saved, the panel collapses. (c) The "(a) GitHub App install" path remains a TODO comment with a link to /v3/integrations as the fallback. |
+| Files likely touched | `RepoAttachPopover.tsx`, possibly a new `<NoRepoAccessPanel>` component if it gets large, `lib/api.ts` for the PAT save endpoint (already exists — `validateGithubPat` + `updateGithubPat`) |
 
-### Item 3 — Failed run `c0fe9c62-bde8-4b0e-a29c-51ed90e5e7a7` (debugged, not fixed)
+### R-322 — Q2: Mono-repo subdirectory
 
-Root cause: the run was killed by a JVM restart at exactly 08:51:18-19 UTC — that's the cutover moment of GH Action `25043079648` (the morning's 4-concern deploy). Fields confirm:
-
-- `failureReason`: *"Interrupted during WORKING (JVM restart / deploy). … Auto-replay of the outline + per-task expansion is a slice-5 follow-up; for now please resubmit."*
-- Started 08:19:04, marked FAILED 08:51:19, exact match to the deploy's "Deploy JAR to GCE" step.
-- Per-task state at kill-time: T1 + T2 PARTIAL, T3 WORKING, T4-T10 PENDING (10 tasks total, all pre-expanded by the outline phase).
-- Cost actually spent: ~$0.18 (outline only). User charged 7 credits ($35) at plan-approval; refund expected via `RunQuotaRefundListener.onRunFailed` — recommend confirming the refund actually fired.
-
-The **deferred slice-5 auto-replay** (re-trigger `runLargePipeline.continueExpansion(...)` on JVM boot, skipping EXPANDED tasks) is the real fix. Until then, runs that catch a deploy mid-execution land FAILED with the proper failureReason + the user has to resubmit. Logged in the parked-list for the next thread.
-
-### GH Action `25043079648` — final state
-
-```
-status:        completed
-conclusion:    success
-total runtime: 374 s (5m14s)
-all 25 steps:  green (no skips on the failure path; Slack success notify fired)
-```
-
-Stage timing:
-- Build frontend: ~25 s
-- Build JAR + tests (702+ green, AsyncAllowlistTest 1/1): ~110 s
-- GCP auth + GCS upload: ~50 s
-- GCE prep + sync + env patch: ~55 s
-- Deploy JAR + JVM startup wait: ~80 s
-- Health check: ~26 s
-- Cleanup + Slack notify: ~28 s
-
-### Cloudflare deploy
-
-Worker `square-bar-e1dc` (custom domains: `executespec.ai` + `www.executespec.ai`)
-- **Pre-batch version:** `30d0d193-3d10-473f-b6ac-3f0696ef4b0c`
-- **Post-batch version:** `8c205e26-081b-405d-bd40-0ef3338be085`
-- Files updated: `index.html` + `llms.txt` (concern 4 email swaps)
-- Deploy duration: ~28 s end-to-end
-- Auth: OAuth-token-on-this-machine for `admin@executespec.ai`
-
-### Post-deploy verification (all probes green)
-
-| Probe | Result |
+| Field | Value |
 |---|---|
-| Anon visit to `https://dev.executespec.ai/` | Final URL **`/v3/landing`** (was `/login` pre-deploy) |
-| h1 on root | `"ExecuteSpec ships AI-written pull requests…actually merge — for one repo or for twenty."` (verbatim hero) |
-| password field on root | **absent** (was present pre-deploy) |
-| TourBanner element on `/v3/landing` | **0** (concern 2) |
-| `/v3/changelog` content | falls through to login (anon, unknown route) — does NOT render V3Changelog component |
-| `body.textContent` grep "Changelog" / "What's new" | not found (concern 3) |
-| Email grep on `/v3/landing` DOM | only `admin@executespec.ai` |
-| Email grep on `/v3/trust` DOM | only `admin@executespec.ai` |
-| Email grep on `/v3/pricing` DOM | only `admin@executespec.ai` |
-| Email grep on `/v3/team` DOM | `admin@executespec.ai` + 4 `@yourco.com` PreviewMembersCard sample roster (leave-classified per audit) |
-| `executespec.ai/` (Cloudflare prod) email grep | only `admin@executespec.ai` |
-| `executespec.ai/llms.txt` (prod) email grep | only `admin@executespec.ai` |
-| Verbatim hero copy on prod | "AI-written pull requests" + "for one repo or for twenty" ≥1 each (preserved) |
+| Source | `RepoAttachPopover.tsx` line 174 `TODO(D-125 #2)` + docstring §2 |
+| Approved option | **(a) `.executespec/root.yml` marker file detection** + fall back to repo root |
+| Effort | S (~half-day) |
+| Acceptance | (a) On repo attach, the backend reads `.executespec/root.yml` from the default branch via GitHub Contents API. (b) If present, parses `root: <subdir>` field and uses that as the project root for codemap + clone operations. (c) If absent or unparseable, falls back to repo root (current behavior). (d) The marker is documented in the README + a comment on `ProjectRepo.subdir` (new column) explaining the convention. |
+| Files likely touched | New `Vxxx__project_repo_subdir.sql` migration adding `project_repo.subdir` column, `ProjectRepo.java` entity, `GitHubRepoService.java` to read the marker, `WorkspaceInitService.java` to use the subdir on clone, frontend `RepoCard.tsx` shows the subdir if non-null |
+| Dovetail | This pairs naturally with R-325 (sparse-checkout for big repos) |
 
-### Screenshots
+### R-323 — Q3: Repo-too-big quota gate
 
-| Path | What |
+| Field | Value |
 |---|---|
-| `/tmp/concern1-screenshots/before.png` | BEFORE — anon visit to `dev.executespec.ai/` shows the login form (the bug) |
-| `/tmp/concern1-screenshots/after.png` | AFTER — anon visit lands on `/v3/landing` with the verbatim hero (the fix) |
+| Source | `RepoAttachPopover.tsx` docstring §3 |
+| Approved option | **(a) hard size limit + reject with helpful copy** NOW. **(d) "yes attach anyway" opt-in** layered on R-324 multi-repo work (deferred). |
+| Effort | XS (a) — read repo `size` from GitHub repo-meta API + reject if > threshold |
+| Acceptance | (a) On repo attach, if GitHub returns `repo.size_kb > 250_000` (250 MB clone equivalent), reject with copy: "This repo is too large for the platform's clone-time budget. Try attaching a smaller repo, or ping `admin@executespec.ai` to discuss large-repo support." (b) Threshold is config-tunable via `application.yml` `executespec.repo.max-size-kb`. (c) Per-tier overrides land later as part of R-325. |
+| Files likely touched | `GitHubRepoService.java` size check, `ProjectRepoService.java` reject path, `application.yml` config, frontend error rendering in `RepoAttachPopover.tsx` |
 
-## What's still parked (NOT this thread's job)
+### R-324 — Q4: Finish multi-repo project flow (own mini-wave, M effort)
 
-| Item | Why parked | Re-open trigger / unblock |
-|---|---|---|
-| **D-125 RepoAttachPopover — 4 product decisions** | User wants to revisit; my recommendations surfaced but not approved | Founder picks an option per question. Recommendations on file: Q1=staged (b)+(c) ship now / (a) defer; Q2=`.executespec/root.yml` marker file; Q3=hard threshold + opt-in toggle; Q4=finish multi-repo project flow (V143/V144 partial). |
-| **Anonymous-run real LLM dispatch flag** | User said "ignore for now"; flag stays OFF. Real dispatcher impl + per-call cost cap + aggregate daily cap don't exist. | If founder wants to flip later, ship aggregate count tracker first (S effort) on stub mode for ≥1 week of baseline traffic before the M-L real-dispatch impl. |
-| **Hero video recording** (R-204) | Real-asset task — a 30-second screen capture of spec→plan→build→PR→Ready is needed. Reminder set for 2026-05-05. | Drop `hero-demo.mp4` (≤8 MB H.264) at `frontend/public/` + flip `USE_REAL_VIDEO` constant in V3Landing.tsx line 498. |
-| **R-313 customer logos** (TrustedByStrip placeholder) | Need a signed customer-permission + a logo SVG/PNG | Edit slot config in `V3Landing.tsx` TrustedByStrip section — 5-min change. |
-| **R-318 Cal.com URL** for Enterprise demo CTA | Mailto fallback ships today; Cal.com account setup is the unblock | 1-line href swap on `PricingGrid.tsx` line 140 — change `mailto:admin@executespec.ai?subject=...` → real Cal.com URL. |
-| **R-319 SOC 2 ETA copy** | Withdrawn 2026-04-28; "Not yet certified" line is live | When a real audit engagement is signed → re-issue with actual auditor name + completion month. |
-| **SSO config screen** on `/v3/team` | V127 schema in place; UI deferred until live IdP for round-trip QA (Okta / Auth0 tenant) | Live IdP test tenant + ~30-min click-through QA. |
-| **R-141 GST tab** on `/v3/billing` | Needs `org.country` field on `/api/v3/entitlements`; backend has no country field today | Decide country source (Stripe / self-declare / Geo-IP) + 1-row migration + 5-line entitlements DTO patch + flip `showGst` to `org.country === 'IN'`. |
+| Field | Value |
+|---|---|
+| Source | V143 (`product_split.sql`) + V144 (`reinstate_per_seat_team_tier.sql`) shipped half the schema; the UX completion was deferred. |
+| Approved option | **(c) finish the multi-repo project flow that V143/V144 already half-shipped** |
+| Effort | **M** — own mini-wave, expect per-3-checkpoint commit cadence |
+| Why high-leverage | Once it lands, **R-325 (per-run repo override) becomes free** (b) and (d) options from the original Q4 audit become trivial UI add-ons; the entire 2.4.0 multi-repo arc closes. |
+| Acceptance (audit-first) | New thread should audit V143 + V144 + the existing `ExecutionSolution` per-repo entity + `ExecutionRun.target_repos` array + the partial `MultiRepoExecutionService` (if exists) before scoping. Surface the audit + propose a wave plan. **Do not start the wave without user-confirmed scope.** |
 
-## Post-UX scope queued (memory file `executespec_post_ux_scope.md`)
+### R-325 — Q3 layer: "yes attach anyway" big-repo opt-in (rides on R-324)
 
-The user's persistent memory holds queued future scope: **CLI / agent
-builder / readymade solutions / plugins / pre-built use cases.** All
-of these are deliberately deferred until the UX-conversion arc closes.
+| Field | Value |
+|---|---|
+| Approved option | **(d) big-repo opt-in toggle** — "Yes, attach anyway (will count more credits)" button |
+| Why deferred | The opt-in needs per-run cost-cap awareness which the multi-repo work in R-324 will provide (since multi-repo runs already have to negotiate per-repo cost). |
+| Acceptance | After R-324 lands: when R-323's threshold-reject fires, surface an opt-in button that bypasses the gate but adds a per-repo credit surcharge tracked in `RunCostLog`. |
 
-## Standing rules + invariants
+---
 
-- **Branch:** `feature/v3-conversion` is the working branch for v3 work. **No PR opens. Push enabled.**
-- **Cohabitation:** keep new work under `frontend/src/v3/`. v2 untouched **except** sanctioned shared-source edits (per the strict-UX handoff): `EventName.java` (additive enum), `SecurityConfig.java` (one `permitAll`), `V2RunOrchestrator.java` (R-162 referral wire-point), and now `ProtectedRoute.tsx` (concern 1 root-route special-case — invariant-preserving change since v2 routes still hit `/login` as before).
-- **Per-3-items checkpoint:** commit + push + dispatch update.
-- **Each commit:** `feat(v3):` / `fix(v3):` / `chore(v3):` + concise subject + co-author footer.
+## 4 · Phase 2 — Future-scope queue (in this exact order)
+
+User directive: queue these in priority order. New thread executes them one-by-one, **audit-first** then **scope confirmation** then **wave execution**.
+
+Memory file: `executespec_post_ux_scope.md` in the user's persistent memory.
+
+### #1 — Agent builder
+
+**Description:** Net-new product capability. Probably a "compose your own agent" UI surface that lets users define custom agent personalities + tool sets + prompt fragments.
+
+**Audit prep (read these first):**
+- `src/main/java/com/navneet/executespec/v2/agent/PlannerAgentV2.java` (the canonical agent shape)
+- `src/main/java/com/navneet/executespec/v2/agent/WorkerAgentV2.java`
+- `src/main/java/com/navneet/executespec/v2/tool/ToolRegistryV2.java` (tool plumbing)
+- `src/main/resources/prompts/v2/*.md` (agent prompts)
+- `src/main/resources/application.yml` `model-matrix:` (provider × tier mapping)
+- `agent-tier-map:` config — agent → tier mapping
+
+**Suggested wave plan (TBD by audit):**
+- New `AgentDefinition` entity + table for user-defined agents
+- A `prompts/user/<userId>/<agentName>.md` file pattern (or DB-backed)
+- Tool-set picker UI on a new `/v3/agents/builder` route
+- Wire user-defined agents into the WorkerAgentV2 dispatch path
+- Tier-gated: agent-builder availability per tier (probably TEAM+ENTERPRISE only)
+
+### #2 — Readymade solutions
+
+**Description:** Pre-built solution templates. Gallery surface — "Build a Stripe checkout page", "Add OAuth to my Next.js app", etc. Fastest way for a new user to ship value.
+
+**Likely surfaces:** `/v3/landing` chip section, `/v3/p/empty` (the V3EmptyProject component shipped in R-310), and a new `/v3/templates` gallery page.
+
+**Audit prep:**
+- `frontend/src/v3/pages/V3Landing.tsx` SAMPLE_PROMPTS (already a 6-item list of canned specs — readymades are a richer version of this)
+- `project/template/ProjectSpecTemplate.java` (V102 introduced spec templates — readymades may extend this entity)
+- `prompts/scaffolds/*.md` (per-project-type scaffolds — readymades may BE a scaffold + a spec pre-bundle)
+
+**Decision-needed:** is a readymade just (template prompt + project-type scaffold + tier-gated)? Or does it need a richer model (e.g. tagged + searchable + hosted gallery + user-contributed)?
+
+### #3 — Most common use cases pre-built
+
+**Description:** Likely overlaps with #2 but with a different framing. Where #2 is "solution-first" (here's a Stripe checkout page), #3 is "use-case-first" ("I want to add user authentication" → here are 3 readymades for that use case).
+
+**Surface candidates:** A taxonomy layer over the readymade gallery. `/v3/templates?usecase=auth` etc. Or a use-case-pickerion surface on `/v3/p/empty`.
+
+**Decision-needed:** scope-merge with #2, or keep separate? If merge: this becomes a navigation/categorization layer over readymades. If separate: this is a new content surface with different metadata.
+
+### #4 — CLI
+
+**Description:** Command-line interface. `executespec` binary. Authenticate, submit specs, watch runs, download workspaces.
+
+**Distribution:** npm or Homebrew (both likely; npm for cross-platform JS devs, Homebrew for macOS shell). Probably a small Node.js or Go binary that wraps the existing `/api/runs` REST endpoints.
+
+**Repository:** Probably a new repo (`executespec-cli`) for clean separation. Could also live under `cli/` in the main repo. Decision-needed.
+
+**Audit prep:**
+- `src/main/java/com/navneet/executespec/api/controller/RunController.java` (existing REST endpoints the CLI will call)
+- `src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java` (CLI needs a token-based auth path; probably reuses the JWT flow or adds a `cli-token` scope)
+- `frontend/src/lib/api.ts` (canonical API shape — CLI mirrors this)
+- `docs/plans/cli-plan.md` if exists (Wave 6 stub doc was placeholder; check current state)
+
+### #5 — Plugins
+
+**Description:** Plugin SDK + first-party plugin examples. Probably extends agent capabilities (custom tools / model providers / linters / scaffolds).
+
+**Likely architecture:** Plugin = a typed Java/Kotlin module that registers itself with `ToolRegistryV2` (for new tools) or `LlmRouterV2` (for new model providers) or `ReviewerAgentV3` (for custom validators). Plus a marketplace surface on `/v3/plugins`.
+
+**Audit prep:**
+- `ToolRegistryV2.java` registration pattern (current Tool contract is `v2/tool/Tool.java`)
+- `LlmRouterV2.java` provider dispatch (current providers: anthropic / openai / gemini)
+- `ReviewerAgentV3.java` review-pass plugin points
+
+**Decision-needed:** first-party-only OR third-party-allowed? If third-party: need sandboxing + signed-bundle review + a plugin-store schema. Big scope.
+
+---
+
+## 5 · Standing rules + invariants
+
+### ⚠️ Branch + deploy rules CHANGED for this thread
+
+- **Working branch:** **`feature/v3-platform-expansion`** (NOT `feature/v3-conversion` — that one is frozen at `cc80c1c4`).
+- **No merge to dev unless founder explicitly says so.** Founder direction 2026-04-28: *"all development will be in a new branch and no merge in dev unless i say so."*
+- **No automatic FF dev → push dev** pattern. Work lands on the feature branch + pushes to origin so it survives + is reviewable, but:
+  - **GH Action `deploy.yml` will NOT fire** (it triggers on push to `dev`, not feature-branch push).
+  - **`https://dev.executespec.ai` will NOT auto-update** with this thread's work. It stays at `cc80c1c4` until founder calls deploy.
+  - **Cloudflare deploys are also gated** — `wrangler deploy` only on founder direction.
+- When founder calls deploy: at that point, FF `dev` from `feature/v3-platform-expansion` (whatever its tip is then), push, watch GH Action, post-deploy verify. Same playbook as before — just deferred.
+
+### Carry-over invariants (unchanged)
+
+- **No PR opens.** Push enabled to the feature branch.
+- **Cohabitation invariant:** keep new work under `frontend/src/v3/` etc. v2 untouched **except** sanctioned shared-source edits (per the strict-UX handoff): `EventName.java` (additive enum), `SecurityConfig.java` (one `permitAll`), `V2RunOrchestrator.java` (R-162 referral wire-point), `ProtectedRoute.tsx` (concern 1 root-route special-case), and the R-190/R-191 v2 cleanup files (post-cutover sanctioned). Any new v2 edit needs commit-body justification.
+- **Per-3-items checkpoint:** commit + push to `feature/v3-platform-expansion` + dispatch update. Per-wave-boundary checkpoint also.
+- **Each commit:** `feat(v3):` / `fix(v3):` / `chore(v3):` + R-### in subject + co-author footer.
 - **Verify before push:**
   - `tsc --noEmit` after frontend changes
   - `mvn -q -DskipTests compile` after backend changes
-  - Full `mvn test` between batches (NOT skipped — AsyncAllowlistTest is sensitive to new `@Async` methods + must be in sync; failure cascades the GH Action deploy)
+  - Full `mvn test` between batches (NOT skipped — `AsyncAllowlistTest` is sensitive to new `@Async` methods + must be in sync; failure cascades the GH Action deploy WHEN the deploy eventually fires)
 - **Stop only for:** real product decision the user must make / item turns out already done / red tests / hard blocker.
 
-## Email rules (in memory file `executespec_email_recipient.md`)
+### Deploy protocol (when founder calls it)
 
-- **Automated email TO field:** `admin@executespec.ai` (was `navneet.prabhakar007@gmail.com` until 2026-04-28).
-- **Visible website + in-app emails:** `admin@executespec.ai` (concern 4 from this batch — fully shipped + verified).
-- **SMTP creds:** Gmail app password from `src/main/resources/application-dev.yml` (`app.mail.smtp.password`). Sender FROM is always `admin@executespec.ai`.
-- **In-repo sender script:** `scripts/slice-email.py` — `RECIPIENT` constant updated in commit `6903173c`.
+```
+# At deploy time, NOT after every batch:
+git push origin feature/v3-platform-expansion       # already done per checkpoint
+git push origin feature/v3-platform-expansion:dev   # FF dev — NOW triggers deploy.yml
+gh run list --branch dev --limit 1                  # grab the run id
+# Monitor stage transitions through to step 19 Health check
+# Run post-deploy verification on dev.executespec.ai
+git fetch origin && git push origin origin/dev:main # FF main (per founder direction this session)
+# Cloudflare website (separate, manual):
+cd /Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/website
+npx wrangler deploy
+```
 
-## Stack URLs / ports
+Health-check step 19 sometimes returns 503 mid-cutover for ~30 s window (Spring context init time on this branch's bean count). Self-resolves on retry. Don't panic.
+
+---
+
+## 6 · Stack URLs / creds
 
 | Surface | URL | Notes |
 |---|---|---|
 | Local backend | `http://localhost:8081` | Spring profile `local` — `mvn spring-boot:run` |
 | Local frontend | `http://localhost:5173` (Vite default) | `npm --prefix frontend run dev` |
-| Local static website | `http://localhost:8989` | Optional, was used in F1 sanity walks |
-| Deployed dev | `https://dev.executespec.ai` | deploys via push to origin/dev → `deploy.yml` GH Action |
-| Production website | `https://executespec.ai` | Cloudflare Worker `square-bar-e1dc` — separate `wrangler deploy` from worktree |
+| Local static website | `http://localhost:8989` | Optional |
+| Deployed dev | `https://dev.executespec.ai` | Frozen at `cc80c1c4`. Only updates when founder calls deploy. |
+| Production website | `https://executespec.ai` | Cloudflare Worker `square-bar-e1dc` version `bb2087de`. Frozen until founder calls deploy. |
 
-The local stack from earlier in the session was likely killed when the user closed terminal sessions. Bring back up if needed:
-```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -Dspring-boot.run.profiles=local
-npm --prefix frontend run dev   # other terminal
-```
+### Test users
 
-## Test users
+| Email | Password | Tier | Where |
+|---|---|---|---|
+| `admin@executespec.ai` | **`REDACTED_FOR_PUBLIC_RELEASE`** | ENTERPRISE / SUPER_ADMIN | **dev.executespec.ai (note: 3 not 4)** |
+| `admin@executespec.ai` | **`REDACTED_FOR_PUBLIC_RELEASE4`** | ENTERPRISE / SUPER_ADMIN | LOCAL stack only — different password! |
+| `freshux-{free,pro,team,enterprise}@test.local` | `FreshUx@1234!` | various | local-stack tier-test users; may or may not exist on dev |
 
-| Email | Password | Tier | Role | Where |
-|---|---|---|---|---|
-| `admin@executespec.ai` | `REDACTED_FOR_PUBLIC_RELEASE` | ENTERPRISE | SUPER_ADMIN | **dev.executespec.ai** (note: `REDACTED_FOR_PUBLIC_RELEASE` — three not four) |
-| `admin@executespec.ai` | `REDACTED_FOR_PUBLIC_RELEASE4` | ENTERPRISE | SUPER_ADMIN | LOCAL stack only — different password |
-| `freshux-{free,pro,team,enterprise}@test.local` | `FreshUx@1234!` | various | various | local-stack tier-test users |
+---
 
-## Deploy protocol (recap)
-
-Push to `origin/dev` automatically fires `deploy.yml` GH Action. Stage order:
-
-1. Set up job / Checkout / Java 21 / Node.js
-2. **Build frontend** (Vite → `src/main/resources/static/`)
-3. **Build JAR + run unit tests** (702+ expected; `AsyncAllowlistTest` is sensitive — every new `@Async` method must be in the allowlist or the build fails)
-4. Authenticate to GCP / gcloud CLI / GCS upload
-5. **Deploy JAR to GCE (dev)**
-6. **Wait for app startup** (Flyway migrations apply here; if a migration fails the JVM never comes up)
-7. **Health check**
-
-Last successful runs:
-- `25043079648` (this batch, 374 s, 2026-04-28T08:51:18Z)
-- `25040076734` (prior, 355 s, 2026-04-28T07:40:49Z)
-
-`main` is now aligned with dev (FF'd this turn). `main` is not on the deploy path — `deploy.yml` only fires on push to `dev`. `main` lagging dev was the standing concern; now resolved.
-
-## Memory references
+## 7 · Memory references
 
 In `/Users/navneetprabhakar/Library/Application Support/Claude/.../memory/`:
-- `executespec_post_ux_scope.md` — queued future scope (CLI / agent builder / ready-mades / plugins / pre-built use cases)
-- `executespec_email_recipient.md` — both email rules above (TO field + visible website)
 
-## Recent gotchas / state-at-handoff
+- **`executespec_post_ux_scope.md`** — the future-scope queue (now being acted on per §4 above)
+- **`executespec_email_recipient.md`** — both email rules (TO field + visible website)
 
-- **Parent repo branch.** `/Users/navneetprabhakar/Documents/antigravity/executespec/` was on `feature/event-tracking-jsonb-fix` earlier today, which caused a stale Cloudflare deploy (pushed pre-Wave-5 website content). The previous thread switched it to `dev` so it's safe for direct-from-parent deploys at `27e468c8` matching dev tip at the time. **Always deploy Cloudflare from the worktree path** to be safe — that's where the live edits land. (Today's Cloudflare deploy was from the worktree.)
-- **`src/main/resources/static/trust-pack.pdf`** — untracked Vite build artifact in the worktree. Vite re-creates it on every `npm run build` (it's the R-320 Trust Pack PDF copied from `frontend/public/trust-pack.pdf`). Don't commit it; it's regenerated.
-- **Wrangler auth** is OAuth-based on this machine for `admin@executespec.ai`. Permissions include `workers:write`. To re-deploy: `cd .../worktrees/cranky-herschel-4d02cf/website && npx wrangler deploy`.
-- **`docs/pre-deploy-closeout.md`** is the pre-batch close-out doc from earlier this morning. The 13 deferred items there are still deferred (this 4-concern batch didn't touch any of them); R-319 SOC 2 stays withdrawn; R-313 / R-318 placeholders preserved.
+---
 
-## Done — what the next thread can pick up cleanly
+## 8 · Known parked items — do NOT touch unless asked
 
-The branch + dev + main + Cloudflare are all aligned and live. The work-list in this handoff doc is **what's parked**, not **what's left to ship**. Pick from "What's still parked" only when the user asks for it.
+| Item | Why parked | Re-open trigger |
+|---|---|---|
+| **R-204** Hero video on `/v3/landing` | Real-asset task — needs a 30-second screen-recording captured | Drop `hero-demo.mp4` (≤8 MB H.264) + `hero-demo-poster.jpg` in `frontend/public/` + flip `USE_REAL_VIDEO` constant in `V3Landing.tsx`. Reminder set for 2026-05-05. |
+| **R-313** Real customer logos on TrustedByStrip | Need signed customer permission + logo SVG/PNG | 5-min config edit in `V3Landing.tsx` |
+| **R-318** Real Cal.com URL for Enterprise demo CTA | Cal.com account setup needed | 1-line href swap on `PricingGrid.tsx` |
+| **R-319** SOC 2 ETA copy on `/v3/trust` | Withdrawn 2026-04-28 — "Not yet certified" copy is live | When a real audit engagement is signed |
+| **SSO config screen** on `/v3/team` | V127 schema in place; UI deferred until live IdP for round-trip QA (Okta / Auth0 tenant) | Live IdP test tenant + ~30-min click-through QA |
+| **R-141** GST tab on `/v3/billing` | Needs `org.country` field on `/api/v3/entitlements`; backend has no country field today | Decide country source (Stripe / self-declare / Geo-IP) + 1-row migration + 5-line entitlements DTO patch |
+| **Anonymous-run real LLM dispatch flag** (`v3.anonymous-trial.real-dispatch`) | Stays OFF; cost-cap design pending | Founder greenlight + aggregate-counter shipping first (S effort, ~30 min) |
+| **R-190 / R-191 backend Vibe-B** (V143 product_split ENUM, ProductSurfaceFilter, etc.) | UI Vibe-A deleted; backend is a different system using same English word | Separate decision — would require Flyway migration + ENUM rename + route-mapping rewrite |
+| **Slice-5 auto-replay** for orphan runs (deferred platform fix) | Runs killed by JVM restarts mid-execution land FAILED + need user resubmit. Real fix is `runLargePipeline.continueExpansion(...)` on JVM boot, skipping EXPANDED tasks. | Eng decision to commit the slice-5 work |
 
-The most likely next ask is one of:
-- D-125 product decisions (4 questions — recommendations awaiting nod)
-- Hero video drop (when the recording is captured)
-- Real customer logo / Cal.com URL swaps (1-line edits when assets land)
-- Post-UX scope (CLI / agent builder / etc.) — fresh build-out, separate arc
+---
 
-If the next ask is a brand-new concern, follow the standing protocol:
-1. Branch stays `feature/v3-conversion`
-2. Per-3-items checkpoint commits + push
-3. tsc + mvn compile + mvn test before push
-4. FF dev → watch deploy.yml → post-deploy verify
-5. Update this doc when the new batch ships
+## 9 · Recent gotchas / state-at-handoff
+
+### Failed run worth checking on dev: `c0fe9c62-bde8-4b0e-a29c-51ed90e5e7a7`
+
+A user-submitted "Medical Clinic Management System" run was killed at 08:51:19 UTC by the morning's 4-concern deploy's JVM restart (08:51:18 UTC). The orphan-run resumer marked it FAILED with the proper failureReason. **User was charged 7 credits ($35) at plan-approval; actual spend ~$0.18**. Confirm `RunQuotaRefundListener.onRunFailed` actually fired and the credits were returned. If not, that's a separate bug worth surfacing.
+
+### Parent repo branch state
+
+`/Users/navneetprabhakar/Documents/antigravity/executespec/` is on branch `dev` at tip `cc80c1c4`. Earlier this morning it was on `feature/event-tracking-jsonb-fix` which caused a stale Cloudflare deploy. Always deploy Cloudflare from the **worktree** path to be safe.
+
+### Cloudflare / website redeploy pattern (when founder calls it)
+
+```bash
+cd /Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/website
+npx wrangler deploy
+```
+
+Wrangler is OAuth-authenticated on this machine for `admin@executespec.ai` with `workers:write`. No further setup needed.
+
+### Vite asset artifacts
+
+- `src/main/resources/static/index.html` — Vite re-bundles this on every `npm run build`. The asset hash bumps. **Don't commit those refreshes** — they're auto-regenerated on every backend deploy.
+- `src/main/resources/static/trust-pack.pdf` — Vite copies from `frontend/public/trust-pack.pdf`. Untracked; ignore.
+- `src/main/resources/static/assets/index-*.js`, `index-*.css` — content-hashed, regenerated each build.
+
+When committing batches, **stage source files explicitly** (`git add frontend/src/...`) instead of `git add -A` to avoid sweeping in build artifacts.
+
+### Docs hygiene rule from CLAUDE.md
+
+Every commit should keep documentation in lockstep with code. Before staging files for any commit:
+
+1. Root `CLAUDE.md` — update if architecture, API contracts, file locations, agent tiers, or in-flight status changed
+2. Per-package `CLAUDE.md` — update if entities / repository methods / agents / migrations changed in that package
+3. `docs/CODEMAP.md` — refresh on new top-level packages / entities / agents / DB migrations
+4. `docs/document_map.md` — refresh on every commit (it's the doc index)
+5. Architecture docs under `docs/` — per-feature plans get added/moved as work lands
+
+If a commit is genuinely doc-trivial: explicit "skip doc-refresh: trivial" in the commit message.
+
+### AsyncAllowlistTest sensitivity
+
+Every new `@Async` method in `src/main/java/...` must be added to `src/test/java/com/navneet/executespec/arch/AsyncAllowlistTest.java::APPROVED`. Failure to do so cascades the GH Action `deploy.yml` build at step 6 "Build JAR (run unit tests)" — *which will only matter when founder eventually calls deploy*. Catch it locally with `JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q test -Dtest=AsyncAllowlistTest` before pushing.
+
+### What might NOT have been caught by R-190/R-191
+
+The previous thread shipped fast across many surfaces. Possible residuals worth a defensive grep before any new wave:
+
+```bash
+grep -rEi "vibe|mission|don't prompt|specify\." frontend/src/ src/main/java/ 2>/dev/null
+```
+
+Any user-visible "Vibe" / "Mission" hits should be 0 (R-190 + R-191 covered them). Any "Don't prompt" / "Specify." should be 0 (R-191 covered). If new ones appear, sweep again with the same playbook.
+
+### Audit-the-tier-mapping reminder for Phase 2 #1 (agent builder)
+
+The agent builder will likely need new agent-tier mappings. Reading `application.yml` `agent-tier-map:` + every entry in `prompts/v2/*.md` is essential prep — the platform's current agent contract (each agent declares a tier, the LlmRouterV2 resolves the tier × provider matrix) is the foundation user-defined agents will plug into.
+
+### Project-wide CLAUDE.md is the canonical doc
+
+Read `/Users/navneetprabhakar/Documents/antigravity/executespec/CLAUDE.md` before scoping any of the Phase 2 items. It's the single source of truth on architecture, agent tiers, tier matrix, security layers, and the v2 vs v2.5 vs v2.6 layering. Per-package `CLAUDE.md` files (e.g. `state/CLAUDE.md`, `router/CLAUDE.md`) cover the local invariants.
+
+---
+
+## 10 · How to use this doc
+
+1. Read §1 (current state) + §2 (decided product calls) before touching anything.
+2. Read §5 (standing rules) carefully — **the branch + deploy rules CHANGED**: no merge to dev without founder direction.
+3. Pick from §3 (Group A, ready to execute) or §4 (future-scope, audit-first).
+4. Check §8 for parked items — do NOT incidentally touch those.
+5. Follow §6 (creds) for execution.
+6. Update this doc at every wave boundary so the next handoff is clean.
+
+---
+
+## 11 · This handoff commit
+
+This file was committed at the cut of `feature/v3-platform-expansion` from `cc80c1c4`. The commit's tip SHA on `origin/feature/v3-platform-expansion` is in the dispatch reply for this turn.
+
+---
+
+**You're cleared. The new branch is cut, the docs are honest, the queue is in priority order. Pick R-321 and start.**
