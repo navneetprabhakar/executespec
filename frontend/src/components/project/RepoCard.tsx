@@ -70,6 +70,17 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
           <div className="mt-1 flex items-center gap-2 text-[11px] text-muted">
             <StackBadge stack={stack} />
             <span>branch: {repo.defaultBranch}</span>
+            {/* R-322 — surface the customer-declared monorepo project root
+                so the user can see at a glance which subdirectory we'll
+                treat as project root. */}
+            {repo.subdir && (
+              <span
+                className="inline-flex items-center rounded-sm bg-accent-blue/10 px-1.5 py-0.5 text-[10px] font-mono text-accent-blue"
+                title=".executespec/root.yml declares this subdirectory as the project root"
+              >
+                root: {repo.subdir}
+              </span>
+            )}
             {repo.lastSyncedSha && (
               <span>· last sync {repo.lastSyncedSha.slice(0, 7)}</span>
             )}

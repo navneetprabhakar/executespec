@@ -21,6 +21,10 @@ export interface ProjectRepo {
   detectedStack: string | null;
   /** v2.5.2 — PR webhook installation state. */
   webhookInstalled: boolean;
+  /** R-322 — declared monorepo project root (null = repo root). Detected
+   *  from {@code .executespec/root.yml} on the default branch at attach
+   *  + sync time. */
+  subdir: string | null;
   createdAt: string;
   updatedAt: string;
 }

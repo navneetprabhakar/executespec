@@ -202,6 +202,28 @@ Batch execution is ideal for large, non-urgent runs. You receive an in-app notif
 
 For existing repos, configure your GitHub PAT in **Settings → Integrations → GitHub**.
 
+#### 3.4.1 Monorepo project root (`.executespec/root.yml`)
+
+If your project lives in a subdirectory of a monorepo, drop a one-line
+marker file at `.executespec/root.yml` on the default branch:
+
+```yaml
+root: apps/web
+```
+
+When ExecuteSpec attaches the repo (and on every subsequent **Sync**),
+it reads the marker and stores the declared subdirectory as the
+project root. The detected path is shown on the repo card in
+**Project → Repos**. Subdirs starting with `/` or containing `..` are
+rejected for safety.
+
+If the marker is missing or unparseable, ExecuteSpec falls back to the
+repo root (today's default), so single-package repos need no change.
+
+> **Repo size limit.** ExecuteSpec rejects repos larger than the
+> platform's clone-time budget (default 250 MB) at attach time. If you
+> need to attach a larger repo, contact `admin@executespec.ai`.
+
 ### 3.5 Launching the Run
 
 1. Click **Launch Run** in the header
