@@ -291,7 +291,7 @@ export default function V3Auth() {
               color:
                 !email.trim() || !password || submitting
                   ? 'var(--v3-text-subtle)'
-                  : '#0B0D10',
+                  : 'var(--v3-text-on-brand)',
               border: 'none',
               borderRadius: 6,
               cursor:

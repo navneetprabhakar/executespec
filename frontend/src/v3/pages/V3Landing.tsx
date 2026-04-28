@@ -220,7 +220,7 @@ export default function V3Landing() {
                 color:
                   text.trim().length === 0 || submitting
                     ? 'var(--v3-text-subtle)'
-                    : '#0B0D10',
+                    : 'var(--v3-text-on-brand)',
                 border: 'none',
                 borderRadius: 6,
                 cursor:
@@ -299,7 +299,7 @@ export default function V3Landing() {
                 fontSize: 13,
                 fontWeight: 600,
                 background: 'var(--v3-brand)',
-                color: '#0B0D10',
+                color: 'var(--v3-text-on-brand)',
                 border: 'none',
                 borderRadius: 6,
                 cursor: 'pointer',
@@ -464,8 +464,8 @@ const DEMO_FRAMES = [
   { phase: 'Spec',     line: 'Add a /healthz endpoint to my Spring Boot app',           tone: 'var(--v3-text-muted)' },
   { phase: 'Plan',     line: 'T1 · Add HealthController · T2 · Wire ManagementMetrics', tone: 'var(--v3-brand)' },
   { phase: 'Build',    line: 'mvn -q compile · 0 errors · 47 source files · 6.2s',      tone: 'var(--v3-brand)' },
-  { phase: 'Test',     line: '14/14 tests passed · reviewer verdict: CLEAN',            tone: '#7AD1C8' },
-  { phase: 'PR opened', line: 'github.com/your-org/svc · #482 · ready for review',      tone: '#7AD1C8' },
+  { phase: 'Test',     line: '14/14 tests passed · reviewer verdict: CLEAN',            tone: 'var(--v3-brand-2)' },
+  { phase: 'PR opened', line: 'github.com/your-org/svc · #482 · ready for review',      tone: 'var(--v3-brand-2)' },
 ];
 
 // ─── R-204 (Wave 4) — Hero-video slot ──────────────────────────────────────
@@ -551,7 +551,7 @@ function DemoAnimation() {
               padding: '2px 6px',
               borderRadius: 3,
               background: i === frame ? 'var(--v3-brand)' : 'var(--v3-surface)',
-              color: i === frame ? '#0B0D10' : 'var(--v3-text-muted)',
+              color: i === frame ? 'var(--v3-text-on-brand)' : 'var(--v3-text-muted)',
               fontWeight: i === frame ? 600 : 400,
               transition: 'background 150ms ease',
             }}
@@ -613,8 +613,8 @@ function SampleRunGallery({ rows }: { rows: V3SampleRun[] }) {
 }
 
 function SampleRunCard({ row }: { row: V3SampleRun }) {
-  const verdictTone = row.verdict === 'READY' ? '#7AD1C8'
-    : row.verdict === 'NEEDS_REVIEW' ? '#F59E0B'
+  const verdictTone = row.verdict === 'READY' ? 'var(--v3-brand-2)'
+    : row.verdict === 'NEEDS_REVIEW' ? 'var(--v3-warning)'
     : '#FCA5A5';
   const verdictLabel = row.verdict === 'READY' ? 'Ready'
     : row.verdict === 'NEEDS_REVIEW' ? 'Needs review'

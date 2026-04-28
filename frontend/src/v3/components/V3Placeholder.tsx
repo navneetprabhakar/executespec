@@ -104,7 +104,7 @@ export default function V3Placeholder({
             gap: 6,
             padding: '8px 14px',
             background: 'var(--v3-brand, #5B8DEF)',
-            color: '#0B0D10',
+            color: 'var(--v3-text-on-brand)',
             fontSize: 13,
             fontWeight: 600,
             borderRadius: 6,

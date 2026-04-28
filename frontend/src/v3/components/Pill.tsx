@@ -25,12 +25,12 @@ interface PillProps {
 }
 
 const toneToVar: Record<PillTone, { bg: string; fg: string; border: string }> = {
-  ok:      { bg: 'rgba(16,185,129,0.12)',  fg: '#10B981', border: 'rgba(16,185,129,0.32)'  },
-  warn:    { bg: 'rgba(245,158,11,0.12)',  fg: '#F59E0B', border: 'rgba(245,158,11,0.32)'  },
-  err:     { bg: 'rgba(239,68,68,0.12)',   fg: '#EF4444', border: 'rgba(239,68,68,0.36)'   },
-  neutral: { bg: 'rgba(148,163,184,0.10)', fg: '#94A3B8', border: 'rgba(148,163,184,0.26)' },
-  info:    { bg: 'rgba(91,141,239,0.14)',  fg: '#5B8DEF', border: 'rgba(91,141,239,0.32)'  },
-  brand:   { bg: 'rgba(91,141,239,0.16)',  fg: '#7AD1C8', border: 'rgba(91,141,239,0.36)'  },
+  ok:      { bg: 'rgba(16,185,129,0.12)',  fg: 'var(--v3-success)', border: 'rgba(16,185,129,0.32)'  },
+  warn:    { bg: 'rgba(245,158,11,0.12)',  fg: 'var(--v3-warning)', border: 'rgba(245,158,11,0.32)'  },
+  err:     { bg: 'rgba(239,68,68,0.12)',   fg: 'var(--v3-error)', border: 'rgba(239,68,68,0.36)'   },
+  neutral: { bg: 'rgba(148,163,184,0.10)', fg: 'var(--v3-text-muted)', border: 'rgba(148,163,184,0.26)' },
+  info:    { bg: 'rgba(91,141,239,0.14)',  fg: 'var(--v3-brand)', border: 'rgba(91,141,239,0.32)'  },
+  brand:   { bg: 'rgba(91,141,239,0.16)',  fg: 'var(--v3-brand-2)', border: 'rgba(91,141,239,0.36)'  },
 };
 
 export default function Pill({

@@ -62,7 +62,7 @@ export default function Term({ name, children, hideHint = false }: TermProps) {
             marginLeft: 2,
             fontSize: 9,
             fontWeight: 700,
-            color: '#94A3B8',
+            color: 'var(--v3-text-muted)',
             border: '1px solid rgba(148,163,184,0.4)',
             borderRadius: '50%',
             lineHeight: 1,

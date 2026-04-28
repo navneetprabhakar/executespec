@@ -14,11 +14,21 @@ import '../v3.css';
  * for now; populated in R-102/R-124) and renders children in a centered
  * max-width container. **No sidebar.** No breadcrumb. Just top-bar + body.
  *
- * Theme lock: v3 force-sets `data-theme="dark"` on the v3 root node so the
- * v3 surface always renders against the off-black palette. v2's theme
- * toggle on /settings keeps working for v2 surfaces (we scope by selector
- * in v3.css). The lock is set on mount + reset on unmount so navigating
- * back to a v2 route restores the user's preferred theme.
+ * R-307 (Wave 6) — Theme lock REMOVED.
+ *
+ * Previous behaviour: V3Shell force-set `data-theme="dark"` on `<html>` on
+ * mount + restored the prior theme on unmount. That was a deliberate Wave-1
+ * lock because v3.css didn't ship a light-mode override block — forcing
+ * dark was the only way to guarantee legibility.
+ *
+ * Wave 6 R-302 added a `[data-theme='light'] .v3-root` block in v3.css
+ * with paper-* primitive aliases for surface/border/text. With the
+ * override in place the lock becomes counterproductive: it overrides the
+ * user's theme choice from the v2 ThemeToggle.
+ *
+ * The `v3-active` class is still set on `<html>` so v2 stylesheets can
+ * conditionally scope their own rules away from v3 routes if needed
+ * (no current consumer; reserved for future use).
  */
 function CapModalMount() {
   const open = useV3Ui((s) => s.capModalOpen);
@@ -29,13 +39,11 @@ function CapModalMount() {
 export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean }) {
   useEffect(() => {
     const root = document.documentElement;
-    const prevTheme = root.getAttribute('data-theme');
-    root.setAttribute('data-theme', 'dark');
+    // R-307 (Wave 6): just mark v3-active. Theme attribute stays under
+    // the user's control via the v2 ThemeToggle (useUiStore).
     root.classList.add('v3-active');
     return () => {
       root.classList.remove('v3-active');
-      if (prevTheme) root.setAttribute('data-theme', prevTheme);
-      else root.removeAttribute('data-theme');
     };
   }, []);
 

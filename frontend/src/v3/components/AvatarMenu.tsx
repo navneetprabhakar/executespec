@@ -127,7 +127,7 @@ export default function AvatarMenu() {
           height: 30,
           borderRadius: '50%',
           background: 'linear-gradient(135deg, var(--v3-brand), var(--v3-brand-2))',
-          color: '#0B0D10',
+          color: 'var(--v3-text-on-brand)',
           border: 'none',
           cursor: 'pointer',
           fontSize: 11,

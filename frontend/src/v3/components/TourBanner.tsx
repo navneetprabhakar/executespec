@@ -67,7 +67,7 @@ export default function TourBanner() {
           fontSize: 11.5,
           fontWeight: 600,
           background: 'var(--v3-brand)',
-          color: '#0B0D10',
+          color: 'var(--v3-text-on-brand)',
           border: 'none',
           borderRadius: 4,
           textDecoration: 'none',

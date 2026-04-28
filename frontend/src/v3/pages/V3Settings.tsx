@@ -241,7 +241,7 @@ function V3OptInCard() {
               fontSize: 11.5,
               fontWeight: 600,
               background: optedIn ? 'transparent' : 'var(--v3-brand)',
-              color: optedIn ? 'var(--v3-text-muted)' : '#0B0D10',
+              color: optedIn ? 'var(--v3-text-muted)' : 'var(--v3-text-on-brand)',
               border: optedIn ? '1px solid var(--v3-border)' : 'none',
               borderRadius: 4,
               cursor: 'pointer',

@@ -20,22 +20,28 @@ interface Props {
   runStartedAt?: string | null;
 }
 
-// Status → colour token, matching the existing TaskGraph palette.
+// R-306 (Wave 6) — status colours sourced from the unified token layer.
+// Previously each status had a Tailwind-palette literal (#3B82F6 blue-500,
+// #8B5CF6 violet-500, #4B5563 gray-600); converged onto --status-* tokens
+// from frontend/src/tokens.css so a status-colour change in one place
+// propagates everywhere. Slight visual diff: WORKING is now --status-executing
+// (#5B8DEF Signal Blue, was Tailwind #3B82F6); PLANNING is now
+// --status-thinking (#A78BFA, was #8B5CF6); both are within-family hue shifts.
 const STATUS_FILL: Record<string, string> = {
-  COMPLETE: '#10B981',
-  WORKING:  '#3B82F6',
-  RUNNING:  '#3B82F6',
-  COMPILING:'#3B82F6',
-  MERGING:  '#3B82F6',
-  PLANNING: '#8B5CF6',
-  REVIEWING:'#8B5CF6',
-  PENDING:  '#4B5563',
-  QUEUED:   '#4B5563',
-  PARTIAL:  '#F59E0B',
-  BLOCKED:  '#F59E0B',
-  FAILED:   '#EF4444',
-  CANCELLED:'#6B7280',
-  SKIPPED:  '#6B7280',
+  COMPLETE: 'var(--status-success)',
+  WORKING:  'var(--status-executing)',
+  RUNNING:  'var(--status-executing)',
+  COMPILING:'var(--status-executing)',
+  MERGING:  'var(--status-executing)',
+  PLANNING: 'var(--status-thinking)',
+  REVIEWING:'var(--status-thinking)',
+  PENDING:  'var(--status-queued)',
+  QUEUED:   'var(--status-queued)',
+  PARTIAL:  'var(--status-waiting)',
+  BLOCKED:  'var(--status-waiting)',
+  FAILED:   'var(--status-error)',
+  CANCELLED:'var(--status-queued)',
+  SKIPPED:  'var(--status-queued)',
 };
 
 const pillClass = (status: string): string => {
@@ -177,7 +183,7 @@ export default function TaskTimeline({ tasks, runStartedAt }: Props) {
   const ticks = pickTicks(totalMs);
 
   return (
-    <div className="w-full bg-[#0a0a0f] border border-[var(--border-default)] rounded-sm">
+    <div className="w-full bg-[var(--geist-bg)] border border-[var(--border-default)] rounded-sm">
       {/* Header strip */}
       <div className="flex items-center gap-4 px-4 py-2 border-b border-[var(--border-default)] text-xs">
         <span className="text-[var(--text-muted)]">
@@ -261,7 +267,7 @@ export default function TaskTimeline({ tasks, runStartedAt }: Props) {
 
               {/* Hover tooltip */}
               {isHover && (
-                <div className="absolute top-full left-48 z-10 mt-1 rounded-sm bg-[#111] border border-white/10 p-3 text-xs shadow-xl min-w-[280px]">
+                <div className="absolute top-full left-48 z-10 mt-1 rounded-sm bg-[var(--gray-100)] border border-white/10 p-3 text-xs shadow-xl min-w-[280px]">
                   <div className="font-medium text-[var(--text-primary)] truncate">{r.title}</div>
                   <div className="mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[var(--text-muted)]">
                     <span>Status</span><span className="text-[var(--text-secondary)]">{r.status}</span>

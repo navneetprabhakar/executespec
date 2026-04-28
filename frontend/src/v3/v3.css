@@ -46,6 +46,13 @@
    * website's text-gradient-orange, brought into the app per Wave-5 E.1. */
   --v3-pop-grad: linear-gradient(to right, var(--c-pop-orange), var(--c-pop-amber));
 
+  /* R-306 (Wave 6) — text colour for elements sitting on a brand-blue or
+   * brand-pop background (CTA buttons, chip pills with bg = --v3-brand).
+   * Same hex as --v3-bg in dark mode but kept distinct so light-mode
+   * doesn't accidentally flip it (a primary-blue button on white still
+   * needs dark text, not page-bg-flipped-to-white). */
+  --v3-text-on-brand: #0B0D10;
+
   --v3-radius-sm: 4px;
   --v3-radius: 6px;
   --v3-radius-lg: 10px;
@@ -143,7 +150,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: #0B0D10;
+  color: var(--v3-text-on-brand);
   font-weight: 700;
   font-size: 13px;
   letter-spacing: -0.02em;

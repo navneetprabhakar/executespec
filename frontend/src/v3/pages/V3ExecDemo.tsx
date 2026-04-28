@@ -154,7 +154,7 @@ export default function V3ExecDemo() {
                     padding: '2px 6px',
                     borderRadius: 3,
                     background: 'rgba(122,209,200,0.15)',
-                    color: '#7AD1C8',
+                    color: 'var(--v3-brand-2)',
                   }}
                 >
                   {w.verifiedScore != null ? `${w.verifiedScore}/100` : '—'}
@@ -205,7 +205,7 @@ export default function V3ExecDemo() {
               fontSize: 13,
               fontWeight: 600,
               background: 'var(--v3-brand)',
-              color: '#0B0D10',
+              color: 'var(--v3-text-on-brand)',
               borderRadius: 6,
               textDecoration: 'none',
             }}
