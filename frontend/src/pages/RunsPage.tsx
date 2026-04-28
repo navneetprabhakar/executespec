@@ -5,8 +5,6 @@ import { useRunStore } from '@/stores/useRunStore';
 import { useSse } from '@/hooks/useSse';
 import { useUiStore } from '@/stores/useUiStore';
 import { useIsMobile } from '@/hooks/useIsMobile';
-import { Sparkles } from 'lucide-react';
-import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
 import { ACTIVE_STATUSES, GATE_STATUSES } from '@/lib/constants';
 
@@ -42,7 +40,8 @@ export default function RunsPage() {
   const runListWidth = useUiStore((s) => s.runListWidth);
   const setRunListWidth = useUiStore((s) => s.setRunListWidth);
 
-  const { isVibe } = useViewMode();
+  // R-190 (post-cutover) — useViewMode no longer exposes isVibe; the
+  // empty-state copy is the Pro-mode "Select a run to view details" line.
 
   // Mobile: show either the list or the detail, not both
   const mobileShowDetail = isMobile && !!activeRunId;
@@ -119,15 +118,7 @@ export default function RunsPage() {
             <RunDetail />
           ) : (
             <div className="h-full flex flex-col items-center justify-center gap-3">
-              {isVibe ? (
-                <>
-                  <Sparkles className="h-8 w-8 text-accent-blue/40" />
-                  <p className="text-sm text-muted">What do you want to build?</p>
-                  <p className="text-xs text-muted">Select a run or start a new one</p>
-                </>
-              ) : (
-                <p className="text-sm text-muted">Select a run to view details</p>
-              )}
+              <p className="text-sm text-muted">Select a run to view details</p>
             </div>
           )}
         </div>

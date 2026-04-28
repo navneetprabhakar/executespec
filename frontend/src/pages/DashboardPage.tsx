@@ -8,15 +8,17 @@ import ActivityFeed from '@/components/dashboard/ActivityFeed';
 import { useMetricsStore } from '@/stores/useMetricsStore';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
-import { useViewMode } from '@/hooks/useViewMode';
 import { fmtTokens } from '@/lib/utils';
 import PageShell, { Section, StatGrid, Stat } from '@/components/shared/PageShell';
 
 export default function DashboardPage() {
+  // R-190 (post-cutover) — useViewMode no longer exposes isVibe; the
+  // simplified-dashboard branch (2-stat grid + activity feed only) was
+  // deleted with the Vibe surface. The full Pro dashboard is the only
+  // path now.
   const isAdmin = useAuthStore(selectIsOrgAdmin);
   const { metrics, modelComparison, userRunsSummary, days, fetchAll } = useMetricsStore();
   const { runs, fetchRuns } = useRunStore();
-  const { isVibe } = useViewMode();
 
   useEffect(() => {
     if (!isAdmin) return;
@@ -31,30 +33,7 @@ export default function DashboardPage() {
     return <Navigate to="/" replace />;
   }
 
-  // ── Vibe mode: simplified dashboard ─────────────────────────────────────
-  if (isVibe) {
-    return (
-      <PageShell
-        eyebrow="Overview"
-        title="Your workspace, at a glance."
-        accent="glance"
-        description="Only what matters most. Switch to Pro for the full breakdown."
-        maxWidth="4xl"
-        hero
-      >
-        <StatGrid cols={2}>
-          <Stat label="Total runs"  value={metrics?.totalRuns ?? 0} />
-          <Stat label="Active"      value={metrics?.activeRuns ?? 0} tone="purple" pulse />
-        </StatGrid>
-
-        <Section eyebrow="Recent activity" title="Latest runs" card={false}>
-          <ActivityFeed runs={runs} />
-        </Section>
-      </PageShell>
-    );
-  }
-
-  // ── Pro mode: full dashboard ────────────────────────────────────────────
+  // ── Full dashboard (was Pro mode pre-R-190) ─────────────────────────────
   return (
     <PageShell
       eyebrow="Dashboard"

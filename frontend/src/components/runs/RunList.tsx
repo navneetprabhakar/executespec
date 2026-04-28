@@ -10,7 +10,6 @@ import NewRunModal from './NewRunModal';
 import { useRunStore } from '@/stores/useRunStore';
 import { useAuthStore, selectIsOrgMember, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import { useUiStore } from '@/stores/useUiStore';
-import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
 import * as api from '@/lib/api';
 
@@ -34,7 +33,9 @@ export default function RunList() {
   const [showModal, setShowModal] = useState(false);
   const [projects, setProjects] = useState<api.ProjectDto[]>([]);
   const { pendingNewRunConfig, setPendingNewRunConfig } = useUiStore();
-  const { isVibe } = useViewMode();
+  // R-190 (post-cutover) — useViewMode no longer exposes isVibe; the
+  // RunCard `compact` prop was previously fed by isVibe. Default cards
+  // (full Pro layout) render unconditionally now.
   const isMobile = useIsMobile();
 
   // Open modal when a pending config is set (e.g., from Re-run or Copilot "Iterate as New Run")
@@ -212,7 +213,6 @@ export default function RunList() {
               index={i}
               isActive={run.runId === activeRunId}
               onClick={() => setActiveRunId(run.runId)}
-              compact={isVibe}
             />
           ))
         )}
