@@ -81,6 +81,18 @@ export default function RepoCard({ link, onUnlink, onSync, onUpdateRelationships
                 root: {repo.subdir}
               </span>
             )}
+            {/* R-325 — flag big-repo opt-in attaches so the user knows
+                runs touching this repo will count more credits. */}
+            {repo.attachedAnyway && (
+              <span
+                className="inline-flex items-center rounded-sm bg-accent-amber/10 px-1.5 py-0.5 text-[10px] text-accent-amber"
+                title={`Attached despite the platform size budget${
+                  repo.sizeKb ? ` (≈${Math.round(repo.sizeKb / 1024)} MB)` : ''
+                }. Runs touching this repo count more credits.`}
+              >
+                big repo · counts more credits
+              </span>
+            )}
             {repo.lastSyncedSha && (
               <span>· last sync {repo.lastSyncedSha.slice(0, 7)}</span>
             )}

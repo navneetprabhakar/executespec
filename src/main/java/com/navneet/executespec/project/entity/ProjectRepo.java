@@ -69,6 +69,21 @@ public class ProjectRepo {
     @Column(name = "subdir", length = 512)
     private String subdir;
 
+    /** R-325 (V156) — GitHub-reported repo size at attach time, in KB.
+     *  Captured on every attach so the credit-surcharge calc can reason
+     *  about the full population. NULL = unknown (pre-V156 row, or GH
+     *  returned no size value at attach). */
+    @Column(name = "size_kb")
+    private Long sizeKb;
+
+    /** R-325 (V156) — TRUE when the attach bypassed the
+     *  {@code executespec.repo.max-size-kb} gate via the opt-in flow.
+     *  Drives the per-run credit surcharge. Default FALSE at the column
+     *  level so legacy rows + non-bypassed attaches both report cleanly. */
+    @Column(name = "attached_anyway", nullable = false)
+    @Builder.Default
+    private boolean attachedAnyway = false;
+
     /** JSON-serialised {@code StackInfo} ({language, framework, version}) or null. */
     @Column(name = "detected_stack", columnDefinition = "jsonb")
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
