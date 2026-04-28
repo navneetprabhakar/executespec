@@ -114,7 +114,26 @@ export default function V3Landing() {
         >
           ExecuteSpec ships AI-written pull requests
           <br />
-          you can actually merge — for one repo or for twenty.
+          you can actually{' '}
+          {/* R-305 (Wave 6) — brand-pop gradient on the verb. ONE word per
+              page max per the strategy; "merge" is the verb the whole
+              pitch hangs on. Mirrors website's text-gradient-orange
+              treatment via --v3-pop-grad (orange→amber). */}
+          <span
+            style={{
+              fontStyle: 'italic',
+              fontFamily: "'Instrument Serif', Georgia, serif",
+              fontWeight: 500,
+              backgroundImage: 'var(--v3-pop-grad)',
+              backgroundClip: 'text',
+              WebkitBackgroundClip: 'text',
+              color: 'transparent',
+              WebkitTextFillColor: 'transparent',
+            }}
+          >
+            merge
+          </span>
+          {' '}— for one repo or for twenty.
         </h1>
         <p
           style={{
