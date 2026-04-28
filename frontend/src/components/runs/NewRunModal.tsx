@@ -273,8 +273,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
             </button>
           ) : (
             <div className="min-w-0 flex-1">
-              {/* M-001 — copy-only Mission rename. */}
-              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-1">New mission</div>
+              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-1">New run</div>
               <h2 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight">
                 Write a spec. <span style={{ fontFamily: "'Instrument Serif', Georgia, serif", fontStyle: 'italic', fontWeight: 400 }}>Ship</span> it.
               </h2>
@@ -564,12 +563,15 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               </>
             )}
 
-            {/* BYOK warning for MAX tier without API keys + inline drawer (M-008). */}
-            {user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
+            {/* BYOK warning for TEAM tier without API keys + inline drawer.
+                Tier-coherence: TEAM + ENTERPRISE are BYOK; if no keys are
+                configured the run cannot dispatch. (Old MAX tier was renamed
+                to TEAM in V141; this check now matches the live tier.) */}
+            {user?.tier === 'TEAM' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
               <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-amber/10 border border-accent-amber/30 text-sm text-secondary">
                 <AlertCircle className="h-4 w-4 text-accent-amber flex-shrink-0 mt-0.5" />
                 <span className="flex-1">
-                  Max plan requires your own API keys.
+                  Team plan requires your own API keys.
                 </span>
                 <button
                   type="button"
@@ -592,7 +594,7 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
               size="lg"
               fullWidth
               loading={launching}
-              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'MAX' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
+              disabled={!goal.trim() || launching || (repoChoice === 'EXISTING' && !repoUrl.trim()) || (user?.tier === 'TEAM' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey)}
             >
               {!launching && <Rocket className="h-4 w-4" />}
               {launching ? 'Launching...' : 'Launch Run'}

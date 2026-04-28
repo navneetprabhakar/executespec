@@ -33,5 +33,34 @@ public enum EventName {
     RUN_COMPLETE,
 
     /** First PR originating from the user's run was merged on GitHub. */
-    PR_MERGED
+    PR_MERGED,
+
+    // ── R-160 (v3) — greenfield-redesign conversion funnel ────────────────────
+    // These mirror the v2 events for the same user actions but discriminate
+    // the v3 surface so we can A/B the conversion lift cleanly. Each fires
+    // at most once per user (same user_activation_event ledger as v2).
+
+    /** Anonymous visitor submitted the homepage textarea (no signup yet). */
+    V3_LANDING_TEXTAREA_SUBMIT,
+
+    /** First v3 run reached PLANNING (signup boundary may have been crossed). */
+    V3_FIRST_RUN_STARTED,
+
+    /** First v3 run reached the "Ready to merge" verdict. */
+    V3_FIRST_RUN_READY,
+
+    /** Second-or-later run submitted in v3 (retention signal). */
+    V3_REPEAT_RUN_SUBMITTED,
+
+    /** Free user upgraded to a paid tier from a v3 nudge. */
+    V3_TIER_UPGRADED,
+
+    /** First teammate seat added under a v3 Team plan. */
+    V3_TEAM_SEAT_ADDED,
+
+    /** Enterprise inquiry submitted from /v3/trust or /v3/pricing. */
+    V3_ENTERPRISE_INQUIRY_SUBMITTED,
+
+    /** Trust Pack PDF downloaded from /v3/trust. */
+    V3_TRUST_PAGE_PDF_DOWNLOADED
 }

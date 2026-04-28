@@ -1,0 +1,20 @@
+{
+  "name": "ExecuteSpec",
+  "short_name": "ExecuteSpec",
+  "description": "Ship AI pull requests you can actually merge.",
+  "start_url": "/v3/home",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0B0D10",
+  "theme_color": "#0B0D10",
+  "categories": ["developer", "productivity"],
+  "icons": [
+    {
+      "src": "/logo.png",
+      "sizes": "any",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}

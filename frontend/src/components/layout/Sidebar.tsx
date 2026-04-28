@@ -237,18 +237,21 @@ export default function Sidebar() {
       {/* Upgrade + Usage — hidden for SUPER_ADMIN since they bypass billing quotas */}
       {expanded && !isSuperAdmin && (
         <div className="px-3 py-2 border-t border-[var(--border-default)] space-y-2">
-          {tier && tier !== 'ENTERPRISE' && tier !== 'MAX' && (
+          {/* Tier-coherence: Upgrade visible to FREE + PRO. TEAM + ENTERPRISE
+              are BYOK (unlimited via own keys), so neither shows Upgrade nor
+              Top-up. The only tier that buys top-up packs is PRO. */}
+          {tier && (tier === 'FREE' || tier === 'PRO') && (
             <button
-              onClick={() => { navigate('/plans'); if (isMobile) closeMobileDrawer(); }}
+              onClick={() => { navigate('/v3/pricing'); if (isMobile) closeMobileDrawer(); }}
               className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"
             >
               <ArrowUpCircle className="h-3.5 w-3.5 flex-shrink-0" />
-              <span>Upgrade{tier === 'FREE' ? ' to Pro' : ''}</span>
+              <span>Upgrade{tier === 'FREE' ? ' to Pro' : ' to Team'}</span>
             </button>
           )}
-          {tier && tier !== 'FREE' && tier !== 'MAX' && tier !== 'ENTERPRISE' && (
+          {tier === 'PRO' && (
             <button
-              onClick={() => { navigate('/billing#topup'); if (isMobile) closeMobileDrawer(); }}
+              onClick={() => { navigate('/v3/billing'); if (isMobile) closeMobileDrawer(); }}
               className="flex items-center justify-center gap-2 w-full px-2 py-2 rounded-sm text-xs font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors"
             >
               <Plus className="h-3.5 w-3.5 flex-shrink-0" />

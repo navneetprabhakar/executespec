@@ -133,6 +133,26 @@ public class MailService {
                 "email/org-invite", ctx);
     }
 
+    /**
+     * R-162 — v3 Free-tier referral invite. Sent when a Free user
+     * invites a friend; the signup URL embeds the V153 invite token
+     * so the auth flow can bind the referee on signup.
+     *
+     * Best-effort: the @Async + try/catch in the calling service
+     * ensures a failed email never aborts the invite write.
+     */
+    @Async
+    public void sendV3ReferralInvite(String toEmail, String referrerName, String token) {
+        String name = (referrerName == null || referrerName.isBlank()) ? "Your friend" : referrerName;
+        Context ctx = new Context();
+        ctx.setVariable("referrerName", name);
+        ctx.setVariable("signupUrl", baseUrl + "/v3/auth?ref=" + token);
+        ctx.setVariable("baseUrl", baseUrl);
+        sendHtml(toEmail,
+                name + " invited you to ExecuteSpec — both of you get +5 free runs",
+                "email/v3-referral-invite", ctx);
+    }
+
     @Async
     public void sendEscalationToAdmin(String adminEmail, String invitedEmail,
                                        String orgName, String invitationId) {

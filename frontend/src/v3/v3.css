@@ -1,0 +1,210 @@
+/* R-101 — v3 visual primitives.
+ *
+ * Scoped via .v3-root so v3 styles never leak into v2 screens during
+ * cohabitation. Variables locked to the dark palette per the greenfield
+ * §3 design spec (off-black background, Signal Blue accent, Mint
+ * secondary, semantic functional palette). Light-mode v3 lands later
+ * (Wave 3); this file pins dark for now.
+ */
+
+.v3-root {
+  --v3-bg: #0B0D10;
+  --v3-surface: #11151B;
+  --v3-surface-elevated: #161B22;
+  --v3-border: #1F242C;
+  --v3-border-strong: #2A2F37;
+  --v3-text: #E8EAED;
+  --v3-text-muted: #94A3B8;
+  --v3-text-subtle: #5E6771;
+  --v3-brand: #5B8DEF;
+  --v3-brand-2: #7AD1C8;
+  --v3-success: #10B981;
+  --v3-warning: #F59E0B;
+  --v3-error: #EF4444;
+  --v3-info: #5B8DEF;
+
+  --v3-radius-sm: 4px;
+  --v3-radius: 6px;
+  --v3-radius-lg: 10px;
+
+  --v3-pad-1: 4px;
+  --v3-pad-2: 8px;
+  --v3-pad-3: 12px;
+  --v3-pad-4: 16px;
+  --v3-pad-5: 24px;
+  --v3-pad-6: 32px;
+  --v3-pad-7: 48px;
+  --v3-pad-8: 64px;
+
+  --v3-fs-caption: 11.5px;
+  --v3-fs-body: 13px;
+  --v3-fs-ui: 14px;
+  --v3-fs-lead: 16px;
+  --v3-fs-h2: 22px;
+  --v3-fs-h1: 32px;
+
+  background: var(--v3-bg);
+  color: var(--v3-text);
+  min-height: 100vh;
+  font-family: -apple-system, BlinkMacSystemFont, 'Geist', 'Inter',
+    'Segoe UI', Roboto, sans-serif;
+  font-size: var(--v3-fs-body);
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.v3-root *,
+.v3-root *::before,
+.v3-root *::after {
+  box-sizing: border-box;
+}
+
+/* TopBar */
+.v3-topbar {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  height: 56px;
+  padding: 0 var(--v3-pad-4);
+  background: rgba(11, 13, 16, 0.86);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--v3-border);
+}
+
+.v3-topbar__brand {
+  display: flex;
+  align-items: center;
+  gap: var(--v3-pad-2);
+  color: var(--v3-text);
+  font-weight: 600;
+  font-size: var(--v3-fs-ui);
+  text-decoration: none;
+}
+
+.v3-topbar__brand-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: var(--v3-radius);
+  background: linear-gradient(135deg, var(--v3-brand), var(--v3-brand-2));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #0B0D10;
+  font-weight: 700;
+  font-size: 13px;
+  letter-spacing: -0.02em;
+}
+
+.v3-topbar__center {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+}
+
+.v3-topbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--v3-pad-2);
+}
+
+.v3-topbar__placeholder {
+  font-size: var(--v3-fs-caption);
+  color: var(--v3-text-subtle);
+  padding: var(--v3-pad-1) var(--v3-pad-3);
+  border: 1px dashed var(--v3-border);
+  border-radius: var(--v3-radius);
+}
+
+/* Main container */
+.v3-main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: var(--v3-pad-5) var(--v3-pad-4);
+}
+
+@media (max-width: 640px) {
+  .v3-main {
+    padding: var(--v3-pad-4) var(--v3-pad-3);
+  }
+
+  /* R-170 — TopBar: shrink the project switcher trigger so the
+     Search button + avatar always remain on-screen. */
+  .v3-topbar {
+    height: 52px;
+    padding: 0 var(--v3-pad-3);
+  }
+  .v3-topbar__brand {
+    font-size: var(--v3-fs-caption);
+  }
+  .v3-topbar__brand-mark {
+    width: 24px;
+    height: 24px;
+  }
+  .v3-topbar__placeholder {
+    display: none;
+  }
+
+  /* R-170 — Run-detail two-pane layout collapses to single column;
+     V3RunDetail.tsx already has a 768px breakpoint inline, this
+     rule extends it to v3-rundetail-grid below 640. */
+  .v3-rundetail-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  /* R-170 — Insights tile grid: 2-up at narrow width instead of
+     auto-fit (avoids 1-tile-wide rendering when one tile's value is
+     long). */
+  .v3-insights-tiles {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  /* R-170 — billing 3-tier card grid renders one column instead of
+     squeezed-3-up at 390px. Bumps minmax floor so each card breathes. */
+  .v3-pricing-grid {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* R-170 — when an iOS user taps the composer, raise it above the
+   bottom edge so the keyboard doesn't cover it. The browser handles
+   most of this via `position: sticky` already; this rule just bumps
+   the textarea min-height on focus so the user sees they have room
+   to type. */
+.v3-root textarea:focus {
+  min-height: 80px;
+}
+
+/* Generic placeholder so first-paint pages have something honest. */
+.v3-placeholder {
+  border: 1px dashed var(--v3-border);
+  border-radius: var(--v3-radius);
+  padding: var(--v3-pad-6) var(--v3-pad-5);
+  color: var(--v3-text-muted);
+  text-align: center;
+}
+
+.v3-placeholder h1 {
+  margin: 0 0 var(--v3-pad-3) 0;
+  font-size: var(--v3-fs-h2);
+  color: var(--v3-text);
+  font-weight: 600;
+}
+
+.v3-placeholder p {
+  margin: 0;
+  font-size: var(--v3-fs-body);
+}
+
+.v3-placeholder code {
+  background: var(--v3-surface);
+  border: 1px solid var(--v3-border);
+  border-radius: var(--v3-radius-sm);
+  padding: 1px 6px;
+  font-family: ui-monospace, 'Geist Mono', SFMono-Regular, Menlo, monospace;
+  font-size: var(--v3-fs-caption);
+  color: var(--v3-brand-2);
+}
