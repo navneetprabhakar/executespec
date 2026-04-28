@@ -111,6 +111,20 @@ public class ExecutionRun {
     @Column(name = "continue_pr_repo")
     private String continuePrRepo;
 
+    /** R-324 (V155) — JSON array of project_repo IDs the user selected at
+     *  Launch time. NULL or {@code "[]"} means "every linked project repo
+     *  is in scope" (today's pre-R-324 default). Persisted as a JSON string
+     *  to mirror {@link com.navneet.executespec.state.entity.PipelineRun#selectedRepoIds}
+     *  so the two surfaces stay symmetric.
+     *
+     *  <p>Populated by {@code ExecutionOrchestrator.createExecution()} from
+     *  {@code req.repoIds()} plus any new-repo IDs minted on the same call.
+     *  Read by {@code ExecutionPlannerService.buildCodemapsText()} to scope
+     *  the planner's view to the user's selection. */
+    @Column(name = "selected_repo_ids", columnDefinition = "jsonb")
+    @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+    private String selectedRepoIds;
+
     @OneToMany(mappedBy = "executionRun", fetch = FetchType.LAZY)
     @OrderBy("sequenceNumber ASC")
     private List<ExecutionSolution> solutions;
