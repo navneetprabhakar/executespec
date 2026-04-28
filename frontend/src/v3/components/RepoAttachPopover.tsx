@@ -79,6 +79,14 @@ interface RepoAttachPopoverProps {
   targetProjectId?: string;
   /** Anchor element for the popover; absent → centre on screen. */
   anchorEl?: HTMLElement | null;
+  /** R-324 Checkpoint 2 — fired right after a successful
+   *  {@code linkProjectRepo}.  When set on the "attach another repo"
+   *  flow (i.e. {@code targetProjectId} present), the popover invokes
+   *  this instead of navigating to `/v3/p/{projectId}` so the host
+   *  page can refresh its repo list in place rather than reload.
+   *  Ignored on the new-project flow (where navigate is the right
+   *  default behaviour). */
+  onAttached?: (newRepoId: string, projectId: string) => void;
 }
 
 type Phase =
@@ -92,6 +100,7 @@ export default function RepoAttachPopover({
   open,
   onClose,
   targetProjectId,
+  onAttached,
 }: RepoAttachPopoverProps) {
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
   const user = useAuthStore((s) => s.user);
@@ -266,7 +275,17 @@ export default function RepoAttachPopover({
 
       await linkProjectRepo(projectId!, created.id);
       onClose();
-      navigate(`/v3/p/${projectId}`);
+      // R-324 Checkpoint 2 — when the popover was opened from an
+      // already-loaded project page (targetProjectId set), give the
+      // host a chance to refresh its repo list in place instead of
+      // bouncing through a navigate to the same URL (which is a no-op
+      // for React Router and wouldn't re-fire the project's load
+      // effect). The new-project flow keeps the legacy navigate.
+      if (targetProjectId && onAttached) {
+        onAttached(created.id, projectId!);
+      } else {
+        navigate(`/v3/p/${projectId}`);
+      }
     } catch (e) {
       setError((e as Error)?.message ?? 'Attach failed');
       setPhase('error');
