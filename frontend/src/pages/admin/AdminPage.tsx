@@ -21,7 +21,7 @@ const STATUS_COLOR: Record<string, string> = {
 
 export default function AdminPage() {
   return (
-    <RoleGuard requireSuperAdmin>
+    <RoleGuard requireSuperAdmin featureName="Admin console">
       <AdminPageInner />
     </RoleGuard>
   );

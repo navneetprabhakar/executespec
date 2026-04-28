@@ -49,7 +49,10 @@ export default function V3Trust() {
 
       {/* Headline status */}
       <section style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-        <Pill tone="warn">SOC 2 Type II — Audit in progress</Pill>
+        {/* R-319 (Wave 7) — chip copy now names the completion target so
+            InfoSec scanners reading the trust page see a date, not just
+            "in progress". F2 VP Eng Dana procurement-blocking gap. */}
+        <Pill tone="warn">SOC 2 Type II — completion Q3 2026</Pill>
         <Pill tone="ok">TLS 1.3 in transit</Pill>
         <Pill tone="ok">AES-256 at rest</Pill>
         <Pill tone="brand">Data residency · us-east4</Pill>
@@ -57,10 +60,14 @@ export default function V3Trust() {
 
       {/* SOC 2 + audits */}
       <Section title="Audit & certifications">
+        {/* R-319 (Wave 7) — explicit Type II completion ETA + Type I
+            availability. Founder swaps the auditor name + the exact
+            month when the engagement letter is signed. F2 P-medium. */}
         <Row label="SOC 2 Type II">
           <span>
-            <strong>Audit in progress</strong> with [Auditor name TBD]. Anticipated
-            attestation Q3 2026. Letter of engagement available under NDA.
+            <strong>Audit underway — completion targeted Q3 2026.</strong>{' '}
+            Letter of engagement and security questionnaire available
+            under NDA. Type I report available on request.
           </span>
         </Row>
         <Row label="ISO 27001">Roadmap — paired with SOC 2 attestation.</Row>
