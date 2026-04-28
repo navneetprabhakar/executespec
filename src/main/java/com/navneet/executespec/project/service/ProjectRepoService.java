@@ -29,6 +29,13 @@ import java.util.stream.Stream;
 @Slf4j
 public class ProjectRepoService {
 
+    /** R-323 (D-125 #3) — hard reject on attach when GitHub reports the
+     *  repo bigger than this many KB. Configurable via
+     *  {@code executespec.repo.max-size-kb}; default 250 MB. -1 disables
+     *  the gate entirely (escape hatch for staging / debug). */
+    @org.springframework.beans.factory.annotation.Value("${executespec.repo.max-size-kb:250000}")
+    private long repoMaxSizeKb;
+
     private final ProjectRepoRepository repoRepo;
     private final ProjectRepoLinkRepository linkRepo;
     private final ProjectRepository projectRepo;
@@ -85,6 +92,26 @@ public class ProjectRepoService {
 
         String branch = req.defaultBranch() != null ? req.defaultBranch() : "main";
         String repoUrl = "https://github.com/" + req.githubRepoFullName();
+        // R-323 — hard size gate. Skipped when the threshold is set to
+        // -1 (escape hatch) or when GitHub didn't return a size we can
+        // trust (private repo + missing PAT, transient 5xx, etc.).
+        // R-325 will layer an opt-in bypass over this gate.
+        if (repoMaxSizeKb > 0) {
+            long sizeKb = gitHub.getRepoSizeKb(repoUrl, null);
+            if (sizeKb > 0 && sizeKb > repoMaxSizeKb) {
+                long thresholdMb = repoMaxSizeKb / 1024;
+                long actualMb = sizeKb / 1024;
+                throw new ResponseStatusException(HttpStatus.PAYLOAD_TOO_LARGE,
+                        "This repo (≈" + actualMb + " MB) is larger than the platform's "
+                                + thresholdMb + " MB clone-time budget. "
+                                + "Try a smaller repo, or contact admin@executespec.ai "
+                                + "to discuss large-repo support.");
+            }
+        }
+        // R-322 — read the .executespec/root.yml monorepo marker on attach
+        // so monorepo customers get correct project-root behaviour without
+        // a separate config step. NULL stays the default (repo root).
+        String subdir = detectMonorepoSubdir(repoUrl, branch, null);
         ProjectRepo entity = ProjectRepo.builder()
                 .id(UUID.randomUUID())
                 .scope(scope)
@@ -95,6 +122,7 @@ public class ProjectRepoService {
                 .defaultBranch(branch)
                 .detectedStack(stackDetector.detect(req.githubRepoFullName(), null))
                 .lastSyncedSha(gitHub.getBranchHeadSha(repoUrl, branch, null))
+                .subdir(subdir)
                 .build();
         repoRepo.save(entity);
 
@@ -145,6 +173,16 @@ public class ProjectRepoService {
                 repo.getDefaultBranch(),
                 overridePat);
         if (headSha != null) repo.setLastSyncedSha(headSha);
+        // R-322 — re-read the monorepo marker on every sync so a customer
+        // who drops .executespec/root.yml after attach gets the subdir
+        // picked up on the next sync. We never clear back to NULL on a
+        // miss — that's a deletion signal that we want explicit, not
+        // accidental from a transient GH 5xx.
+        String subdir = detectMonorepoSubdir(
+                "https://github.com/" + repo.getGithubRepoFullName(),
+                repo.getDefaultBranch(),
+                overridePat);
+        if (subdir != null) repo.setSubdir(subdir);
         repo.setUpdatedAt(Instant.now());
         ProjectRepo saved = repoRepo.save(repo);
 
@@ -462,6 +500,70 @@ public class ProjectRepoService {
     private static String extractOwner(String fullName) {
         int slash = fullName.indexOf('/');
         return slash > 0 ? fullName.substring(0, slash) : fullName;
+    }
+
+    /**
+     * R-322 (D-125 #2) — read the monorepo marker file
+     * {@code .executespec/root.yml} from the repo's default branch and
+     * return the customer-declared {@code root: <subdir>} value.
+     *
+     * <p>Returns {@code null} when the file is missing, unparseable, or the
+     * declared subdir fails sanity checks (absolute, traversal, length).
+     * Callers treat {@code null} as "use repo root" — the existing default
+     * for every row before V154.
+     */
+    String detectMonorepoSubdir(String repoUrl, String branch, String overridePat) {
+        try {
+            String body = gitHub.readRepoFile(repoUrl, ".executespec/root.yml", branch, overridePat);
+            // GitHubRepoService surfaces failures as a "// ..." sentinel
+            // rather than throwing; treat those as "no marker present".
+            if (body == null || body.isBlank() || body.startsWith("// ")) return null;
+            return parseRootYamlSubdir(body);
+        } catch (Exception e) {
+            log.debug("[R-322] subdir marker probe failed for {} ({}): {}",
+                    repoUrl, branch, e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * Parses the {@code root: <subdir>} key out of a {@code .executespec/root.yml}
+     * file. Tolerant of comments, surrounding whitespace, and unquoted /
+     * single-/ double-quoted values. Rejects absolute paths and traversal
+     * segments so a malicious marker can't escape the repo root.
+     */
+    static String parseRootYamlSubdir(String yamlBody) {
+        if (yamlBody == null) return null;
+        for (String rawLine : yamlBody.split("\\R")) {
+            String line = rawLine;
+            int hash = line.indexOf('#');
+            if (hash >= 0) line = line.substring(0, hash);
+            line = line.trim();
+            if (line.isEmpty()) continue;
+            if (!line.startsWith("root")) continue;
+            int colon = line.indexOf(':');
+            if (colon < 0) continue;
+            String value = line.substring(colon + 1).trim();
+            if (value.isEmpty()) return null;
+            // Strip matching surrounding quotes if any.
+            if ((value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) ||
+                (value.startsWith("'")  && value.endsWith("'")  && value.length() >= 2)) {
+                value = value.substring(1, value.length() - 1);
+            }
+            // Normalise leading "./" so "./apps/web" and "apps/web" agree.
+            while (value.startsWith("./")) value = value.substring(2);
+            // Trim a trailing slash so "apps/web/" and "apps/web" agree.
+            while (value.endsWith("/") && value.length() > 1) {
+                value = value.substring(0, value.length() - 1);
+            }
+            // Sanity gates: reject absolute, traversal, empty, oversized.
+            if (value.isEmpty()) return null;
+            if (value.startsWith("/")) return null;
+            if (value.contains("..")) return null;
+            if (value.length() > 512) return null;
+            return value;
+        }
+        return null;
     }
 
     private static String serializeList(List<String> items) {

@@ -60,6 +60,15 @@ public class ProjectRepo {
     @Builder.Default
     private boolean webhookInstalled = false;
 
+    /** R-322 (D-125 #2) — when the repo is a monorepo and the customer
+     *  has dropped a {@code .executespec/root.yml} file declaring
+     *  {@code root: <subdir>}, this is the relative path inside the repo
+     *  that downstream consumers (codemap, planner, worker) should treat
+     *  as the project root. NULL = repo root (today's default). Detected
+     *  on attach + sync via the GitHub Contents API. */
+    @Column(name = "subdir", length = 512)
+    private String subdir;
+
     /** JSON-serialised {@code StackInfo} ({language, framework, version}) or null. */
     @Column(name = "detected_stack", columnDefinition = "jsonb")
     @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)

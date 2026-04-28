@@ -16,6 +16,8 @@ public record ProjectRepoDto(
         String lastSyncedSha,
         String detectedStack,
         boolean webhookInstalled,
+        // R-322 — declared monorepo project root (null = repo root).
+        String subdir,
         Instant createdAt,
         Instant updatedAt
 ) {
@@ -31,6 +33,7 @@ public record ProjectRepoDto(
                 r.getLastSyncedSha(),
                 r.getDetectedStack(),
                 r.isWebhookInstalled(),
+                r.getSubdir(),
                 r.getCreatedAt(),
                 r.getUpdatedAt()
         );
