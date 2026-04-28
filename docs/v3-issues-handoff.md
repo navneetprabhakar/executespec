@@ -61,9 +61,9 @@ npm --prefix frontend run dev   # frontend (different terminal)
 
 ### Last known R-### used
 
-**`R-326`** (Phase 1.5 doc-tree refresh, in flight at handoff time —
-Cluster A pushed; clusters B/C/D pending). Next free: **`R-327`**.
-Use sequential R-3## IDs for new work below.
+**`R-326`** (Phase 1.5 doc-tree refresh — clusters A/B/C shipped;
+D was a no-op grep that confirmed 0 stale refs). Next free:
+**`R-327`**. Use sequential R-3## IDs for new work below.
 
 ---
 
@@ -153,12 +153,12 @@ Group A.
 
 ### Cluster cadence (one commit per cluster)
 
-| Cluster | Scope | Status |
-|---|---|---|
-| **A** — Root + handoff | `/CLAUDE.md`, `/README.md`, `/CHANGELOG.md`, this handoff doc | shipped this commit |
-| **B** — `docs/` user-facing + architecture | ARCHITECTURE / CODEMAP / DEPLOYMENT / JAVADOC / PRD / RBAC / USER_MANUAL / WORKFLOWS / document_map / frontend-api-usage | next |
-| **C** — `docs/plans/` | classify every plan SHIPPED / SUPERSEDED / STILL-PENDING; rewrite stale "we will do X" claims | next |
-| **D** — per-package CLAUDE.md sweep | `frontend/CLAUDE.md`, `src/main/java/.../*/CLAUDE.md` | next |
+| Cluster | Scope | Status | Commit |
+|---|---|---|---|
+| **A** — Root + handoff | `/CLAUDE.md` line 108 MAX → TEAM, `/README.md` line 3 MAX → TEAM, this handoff full refresh | **shipped** | `85a7c705` |
+| **B** — `docs/` user-facing + architecture | `CODEMAP.md` migration trail extended (V154/V155/V156); `document_map.md` header refreshed; rest of cluster found clean | **shipped** | `cbd5863b` |
+| **C** — `docs/plans/` | 3 unclassified files added (project-surface-vite-split / pre-deploy-open-items / wave-7-issue-list); rest of index already accurate | **shipped** | `cb261ad8` |
+| **D** — per-package CLAUDE.md sweep | grep for `TourBanner`/`V3Changelog`/`Don't prompt`/`Specify.`/`Vibe-A UI`/`TODO(D-125` across all 7 per-package CLAUDE.md files (`frontend/`, `validator/`, `agent/`, `state/`, `harness/`, `deployment/`, `router/`) → **0 hits**. Pre-package CLAUDE.md docs were already cleaned by R-190/R-191. | **shipped (no-op)** | (no commit) |
 
 ### Cluster A (this commit) — what changed
 
