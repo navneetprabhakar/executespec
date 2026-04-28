@@ -314,6 +314,12 @@ export default function V3Landing() {
         <VerifiedCounter stats={stats} />
       )}
 
+      {/* R-202 (Wave 4) — "Trusted by" logo strip. Placeholder slots until
+          we have real customer logos to ship; the "Add your logo here →"
+          tail-link is the social-proof acquisition CTA. Honest copy: tells
+          the visitor what this strip will become without fabricating logos. */}
+      <TrustedByStrip />
+
       {/* Selling-point #3 — CSS-frame demo placeholder. Real video lands later;
           this gives the page motion + a story for personas who skim. */}
       <DemoAnimation />
@@ -575,6 +581,101 @@ function SampleRunCard({ row }: { row: V3SampleRun }) {
         {row.durationMs != null && ` · ${Math.round(row.durationMs / 1000)}s`}
       </div>
     </div>
+  );
+}
+
+// ─── R-202 (Wave 4) — "Trusted by" logo strip ──────────────────────────────
+// Placeholder until real customer logos can be sourced. Honest framing: the
+// strip explains what it'll become rather than fabricating logos. The
+// "Add your logo here →" tail link routes to a brief 3-question form via
+// mailto: so the marketing team can get a real social-proof acquisition
+// pipeline going without waiting on a CRM build.
+
+function TrustedByStrip() {
+  // Slot count — sized for desktop 5-up, wraps to 3 then 2 on smaller widths.
+  const slots = ['Your logo', 'Your logo', 'Your logo', 'Your logo', 'Your logo'];
+  return (
+    <section
+      aria-label="Trusted by — placeholder"
+      style={{
+        margin: '24px auto 0',
+        maxWidth: 960,
+        width: '100%',
+        padding: '14px 16px',
+        background: 'var(--v3-surface)',
+        border: '1px dashed var(--v3-border)',
+        borderRadius: 10,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 11,
+            color: 'var(--v3-text-subtle)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.8,
+            fontWeight: 600,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Trusted by
+        </span>
+        <div
+          style={{
+            display: 'flex',
+            gap: 14,
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            flex: 1,
+            justifyContent: 'center',
+          }}
+        >
+          {slots.map((label, i) => (
+            <div
+              key={i}
+              aria-hidden="true"
+              style={{
+                width: 110,
+                height: 26,
+                borderRadius: 4,
+                background: 'var(--v3-bg)',
+                border: '1px solid var(--v3-border)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontSize: 10,
+                color: 'var(--v3-text-subtle)',
+                letterSpacing: 0.4,
+              }}
+            >
+              {label}
+            </div>
+          ))}
+        </div>
+        <a
+          href="mailto:hello@executespec.ai?subject=Trusted-by%20logo%20—%20%5Borg%20name%5D&body=We%27d%20like%20our%20logo%20on%20your%20landing.%20Org%3A%20%5Bname%5D.%20Logo%20file%3A%20%5Bsvg%2Fpng%20attached%5D.%20Use%20approval%3A%20%5Bcontact%20%2B%20OK%5D."
+          style={{
+            fontSize: 11,
+            color: 'var(--v3-brand)',
+            textDecoration: 'none',
+            whiteSpace: 'nowrap',
+            padding: '4px 10px',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+          }}
+        >
+          Add your logo →
+        </a>
+      </div>
+    </section>
   );
 }
 
