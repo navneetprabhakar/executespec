@@ -2,12 +2,17 @@
 
 ## TL;DR
 
-The 4-concern fix batch from 2026-04-28 has shipped end-to-end:
-backend deployed to `dev.executespec.ai` via GH Action `25043079648`
-(green at T+374s), Cloudflare website redeployed to `executespec.ai`
-(version `8c205e26`), `main` FF'd to dev. **`origin/dev` =
-`origin/main` = `50024fb4`.** No work in flight; clean state for the
-next thread to pick up product asks.
+Two batches shipped end-to-end this session:
+
+  1. **4-concern fix batch** (root-route + remove-What's-new + remove-
+     changelog + email-sweep) — GH Action `25043079648` green at T+374s,
+     Cloudflare redeploy `8c205e26`.
+  2. **R-190 + R-191 post-cutover cleanup** — Vibe UI surface deleted +
+     Mission/Specify vocabulary purged. GH Action `25047545954` green at
+     T+382s.
+
+`main` FF'd to dev after each. **`origin/dev` = `origin/main` =
+`6eee94fe`.** No work in flight; clean state for the next thread.
 
 ## Branch + worktree state
 
@@ -15,9 +20,9 @@ next thread to pick up product asks.
 |---|---|
 | Working branch | **`feature/v3-conversion`** |
 | Worktree path | **`/Users/navneetprabhakar/Documents/antigravity/executespec/.claude/worktrees/cranky-herschel-4d02cf/`** |
-| `origin/feature/v3-conversion` tip | **`50024fb4c1f8562292efbd2b3d6fe5182c0ad320`** |
-| `origin/dev` tip | **`50024fb4c1f8562292efbd2b3d6fe5182c0ad320`** ← matches feature |
-| `origin/main` tip | **`50024fb4c1f8562292efbd2b3d6fe5182c0ad320`** ← matches dev (FF'd this turn) |
+| `origin/feature/v3-conversion` tip | **`6eee94fed32796bc71e1db485b0c52e5638b0a6a`** |
+| `origin/dev` tip | **`6eee94fed32796bc71e1db485b0c52e5638b0a6a`** ← matches feature |
+| `origin/main` tip | **`6eee94fed32796bc71e1db485b0c52e5638b0a6a`** ← matches dev (FF'd this turn) |
 | Local commits ahead of origin | **0** |
 | Uncommitted edits | **none** (only `src/main/resources/static/trust-pack.pdf` untracked — Vite build artifact, ignore) |
 
@@ -38,6 +43,42 @@ next thread to pick up product asks.
 | Commit | Subject | Why |
 |---|---|---|
 | `6903173c` | `chore(scripts): redirect slice-email.py recipient to admin@executespec.ai` | Email-recipient rule lock — automated emails now go to `admin@executespec.ai`. Bundled into the same dev push. |
+
+### R-190 + R-191 post-cutover cleanup (2026-04-28)
+
+| # | Item | Commit | Status |
+|---|---|---|---|
+| R-190 | Remove Vibe UI surface (post-cutover; backend product-surface arch untouched) | `697e6fb8` | ✅ shipped + verified live |
+| R-191 | Purge Mission vocabulary + replace "Don't prompt. Specify." tagline | `6eee94fe` | ✅ shipped + verified live |
+
+**R-190 scope (UI Vibe-A only):** deleted `Vibe*.tsx` + `lib/vibeNarrative.ts`; collapsed `'vibe' | 'pro' | 'project'` ViewMode union to `'pro' | 'project'`; dropped `isVibe` / `vibeRunDefaults` / `escalateToPro` helpers from `useViewMode`; collapsed `isVibe` branches across RunDetail / RunDetailTabs / RunCard / RunList / NewRunModal / RunsPage / DashboardPage; dropped Vibe button from ViewModeToggle; narrowed `lib/api.ts` AuthUser type + added `normalizeAuthUser()` to coerce legacy `view_mode='vibe'` rows to `'pro'` at the parse boundary (called from useAuthStore.login + refreshAccessToken + loadMe — no V145 SQL migration shipped per the explicit "frontend-normalize only" decision). Backend Vibe-B (V143 product_split ENUM, ProductSurfaceFilter, TierProductSurfaceMapper, OAuthSurfaceResolver) intentionally untouched.
+
+**R-191 scope:** `LoginPage.tsx` "Don't prompt. Specify." → "Sign in to ship a spec." + subtitle swapped to v3-aligned "AI-written pull requests…" hero copy. `SharedReportPage.tsx` footer "Don't prompt. Specify." → "AI-written pull requests you can actually merge." `glossary.ts` mission entry replaced with run entry. `ExecSummaryPage.tsx` / `TeamMemberDashboard.tsx` / `ProjectDashboardPage.tsx` "Mission(s)" copy → "Run(s)". Stale historical-context comments in Sidebar / App.tsx trimmed.
+
+### GH Action `25047545954` — final state (R-190 + R-191)
+
+```
+status:        completed
+conclusion:    success
+total runtime: 382 s (6m22s)
+all 25 steps:  green (Slack success notify fired)
+```
+
+Stage timing matched the prior run within ±10 s on every stage.
+
+### Post-deploy verification (R-190 + R-191) — every probe green
+
+| Probe | Result |
+|---|---|
+| `/login` contains "Don't prompt" | **0** ✅ |
+| `/login` contains "Specify." | **0** ✅ |
+| `/login` contains "Sign in to ship a spec." | **present** ✅ |
+| `/login` contains verbatim hero "AI-written pull requests" | **present** ✅ |
+| ViewModeToggle "Vibe" button on header | **gone** ✅ (toggle is retired from the header anyway per Phase 1.1 #8) |
+| VibeProgressNarrative element on run detail | **gone** ✅ |
+| `localStorage.es:viewMode='vibe'` after authed page load | **normalized to 'pro'** ✅ |
+| `body.textContent` "Mission" hits on / (authed admin) | **0** ✅ |
+| Run cards show "Code generated" / "Run failed" copy | confirmed via screenshot ✅ |
 
 ### GH Action `25043079648` — final state
 
@@ -103,7 +144,6 @@ Worker `square-bar-e1dc` (custom domains: `executespec.ai` + `www.executespec.ai
 | **R-319 SOC 2 ETA copy** | Withdrawn 2026-04-28; "Not yet certified" line is live | When a real audit engagement is signed → re-issue with actual auditor name + completion month. |
 | **SSO config screen** on `/v3/team` | V127 schema in place; UI deferred until live IdP for round-trip QA (Okta / Auth0 tenant) | Live IdP test tenant + ~30-min click-through QA. |
 | **R-141 GST tab** on `/v3/billing` | Needs `org.country` field on `/api/v3/entitlements`; backend has no country field today | Decide country source (Stripe / self-declare / Geo-IP) + 1-row migration + 5-line entitlements DTO patch + flip `showGst` to `org.country === 'IN'`. |
-| **R-190 / R-191 Vibe + Mission-vocabulary purge** | Post-cutover only — only safe after v2 surface fully retired | v2 → v3 cutover complete (no `/dashboard` v2 traffic). |
 
 ## Post-UX scope queued (memory file `executespec_post_ux_scope.md`)
 
