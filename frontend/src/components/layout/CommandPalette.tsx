@@ -7,11 +7,12 @@ import { useState } from 'react';
 import NewRunModal from '@/components/runs/NewRunModal';
 
 const NAV_COMMANDS = [
-  // Phase 1.1 #16 — copy-only "Missions" rename (URL paths unchanged).
-  { label: 'Go to Missions',     path: '/',              icon: LayoutDashboard },
+  // Tier-coherence: terminology unified to "Runs"; "Plans" + "Pricing"
+  // collapsed onto /v3/pricing (single source of truth for tiers).
+  { label: 'Go to Runs',         path: '/',              icon: LayoutDashboard },
   { label: 'Go to Projects',     path: '/projects',      icon: BarChart3 },
-  { label: 'Go to Plans',        path: '/plans',         icon: DollarSign },
-  { label: 'Go to Pricing',      path: '/pricing',       icon: DollarSign },
+  { label: 'Go to Pricing',      path: '/v3/pricing',    icon: DollarSign },
+  { label: 'Go to Billing',      path: '/v3/billing',    icon: DollarSign },
   { label: 'Go to Integrations', path: '/integrations',  icon: Plug },
   { label: 'Go to Invoices',     path: '/invoices',      icon: DollarSign },
   { label: 'Go to Settings',     path: '/settings',      icon: Settings },
@@ -47,14 +48,13 @@ export default function CommandPalette() {
                 <Command.Group heading="Actions" className="[&_[cmdk-group-heading]]:px-4 [&_[cmdk-group-heading]]:py-1.5 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:text-[var(--text-muted)] [&_[cmdk-group-heading]]:font-medium">
                   <CmdItem
                     icon={<Plus className="h-4 w-4" />}
-                    /* M-001 — copy-only Mission rename. */
-                    label="New mission"
+                    label="New run"
                     onSelect={() => { setCommandPaletteOpen(false); setShowNewRun(true); }}
                   />
                   <CmdItem
                     icon={<Wand2 className="h-4 w-4" />}
-                    label="Estimate Feasibility"
-                    onSelect={() => { setCommandPaletteOpen(false); navigate('/pricing'); }}
+                    label="See pricing"
+                    onSelect={() => { setCommandPaletteOpen(false); navigate('/v3/pricing'); }}
                   />
                 </Command.Group>
 

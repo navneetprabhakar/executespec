@@ -57,15 +57,18 @@ export const NAV_ITEMS: {
   superAdminOnly?: boolean;
   requiredPermission?: string;
 }[] = [
-  // Phase 1.1 #16 — "Mission" as primary noun in user-visible copy.
-  // URL paths + DTO keys keep "run" — copy-only rename per the plan.
-  { path: '/',             label: 'Missions',     icon: 'LayoutDashboard', adminOnly: false },
+  // Tier-coherence: terminology unified to "Runs" across the app, marketing,
+  // emails, and API DTOs (Phase 1.1 #16's Mission rename is reverted —
+  // "Run" is what the product calls the unit elsewhere). Sidebar Pricing
+  // entry removed since /pricing is now an admin tool (per-1M-token model
+  // rates) reachable at /admin/model-rates; consumer-facing pricing lives
+  // at /v3/pricing reachable via the Header Upgrade pill.
+  { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
   // v2.5.14 Phase 3.1 — exec summary for Business Owner persona.
-  // Gated behind canViewCostBreakdown (PRO/MAX/ENTERPRISE) — FREE can't see
-  // the spend aggregate because that's a paid-tier analytics feature.
+  // Gated behind canViewCostBreakdown (PRO/TEAM/ENTERPRISE) — FREE can't
+  // see the spend aggregate because that's a paid-tier analytics feature.
   { path: '/exec',         label: 'Exec summary', icon: 'TrendingUp',      adminOnly: false, requiredPermission: 'canViewCostBreakdown' },
   { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3',       adminOnly: true  },
-  { path: '/pricing',      label: 'Pricing',      icon: 'DollarSign',     adminOnly: false, requiredPermission: 'canViewPricing' },
   { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false, requiredPermission: 'canManageIntegrations' },
   { path: '/invoices',     label: 'Invoices',     icon: 'Receipt',        adminOnly: false, requiredPermission: 'canViewInvoices' },
   { path: '/accounting',   label: 'Accounting',   icon: 'Calculator',     adminOnly: false, requiredPermission: 'canViewAccounting' },

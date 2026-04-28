@@ -143,6 +143,21 @@ public class SecurityConfig {
                         .requestMatchers("/api/runs/*/events").permitAll()
                         // Public shared validation reports (no auth)
                         .requestMatchers(HttpMethod.GET, "/api/reports/shared/*").permitAll()
+                        // R-111 — anonymous-trial endpoint. No JWT; rate-limited
+                        // by IP. Real LLM dispatch is gated by a feature flag
+                        // until the anti-abuse story is locked in Wave 2.
+                        .requestMatchers(HttpMethod.POST, "/api/v3/anonymous-runs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v3/anonymous-runs/*").permitAll()
+                        // R-162 magic-link landing — token IS the credential,
+                        // so the lookup is public by token.
+                        .requestMatchers(HttpMethod.GET, "/api/v3/referrals/lookup").permitAll()
+                        // Selling-point landing surfaces — read-only,
+                        // anonymized aggregates that drive the public
+                        // marketing proof (verified-score counter, sample
+                        // run gallery, public exec snapshot).
+                        .requestMatchers(HttpMethod.GET, "/api/v3/landing/stats").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v3/landing/sample-runs").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/v3/public/**").permitAll()
                         // Static frontend assets (SPA)
                         .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico").permitAll()
                         .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()

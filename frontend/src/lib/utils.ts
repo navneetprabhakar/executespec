@@ -105,8 +105,7 @@ export function describeRunStatus(
       if (total > 0) return `Paused — ${completed}/${total} tasks done`;
       return 'Run paused';
     case 'CANCELLED':
-      // M-001 — copy-only Mission rename.
-      return 'Mission cancelled';
+      return 'Run cancelled';
     case 'STUCK':
       return 'Pipeline stalled — may need retry';
     default:

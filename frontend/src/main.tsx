@@ -11,6 +11,16 @@ import { initTelemetry } from '@/lib/telemetry';
 // Initialize OTel before rendering — instruments all subsequent fetch() calls
 initTelemetry();
 
+// R-171 — register the v3 service worker so iOS / Android can install
+// the app from the home screen. Production-only so Vite HMR isn't
+// disrupted in dev. Safe-by-default: any registration error is
+// swallowed (the app still works without a SW).
+if (typeof window !== 'undefined' && 'serviceWorker' in navigator && (import.meta as any).env?.PROD) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('/sw.js').catch(() => {});
+  });
+}
+
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>

@@ -154,6 +154,19 @@ public class V2RunOrchestrator {
     private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
     /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
     private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
+
+    /**
+     * R-162 — referral hook. Wired here so that when a referee's first
+     * run reaches a successful terminal status, the inviting Free user
+     * gets +5 lifetime credits granted automatically. Idempotent on
+     * the service side (uses pending-invite presence as the once-only
+     * marker until V153 promotes it to a granted_at column).
+     */
+    private final com.navneet.executespec.v3.referral.ReferralService referralService;
+    /** R-162 — terminal-status referral hook. Logic extracted into a helper
+     *  so the wire-point is unit-testable without exercising the orchestrator
+     *  end-to-end (see {@link com.navneet.executespec.v3.referral.ReferralCompletionHook}). */
+    private final com.navneet.executespec.v3.referral.ReferralCompletionHook referralCompletionHook;
     /** v2.5.8 — publishes PipelineEvent.RunCompleted/RunFailed so in-app
      *  notifications, quota refund, and workspace GCS upload listeners fire for
      *  V2 runs. Previously only V1 PipelineHarness published these events,
@@ -1220,6 +1233,12 @@ public class V2RunOrchestrator {
             if (cost.outputTokens() > persistedOut) r.setTotalOutputTokens(cost.outputTokens());
             runRepo.save(r);
             writeRunCostLog(r, cost);
+
+            // R-162 — referral grant hook. Delegates to ReferralCompletionHook
+            // so the conditional + try/catch + idempotency contract lives in
+            // one testable place. Fires only on COMPLETE + non-null owner;
+            // ReferralService.onRefereeFirstReadyRun itself is idempotent.
+            referralCompletionHook.onTerminalStatus(runId, r.getStatus(), r.getCreatedByUserId());
         });
         broadcaster.emit(runId, RunEvent.runStatus(runId, finalStatus));
         broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));

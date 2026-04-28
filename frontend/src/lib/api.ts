@@ -883,7 +883,9 @@ export interface AuthUser {
   firstName: string;
   lastName: string;
   globalRole: 'SUPER_ADMIN' | 'FINANCE' | 'USER';
-  tier: 'FREE' | 'PRO' | 'TEAM' | 'MAX' | 'ENTERPRISE';
+  // Tier-coherence: 4-tier ladder. Legacy MAX was renamed to TEAM in V141
+  // and the JAR no longer emits MAX. Type narrowed to match backend reality.
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
   status: string;
   mustChangePassword: boolean;
   emailVerified: boolean;

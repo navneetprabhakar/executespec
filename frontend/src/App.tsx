@@ -8,8 +8,8 @@ import RunsPage from '@/pages/RunsPage';
 import DashboardPage from '@/pages/DashboardPage';
 import ExecSummaryPage from '@/pages/ExecSummaryPage';
 import PricingPage from '@/pages/PricingPage';
-import PlansPage from '@/pages/PlansPage';
-import BillingPage from '@/pages/BillingPage';
+// Tier-coherence: PlansPage + BillingPage no longer mounted — v2 routes
+// `/plans` + `/billing` redirect to /v3/pricing + /v3/billing.
 import IntegrationsPage from '@/pages/IntegrationsPage';
 import SettingsPage from '@/pages/SettingsPage';
 
@@ -58,6 +58,27 @@ import DpaPage from '@/pages/DpaPage';
 // Wave 2.2 — onboarding
 import WelcomePage from '@/pages/onboarding/WelcomePage';
 import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
+
+// v3 (R-101+) — greenfield UX redesign, mounted under /v3/* without
+// touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
+import V3Shell from '@/v3/components/V3Shell';
+import V3HomeRedirect from '@/v3/pages/V3HomeRedirect';
+import V3Landing from '@/v3/pages/V3Landing';
+import V3Auth from '@/v3/pages/V3Auth';
+import V3ProjectHome from '@/v3/pages/V3ProjectHome';
+import V3RunDetail from '@/v3/pages/V3RunDetail';
+import V3Settings from '@/v3/pages/V3Settings';
+import V3Billing from '@/v3/pages/V3Billing';
+import V3Pricing from '@/v3/pages/V3Pricing';
+import V3Integrations from '@/v3/pages/V3Integrations';
+import V3Team from '@/v3/pages/V3Team';
+import V3Trust from '@/v3/pages/V3Trust';
+import V3Insights from '@/v3/pages/V3Insights';
+import V2OptInGate from '@/v3/components/V2OptInGate';
+import V3Changelog from '@/v3/pages/V3Changelog';
+// Selling-point #6 — public anonymized /exec snapshot for the
+// PgM/CFO conversion path. Public, no auth, share-link-able.
+import V3ExecDemo from '@/v3/pages/V3ExecDemo';
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -119,6 +140,29 @@ export default function App() {
       <Route path="/privacy" element={<PrivacyPage />} />
       <Route path="/dpa" element={<DpaPage />} />
 
+      {/* ── v3 greenfield surfaces (R-101+) ──
+          Mounted outside AppLayout so v3 owns its own chrome (no v2 sidebar,
+          no v2 header). Auth gating per-screen (some v3 routes are public:
+          /v3/landing, /v3/pricing, /v3/trust, /v3/auth). */}
+      <Route path="/v3" element={<V3Shell />}>
+        <Route index element={<Navigate to="home" replace />} />
+        <Route path="home" element={<V3HomeRedirect />} />
+        <Route path="landing" element={<V3Landing />} />
+        <Route path="auth" element={<V3Auth />} />
+        <Route path="p/:slug" element={<V3ProjectHome />} />
+        <Route path="p/:slug/r/:runShort" element={<V3RunDetail />} />
+        <Route path="settings" element={<V3Settings />} />
+        <Route path="billing" element={<V3Billing />} />
+        <Route path="pricing" element={<V3Pricing />} />
+        <Route path="integrations" element={<V3Integrations />} />
+        <Route path="team" element={<V3Team />} />
+        <Route path="trust" element={<V3Trust />} />
+        <Route path="insights" element={<V3Insights />} />
+        <Route path="changelog" element={<V3Changelog />} />
+        {/* Selling-point #6 — public exec snapshot. No auth required. */}
+        <Route path="exec-demo" element={<V3ExecDemo />} />
+      </Route>
+
       {/* ── Protected app routes ── */}
       <Route element={<ProtectedRoute />}>
         {/* Wave 2.2 — welcome/onboarding (chrome-free, before AppLayout). */}
@@ -135,13 +179,25 @@ export default function App() {
               PRO subscribers whose tier-state-changed email links here.
               Renders /plans with a query flag so the page can show a
               "your PRO plan still works" banner (non-blocking). */}
-          <Route path="legacy/billing" element={<Navigate to="/plans?legacy=1" replace />} />
-          <Route index element={<RunsPage />} />
-          <Route path="dashboard" element={<DashboardPage />} />
-          <Route path="pricing" element={<PricingPage />} />
-          <Route path="plans" element={<PlansPage />} />
-          <Route path="billing" element={<BillingPage />} />
-          <Route path="integrations" element={<IntegrationsPage />} />
+          {/* Tier-coherence: /plans is now a redirect; route legacy email
+              links straight to /v3/billing where grandfathered subscribers
+              can verify their plan + manage payment. */}
+          <Route path="legacy/billing" element={<Navigate to="/v3/billing" replace />} />
+          {/* R-180 — v2 → v3 opt-in redirect gate. When localStorage
+              flag `v3-opt-in` === '1', these routes Navigate to the
+              v3 equivalent. Otherwise the v2 element renders unchanged.
+              See frontend/src/v3/lib/optIn.ts for the full mapping. */}
+          <Route index element={<V2OptInGate><RunsPage /></V2OptInGate>} />
+          <Route path="dashboard" element={<V2OptInGate><DashboardPage /></V2OptInGate>} />
+          {/* Tier-coherence: /pricing was an admin tool (per-1M-token model
+              rates). Moved to /admin/model-rates. /plans + /billing both
+              redirect to /v3/pricing + /v3/billing — single source of truth
+              for tier display. */}
+          <Route path="pricing" element={<Navigate to="/v3/pricing" replace />} />
+          <Route path="plans" element={<Navigate to="/v3/pricing" replace />} />
+          <Route path="billing" element={<Navigate to="/v3/billing" replace />} />
+          <Route path="admin/model-rates" element={<PricingPage />} />
+          <Route path="integrations" element={<V2OptInGate><IntegrationsPage /></V2OptInGate>} />
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="audit" element={<AuditPage />} />
@@ -151,14 +207,14 @@ export default function App() {
               but render at one URL. */}
           <Route path="governance/audit" element={<AuditPage />} />
           <Route path="deployments" element={<DeploymentsPage />} />
-          <Route path="settings" element={<SettingsPage />} />
+          <Route path="settings" element={<V2OptInGate><SettingsPage /></V2OptInGate>} />
           {/* v2.5.14 Phase 3.1 — executive summary (business-owner persona). */}
-          <Route path="exec" element={<ExecSummaryPage />} />
+          <Route path="exec" element={<V2OptInGate><ExecSummaryPage /></V2OptInGate>} />
 
           {/* Org pages */}
           <Route path="org/settings" element={<OrgSettingsPage />} />
           <Route path="org/projects" element={<OrgProjectsPage />} />
-          <Route path="projects" element={<ProjectsListPage />} />
+          <Route path="projects" element={<V2OptInGate><ProjectsListPage /></V2OptInGate>} />
           {/* v2.5.12 — fallback so /projects/:id (without /dashboard) resolves.
               The API side lists projects at /api/projects/{id}/dashboard; users
               were hitting /projects/{id} and seeing a blank page because the
