@@ -53,20 +53,23 @@ export default function AvatarMenu() {
 
   // Logged-out: show Sign in + Pricing
   if (!user) {
+    // Selling-point fix #4: per-persona top-nav routing. Procurement (Devon)
+    // and eng-managers (Priya) need a self-route to /v3/team + /v3/trust
+    // before they're willing to sign up. Linear / Vercel / Stripe all do
+    // this — separate "For teams" / "For enterprise" entry points.
+    const navLinkStyle: React.CSSProperties = {
+      color: 'var(--v3-text-muted)',
+      fontSize: 12,
+      padding: '6px 10px',
+      borderRadius: 6,
+      textDecoration: 'none',
+      whiteSpace: 'nowrap',
+    };
     return (
-      <div style={{ display: 'flex', gap: 6 }}>
-        <Link
-          to="/v3/pricing"
-          style={{
-            color: 'var(--v3-text-muted)',
-            fontSize: 12,
-            padding: '6px 10px',
-            borderRadius: 6,
-            textDecoration: 'none',
-          }}
-        >
-          Pricing
-        </Link>
+      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        <Link to="/v3/team" style={navLinkStyle}>For teams</Link>
+        <Link to="/v3/trust" style={navLinkStyle}>For enterprise</Link>
+        <Link to="/v3/pricing" style={navLinkStyle}>Pricing</Link>
         <Link
           to="/login"
           style={{
@@ -77,6 +80,7 @@ export default function AvatarMenu() {
             borderRadius: 6,
             background: 'var(--v3-brand)',
             textDecoration: 'none',
+            marginLeft: 4,
           }}
         >
           Sign in

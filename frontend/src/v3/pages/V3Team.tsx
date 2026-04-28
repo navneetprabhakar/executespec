@@ -704,11 +704,25 @@ function SsoPanel() {
       </div>
       <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
         Configure SAML / OIDC for Okta, Auth0, Azure AD, Google Workspace,
-        or any standards-compliant IdP. Schema is in place; the
-        configuration screen lands as a Wave 3 follow-up that needs
-        round-trip QA against a live IdP.
+        or any standards-compliant IdP. SSO is enabled per-org by your
+        ExecuteSpec rep — set up takes ~30 minutes against your IdP.
       </p>
-      <div style={{ marginTop: 10 }}>
+      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <a
+          href="mailto:enterprise@executespec.ai?subject=SSO%20config%20%E2%80%94%20%5Borg%20name%5D"
+          style={{
+            padding: '5px 12px',
+            fontSize: 12,
+            fontWeight: 600,
+            background: 'var(--v3-brand)',
+            color: '#0B0D10',
+            border: 'none',
+            borderRadius: 6,
+            textDecoration: 'none',
+          }}
+        >
+          Talk to sales →
+        </a>
         <Link
           to="/admin"
           style={{
