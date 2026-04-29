@@ -1,0 +1,77 @@
+slug: stripe-checkout
+name: Stripe Checkout
+tagline: One-time payment endpoint with Stripe's hosted Checkout
+description: |
+  Wires Stripe's hosted Checkout into your app — generates the
+  Checkout Session on the server, redirects the user, handles the
+  success / cancel callbacks, and verifies the webhook on payment
+  completion. Persists the order in your existing data layer.
+category: take-payments
+macro_group: people-and-money
+tags: [payments, stripe, checkout, one-time]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/stripe.svg
+est_files: [4, 10]
+est_credits: [2.0, 4.0]
+slots:
+  - name: stripe_secret_key
+    display_name: Stripe Secret Key
+    type: SECRET
+    required: true
+    description: From the Stripe Dashboard (Developers → API keys).
+    display_order: 0
+  - name: stripe_webhook_secret
+    display_name: Stripe Webhook Secret
+    type: SECRET
+    required: true
+    description: From your webhook endpoint config in Stripe Dashboard.
+    display_order: 1
+  - name: currency
+    display_name: Currency
+    type: SELECT
+    required: true
+    default_value: USD
+    options: [USD, EUR, GBP, INR, AUD, CAD, JPY]
+    description: ISO 4217 currency code for the Checkout Session.
+    display_order: 2
+  - name: success_url
+    display_name: Success redirect URL
+    type: TEXT
+    required: true
+    default_value: /checkout/success
+    description: Path users return to after a successful payment.
+    display_order: 3
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add Stripe hosted Checkout to this Express app.
+      Use {{stripe_secret_key}} server-side; verify webhooks with
+      {{stripe_webhook_secret}}. Charge in {{currency}}; redirect
+      successful payments to {{success_url}}. Persist the order in
+      the existing data layer.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add Stripe hosted Checkout to this Next.js (App Router) app.
+      Server-action mints the Checkout Session with
+      {{stripe_secret_key}}; webhook verifies via
+      {{stripe_webhook_secret}}. Charge in {{currency}}; redirect
+      to {{success_url}}.
+    scaffold_key: node-frontend
+  - language: python
+    framework: fastapi
+    options: {db: postgres}
+    spec_template: |
+      Add Stripe hosted Checkout to this FastAPI app.
+      Server endpoint mints the Checkout Session with
+      {{stripe_secret_key}}; webhook handler verifies via
+      {{stripe_webhook_secret}}. Charge in {{currency}}; redirect
+      to {{success_url}}.
+    scaffold_key: python
