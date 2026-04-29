@@ -1,0 +1,51 @@
+slug: pages-router-to-app-router
+name: Next.js Pages Router → App Router
+tagline: Migrate from /pages to /app with server-component split
+description: |
+  Rewrites the legacy Next.js Pages Router to the App Router.
+  Routes move from /pages to /app, layouts get extracted, data
+  fetching moves to server components + actions, and getServerSideProps
+  / getStaticProps call sites get translated to the new equivalents.
+source_stack:
+  language: typescript
+  framework: nextjs
+  min_version: "13.x"
+target_stack:
+  language: typescript
+  framework: nextjs
+  router: app
+affected_files_glob: "{pages,app,components,lib}/**/*.{ts,tsx}"
+category: framework-migration
+tags: [nextjs, app-router, server-components, frontend]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/pages-to-app-router-fallback.md
+preservation_contract:
+  preserve_routes: true
+  preserve_data_fetching_semantics: true
+  preserve_seo_metadata: true
+est_files: [15, 120]
+est_credits: [8.0, 50.0]
+slots:
+  - name: extract_layouts
+    display_name: Extract shared layouts
+    type: BOOLEAN
+    required: false
+    default_value: "true"
+    description: Detect shared layout patterns and extract into App Router layout.tsx files.
+    display_order: 0
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Migrate this Next.js Pages Router app to the App Router.
+      - Move every /pages route to its equivalent /app/[route]/page.tsx
+      - For each `getServerSideProps` → server component data fetch
+      - For each `getStaticProps` → server component with revalidate
+      - For each `getStaticPaths` → generateStaticParams export
+      - Convert API routes from /pages/api → /app/api/[route]/route.ts
+      - Extract shared layouts: {{extract_layouts}}
+      - Preserve every route's URL shape, SEO metadata, and data
+        fetching semantics; the reviewer will verify via the
+        preservation contract.
