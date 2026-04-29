@@ -1,0 +1,69 @@
+slug: openai-chat
+name: OpenAI chat endpoint
+tagline: Streaming GPT chat endpoint with conversation memory
+description: |
+  Adds a /api/chat endpoint that streams responses from OpenAI's
+  chat-completions API. Persists the conversation in your existing
+  data layer so users get context across messages.
+category: add-ai
+macro_group: smart-and-reach
+tags: [ai, llm, openai, chat, streaming]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/openai.svg
+est_files: [3, 6]
+est_credits: [2.0, 5.0]
+slots:
+  - name: openai_api_key
+    display_name: OpenAI API Key
+    type: SECRET
+    required: true
+    description: From platform.openai.com → API keys.
+    display_order: 0
+  - name: model
+    display_name: Model
+    type: SELECT
+    required: true
+    default_value: gpt-4o-mini
+    options: [gpt-4o, gpt-4o-mini, gpt-4-turbo, gpt-3.5-turbo, o1-mini]
+    description: OpenAI model to route chat completions through.
+    display_order: 1
+  - name: system_prompt
+    display_name: System prompt
+    type: TEXT
+    required: false
+    default_value: You are a helpful assistant.
+    description: Sets the assistant's persona / constraints.
+    display_order: 2
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres, sse: true}
+    spec_template: |
+      Add an /api/chat streaming endpoint to this Express app.
+      Use {{openai_api_key}} to call OpenAI's chat completions API
+      with model {{model}}. Persist conversations + messages in the
+      existing data layer. Stream tokens via Server-Sent Events.
+      System prompt: {{system_prompt}}
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app, ai_sdk: true}
+    spec_template: |
+      Add an /api/chat route to this Next.js (App Router) app using
+      the Vercel AI SDK. Call OpenAI {{model}} with
+      {{openai_api_key}}; stream responses via the AI SDK's
+      streamText helper. Persist conversations.
+      System prompt: {{system_prompt}}
+    scaffold_key: node-frontend
+  - language: python
+    framework: fastapi
+    options: {db: postgres, sse: true}
+    spec_template: |
+      Add an /api/chat streaming endpoint to this FastAPI app.
+      Use {{openai_api_key}} with the openai Python SDK at model
+      {{model}}; stream tokens via SSE. Persist conversations.
+      System prompt: {{system_prompt}}
+    scaffold_key: python
