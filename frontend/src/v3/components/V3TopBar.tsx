@@ -1,18 +1,40 @@
-import { Link } from 'react-router-dom';
-import { useV3Ui } from '../stores/useV3Ui';
+import { Link, NavLink } from 'react-router-dom';
 import AvatarMenu from './AvatarMenu';
 import ProjectSwitcher from './ProjectSwitcher';
 
 /**
  * R-101 — top-bar shell.
- * R-103 — wires the ⌘K button to the command palette.
  *
  * R-104/R-124 fill in the avatar menu + project switcher; the
  * placeholder chips are still here for those.
+ *
+ * R-330/R-340 — Library + Migrations product links. The catalogs
+ * are first-class surfaces, so they live in the top bar (not behind
+ * a project) — discoverable for FREE users browsing the locked
+ * solutions before they have a project to instantiate against.
+ *
+ * 2026-04-29 (UX research review):
+ * - Visible "Search ⌘K" button removed.  The keyboard hotkey is wired
+ *   globally on {@link ../components/CmdK} (document-level keydown
+ *   listener on ⌘K / Ctrl+K), so power users still summon the palette;
+ *   mouse users have no use for it because the top-bar pills +
+ *   ProjectSwitcher cover the main destinations.  Net: one fewer slot
+ *   in the top bar without functional regression.
  */
-export default function V3TopBar() {
-  const openCmdK = useV3Ui((s) => s.openCmdK);
+const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '4px 10px',
+  borderRadius: 6,
+  fontSize: 13,
+  fontWeight: 500,
+  textDecoration: 'none',
+  color: isActive ? 'var(--v3-text)' : 'var(--v3-text-muted)',
+  background: isActive ? 'var(--v3-surface)' : 'transparent',
+  border: `1px solid ${isActive ? 'var(--v3-border)' : 'transparent'}`,
+});
 
+export default function V3TopBar() {
   return (
     <header className="v3-topbar" role="banner">
       <Link to="/v3/home" className="v3-topbar__brand" aria-label="ExecuteSpec home">
@@ -21,47 +43,16 @@ export default function V3TopBar() {
         </span>
         ExecuteSpec
       </Link>
-      <div className="v3-topbar__center">
+      <div className="v3-topbar__center" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <ProjectSwitcher />
+        <NavLink to="/v3/library" style={navLinkStyle} title="Readymade Solutions library">
+          Library
+        </NavLink>
+        <NavLink to="/v3/migrations" style={navLinkStyle} title="Migration recipes">
+          Migrations
+        </NavLink>
       </div>
       <div className="v3-topbar__right">
-        <button
-          type="button"
-          onClick={openCmdK}
-          aria-label="Open command palette (⌘K)"
-          title="Search & actions (⌘K)"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '4px 10px',
-            background: 'var(--v3-surface)',
-            color: 'var(--v3-text-muted)',
-            border: '1px solid var(--v3-border)',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontSize: 12,
-            fontFamily: 'inherit',
-          }}
-        >
-          <span style={{ fontSize: 11 }}>Search</span>
-          <kbd
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              padding: '0 5px',
-              height: 18,
-              borderRadius: 4,
-              background: 'var(--v3-bg)',
-              border: '1px solid var(--v3-border)',
-              fontSize: 10,
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-              color: 'var(--v3-text-muted)',
-            }}
-          >
-            ⌘K
-          </kbd>
-        </button>
         <AvatarMenu />
       </div>
     </header>

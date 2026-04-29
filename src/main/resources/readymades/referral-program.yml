@@ -1,0 +1,54 @@
+slug: referral-program
+name: Referral program
+tagline: Invite-a-friend with reward credits + leaderboard
+description: |
+  Adds an invite-a-friend flow — every user gets a unique referral
+  code, the signup form accepts a referral code, both sides earn
+  rewards on activation.  Includes a /referrals page showing the
+  user's invite link, total referrals, and pending rewards.
+category: grow-the-user-base
+macro_group: ui-and-growth
+tags: [marketing, referral, growth, viral]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/users-plus.svg
+est_files: [5, 10]
+est_credits: [2.0, 4.5]
+slots:
+  - name: reward_credits
+    display_name: Reward (credits per referral)
+    type: NUMBER
+    required: false
+    default_value: "5"
+    description: How much credit both referrer + referee earn on activation.
+    display_order: 0
+  - name: activation_event
+    display_name: Activation event
+    type: SELECT
+    required: false
+    default_value: signup_verified
+    options: [signup_verified, first_purchase, first_completed_action]
+    description: Event that triggers the reward payout.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add a referral program to this Express app.  Tables:
+      referral_code(user_id, code) + referral_grant(referrer_id,
+      referee_id, status).  Reward {{reward_credits}} credits per
+      side on the {{activation_event}} event.  Endpoints:
+      POST /referrals/redeem (server-validates code at signup).
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add a /referrals page to this Next.js app showing the user's
+      invite link, count, pending rewards.  Reward
+      {{reward_credits}} credits per side; trigger on
+      {{activation_event}}.
+    scaffold_key: node-frontend

@@ -1,0 +1,51 @@
+slug: sentry-error-reporting
+name: Error reporting via Sentry
+tagline: Auto-captures exceptions, traces, and source-mapped stacks
+description: |
+  Wires Sentry's SDK — exception capture, performance tracing,
+  source-map upload at build time, and a release tag from the
+  current git SHA.  Adds a /test/error endpoint to confirm capture
+  end-to-end.
+category: ship-and-monitor
+macro_group: data-and-infra
+tags: [observability, errors, sentry, monitoring]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/sentry.svg
+est_files: [3, 6]
+est_credits: [1.0, 2.5]
+slots:
+  - name: dsn
+    display_name: Sentry DSN
+    type: SECRET
+    required: true
+    description: From sentry.io project → Settings → Client Keys.
+    display_order: 0
+  - name: environment
+    display_name: Environment tag
+    type: TEXT
+    required: false
+    default_value: production
+    description: Tag attached to every event for filtering.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Add Sentry to this Express app.  Init with {{dsn}} +
+      environment {{environment}}.  Wire the request handler before
+      routes and the error handler after.  Upload source maps at
+      build time.  Add GET /test/error to confirm capture.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Run `npx @sentry/wizard@latest -i nextjs` config conceptually:
+      add sentry.client.config.ts + sentry.server.config.ts +
+      sentry.edge.config.ts with {{dsn}} + environment {{environment}}.
+      Wire next.config.js source-map upload.
+    scaffold_key: node-frontend

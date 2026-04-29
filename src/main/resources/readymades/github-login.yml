@@ -1,0 +1,55 @@
+slug: github-login
+name: Login with GitHub
+tagline: One-click sign-in via GitHub OAuth
+description: |
+  Adds a "Sign in with GitHub" button + the OAuth callback handler.
+  Reuses your existing User entity, links the GitHub account, and
+  stores the OAuth access token if your spec asks (useful for repo
+  reads).
+category: sign-in-and-users
+macro_group: people-and-money
+tags: [auth, oauth, social, github]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/github.svg
+est_files: [3, 8]
+est_credits: [1.0, 2.0]
+slots:
+  - name: client_id
+    display_name: GitHub OAuth Client ID
+    type: SECRET
+    required: true
+    description: From github.com/settings/developers → New OAuth App.
+    display_order: 0
+  - name: client_secret
+    display_name: GitHub OAuth Client Secret
+    type: SECRET
+    required: true
+    description: Generated on the same page as the Client ID.
+    display_order: 1
+  - name: callback_path
+    display_name: Callback URL path
+    type: TEXT
+    required: false
+    default_value: /auth/github/callback
+    description: Path your app receives the OAuth callback on.
+    display_order: 2
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add GitHub OAuth sign-in to this Express app.  Use passport-github2
+      with {{client_id}} + {{client_secret}}.  Mount the callback at
+      {{callback_path}}.  Persist users in the existing data layer.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app, auth_lib: nextauth}
+    spec_template: |
+      Add GitHub login to this Next.js (App Router) app using NextAuth
+      with the GitHub provider.  Wire {{client_id}} + {{client_secret}}.
+      Callback: {{callback_path}}.
+    scaffold_key: node-frontend

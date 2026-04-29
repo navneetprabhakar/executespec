@@ -1,0 +1,52 @@
+slug: tailwind-v3-to-v4
+name: Tailwind v3 → v4
+tagline: Migrate config to v4 CSS-first pattern + drop deprecated utilities
+description: |
+  Migrates a Tailwind v3 project to v4.  Converts
+  `tailwind.config.{js,ts}` to the new CSS-first pattern
+  (@import "tailwindcss"; @theme { … }), drops deprecated utility
+  classes, replaces `@apply` patterns where the rewriter has a
+  cleaner v4 alternative, and updates the postcss / vite plugin
+  imports.
+source_stack:
+  language: typescript
+  framework: tailwind
+  source_version: "3"
+target_stack:
+  language: typescript
+  framework: tailwind
+  target_version: "4"
+affected_files_glob: "{src,app,pages,components}/**/*.{tsx,jsx,html,css}"
+category: framework-migration
+tags: [tailwind, css, modernization]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/tailwind-v3-to-v4-fallback.md
+preservation_contract:
+  preserve_visual_output: true
+  preserve_responsive_breakpoints: true
+est_files: [3, 30]
+est_credits: [2.0, 8.0]
+slots: []
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Migrate this codebase from Tailwind v3 to v4.
+      - Drop `tailwind.config.{js,ts}`.  Replace with a
+        `@import "tailwindcss";` line + `@theme { … }` block in
+        the existing globals stylesheet, carrying the project's
+        color/font tokens.
+      - Update postcss / vite config to use the new
+        `@tailwindcss/postcss` (or `@tailwindcss/vite`) plugin.
+      - Sweep templates for deprecated utilities:
+          `bg-opacity-*` → use the slash syntax `bg-black/50`
+          `text-opacity-*` → `text-white/80`
+          `border-opacity-*` → `border-white/20`
+          `flex-shrink-*` → `shrink-*`
+          `flex-grow-*` → `grow-*`
+      - Replace `@apply` blocks where v4's CSS-vars approach
+        gives cleaner results (e.g. component variants).
+      - Run a visual-regression diff on the affected pages and
+        flag anything that moved more than 2px or shifted color.

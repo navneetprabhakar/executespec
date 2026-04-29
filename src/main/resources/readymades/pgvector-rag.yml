@@ -1,0 +1,54 @@
+slug: pgvector-rag
+name: RAG with pgvector
+tagline: Postgres-native semantic search + retrieval pipeline
+description: |
+  Wires a full RAG pipeline using pgvector — chunking + embedding
+  documents on ingest (OpenAI text-embedding-3-small by default),
+  similarity-search retrieval, and a chat endpoint that grounds
+  answers in retrieved chunks.  Includes a /api/documents upload
+  endpoint with async indexing.
+category: add-ai
+macro_group: smart-and-reach
+tags: [ai, rag, pgvector, embeddings, semantic-search]
+kind: STACK
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/pgvector.svg
+est_files: [8, 16]
+est_credits: [4.0, 12.0]
+slots:
+  - name: openai_api_key
+    display_name: OpenAI API Key (for embeddings)
+    type: SECRET
+    required: true
+    description: Used for text-embedding-3-small.
+    display_order: 0
+  - name: chat_provider
+    display_name: Chat provider
+    type: SELECT
+    required: false
+    default_value: openai
+    options: [openai, anthropic, gemini]
+    description: Which LLM does the grounded answer-generation.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add a RAG pipeline to this Express app.  Postgres extension
+      pgvector enabled; tables document + document_chunk(content,
+      embedding vector(1536)).  POST /api/documents accepts text +
+      indexes async (chunk → embed via {{openai_api_key}} →
+      upsert).  POST /api/chat retrieves top-5 chunks by cosine
+      similarity, then calls {{chat_provider}} grounded on them.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {db: postgres}
+    spec_template: |
+      Add RAG to this FastAPI app.  pgvector + sqlalchemy.
+      Embeddings via {{openai_api_key}} (text-embedding-3-small).
+      Grounded answers from {{chat_provider}}.
+    scaffold_key: python

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useLocation, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, ShieldCheck, Zap, GitBranch, CheckCircle2 } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -50,6 +50,24 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const from = (location.state as any)?.from?.pathname ?? '/';
+
+  // R-341 (2026-04-29) — marketing-site handoff.  When the user types
+  // a spec on executespec.ai's hero composer and submits, they're
+  // redirected here as `/login?spec=<encoded>`.  Stash the spec to
+  // sessionStorage as `v3-anon-spec` so the existing post-auth claim
+  // flow (V3Auth.claimAndForward) hydrates the in-app composer with
+  // it after the user signs in / signs up.  Length-capped at 4 KB to
+  // match the website's submit-handler cap.
+  useEffect(() => {
+    const spec = searchParams.get('spec');
+    if (!spec) return;
+    try {
+      const capped = spec.length > 4000 ? spec.slice(0, 4000) : spec;
+      sessionStorage.setItem('v3-anon-spec', capped);
+    } catch (_) {
+      /* sessionStorage can throw in private mode — silent fallback */
+    }
+  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

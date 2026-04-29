@@ -1,0 +1,59 @@
+slug: cjs-to-esm
+name: CommonJS → ESM
+tagline: Convert require/module.exports to import/export
+description: |
+  Modernizes a Node project from CommonJS to ESM.  Rewrites
+  every `require(…)` to `import …`, every `module.exports` /
+  `exports.x` to named/default `export`, adds `"type": "module"`
+  to package.json, fixes `__dirname` / `__filename` (which
+  don't exist in ESM), and updates extensions on relative imports
+  where required by the engine.
+source_stack:
+  language: javascript
+  module_system: commonjs
+target_stack:
+  language: javascript
+  module_system: esm
+affected_files_glob: "**/*.{js,mjs,cjs}"
+category: language-migration
+tags: [esm, commonjs, modernization, node]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/cjs-to-esm-fallback.md
+preservation_contract:
+  preserve_runtime_behaviour: true
+  preserve_public_module_api: true
+est_files: [10, 200]
+est_credits: [3.0, 25.0]
+slots:
+  - name: keep_cjs_for
+    display_name: Files to keep as CJS
+    type: TEXT
+    required: false
+    description: |
+      Comma-separated globs to LEAVE on CommonJS (e.g. legacy
+      .cjs build scripts).  Empty = convert everything.
+    display_order: 0
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Migrate this Node codebase from CommonJS to ESM.
+      - Add "type": "module" to package.json.
+      - For every `.js` file (excluding {{keep_cjs_for}}):
+        - `const x = require('y')` → `import x from 'y'`
+        - `const { a, b } = require('y')` → `import { a, b } from 'y'`
+        - `module.exports = X` → `export default X`
+        - `module.exports.X = Y` → `export const X = Y`
+      - Fix `__dirname` / `__filename`:
+          import { fileURLToPath } from 'node:url';
+          import { dirname } from 'node:path';
+          const __filename = fileURLToPath(import.meta.url);
+          const __dirname = dirname(__filename);
+      - Add `.js` extensions on relative imports where the engine
+        requires them (Node ESM strict mode).
+      - Files matching {{keep_cjs_for}} get renamed to `.cjs`
+        (kept as-is).
+      - Verify: `node --input-type=module -e 'await import("./src/index.js")'`
+        succeeds at the entry point.
