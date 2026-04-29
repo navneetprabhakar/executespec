@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ExecuteSpec — AI that ships pull requests your team will actually merge</title>
+    <title>ExecuteSpec — AI that ships pull requests, plus a catalog of 28 readymade solutions + 11 modernization recipes</title>
     
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
@@ -15,8 +15,8 @@
     </script>
 
     <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
-    <meta name="description" content="AI that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR — ~80% of real runs land Ready. From $20/mo Pro; $39/seat Team with BYOK; Enterprise SOC 2 + DPA + SSO.">
-    <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
+    <meta name="description" content="AI that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR — ~80% of real runs land Ready. Plus a catalog of 28 readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions, …) and 11 modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, Class components→hooks, …). From $20/mo Pro; $39/seat Team with BYOK; Enterprise SOC 2 + DPA + SSO.">
+    <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, AI code templates, AI starter solutions, AI scaffold library, Stripe checkout boilerplate, OAuth login boilerplate, Razorpay checkout, Resend transactional email, RAG pgvector, AI feature scaffolding, AI codegen catalog, ai modernization recipes, ai migration tool, JavaScript to TypeScript codemod, CommonJS to ESM, Express to Fastify migration, Mongoose to Prisma migration, REST to tRPC migration, React class components to hooks, Tailwind v3 to v4 migration, Vue 2 to Vue 3 migration, Webpack to Vite migration, Mocha to Vitest migration, Pages Router to App Router, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
     <meta name="author" content="ExecuteSpec">
     <meta name="publisher" content="ExecuteSpec">
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
@@ -876,8 +876,8 @@
                 ExecuteSpec
             </a>
             <div class="nav-links">
+                <a href="#catalog">Catalog</a>
                 <a href="#project-workspace">Project Workspace</a>
-                <a href="#dual-mode">Dual-Mode</a>
                 <a href="#quality">Quality Gates</a>
                 <a href="#use-cases">Enterprise Chores</a>
                 <a href="#pricing">Pricing</a>
@@ -891,8 +891,8 @@
     <!-- v2.5.14 — mobile drawer. Replaces the vanished <900px nav. -->
     <div id="mobileDrawer" class="mobile-drawer" role="dialog" aria-label="Navigation">
         <button class="mobile-drawer-close" aria-label="Close menu" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Close</button>
+        <a href="#catalog" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Library + Migrations</a>
         <a href="#project-workspace" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Project Workspace</a>
-        <a href="#dual-mode" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Dual-Mode Execution</a>
         <a href="#quality" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Quality Gates</a>
         <a href="#use-cases" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Enterprise Chores</a>
         <a href="#pricing" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Pricing</a>
@@ -911,12 +911,61 @@
                 ExecuteSpec ships <span class="text-gradient-orange">AI-written pull requests</span> you can actually merge — for one repo or for twenty.
             </h1>
             <p class="subtitle" style="margin: 24px auto 0;">
-                Plan, build, test, review, open a PR. ~80% of real runs land Ready — and you see the verdict (Ready / Needs review / Failed) on every one of yours.
+                Type a spec, or pick from a catalog of <a href="#catalog" style="color: var(--blue-light); text-decoration: none;">28 readymade solutions and 11 modernization recipes</a>. Plan, build, test, review, open a PR. ~80% of real runs land Ready — with a verdict (Ready / Needs review / Failed) on every one of yours.
             </p>
-            <div class="hero-buttons">
-                <a href="https://dev.executespec.ai" class="btn btn-primary" target="_blank">Try Free — 5 Lifetime Runs</a>
+
+            <!-- Chat-first composer.  Migrated 2026-04-29 from the in-app
+                 V3Landing page so the website is now the single canonical
+                 landing surface.  The submit handler stashes the spec on
+                 the app domain via a query param and redirects to the
+                 V3Landing prefill path; V3Landing reads the param, hydrates
+                 its composer, and handles the auth/sign-up handoff. -->
+            <form id="hero-composer" onsubmit="return heroComposerSubmit(event)" style="margin: 32px auto 0; max-width: 720px; text-align: left;">
+                <label for="hero-spec" class="mono" style="display: block; font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">What do you want shipped?</label>
+                <textarea
+                    id="hero-spec"
+                    name="hero-spec"
+                    rows="3"
+                    placeholder="Add OAuth login to my Next.js app · Migrate from Express to Fastify · Build a Stripe checkout endpoint · Add unit-test coverage for src/auth/"
+                    style="width: 100%; padding: 14px 16px; font-family: var(--font-base); font-size: 0.95rem; line-height: 1.5; background: var(--surface); color: var(--text); border: 1px solid var(--surface-border); border-radius: 12px; resize: vertical; outline: none; transition: border-color 0.15s;"
+                    onfocus="this.style.borderColor='var(--blue)'"
+                    onblur="this.style.borderColor='var(--surface-border)'"
+                ></textarea>
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px;">
+                    <button type="submit" class="btn btn-primary" style="padding: 10px 24px;">Ship this →</button>
+                    <span style="font-size: 0.78rem; color: var(--text-muted);">No credit card. Free for 5 lifetime runs.</span>
+                </div>
+            </form>
+
+            <div class="hero-buttons" style="margin-top: 24px;">
+                <a href="https://dev.executespec.ai/v3/library" class="btn btn-ghost" target="_blank">Browse the catalog →</a>
                 <a href="https://dev.executespec.ai/v3/exec-demo" class="btn btn-ghost" target="_blank">See a team's last 30 days →</a>
             </div>
+
+            <script>
+                // Submit handler for the hero composer — redirects to the app's
+                // V3Landing with the spec in a query param.  V3Landing's mount
+                // hook reads ?prefill=… and hydrates its textarea with it.
+                // Length-capped at 4 KB to stay under the typical URL-length
+                // tolerance of every real-world server / CDN we touch.
+                function heroComposerSubmit(e) {
+                    e.preventDefault();
+                    var ta = document.getElementById('hero-spec');
+                    var raw = (ta.value || '').trim();
+                    if (raw.length === 0) {
+                        ta.focus();
+                        return false;
+                    }
+                    var capped = raw.length > 4000 ? raw.slice(0, 4000) : raw;
+                    var url = 'https://dev.executespec.ai/v3/landing?prefill=' + encodeURIComponent(capped);
+                    if (window.gtag) {
+                        try { window.gtag('event', 'hero_composer_submit', { length: capped.length }); }
+                        catch (_) { /* analytics is non-critical */ }
+                    }
+                    window.location.href = url;
+                    return false;
+                }
+            </script>
             <!-- Selling-point proof strip. Numbers backed by /api/v3/landing/stats
                  (anonymized aggregate across the platform). -->
             <p style="margin-top:28px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
@@ -1032,6 +1081,69 @@
                     <div><strong style="color: var(--orange);">Team</strong> &middot; Unlimited &middot; per-seat (min 2)</div>
                     <div><strong style="color: var(--purple);">Enterprise</strong> &middot; Unlimited + Execution View</div>
                 </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Catalog — Library + Migrations as first-class products. Added 2026-04-29
+         alongside the W1–W5 Readymades + W1–W7 Migrations ship: 28 readymade
+         solutions across 15 categories, 11 v1 migration recipes.  Surfaces the
+         "browse, click, ship" path that complements the chat-first composer. -->
+    <section id="catalog" style="background: var(--surface); border-top: 1px solid var(--surface-border);">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--green);">Library + Migrations</span>
+                <h2 class="h2" style="margin-top: 16px;">Skip the boilerplate. Ship the readymade.</h2>
+                <p class="subtitle" style="margin: 0 auto;">A catalog of vetted solutions you can drop into any project — auth, payments, AI, infra, whole modernization recipes. Pick one, fill three slots, get a PR. Same plan-then-approve pipeline as a chat-driven run, just less typing.</p>
+            </div>
+
+            <!-- Two-product split — the catalog has two surfaces today. -->
+            <div class="dual-mode-grid" style="margin-top: 40px;">
+                <!-- Library card -->
+                <div class="mode-card" style="border-top: 4px solid var(--green);">
+                    <div class="mode-icon">📚</div>
+                    <h3 class="mode-title">Library — 28 readymade solutions</h3>
+                    <p class="mode-desc">Pre-built, parameterized solutions across 15 categories. Each one ships with multiple variants (TypeScript / Python · Express / Next.js / FastAPI) and auto-resolves to your repo's detected stack.</p>
+                    <ul class="feature-list">
+                        <li><span class="check-icon">✓</span> <div><strong>Sign-in &amp; users</strong> — login-with-google, github-login, email + password, magic link</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Take payments</strong> — Stripe checkout, Razorpay (India)</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Add AI</strong> — OpenAI chat, Claude chat, RAG with pgvector</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Send messages</strong> — Resend transactional email, Twilio SMS</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Store data</strong> — Postgres + Prisma, Redis cache</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Ship &amp; monitor</strong> — Dockerize, GitHub Actions CI, Sentry</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Build the UI</strong> — shadcn/ui, dark-mode toggle</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>+ 7 more categories</strong> — track usage, grow the user base, talk to users, location &amp; maps, booking, mobile (Expo), APIs (OpenAPI), security (rate-limiting)</div></li>
+                    </ul>
+                    <a href="https://dev.executespec.ai/v3/library" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse the library →</a>
+                </div>
+
+                <!-- Migrations card -->
+                <div class="mode-card" style="border-top: 4px solid var(--purple);">
+                    <div class="mode-icon">🔀</div>
+                    <h3 class="mode-title">Migrations — 11 modernization recipes</h3>
+                    <p class="mode-desc">Cross-repo modernization runs with halt-and-inspect dry-runs. Estimate the file count + cost before you spend a credit; review the sample diff; then apply across one repo or twenty.</p>
+                    <ul class="feature-list">
+                        <li><span class="check-icon">✓</span> <div><strong>Language &amp; module</strong> — JS → TypeScript · CommonJS → ESM</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Framework jumps</strong> — Express → Fastify · Pages Router → App Router · REST → tRPC · Vue 2 → Vue 3</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Library swaps</strong> — Mongoose → Prisma · Mocha → Vitest · Webpack → Vite · Tailwind v3 → v4</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>API modernization</strong> — Class components → hooks (React)</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Halt-and-inspect dry-run</strong> — preview cost &amp; file count before applying</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Multi-repo fan-out</strong> — apply the same recipe to every repo in a project in one launch</div></li>
+                    </ul>
+                    <a href="https://dev.executespec.ai/v3/migrations" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse migrations →</a>
+                </div>
+            </div>
+
+            <!-- Tier visibility band — sets honest expectations on which entries are unlocked at each tier. -->
+            <div style="text-align: center; margin-top: 48px; padding: 24px; background: var(--bg); border: 1px solid var(--surface-border); border-radius: 16px; max-width: 920px; margin-left: auto; margin-right: auto;">
+                <div class="mono" style="color: var(--text-muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">What's unlocked per tier</div>
+                <div style="display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; font-size: 0.9rem;">
+                    <div><strong style="color: var(--text-muted);">Free</strong> &middot; 13 readymades unlocked</div>
+                    <div><strong style="color: var(--blue-light);">Pro</strong> &middot; All 28 + 10 migrations</div>
+                    <div><strong style="color: var(--orange);">Team</strong> &middot; All 28 + all 11</div>
+                    <div><strong style="color: var(--purple);">Enterprise</strong> &middot; All + private contributions</div>
+                </div>
+                <p style="margin-top: 16px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6;">Locked entries still show on every catalog — you can read what they do, see the variants, and click "Upgrade to unlock". No hiding the surface area.</p>
             </div>
         </div>
     </section>
@@ -2051,8 +2163,8 @@
         <div class="container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 24px;">
             <div>© 2026 ExecuteSpec. Built for Engineering Leaders.</div>
             <div class="nav-links" style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px;">
+                <a href="#catalog">Catalog</a>
                 <a href="#project-workspace">Project Workspace</a>
-                <a href="#dual-mode">Features</a>
                 <a href="#quality">Testing</a>
                 <a href="#pricing">Pricing</a>
                 <a href="#faq">FAQ</a>
