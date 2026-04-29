@@ -1,0 +1,70 @@
+slug: express-to-fastify
+name: Express → Fastify
+tagline: Migrate your Express app to Fastify for 2-3× throughput
+description: |
+  Rewrites Express route handlers + middleware into Fastify
+  equivalents. Preserves every public route + payload contract;
+  the W8 hybrid AST pass converts ~70% mechanically and routes
+  the residual to AI fallback.
+source_stack:
+  language: typescript
+  framework: express
+  min_version: "4.x"
+target_stack:
+  language: typescript
+  framework: fastify
+  target_version: "5.x"
+affected_files_glob: "src/**/*.{js,ts}"
+category: framework-migration
+tags: [express, fastify, backend]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/express-to-fastify-fallback.md
+preservation_contract:
+  preserve_routes: true
+  preserve_middlewares: true
+  preserve_response_codes: true
+  preserve_request_body_schema: true
+est_files: [10, 60]
+est_credits: [5.0, 30.0]
+slots:
+  - name: target_version
+    display_name: Target Fastify version
+    type: SELECT
+    required: true
+    default_value: "5.x"
+    options: ["5.x", "4.x-compat"]
+    description: 5.x is the latest stable; 4.x-compat preserves Express-style middleware shape.
+    display_order: 0
+variants:
+  - options_signature: target_version=5.x
+    options: {target_version: "5.x"}
+    spec_template: |
+      Migrate this Express application to Fastify {{target_version}}.
+      - Replace `app.get/post/put/delete` with Fastify's
+        `fastify.route` / `fastify.get` etc., preserving the URL,
+        HTTP method, and response contract for every existing route
+      - Convert Express middleware (`(req,res,next) => {}`) to
+        Fastify hooks (`onRequest` / `preHandler`) preserving order
+      - Replace `req.body` with Fastify's request validation schema
+      - Replace `res.status().json()` with `reply.code().send()`
+      - Update package.json: remove express, add fastify ^5
+      - Preserve ALL existing routes + status codes + body schemas
+        exactly; the reviewer will verify via the preservation
+        contract
+  - options_signature: target_version=4.x-compat
+    options: {target_version: "4.x-compat"}
+    spec_template: |
+      Migrate this Express application to Fastify with the
+      `@fastify/middie` Express-compat shim so existing
+      `(req,res,next)` middleware continues to work unchanged.
+      - Mount `@fastify/middie` so all existing middleware modules
+        attach via `fastify.use(...)`
+      - Convert routes to `fastify.route` but keep the request /
+        response shape Express-style for backwards compatibility
+      - This is a transitional path; the v5 native route shape is
+        recommended once middleware is migrated
+dependencies:
+  - slug: js-to-typescript
+    kind: RECOMMENDED_AFTER
