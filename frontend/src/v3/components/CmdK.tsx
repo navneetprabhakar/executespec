@@ -46,24 +46,24 @@ export default function CmdK() {
 
   // Build the action list. v3 routes are placeholder destinations
   // until the matching R-IDs land; clicking them today routes to
-  // /v3/home so nothing breaks (real targets wired by R-104+).
+  // /home so nothing breaks (real targets wired by R-104+).
   const actions = useMemo<Action[]>(() => {
     const all: Action[] = [
-      { id: 'home', label: 'Go to home', hint: 'Home', run: () => navigate('/v3/home') },
-      { id: 'settings', label: 'Open settings', hint: 'Account · keys · theme', run: () => navigate('/v3/settings') },
-      { id: 'billing', label: 'Open billing & plan', hint: 'Plan · usage · pricing', run: () => navigate('/v3/billing') },
-      { id: 'team', label: 'Open team', hint: 'Members · seats · invites', run: () => navigate('/v3/team') },
-      { id: 'integrations', label: 'Open integrations', hint: 'GitHub · Slack · Jira', run: () => navigate('/v3/integrations') },
-      { id: 'pricing', label: 'View pricing', hint: 'Free · Pro · Team', run: () => navigate('/v3/pricing') },
-      { id: 'trust', label: 'View Trust & Security', hint: 'SOC 2 · DPA', run: () => navigate('/v3/trust') },
-      { id: 'help', label: 'Show keyboard shortcuts', hint: '?', run: () => navigate('/v3/home') },
+      { id: 'home', label: 'Go to home', hint: 'Home', run: () => navigate('/home') },
+      { id: 'settings', label: 'Open settings', hint: 'Account · keys · theme', run: () => navigate('/settings') },
+      { id: 'billing', label: 'Open billing & plan', hint: 'Plan · usage · pricing', run: () => navigate('/billing') },
+      { id: 'team', label: 'Open team', hint: 'Members · seats · invites', run: () => navigate('/team') },
+      { id: 'integrations', label: 'Open integrations', hint: 'GitHub · Slack · Jira', run: () => navigate('/integrations') },
+      { id: 'pricing', label: 'View pricing', hint: 'Free · Pro · Team', run: () => navigate('/pricing') },
+      { id: 'trust', label: 'View Trust & Security', hint: 'SOC 2 · DPA', run: () => navigate('/trust') },
+      { id: 'help', label: 'Show keyboard shortcuts', hint: '?', run: () => navigate('/home') },
       { id: 'theme', label: `Switch theme (currently ${theme})`, hint: 'Light · Dark', run: () => toggleTheme() },
       { id: 'logout', label: 'Sign out', run: () => { void logout(); } },
       // Admin-only
-      { id: 'admin-tiers', label: 'Admin · Tier lifecycle', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
-      { id: 'admin-flags', label: 'Admin · Feature flags', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
-      { id: 'admin-audit', label: 'Admin · Audit log', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
-      { id: 'admin-halt', label: 'Admin · Halt all runs (confirm required)', requireRole: 'SUPER_ADMIN', run: () => navigate('/v3/home') },
+      { id: 'admin-tiers', label: 'Admin · Tier lifecycle', requireRole: 'SUPER_ADMIN', run: () => navigate('/home') },
+      { id: 'admin-flags', label: 'Admin · Feature flags', requireRole: 'SUPER_ADMIN', run: () => navigate('/home') },
+      { id: 'admin-audit', label: 'Admin · Audit log', requireRole: 'SUPER_ADMIN', run: () => navigate('/home') },
+      { id: 'admin-halt', label: 'Admin · Halt all runs (confirm required)', requireRole: 'SUPER_ADMIN', run: () => navigate('/home') },
     ];
     const role = user?.globalRole;
     return all.filter((a) => {

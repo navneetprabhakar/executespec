@@ -210,7 +210,7 @@ export default function ProjectSwitcher() {
                   role="menuitem"
                   type="button"
                   onClick={() => {
-                    navigate(`/v3/p/${p.id}`);
+                    navigate(`/projects/${p.id}`);
                     setOpen(false);
                   }}
                   style={{

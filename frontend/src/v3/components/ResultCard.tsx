@@ -13,7 +13,7 @@ import { STATUS_LABELS, VERDICT_LABELS, type V3Verdict, COST_PREFIX } from '../l
  * R-122 — inline run-result card.
  *
  * Compact summary of a finished (or in-flight) run. Lives in the
- * project conversation thread. Click "Open run" → /v3/p/{slug}/r/{runShort}
+ * project conversation thread. Click "Open run" → /projects/{slug}/runs/{runShort}
  * for the PR-shaped detail (R-130).
  *
  * Shows the honest 3-state verdict (Ready / Needs review / Failed)
@@ -169,7 +169,7 @@ export default function ResultCard({ runId, initialStatus }: ResultCardProps) {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             <button
               type="button"
-              onClick={() => navigate(`/v3/p/${detail.projectId ?? ''}/r/${runId}`)}
+              onClick={() => navigate(`/projects/${detail.projectId ?? ''}/r/${runId}`)}
               style={{
                 padding: '5px 12px',
                 fontSize: 12,

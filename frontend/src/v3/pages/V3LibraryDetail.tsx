@@ -141,7 +141,7 @@ export default function V3LibraryDetail() {
         variantId: selectedVariantId || undefined,
         branch: branch.trim() || undefined,
       });
-      navigate(`/v3/p/${projectId}/r/${r.executionRunId}`);
+      navigate(`/projects/${projectId}/runs/${r.executionRunId}`);
     } catch (e) {
       setApplyError((e as Error)?.message ?? 'Instantiate failed');
     } finally {
@@ -162,7 +162,7 @@ export default function V3LibraryDetail() {
         <div style={errorBoxStyle}>
           {error ?? 'Solution not found.'}
           <div style={{ marginTop: 8 }}>
-            <Link to="/v3/library" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
+            <Link to="/library" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
               ← back to library
             </Link>
           </div>
@@ -177,7 +177,7 @@ export default function V3LibraryDetail() {
     <div style={{ padding: 16, paddingBottom: 48, display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Breadcrumb */}
       <div style={{ fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-        <Link to="/v3/library" style={{ color: 'var(--v3-text-subtle)' }}>library</Link>
+        <Link to="/library" style={{ color: 'var(--v3-text-subtle)' }}>library</Link>
         {' / '}
         <span style={{ color: 'var(--v3-text)' }}>{s.slug}</span>
       </div>
@@ -246,7 +246,7 @@ export default function V3LibraryDetail() {
           <div style={{ fontSize: 14, fontWeight: 600, color: '#FBBF24', marginBottom: 6 }}>
             This solution requires the {detail.unlockTier} tier.
           </div>
-          <Link to="/v3/pricing" style={{
+          <Link to="/pricing" style={{
             display: 'inline-block',
             marginTop: 6,
             padding: '6px 12px',

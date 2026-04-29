@@ -8,7 +8,7 @@ import { createProject } from '@/lib/api';
  * R-310 (Wave 7) — explicit empty-state for users with zero projects.
  *
  * **Why this exists.** F1 e2e walk found that V3HomeRedirect was sending
- * 0-projects users to `/v3/p/empty`, which V3ProjectHome then tried to
+ * 0-projects users to `/projects/empty`, which V3ProjectHome then tried to
  * load via `getProject('empty')` (404) + `getRuns({projectId:'empty'})`.
  * The page rendered with no `<h1>`, the network panel showed `404 on
  * /api/projects/empty`, and the user concluded the product was broken.
@@ -16,12 +16,12 @@ import { createProject } from '@/lib/api';
  * broken?" trigger in the product).
  *
  * **What this fix is.** A real empty-state component routed at the
- * literal slug `/v3/p/empty` (registered BEFORE the catch-all `p/:slug`
+ * literal slug `/projects/empty` (registered BEFORE the catch-all `p/:slug`
  * in App.tsx so it takes priority). Renders:
  *   - A welcome line that uses the user's first name when available
  *   - A short reframing of the value proposition
  *   - A primary "Create my first project" CTA that POSTs a default-named
- *     project + auto-navigates to `/v3/p/{newId}` (where Composer kicks in)
+ *     project + auto-navigates to `/projects/{newId}` (where Composer kicks in)
  *   - A secondary "Set up a real project (with a GitHub repo) →" link to
  *     /org/projects, for users who already have a repo to wire up
  *
@@ -32,7 +32,7 @@ import { createProject } from '@/lib/api';
  * V3ProjectHome fell into.
  *
  * Acceptance per docs/plans/wave-7-issue-list.md R-310:
- *   (a) `/v3/p/empty` renders this component
+ *   (a) `/projects/empty` renders this component
  *   (b) Walker finds zero "?"-headed pages on Free + Pro
  *   (c) No `/api/projects/empty` 404 fired on visit
  */
@@ -52,7 +52,7 @@ export default function V3EmptyProject() {
         ? `${firstName}'s first project`
         : 'My first project';
       const project = await createProject({ name: defaultName });
-      navigate(`/v3/p/${project.id}`, { replace: true });
+      navigate(`/projects/${project.id}`, { replace: true });
     } catch (e) {
       setError((e as Error)?.message ?? 'Failed to create project');
       setCreating(false);

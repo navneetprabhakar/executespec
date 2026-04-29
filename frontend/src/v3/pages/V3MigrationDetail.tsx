@@ -122,7 +122,7 @@ export default function V3MigrationDetail() {
         slotValues,
         branch: branch.trim() || undefined,
       });
-      navigate(`/v3/p/${projectId}/r/${r.executionRunId}`);
+      navigate(`/projects/${projectId}/runs/${r.executionRunId}`);
     } catch (e) {
       setApplyError((e as Error)?.message ?? 'Apply failed');
     } finally {
@@ -150,7 +150,7 @@ export default function V3MigrationDetail() {
         }}>
           {error ?? 'Recipe not found.'}
           <div style={{ marginTop: 8 }}>
-            <Link to="/v3/migrations" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
+            <Link to="/migrations" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
               ← back to migrations
             </Link>
           </div>
@@ -165,7 +165,7 @@ export default function V3MigrationDetail() {
     <div style={{ padding: 16, paddingBottom: 48, display: 'flex', flexDirection: 'column', gap: 20 }}>
       {/* Breadcrumb */}
       <div style={{ fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-        <Link to="/v3/migrations" style={{ color: 'var(--v3-text-subtle)' }}>migrations</Link>
+        <Link to="/migrations" style={{ color: 'var(--v3-text-subtle)' }}>migrations</Link>
         {' / '}
         <span style={{ color: 'var(--v3-text)' }}>{r.slug}</span>
       </div>
@@ -212,7 +212,7 @@ export default function V3MigrationDetail() {
           <div style={{ fontSize: 14, fontWeight: 600, color: '#FBBF24', marginBottom: 6 }}>
             This recipe requires the {detail.unlockTier} tier.
           </div>
-          <Link to="/v3/pricing" style={{
+          <Link to="/pricing" style={{
             display: 'inline-block',
             marginTop: 6,
             padding: '6px 12px',

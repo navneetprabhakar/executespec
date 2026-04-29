@@ -14,7 +14,7 @@ import {
  * groups (people-and-money / data-and-infra / ui-and-growth /
  * smart-and-reach) + 15 user-friendly categories + tier filter +
  * free-text search.  Locked cards (caller below solution.tier) link
- * to /v3/pricing instead of the detail page.
+ * to /pricing instead of the detail page.
  *
  * <p>Mirrors V3Migrations shape so users get a consistent gallery
  * UX across both products.  When a third library-shaped product
@@ -232,13 +232,13 @@ function SolutionCard({ item }: { item: ReadymadeListItem }) {
 
   if (item.locked) {
     return (
-      <Link to="/v3/pricing" style={{ textDecoration: 'none' }}>
+      <Link to="/pricing" style={{ textDecoration: 'none' }}>
         {inner}
       </Link>
     );
   }
   return (
-    <Link to={`/v3/library/${s.slug}`} style={{ textDecoration: 'none' }}>
+    <Link to={`/library/${s.slug}`} style={{ textDecoration: 'none' }}>
       {inner}
     </Link>
   );

@@ -8,7 +8,7 @@ import { listMigrations, type MigrationListItem } from '@/lib/api';
  * Backed by GET /api/migrations (list with optional category / tier /
  * search filters; tier-gating decoration applied per-row by the
  * server based on the caller's tier).  Lock-icon cards open an
- * upgrade prompt; unlocked cards link to /v3/migrations/:slug for the
+ * upgrade prompt; unlocked cards link to /migrations/:slug for the
  * detail page where the user fills slots + runs Phase 1 dry-run +
  * applies.
  */
@@ -210,13 +210,13 @@ function RecipeCard({ item }: { item: MigrationListItem }) {
 
   if (item.locked) {
     return (
-      <Link to="/v3/pricing" style={{ textDecoration: 'none' }}>
+      <Link to="/pricing" style={{ textDecoration: 'none' }}>
         {inner}
       </Link>
     );
   }
   return (
-    <Link to={`/v3/migrations/${r.slug}`} style={{ textDecoration: 'none' }}>
+    <Link to={`/migrations/${r.slug}`} style={{ textDecoration: 'none' }}>
       {inner}
     </Link>
   );

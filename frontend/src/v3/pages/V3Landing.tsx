@@ -26,7 +26,7 @@ import Pill from '../components/Pill';
  *
  * On stub mode (Wave 1 default), submit returns a fake run reference;
  * we surface it as "Sign up to ship a real run" with the spec preserved
- * in sessionStorage for the auth → /v3/p/... handoff.
+ * in sessionStorage for the auth → /projects/... handoff.
  *
  * Selling-point pass: hero copy + CSS-frame demo + verified-score
  * counter + sample-run gallery + per-persona footer routing all
@@ -108,7 +108,7 @@ export default function V3Landing() {
     } catch {
       /* private mode — best-effort */
     }
-    navigate('/login', { state: { from: '/v3/landing' } });
+    navigate('/login', { state: { from: '/' } });
   }
 
   return (
@@ -364,15 +364,15 @@ export default function V3Landing() {
           Sign in
         </Link>{' '}
         ·{' '}
-        <Link to="/v3/home" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to="/home" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
           v3 home
         </Link>{' '}
         ·{' '}
-        <Link to="/v3/exec-demo" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to="/exec-demo" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
           See a team's last 30 days
         </Link>{' '}
         ·{' '}
-        <Link to="/v3/trust" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to="/trust" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
           SOC 2 · DPA · DSAR
         </Link>
       </footer>
@@ -428,7 +428,7 @@ function VerifiedCounter({ stats }: { stats: V3LandingStats }) {
         </span>
       </div>
       <Link
-        to="/v3/exec-demo"
+        to="/exec-demo"
         style={{
           fontSize: 12,
           color: 'var(--v3-brand)',
@@ -927,7 +927,7 @@ function CompetitorTable() {
         }}
       >
         Want the long version? Check{' '}
-        <Link to="/v3/exec-demo" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+        <Link to="/exec-demo" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
           live numbers
         </Link>
         .
@@ -943,19 +943,19 @@ function PersonaCtaStrip() {
     {
       title: 'For teams',
       body: 'Per-seat collab, BYOK, audit log, SSO. Bring your engineers into one project.',
-      href: '/v3/team',
+      href: '/team',
       cta: 'See team features →',
     },
     {
       title: 'For enterprise',
       body: 'SOC 2 audit-in-progress, signed DPA, dedicated infra, custom MSA, SAML/OIDC.',
-      href: '/v3/trust',
+      href: '/trust',
       cta: 'Trust posture →',
     },
     {
       title: 'For PgM / CFO',
       body: 'Watch a real team\'s last 30 days — spend by project, top wins, success rate.',
-      href: '/v3/exec-demo',
+      href: '/exec-demo',
       cta: 'Public demo →',
     },
   ];

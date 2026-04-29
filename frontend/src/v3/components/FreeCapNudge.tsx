@@ -99,7 +99,7 @@ export function FreeCapToast() {
         type="button"
         onClick={() => {
           trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: 'FREE', toTier: 'PRO', source: 'cap_toast' });
-          navigate('/v3/billing');
+          navigate('/billing');
         }}
         style={{
           padding: '4px 10px',
@@ -158,7 +158,7 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
 
   function onUpgrade() {
     trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: 'FREE', toTier: 'PRO', source: 'cap_modal' });
-    navigate('/v3/billing');
+    navigate('/billing');
     onClose();
   }
 
