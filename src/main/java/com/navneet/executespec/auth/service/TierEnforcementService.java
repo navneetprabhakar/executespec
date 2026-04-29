@@ -649,6 +649,33 @@ public class TierEnforcementService {
     }
 
     /**
+     * R-341 — predicate: does this (tier, hasByok) pair need a hard
+     * cost cap?  Used by the Readymades + Migrations product UIs to
+     * decide whether to render the cost-cap input or an info-only
+     * "Est. $X on your keys" chip.
+     *
+     * <p>Backend enforcement of the cap itself is unchanged
+     * ({@link #resolveRunCostBudget} returns the dollar value the
+     * V2 cost tracker uses to abort runaway runs). This helper just
+     * gates the UX surface so TEAM/ENTERPRISE BYOK customers don't
+     * see capacity controls they don't pay for.
+     *
+     * @return {@code true} when FREE or PRO without BYOK; {@code false}
+     *         for TEAM / ENTERPRISE / PRO+BYOK / unknown tiers (safe
+     *         default = no cap UI).
+     */
+    public boolean requiresCostCap(String tier, boolean hasByok) {
+        if (tier == null) return true; // anonymous → treat as FREE-equivalent
+        String t = tier.toUpperCase();
+        if ("ENTERPRISE".equals(t)) return false;
+        if ("TEAM".equals(t))       return false;
+        if ("MAX".equals(t))        return false; // legacy alias for TEAM
+        if ("PRO".equals(t))        return !hasByok;
+        if ("FREE".equals(t))       return true;
+        return false;
+    }
+
+    /**
      * Resolves the per-run USD cost budget for the given tier and BYOK status.
      * Returns -1 for unlimited (ENTERPRISE, PRO with BYOK, SUPER_ADMIN).
      */
