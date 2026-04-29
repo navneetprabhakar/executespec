@@ -914,40 +914,113 @@
                 Type a spec, or pick from a catalog of <a href="#catalog" style="color: var(--blue-light); text-decoration: none;">28 readymade solutions and 11 modernization recipes</a>. Plan, build, test, review, open a PR. ~80% of real runs land Ready — with a verdict (Ready / Needs review / Failed) on every one of yours.
             </p>
 
-            <!-- Chat-first composer.  Migrated 2026-04-29 from the in-app
-                 V3Landing page so the website is now the single canonical
-                 landing surface.  The submit handler stashes the spec on
-                 the app domain via a query param and redirects to the
-                 V3Landing prefill path; V3Landing reads the param, hydrates
-                 its composer, and handles the auth/sign-up handoff. -->
+            <!-- Chat-first composer + sample prompts + live stats card.
+                 Migrated 2026-04-29 (R-338) from the in-app V3Landing page
+                 so the website is now the single canonical landing surface
+                 with the same direct-interaction shape:
+                  - <textarea> + sample-prompt chips (clickable, populate it)
+                  - live stats card ("3 specs shipped this week · 66%
+                    verified · 89 total runs all-time") fetched from
+                    /api/v3/landing/stats with graceful fallback
+                  - 30-day proof line ("89 PRs shipped in the last 30 days")
+                    fetched from /api/v3/public/exec-snapshot
+                 Submit stashes the spec on the app domain via a query param
+                 and redirects to /v3/landing?prefill=… ; V3Landing's mount
+                 hook reads the param + hydrates its composer for the auth
+                 handoff. -->
             <form id="hero-composer" onsubmit="return heroComposerSubmit(event)" style="margin: 32px auto 0; max-width: 720px; text-align: left;">
                 <label for="hero-spec" class="mono" style="display: block; font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">What do you want shipped?</label>
                 <textarea
                     id="hero-spec"
                     name="hero-spec"
                     rows="3"
-                    placeholder="Add OAuth login to my Next.js app · Migrate from Express to Fastify · Build a Stripe checkout endpoint · Add unit-test coverage for src/auth/"
+                    placeholder='e.g. "Add a forgot-password flow to my Spring Boot app"'
                     style="width: 100%; padding: 14px 16px; font-family: var(--font-base); font-size: 0.95rem; line-height: 1.5; background: var(--surface); color: var(--text); border: 1px solid var(--surface-border); border-radius: 12px; resize: vertical; outline: none; transition: border-color 0.15s;"
                     onfocus="this.style.borderColor='var(--blue)'"
                     onblur="this.style.borderColor='var(--surface-border)'"
                 ></textarea>
                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px;">
                     <button type="submit" class="btn btn-primary" style="padding: 10px 24px;">Ship this →</button>
-                    <span style="font-size: 0.78rem; color: var(--text-muted);">No credit card. Free for 5 lifetime runs.</span>
+                    <span style="font-size: 0.78rem; color: var(--text-muted);">Free preview · no card · ~60s · sign up to ship the code</span>
                 </div>
             </form>
 
-            <div class="hero-buttons" style="margin-top: 24px;">
+            <!-- Sample-prompt chip rail.  Six canned prompts you can click
+                 to seed the textarea (matches V3Landing's SAMPLE_PROMPTS).
+                 Same prompts ride the Catalog narrative — half are
+                 readymades, half are migrations / one-off specs. -->
+            <div id="hero-sample-prompts" style="margin: 16px auto 0; max-width: 720px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; text-align: left;">
+                <button type="button" class="hero-prompt-chip" data-prompt="Add OAuth login to my Next.js app">Add OAuth login to my Next.js app</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Refactor a React component to TypeScript">Refactor a React component to TypeScript</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Build a Stripe checkout endpoint">Build a Stripe checkout endpoint</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Add unit-test coverage for src/auth/">Add unit-test coverage for src/auth/</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Migrate from Express to Fastify">Migrate from Express to Fastify</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Add a /healthz endpoint to my Spring Boot app">Add a /healthz endpoint to my Spring Boot app</button>
+            </div>
+
+            <!-- Live stats card — populated by /api/v3/landing/stats on
+                 page load.  Hidden by default (display:none); the JS
+                 below removes that style + writes the numbers when the
+                 fetch resolves.  Numbers update weekly. -->
+            <div id="hero-stats" style="display:none; margin: 24px auto 0; max-width: 560px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; text-align: left;">
+                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: center;">
+                    <div style="text-align: center;">
+                        <div id="stat-specs-week" style="font-size: 1.4rem; font-weight: 700; color: var(--text);">—</div>
+                        <div class="mono" style="font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px;">specs shipped this week</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div id="stat-verified" style="font-size: 1.4rem; font-weight: 700; color: var(--blue-light);">—</div>
+                        <div class="mono" style="font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px;">verified score ≥ 80</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div id="stat-total-runs" style="font-size: 1.4rem; font-weight: 700; color: var(--text);">—</div>
+                        <div class="mono" style="font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px;">total runs all-time</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 30-day proof line — assertive single number from
+                 /api/v3/public/exec-snapshot.  Hidden until fetch
+                 resolves; orange counter mimics the V3Landing R-313
+                 styling. -->
+            <p id="hero-snapshot-line" style="display:none; margin: 16px auto 0; font-size: 0.95rem; color: var(--text-muted); max-width: 560px;">
+                <strong id="hero-snapshot-runs" style="color: var(--orange); font-style: italic; font-weight: 600;">—</strong>
+                PRs shipped in the last 30 days
+            </p>
+
+            <div class="hero-buttons" style="margin-top: 28px;">
                 <a href="https://dev.executespec.ai/v3/library" class="btn btn-ghost" target="_blank">Browse the catalog →</a>
                 <a href="https://dev.executespec.ai/v3/exec-demo" class="btn btn-ghost" target="_blank">See a team's last 30 days →</a>
             </div>
 
+            <style>
+                .hero-prompt-chip {
+                    padding: 8px 12px;
+                    background: var(--surface);
+                    color: var(--text-muted);
+                    border: 1px solid var(--surface-border);
+                    border-radius: 8px;
+                    font-family: inherit;
+                    font-size: 0.82rem;
+                    line-height: 1.4;
+                    text-align: left;
+                    cursor: pointer;
+                    transition: background 0.15s, border-color 0.15s, color 0.15s;
+                }
+                .hero-prompt-chip:hover {
+                    background: var(--bg);
+                    border-color: var(--blue);
+                    color: var(--text);
+                }
+            </style>
+
             <script>
-                // Submit handler for the hero composer — redirects to the app's
-                // V3Landing with the spec in a query param.  V3Landing's mount
-                // hook reads ?prefill=… and hydrates its textarea with it.
-                // Length-capped at 4 KB to stay under the typical URL-length
-                // tolerance of every real-world server / CDN we touch.
+                // ── Hero composer submit ────────────────────────────────
+                // Redirects to the app's V3Landing with the spec in a
+                // query param.  V3Landing's mount hook reads ?prefill=…
+                // and hydrates its textarea + handles the auth handoff.
+                // Length-capped at 4 KB to stay under the URL-length
+                // tolerance of every real-world server / CDN.
                 function heroComposerSubmit(e) {
                     e.preventDefault();
                     var ta = document.getElementById('hero-spec');
@@ -965,10 +1038,59 @@
                     window.location.href = url;
                     return false;
                 }
+
+                // ── Sample-prompt chip handlers ─────────────────────────
+                document.querySelectorAll('.hero-prompt-chip').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var p = btn.getAttribute('data-prompt') || '';
+                        var ta = document.getElementById('hero-spec');
+                        ta.value = p;
+                        ta.focus();
+                        // Scroll into view in case the user is on a
+                        // small viewport and the chip pushed it off.
+                        ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    });
+                });
+
+                // ── Live aggregates fetch (CORS-safe; silent on failure) ─
+                // Wave 7 selling-point: counters land on the static site
+                // exactly the way the in-app V3Landing renders them.
+                // Both endpoints are public + permitAll on the backend;
+                // dev CORS allows executespec.ai per application-dev.yml.
+                var API_BASE = 'https://dev.executespec.ai';
+                function fetchStats() {
+                    fetch(API_BASE + '/api/v3/landing/stats', { mode: 'cors' })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (s) {
+                            if (!s) return;
+                            // Honest gate (matches V3Landing): only show
+                            // the card when there's actually data.
+                            if ((s.specsThisWeek || 0) === 0 && (s.totalRunsAllTime || 0) === 0) return;
+                            document.getElementById('stat-specs-week').textContent = String(s.specsThisWeek || 0);
+                            document.getElementById('stat-verified').textContent =
+                                (s.verifiedScorePercent != null ? s.verifiedScorePercent + '%' : '—');
+                            document.getElementById('stat-total-runs').textContent = String(s.totalRunsAllTime || 0);
+                            document.getElementById('hero-stats').style.display = 'block';
+                        })
+                        .catch(function () { /* hide block on failure */ });
+                }
+                function fetchSnapshot() {
+                    fetch(API_BASE + '/api/v3/public/exec-snapshot', { mode: 'cors' })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (snap) {
+                            if (!snap || (snap.totalRuns || 0) === 0) return;
+                            document.getElementById('hero-snapshot-runs').textContent = String(snap.totalRuns);
+                            document.getElementById('hero-snapshot-line').style.display = 'block';
+                        })
+                        .catch(function () { /* silent */ });
+                }
+                fetchStats();
+                fetchSnapshot();
             </script>
-            <!-- Selling-point proof strip. Numbers backed by /api/v3/landing/stats
-                 (anonymized aggregate across the platform). -->
-            <p style="margin-top:28px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
+
+            <!-- Selling-point proof strip.  Numbers above are LIVE; this
+                 line stays as the static fallback that always renders. -->
+            <p style="margin-top:24px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
                 ~80% verified ≥ 80 · plan-approval gate · BYOK on Team + Enterprise · no credit card
             </p>
             <!-- Per-persona conversion routing. Each link goes to the surface
