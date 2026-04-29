@@ -1,11 +1,28 @@
 # Agent Builder — pending plan
 
-> **Status:** PENDING (scope approved 2026-04-29; not yet started).
-> **Branch when work begins:** `feature/v3-platform-expansion` (or
-> a new branch off it; TBD at execution time).
-> **R-### range reserved:** R-327 → R-331 (one per wave below).
-> **Author:** 2026-04-29 thread, after competitor analysis +
-> 4-angle differentiation discussion.
+> **Status:** **PARKED 2026-04-29** — wrong product shape.
+>
+> The original framing in this doc was "let users customise the
+> system prompt + tool whitelist of our internal V2 worker." On
+> 2026-04-29 the founder corrected the framing: Agent Builder is
+> meant to be a **standalone product surface where users build
+> their own AI agents** (drag-and-drop visual builder, library of
+> readymade agents, optional code export so the user owns the
+> agent code). What this doc describes is "agent customisation,"
+> which is internal-plumbing work with no clear customer payoff
+> right now and was rejected.
+>
+> The plan stays in the repo as work product so we don't lose the
+> competitor analysis + scope-decision artefacts, but **do NOT
+> execute against this plan.** When Agent Builder is properly
+> scoped (drag-drop visual + readymade agents + run-on-platform-or-
+> export-as-code), a new `pending-agent-builder-v2-plan.md` should
+> be authored and this file moved to a `docs/plans/archived/` or
+> renamed `superseded-` prefix.
+>
+> Originally authored: 2026-04-29 (early in the same thread).
+> R-### range reserved: R-327 → R-331 (no longer reserved — the
+> readymade-solutions plan now claims R-327+).
 
 ## One-line pitch
 
