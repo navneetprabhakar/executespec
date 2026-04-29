@@ -1,11 +1,13 @@
 package com.navneet.executespec.migration.controller;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.migration.dto.MigrationDetailDto;
 import com.navneet.executespec.migration.dto.MigrationDryRunDto;
 import com.navneet.executespec.migration.dto.MigrationListItemDto;
 import com.navneet.executespec.migration.entity.MigrationRecipe.Tier;
 import com.navneet.executespec.migration.service.MigrationDryRunService;
+import com.navneet.executespec.migration.service.MigrationOrchestrator;
 import com.navneet.executespec.migration.service.MigrationService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -36,6 +38,7 @@ public class MigrationController {
 
     private final MigrationService migrationService;
     private final MigrationDryRunService dryRunService;
+    private final MigrationOrchestrator migrationOrchestrator;
 
     @GetMapping
     public List<MigrationListItemDto> list(
@@ -69,22 +72,31 @@ public class MigrationController {
     }
 
     /**
-     * R-338 STUB — Phase 2 apply path.  Wired in W4 once
-     * {@code MigrationOrchestrator} dispatches per-repo V2 runs
-     * with slot-substituted specs.  Returns 501 so the UI can be
-     * authored against the contract shape.
+     * R-339 — Phase 2 apply path.  Validates slot values, picks the
+     * variant, composes the spec, and dispatches a multi-repo
+     * ExecutionRun via the existing
+     * {@link com.navneet.executespec.execution.service.ExecutionOrchestrator}.
+     *
+     * <p>The returned {@code executionRunId} is what the UI should
+     * navigate to (the existing run-detail surface handles the rest
+     * of the pipeline lifecycle).
      */
     @PostMapping("/{slug}/apply")
-    public ResponseEntity<Map<String, Object>> apply(@PathVariable String slug,
-                                                     @RequestBody Map<String, Object> body) {
-        log.info("[R-338] /api/migrations/{}/apply called — STUB (W4 wiring not yet shipped)", slug);
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(Map.of(
-            "status", "not_implemented",
-            "message", "Phase-2 apply (multi-repo V2 dispatch + slot "
-                + "substitution + cost-cap enforcement) ships in Wave 4 "
-                + "of the Migrations plan. The contract shape is stable; "
-                + "the implementation lands then.",
-            "slug", slug
+    public ResponseEntity<Map<String, Object>> apply(
+            @PathVariable String slug,
+            @RequestBody MigrationOrchestrator.ApplyRequest req,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        if (userDetails == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("status", "unauthenticated"));
+        }
+        ExecutionRun run = migrationOrchestrator.apply(slug, req, userDetails.getUser().getId());
+        log.info("[R-339] migration {} applied — executionRun {}", slug, run.getId());
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of(
+            "executionRunId", run.getId(),
+            "status", run.getStatus(),
+            "message", "Migration started across " + (req.repoIds() == null ? 0 : req.repoIds().size())
+                + " repo(s). Track progress on the run detail page."
         ));
     }
 
