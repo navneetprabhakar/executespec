@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   getLibraryDetail,
@@ -7,27 +7,32 @@ import {
   resolveLibraryVariant,
   type ReadymadeDetail,
   type ReadymadeSlot,
-  type ReadymadeVariant,
   type VariantResolutionResult,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
+import ProjectRepoPicker from '../components/ProjectRepoPicker';
+import StackPicker from '../components/StackPicker';
 
 /**
- * R-330 — Readymade Solutions detail page.
+ * R-330 / R-335 — Readymade Solutions detail page.
  *
- * <p>Mirrors V3MigrationDetail but tuned to the Readymades shape:
+ * <p>R-335 (UX rev): replaced the free-form Project ID + Repo IDs
+ * text inputs with {@link ProjectRepoPicker} (real dropdowns +
+ * inline new-project / new-repo flows), and the "Pick variant /
+ * resolve from your stack" combo with {@link StackPicker} (clear
+ * language → framework chip rows + silent auto-resolution from
+ * the first picked repo).
+ *
+ * <p>Flow:
  * <ol>
- *   <li>User picks projectId + repoIds.</li>
- *   <li>For the first repo, the page calls
- *       {@code POST /api/library/{slug}/resolve} to surface the
- *       best-match variant (and the full available list when no
- *       exact match exists).</li>
- *   <li>User fills slots (rendered by type).</li>
- *   <li>Cost framing chip (R-341 cross-product) sets expectations
- *       per tier.</li>
- *   <li>Click "Use this" → POST /instantiate → navigate to the run
- *       detail page where the existing pipeline lifecycle takes
- *       over.</li>
+ *   <li>{@code 1.} ProjectRepoPicker — pick (or create) project,
+ *       then pick (or add) one or more repos.</li>
+ *   <li>{@code 2.} StackPicker — pick language + framework; the
+ *       chosen variant pre-fills via repo-stack auto-resolve.</li>
+ *   <li>{@code 3.} Slot inputs — rendered by type (TEXT / SECRET /
+ *       SELECT / NUMBER / BOOLEAN).</li>
+ *   <li>{@code 4.} Use → POST /instantiate → navigate to the run
+ *       detail page.</li>
  * </ol>
  *
  * <p>Locked solutions (caller below solution.tier) render the
@@ -45,15 +50,14 @@ export default function V3LibraryDetail() {
 
   // Form state
   const [projectId, setProjectId] = useState('');
-  const [repoIdsInput, setRepoIdsInput] = useState('');
+  const [repoIds, setRepoIds] = useState<string[]>([]);
   const [branch, setBranch] = useState('');
   const [slotValues, setSlotValues] = useState<Record<string, string>>({});
   const [selectedVariantId, setSelectedVariantId] = useState<string>('');
 
-  // Variant resolution state
+  // Auto-resolved variant hint — silent in the background, surfaced
+  // by StackPicker as a small detection chip.  No manual button.
   const [resolution, setResolution] = useState<VariantResolutionResult | null>(null);
-  const [resolveBusy, setResolveBusy] = useState(false);
-  const [resolveError, setResolveError] = useState<string | null>(null);
 
   // Apply state
   const [applyBusy, setApplyBusy] = useState(false);
@@ -74,8 +78,11 @@ export default function V3LibraryDetail() {
         }
         setSlotValues(seed);
         // Default to first variant if there's only one — saves the
-        // user a click on single-variant solutions.
-        if (data.variants.length === 1) {
+        // user a click on single-variant solutions.  Multi-variant
+        // entries default to the first language's first framework so
+        // the form is always submittable; the auto-resolve effect
+        // below will refine the pick once a project + repo land.
+        if (data.variants.length >= 1) {
           setSelectedVariantId(data.variants[0].id);
         }
       })
@@ -91,48 +98,50 @@ export default function V3LibraryDetail() {
     };
   }, [slug]);
 
-  const repoIds = useMemo(
-    () => repoIdsInput.split(',').map((s) => s.trim()).filter(Boolean),
-    [repoIdsInput]
-  );
-
-  async function onResolveVariant() {
-    if (!slug || !projectId.trim() || repoIds.length === 0) {
-      setResolveError('Project ID and at least one repo ID are required to resolve.');
+  // R-335 — silent auto-resolve.  Fires whenever the user has a
+  // project + at least one repo selected.  Updates the StackPicker's
+  // detected-stack hint chip and pre-selects the matching variant
+  // when the resolver returns OK.  No spinner, no errors surfaced —
+  // a failed resolution just means the manual chip-picker is the
+  // source of truth (the user-facing form still works).
+  useEffect(() => {
+    if (!slug || !projectId || repoIds.length === 0) {
+      setResolution(null);
       return;
     }
-    setResolveBusy(true);
-    setResolveError(null);
-    try {
-      // Resolve against the first selected repo.  When the user has
-      // multiple repos selected, they're expected to be a cohesive
-      // set (same stack); if not, manual variant pick covers it.
-      const r = await resolveLibraryVariant(slug, projectId.trim(), repoIds[0]);
-      setResolution(r);
-      if (r.bestMatch) setSelectedVariantId(r.bestMatch.id);
-    } catch (e) {
-      setResolveError((e as Error)?.message ?? 'Variant resolution failed');
-    } finally {
-      setResolveBusy(false);
-    }
-  }
+    let cancelled = false;
+    resolveLibraryVariant(slug, projectId, repoIds[0])
+      .then((r) => {
+        if (cancelled) return;
+        setResolution(r);
+        if (r.bestMatch) setSelectedVariantId(r.bestMatch.id);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setResolution(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [slug, projectId, repoIds]);
 
   async function onInstantiate() {
-    if (!slug || !projectId.trim() || repoIds.length === 0) {
-      setApplyError('Project ID and at least one repo ID are required.');
+    if (!projectId || repoIds.length === 0) {
+      setApplyError('Pick a project and at least one repo first.');
       return;
     }
+    if (!slug) return;
     setApplyBusy(true);
     setApplyError(null);
     try {
       const r = await instantiateLibrarySolution(slug, {
-        projectId: projectId.trim(),
+        projectId,
         repoIds,
         slotValues,
         variantId: selectedVariantId || undefined,
         branch: branch.trim() || undefined,
       });
-      navigate(`/v3/p/${projectId.trim()}/r/${r.executionRunId}`);
+      navigate(`/v3/p/${projectId}/r/${r.executionRunId}`);
     } catch (e) {
       setApplyError((e as Error)?.message ?? 'Instantiate failed');
     } finally {
@@ -256,49 +265,27 @@ export default function V3LibraryDetail() {
       {/* Use form (gated on lock state) */}
       {!detail.locked && (
         <>
-          <FormSection title="1. Pick project + repo">
-            <FormField label="Project ID">
-              <input value={projectId} onChange={(e) => setProjectId(e.target.value)}
-                     placeholder="proj-uuid" style={inputStyle} />
-            </FormField>
-            <FormField label="Repo IDs" hint="Comma-separated UUIDs (most readymades target a single repo).">
-              <input value={repoIdsInput} onChange={(e) => setRepoIdsInput(e.target.value)}
-                     placeholder="repo-uuid" style={inputStyle} />
-            </FormField>
-            <FormField label="Branch (optional)">
+          <FormSection title="1. Where will this run?">
+            <ProjectRepoPicker
+              projectId={projectId}
+              repoIds={repoIds}
+              onProjectChange={setProjectId}
+              onRepoIdsChange={setRepoIds}
+            />
+            <FormField label="Branch (optional)" hint="Defaults to the project's target branch.">
               <input value={branch} onChange={(e) => setBranch(e.target.value)}
                      placeholder="feature/add-stripe-checkout" style={inputStyle} />
             </FormField>
           </FormSection>
 
-          {/* Variant resolution */}
-          <FormSection title="2. Pick variant (or auto-resolve from your stack)">
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-              {detail.variants.length === 1
-                ? `Single variant — ${detail.variants[0].language} / ${detail.variants[0].framework}.`
-                : `${detail.variants.length} variants available.  Click "Resolve from repo" to auto-pick by your repo's detected stack, or pick manually below.`}
-            </p>
-            {detail.variants.length > 1 && (
-              <>
-                <button type="button" onClick={onResolveVariant}
-                        disabled={resolveBusy || !projectId.trim() || repoIds.length === 0}
-                        style={primaryButton(resolveBusy || !projectId.trim() || repoIds.length === 0)}>
-                  {resolveBusy ? 'Resolving…' : 'Resolve from repo'}
-                </button>
-                {resolveError && <div style={errorBoxStyle}>{resolveError}</div>}
-                {resolution && <ResolutionBanner result={resolution} />}
-                <select value={selectedVariantId}
-                        onChange={(e) => setSelectedVariantId(e.target.value)}
-                        style={inputStyle}>
-                  <option value="">(auto)</option>
-                  {detail.variants.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {variantLabel(v)}
-                    </option>
-                  ))}
-                </select>
-              </>
-            )}
+          {/* Stack — language + framework chips, with silent auto-detection */}
+          <FormSection title="2. Stack">
+            <StackPicker
+              variants={detail.variants}
+              selectedVariantId={selectedVariantId}
+              onChange={setSelectedVariantId}
+              resolution={resolution}
+            />
           </FormSection>
 
           {/* Slots */}
@@ -346,61 +333,8 @@ export default function V3LibraryDetail() {
   );
 }
 
-function ResolutionBanner({ result }: { result: VariantResolutionResult }) {
-  const labelByReason: Record<string, { color: string; label: string; explainer: string }> = {
-    OK: {
-      color: '#4ADE80',
-      label: 'Resolved',
-      explainer: `Best match: ${result.detectedLanguage} + ${result.detectedFramework} variant.`,
-    },
-    NO_VARIANT_FOR_STACK: {
-      color: '#FBBF24',
-      label: 'No exact match',
-      explainer: `Detected ${result.detectedLanguage}${result.detectedFramework ? ' + ' + result.detectedFramework : ''}, but no variant for that stack — pick manually below.`,
-    },
-    STACK_NOT_DETECTED: {
-      color: '#FBBF24',
-      label: 'Stack not detected',
-      explainer: 'We couldn\'t read the repo\'s stack — sync the repo first or pick a variant manually.',
-    },
-    REPO_NOT_LINKED: {
-      color: '#FCA5A5',
-      label: 'Repo not linked',
-      explainer: 'That repo isn\'t linked to this project. Check the IDs.',
-    },
-  };
-  const meta = labelByReason[result.reason] ?? labelByReason.STACK_NOT_DETECTED;
-  return (
-    <div style={{
-      padding: 8,
-      background: 'var(--v3-surface-elevated)',
-      border: '1px solid var(--v3-border)',
-      borderRadius: 4,
-      fontSize: 11.5,
-      color: 'var(--v3-text)',
-    }}>
-      <span style={{ color: meta.color, fontWeight: 600, marginRight: 6 }}>{meta.label}</span>
-      {meta.explainer}
-    </div>
-  );
-}
-
-function variantLabel(v: ReadymadeVariant): string {
-  const opts = v.options;
-  let optsLabel = '';
-  if (opts) {
-    try {
-      const parsed = JSON.parse(opts);
-      const pairs = Object.entries(parsed)
-        .map(([k, val]) => `${k}=${val}`)
-        .join(', ');
-      if (pairs) optsLabel = ` (${pairs})`;
-    } catch {
-      /* ignore */
-    }
-  }
-  return `${v.language} · ${v.framework}${optsLabel}`;
-}
+// R-335: ResolutionBanner + variantLabel removed.  Their roles moved
+// into the StackPicker component (DetectionHint + variantFrameworkLabel).
 
 function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (

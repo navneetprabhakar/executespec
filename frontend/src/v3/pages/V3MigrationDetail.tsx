@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   getMigrationDetail,
@@ -10,6 +10,7 @@ import {
   type MigrationSlot,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
+import ProjectRepoPicker from '../components/ProjectRepoPicker';
 
 /**
  * R-340 — recipe detail page with the W3 two-phase halt-and-inspect
@@ -45,9 +46,11 @@ export default function V3MigrationDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Apply-form state
+  // Apply-form state.  R-335 (UX rev): projectId + repoIds now driven
+  // by the shared {@link ProjectRepoPicker} dropdown component instead
+  // of free-form UUID text inputs.
   const [projectId, setProjectId] = useState('');
-  const [repoIdsInput, setRepoIdsInput] = useState('');
+  const [repoIds, setRepoIds] = useState<string[]>([]);
   const [branch, setBranch] = useState('');
   const [slotValues, setSlotValues] = useState<Record<string, string>>({});
 
@@ -88,20 +91,15 @@ export default function V3MigrationDetail() {
     };
   }, [slug]);
 
-  const repoIds = useMemo(
-    () => repoIdsInput.split(',').map((s) => s.trim()).filter(Boolean),
-    [repoIdsInput]
-  );
-
   async function onComputePlan() {
-    if (!slug || !projectId.trim() || repoIds.length === 0) {
-      setDryRunError('Project ID and at least one repo ID are required.');
+    if (!slug || !projectId || repoIds.length === 0) {
+      setDryRunError('Pick a project and at least one repo first.');
       return;
     }
     setDryRunBusy(true);
     setDryRunError(null);
     try {
-      const r = await migrationDryRun(slug, { projectId: projectId.trim(), repoIds });
+      const r = await migrationDryRun(slug, { projectId, repoIds });
       setDryRunResult(r);
     } catch (e) {
       setDryRunError((e as Error)?.message ?? 'Dry-run failed');
@@ -111,20 +109,20 @@ export default function V3MigrationDetail() {
   }
 
   async function onApply() {
-    if (!slug || !projectId.trim() || repoIds.length === 0) {
-      setApplyError('Project ID and at least one repo ID are required.');
+    if (!slug || !projectId || repoIds.length === 0) {
+      setApplyError('Pick a project and at least one repo first.');
       return;
     }
     setApplyBusy(true);
     setApplyError(null);
     try {
       const r = await migrationApply(slug, {
-        projectId: projectId.trim(),
+        projectId,
         repoIds,
         slotValues,
         branch: branch.trim() || undefined,
       });
-      navigate(`/v3/p/${projectId.trim()}/r/${r.executionRunId}`);
+      navigate(`/v3/p/${projectId}/r/${r.executionRunId}`);
     } catch (e) {
       setApplyError((e as Error)?.message ?? 'Apply failed');
     } finally {
@@ -233,24 +231,20 @@ export default function V3MigrationDetail() {
       {/* Apply form (gated on lock state) */}
       {!detail.locked && (
         <>
-          {/* Project + repos */}
-          <FormSection title="1. Pick project + repos">
-            <FormField label="Project ID" hint="UUID of the project this migration runs against.">
-              <input
-                value={projectId}
-                onChange={(e) => setProjectId(e.target.value)}
-                placeholder="proj-uuid"
-                style={inputStyle}
-              />
-            </FormField>
-            <FormField label="Repo IDs" hint="Comma-separated UUIDs of project repos to migrate.">
-              <input
-                value={repoIdsInput}
-                onChange={(e) => setRepoIdsInput(e.target.value)}
-                placeholder="repo-uuid-1, repo-uuid-2"
-                style={inputStyle}
-              />
-            </FormField>
+          {/* Project + repos — R-335 dropdown picker */}
+          <FormSection title="1. Where will this migration run?">
+            <ProjectRepoPicker
+              projectId={projectId}
+              repoIds={repoIds}
+              onProjectChange={(id) => {
+                setProjectId(id);
+                // Stale dry-run output references the prior project's
+                // repos; clear it so the user sees a fresh applicability
+                // table after switching projects.
+                setDryRunResult(null);
+              }}
+              onRepoIdsChange={setRepoIds}
+            />
             <FormField label="Branch (optional)" hint="Override the default branch for this run.">
               <input
                 value={branch}
