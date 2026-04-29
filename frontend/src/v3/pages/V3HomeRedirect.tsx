@@ -36,6 +36,29 @@ export default function V3HomeRedirect() {
     getProjects()
       .then((list) => {
         if (cancelled) return;
+        // R-343 — persona-tagged signup fork.  RegisterPage stashes the
+        // user's chosen persona; we honor it on the FIRST dispatch only
+        // (clear after read) so subsequent /home visits land on the
+        // first project as before.  Enterprise → trust page (procurement
+        // path), Team → /team for the invite-teammates step, Personal /
+        // unset → first project (or empty-state).
+        let persona: string | null = null;
+        try {
+          persona = sessionStorage.getItem('v3-signup-persona');
+          if (persona) sessionStorage.removeItem('v3-signup-persona');
+        } catch (_) { /* private mode — ignore */ }
+
+        if (persona === 'enterprise') {
+          setTarget('/trust');
+          return;
+        }
+        if (persona === 'team' && (!list || list.length === 0)) {
+          // Send Erin to /team for the invite-first onboarding step.
+          // If she already has a project, dispatch normally — assume
+          // she's a returning user.
+          setTarget('/team');
+          return;
+        }
         if (list && list.length > 0) {
           setTarget(`/projects/${list[0].id}`);
         } else {

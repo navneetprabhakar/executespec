@@ -411,6 +411,18 @@ function DryRunSummary({ result, showCostCap }: { result: MigrationDryRunResult;
     ? `${result.estFilesLowTotal}–${result.estFilesHighTotal} files total`
     : null;
 
+  // R-343 (P1 from UX persona review) — Riley wants a one-line
+  // applicability rollup: "3 of 4 applicable · 1 stack mismatch".
+  // Avoids hunting through per-repo cards to find blockers.
+  const total = result.perRepo.length;
+  const applicable = result.perRepo.filter((r) => r.status === 'APPLICABLE').length;
+  const blocked = total - applicable;
+  const blockedReasons = blocked > 0
+    ? Array.from(new Set(result.perRepo
+        .filter((r) => r.status !== 'APPLICABLE')
+        .map((r) => r.status))).join(', ').toLowerCase().replace(/_/g, ' ')
+    : null;
+
   return (
     <div style={{
       marginTop: 8,
@@ -422,6 +434,35 @@ function DryRunSummary({ result, showCostCap }: { result: MigrationDryRunResult;
       <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--v3-text)', marginBottom: 8 }}>
         Plan summary
       </div>
+      {/* R-343 — applicability rollup line.  Renders only when total > 0. */}
+      {total > 0 && (
+        <div style={{
+          marginBottom: 10,
+          padding: '6px 10px',
+          background: blocked === 0 ? 'rgba(74,222,128,0.08)' : 'rgba(251,191,36,0.10)',
+          border: `1px solid ${blocked === 0 ? 'rgba(74,222,128,0.30)' : 'rgba(251,191,36,0.35)'}`,
+          borderRadius: 4,
+          fontSize: 12,
+          color: 'var(--v3-text)',
+          lineHeight: 1.5,
+        }}>
+          <strong style={{ color: blocked === 0 ? '#4ADE80' : '#FBBF24' }}>
+            {applicable} of {total}
+          </strong>{' '}
+          {applicable === 1 ? 'repo is' : 'repos are'} applicable
+          {blocked > 0 && (
+            <>
+              {' · '}
+              <span style={{ color: '#FBBF24' }}>
+                {blocked} blocked{blockedReasons ? ` (${blockedReasons})` : ''}
+              </span>
+            </>
+          )}
+          {blocked === 0 && total > 1 && (
+            <span style={{ color: 'var(--v3-text-subtle)' }}> · ready to fan out</span>
+          )}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         {totalCost && <span style={chipStyle}>{totalCost}</span>}
         {totalFiles && <span style={chipStyle}>{totalFiles}</span>}

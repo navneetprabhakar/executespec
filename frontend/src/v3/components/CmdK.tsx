@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useUiStore } from '@/stores/useUiStore';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useRunStore } from '@/stores/useRunStore';
 import { useV3Ui } from '../stores/useV3Ui';
 import { GLOSSARY } from '../lib/glossary';
 
@@ -43,6 +44,12 @@ export default function CmdK() {
   const { theme, toggleTheme } = useUiStore();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
+  // R-343 (P0 from UX persona review) — wire the v2 useRunStore into
+  // the v3 palette so power users can re-launch / jump to a recent run
+  // without leaving the keyboard.  Mirrors the v2 CommandPalette
+  // "Recent Runs" group.  No new fetch — uses whatever the run-list
+  // store has already loaded; falls back gracefully when empty.
+  const recentRuns = useRunStore((s) => s.runs);
 
   // Build the action list. v3 routes are placeholder destinations
   // until the matching R-IDs land; clicking them today routes to
@@ -66,13 +73,31 @@ export default function CmdK() {
       { id: 'admin-halt', label: 'Admin · Halt all runs (confirm required)', requireRole: 'SUPER_ADMIN', run: () => navigate('/home') },
     ];
     const role = user?.globalRole;
-    return all.filter((a) => {
+    const filteredByRole = all.filter((a) => {
       if (!a.requireRole) return true;
       if (a.requireRole === 'SUPER_ADMIN') return role === 'SUPER_ADMIN';
       if (a.requireRole === 'ORG_ADMIN') return role === 'SUPER_ADMIN' || user?.orgRole === 'ORG_ADMIN';
       return false;
     });
-  }, [navigate, theme, toggleTheme, logout, user]);
+    // R-343 — append Recent runs as virtual actions.  Top 5 from the
+    // shared run-store; each one navigates to the project's run-detail
+    // surface (or /runs filtered when projectId is missing on legacy
+    // anonymous-trial rows).  IDs prefixed with `run-` so they don't
+    // collide with the static action ids above.
+    const runActions: Action[] = (recentRuns ?? []).slice(0, 5).map((r) => {
+      const preview = (r.userRequest ?? '').trim().slice(0, 50) || '(no spec text)';
+      const target = r.projectId
+        ? `/projects/${r.projectId}/runs/${r.runId}`
+        : `/runs`;
+      return {
+        id: `run-${r.runId}`,
+        label: `Recent · ${preview}${(r.userRequest?.length ?? 0) > 50 ? '…' : ''}`,
+        hint: r.runId.slice(0, 8),
+        run: () => navigate(target),
+      };
+    });
+    return [...filteredByRole, ...runActions];
+  }, [navigate, theme, toggleTheme, logout, user, recentRuns]);
 
   // R-153 — `?` mode renders glossary terms instead of actions.
   const isGlossaryMode = query.startsWith('?');

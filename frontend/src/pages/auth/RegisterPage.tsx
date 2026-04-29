@@ -14,8 +14,25 @@ const PWD_RULES: Array<{ label: string; test: (p: string) => boolean }> = [
   { label: 'no spaces', test: (p) => p.length > 0 && !/\s/.test(p) },
 ];
 
+/**
+ * R-343 (P0 from UX persona review) — persona-tagged signup.
+ *
+ * Different personas have different first-week needs:
+ *   - "personal"   : Marcus (solo dev) — go straight to the composer.
+ *   - "team"       : Erin (eng manager) — invite teammates, then compose.
+ *   - "enterprise" : Priya / Devon — show SOC 2 + DPA + book-a-call.
+ *
+ * Pre-this-fix every persona was routed through the same single-dev
+ * onboarding.  This adds a 3-radio-pill picker above the name fields;
+ * the chosen persona is stashed in sessionStorage so the post-signup
+ * dispatch (in V3HomeRedirect / V3Auth.claimAndForward) can fork on
+ * it without backend changes.
+ */
+type SignupPersona = 'personal' | 'team' | 'enterprise';
+
 export default function RegisterPage() {
   const [form, setForm] = useState({ email: '', firstName: '', lastName: '', password: '', confirm: '' });
+  const [persona, setPersona] = useState<SignupPersona>('personal');
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -57,6 +74,10 @@ export default function RegisterPage() {
       // so the backend persists attribution on app_user + forwards it to PostHog
       // on the SIGNUP funnel event. Safe when no query params present.
       const attribution = readSignupAttribution();
+      // R-343 — stash persona so the post-signup dispatch can fork by
+      // intent (Personal → composer; Team → invite-teammates step;
+      // Enterprise → trust + book-a-call).  V3HomeRedirect reads this.
+      try { sessionStorage.setItem('v3-signup-persona', persona); } catch (_) { /* private mode */ }
       await register(form.email, form.firstName, form.lastName, form.password, attribution);
       setSuccess(true);
     } catch (err: any) {
@@ -96,6 +117,40 @@ export default function RegisterPage() {
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-3.5">
+        {/* R-343 — persona picker.  Drives post-signup onboarding
+            without requiring a backend column today (sessionStorage
+            stash → V3HomeRedirect fork).  When this proves the
+            persona-onboarding hypothesis, plumb it through
+            `attribution.persona` so the backend records it on
+            app_user for activation-funnel segmentation. */}
+        <fieldset>
+          <legend className="block text-xs font-medium text-muted mb-1.5">I'm signing up as a…</legend>
+          <div className="grid grid-cols-3 gap-1.5">
+            {(['personal', 'team', 'enterprise'] as const).map((p) => (
+              <button
+                key={p}
+                type="button"
+                onClick={() => setPersona(p)}
+                aria-pressed={persona === p}
+                className={`rounded-md border px-2 py-1.5 text-xs font-medium transition-colors ${
+                  persona === p
+                    ? 'border-accent-blue bg-[color-mix(in_srgb,var(--accent-blue)_15%,transparent)] text-primary'
+                    : 'border-[var(--border-default)] bg-[var(--gray-200)] text-muted hover:text-primary hover:border-[var(--border-hover)]'
+                }`}
+              >
+                {p === 'personal' && 'Solo dev'}
+                {p === 'team' && 'Team (2+ devs)'}
+                {p === 'enterprise' && 'Enterprise'}
+              </button>
+            ))}
+          </div>
+          <p className="mt-1.5 text-[11px] text-muted">
+            {persona === 'personal' && "We'll send you straight to the composer."}
+            {persona === 'team' && "We'll show you how to invite teammates first."}
+            {persona === 'enterprise' && "We'll route you to the trust + procurement page."}
+          </p>
+        </fieldset>
+
         <div className="grid grid-cols-2 gap-3">
           <Field label="First name" id="firstName">
             <input id="firstName" type="text" value={form.firstName} onChange={set('firstName')} required autoComplete="given-name"

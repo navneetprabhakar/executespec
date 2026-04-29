@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Sparkles, FolderPlus, ArrowRight } from 'lucide-react';
+import { Sparkles, FolderPlus, ArrowRight, MessageSquareText } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { createProject } from '@/lib/api';
 
@@ -42,6 +42,28 @@ export default function V3EmptyProject() {
   const firstName = user?.firstName?.trim() || '';
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // R-343 (P0 fix from UX persona review) — surface the typed spec the
+  // user brought from the marketing site.  V3Auth.claimAndForward
+  // already routes the user here when they have no project yet, but
+  // it never *displayed* the stashed spec, so users typed "Add OAuth
+  // login" on executespec.ai, signed up, and landed on a generic
+  // "create your first project" screen — concluding their spec
+  // disappeared.  This effect reads the sessionStorage key written
+  // by the marketing-site hero composer + the V3Landing fallback,
+  // and renders a "Your spec is ready" card above the create-project
+  // CTA.  When the user clicks Create, the spec stays in
+  // sessionStorage so V3ProjectHome's composer hydrates with it on
+  // the project they just created.
+  const [stashedSpec, setStashedSpec] = useState<string>('');
+  useEffect(() => {
+    try {
+      const spec = sessionStorage.getItem('v3-anon-spec');
+      if (spec && spec.trim().length > 0) setStashedSpec(spec.trim());
+    } catch (_) {
+      /* private mode — silent fallback */
+    }
+  }, []);
 
   async function onCreate() {
     if (creating) return;
@@ -106,10 +128,85 @@ export default function V3EmptyProject() {
           color: 'var(--v3-text-muted)',
         }}
       >
-        You don't have any projects yet — let's create your first one.
-        Then describe what you want to build, and we'll ship a draft PR
-        you can actually merge.
+        {stashedSpec
+          ? "Your spec is ready — let's create a project to ship it into."
+          : "You don't have any projects yet — let's create your first one. Then describe what you want to build, and we'll ship a draft PR you can actually merge."}
       </p>
+
+      {/* R-343 — spec-ready card.  Rendered when V3Auth.claimAndForward
+          handed off a spec via sessionStorage.  Tells the user explicitly
+          that their typed spec is preserved + will hydrate the composer
+          on the project they're about to create.  Truncated to 280 chars
+          for the preview; the full spec rides through. */}
+      {stashedSpec && (
+        <div
+          style={{
+            marginTop: 16,
+            maxWidth: 560,
+            width: '100%',
+            padding: 14,
+            background: 'var(--v3-surface)',
+            border: '1px solid var(--v3-border-strong)',
+            borderRadius: 8,
+            textAlign: 'left',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'flex-start',
+          }}
+        >
+          <div
+            style={{
+              width: 28,
+              height: 28,
+              borderRadius: 6,
+              background: 'rgba(91,141,239,0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+            }}
+          >
+            <MessageSquareText className="h-4 w-4" style={{ color: 'var(--v3-brand)' }} aria-hidden="true" />
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--v3-text-subtle)',
+                letterSpacing: 0.4,
+                textTransform: 'uppercase',
+                marginBottom: 4,
+              }}
+            >
+              Your spec, ready to ship
+            </div>
+            <div
+              style={{
+                fontSize: 13,
+                color: 'var(--v3-text)',
+                lineHeight: 1.5,
+                whiteSpace: 'pre-wrap',
+                overflow: 'hidden',
+                display: '-webkit-box',
+                WebkitLineClamp: 4,
+                WebkitBoxOrient: 'vertical',
+              }}
+            >
+              {stashedSpec.length > 280 ? stashedSpec.slice(0, 280) + '…' : stashedSpec}
+            </div>
+            <div
+              style={{
+                marginTop: 6,
+                fontSize: 11,
+                color: 'var(--v3-text-subtle)',
+              }}
+            >
+              We'll pre-fill this in your composer the moment your project's ready.
+            </div>
+          </div>
+        </div>
+      )}
 
       <button
         type="button"

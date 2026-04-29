@@ -1148,7 +1148,26 @@
                         return false;
                     }
                     var capped = raw.length > 4000 ? raw.slice(0, 4000) : raw;
-                    var url = 'https://dev.executespec.ai/?spec=' + encodeURIComponent(capped);
+                    var qs = new URLSearchParams();
+                    qs.set('spec', capped);
+                    // R-343 (cross-cutting fix from UX persona review) —
+                    // forward the marketing-site URL's UTM + ref params
+                    // through to the app domain so the post-signup
+                    // attribution funnel (RegisterPage's readSignupAttribution)
+                    // can persist them on the app_user record.  Without
+                    // this, every click from a campaign-tagged link to
+                    // the website lost its attribution at the domain
+                    // hop.  Forwarding only the well-known fields keeps
+                    // the URL clean.
+                    try {
+                        var siteParams = new URLSearchParams(window.location.search);
+                        ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref']
+                            .forEach(function (k) {
+                                var v = siteParams.get(k);
+                                if (v) qs.set(k, v);
+                            });
+                    } catch (_) { /* URLSearchParams not available — skip */ }
+                    var url = 'https://dev.executespec.ai/?' + qs.toString();
                     if (window.gtag) {
                         try { window.gtag('event', 'hero_composer_submit', { length: capped.length }); }
                         catch (_) { /* analytics is non-critical */ }
