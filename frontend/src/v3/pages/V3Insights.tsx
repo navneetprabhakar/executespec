@@ -12,7 +12,7 @@ import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import Pill from '../components/Pill';
 
 /**
- * R-152 — /v3/insights.
+ * R-152 — /insights.
  *
  * Greenfield §4.11: collapses today's /dashboard + /exec +
  * /admin/analytics into one page. ORG_ADMIN+ gated; non-admins are
@@ -44,7 +44,7 @@ export default function V3Insights() {
     // because `loadMe` hasn't returned yet.
     if (user === null) return;
     if (!isOrgAdmin) {
-      navigate('/v3/home');
+      navigate('/home');
       return;
     }
     let cancelled = false;
@@ -284,7 +284,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function RunRow({ run, tone }: { run: RunSummary; tone: 'ok' | 'warn' }) {
   const navigate = useNavigate();
-  const target = run.projectId ? `/v3/p/${run.projectId}/r/${run.runId}` : '#';
+  const target = run.projectId ? `/projects/${run.projectId}/runs/${run.runId}` : '#';
   return (
     <div
       role="button"

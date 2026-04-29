@@ -3,7 +3,7 @@ import { trackV3, V3_EVENTS } from '../lib/events';
 import Pill from '../components/Pill';
 
 /**
- * R-151 — /v3/trust page (Amara unlock).
+ * R-151 — /trust page (Amara unlock).
  *
  * Greenfield §4.13: bullet-dense, scannable, attachable to a vendor
  * risk packet in two clicks. Wave 7 follow-up: SOC 2 status reads
@@ -208,7 +208,7 @@ export default function V3Trust() {
         </div>
         <p style={{ margin: '12px 0 0', fontSize: 11, color: 'var(--v3-text-subtle)' }}>
           Need an MSA, custom DPA, or sub-processor list addition?{' '}
-          <Link to="/v3/pricing" style={{ color: 'var(--v3-brand)' }}>
+          <Link to="/pricing" style={{ color: 'var(--v3-brand)' }}>
             See Enterprise →
           </Link>
         </p>

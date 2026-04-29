@@ -9,7 +9,7 @@
  * Currency: USD by default; INR surfaces when geo-detect matches
  * Asia/Kolkata or navigator.language starts with `en-in` / `hi`.
  *
- * Both /v3/billing and /v3/pricing read from this module so the
+ * Both /billing and /pricing read from this module so the
  * customer-facing prices and the in-app upsell stay in lockstep.
  */
 
@@ -98,7 +98,7 @@ export const PRICING_CARDS: PricingCard[] = [
 export const ENTERPRISE_FOOTER = {
   headline: 'Need more? Talk to sales for Enterprise (SSO + SOC 2 + DPA).',
   ctaLabel: 'Talk to sales →',
-  ctaHref: '/v3/trust',
+  ctaHref: '/trust',
 };
 
 /** Yearly pricing — straight 17% discount per greenfield §7. */

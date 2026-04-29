@@ -46,7 +46,7 @@ export default function V3Billing() {
 
   function onPickTier(tier: TierKey) {
     if (tier === 'ENTERPRISE') {
-      window.location.href = '/v3/trust';
+      window.location.href = '/trust';
       return;
     }
     trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: ent?.tierKey, toTier: tier });
@@ -79,7 +79,7 @@ export default function V3Billing() {
             fontSize: 12,
           }}
         >
-          {error} · <Link to="/v3/home" style={{ color: 'var(--v3-brand)' }}>Back home</Link>
+          {error} · <Link to="/home" style={{ color: 'var(--v3-brand)' }}>Back home</Link>
         </div>
       )}
 

@@ -17,7 +17,7 @@ import { useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin } from '@/stores/use
  *
  * Each menu item is a real Link or a function call. Destinations
  * that haven't shipped yet (R-141 billing, R-143 team, etc.) route
- * to /v3/home with a query hint so the user gets a "coming soon"
+ * to /home with a query hint so the user gets a "coming soon"
  * affordance rather than a 404.
  */
 export default function AvatarMenu() {
@@ -54,7 +54,7 @@ export default function AvatarMenu() {
   // Logged-out: show Sign in + Pricing
   if (!user) {
     // Selling-point fix #4: per-persona top-nav routing. Procurement (Devon)
-    // and eng-managers (Priya) need a self-route to /v3/team + /v3/trust
+    // and eng-managers (Priya) need a self-route to /team + /trust
     // before they're willing to sign up. Linear / Vercel / Stripe all do
     // this — separate "For teams" / "For enterprise" entry points.
     const navLinkStyle: React.CSSProperties = {
@@ -73,11 +73,11 @@ export default function AvatarMenu() {
             copy on the catalog rows do the upgrade selling.  Keeping
             these in the marketing rail closes the
             "I can't find the products" gap. */}
-        <Link to="/v3/library" style={navLinkStyle}>Library</Link>
-        <Link to="/v3/migrations" style={navLinkStyle}>Migrations</Link>
-        <Link to="/v3/team" style={navLinkStyle}>For teams</Link>
-        <Link to="/v3/trust" style={navLinkStyle}>For enterprise</Link>
-        <Link to="/v3/pricing" style={navLinkStyle}>Pricing</Link>
+        <Link to="/library" style={navLinkStyle}>Library</Link>
+        <Link to="/migrations" style={navLinkStyle}>Migrations</Link>
+        <Link to="/team" style={navLinkStyle}>For teams</Link>
+        <Link to="/trust" style={navLinkStyle}>For enterprise</Link>
+        <Link to="/pricing" style={navLinkStyle}>Pricing</Link>
         <Link
           to="/login"
           style={{
@@ -99,17 +99,17 @@ export default function AvatarMenu() {
 
   // Logged-in: avatar dropdown
   const items: { label: string; onClick: () => void; subtle?: boolean }[] = [
-    { label: 'Account', onClick: () => navigate('/v3/settings') },
-    { label: 'Billing & plan', onClick: () => navigate('/v3/billing') },
+    { label: 'Account', onClick: () => navigate('/settings') },
+    { label: 'Billing & plan', onClick: () => navigate('/billing') },
   ];
   if (user.tier && user.tier !== 'FREE') {
-    items.push({ label: 'Team', onClick: () => navigate('/v3/team') });
+    items.push({ label: 'Team', onClick: () => navigate('/team') });
   }
-  items.push({ label: 'Integrations', onClick: () => navigate('/v3/integrations') });
+  items.push({ label: 'Integrations', onClick: () => navigate('/integrations') });
   if (isOrgAdmin || isSuperAdmin) {
-    items.push({ label: 'Insights', onClick: () => navigate('/v3/insights') });
+    items.push({ label: 'Insights', onClick: () => navigate('/insights') });
   }
-  items.push({ label: 'Help', onClick: () => navigate('/v3/home?dest=help') });
+  items.push({ label: 'Help', onClick: () => navigate('/home?dest=help') });
   items.push({
     label: 'Sign out',
     subtle: true,
