@@ -2777,6 +2777,140 @@ export const migrationApply = (
     body: JSON.stringify(body),
   });
 
+// ── Readymade Solutions library (R-327..R-331) ────────────────────────────
+
+export interface ReadymadeSolutionSummary {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string | null;
+  description: string | null;
+  category: string;
+  macroGroup: string;
+  tags: string | null;
+  kind: 'PRIMITIVE' | 'STACK' | 'INTEGRATION';
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  source: 'FIRST_PARTY' | 'COMMUNITY';
+  status: 'LISTED' | 'HIDDEN' | 'ARCHIVED';
+  iconUrl: string | null;
+  thumbnailUrl: string | null;
+  samplePrUrl: string | null;
+  estFilesLow: number | null;
+  estFilesHigh: number | null;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+  authorUserId: string | null;
+  authorOrgId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReadymadeListItem {
+  solution: ReadymadeSolutionSummary;
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface ReadymadeVariant {
+  id: string;
+  solutionId: string;
+  language: string;
+  framework: string;
+  options: string | null;
+  specTemplate: string;
+  scaffoldKey: string | null;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+  createdAt: string;
+}
+
+export interface ReadymadeSlot {
+  id: string;
+  solutionId: string;
+  name: string;
+  displayName: string;
+  type: 'TEXT' | 'SELECT' | 'SECRET' | 'REPO_PICKER' | 'FILE_PATH' | 'NUMBER' | 'BOOLEAN';
+  required: boolean;
+  defaultValue: string | null;
+  options: string | null;
+  description: string | null;
+  displayOrder: number;
+}
+
+export interface ReadymadeDependency {
+  solutionId: string;
+  dependsOnId: string;
+  required: boolean;
+}
+
+export interface ReadymadeDetail {
+  solution: ReadymadeSolutionSummary;
+  variants: ReadymadeVariant[];
+  slots: ReadymadeSlot[];
+  dependencies: ReadymadeDependency[];
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface VariantResolutionResult {
+  bestMatch: ReadymadeVariant | null;
+  availableVariants: ReadymadeVariant[];
+  detectedLanguage: string | null;
+  detectedFramework: string | null;
+  reason: 'OK' | 'NO_VARIANT_FOR_STACK' | 'STACK_NOT_DETECTED' | 'REPO_NOT_LINKED';
+}
+
+export interface LibraryFacets {
+  categories: Record<string, number>;
+  macroGroups: Record<string, number>;
+}
+
+export const listLibrary = (
+  filters: { category?: string; macroGroup?: string; tier?: string; search?: string } = {},
+) => {
+  const qs = new URLSearchParams();
+  if (filters.category) qs.set('category', filters.category);
+  if (filters.macroGroup) qs.set('macro_group', filters.macroGroup);
+  if (filters.tier) qs.set('tier', filters.tier);
+  if (filters.search) qs.set('search', filters.search);
+  const q = qs.toString();
+  return req<ReadymadeListItem[]>(`/library${q ? `?${q}` : ''}`);
+};
+
+export const getLibraryDetail = (slug: string) =>
+  req<ReadymadeDetail>(`/library/${encodeURIComponent(slug)}`);
+
+export const getLibraryFacets = () =>
+  req<LibraryFacets>(`/library/categories`);
+
+export const resolveLibraryVariant = (slug: string, projectId: string, repoId: string) =>
+  req<VariantResolutionResult>(
+    `/library/${encodeURIComponent(slug)}/resolve?projectId=${encodeURIComponent(projectId)}&repoId=${encodeURIComponent(repoId)}`,
+    { method: 'POST' },
+  );
+
+/** R-331 — instantiate a solution into a V2 run (slot-substituted spec → ExecutionOrchestrator). */
+export const instantiateLibrarySolution = (
+  slug: string,
+  body: {
+    projectId: string;
+    repoIds: string[];
+    slotValues?: Record<string, string>;
+    variantId?: string;
+    branch?: string;
+  },
+) =>
+  req<{ executionRunId: string; status: string; message: string }>(
+    `/library/${encodeURIComponent(slug)}/instantiate`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+
+export const favouriteLibrarySolution = (slug: string) =>
+  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, { method: 'POST' });
+
+export const unfavouriteLibrarySolution = (slug: string) =>
+  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+
 /**
  * R-341 — tier-stratified cost-cap predicate.  Mirrors the backend's
  * {@code TierEnforcementService.requiresCostCap}.  Drives the
