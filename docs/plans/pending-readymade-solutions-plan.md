@@ -46,10 +46,43 @@ pick from to ship standard features fast. Each solution:
 | 1 | Catalog breadth for v1 | **Build all 15 categories**; user-friendly categorisation (see below). |
 | 2 | First-party vs community | **Both** — single catalog with `source: FIRST_PARTY \| COMMUNITY` flag; community submissions go through a moderation pipeline. |
 | 3 | Architecture-awareness depth | **L1 in v1** (stack-aware variant resolution: pick the right TS/Python/Go variant based on detected stack); **L2** (rewrite generated code to match the user's existing patterns) **deferred to v1.5+**. |
-| 4 | Migrations as a product | **Separate product** — migrations (Express→Fastify, JS→TS, Mongoose→Prisma, etc.) get their own plan doc + product surface. NOT included in this library. |
+| 4 | Migrations as a product | **Separate product** — migrations (Express→Fastify, JS→TS, Mongoose→Prisma, etc.) get their own plan doc + product surface. NOT included in this library. See [pending-migrations-plan.md](pending-migrations-plan.md). |
 | 5 | Stacks vs primitives | **Both in v1** — no end-user separation; the library treats single-solution primitives and multi-solution stacks the same way. Stacks declare their member primitives via the dependency graph. |
 | 6 | Tier gating | **Visible-but-locked.** FREE users see the entire library; lightweight starter solutions are unlocked, the rest render with a lock icon + upgrade CTA. PRO/TEAM/ENTERPRISE see the full catalog unlocked. |
 | 7 | **Language as a parameter** | First-class — every solution declares a list of supported languages; the variant resolution picks language × framework × provider per repo. |
+| 8 | **Tier-stratified cost model** *(added 2026-04-29 — applies to both Readymades AND Migrations)* | **FREE/PRO** = managed-key + credit-charged → cost caps mandatory + enforced. **TEAM/ENTERPRISE** = BYOK + fixed subscription → cost caps info-only (we surface estimated cost but don't enforce; LLM bill goes direct from provider to customer). See dedicated section below. |
+
+## Tier-stratified cost model (cross-product)
+
+Added 2026-04-29 — applies to **both** this product and Migrations:
+
+- **FREE / PRO tiers — managed-key, credit-charged:**
+  ExecuteSpec pays the LLM provider; user pays per-credit.
+  **Cost caps are mandatory.** Card chips show "X credits"; detail
+  page enforces a per-launch budget; runaway runs auto-abort on cap
+  hit.
+- **TEAM / ENTERPRISE tiers — BYOK, fixed-subscription:**
+  User brings their own LLM keys; pays a fixed monthly subscription
+  for ExecuteSpec the **service** (not per-credit). LLM cost is on
+  them, billed direct by Anthropic / OpenAI / Google.
+  **Cost caps are info-only** — we surface estimated cost so they
+  can budget against their LLM provider, but we don't enforce.
+
+Implementation:
+
+- `TierEnforcementService.requiresCostCap(tier)` predicate (true
+  for FREE/PRO, false for TEAM/ENTERPRISE).
+- `V2RunCostTracker` tracks cost regardless (for analytics +
+  recipe-cost calibration); the cap-enforcement gate fires only
+  when `requiresCostCap` is true.
+- UI: cost-cap input on detail page rendered conditionally. For
+  TEAM/ENTERPRISE: read-only "Est. $X on your keys" chip.
+- BYOK key usage: `ApiKeyResolver` already picks user-keys for
+  TEAM/ENTERPRISE — no new wiring there.
+
+This wires into the readymades flow at **Wave 4 (frontend gallery
++ detail page)** and **Wave 5 (slot-filling + spec composition)**;
+the Migrations plan does the equivalent at its W6.
 
 ## User-friendly categorisation (15 categories)
 
