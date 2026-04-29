@@ -1,0 +1,50 @@
+slug: mapbox-embed
+name: Mapbox embed
+tagline: Interactive map with markers + geocoding
+description: |
+  Adds a <Map/> component using Mapbox GL JS — pannable, markers
+  via a markers prop, optional geocoding (search-by-address) and
+  user-location button.  Theme-aware (auto switches map style on
+  dark mode).
+category: location-and-maps
+macro_group: smart-and-reach
+tags: [maps, mapbox, geocoding, location]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/map.svg
+est_files: [3, 6]
+est_credits: [1.0, 2.5]
+slots:
+  - name: access_token
+    display_name: Mapbox Access Token
+    type: SECRET
+    required: true
+    description: From account.mapbox.com → Tokens.
+    display_order: 0
+  - name: default_center
+    display_name: Default center (lng,lat)
+    type: TEXT
+    required: false
+    default_value: "-74.006,40.7128"
+    description: Map center on first load (e.g. "-74.006,40.7128" for NYC).
+    display_order: 1
+variants:
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add a <Map/> client component to this Next.js app using
+      mapbox-gl.  Token: {{access_token}}.  Default center:
+      {{default_center}}.  Props: markers, onClickMarker, theme
+      (auto-detected).  Include @mapbox/mapbox-gl-geocoder.
+    scaffold_key: node-frontend
+  - language: typescript
+    framework: vite-react
+    options: {}
+    spec_template: |
+      Add a <Map/> component using mapbox-gl with token
+      {{access_token}}, center {{default_center}}.  Theme-aware,
+      geocoder enabled.
+    scaffold_key: node-frontend

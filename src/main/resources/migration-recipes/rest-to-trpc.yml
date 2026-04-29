@@ -1,0 +1,49 @@
+slug: rest-to-trpc
+name: REST → tRPC
+tagline: Convert REST endpoints to tRPC with type-safe client
+description: |
+  Enumerates existing REST routes (Express / Fastify / Next.js API),
+  generates equivalent tRPC procedures + a typed client, and rewrites
+  call sites in the frontend to use the tRPC client.  Preserves every
+  endpoint's input/output contract.
+source_stack:
+  language: typescript
+target_stack:
+  language: typescript
+  api_style: trpc
+affected_files_glob: "src/**/*.{ts,tsx}"
+category: api-style-migration
+tags: [trpc, rest, typesafe-api]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/rest-to-trpc-fallback.md
+preservation_contract:
+  preserve_endpoint_contracts: true
+  preserve_request_shapes: true
+  preserve_response_shapes: true
+est_files: [10, 80]
+est_credits: [5.0, 35.0]
+slots:
+  - name: trpc_router_path
+    display_name: tRPC router path
+    type: TEXT
+    required: false
+    default_value: src/server/trpc/router.ts
+    description: Where the central tRPC router lives.
+    display_order: 0
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Convert this app's REST routes to tRPC procedures.
+      - Enumerate every Express/Fastify/Next route + its handler;
+        generate equivalent tRPC procedures (queries for GETs,
+        mutations for POST/PUT/PATCH/DELETE) at {{trpc_router_path}}.
+      - Use Zod schemas for input validation, mirroring whatever
+        validation libraries the existing handlers use.
+      - Rewrite every fetch / axios call in the frontend to use the
+        generated tRPC client.
+      - Set up the tRPC server adapter for the existing framework.
+      - Preserve every endpoint's input/output contract; the
+        reviewer will verify via the preservation contract.

@@ -1,0 +1,51 @@
+slug: rate-limiting
+name: API rate limiting
+tagline: Per-IP + per-user token-bucket limits with Redis backend
+description: |
+  Adds rate-limit middleware with two configurable buckets — per-IP
+  for unauthenticated routes, per-user for authenticated.  Redis-backed
+  so limits survive restarts and work across multiple instances.
+  Returns 429 with Retry-After.
+category: stay-compliant
+macro_group: data-and-infra
+tags: [security, rate-limit, abuse-protection]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/shield.svg
+est_files: [2, 5]
+est_credits: [1.0, 2.5]
+slots:
+  - name: redis_url
+    display_name: Redis URL
+    type: SECRET
+    required: true
+    default_value: redis://localhost:6379
+    description: Backing store for rate-limit counters.
+    display_order: 0
+  - name: requests_per_minute
+    display_name: Requests / minute (default)
+    type: NUMBER
+    required: false
+    default_value: "60"
+    description: Default per-IP cap; can be overridden per-route.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Add rate-limit middleware to this Express app using rate-limiter-flexible
+      with a Redis store at {{redis_url}}.  Per-IP cap
+      {{requests_per_minute}}/min globally; per-user cap (when
+      authenticated) of 5x that.  Return 429 + Retry-After on breach.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {}
+    spec_template: |
+      Add slowapi rate-limit middleware to this FastAPI app with a
+      Redis backend at {{redis_url}}.  Default {{requests_per_minute}}/min
+      per IP.  Return 429 + Retry-After.
+    scaffold_key: python

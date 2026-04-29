@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ExecuteSpec — AI that ships pull requests your team will actually merge</title>
+    <title>ExecuteSpec — AI that ships pull requests, plus a catalog of 28 readymade solutions + 11 modernization recipes</title>
     
     <!-- Google Analytics (GA4) -->
     <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
@@ -15,8 +15,8 @@
     </script>
 
     <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
-    <meta name="description" content="AI that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR — ~80% of real runs land Ready. From $20/mo Pro; $39/seat Team with BYOK; Enterprise SOC 2 + DPA + SSO.">
-    <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
+    <meta name="description" content="AI that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR — ~80% of real runs land Ready. Plus a catalog of 28 readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions, …) and 11 modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, Class components→hooks, …). From $20/mo Pro; $39/seat Team with BYOK; Enterprise SOC 2 + DPA + SSO.">
+    <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, AI code templates, AI starter solutions, AI scaffold library, Stripe checkout boilerplate, OAuth login boilerplate, Razorpay checkout, Resend transactional email, RAG pgvector, AI feature scaffolding, AI codegen catalog, ai modernization recipes, ai migration tool, JavaScript to TypeScript codemod, CommonJS to ESM, Express to Fastify migration, Mongoose to Prisma migration, REST to tRPC migration, React class components to hooks, Tailwind v3 to v4 migration, Vue 2 to Vue 3 migration, Webpack to Vite migration, Mocha to Vitest migration, Pages Router to App Router, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
     <meta name="author" content="ExecuteSpec">
     <meta name="publisher" content="ExecuteSpec">
     <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1">
@@ -521,26 +521,49 @@
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        html { scroll-behavior: smooth; }
+        html { scroll-behavior: smooth; max-width: 100vw; overflow-x: hidden; }
         body {
             font-family: var(--font-body);
             background-color: var(--bg);
             color: var(--text-main);
             line-height: 1.6;
             overflow-x: hidden;
+            max-width: 100vw;
+            width: 100%;
+        }
+        /* R-339 follow-up — make every block-level element respect the
+           viewport even if a child was authored with desktop-only widths.
+           The page-wide audit found that some long unbreakable words
+           ("AI-written", "<span> .text-gradient-orange") and inline-styled
+           grids were forcing horizontal overflow, which was being clipped
+           by `body { overflow-x: hidden; }` instead of wrapping properly.
+           These two rules force long words to break, hyphenate, or wrap
+           inside any text-bearing container without the author having to
+           remember every spot. */
+        :where(p, h1, h2, h3, h4, h5, h6, span, li, a, button, label) {
+            overflow-wrap: anywhere;
+            word-break: break-word;
         }
         a { color: inherit; text-decoration: none; }
-        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+        .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; width: 100%; }
 
-        /* Typography */
-        .h1 { font-size: clamp(3rem, 7vw, 5rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.04em; }
-        .h2 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; }
-        .subtitle { font-size: clamp(1.1rem, 2vw, 1.25rem); color: var(--text-muted); max-width: 750px; }
+        /* Typography — responsive font sizes use clamp() with a small
+           lower bound so they actually shrink on phones (was clamp(3rem,…)
+           which floored at 48px and wouldn't go any smaller no matter how
+           narrow the viewport got — the reason the H1 looked desktop-sized
+           on a 400px screen). */
+        .h1 { font-size: clamp(1.7rem, 7vw, 5rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.03em; max-width: 100%; }
+        .h2 { font-size: clamp(1.4rem, 5vw, 3rem); line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; max-width: 100%; }
+        .subtitle { font-size: clamp(0.95rem, 2vw, 1.25rem); color: var(--text-muted); max-width: 750px; }
         .mono { font-family: var(--font-mono); font-size: 0.9rem; }
-        
+
         /* Gradients */
         .text-gradient-blue { background: linear-gradient(to right, var(--blue), var(--purple)); -webkit-background-clip: text; color: transparent; }
-        .text-gradient-orange { background: linear-gradient(to right, var(--orange), var(--yellow)); -webkit-background-clip: text; color: transparent; }
+        /* `display: inline` is implicit but stating it defensively prevents
+           any future change to the parent from making the gradient span
+           inline-block (which can break line-wrap on long phrases like
+           "AI-written pull requests"). */
+        .text-gradient-orange { background: linear-gradient(to right, var(--orange), var(--yellow)); -webkit-background-clip: text; color: transparent; display: inline; }
         /* v2.5.14 — `bg-gradient-blue` kept as legacy alias; points to new brand gradient so existing CTA markup gets the updated look. */
         .bg-gradient-blue { background: var(--brand-grad); color: #ffffff; border: none; box-shadow: 0 4px 14px rgba(91,141,239,0.30); }
 
@@ -719,11 +742,29 @@
             .container { padding: 0 16px; }
             section { padding: 64px 0; }
             .section-header { margin-bottom: 40px; }
-            .h1 { font-size: 2.4rem; }
-            .mode-card { padding: 28px; }
-            .price-card { padding: 28px; }
+            .h1 { font-size: 2rem; line-height: 1.15; letter-spacing: -0.02em; }
+            .h2 { font-size: 1.55rem; line-height: 1.2; }
+            .subtitle { font-size: 0.95rem; line-height: 1.5; }
+            .mode-card { padding: 24px 20px; }
+            .mode-title { font-size: 1.2rem; }
+            .price-card { padding: 24px 20px; }
             .hero-buttons { flex-direction: column; }
             .hero-buttons .btn { width: 100%; }
+        }
+
+        /* Very narrow phones (iPhone SE 1st-gen 320, iPhone 12 mini 360,
+           Galaxy S5 360 etc.) — additional shrink so the long words
+           in the hero ("AI-written", "ExecuteSpec") fit cleanly. */
+        @media (max-width: 480px) {
+            .container { padding: 0 14px; }
+            .h1 { font-size: 1.7rem; }
+            .h2 { font-size: 1.35rem; }
+            .subtitle { font-size: 0.9rem; }
+        }
+
+        @media (max-width: 380px) {
+            .h1 { font-size: 1.5rem; }
+            .h2 { font-size: 1.2rem; }
         }
 
         /* Tablet + small laptop */
@@ -876,8 +917,8 @@
                 ExecuteSpec
             </a>
             <div class="nav-links">
+                <a href="#catalog">Catalog</a>
                 <a href="#project-workspace">Project Workspace</a>
-                <a href="#dual-mode">Dual-Mode</a>
                 <a href="#quality">Quality Gates</a>
                 <a href="#use-cases">Enterprise Chores</a>
                 <a href="#pricing">Pricing</a>
@@ -891,8 +932,8 @@
     <!-- v2.5.14 — mobile drawer. Replaces the vanished <900px nav. -->
     <div id="mobileDrawer" class="mobile-drawer" role="dialog" aria-label="Navigation">
         <button class="mobile-drawer-close" aria-label="Close menu" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Close</button>
+        <a href="#catalog" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Library + Migrations</a>
         <a href="#project-workspace" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Project Workspace</a>
-        <a href="#dual-mode" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Dual-Mode Execution</a>
         <a href="#quality" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Quality Gates</a>
         <a href="#use-cases" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Enterprise Chores</a>
         <a href="#pricing" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Pricing</a>
@@ -911,15 +952,263 @@
                 ExecuteSpec ships <span class="text-gradient-orange">AI-written pull requests</span> you can actually merge — for one repo or for twenty.
             </h1>
             <p class="subtitle" style="margin: 24px auto 0;">
-                Plan, build, test, review, open a PR. ~80% of real runs land Ready — and you see the verdict (Ready / Needs review / Failed) on every one of yours.
+                Type a spec, or pick from a catalog of <a href="#catalog" style="color: var(--blue-light); text-decoration: none;">28 readymade solutions and 11 modernization recipes</a>. Plan, build, test, review, open a PR. ~80% of real runs land Ready — with a verdict (Ready / Needs review / Failed) on every one of yours.
             </p>
-            <div class="hero-buttons">
-                <a href="https://dev.executespec.ai" class="btn btn-primary" target="_blank">Try Free — 5 Lifetime Runs</a>
+
+            <!-- Chat-first composer + sample prompts + live stats card.
+                 Migrated 2026-04-29 (R-338) from the in-app V3Landing page
+                 so the website is now the single canonical landing surface
+                 with the same direct-interaction shape:
+                  - <textarea> + sample-prompt chips (clickable, populate it)
+                  - live stats card ("3 specs shipped this week · 66%
+                    verified · 89 total runs all-time") fetched from
+                    /api/v3/landing/stats with graceful fallback
+                  - 30-day proof line ("89 PRs shipped in the last 30 days")
+                    fetched from /api/v3/public/exec-snapshot
+                 Submit stashes the spec on the app domain via a query param
+                 and redirects to /v3/landing?prefill=… ; V3Landing's mount
+                 hook reads the param + hydrates its composer for the auth
+                 handoff. -->
+            <form id="hero-composer" onsubmit="return heroComposerSubmit(event)" style="margin: 32px auto 0; max-width: 720px; text-align: left;">
+                <label for="hero-spec" class="mono" style="display: block; font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">What do you want shipped?</label>
+                <textarea
+                    id="hero-spec"
+                    name="hero-spec"
+                    rows="3"
+                    placeholder='e.g. "Add a forgot-password flow to my Spring Boot app"'
+                    style="width: 100%; padding: 14px 16px; font-family: var(--font-base); font-size: 0.95rem; line-height: 1.5; background: var(--surface); color: var(--text); border: 1px solid var(--surface-border); border-radius: 12px; resize: vertical; outline: none; transition: border-color 0.15s;"
+                    onfocus="this.style.borderColor='var(--blue)'"
+                    onblur="this.style.borderColor='var(--surface-border)'"
+                ></textarea>
+                <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px;">
+                    <button type="submit" class="btn btn-primary" style="padding: 10px 24px;">Ship this →</button>
+                    <span style="font-size: 0.78rem; color: var(--text-muted);">Free preview · no card · ~60s · sign up to ship the code</span>
+                </div>
+            </form>
+
+            <!-- Sample-prompt chip rail.  Six canned prompts you can click
+                 to seed the textarea (matches V3Landing's SAMPLE_PROMPTS).
+                 Same prompts ride the Catalog narrative — half are
+                 readymades, half are migrations / one-off specs.
+                 Grid template lives in CSS (.hero-prompt-grid) so the
+                 mobile media query can reflow the columns without
+                 fighting inline-style specificity. -->
+            <div id="hero-sample-prompts" class="hero-prompt-grid">
+                <button type="button" class="hero-prompt-chip" data-prompt="Add OAuth login to my Next.js app">Add OAuth login to my Next.js app</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Refactor a React component to TypeScript">Refactor a React component to TypeScript</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Build a Stripe checkout endpoint">Build a Stripe checkout endpoint</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Add unit-test coverage for src/auth/">Add unit-test coverage for src/auth/</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Migrate from Express to Fastify">Migrate from Express to Fastify</button>
+                <button type="button" class="hero-prompt-chip" data-prompt="Add a /healthz endpoint to my Spring Boot app">Add a /healthz endpoint to my Spring Boot app</button>
+            </div>
+
+            <!-- Live stats card — populated by /api/v3/landing/stats on
+                 page load.  Hidden by default; the JS below removes that
+                 style + writes the numbers when the fetch resolves.
+                 Grid + cell rules live in CSS (.hero-stats-card +
+                 .hero-stats-grid) so the mobile media query can reflow
+                 to a stack on narrow phones. -->
+            <div id="hero-stats" class="hero-stats-card" style="display: none;">
+                <div class="hero-stats-grid">
+                    <div class="hero-stats-cell">
+                        <div id="stat-specs-week" class="hero-stats-num">—</div>
+                        <div class="hero-stats-label mono">specs shipped this week</div>
+                    </div>
+                    <div class="hero-stats-cell">
+                        <div id="stat-verified" class="hero-stats-num" style="color: var(--blue-light);">—</div>
+                        <div class="hero-stats-label mono">verified score ≥ 80</div>
+                    </div>
+                    <div class="hero-stats-cell">
+                        <div id="stat-total-runs" class="hero-stats-num">—</div>
+                        <div class="hero-stats-label mono">total runs all-time</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 30-day proof line — assertive single number from
+                 /api/v3/public/exec-snapshot.  Hidden until fetch
+                 resolves; orange counter mimics the V3Landing R-313
+                 styling. -->
+            <p id="hero-snapshot-line" style="display:none; margin: 16px auto 0; font-size: 0.95rem; color: var(--text-muted); max-width: 560px;">
+                <strong id="hero-snapshot-runs" style="color: var(--orange); font-style: italic; font-weight: 600;">—</strong>
+                PRs shipped in the last 30 days
+            </p>
+
+            <div class="hero-buttons" style="margin-top: 28px;">
+                <a href="https://dev.executespec.ai/v3/library" class="btn btn-ghost" target="_blank">Browse the catalog →</a>
                 <a href="https://dev.executespec.ai/v3/exec-demo" class="btn btn-ghost" target="_blank">See a team's last 30 days →</a>
             </div>
-            <!-- Selling-point proof strip. Numbers backed by /api/v3/landing/stats
-                 (anonymized aggregate across the platform). -->
-            <p style="margin-top:28px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
+
+            <style>
+                /* Sample-prompt chip rail under the hero textarea.
+                   220px min-col on desktop tightens to 150px on mobile
+                   so two chips fit per row even on a 360-wide phone. */
+                .hero-prompt-grid {
+                    margin: 16px auto 0;
+                    max-width: 720px;
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                    gap: 8px;
+                    text-align: left;
+                }
+                .hero-prompt-chip {
+                    padding: 8px 12px;
+                    background: var(--surface);
+                    color: var(--text-muted);
+                    border: 1px solid var(--surface-border);
+                    border-radius: 8px;
+                    font-family: inherit;
+                    font-size: 0.82rem;
+                    line-height: 1.4;
+                    text-align: left;
+                    cursor: pointer;
+                    transition: background 0.15s, border-color 0.15s, color 0.15s;
+                }
+                .hero-prompt-chip:hover {
+                    background: var(--bg);
+                    border-color: var(--blue);
+                    color: var(--text);
+                }
+
+                /* Live stats card — 3-column on desktop, stacks at the
+                   ≤480px breakpoint below.  Cells are centered. */
+                .hero-stats-card {
+                    margin: 24px auto 0;
+                    max-width: 560px;
+                    padding: 14px 18px;
+                    background: var(--surface);
+                    border: 1px solid var(--surface-border);
+                    border-radius: 12px;
+                    text-align: left;
+                }
+                .hero-stats-grid {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 16px;
+                    align-items: center;
+                }
+                .hero-stats-cell { text-align: center; }
+                .hero-stats-num { font-size: 1.4rem; font-weight: 700; color: var(--text); }
+                .hero-stats-label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
+
+                /* Mobile pass — hero composer + stats card.  Targets
+                   the existing 640px breakpoint so it stays consistent
+                   with the rest of the marketing-site responsive system. */
+                @media (max-width: 640px) {
+                    .hero-prompt-grid {
+                        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    }
+                    /* Stats card: tighten the 3-column gap so 3 small
+                       numbers + labels still fit a 360-wide phone
+                       without overflowing or truncating mid-word. */
+                    .hero-stats-grid { gap: 8px; }
+                    .hero-stats-num { font-size: 1.15rem; }
+                    .hero-stats-label { font-size: 0.6rem; letter-spacing: 0.05em; }
+                    .hero-stats-card { padding: 12px; }
+                    /* Hero textarea — slightly smaller font on phones,
+                       and tame the rows so the keyboard doesn't push
+                       half the page off-screen. */
+                    #hero-spec { font-size: 0.9rem; padding: 12px 14px; }
+                }
+
+                /* Very narrow phones (iPhone SE 1st-gen, 320px wide) —
+                   stack the stats card vertically so labels don't get
+                   crushed. */
+                @media (max-width: 380px) {
+                    .hero-stats-grid {
+                        grid-template-columns: 1fr;
+                        gap: 12px;
+                    }
+                }
+            </style>
+
+            <script>
+                // ── Hero composer submit ────────────────────────────────
+                // R-341 (2026-04-29): redirects to the bare app root with
+                // the spec in a `?spec=` query param.  The SPA's
+                // ProtectedRoute / LoginPage chain now reads the param,
+                // stashes it to sessionStorage as `v3-anon-spec`, and the
+                // existing post-auth claim flow (V3Auth.claimAndForward)
+                // picks it up to dispatch the run.
+                //
+                // Previously this routed to /v3/landing?prefill=… which
+                // re-rendered the same composer screen on the app domain
+                // (a duplicate landing-on-landing UX).  V3Landing inside
+                // the SPA is now a Navigate redirect to root — the
+                // marketing site at executespec.ai is the single canonical
+                // landing surface.
+                //
+                // Length-capped at 4 KB to stay under URL-length limits.
+                function heroComposerSubmit(e) {
+                    e.preventDefault();
+                    var ta = document.getElementById('hero-spec');
+                    var raw = (ta.value || '').trim();
+                    if (raw.length === 0) {
+                        ta.focus();
+                        return false;
+                    }
+                    var capped = raw.length > 4000 ? raw.slice(0, 4000) : raw;
+                    var url = 'https://dev.executespec.ai/?spec=' + encodeURIComponent(capped);
+                    if (window.gtag) {
+                        try { window.gtag('event', 'hero_composer_submit', { length: capped.length }); }
+                        catch (_) { /* analytics is non-critical */ }
+                    }
+                    window.location.href = url;
+                    return false;
+                }
+
+                // ── Sample-prompt chip handlers ─────────────────────────
+                document.querySelectorAll('.hero-prompt-chip').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var p = btn.getAttribute('data-prompt') || '';
+                        var ta = document.getElementById('hero-spec');
+                        ta.value = p;
+                        ta.focus();
+                        // Scroll into view in case the user is on a
+                        // small viewport and the chip pushed it off.
+                        ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    });
+                });
+
+                // ── Live aggregates fetch (CORS-safe; silent on failure) ─
+                // Wave 7 selling-point: counters land on the static site
+                // exactly the way the in-app V3Landing renders them.
+                // Both endpoints are public + permitAll on the backend;
+                // dev CORS allows executespec.ai per application-dev.yml.
+                var API_BASE = 'https://dev.executespec.ai';
+                function fetchStats() {
+                    fetch(API_BASE + '/api/v3/landing/stats', { mode: 'cors' })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (s) {
+                            if (!s) return;
+                            // Honest gate (matches V3Landing): only show
+                            // the card when there's actually data.
+                            if ((s.specsThisWeek || 0) === 0 && (s.totalRunsAllTime || 0) === 0) return;
+                            document.getElementById('stat-specs-week').textContent = String(s.specsThisWeek || 0);
+                            document.getElementById('stat-verified').textContent =
+                                (s.verifiedScorePercent != null ? s.verifiedScorePercent + '%' : '—');
+                            document.getElementById('stat-total-runs').textContent = String(s.totalRunsAllTime || 0);
+                            document.getElementById('hero-stats').style.display = 'block';
+                        })
+                        .catch(function () { /* hide block on failure */ });
+                }
+                function fetchSnapshot() {
+                    fetch(API_BASE + '/api/v3/public/exec-snapshot', { mode: 'cors' })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (snap) {
+                            if (!snap || (snap.totalRuns || 0) === 0) return;
+                            document.getElementById('hero-snapshot-runs').textContent = String(snap.totalRuns);
+                            document.getElementById('hero-snapshot-line').style.display = 'block';
+                        })
+                        .catch(function () { /* silent */ });
+                }
+                fetchStats();
+                fetchSnapshot();
+            </script>
+
+            <!-- Selling-point proof strip.  Numbers above are LIVE; this
+                 line stays as the static fallback that always renders. -->
+            <p style="margin-top:24px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
                 ~80% verified ≥ 80 · plan-approval gate · BYOK on Team + Enterprise · no credit card
             </p>
             <!-- Per-persona conversion routing. Each link goes to the surface
@@ -1024,15 +1313,109 @@
                 </div>
             </div>
 
-            <div style="text-align: center; margin-top: 48px; padding: 24px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 16px; max-width: 900px; margin-left: auto; margin-right: auto;">
+            <div class="catalog-tier-band" style="background: var(--surface);">
                 <div class="mono" style="color: var(--text-muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">Project limits by tier</div>
-                <div style="display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; font-size: 0.9rem;">
+                <div class="catalog-tier-row">
                     <div><strong style="color: var(--text-muted);">Free</strong> &middot; 1 project &middot; 1 repo</div>
                     <div><strong style="color: var(--blue-light);">Pro</strong> &middot; Unlimited projects + repos &middot; solo</div>
                     <div><strong style="color: var(--orange);">Team</strong> &middot; Unlimited &middot; per-seat (min 2)</div>
                     <div><strong style="color: var(--purple);">Enterprise</strong> &middot; Unlimited + Execution View</div>
                 </div>
             </div>
+        </div>
+    </section>
+
+    <!-- Catalog — Library + Migrations as first-class products. Added 2026-04-29
+         alongside the W1–W5 Readymades + W1–W7 Migrations ship: 28 readymade
+         solutions across 15 categories, 11 v1 migration recipes.  Surfaces the
+         "browse, click, ship" path that complements the chat-first composer. -->
+    <section id="catalog" style="background: var(--surface); border-top: 1px solid var(--surface-border);">
+        <div class="container">
+            <div class="section-header text-center" style="text-align: center;">
+                <span class="section-label mono" style="color: var(--green);">Library + Migrations</span>
+                <h2 class="h2" style="margin-top: 16px;">Skip the boilerplate. Ship the readymade.</h2>
+                <p class="subtitle" style="margin: 0 auto;">A catalog of vetted solutions you can drop into any project — auth, payments, AI, infra, whole modernization recipes. Pick one, fill three slots, get a PR. Same plan-then-approve pipeline as a chat-driven run, just less typing.</p>
+            </div>
+
+            <!-- Two-product split — the catalog has two surfaces today. -->
+            <div class="dual-mode-grid" style="margin-top: 40px;">
+                <!-- Library card -->
+                <div class="mode-card" style="border-top: 4px solid var(--green);">
+                    <div class="mode-icon">📚</div>
+                    <h3 class="mode-title">Library — 28 readymade solutions</h3>
+                    <p class="mode-desc">Pre-built, parameterized solutions across 15 categories. Each one ships with multiple variants (TypeScript / Python · Express / Next.js / FastAPI) and auto-resolves to your repo's detected stack.</p>
+                    <ul class="feature-list">
+                        <li><span class="check-icon">✓</span> <div><strong>Sign-in &amp; users</strong> — login-with-google, github-login, email + password, magic link</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Take payments</strong> — Stripe checkout, Razorpay (India)</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Add AI</strong> — OpenAI chat, Claude chat, RAG with pgvector</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Send messages</strong> — Resend transactional email, Twilio SMS</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Store data</strong> — Postgres + Prisma, Redis cache</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Ship &amp; monitor</strong> — Dockerize, GitHub Actions CI, Sentry</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Build the UI</strong> — shadcn/ui, dark-mode toggle</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>+ 7 more categories</strong> — track usage, grow the user base, talk to users, location &amp; maps, booking, mobile (Expo), APIs (OpenAPI), security (rate-limiting)</div></li>
+                    </ul>
+                    <a href="https://dev.executespec.ai/v3/library" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse the library →</a>
+                </div>
+
+                <!-- Migrations card -->
+                <div class="mode-card" style="border-top: 4px solid var(--purple);">
+                    <div class="mode-icon">🔀</div>
+                    <h3 class="mode-title">Migrations — 11 modernization recipes</h3>
+                    <p class="mode-desc">Cross-repo modernization runs with halt-and-inspect dry-runs. Estimate the file count + cost before you spend a credit; review the sample diff; then apply across one repo or twenty.</p>
+                    <ul class="feature-list">
+                        <li><span class="check-icon">✓</span> <div><strong>Language &amp; module</strong> — JS → TypeScript · CommonJS → ESM</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Framework jumps</strong> — Express → Fastify · Pages Router → App Router · REST → tRPC · Vue 2 → Vue 3</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Library swaps</strong> — Mongoose → Prisma · Mocha → Vitest · Webpack → Vite · Tailwind v3 → v4</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>API modernization</strong> — Class components → hooks (React)</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Halt-and-inspect dry-run</strong> — preview cost &amp; file count before applying</div></li>
+                        <li><span class="check-icon">✓</span> <div><strong>Multi-repo fan-out</strong> — apply the same recipe to every repo in a project in one launch</div></li>
+                    </ul>
+                    <a href="https://dev.executespec.ai/v3/migrations" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse migrations →</a>
+                </div>
+            </div>
+
+            <!-- Tier visibility band — sets honest expectations on which
+                 entries are unlocked at each tier.  flex-wrap + 12px
+                 row-gap reflows to 4 stacked rows on a phone without
+                 horizontal overflow. -->
+            <div class="catalog-tier-band">
+                <div class="mono" style="color: var(--text-muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">What's unlocked per tier</div>
+                <div class="catalog-tier-row">
+                    <div><strong style="color: var(--text-muted);">Free</strong> &middot; 13 readymades unlocked</div>
+                    <div><strong style="color: var(--blue-light);">Pro</strong> &middot; All 28 + 10 migrations</div>
+                    <div><strong style="color: var(--orange);">Team</strong> &middot; All 28 + all 11</div>
+                    <div><strong style="color: var(--purple);">Enterprise</strong> &middot; All + private contributions</div>
+                </div>
+                <p style="margin-top: 16px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6;">Locked entries still show on every catalog — you can read what they do, see the variants, and click "Upgrade to unlock". No hiding the surface area.</p>
+            </div>
+            <style>
+                .catalog-tier-band {
+                    text-align: center;
+                    margin: 48px auto 0;
+                    padding: 24px;
+                    background: var(--bg);
+                    border: 1px solid var(--surface-border);
+                    border-radius: 16px;
+                    max-width: 920px;
+                }
+                .catalog-tier-row {
+                    display: flex;
+                    gap: 24px;
+                    row-gap: 12px;
+                    justify-content: center;
+                    flex-wrap: wrap;
+                    font-size: 0.9rem;
+                }
+                @media (max-width: 640px) {
+                    .catalog-tier-band { padding: 18px 16px; margin-top: 32px; }
+                    .catalog-tier-row {
+                        flex-direction: column;
+                        gap: 8px;
+                        font-size: 0.85rem;
+                        text-align: center;
+                    }
+                }
+            </style>
         </div>
     </section>
 
@@ -2051,8 +2434,8 @@
         <div class="container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 24px;">
             <div>© 2026 ExecuteSpec. Built for Engineering Leaders.</div>
             <div class="nav-links" style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px;">
+                <a href="#catalog">Catalog</a>
                 <a href="#project-workspace">Project Workspace</a>
-                <a href="#dual-mode">Features</a>
                 <a href="#quality">Testing</a>
                 <a href="#pricing">Pricing</a>
                 <a href="#faq">FAQ</a>

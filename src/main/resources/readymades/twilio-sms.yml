@@ -1,0 +1,52 @@
+slug: twilio-sms
+name: SMS notifications via Twilio
+tagline: Send transactional SMS with delivery status tracking
+description: |
+  Adds Twilio SMS sending — a sendSms() helper, opt-in/opt-out
+  tracking, and a webhook handler for delivery status callbacks.
+category: send-messages
+macro_group: people-and-money
+tags: [sms, twilio, notifications]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/twilio.svg
+est_files: [3, 6]
+est_credits: [1.5, 3.0]
+slots:
+  - name: account_sid
+    display_name: Twilio Account SID
+    type: SECRET
+    required: true
+    description: From console.twilio.com → Account Info.
+    display_order: 0
+  - name: auth_token
+    display_name: Twilio Auth Token
+    type: SECRET
+    required: true
+    description: From the same Account Info page.
+    display_order: 1
+  - name: from_number
+    display_name: Twilio sender number
+    type: TEXT
+    required: true
+    description: A number you've purchased/verified in Twilio (E.164 format).
+    display_order: 2
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add Twilio SMS to this Express app.  lib/sms.ts exports
+      sendSms({ to, body }) using {{account_sid}} + {{auth_token}}
+      from {{from_number}}.  Track opt-out keywords; persist
+      delivery-status webhook updates.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {db: postgres}
+    spec_template: |
+      Add Twilio SMS to this FastAPI app via the twilio Python SDK
+      using {{account_sid}} + {{auth_token}}.  Sender: {{from_number}}.
+    scaffold_key: python

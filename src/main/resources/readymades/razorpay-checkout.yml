@@ -1,0 +1,54 @@
+slug: razorpay-checkout
+name: Razorpay one-time checkout
+tagline: Indian-market checkout flow with UPI / cards / netbanking
+description: |
+  Adds a Razorpay-hosted checkout page + webhook handler for the
+  payment-completion event.  Suitable for one-time purchases.
+  Stores the payment record in your existing data layer.
+category: take-payments
+macro_group: people-and-money
+tags: [payments, razorpay, checkout, india]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/razorpay.svg
+est_files: [4, 9]
+est_credits: [1.5, 3.5]
+slots:
+  - name: key_id
+    display_name: Razorpay Key ID
+    type: SECRET
+    required: true
+    description: From dashboard.razorpay.com → API Keys.
+    display_order: 0
+  - name: key_secret
+    display_name: Razorpay Key Secret
+    type: SECRET
+    required: true
+    description: From dashboard.razorpay.com → API Keys (Test or Live).
+    display_order: 1
+  - name: webhook_secret
+    display_name: Webhook signing secret
+    type: SECRET
+    required: true
+    description: From dashboard.razorpay.com → Webhooks → Generate.
+    display_order: 2
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add Razorpay checkout to this Express app.  POST /payments/order
+      creates an order via the Razorpay SDK using {{key_id}} +
+      {{key_secret}}.  POST /webhooks/razorpay verifies the signature
+      with {{webhook_secret}} (HMAC-SHA256) and persists the payment.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {db: postgres}
+    spec_template: |
+      Add Razorpay checkout to this FastAPI app.  Use the razorpay
+      Python SDK with {{key_id}} + {{key_secret}}.  Webhook handler
+      verifies with {{webhook_secret}}.
+    scaffold_key: python

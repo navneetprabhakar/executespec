@@ -1,0 +1,44 @@
+slug: expo-app-shell
+name: Expo app shell
+tagline: React Native app scaffold with auth + nav + dark mode
+description: |
+  Scaffolds a React Native + Expo app with the four primitives a
+  consumer mobile app always needs — splash + onboarding stack,
+  auth (email + Google), bottom-tab navigation, and dark-mode
+  support.  Hits Hermes; ships an EAS build profile.
+category: go-mobile
+macro_group: smart-and-reach
+tags: [mobile, expo, react-native, ios, android]
+kind: STACK
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/expo.svg
+est_files: [12, 25]
+est_credits: [4.0, 10.0]
+slots:
+  - name: app_name
+    display_name: App display name
+    type: TEXT
+    required: true
+    default_value: My App
+    description: Shows on the home screen + app stores.
+    display_order: 0
+  - name: bundle_id
+    display_name: Bundle / package ID
+    type: TEXT
+    required: true
+    default_value: com.example.myapp
+    description: Reverse-DNS app identifier (must be unique on the stores).
+    display_order: 1
+variants:
+  - language: typescript
+    framework: react-native-expo
+    options: {router: expo-router}
+    spec_template: |
+      Scaffold an Expo app called "{{app_name}}" with bundle id
+      {{bundle_id}}.  Use expo-router (file-based) with auth +
+      tabs stacks.  Email + Google sign-in.  Dark-mode aware via
+      useColorScheme.  Add an EAS build profile (preview +
+      production).  Configure Hermes.
+    scaffold_key: react-native-expo

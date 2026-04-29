@@ -1,0 +1,50 @@
+slug: feature-flags-growthbook
+name: Feature flags via GrowthBook
+tagline: A/B-test-ready feature gating with self-hosted option
+description: |
+  Wires GrowthBook for feature flagging + A/B tests.  Includes a
+  React hook (useFeature("flag-key")), a server-side helper for
+  conditionally gating routes, and identify() integration so
+  experiments target the same userId your analytics tracks.
+category: track-usage
+macro_group: ui-and-growth
+tags: [feature-flags, growthbook, ab-testing, experimentation]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/growthbook.svg
+est_files: [3, 6]
+est_credits: [1.0, 2.5]
+slots:
+  - name: client_key
+    display_name: GrowthBook Client Key
+    type: SECRET
+    required: true
+    description: From growthbook.io → SDK Connections → Client Key.
+    display_order: 0
+  - name: api_host
+    display_name: API host
+    type: TEXT
+    required: false
+    default_value: https://cdn.growthbook.io
+    description: SaaS default; swap for self-hosted GrowthBook URL.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add @growthbook/growthbook-react to this Next.js app.  Init
+      with {{client_key}} from {{api_host}}.  GrowthBookProvider
+      at the root.  Add a useFeature() example.  Server-side
+      helper in lib/feature-flags.ts.
+    scaffold_key: node-frontend
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Add the @growthbook/growthbook server SDK to this Express
+      app.  Initialize with {{client_key}} from {{api_host}}.
+      Provide getFeatureFlag(key, userId) helper for route guards.
+    scaffold_key: node-backend

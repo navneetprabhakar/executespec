@@ -1,0 +1,46 @@
+slug: dockerize-app
+name: Dockerize the app
+tagline: Multi-stage Dockerfile + docker-compose for local dev
+description: |
+  Adds a production-grade multi-stage Dockerfile (slim runtime
+  image), a .dockerignore, and a docker-compose.yml for local dev
+  with Postgres + Redis sidecars.  Hardened defaults — non-root
+  user, healthchecks, signal-trapping init.
+category: ship-and-monitor
+macro_group: data-and-infra
+tags: [docker, container, devops, ship]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/docker.svg
+est_files: [3, 5]
+est_credits: [1.0, 2.0]
+slots:
+  - name: app_port
+    display_name: App listen port
+    type: NUMBER
+    required: false
+    default_value: "3000"
+    description: Port the container exposes.
+    display_order: 0
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Add a multi-stage Dockerfile (build + runtime) for this Express
+      app.  Final image based on node:20-alpine, runs as a non-root
+      user, exposes {{app_port}}, has a HEALTHCHECK on /healthz.
+      Add a docker-compose.yml with Postgres + Redis sidecars for
+      local dev.  Add .dockerignore.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {}
+    spec_template: |
+      Multi-stage Dockerfile for this FastAPI app, runtime on
+      python:3.12-slim, runs as non-root, exposes {{app_port}},
+      uses uvicorn with --proxy-headers.  docker-compose.yml with
+      Postgres for local dev.
+    scaffold_key: python

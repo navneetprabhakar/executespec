@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import {
   LayoutDashboard, BarChart3, DollarSign, Plug, Settings, FolderKanban, ClipboardList,
   Receipt, Calculator, Rocket, ArrowUpCircle, X, ChevronLeft, Plus, TrendingUp,
+  Library, GitBranch,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NAV_ITEMS } from '@/lib/constants';
@@ -19,7 +20,7 @@ import { fetchBillingStatus } from '@/lib/billing-api';
 
 const ICON_MAP: Record<string, React.ElementType> = {
   LayoutDashboard, BarChart3, DollarSign, Plug, ClipboardList, Settings,
-  Receipt, Calculator, Rocket, TrendingUp,
+  Receipt, Calculator, Rocket, TrendingUp, Library, GitBranch,
 };
 
 export default function Sidebar() {
