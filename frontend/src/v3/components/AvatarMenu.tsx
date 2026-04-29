@@ -67,6 +67,14 @@ export default function AvatarMenu() {
     };
     return (
       <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+        {/* R-330 / R-340 — public catalog surfaces.  Casey (FREE
+            tier explorer) is the persona that converts on browsing
+            the catalog *before* signing up; the lock icons + tier
+            copy on the catalog rows do the upgrade selling.  Keeping
+            these in the marketing rail closes the
+            "I can't find the products" gap. */}
+        <Link to="/v3/library" style={navLinkStyle}>Library</Link>
+        <Link to="/v3/migrations" style={navLinkStyle}>Migrations</Link>
         <Link to="/v3/team" style={navLinkStyle}>For teams</Link>
         <Link to="/v3/trust" style={navLinkStyle}>For enterprise</Link>
         <Link to="/v3/pricing" style={navLinkStyle}>Pricing</Link>
