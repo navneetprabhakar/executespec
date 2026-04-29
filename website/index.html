@@ -948,8 +948,11 @@
             <!-- Sample-prompt chip rail.  Six canned prompts you can click
                  to seed the textarea (matches V3Landing's SAMPLE_PROMPTS).
                  Same prompts ride the Catalog narrative — half are
-                 readymades, half are migrations / one-off specs. -->
-            <div id="hero-sample-prompts" style="margin: 16px auto 0; max-width: 720px; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 8px; text-align: left;">
+                 readymades, half are migrations / one-off specs.
+                 Grid template lives in CSS (.hero-prompt-grid) so the
+                 mobile media query can reflow the columns without
+                 fighting inline-style specificity. -->
+            <div id="hero-sample-prompts" class="hero-prompt-grid">
                 <button type="button" class="hero-prompt-chip" data-prompt="Add OAuth login to my Next.js app">Add OAuth login to my Next.js app</button>
                 <button type="button" class="hero-prompt-chip" data-prompt="Refactor a React component to TypeScript">Refactor a React component to TypeScript</button>
                 <button type="button" class="hero-prompt-chip" data-prompt="Build a Stripe checkout endpoint">Build a Stripe checkout endpoint</button>
@@ -959,22 +962,24 @@
             </div>
 
             <!-- Live stats card — populated by /api/v3/landing/stats on
-                 page load.  Hidden by default (display:none); the JS
-                 below removes that style + writes the numbers when the
-                 fetch resolves.  Numbers update weekly. -->
-            <div id="hero-stats" style="display:none; margin: 24px auto 0; max-width: 560px; padding: 14px 18px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; text-align: left;">
-                <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; align-items: center;">
-                    <div style="text-align: center;">
-                        <div id="stat-specs-week" style="font-size: 1.4rem; font-weight: 700; color: var(--text);">—</div>
-                        <div class="mono" style="font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px;">specs shipped this week</div>
+                 page load.  Hidden by default; the JS below removes that
+                 style + writes the numbers when the fetch resolves.
+                 Grid + cell rules live in CSS (.hero-stats-card +
+                 .hero-stats-grid) so the mobile media query can reflow
+                 to a stack on narrow phones. -->
+            <div id="hero-stats" class="hero-stats-card" style="display: none;">
+                <div class="hero-stats-grid">
+                    <div class="hero-stats-cell">
+                        <div id="stat-specs-week" class="hero-stats-num">—</div>
+                        <div class="hero-stats-label mono">specs shipped this week</div>
                     </div>
-                    <div style="text-align: center;">
-                        <div id="stat-verified" style="font-size: 1.4rem; font-weight: 700; color: var(--blue-light);">—</div>
-                        <div class="mono" style="font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px;">verified score ≥ 80</div>
+                    <div class="hero-stats-cell">
+                        <div id="stat-verified" class="hero-stats-num" style="color: var(--blue-light);">—</div>
+                        <div class="hero-stats-label mono">verified score ≥ 80</div>
                     </div>
-                    <div style="text-align: center;">
-                        <div id="stat-total-runs" style="font-size: 1.4rem; font-weight: 700; color: var(--text);">—</div>
-                        <div class="mono" style="font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px;">total runs all-time</div>
+                    <div class="hero-stats-cell">
+                        <div id="stat-total-runs" class="hero-stats-num">—</div>
+                        <div class="hero-stats-label mono">total runs all-time</div>
                     </div>
                 </div>
             </div>
@@ -994,6 +999,17 @@
             </div>
 
             <style>
+                /* Sample-prompt chip rail under the hero textarea.
+                   220px min-col on desktop tightens to 150px on mobile
+                   so two chips fit per row even on a 360-wide phone. */
+                .hero-prompt-grid {
+                    margin: 16px auto 0;
+                    max-width: 720px;
+                    display: grid;
+                    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+                    gap: 8px;
+                    text-align: left;
+                }
                 .hero-prompt-chip {
                     padding: 8px 12px;
                     background: var(--surface);
@@ -1011,6 +1027,57 @@
                     background: var(--bg);
                     border-color: var(--blue);
                     color: var(--text);
+                }
+
+                /* Live stats card — 3-column on desktop, stacks at the
+                   ≤480px breakpoint below.  Cells are centered. */
+                .hero-stats-card {
+                    margin: 24px auto 0;
+                    max-width: 560px;
+                    padding: 14px 18px;
+                    background: var(--surface);
+                    border: 1px solid var(--surface-border);
+                    border-radius: 12px;
+                    text-align: left;
+                }
+                .hero-stats-grid {
+                    display: grid;
+                    grid-template-columns: repeat(3, 1fr);
+                    gap: 16px;
+                    align-items: center;
+                }
+                .hero-stats-cell { text-align: center; }
+                .hero-stats-num { font-size: 1.4rem; font-weight: 700; color: var(--text); }
+                .hero-stats-label { font-size: 0.65rem; color: var(--text-muted); letter-spacing: 0.08em; text-transform: uppercase; margin-top: 2px; }
+
+                /* Mobile pass — hero composer + stats card.  Targets
+                   the existing 640px breakpoint so it stays consistent
+                   with the rest of the marketing-site responsive system. */
+                @media (max-width: 640px) {
+                    .hero-prompt-grid {
+                        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+                    }
+                    /* Stats card: tighten the 3-column gap so 3 small
+                       numbers + labels still fit a 360-wide phone
+                       without overflowing or truncating mid-word. */
+                    .hero-stats-grid { gap: 8px; }
+                    .hero-stats-num { font-size: 1.15rem; }
+                    .hero-stats-label { font-size: 0.6rem; letter-spacing: 0.05em; }
+                    .hero-stats-card { padding: 12px; }
+                    /* Hero textarea — slightly smaller font on phones,
+                       and tame the rows so the keyboard doesn't push
+                       half the page off-screen. */
+                    #hero-spec { font-size: 0.9rem; padding: 12px 14px; }
+                }
+
+                /* Very narrow phones (iPhone SE 1st-gen, 320px wide) —
+                   stack the stats card vertically so labels don't get
+                   crushed. */
+                @media (max-width: 380px) {
+                    .hero-stats-grid {
+                        grid-template-columns: 1fr;
+                        gap: 12px;
+                    }
                 }
             </style>
 
@@ -1195,9 +1262,9 @@
                 </div>
             </div>
 
-            <div style="text-align: center; margin-top: 48px; padding: 24px; background: var(--surface); border: 1px solid var(--surface-border); border-radius: 16px; max-width: 900px; margin-left: auto; margin-right: auto;">
+            <div class="catalog-tier-band" style="background: var(--surface);">
                 <div class="mono" style="color: var(--text-muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">Project limits by tier</div>
-                <div style="display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; font-size: 0.9rem;">
+                <div class="catalog-tier-row">
                     <div><strong style="color: var(--text-muted);">Free</strong> &middot; 1 project &middot; 1 repo</div>
                     <div><strong style="color: var(--blue-light);">Pro</strong> &middot; Unlimited projects + repos &middot; solo</div>
                     <div><strong style="color: var(--orange);">Team</strong> &middot; Unlimited &middot; per-seat (min 2)</div>
@@ -1256,10 +1323,13 @@
                 </div>
             </div>
 
-            <!-- Tier visibility band — sets honest expectations on which entries are unlocked at each tier. -->
-            <div style="text-align: center; margin-top: 48px; padding: 24px; background: var(--bg); border: 1px solid var(--surface-border); border-radius: 16px; max-width: 920px; margin-left: auto; margin-right: auto;">
+            <!-- Tier visibility band — sets honest expectations on which
+                 entries are unlocked at each tier.  flex-wrap + 12px
+                 row-gap reflows to 4 stacked rows on a phone without
+                 horizontal overflow. -->
+            <div class="catalog-tier-band">
                 <div class="mono" style="color: var(--text-muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">What's unlocked per tier</div>
-                <div style="display: flex; gap: 24px; justify-content: center; flex-wrap: wrap; font-size: 0.9rem;">
+                <div class="catalog-tier-row">
                     <div><strong style="color: var(--text-muted);">Free</strong> &middot; 13 readymades unlocked</div>
                     <div><strong style="color: var(--blue-light);">Pro</strong> &middot; All 28 + 10 migrations</div>
                     <div><strong style="color: var(--orange);">Team</strong> &middot; All 28 + all 11</div>
@@ -1267,6 +1337,34 @@
                 </div>
                 <p style="margin-top: 16px; font-size: 0.78rem; color: var(--text-muted); line-height: 1.6;">Locked entries still show on every catalog — you can read what they do, see the variants, and click "Upgrade to unlock". No hiding the surface area.</p>
             </div>
+            <style>
+                .catalog-tier-band {
+                    text-align: center;
+                    margin: 48px auto 0;
+                    padding: 24px;
+                    background: var(--bg);
+                    border: 1px solid var(--surface-border);
+                    border-radius: 16px;
+                    max-width: 920px;
+                }
+                .catalog-tier-row {
+                    display: flex;
+                    gap: 24px;
+                    row-gap: 12px;
+                    justify-content: center;
+                    flex-wrap: wrap;
+                    font-size: 0.9rem;
+                }
+                @media (max-width: 640px) {
+                    .catalog-tier-band { padding: 18px 16px; margin-top: 32px; }
+                    .catalog-tier-row {
+                        flex-direction: column;
+                        gap: 8px;
+                        font-size: 0.85rem;
+                        text-align: center;
+                    }
+                }
+            </style>
         </div>
     </section>
 
