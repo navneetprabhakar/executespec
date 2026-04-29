@@ -1,0 +1,50 @@
+slug: magic-link-auth
+name: Magic-link sign-in
+tagline: Passwordless email-link login
+description: |
+  Adds a passwordless flow — user enters email, receives a one-time
+  signed link, clicking it logs them in.  Uses short-lived signed
+  tokens (15 min default).
+category: sign-in-and-users
+macro_group: people-and-money
+tags: [auth, magic-link, passwordless, email]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/sparkle.svg
+est_files: [3, 7]
+est_credits: [1.5, 3.5]
+slots:
+  - name: from_email
+    display_name: Sender address
+    type: TEXT
+    required: true
+    default_value: noreply@example.com
+    description: Address the magic link is sent from.
+    display_order: 0
+  - name: token_ttl_minutes
+    display_name: Link expiry (minutes)
+    type: NUMBER
+    required: false
+    default_value: "15"
+    description: How long the magic link stays valid.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add magic-link auth to this Express app.  POST /auth/request-link
+      sends a signed token (TTL {{token_ttl_minutes}} min) to the
+      submitted email from {{from_email}}.  GET /auth/magic?token=…
+      verifies + issues a session JWT.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app, auth_lib: nextauth}
+    spec_template: |
+      Add NextAuth Email provider to this Next.js app for passwordless
+      sign-in.  Use {{from_email}} as the sender.  Token TTL
+      {{token_ttl_minutes}} min.
+    scaffold_key: node-frontend

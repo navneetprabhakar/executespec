@@ -1,0 +1,46 @@
+slug: prisma-postgres
+name: Postgres + Prisma data layer
+tagline: Type-safe ORM with migrations + studio
+description: |
+  Bootstraps Prisma against a Postgres instance — initializes
+  schema.prisma with sensible base models (User), generates the
+  client, adds a singleton lib/prisma.ts, wires migrate scripts,
+  and runs a first migration.
+category: store-data
+macro_group: data-and-infra
+tags: [postgres, prisma, orm, database]
+kind: STACK
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/postgres.svg
+est_files: [5, 12]
+est_credits: [1.5, 4.0]
+slots:
+  - name: database_url
+    display_name: DATABASE_URL
+    type: SECRET
+    required: true
+    default_value: "postgres://user:pass@localhost:5432/mydb"
+    description: Postgres connection string (env var Prisma will read).
+    display_order: 0
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Add Prisma + Postgres to this Express app.  Init schema.prisma
+      pointing at {{database_url}}.  Add a User model.  Generate the
+      client.  Singleton lib/prisma.ts.  Add npm scripts: db:migrate,
+      db:studio, db:seed.  Run prisma migrate dev once to create the
+      first migration.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add Prisma + Postgres to this Next.js app.  schema.prisma with
+      User + Account + Session + VerificationToken (NextAuth-ready)
+      models pointing at {{database_url}}.  Singleton client at
+      lib/prisma.ts (avoid hot-reload connection storm).
+    scaffold_key: node-frontend

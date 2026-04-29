@@ -1,0 +1,56 @@
+slug: anthropic-chat
+name: Claude chat endpoint
+tagline: Streaming Anthropic Claude chat with tool use
+description: |
+  Adds a /api/chat streaming endpoint backed by Anthropic's Claude
+  models.  Supports the Messages API's streaming + tool use.
+  Persists conversations in your existing data layer.
+category: add-ai
+macro_group: smart-and-reach
+tags: [ai, llm, anthropic, claude, chat]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/anthropic.svg
+est_files: [3, 6]
+est_credits: [2.0, 5.0]
+slots:
+  - name: anthropic_api_key
+    display_name: Anthropic API Key
+    type: SECRET
+    required: true
+    description: From console.anthropic.com → API Keys.
+    display_order: 0
+  - name: model
+    display_name: Model
+    type: SELECT
+    required: true
+    default_value: claude-sonnet-4-6
+    options: [claude-sonnet-4-6, claude-haiku-4-5, claude-opus-4]
+    description: Claude model to route chat through.
+    display_order: 1
+  - name: system_prompt
+    display_name: System prompt
+    type: TEXT
+    required: false
+    default_value: You are a helpful assistant.
+    display_order: 2
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres, sse: true}
+    spec_template: |
+      Add an /api/chat streaming endpoint to this Express app using
+      the @anthropic-ai/sdk.  Use {{anthropic_api_key}} + model
+      {{model}}.  System prompt: {{system_prompt}}.  Stream tokens
+      via SSE.  Persist conversations.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app, ai_sdk: true}
+    spec_template: |
+      Add /api/chat to this Next.js (App Router) app via the Vercel
+      AI SDK with the @ai-sdk/anthropic provider.  Model {{model}}
+      from {{anthropic_api_key}}.  System: {{system_prompt}}.
+    scaffold_key: node-frontend

@@ -1,0 +1,58 @@
+slug: google-calendar-booking
+name: Google Calendar booking
+tagline: Show availability + book appointments via OAuth-linked calendar
+description: |
+  Connects a user's Google Calendar via OAuth, reads their busy
+  blocks to compute availability, and accepts bookings (creates a
+  calendar event with the guest as an attendee + sends invite).
+  Drop-in for service-business sites.
+category: booking-and-scheduling
+macro_group: smart-and-reach
+tags: [booking, calendar, google, scheduling, appointments]
+kind: STACK
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/calendar.svg
+est_files: [6, 14]
+est_credits: [3.0, 7.0]
+slots:
+  - name: google_client_id
+    display_name: Google OAuth Client ID
+    type: SECRET
+    required: true
+    description: With Calendar API scope enabled.
+    display_order: 0
+  - name: google_client_secret
+    display_name: Google OAuth Client Secret
+    type: SECRET
+    required: true
+    description: From the same OAuth credential.
+    display_order: 1
+  - name: default_slot_minutes
+    display_name: Default appointment length (min)
+    type: NUMBER
+    required: false
+    default_value: "30"
+    description: Length of each bookable slot.
+    display_order: 2
+variants:
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add Google Calendar booking to this Next.js app.  OAuth scopes
+      include calendar.events.  Use {{google_client_id}} +
+      {{google_client_secret}}.  GET /api/availability?date=…
+      computes free {{default_slot_minutes}}-min slots from the
+      provider's busy blocks.  POST /api/book creates the event.
+    scaffold_key: node-frontend
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add Google Calendar booking to this Express app.  OAuth init
+      with calendar.events scope.  Slot length:
+      {{default_slot_minutes}}.  Persist bookings to the DB +
+      mirror as calendar events.
+    scaffold_key: node-backend

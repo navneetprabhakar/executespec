@@ -1,0 +1,49 @@
+slug: redis-cache
+name: Redis cache layer
+tagline: Drop-in caching helper with TTL + invalidation patterns
+description: |
+  Wires Redis as the application cache.  Adds lib/cache.ts with
+  get/set/del + a memoize() wrapper, plus pattern-based invalidation
+  helpers.  Connection pool + retry policy out of the box.
+category: store-data
+macro_group: data-and-infra
+tags: [redis, cache, performance]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/redis.svg
+est_files: [3, 6]
+est_credits: [1.0, 2.5]
+slots:
+  - name: redis_url
+    display_name: Redis URL
+    type: SECRET
+    required: true
+    default_value: redis://localhost:6379
+    description: redis:// or rediss:// connection string.
+    display_order: 0
+  - name: default_ttl_seconds
+    display_name: Default cache TTL (s)
+    type: NUMBER
+    required: false
+    default_value: "300"
+    description: Default expiry for cached values when not specified per-call.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Wire Redis into this Express app at {{redis_url}}.  lib/cache.ts
+      exports get/set/del + memoize(fn, key, ttl).  Default TTL
+      {{default_ttl_seconds}}s.  Use ioredis with connection retry.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {}
+    spec_template: |
+      Add Redis caching to this FastAPI app at {{redis_url}}.  Use
+      redis-py async client.  lib/cache.py with get/set/delete +
+      a @cache decorator.  Default TTL {{default_ttl_seconds}}s.
+    scaffold_key: python

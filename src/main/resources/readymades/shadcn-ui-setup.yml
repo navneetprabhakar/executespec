@@ -1,0 +1,45 @@
+slug: shadcn-ui-setup
+name: shadcn/ui component library
+tagline: Tailwind + Radix primitives copied straight into your repo
+description: |
+  Initializes shadcn/ui — runs the init wizard conceptually,
+  configures components.json, installs Tailwind, and copies the
+  10 most-used components (Button, Input, Dialog, Dropdown, Form,
+  Table, Toast, Tabs, Card, Badge) into components/ui.
+category: build-the-ui
+macro_group: ui-and-growth
+tags: [ui, shadcn, tailwind, radix, components]
+kind: STACK
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/shadcn.svg
+est_files: [12, 22]
+est_credits: [1.5, 3.5]
+slots:
+  - name: theme
+    display_name: Color theme
+    type: SELECT
+    required: false
+    default_value: slate
+    options: [slate, gray, zinc, neutral, stone]
+    description: shadcn base color palette.
+    display_order: 0
+variants:
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Initialize shadcn/ui in this Next.js app.  Theme: {{theme}}.
+      components.json + tailwind config + globals.css.  Copy the 10
+      most-used components into components/ui.  Add lib/utils.ts
+      with cn() helper.
+    scaffold_key: node-frontend
+  - language: typescript
+    framework: vite-react
+    options: {}
+    spec_template: |
+      Initialize shadcn/ui in this Vite + React app.  Theme:
+      {{theme}}.  Tailwind config + components.json + 10 starter
+      components.  lib/utils.ts.
+    scaffold_key: node-frontend

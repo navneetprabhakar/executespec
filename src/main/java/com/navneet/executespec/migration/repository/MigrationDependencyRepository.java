@@ -2,6 +2,7 @@ package com.navneet.executespec.migration.repository;
 
 import com.navneet.executespec.migration.entity.MigrationDependency;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.UUID;
@@ -15,5 +16,8 @@ public interface MigrationDependencyRepository
     /** Inbound edges: "what depends on {@code dependsOnId}?" */
     List<MigrationDependency> findByDependsOnId(UUID dependsOnId);
 
+    /** See {@link MigrationVariantRepository#deleteByRecipeId} — same
+     *  reseeder-self-invocation rationale for the @Transactional. */
+    @Transactional
     void deleteByRecipeId(UUID recipeId);
 }
