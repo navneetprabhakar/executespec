@@ -1,0 +1,55 @@
+slug: webpack-to-vite
+name: Webpack → Vite
+tagline: Replace Webpack with Vite for instant HMR + faster builds
+description: |
+  Reads webpack.config.js + maps the build pipeline to Vite.
+  Loaders → plugins; HtmlWebpackPlugin → vite default; aliases
+  carry over to vite.config.ts; dev script swaps to `vite`.
+source_stack:
+  language: typescript
+target_stack:
+  language: typescript
+  bundler: vite
+affected_files_glob: "{webpack.config.{js,ts},vite.config.{js,ts},package.json}"
+category: tooling-migration
+tags: [vite, webpack, bundler, dev-experience]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/webpack-to-vite-fallback.md
+preservation_contract:
+  preserve_bundle_entry_points: true
+  preserve_path_aliases: true
+  preserve_env_var_handling: true
+est_files: [3, 12]
+est_credits: [2.0, 8.0]
+slots:
+  - name: framework_template
+    display_name: Vite framework template
+    type: SELECT
+    required: true
+    default_value: react-ts
+    options: [react-ts, react, vue, vue-ts, svelte, vanilla, vanilla-ts]
+    description: Pick the closest match for your existing webpack setup.
+    display_order: 0
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Migrate this app's bundler from Webpack to Vite using the
+      {{framework_template}} template.
+      - Read the existing webpack.config.{js,ts} and translate every
+        loader to its Vite plugin equivalent (babel → @vitejs/plugin-
+        react or equivalent; sass-loader → built-in; raw-loader →
+        ?raw imports).
+      - Generate a vite.config.ts capturing the same entry points,
+        path aliases (resolve.alias), env var handling
+        (define / import.meta.env), and dev server proxies.
+      - Update package.json scripts: replace `webpack serve` with
+        `vite`; replace `webpack --mode production` with
+        `vite build`.
+      - Drop webpack + webpack-cli + webpack-related loaders /
+        plugins from devDependencies; add vite + the chosen
+        framework plugin.
+      - Preserve bundle entry points, path aliases, and env var
+        handling exactly.

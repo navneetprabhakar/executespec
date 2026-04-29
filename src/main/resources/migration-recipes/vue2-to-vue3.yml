@@ -1,0 +1,61 @@
+slug: vue2-to-vue3
+name: Vue 2 → Vue 3
+tagline: Options API → Composition API, Vuex → Pinia, Vue CLI → Vite
+description: |
+  Stretch v1 recipe.  Migrates a Vue 2 codebase to Vue 3 — Options
+  API components rewritten to Composition API with `<script setup>`,
+  Vuex stores ported to Pinia, Vue Router v3 → v4, and the build
+  pipeline modernized from Vue CLI to Vite.  Existing component
+  templates carry over largely unchanged; the lift is mostly in
+  the script + store + router layers.
+source_stack:
+  language: javascript
+  framework: vue
+  source_version: "2"
+target_stack:
+  language: typescript
+  framework: vue
+  target_version: "3"
+affected_files_glob: "src/**/*.{vue,js,ts}"
+category: framework-migration
+tags: [vue, vue3, composition-api, pinia, modernization]
+tier: TEAM
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/vue2-to-vue3-fallback.md
+preservation_contract:
+  preserve_component_props_api: true
+  preserve_emitted_events: true
+  preserve_template_render: true
+est_files: [20, 200]
+est_credits: [10.0, 60.0]
+slots:
+  - name: convert_to_typescript
+    display_name: Convert to TypeScript
+    type: BOOLEAN
+    required: false
+    default_value: "true"
+    description: Promote `<script>` blocks to `<script setup lang="ts">` while migrating.
+    display_order: 0
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Migrate this Vue 2 codebase to Vue 3.  Convert to TypeScript:
+      {{convert_to_typescript}}.
+      - Components: Options API → Composition API with
+        `<script setup>` (or `lang="ts"` if convert_to_typescript).
+        Map data → ref/reactive, computed → computed(), methods →
+        plain functions, watch → watch/watchEffect, lifecycle hooks
+        → onMounted/onUnmounted/etc.
+      - Filters → composables or template helpers (Vue 3 dropped
+        filters).
+      - Vuex stores → Pinia.  One store per Vuex module.
+      - Vue Router v3 → v4 (createRouter + createWebHistory; mode
+        option dropped).
+      - Build pipeline: Vue CLI → Vite with @vitejs/plugin-vue.
+        Update package.json scripts + tsconfig + vite.config.
+      - Global event bus → mitt (Vue 3 dropped $on/$off/$emit on
+        instances).
+      - Verify: `npm run build` succeeds + `npm test` passes
+        every test that was green pre-migration.

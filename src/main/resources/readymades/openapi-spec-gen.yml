@@ -1,0 +1,51 @@
+slug: openapi-spec-gen
+name: OpenAPI spec generation
+tagline: Auto-generated OpenAPI 3.1 docs from your route handlers
+description: |
+  Generates an OpenAPI 3.1 spec from your existing route handlers
+  (Zod / Pydantic schemas → OpenAPI), serves the JSON at
+  /api/openapi.json, and mounts a Swagger UI viewer at /api/docs.
+category: work-with-apis
+macro_group: smart-and-reach
+tags: [openapi, swagger, api-docs, dx]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/openapi.svg
+est_files: [3, 6]
+est_credits: [1.0, 2.5]
+slots:
+  - name: api_title
+    display_name: API title
+    type: TEXT
+    required: false
+    default_value: My API
+    description: Shows in the Swagger UI header.
+    display_order: 0
+  - name: api_version
+    display_name: API version
+    type: TEXT
+    required: false
+    default_value: "1.0.0"
+    description: Semver-style version string.
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {validation: zod}
+    spec_template: |
+      Add OpenAPI generation to this Express app via @asteasolutions/zod-to-openapi.
+      Title "{{api_title}}", version {{api_version}}.  Serve JSON at
+      /api/openapi.json + Swagger UI at /api/docs.  Wire each route's
+      Zod schema as the source of truth.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {}
+    spec_template: |
+      FastAPI ships OpenAPI built-in — verify /openapi.json is on
+      and /docs serves Swagger UI.  Set the FastAPI app's
+      title="{{api_title}}", version="{{api_version}}".  Add
+      response models on every route so the schema is complete.
+    scaffold_key: python

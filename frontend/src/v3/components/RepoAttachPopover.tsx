@@ -5,6 +5,8 @@ import {
   createRepo,
   createProject,
   linkProjectRepo,
+  validateGitHub,
+  updateGithubSettings,
   type GitHubRemoteRepo,
 } from '@/lib/api';
 import { useAuthStore } from '@/stores/useAuthStore';
@@ -43,11 +45,13 @@ import Pill from './Pill';
  * gaps have TODO comments at their natural call-sites so they can't
  * slip silently:
  *
- *   1. Private repo with no GitHub App access — today we list any
- *      repo the user's PAT can see. Org-level App install path is
- *      surfaced as a fallback link to /v3/integrations. TODO:
- *      decide whether the popover should auto-detect "no access"
- *      and switch to App-install copy inline.
+ *   1. Private repo with no GitHub App access — R-321 (2026-04-28)
+ *      shipped Q1(b) + Q1(c): when the popover detects no PAT, it
+ *      now renders an inline PAT form + an "Ask your admin"
+ *      affordance (pre-filled mailto + copy-link button) inside the
+ *      popover, so users can paste-and-go without a context switch
+ *      to /v3/integrations. Q1(a) — org-wide GitHub App install
+ *      flow — remains deferred until the App is registered.
  *
  *   2. Mono-repo subdirectory selection — design doesn't ask. Today
  *      we assume the repo root is the project root. TODO: an
@@ -75,6 +79,14 @@ interface RepoAttachPopoverProps {
   targetProjectId?: string;
   /** Anchor element for the popover; absent → centre on screen. */
   anchorEl?: HTMLElement | null;
+  /** R-324 Checkpoint 2 — fired right after a successful
+   *  {@code linkProjectRepo}.  When set on the "attach another repo"
+   *  flow (i.e. {@code targetProjectId} present), the popover invokes
+   *  this instead of navigating to `/v3/p/{projectId}` so the host
+   *  page can refresh its repo list in place rather than reload.
+   *  Ignored on the new-project flow (where navigate is the right
+   *  default behaviour). */
+  onAttached?: (newRepoId: string, projectId: string) => void;
 }
 
 type Phase =
@@ -88,9 +100,11 @@ export default function RepoAttachPopover({
   open,
   onClose,
   targetProjectId,
+  onAttached,
 }: RepoAttachPopoverProps) {
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
   const user = useAuthStore((s) => s.user);
+  const setUser = useAuthStore((s) => s.setUser);
   const navigate = useNavigate();
 
   const [phase, setPhase] = useState<Phase>('loading');
@@ -98,6 +112,20 @@ export default function RepoAttachPopover({
   const [filter, setFilter] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [selecting, setSelecting] = useState<string | null>(null);
+
+  // R-321 — inline PAT form state for the no-PAT panel. Mirrors
+  // SettingsPage's PAT flow but condensed into the popover so users
+  // who land here without a PAT can paste-and-go without a context
+  // switch to /v3/integrations.
+  const [patInput, setPatInput] = useState('');
+  const [patSaving, setPatSaving] = useState(false);
+  const [patTesting, setPatTesting] = useState(false);
+  const [patMsg, setPatMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [installLinkCopied, setInstallLinkCopied] = useState(false);
+  // R-325 — track the repo the user just tried to attach so we can
+  // surface a single-click "Attach anyway" retry on size-gate
+  // rejection. Cleared on every retry / popover open.
+  const [oversizedRepo, setOversizedRepo] = useState<GitHubRemoteRepo | null>(null);
 
   // Load repos whenever the popover opens.
   useEffect(() => {
@@ -108,8 +136,8 @@ export default function RepoAttachPopover({
     setFilter('');
     setRepos([]);
 
-    // TODO(D-125): if user.hasGithubPat is false, treat that as the
-    // "no PAT" path immediately rather than fetching and 4xx-ing.
+    // R-321 — short-circuit to the no-PAT panel rather than fetching
+    // and 4xx-ing if we already know the user has no token configured.
     if (user && user.hasGithubPat === false) {
       setPhase('no-pat');
       return;
@@ -140,6 +168,16 @@ export default function RepoAttachPopover({
     };
   }, [open, isAuthed, user]);
 
+  // Reset PAT-form state on every open so a stale "saved ✓" message
+  // doesn't bleed across sessions.
+  useEffect(() => {
+    if (!open) return;
+    setPatInput('');
+    setPatMsg(null);
+    setInstallLinkCopied(false);
+    setOversizedRepo(null);
+  }, [open]);
+
   // Esc to close
   useEffect(() => {
     if (!open) return;
@@ -150,23 +188,84 @@ export default function RepoAttachPopover({
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
+  // R-321 — test PAT against GitHub before save. Mirrors SettingsPage.
+  async function onTestPat() {
+    if (!patInput.trim()) {
+      setPatMsg({ ok: false, text: 'Paste a PAT first.' });
+      return;
+    }
+    setPatTesting(true);
+    setPatMsg(null);
+    try {
+      const result = await validateGitHub(patInput.trim());
+      setPatMsg({ ok: result.valid, text: result.message });
+    } catch (e) {
+      setPatMsg({ ok: false, text: (e as Error)?.message ?? 'Validation failed.' });
+    } finally {
+      setPatTesting(false);
+    }
+  }
+
+  // R-321 — save the PAT, refresh user, then re-trigger repo load.
+  // The load-effect above is keyed on `user`, so updating it via
+  // setUser() naturally re-runs the listing.
+  async function onSavePat() {
+    if (!patInput.trim()) {
+      setPatMsg({ ok: false, text: 'Paste a PAT first.' });
+      return;
+    }
+    setPatSaving(true);
+    setPatMsg(null);
+    try {
+      const updated = await updateGithubSettings(patInput.trim(), user?.githubOwner ?? '');
+      setUser(updated);
+      setPatInput('');
+      setPatMsg({ ok: true, text: 'Saved. Listing your repos…' });
+    } catch (e) {
+      setPatMsg({ ok: false, text: (e as Error)?.message ?? 'Failed to save.' });
+    } finally {
+      setPatSaving(false);
+    }
+  }
+
+  // R-321 — copy a sharable install link to the clipboard so the user
+  // can paste it into Slack/email for an admin. The (a) GitHub App
+  // org-install path is deferred until the App is registered; for now
+  // the link points to /v3/integrations where the admin can paste a
+  // PAT (and, eventually, click through the App install).
+  async function onCopyInstallLink() {
+    const url = `${window.location.origin}/v3/integrations`;
+    try {
+      await navigator.clipboard.writeText(url);
+      setInstallLinkCopied(true);
+      setTimeout(() => setInstallLinkCopied(false), 2000);
+    } catch {
+      // Older browsers / non-secure contexts: fall through silently.
+      // The mailto link still works.
+    }
+  }
+
   const filtered = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return repos;
     return repos.filter((r) => r.fullName.toLowerCase().includes(q));
   }, [repos, filter]);
 
-  async function onPick(repo: GitHubRemoteRepo) {
+  async function onPick(repo: GitHubRemoteRepo, attachAnyway = false) {
     setSelecting(repo.fullName);
     setPhase('attaching');
     setError(null);
+    if (!attachAnyway) setOversizedRepo(null);
     try {
       // Step 1 — register the repo with v3 (USER scope; ORG path can
-      // be added later when org-wide GitHub App is wired).
+      // be added later when org-wide GitHub App is wired). The
+      // attachAnyway flag (R-325) bypasses the backend size gate and
+      // marks the row so runs touching it count more credits.
       const created = await createRepo({
         scope: 'USER',
         githubRepoFullName: repo.fullName,
         defaultBranch: repo.defaultBranch,
+        attachAnyway,
       });
 
       let projectId = targetProjectId;
@@ -185,9 +284,29 @@ export default function RepoAttachPopover({
 
       await linkProjectRepo(projectId!, created.id);
       onClose();
-      navigate(`/v3/p/${projectId}`);
+      // R-324 Checkpoint 2 — when the popover was opened from an
+      // already-loaded project page (targetProjectId set), give the
+      // host a chance to refresh its repo list in place instead of
+      // bouncing through a navigate to the same URL (which is a no-op
+      // for React Router and wouldn't re-fire the project's load
+      // effect). The new-project flow keeps the legacy navigate.
+      if (targetProjectId && onAttached) {
+        onAttached(created.id, projectId!);
+      } else {
+        navigate(`/v3/p/${projectId}`);
+      }
     } catch (e) {
-      setError((e as Error)?.message ?? 'Attach failed');
+      const msg = (e as Error)?.message ?? 'Attach failed';
+      // R-325 — detect the backend's 413 size-gate copy and stash the
+      // repo so we can surface an "Attach anyway" CTA. The message
+      // contract is owned by ProjectRepoService.createRepo.
+      const looksLikeSizeGate =
+        msg.includes('larger than the platform') ||
+        msg.includes('clone-time budget');
+      if (looksLikeSizeGate && !attachAnyway) {
+        setOversizedRepo(repo);
+      }
+      setError(msg);
       setPhase('error');
     } finally {
       setSelecting(null);
@@ -284,41 +403,239 @@ export default function RepoAttachPopover({
           )}
 
           {phase === 'no-pat' && (
-            <div style={{ padding: '8px 4px' }}>
-              <Pill tone="warn">GitHub not connected</Pill>
-              <p
+            <div style={{ padding: '4px 2px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div>
+                <Pill tone="warn">GitHub not connected</Pill>
+                <p
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 0,
+                    fontSize: 12.5,
+                    color: 'var(--v3-text)',
+                    lineHeight: 1.55,
+                  }}
+                >
+                  Paste a personal access token (PAT) to list your repos —
+                  or send the install link to a teammate who can.
+                </p>
+              </div>
+
+              {/* R-321 (b) — inline PAT form. Mirrors SettingsPage's flow
+                  so users who land here unconfigured can paste-and-go
+                  without a context switch. */}
+              <div
                 style={{
-                  marginTop: 8,
-                  marginBottom: 12,
-                  fontSize: 12.5,
-                  color: 'var(--v3-text)',
-                  lineHeight: 1.55,
-                }}
-              >
-                Connect GitHub to list your repositories. We use a personal
-                access token (PAT) for now — the org-wide GitHub App install
-                path is on the way.
-              </p>
-              <button
-                type="button"
-                onClick={() => {
-                  onClose();
-                  navigate('/v3/integrations');
-                }}
-                style={{
-                  padding: '8px 14px',
-                  background: 'var(--v3-brand)',
-                  color: 'var(--v3-text-on-brand)',
-                  border: 'none',
+                  border: '1px solid var(--v3-border)',
                   borderRadius: 6,
-                  cursor: 'pointer',
-                  fontSize: 12.5,
-                  fontWeight: 600,
-                  fontFamily: 'inherit',
+                  padding: 12,
+                  background: 'var(--v3-surface-elevated)',
                 }}
               >
-                Open Integrations →
-              </button>
+                <label
+                  htmlFor="repo-attach-pat"
+                  style={{
+                    display: 'block',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--v3-text-subtle)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.4,
+                    marginBottom: 6,
+                  }}
+                >
+                  Paste a PAT
+                </label>
+                <input
+                  id="repo-attach-pat"
+                  type="password"
+                  autoComplete="off"
+                  value={patInput}
+                  onChange={(e) => setPatInput(e.target.value)}
+                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                  disabled={patSaving || patTesting}
+                  style={{
+                    width: '100%',
+                    padding: '7px 10px',
+                    background: 'var(--v3-bg)',
+                    color: 'var(--v3-text)',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 4,
+                    fontSize: 12.5,
+                    outline: 'none',
+                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  }}
+                />
+                <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                  <button
+                    type="button"
+                    onClick={onSavePat}
+                    disabled={patSaving || patTesting || !patInput.trim()}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'var(--v3-brand)',
+                      color: 'var(--v3-text-on-brand)',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: patSaving || patTesting || !patInput.trim() ? 'not-allowed' : 'pointer',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      fontFamily: 'inherit',
+                      opacity: patSaving || patTesting || !patInput.trim() ? 0.6 : 1,
+                    }}
+                  >
+                    {patSaving ? 'Saving…' : 'Save & list repos'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onTestPat}
+                    disabled={patSaving || patTesting || !patInput.trim()}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'transparent',
+                      color: 'var(--v3-text)',
+                      border: '1px solid var(--v3-border)',
+                      borderRadius: 4,
+                      cursor: patSaving || patTesting || !patInput.trim() ? 'not-allowed' : 'pointer',
+                      fontSize: 12,
+                      fontFamily: 'inherit',
+                      opacity: patSaving || patTesting || !patInput.trim() ? 0.6 : 1,
+                    }}
+                  >
+                    {patTesting ? 'Testing…' : 'Test'}
+                  </button>
+                </div>
+                {patMsg && (
+                  <p
+                    style={{
+                      marginTop: 8,
+                      marginBottom: 0,
+                      fontSize: 11.5,
+                      color: patMsg.ok ? '#4ADE80' : '#FCA5A5',
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {patMsg.text}
+                  </p>
+                )}
+                <p
+                  style={{
+                    marginTop: 8,
+                    marginBottom: 0,
+                    fontSize: 10.5,
+                    color: 'var(--v3-text-subtle)',
+                    lineHeight: 1.4,
+                  }}
+                >
+                  Needs the <code>repo</code> scope.{' '}
+                  <a
+                    href="https://github.com/settings/tokens/new?scopes=repo&description=ExecuteSpec"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{ color: 'var(--v3-brand)' }}
+                  >
+                    Generate one →
+                  </a>
+                </p>
+              </div>
+
+              {/* R-321 (c) — "ask your admin" affordance: pre-filled
+                  mailto + copy-link button. The GitHub App org-install
+                  flow (Q1 option a) is deferred until the App is
+                  registered; this panel is the bridge until then. */}
+              <div
+                style={{
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 6,
+                  padding: 12,
+                  background: 'var(--v3-surface-elevated)',
+                }}
+              >
+                <p
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--v3-text-subtle)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.4,
+                    margin: '0 0 6px',
+                  }}
+                >
+                  Ask your admin
+                </p>
+                <p
+                  style={{
+                    fontSize: 11.5,
+                    color: 'var(--v3-text)',
+                    lineHeight: 1.5,
+                    margin: '0 0 10px',
+                  }}
+                >
+                  No PAT for this org? Send a teammate the setup link.
+                </p>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <a
+                    href={`mailto:?subject=${encodeURIComponent(
+                      'Please set up GitHub access for ExecuteSpec'
+                    )}&body=${encodeURIComponent(
+                      `Hi — I'm trying to use ExecuteSpec but my account can't list our repos.\n\nCould you set up GitHub access for the org? Setup link: ${window.location.origin}/v3/integrations\n\nThanks.`
+                    )}`}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'var(--v3-brand)',
+                      color: 'var(--v3-text-on-brand)',
+                      border: 'none',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      textDecoration: 'none',
+                      fontFamily: 'inherit',
+                      display: 'inline-block',
+                    }}
+                  >
+                    Email admin
+                  </a>
+                  <button
+                    type="button"
+                    onClick={onCopyInstallLink}
+                    style={{
+                      padding: '6px 12px',
+                      background: 'transparent',
+                      color: 'var(--v3-text)',
+                      border: '1px solid var(--v3-border)',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      fontSize: 12,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {installLinkCopied ? 'Copied ✓' : 'Copy install link'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Tertiary fallback — full Integrations page if neither
+                  affordance fits the user's situation. */}
+              <div style={{ textAlign: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    onClose();
+                    navigate('/v3/integrations');
+                  }}
+                  style={{
+                    background: 'transparent',
+                    border: 'none',
+                    color: 'var(--v3-text-subtle)',
+                    fontSize: 11,
+                    cursor: 'pointer',
+                    textDecoration: 'underline',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Or open the full Integrations page →
+                </button>
+              </div>
             </div>
           )}
 
@@ -389,10 +706,12 @@ export default function RepoAttachPopover({
                   </li>
                 ))}
               </ul>
-              {/* TODO(D-125 #1): if the org-wide App install path
-                  becomes available, surface it as a footer link here
-                  for users whose PAT can't see all the repos they
-                  expect. */}
+              {/* R-321 (2026-04-28) — the org-wide App install flow
+                  (Q1 option a) is still deferred until the App is
+                  registered. Until then, users whose PAT can't see
+                  all the repos they expect can fall through to the
+                  /v3/integrations link below for the full setup
+                  surface. */}
               <p
                 style={{
                   marginTop: 10,
@@ -430,37 +749,62 @@ export default function RepoAttachPopover({
               }}
             >
               {error ?? 'Something went wrong. Try again.'}
-              <button
-                type="button"
-                onClick={() => {
-                  setPhase('loading');
-                  // Re-trigger effect by toggling open prop is owned
-                  // by the parent — instead just retry the listing.
-                  listGitHubRepos()
-                    .then((list) => {
-                      setRepos(list ?? []);
-                      setPhase('list');
-                      setError(null);
-                    })
-                    .catch((e: Error) => {
-                      setError(e?.message ?? 'Failed');
-                      setPhase('error');
-                    });
-                }}
-                style={{
-                  marginTop: 8,
-                  padding: '4px 10px',
-                  background: 'transparent',
-                  color: 'var(--v3-text)',
-                  border: '1px solid var(--v3-border)',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 11,
-                  fontFamily: 'inherit',
-                }}
-              >
-                Retry
-              </button>
+              <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                {/* R-325 — opt-in CTA shown only when the most recent
+                    attach hit the size gate. One click re-submits the
+                    same repo with attachAnyway=true. */}
+                {oversizedRepo && (
+                  <button
+                    type="button"
+                    onClick={() => onPick(oversizedRepo, true)}
+                    title="Attach this repo despite its size. Runs touching it count more credits."
+                    style={{
+                      padding: '4px 10px',
+                      background: 'rgba(245,158,11,0.18)',
+                      color: '#FBBF24',
+                      border: '1px solid rgba(245,158,11,0.5)',
+                      borderRadius: 4,
+                      cursor: 'pointer',
+                      fontSize: 11,
+                      fontWeight: 600,
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Attach anyway (counts more credits)
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhase('loading');
+                    setOversizedRepo(null);
+                    // Re-trigger effect by toggling open prop is owned
+                    // by the parent — instead just retry the listing.
+                    listGitHubRepos()
+                      .then((list) => {
+                        setRepos(list ?? []);
+                        setPhase('list');
+                        setError(null);
+                      })
+                      .catch((e: Error) => {
+                        setError(e?.message ?? 'Failed');
+                        setPhase('error');
+                      });
+                  }}
+                  style={{
+                    padding: '4px 10px',
+                    background: 'transparent',
+                    color: 'var(--v3-text)',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  {oversizedRepo ? 'Pick a different repo' : 'Retry'}
+                </button>
+              </div>
             </div>
           )}
         </div>

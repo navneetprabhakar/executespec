@@ -1,9 +1,11 @@
 # `docs/plans/` — index + post-execution status
 
-> Authoritative as of 2026-04-27 (M-067 doc-tree refresh on
-> `feature/v2.7-foundation`). Captures whether each plan is still
-> live, has been superseded, or shipped (and where the operational
-> truth lives now).
+> Authoritative as of 2026-04-28 (R-326 doc-tree refresh, cluster C,
+> on `feature/v3-platform-expansion`). Brings three previously
+> unclassified plan files into the table (project-surface vite
+> split, pre-deploy open items, wave-7 issue list) and confirms
+> the rest are still accurate. Earlier authority: 2026-04-27 M-067
+> refresh on `feature/v2.7-foundation`.
 
 ## Status table
 
@@ -17,6 +19,12 @@
 | [`phase-2-3-deferred.md`](phase-2-3-deferred.md) | **PARTIALLY SUPERSEDED by M-* execution + `docs/backlog-deferred-items.md`.** Phase 1.0 / 1.1 / 1.2 / 1.3 items are now SHIPPED via Wave 1+2+3+Backlog (see `CHANGELOG.md` v2.7 entry). Phase 2 + Phase 3 deferral rationale still authoritative — the cookie-domain switch, multi-org work, etc., remain deferred per the same reasons. | Combined: this file (Phase 2 + 3 reasoning) + [`backlog-deferred-items.md`](../backlog-deferred-items.md) (per-item first-slice + owner) |
 | [`ux-overhaul-v4.md`](ux-overhaul-v4.md) | **SHIPPED** on `feature/ux-overhaul-v4-pulse-tab`. Operational truth in `frontend/CLAUDE.md`; this file remains as the design rationale + before/after screenshots. | `frontend/CLAUDE.md` |
 | [`eval-2026-04-26-partial-and-openai-degradation.md`](eval-2026-04-26-partial-and-openai-degradation.md) | **HISTORICAL INVESTIGATION** — root-cause analysis of the booking-spec PARTIAL pattern + OpenAI iteration count. Two of the three findings are now closed by code fixes that landed before the v2.7 batch; the smoke-test bug is still pending. Keep as evidence; don't update. | Self |
+| [`pending-project-surface-vite-split.md`](pending-project-surface-vite-split.md) | **STILL PENDING** — Phase 2 of the v2.7 product-split. Splits the project-surface (TEAM/ENTERPRISE → Build) into a separate Vite bundle from the consumer-surface (FREE/PRO/MAX → Vibe). Multi-week effort, not yet scheduled. Today's surfaces co-habit one bundle (cohabitation invariant under `frontend/src/v3/`). | Self |
+| [`pre-deploy-open-items.md`](pre-deploy-open-items.md) | **HISTORICAL** — pre-deploy audit on `feature/v3-conversion` at tip `cb98ed67` (2026-04-28). Items either landed in the post-Wave-7 deploy or were rolled into the queued-work handoff (`docs/v3-issues-handoff.md`). Not authoritative anymore; keep as snapshot. | `docs/v3-issues-handoff.md` |
+| [`wave-7-issue-list.md`](wave-7-issue-list.md) | **HISTORICAL** — Wave 7 issue compilation from end-to-end test reports + persona-conversion reports on `feature/v3-conversion` (2026-04-28). Items either landed in the post-Wave-7 deploy or are tracked in the queued-work handoff. Snapshot only. | `docs/v3-issues-handoff.md` |
+| [`pending-agent-builder-plan.md`](pending-agent-builder-plan.md) | **PARKED 2026-04-29** — wrong product shape (described internal-worker customisation, founder wants user-facing drag-drop builder + readymade agents + optional code export). Plan stays as work product; do NOT execute. New `pending-agent-builder-v2-plan.md` authored once the corrected scope settles. | Self (parked) |
+| [`pending-readymade-solutions-plan.md`](pending-readymade-solutions-plan.md) | **W1–W5 SHIPPED 2026-04-29** on `feature/readymades-and-migrations` (tip `a6c9f0a2`, NOT yet merged to dev). Library API + 3 POC seeds + frontend gallery + detail + variant resolver + instantiate path (V2 dispatch with V160 tracking columns). Cross-product `composer/` package + tier-stratified cost framing shared with Migrations. **W6** (catalog expansion of 130+ solutions, multi-month authoring), **W7** (community contribution moderation), **W8** (tier-gating UI polish), **W9** (FTS search + recommendations) all v1.5 follow-ups. R-### range R-327 → R-331 consumed; R-332..R-335 reserved. | Self |
+| [`pending-migrations-plan.md`](pending-migrations-plan.md) | **W1–W7 SHIPPED 2026-04-29** on `feature/readymades-and-migrations` (tip `05d92db6`, NOT yet merged to dev). Library API + dry-run + apply (multi-repo fan-out via existing Execution View) + frontend gallery + halt-and-inspect detail + tier-stratified cost UX (cross-product) + 8 of 11 v1 recipe seeds. **W8 (hybrid AST+AI), W9 (PostMergeCascade continuous), W10 (polyglot)** explicitly deferred per the plan's v1.5+ staging. Cross-product `composer/` package (SlotValidator + SpecComposer) + `requiresCostCap` predicate live; Readymades W4+ adopts. R-### range R-336 → R-342 consumed; R-343/344/345 reserved. | Self |
 
 ## Where shipped plans went
 

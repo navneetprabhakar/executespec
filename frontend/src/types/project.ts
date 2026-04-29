@@ -21,6 +21,16 @@ export interface ProjectRepo {
   detectedStack: string | null;
   /** v2.5.2 — PR webhook installation state. */
   webhookInstalled: boolean;
+  /** R-322 — declared monorepo project root (null = repo root). Detected
+   *  from {@code .executespec/root.yml} on the default branch at attach
+   *  + sync time. */
+  subdir: string | null;
+  /** R-325 — GitHub-reported repo size at attach time, in KB. NULL when
+   *  the row predates V156 or GH didn't return a size. */
+  sizeKb: number | null;
+  /** R-325 — TRUE when the attach bypassed the size-gate via the
+   *  "Attach anyway" opt-in. Drives a per-run credit surcharge. */
+  attachedAnyway: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -105,6 +115,11 @@ export interface LinkRepoRequest {
   scope: RepoScope;
   githubRepoFullName: string;
   defaultBranch?: string;
+  /** R-325 — when true, bypass the {@code executespec.repo.max-size-kb}
+   *  hard reject. Set by RepoAttachPopover only after the user clicks
+   *  "Attach anyway" on the size-gate prompt. Runs touching this repo
+   *  count more credits. */
+  attachAnyway?: boolean;
 }
 
 export interface ProjectSettings {

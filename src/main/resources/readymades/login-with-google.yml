@@ -1,0 +1,64 @@
+slug: login-with-google
+name: Login with Google
+tagline: One-click sign-in via Google OAuth
+description: |
+  Adds a "Sign in with Google" button + the OAuth callback handler
+  to your existing app. Reuses your User entity if one is detected;
+  otherwise auto-installs the User-entity sub-solution.
+category: sign-in-and-users
+macro_group: people-and-money
+tags: [auth, oauth, social, google]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/google.svg
+est_files: [3, 8]
+est_credits: [1.0, 2.0]
+slots:
+  - name: client_id
+    display_name: Google OAuth Client ID
+    type: SECRET
+    required: true
+    description: From your Google Cloud Console OAuth credentials.
+    display_order: 0
+  - name: client_secret
+    display_name: Google OAuth Client Secret
+    type: SECRET
+    required: true
+    description: From your Google Cloud Console OAuth credentials.
+    display_order: 1
+  - name: callback_path
+    display_name: Callback URL path
+    type: TEXT
+    required: false
+    default_value: /auth/google/callback
+    description: Path your app receives the OAuth callback on.
+    display_order: 2
+variants:
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add Google OAuth sign-in to this Express app.
+      Use {{client_id}} as the OAuth client ID and {{client_secret}}
+      for the secret. Mount the callback at {{callback_path}}.
+      Persist the user in the existing User table.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add Google OAuth sign-in to this Next.js (App Router) app.
+      Wire {{client_id}} + {{client_secret}} via environment
+      variables; route the callback through {{callback_path}}.
+      Use NextAuth.js or @auth/core; reuse the existing User model.
+    scaffold_key: node-frontend
+  - language: python
+    framework: fastapi
+    options: {db: postgres}
+    spec_template: |
+      Add Google OAuth sign-in to this FastAPI app.
+      Use {{client_id}} + {{client_secret}}; mount the callback at
+      {{callback_path}}. Use authlib for the OAuth flow.
+    scaffold_key: python

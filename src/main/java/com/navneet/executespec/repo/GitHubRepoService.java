@@ -495,6 +495,48 @@ public class GitHubRepoService {
     }
 
     /**
+     * R-323 (D-125 #3) — read the repo's reported size (in KB) from
+     * GitHub's repo-meta endpoint so we can gate attach on a clone-time
+     * budget. Returns {@code -1} on any failure (missing PAT, repo
+     * unreachable, parse error) so callers can treat "unknown size" as
+     * "don't gate" rather than blowing up the attach flow.
+     *
+     * <p>Background: {@code GET /repos/{owner}/{repo}} returns a JSON
+     * body with a top-level {@code "size"} integer in KB.  We've already
+     * been hitting this endpoint inside {@link #getDefaultBranch}; this
+     * is a parallel reader on the same resource.
+     */
+    public long getRepoSizeKb(String repoUrl, String overridePat) {
+        String effectivePat = resolve(overridePat, pat);
+        if (effectivePat == null || effectivePat.isBlank()) return -1L;
+
+        String[] ownerRepo = extractOwnerRepo(repoUrl);
+        if (ownerRepo == null) return -1L;
+
+        try {
+            HttpClient client = HttpClient.newHttpClient();
+            HttpRequest request = HttpRequest.newBuilder()
+                    .uri(URI.create("https://api.github.com/repos/" + ownerRepo[0] + "/" + ownerRepo[1]))
+                    .header("Authorization", "Bearer " + effectivePat)
+                    .header("Accept", "application/vnd.github+json")
+                    .GET()
+                    .build();
+            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+            if (response.statusCode() != 200) {
+                log.debug("[R-323] getRepoSizeKb {} status {}", repoUrl, response.statusCode());
+                return -1L;
+            }
+            JsonNode root = new ObjectMapper().readTree(response.body());
+            JsonNode size = root.get("size");
+            if (size == null || !size.isNumber()) return -1L;
+            return size.asLong();
+        } catch (Exception e) {
+            log.debug("[R-323] getRepoSizeKb error for {}: {}", repoUrl, e.getMessage());
+            return -1L;
+        }
+    }
+
+    /**
      * Pilot v3.0 — fetch the HEAD SHA of a given branch for drift detection.
      * Returns {@code null} on any failure (missing PAT, unauthorised, repo moved)
      * so callers can treat the repo as "unknown" without throwing.

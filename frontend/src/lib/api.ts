@@ -2640,3 +2640,290 @@ export const compactProjectChat = (projectId: string) =>
     { method: 'POST' },
   );
 
+// ── Migrations product (R-336..R-339) ─────────────────────────────────────
+
+export interface MigrationRecipeSummary {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string | null;
+  description: string | null;
+  sourceStack: string;
+  targetStack: string;
+  affectedFilesGlob: string;
+  category: string;
+  tags: string | null;
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  source: 'FIRST_PARTY' | 'COMMUNITY';
+  status: 'LISTED' | 'HIDDEN' | 'ARCHIVED';
+  estFilesLow: number | null;
+  estFilesHigh: number | null;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+  iconUrl: string | null;
+  thumbnailUrl: string | null;
+  samplePrUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MigrationListItem {
+  recipe: MigrationRecipeSummary;
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface MigrationVariant {
+  id: string;
+  recipeId: string;
+  optionsSignature: string;
+  options: string;
+  specTemplate: string;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+}
+
+export interface MigrationSlot {
+  id: string;
+  recipeId: string;
+  name: string;
+  displayName: string;
+  type: 'TEXT' | 'SELECT' | 'SECRET' | 'REPO_PICKER' | 'FILE_PATH' | 'NUMBER' | 'BOOLEAN';
+  required: boolean;
+  defaultValue: string | null;
+  options: string | null;
+  description: string | null;
+  displayOrder: number;
+}
+
+export interface MigrationDependency {
+  recipeId: string;
+  dependsOnId: string;
+  kind: 'PREREQUISITE' | 'RECOMMENDED_AFTER';
+}
+
+export interface MigrationDetail {
+  recipe: MigrationRecipeSummary;
+  variants: MigrationVariant[];
+  slots: MigrationSlot[];
+  dependencies: MigrationDependency[];
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface MigrationDryRunRepoApplicability {
+  repoId: string;
+  fullName: string | null;
+  status: 'APPLICABLE' | 'INCOMPATIBLE_STACK' | 'UNKNOWN_STACK' | 'NOT_LINKED';
+  reason: string | null;
+  estFilesLow: number | null;
+  estFilesHigh: number | null;
+  estCostLow: string | null;
+  estCostHigh: string | null;
+}
+
+export interface MigrationDryRunResult {
+  slug: string;
+  name: string;
+  estCostLowTotal: string | null;
+  estCostHighTotal: string | null;
+  estFilesLowTotal: number | null;
+  estFilesHighTotal: number | null;
+  sampleDiff: string | null;
+  perRepo: MigrationDryRunRepoApplicability[];
+}
+
+export interface MigrationApplyResponse {
+  executionRunId: string;
+  status: string;
+  message: string;
+}
+
+export const listMigrations = (
+  filters: { category?: string; tier?: string; search?: string } = {},
+) => {
+  const qs = new URLSearchParams();
+  if (filters.category) qs.set('category', filters.category);
+  if (filters.tier) qs.set('tier', filters.tier);
+  if (filters.search) qs.set('search', filters.search);
+  const q = qs.toString();
+  return req<MigrationListItem[]>(`/migrations${q ? `?${q}` : ''}`);
+};
+
+export const getMigrationDetail = (slug: string) =>
+  req<MigrationDetail>(`/migrations/${encodeURIComponent(slug)}`);
+
+export const migrationDryRun = (
+  slug: string,
+  body: { projectId: string; repoIds: string[] },
+) =>
+  req<MigrationDryRunResult>(`/migrations/${encodeURIComponent(slug)}/dry-run`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const migrationApply = (
+  slug: string,
+  body: {
+    projectId: string;
+    repoIds: string[];
+    slotValues?: Record<string, string>;
+    optionsSignature?: string;
+    branch?: string;
+  },
+) =>
+  req<MigrationApplyResponse>(`/migrations/${encodeURIComponent(slug)}/apply`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+// ── Readymade Solutions library (R-327..R-331) ────────────────────────────
+
+export interface ReadymadeSolutionSummary {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string | null;
+  description: string | null;
+  category: string;
+  macroGroup: string;
+  tags: string | null;
+  kind: 'PRIMITIVE' | 'STACK' | 'INTEGRATION';
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  source: 'FIRST_PARTY' | 'COMMUNITY';
+  status: 'LISTED' | 'HIDDEN' | 'ARCHIVED';
+  iconUrl: string | null;
+  thumbnailUrl: string | null;
+  samplePrUrl: string | null;
+  estFilesLow: number | null;
+  estFilesHigh: number | null;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+  authorUserId: string | null;
+  authorOrgId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReadymadeListItem {
+  solution: ReadymadeSolutionSummary;
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface ReadymadeVariant {
+  id: string;
+  solutionId: string;
+  language: string;
+  framework: string;
+  options: string | null;
+  specTemplate: string;
+  scaffoldKey: string | null;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+  createdAt: string;
+}
+
+export interface ReadymadeSlot {
+  id: string;
+  solutionId: string;
+  name: string;
+  displayName: string;
+  type: 'TEXT' | 'SELECT' | 'SECRET' | 'REPO_PICKER' | 'FILE_PATH' | 'NUMBER' | 'BOOLEAN';
+  required: boolean;
+  defaultValue: string | null;
+  options: string | null;
+  description: string | null;
+  displayOrder: number;
+}
+
+export interface ReadymadeDependency {
+  solutionId: string;
+  dependsOnId: string;
+  required: boolean;
+}
+
+export interface ReadymadeDetail {
+  solution: ReadymadeSolutionSummary;
+  variants: ReadymadeVariant[];
+  slots: ReadymadeSlot[];
+  dependencies: ReadymadeDependency[];
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface VariantResolutionResult {
+  bestMatch: ReadymadeVariant | null;
+  availableVariants: ReadymadeVariant[];
+  detectedLanguage: string | null;
+  detectedFramework: string | null;
+  reason: 'OK' | 'NO_VARIANT_FOR_STACK' | 'STACK_NOT_DETECTED' | 'REPO_NOT_LINKED';
+}
+
+export interface LibraryFacets {
+  categories: Record<string, number>;
+  macroGroups: Record<string, number>;
+}
+
+export const listLibrary = (
+  filters: { category?: string; macroGroup?: string; tier?: string; search?: string } = {},
+) => {
+  const qs = new URLSearchParams();
+  if (filters.category) qs.set('category', filters.category);
+  if (filters.macroGroup) qs.set('macro_group', filters.macroGroup);
+  if (filters.tier) qs.set('tier', filters.tier);
+  if (filters.search) qs.set('search', filters.search);
+  const q = qs.toString();
+  return req<ReadymadeListItem[]>(`/library${q ? `?${q}` : ''}`);
+};
+
+export const getLibraryDetail = (slug: string) =>
+  req<ReadymadeDetail>(`/library/${encodeURIComponent(slug)}`);
+
+export const getLibraryFacets = () =>
+  req<LibraryFacets>(`/library/categories`);
+
+export const resolveLibraryVariant = (slug: string, projectId: string, repoId: string) =>
+  req<VariantResolutionResult>(
+    `/library/${encodeURIComponent(slug)}/resolve?projectId=${encodeURIComponent(projectId)}&repoId=${encodeURIComponent(repoId)}`,
+    { method: 'POST' },
+  );
+
+/** R-331 — instantiate a solution into a V2 run (slot-substituted spec → ExecutionOrchestrator). */
+export const instantiateLibrarySolution = (
+  slug: string,
+  body: {
+    projectId: string;
+    repoIds: string[];
+    slotValues?: Record<string, string>;
+    variantId?: string;
+    branch?: string;
+  },
+) =>
+  req<{ executionRunId: string; status: string; message: string }>(
+    `/library/${encodeURIComponent(slug)}/instantiate`,
+    { method: 'POST', body: JSON.stringify(body) },
+  );
+
+export const favouriteLibrarySolution = (slug: string) =>
+  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, { method: 'POST' });
+
+export const unfavouriteLibrarySolution = (slug: string) =>
+  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+
+/**
+ * R-341 — tier-stratified cost-cap predicate.  Mirrors the backend's
+ * {@code TierEnforcementService.requiresCostCap}.  Drives the
+ * Readymades + Migrations cost-UI: FREE/PRO without BYOK get the
+ * cost-cap input; TEAM/ENTERPRISE (and PRO with BYOK) get the
+ * read-only "Est. $X on your keys" chip instead.
+ */
+export function requiresCostCap(user: AuthUser | null | undefined): boolean {
+  if (!user) return true; // anonymous → treat as FREE-equivalent
+  const tier = user.tier;
+  if (tier === 'ENTERPRISE' || tier === 'TEAM') return false;
+  const hasByok = !!(user.hasOpenAiKey || user.hasAnthropicKey || user.hasGeminiKey);
+  if (tier === 'PRO') return !hasByok;
+  return true; // FREE
+}
+
