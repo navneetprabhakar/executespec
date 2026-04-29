@@ -4,10 +4,12 @@ import {
   getMigrationDetail,
   migrationApply,
   migrationDryRun,
+  requiresCostCap,
   type MigrationDetail,
   type MigrationDryRunResult,
   type MigrationSlot,
 } from '@/lib/api';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 /**
  * R-340 — recipe detail page with the W3 two-phase halt-and-inspect
@@ -34,6 +36,10 @@ import {
 export default function V3MigrationDetail() {
   const { slug } = useParams<{ slug: string }>();
   const navigate = useNavigate();
+  // R-341 — caller's tier drives the cost-section UX (cap-input vs
+  // info-only chip).
+  const user = useAuthStore((s) => s.user);
+  const showCostCap = requiresCostCap(user);
 
   const [detail, setDetail] = useState<MigrationDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -288,7 +294,7 @@ export default function V3MigrationDetail() {
             {dryRunError && (
               <div style={errorBoxStyle}>{dryRunError}</div>
             )}
-            {dryRunResult && <DryRunSummary result={dryRunResult} />}
+            {dryRunResult && <DryRunSummary result={dryRunResult} showCostCap={showCostCap} />}
           </FormSection>
 
           {/* Phase 2 — apply */}
@@ -403,7 +409,7 @@ function SlotInput({ slot, value, onChange }: {
   );
 }
 
-function DryRunSummary({ result }: { result: MigrationDryRunResult }) {
+function DryRunSummary({ result, showCostCap }: { result: MigrationDryRunResult; showCostCap: boolean }) {
   const totalCost = result.estCostLowTotal && result.estCostHighTotal
     ? `≈ ${parseFloat(result.estCostLowTotal).toFixed(0)}–${parseFloat(result.estCostHighTotal).toFixed(0)} credits total`
     : null;
@@ -426,6 +432,21 @@ function DryRunSummary({ result }: { result: MigrationDryRunResult }) {
         {totalCost && <span style={chipStyle}>{totalCost}</span>}
         {totalFiles && <span style={chipStyle}>{totalFiles}</span>}
         <span style={chipStyle}>{result.perRepo.length} repo(s) selected</span>
+      </div>
+      {/* R-341 — tier-stratified cost framing. */}
+      <div style={{
+        marginBottom: 10,
+        padding: '6px 10px',
+        background: showCostCap ? 'rgba(91,141,239,0.10)' : 'rgba(122,209,200,0.10)',
+        border: `1px solid ${showCostCap ? 'rgba(91,141,239,0.35)' : 'rgba(122,209,200,0.35)'}`,
+        borderRadius: 4,
+        fontSize: 11.5,
+        color: 'var(--v3-text)',
+        lineHeight: 1.5,
+      }}>
+        {showCostCap
+          ? '💳 Will use platform credits — capped at your tier\'s per-run budget. Upgrade or add a BYOK key on Settings to remove the cap.'
+          : '🔑 Will use your own LLM provider keys (BYOK) — billed direct by the provider, no platform-side cap.'}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {result.perRepo.map((row) => (

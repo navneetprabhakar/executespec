@@ -2777,3 +2777,19 @@ export const migrationApply = (
     body: JSON.stringify(body),
   });
 
+/**
+ * R-341 — tier-stratified cost-cap predicate.  Mirrors the backend's
+ * {@code TierEnforcementService.requiresCostCap}.  Drives the
+ * Readymades + Migrations cost-UI: FREE/PRO without BYOK get the
+ * cost-cap input; TEAM/ENTERPRISE (and PRO with BYOK) get the
+ * read-only "Est. $X on your keys" chip instead.
+ */
+export function requiresCostCap(user: AuthUser | null | undefined): boolean {
+  if (!user) return true; // anonymous → treat as FREE-equivalent
+  const tier = user.tier;
+  if (tier === 'ENTERPRISE' || tier === 'TEAM') return false;
+  const hasByok = !!(user.hasOpenAiKey || user.hasAnthropicKey || user.hasGeminiKey);
+  if (tier === 'PRO') return !hasByok;
+  return true; // FREE
+}
+
