@@ -2640,3 +2640,140 @@ export const compactProjectChat = (projectId: string) =>
     { method: 'POST' },
   );
 
+// ── Migrations product (R-336..R-339) ─────────────────────────────────────
+
+export interface MigrationRecipeSummary {
+  id: string;
+  slug: string;
+  name: string;
+  tagline: string | null;
+  description: string | null;
+  sourceStack: string;
+  targetStack: string;
+  affectedFilesGlob: string;
+  category: string;
+  tags: string | null;
+  tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE';
+  source: 'FIRST_PARTY' | 'COMMUNITY';
+  status: 'LISTED' | 'HIDDEN' | 'ARCHIVED';
+  estFilesLow: number | null;
+  estFilesHigh: number | null;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+  iconUrl: string | null;
+  thumbnailUrl: string | null;
+  samplePrUrl: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MigrationListItem {
+  recipe: MigrationRecipeSummary;
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface MigrationVariant {
+  id: string;
+  recipeId: string;
+  optionsSignature: string;
+  options: string;
+  specTemplate: string;
+  estCreditsLow: string | null;
+  estCreditsHigh: string | null;
+}
+
+export interface MigrationSlot {
+  id: string;
+  recipeId: string;
+  name: string;
+  displayName: string;
+  type: 'TEXT' | 'SELECT' | 'SECRET' | 'REPO_PICKER' | 'FILE_PATH' | 'NUMBER' | 'BOOLEAN';
+  required: boolean;
+  defaultValue: string | null;
+  options: string | null;
+  description: string | null;
+  displayOrder: number;
+}
+
+export interface MigrationDependency {
+  recipeId: string;
+  dependsOnId: string;
+  kind: 'PREREQUISITE' | 'RECOMMENDED_AFTER';
+}
+
+export interface MigrationDetail {
+  recipe: MigrationRecipeSummary;
+  variants: MigrationVariant[];
+  slots: MigrationSlot[];
+  dependencies: MigrationDependency[];
+  locked: boolean;
+  unlockTier: string | null;
+}
+
+export interface MigrationDryRunRepoApplicability {
+  repoId: string;
+  fullName: string | null;
+  status: 'APPLICABLE' | 'INCOMPATIBLE_STACK' | 'UNKNOWN_STACK' | 'NOT_LINKED';
+  reason: string | null;
+  estFilesLow: number | null;
+  estFilesHigh: number | null;
+  estCostLow: string | null;
+  estCostHigh: string | null;
+}
+
+export interface MigrationDryRunResult {
+  slug: string;
+  name: string;
+  estCostLowTotal: string | null;
+  estCostHighTotal: string | null;
+  estFilesLowTotal: number | null;
+  estFilesHighTotal: number | null;
+  sampleDiff: string | null;
+  perRepo: MigrationDryRunRepoApplicability[];
+}
+
+export interface MigrationApplyResponse {
+  executionRunId: string;
+  status: string;
+  message: string;
+}
+
+export const listMigrations = (
+  filters: { category?: string; tier?: string; search?: string } = {},
+) => {
+  const qs = new URLSearchParams();
+  if (filters.category) qs.set('category', filters.category);
+  if (filters.tier) qs.set('tier', filters.tier);
+  if (filters.search) qs.set('search', filters.search);
+  const q = qs.toString();
+  return req<MigrationListItem[]>(`/migrations${q ? `?${q}` : ''}`);
+};
+
+export const getMigrationDetail = (slug: string) =>
+  req<MigrationDetail>(`/migrations/${encodeURIComponent(slug)}`);
+
+export const migrationDryRun = (
+  slug: string,
+  body: { projectId: string; repoIds: string[] },
+) =>
+  req<MigrationDryRunResult>(`/migrations/${encodeURIComponent(slug)}/dry-run`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const migrationApply = (
+  slug: string,
+  body: {
+    projectId: string;
+    repoIds: string[];
+    slotValues?: Record<string, string>;
+    optionsSignature?: string;
+    branch?: string;
+  },
+) =>
+  req<MigrationApplyResponse>(`/migrations/${encodeURIComponent(slug)}/apply`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+

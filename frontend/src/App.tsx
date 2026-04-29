@@ -78,6 +78,9 @@ import V3Integrations from '@/v3/pages/V3Integrations';
 import V3Team from '@/v3/pages/V3Team';
 import V3Trust from '@/v3/pages/V3Trust';
 import V3Insights from '@/v3/pages/V3Insights';
+// R-340 — Migrations product W5 frontend (gallery + detail).
+import V3Migrations from '@/v3/pages/V3Migrations';
+import V3MigrationDetail from '@/v3/pages/V3MigrationDetail';
 import V2OptInGate from '@/v3/components/V2OptInGate';
 // Selling-point #6 — public anonymized /exec snapshot for the
 // PgM/CFO conversion path. Public, no auth, share-link-able.
@@ -172,6 +175,9 @@ export default function App() {
         <Route path="team" element={<V3Team />} />
         <Route path="trust" element={<V3Trust />} />
         <Route path="insights" element={<V3Insights />} />
+        {/* R-340 — Migrations product gallery + detail. */}
+        <Route path="migrations" element={<V3Migrations />} />
+        <Route path="migrations/:slug" element={<V3MigrationDetail />} />
         {/* /v3/changelog route removed 2026-04-28 (concern 3 — page
             deleted; revisit later). Falls through to the SPA's catch-all
             redirect at "/*" → "/", which now lands anon visitors on
