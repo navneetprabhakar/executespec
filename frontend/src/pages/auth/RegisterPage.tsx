@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { Link, useSearchParams } from 'react-router-dom';
 import { Eye, EyeOff, Mail, Check, AlertCircle } from 'lucide-react';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { readSignupAttribution } from '@/lib/analytics';
@@ -22,6 +22,23 @@ export default function RegisterPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const { register } = useAuthStore();
+  const [searchParams] = useSearchParams();
+
+  // R-341 (2026-04-29) — marketing-site handoff.  Mirrors the
+  // LoginPage hook: when the user lands here from
+  // executespec.ai's hero composer with `?spec=<encoded>`, stash
+  // it to sessionStorage as `v3-anon-spec` so the post-signup
+  // claim flow hydrates the in-app composer after registration.
+  useEffect(() => {
+    const spec = searchParams.get('spec');
+    if (!spec) return;
+    try {
+      const capped = spec.length > 4000 ? spec.slice(0, 4000) : spec;
+      sessionStorage.setItem('v3-anon-spec', capped);
+    } catch (_) {
+      /* sessionStorage can throw in private mode — silent fallback */
+    }
+  }, [searchParams]);
 
   const set = (k: keyof typeof form) => (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm(f => ({ ...f, [k]: e.target.value }));

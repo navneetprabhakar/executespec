@@ -67,7 +67,12 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 // touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
 import V3Shell from '@/v3/components/V3Shell';
 import V3HomeRedirect from '@/v3/pages/V3HomeRedirect';
-import V3Landing from '@/v3/pages/V3Landing';
+// R-341 (2026-04-29): V3Landing route converted to a Navigate redirect
+// to root (the static marketing site at executespec.ai is now the
+// canonical public landing surface).  The component file stays in the
+// codebase so direct deep-links + e2e tests keep their reference, but
+// it no longer mounts as a user-facing page.
+// import V3Landing from '@/v3/pages/V3Landing';
 import V3Auth from '@/v3/pages/V3Auth';
 import V3ProjectHome from '@/v3/pages/V3ProjectHome';
 import V3RunDetail from '@/v3/pages/V3RunDetail';
@@ -158,11 +163,16 @@ export default function App() {
       {/* ── v3 greenfield surfaces (R-101+) ──
           Mounted outside AppLayout so v3 owns its own chrome (no v2 sidebar,
           no v2 header). Auth gating per-screen (some v3 routes are public:
-          /v3/landing, /v3/pricing, /v3/trust, /v3/auth). */}
+          /v3/pricing, /v3/trust, /v3/auth, /v3/library, /v3/migrations).
+          R-341 (2026-04-29): /v3/landing is now a Navigate redirect to
+          root — the static marketing site at executespec.ai is the
+          canonical public landing surface and the SPA hands off via
+          the `?spec=` query param after the marketing-site composer
+          submit. */}
       <Route path="/v3" element={<V3Shell />}>
         <Route index element={<Navigate to="home" replace />} />
         <Route path="home" element={<V3HomeRedirect />} />
-        <Route path="landing" element={<V3Landing />} />
+        <Route path="landing" element={<Navigate to="/" replace />} />
         <Route path="auth" element={<V3Auth />} />
         {/* R-310 (Wave 7) — explicit empty-state route. MUST come before
             the catch-all `p/:slug` so V3ProjectHome doesn't fire a 404 GET
@@ -200,11 +210,16 @@ export default function App() {
         {/* Wave 2.2 — sandbox → run-submit prefill landing (inside AppLayout for nav consistency) */}
         <Route element={<AppLayout />}>
           {/* R-201 (Wave 4) — /runs/new used to chain through /projects which
-              then routed to v2 ProjectsListPage. Replaced with a hard-redirect
-              to /v3/landing — that's the single composer-first entry point
-              per the v3 redesign (greenfield doc §4.1 + §4.4). The chained
-              redirect was the "ghost route" symptom in the fresh-eyes audit. */}
-          <Route path="runs/new" element={<Navigate to="/v3/landing" replace />} />
+              then routed to v2 ProjectsListPage.
+              R-341 (2026-04-29): the /v3/landing redirect target was
+              retired (V3Landing is now a redirect to root since the
+              marketing site is the canonical landing).  This route is
+              auth-gated (inside the ProtectedRoute block) so an authed
+              user who hits /runs/new has just typed it into the URL bar
+              with intent — send them to the v3 home which dispatches
+              to their first project.  Anon hits would have already been
+              caught by ProtectedRoute and bounced to /login. */}
+          <Route path="runs/new" element={<Navigate to="/v3/home" replace />} />
           <Route path="runs/new/sandbox" element={<RunsNewLanding />} />
           {/* Phase 1.1 #9: /legacy/billing — soft landing for grandfathered
               PRO subscribers whose tier-state-changed email links here.

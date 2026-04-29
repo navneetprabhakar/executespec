@@ -1124,11 +1124,21 @@
 
             <script>
                 // ── Hero composer submit ────────────────────────────────
-                // Redirects to the app's V3Landing with the spec in a
-                // query param.  V3Landing's mount hook reads ?prefill=…
-                // and hydrates its textarea + handles the auth handoff.
-                // Length-capped at 4 KB to stay under the URL-length
-                // tolerance of every real-world server / CDN.
+                // R-341 (2026-04-29): redirects to the bare app root with
+                // the spec in a `?spec=` query param.  The SPA's
+                // ProtectedRoute / LoginPage chain now reads the param,
+                // stashes it to sessionStorage as `v3-anon-spec`, and the
+                // existing post-auth claim flow (V3Auth.claimAndForward)
+                // picks it up to dispatch the run.
+                //
+                // Previously this routed to /v3/landing?prefill=… which
+                // re-rendered the same composer screen on the app domain
+                // (a duplicate landing-on-landing UX).  V3Landing inside
+                // the SPA is now a Navigate redirect to root — the
+                // marketing site at executespec.ai is the single canonical
+                // landing surface.
+                //
+                // Length-capped at 4 KB to stay under URL-length limits.
                 function heroComposerSubmit(e) {
                     e.preventDefault();
                     var ta = document.getElementById('hero-spec');
@@ -1138,7 +1148,7 @@
                         return false;
                     }
                     var capped = raw.length > 4000 ? raw.slice(0, 4000) : raw;
-                    var url = 'https://dev.executespec.ai/v3/landing?prefill=' + encodeURIComponent(capped);
+                    var url = 'https://dev.executespec.ai/?spec=' + encodeURIComponent(capped);
                     if (window.gtag) {
                         try { window.gtag('event', 'hero_composer_submit', { length: capped.length }); }
                         catch (_) { /* analytics is non-critical */ }
