@@ -5,6 +5,8 @@ import {
   getProjects,
   getProjectRepos,
   linkProjectRepo,
+  listGitHubRepos,
+  type GitHubRemoteRepo,
   type ProjectDto,
 } from '@/lib/api';
 import type { ProjectRepoLink } from '@/types/project';
@@ -329,6 +331,57 @@ function NewRepoInline({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // R-336 — fetch the caller's GitHub repo catalogue on mount so the
+  // picker can offer a real dropdown instead of a paste-the-string
+  // text input.  Endpoint reads the user's stored PAT and returns
+  // every repo they can see (owned + collaborator + org-member).
+  // Falls back to the free-form input when:
+  //   - the call fails (no PAT on the user, GitHub down, 401)
+  //   - the response is empty (rare — usually means PAT scope too narrow)
+  //   - the user explicitly toggles "type manually" (forks not in the
+  //     default owner's list, etc.)
+  const [githubRepos, setGithubRepos] = useState<GitHubRemoteRepo[] | null>(null);
+  const [ghLoadErr, setGhLoadErr] = useState<string | null>(null);
+  const [ghLoading, setGhLoading] = useState(true);
+  const [manualMode, setManualMode] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    setGhLoading(true);
+    listGitHubRepos()
+      .then((repos) => {
+        if (cancelled) return;
+        setGithubRepos(repos);
+        if (repos.length === 0) {
+          // Not a hard error — could be a scope-restricted PAT.
+          // We render the manual-fallback hint when this lands.
+          setGhLoadErr(null);
+        }
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setGhLoadErr(e?.message ?? 'Could not list GitHub repos');
+        setGithubRepos(null);
+      })
+      .finally(() => {
+        if (!cancelled) setGhLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** When user picks a row from the dropdown, mirror its default
+   *  branch into the branch input so they don't have to retype it. */
+  function pickGithubRepo(value: string) {
+    setFullName(value);
+    if (value === '') return;
+    const found = githubRepos?.find((r) => r.fullName === value);
+    if (found?.defaultBranch) {
+      setDefaultBranch(found.defaultBranch);
+    }
+  }
+
   async function submit() {
     if (!fullName.trim() || !fullName.includes('/')) {
       setErr('Repo full name must look like "owner/repo".');
@@ -351,6 +404,11 @@ function NewRepoInline({
     }
   }
 
+  // R-336 — manual mode is the fallback when the GitHub list call
+  // fails OR the user toggles it (e.g. for a forked repo outside
+  // their default owner's catalogue).
+  const useManual = manualMode || ghLoadErr !== null || (githubRepos !== null && githubRepos.length === 0);
+
   return (
     <div
       style={{
@@ -367,13 +425,67 @@ function NewRepoInline({
       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--v3-text-subtle)' }}>
         Add repo
       </div>
-      <input
-        autoFocus
-        value={fullName}
-        onChange={(e) => setFullName(e.target.value)}
-        placeholder="owner/repo (e.g. navneetprabhakar/executespec)"
-        style={inputStyle}
-      />
+
+      {ghLoading ? (
+        <span style={hintStyle}>Loading your GitHub repos…</span>
+      ) : useManual ? (
+        <>
+          {ghLoadErr && (
+            <span style={{ ...hintStyle, color: '#FBBF24' }}>
+              Couldn't fetch from GitHub ({ghLoadErr}) — type the repo name below.
+            </span>
+          )}
+          {!ghLoadErr && githubRepos && githubRepos.length === 0 && (
+            <span style={{ ...hintStyle, color: '#FBBF24' }}>
+              No repos returned from GitHub — your PAT may be missing the
+              <code style={{ margin: '0 4px' }}>repo</code>scope. Type the
+              repo name manually below.
+            </span>
+          )}
+          <input
+            autoFocus
+            value={fullName}
+            onChange={(e) => setFullName(e.target.value)}
+            placeholder="owner/repo (e.g. navneetprabhakar/executespec)"
+            style={inputStyle}
+          />
+        </>
+      ) : (
+        <>
+          <select
+            autoFocus
+            value={fullName}
+            onChange={(e) => pickGithubRepo(e.target.value)}
+            style={inputStyle}
+          >
+            <option value="">— Pick a repo from GitHub —</option>
+            {githubRepos?.map((r) => (
+              <option key={r.fullName} value={r.fullName}>
+                {r.fullName}
+                {r.isPrivate ? ' (private)' : ''} · {r.defaultBranch}
+              </option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={() => setManualMode(true)}
+            style={{
+              alignSelf: 'flex-start',
+              padding: 0,
+              background: 'transparent',
+              border: 'none',
+              fontSize: 11,
+              color: 'var(--v3-text-subtle)',
+              cursor: 'pointer',
+              textDecoration: 'underline',
+              fontFamily: 'inherit',
+            }}
+          >
+            Don't see it? Type the repo name manually.
+          </button>
+        </>
+      )}
+
       <div style={{ display: 'flex', gap: 6 }}>
         <select
           value={scope}
@@ -391,7 +503,7 @@ function NewRepoInline({
         />
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <button type="button" onClick={submit} disabled={busy} style={primaryButtonSm(busy)}>
+        <button type="button" onClick={submit} disabled={busy || !fullName} style={primaryButtonSm(busy || !fullName)}>
           {busy ? 'Adding…' : 'Add + link'}
         </button>
         <button type="button" onClick={onCancel} style={ghostButtonSm}>
