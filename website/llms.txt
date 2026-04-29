@@ -91,4 +91,3 @@ The selling-point line: **"AI that ships pull requests your team will actually m
 - Sales / enterprise: admin@executespec.ai
 - Support: admin@executespec.ai
 - LinkedIn: https://www.linkedin.com/company/executespec
-- Founder: Navneet Prabhakar — https://www.linkedin.com/in/navneetprabhakar/
