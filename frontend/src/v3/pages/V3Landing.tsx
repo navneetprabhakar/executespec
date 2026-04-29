@@ -44,7 +44,25 @@ const SAMPLE_PROMPTS = [
 ];
 
 export default function V3Landing() {
-  const [text, setText] = useState('');
+  // 2026-04-29 — the static marketing site (executespec.ai) now hosts a
+  // chat-first composer in its hero.  When the visitor submits there, the
+  // marketing site redirects here with the typed spec in a `?prefill=…`
+  // query param.  Initial state honors that param so the user lands inside
+  // the app with their spec already in the textarea, ready to refine + ship.
+  const initialPrefill = (() => {
+    if (typeof window === 'undefined') return '';
+    try {
+      const raw = new URLSearchParams(window.location.search).get('prefill');
+      if (!raw) return '';
+      // Cap at 4 KB to match the website's submit-handler cap.  Anything
+      // longer is almost certainly an exploit attempt or a malformed link.
+      return raw.length > 4000 ? raw.slice(0, 4000) : raw;
+    } catch {
+      return '';
+    }
+  })();
+
+  const [text, setText] = useState(initialPrefill);
   const [submitting, setSubmitting] = useState(false);
   // 2026-04-28 — `result` state + AnonymousRunResponse type removed. The
   // submit handler now navigates to /login on first keystroke-then-submit

@@ -1,0 +1,44 @@
+slug: mocha-to-vitest
+name: Mocha → Vitest
+tagline: Modernize your test suite to Vitest with full ESM support
+description: |
+  Converts every Mocha + Chai test file to Vitest.  describe/it/before/
+  beforeEach/after/afterEach all carry over; the assertion library
+  swaps from Chai to Vitest's built-in expect.  package.json scripts
+  + config get refreshed.
+source_stack:
+  language: typescript
+target_stack:
+  language: typescript
+  test_runner: vitest
+affected_files_glob: "{test,tests,src}/**/*.{test,spec}.{ts,js}"
+category: tooling-migration
+tags: [vitest, mocha, chai, testing]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/mocha-to-vitest-fallback.md
+preservation_contract:
+  preserve_test_outcomes: true
+  preserve_test_descriptions: true
+est_files: [5, 60]
+est_credits: [2.0, 15.0]
+slots: []
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Migrate this codebase's test suite from Mocha to Vitest.
+      - Replace `import {describe, it} from 'mocha'` with the Vitest
+        equivalent (or drop the import — Vitest globals are on by
+        default with the right config).
+      - Swap chai's `expect(x).to.equal(y)` for Vitest's
+        `expect(x).toEqual(y)`.  Other chai matchers map similarly:
+        `to.deep.equal` → `toEqual`, `to.be.true` → `toBe(true)`,
+        `to.have.lengthOf(n)` → `toHaveLength(n)`.
+      - Replace `sinon.spy/stub` with `vi.fn/spyOn` where used.
+      - Update package.json: drop mocha + chai, add vitest.
+      - Generate vitest.config.ts with sensible defaults
+        (test environment matching the existing setup).
+      - Update test scripts from `mocha …` to `vitest run`.
+      - Preserve every test's assertions + outcomes exactly.

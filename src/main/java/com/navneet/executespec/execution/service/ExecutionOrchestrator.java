@@ -112,8 +112,33 @@ public class ExecutionOrchestrator {
                 .sourceExecutionId(blankToNull(req.sourceExecutionId()))
                 .continuePrNumber(req.continuePrNumber())
                 .continuePrRepo(blankToNull(req.continuePrRepoFullName()))
+                // R-324 — persist the launch-time repo selection (existing
+                // links + any newly-minted repos from req.newRepos()) so
+                // the planner can scope decomposition + the SSE/UI can
+                // surface what's actually in scope. NULL when the user
+                // didn't select anything (every linked repo is in scope).
+                .selectedRepoIds(serializeRepoIds(effectiveRepoIds))
                 .build();
         return runRepo.save(run);
+    }
+
+    /**
+     * R-324 — serialise a list of repo IDs to a JSON string for storage in
+     * the {@code execution_run.selected_repo_ids} JSONB column. Returns
+     * {@code null} when the list is null or empty (which the column treats
+     * as "no explicit selection — every linked repo is in scope").
+     *
+     * <p>Plain string concatenation is safe here because every entry is a
+     * UUID-shaped string, which has no characters needing JSON escaping.
+     */
+    private static String serializeRepoIds(java.util.List<String> ids) {
+        if (ids == null || ids.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder("[");
+        for (int i = 0; i < ids.size(); i++) {
+            if (i > 0) sb.append(',');
+            sb.append('"').append(ids.get(i)).append('"');
+        }
+        return sb.append(']').toString();
     }
 
     private String composeRequirement(String requirement,

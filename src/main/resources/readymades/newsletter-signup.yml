@@ -1,0 +1,52 @@
+slug: newsletter-signup
+name: Newsletter signup form
+tagline: Email-capture component + double-opt-in confirmation flow
+description: |
+  Adds a newsletter signup form component + the backend route to
+  store + confirm.  Sends a double-opt-in email; verified
+  subscribers go to a separate "confirmed" status.  Designed to
+  paste into a marketing landing page.
+category: grow-the-user-base
+macro_group: ui-and-growth
+tags: [marketing, newsletter, email-capture, double-opt-in]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/mail-plus.svg
+est_files: [3, 6]
+est_credits: [1.0, 2.0]
+slots:
+  - name: from_email
+    display_name: Confirmation sender
+    type: TEXT
+    required: true
+    default_value: hello@example.com
+    description: Address that the double-opt-in confirmation email comes from.
+    display_order: 0
+  - name: list_name
+    display_name: List name
+    type: TEXT
+    required: false
+    default_value: default
+    description: Logical list to attach signups to (for future segmentation).
+    display_order: 1
+variants:
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add a NewsletterSignup React Server Component + a /api/subscribe
+      route + a /confirm/:token route.  Persist signups to a
+      newsletter_signup table with status pending → confirmed.
+      Sender: {{from_email}}.  List: {{list_name}}.  Honeypot field
+      to deter bots.
+    scaffold_key: node-frontend
+  - language: typescript
+    framework: express
+    options: {db: postgres}
+    spec_template: |
+      Add a /api/subscribe + /confirm endpoint to this Express app.
+      Sender: {{from_email}}.  List: {{list_name}}.  Honeypot
+      field; rate-limit by IP.
+    scaffold_key: node-backend

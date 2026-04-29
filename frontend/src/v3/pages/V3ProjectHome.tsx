@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useV3ProjectStore, type Bubble } from '../stores/useV3ProjectStore';
 import Composer from '../components/Composer';
 import PlanCard from '../components/PlanCard';
 import ResultCard from '../components/ResultCard';
 import Pill from '../components/Pill';
+import RepoAttachPopover from '../components/RepoAttachPopover';
 import {
   PROJECT_PLURAL,
   PROVIDER_DISPLAY,
@@ -35,6 +36,11 @@ export default function V3ProjectHome() {
   const navigate = useNavigate();
   const { loaded, loading, project, bubbles, error, load, reset } = useV3ProjectStore();
   const threadRef = useRef<HTMLDivElement>(null);
+  // R-324 Checkpoint 2 — "Attach another repo" affordance state.
+  // The popover handles the actual link call; we just rehydrate the
+  // project store on success so the new repo lands in scope for the
+  // next launch without a hard reload.
+  const [attachOpen, setAttachOpen] = useState(false);
 
   // Load on mount + on slug change
   useEffect(() => {
@@ -114,7 +120,46 @@ export default function V3ProjectHome() {
               · {Math.floor(bubbles.length / 2)} runs in thread
             </span>
           )}
+          {/* R-324 Checkpoint 2 — entry point for the "Attach another
+              repo" flow. Opens RepoAttachPopover with targetProjectId
+              set so the picked repo links into THIS project rather
+              than spawning a new one. */}
+          {slug && (
+            <button
+              type="button"
+              onClick={() => setAttachOpen(true)}
+              style={{
+                marginLeft: 'auto',
+                padding: '4px 10px',
+                background: 'transparent',
+                color: 'var(--v3-text-subtle)',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: 11.5,
+                fontFamily: 'inherit',
+              }}
+              title="Attach another GitHub repo to this project"
+            >
+              + Attach repo
+            </button>
+          )}
         </div>
+      )}
+
+      {/* R-324 Checkpoint 2 — popover for adding repos to an existing
+          project. onAttached refreshes the project store so the new
+          repo lands in scope for the next Launch without a hard
+          reload. */}
+      {slug && (
+        <RepoAttachPopover
+          open={attachOpen}
+          onClose={() => setAttachOpen(false)}
+          targetProjectId={slug}
+          onAttached={() => {
+            void load(slug);
+          }}
+        />
       )}
 
       {/* Thread */}

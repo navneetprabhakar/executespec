@@ -91,7 +91,12 @@ public class ExecutionPlannerService {
         try {
             String template = new ClassPathResource("prompts/execution_planner.txt")
                     .getContentAsString(StandardCharsets.UTF_8);
-            String codemapsText = buildCodemapsText(run.getProjectId());
+            // R-324 — scope the planner's codemap view to the user's
+            // launch-time repo selection when one was made. NULL/empty
+            // means "every linked project repo is in scope" (today's
+            // pre-R-324 default), so this is a no-op for legacy runs.
+            java.util.Set<UUID> scopedRepoIds = parseSelectedRepoIds(run.getSelectedRepoIds());
+            String codemapsText = buildCodemapsText(run.getProjectId(), scopedRepoIds);
             String filled = template
                     .replace("{{REQUIREMENT}}", run.getRequirement() == null ? "" : run.getRequirement())
                     .replace("{{UNIFIED_ARCH_DOC}}",
@@ -143,19 +148,65 @@ public class ExecutionPlannerService {
         }
     }
 
-    private String buildCodemapsText(String projectId) {
+    /** Package-private for unit-test access — see
+     *  {@link com.navneet.executespec.execution.service.ExecutionPlannerCodemapFilterTest}. */
+    String buildCodemapsText(String projectId, java.util.Set<UUID> scopedRepoIds) {
         var maps = codeMapRepo.findByProjectId(projectId);
         if (maps.isEmpty()) return "(no codemaps)";
+        // R-324 — when the user picked a subset of project repos at Launch
+        // time, restrict the planner's view to those repos. Empty / null
+        // scope means "no filter" (every linked repo is in scope).
+        boolean filtered = scopedRepoIds != null && !scopedRepoIds.isEmpty();
         StringBuilder sb = new StringBuilder();
+        int included = 0;
         for (var cm : maps) {
+            if (filtered && !scopedRepoIds.contains(cm.getRepoId())) continue;
             String repoName = projectRepoRepo.findById(cm.getRepoId())
                     .map(ProjectRepo::getGithubRepoFullName)
                     .orElse(cm.getRepoId().toString());
             sb.append("### ").append(repoName)
               .append(" (id=").append(cm.getRepoId()).append(")\n")
               .append(truncate(cm.getContent(), 3000)).append("\n\n");
+            included++;
+        }
+        if (included == 0) {
+            // The user selected repos that have no codemaps yet. Surface
+            // that explicitly so the planner doesn't silently fall back
+            // to a "(no codemaps)" empty state, which masks the cause.
+            return filtered
+                    ? "(no codemaps for the selected repos — analyse the project to generate them)"
+                    : "(no codemaps)";
         }
         return sb.toString();
+    }
+
+    /**
+     * R-324 — parse the {@code execution_run.selected_repo_ids} JSONB
+     * column (stored as a JSON string of UUID strings) into a Set for
+     * filtering. Tolerant of malformed values: returns an empty set
+     * which the caller treats as "no filter".
+     */
+    java.util.Set<UUID> parseSelectedRepoIds(String json) {
+        if (json == null || json.isBlank() || "[]".equals(json.trim())) return java.util.Set.of();
+        try {
+            JsonNode node = objectMapper.readTree(json);
+            if (!node.isArray()) return java.util.Set.of();
+            java.util.Set<UUID> out = new java.util.LinkedHashSet<>();
+            for (JsonNode el : node) {
+                String s = el.asText(null);
+                if (s == null || s.isBlank()) continue;
+                try {
+                    out.add(UUID.fromString(s));
+                } catch (IllegalArgumentException ignored) {
+                    // Not a UUID — skip rather than throw; legacy rows
+                    // could have any shape.
+                }
+            }
+            return out;
+        } catch (Exception e) {
+            log.debug("[R-324] parseSelectedRepoIds failed for input '{}': {}", json, e.getMessage());
+            return java.util.Set.of();
+        }
     }
 
     private ExecutionPlan parsePlan(String raw) throws Exception {

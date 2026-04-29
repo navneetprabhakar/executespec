@@ -332,7 +332,7 @@ ENTERPRISE + MAX project-level workbench for multi-repo, multi-solution work.
 
 ## Migrations index
 
-V1–V146 across the lifetime of the project. Recent ranges:
+V1–V156 across the lifetime of the project. Recent ranges:
 
 | Range | Theme |
 |-------|-------|
@@ -353,6 +353,9 @@ V1–V146 across the lifetime of the project. Recent ranges:
 | V148 | **Governance caps** (M-032 + M-033 + M-039, Wave 3). 3 nullable columns: `project.spend_cap_usd_monthly NUMERIC(10,2)` (per-project monthly LLM cap), `org.require_admin_approval_above_usd NUMERIC(10,2)` (USD threshold above which only ORG_ADMIN/BILLING_ADMIN/SUPER_ADMIN can approve a plan), `org.allowed_github_owners VARCHAR(1024)` (CSV repo-owner allowlist). Enforced by new `GovernanceGuard` service called from `RunController.approvePlan` + `ProjectRepoService.{linkToProject, createAndLinkNewRepo}`. |
 | V149 | **TEAM-BYOK plan** (M-051, Wave 3, parked decision #2). 2 new `billing_plan` rows ("Team Monthly INR (BYOK)" ₹3,199/seat + "Team Monthly USD (BYOK)" $39/seat) with `key_mode='BYOK'`. Same TEAM tier + same product_access set as the managed-key plans; the only differences are the BYOK flag + the lower per-seat price (closes margin risk on heavy users). 3 `billing_plan_limit` rows (RUNS unlimited, PROJECTS=5, STORAGE_MB=5120). Idempotent (NOT EXISTS guards). Annual TEAM-BYOK rows deferred until demand signal. |
 | V150 | **Activity retention flag seed** (M-038, Backlog). 1 `feature_flag` row: `activity.retention.days = 365`, PLATFORM scope. Read by `ActivityFeedRetentionJob.effectiveRetentionDays()` first; falls back to `activity.feed.retention.days` from application.yml. Clamped to [30, 3650] in code so a typo can't drop everything or hoard forever. SOC 2 / ISO 27001 customers can adjust without a deploy via the existing `/admin/feature-flags` UI. |
+| V154 | **Mono-repo subdir marker** (R-322, on `feature/v3-platform-expansion`, NOT yet merged to `dev`/`main`). Adds `project_repo.subdir VARCHAR(512)` (NULL = repo root). Detected on attach + sync from `.executespec/root.yml` on the default branch via the existing `GitHubRepoService.readRepoFile`. Tolerant parser handles quoted/unquoted, `./` prefix, trailing `/`, comments; rejects absolute / traversal / oversized values. Surfaced on `RepoCard` as a `root: <subdir>` chip when set. |
+| V155 | **Launch-time repo selection** (R-324, on `feature/v3-platform-expansion`). Adds `execution_run.selected_repo_ids JSONB` (NULL/empty = "every linked repo in scope"). `ExecutionOrchestrator.createExecution` serialises `req.repoIds()` + any new-repo IDs into the column; `ExecutionPlannerService.buildCodemapsText` filters codemaps to the scoped set when non-empty. Frontend "+ Attach repo" affordance on `V3ProjectHome` with `onAttached` callback re-loads the project store in place. |
+| V156 | **Big-repo opt-in tracking** (R-325, on `feature/v3-platform-expansion`). Adds `project_repo.size_kb BIGINT` + `project_repo.attached_anyway BOOLEAN DEFAULT FALSE`. The R-323 `executespec.repo.max-size-kb` gate in `ProjectRepoService.createRepo` rejects oversized repos with a 413 mentioning the opt-in path; `CreateRepoRequest.attachAnyway` bypasses the gate + flips the `attached_anyway` column on. UI surfaces a "big repo · counts more credits" amber chip on `RepoCard`. Per-run credit-surcharge formula deferred to the next pricing pass. |
 
 Older ranges are documented in `JAVADOC.md §21.1 Flyway Migrations` and `DEPLOYMENT.md`.
 

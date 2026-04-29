@@ -628,6 +628,14 @@ executespec:
       - resend
       - mintlify
 
+  # R-323 (D-125 #3) — repo-size gate enforced when a repo is attached.
+  # GitHub returns repo `size` in KB (KiB-ish, but close enough for a
+  # clone-time-budget heuristic). Default 250 MB ≈ 250 000 KB; ops can
+  # bump this per environment without a redeploy. Per-tier overrides +
+  # an opt-in bypass land with R-325 alongside the multi-repo work.
+  repo:
+    max-size-kb: ${EXECUTESPEC_REPO_MAX_SIZE_KB:250000}
+
   rate-limit:
     enabled: true
 

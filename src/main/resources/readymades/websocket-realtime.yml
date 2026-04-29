@@ -1,0 +1,45 @@
+slug: websocket-realtime
+name: WebSocket realtime channel
+tagline: Bidirectional events with rooms + reconnection
+description: |
+  Adds a Socket.IO server + a thin client wrapper for realtime
+  features (chat, presence, live cursors).  Rooms, auth-on-connect,
+  exponential-backoff reconnection, and a /test/ws diagnostic
+  endpoint.
+category: talk-to-users
+macro_group: ui-and-growth
+tags: [realtime, websocket, socketio, presence]
+kind: PRIMITIVE
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/wifi.svg
+est_files: [4, 8]
+est_credits: [1.5, 3.5]
+slots:
+  - name: cors_origin
+    display_name: Allowed origin
+    type: TEXT
+    required: false
+    default_value: http://localhost:3000
+    description: Origin allowed to connect to the websocket server.
+    display_order: 0
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Mount Socket.IO on this Express app.  CORS origin
+      {{cors_origin}}.  Auth handshake on connect (verify the JWT
+      cookie).  Rooms for "user:<userId>" and ad-hoc channels.
+      Reconnection enabled.  Add a tiny lib/socket.ts client wrapper
+      consumers can import.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add a Socket.IO server inside a custom Next.js server (or via
+      a Pages-Router fallback).  Origin: {{cors_origin}}.  Provide
+      a useSocket() React hook.
+    scaffold_key: node-frontend

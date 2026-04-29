@@ -1,0 +1,55 @@
+slug: class-components-to-hooks
+name: Class components → hooks (React)
+tagline: Modernize React class components to functional + hooks
+description: |
+  Converts React class components to functional components with
+  hooks. componentDidMount/componentWillUnmount → useEffect;
+  setState → useState; forceUpdate → useReducer; lifecycle order
+  preserved.
+source_stack:
+  language: typescript
+  framework: react
+  min_version: "16.8"
+target_stack:
+  language: typescript
+  framework: react
+  target_version: latest
+affected_files_glob: "src/**/*.{tsx,jsx}"
+category: framework-migration
+tags: [react, hooks, modernization, frontend]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/class-components-to-hooks-fallback.md
+preservation_contract:
+  preserve_component_props_api: true
+  preserve_render_output: true
+  preserve_lifecycle_order: true
+est_files: [5, 50]
+est_credits: [4.0, 20.0]
+slots:
+  - name: extract_custom_hooks
+    display_name: Extract reusable logic into custom hooks
+    type: BOOLEAN
+    required: false
+    default_value: "false"
+    description: When true, repeated state-mgmt patterns get pulled into useXxx custom hooks.
+    display_order: 0
+variants:
+  - options_signature: default
+    options: {}
+    spec_template: |
+      Convert this React app's class components to functional
+      components with hooks.
+      - Identify every `class X extends React.Component` declaration
+      - Convert to `function X(props) { ... }` with equivalent hooks:
+        * `this.state = {...}` → useState per field
+        * `componentDidMount()` → `useEffect(() => {}, [])`
+        * `componentDidUpdate(prevProps)` → `useEffect(() => {}, [deps])`
+        * `componentWillUnmount()` → useEffect cleanup
+        * `forceUpdate()` → `useReducer((x) => x + 1, 0)[1]`
+      - Preserve the public props API + render output exactly
+      - Extract custom hooks: {{extract_custom_hooks}}
+      - The reviewer will verify the preservation contract; do NOT
+        change component prop names, public methods, or render
+        output structure
