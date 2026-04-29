@@ -1,12 +1,26 @@
-# Migrations Product — pending plan
+# Migrations Product — IN-FLIGHT (W1–W7 SHIPPED on `feature/readymades-and-migrations`)
 
-> **Status:** PENDING (scope approved 2026-04-29; not yet started).
-> **Branch when work begins:** `feature/v3-platform-expansion` (or
-> a new branch off it; TBD at execution time).
-> **R-### range reserved:** R-336 → R-345+ (catalog seed + polyglot
-> expansion are multi-commit ongoing efforts).
+> **Status:** **W1–W7 shipped on `feature/readymades-and-migrations`
+> 2026-04-29.** Branch tip `05d92db6` pushed; not yet merged to dev.
+> W8 / W9 / W10 deliberately deferred per the plan's own staging.
+> **Branch:** `feature/readymades-and-migrations` (off fresh `dev`
+> at `902ce292`).
+> **R-### consumed:** R-336 (W1) → R-342 (W7).  R-343 (W8) / R-344
+> (W9) / R-345 (W10) reserved for the v1.5+ follow-ups.
 > **Author:** 2026-04-29 thread, after codebase audit + competitor
 > analysis + 4-angle scope discussion.
+
+## Shipped commit trail (this branch)
+
+| Wave | R-### | Commit | What landed |
+|---|---|---|---|
+| W1 | R-336 | `c3c6eaaa` | V158 schema (5 tables) + entities + repos + DTOs |
+| W2 | R-337 | `c3c6eaaa` (same commit) → seeded later via separate commit | Catalog YAML format + 3 POC recipes (js-to-typescript / express-to-fastify / class-components-to-hooks) + MigrationRecipeSeeder (`@PostConstruct` boot-load + `@Transactional` `reseed()`) + `MigrationAdminController` |
+| W3 | R-338 | `f81bbb24` | Library API (`GET /api/migrations`, `GET /api/migrations/{slug}`, `POST /dry-run`) + `MigrationStackMatcher` + `MigrationDryRunService` (Phase 1 halt-and-inspect, no LLM call in v1) |
+| W4 | R-339 | `416cec06` | V159 tracking columns on `execution_run` + `MigrationOrchestrator` (apply path, multi-repo fan-out via existing Execution View) + cross-product `composer/SlotValidator` + `composer/SpecComposer` + wired `POST /api/migrations/{slug}/apply` |
+| W5 | R-340 | `e21c0145` | Frontend `/v3/migrations` gallery + `/v3/migrations/:slug` halt-and-inspect detail page + 6 migration helpers in `lib/api.ts` |
+| W6 | R-341 | `3c78245b` | `TierEnforcementService.requiresCostCap(tier, hasByok)` + frontend `requiresCostCap(user)` mirror + tier-stratified cost framing on the dry-run summary panel |
+| W7 (partial) | R-342 | `05d92db6` | 5 more recipe seeds: mongoose-to-prisma (3 variants), rest-to-trpc, pages-router-to-app-router, mocha-to-vitest, webpack-to-vite — total v1 catalog now 8 of 11 |
 
 ## One-line pitch
 
@@ -402,17 +416,18 @@ CREATE TABLE migration_dry_run_cache (
 
 ## Out of scope (v1) — explicit list
 
-| Deferred to | Item |
-|---|---|
-| v1.5 (W8) | Hybrid AST + AI fallback per-language |
-| v1.5 (W9) | Continuous suggestions via PostMergeCascade |
-| v1.5+ (W10) | Polyglot recipes (Python, Java, Go) |
-| v2 | Custom recipe authoring inside the UI (community + first-party) |
-| v2 | Migration recipe versioning + rollback |
-| v2 | Cross-recipe orchestration (run a sequence of migrations as one launch) |
-| v2 | Migration "dry-run" that re-runs the full recipe LLM-side without applying (today's dry-run is sample-only) |
-| Roadmap | Migration marketplace with revenue share |
-| Roadmap | Migration recipe import from OpenRewrite / Codemod.com registries |
+| Deferred to | Item | Status as of 2026-04-29 |
+|---|---|---|
+| **W8 (v1.5)** | **Hybrid AST + AI fallback per-language** | **EXPLICITLY DEFERRED.** Schema field `migration_recipe.deterministic_recipe_ref` already in V158 ready to populate; needs ast-grep / OpenRewrite integration which is real per-language lift. Pick this up when v1 hits enough usage to justify the predictability+cost win. |
+| **W9 (v1.5)** | **Continuous suggestions via PostMergeCascade** | **EXPLICITLY DEFERRED.** Beautiful long-term retention play; needs catalog ≥ 30 recipes that genuinely cover real Renovate bumps + careful notification-rate design. v1 ships on-demand only; W9 lands once recipe coverage is meaningful. |
+| **W10 (v1.5+)** | **Polyglot recipes (Python, Java, Go)** | **EXPLICITLY DEFERRED.** v1 ships TS/JS only because ast-grep / jscodeshift coverage is most mature there.  Java should wrap OpenRewrite when authored; Python via libcst.  No catalog gap blocking v1 ship; expand as language demand surfaces. |
+| v2 | Custom recipe authoring inside the UI (community + first-party) | Not started; out of scope. |
+| v2 | Migration recipe versioning + rollback | Not started; not blocking ship. |
+| v2 | Cross-recipe orchestration (run a sequence of migrations as one launch) | Not started; W9 dependency-graph schema already supports the concept. |
+| v2 | Migration "dry-run" that re-runs the full recipe LLM-side without applying (today's dry-run is sample-only) | Not started; W3 dry-run is cache-only by design. |
+| Roadmap | Migration marketplace with revenue share | Not started; out of scope. |
+| Roadmap | Migration recipe import from OpenRewrite / Codemod.com registries | Not started; future ecosystem play. |
+| Catalog follow-up | 3 remaining v1 recipes (CommonJS → ESM, Tailwind v3 → v4, Vue 2 → Vue 3) | Authoring tracked; ships as individual commits per recipe. None block v1 launch. |
 
 ## Effort + cadence
 
