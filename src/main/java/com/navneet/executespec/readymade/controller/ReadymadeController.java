@@ -1,6 +1,7 @@
 package com.navneet.executespec.readymade.controller;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.readymade.dto.ReadymadeDetailDto;
 import com.navneet.executespec.readymade.dto.ReadymadeListItemDto;
 import com.navneet.executespec.readymade.dto.VariantResolutionDto;
@@ -9,6 +10,7 @@ import com.navneet.executespec.readymade.entity.ReadymadeSolution;
 import com.navneet.executespec.readymade.entity.ReadymadeSolution.Tier;
 import com.navneet.executespec.readymade.repository.ReadymadeFavouriteRepository;
 import com.navneet.executespec.readymade.repository.ReadymadeSolutionRepository;
+import com.navneet.executespec.readymade.service.ReadymadeOrchestrator;
 import com.navneet.executespec.readymade.service.ReadymadeService;
 import com.navneet.executespec.readymade.service.VariantResolver;
 import lombok.RequiredArgsConstructor;
@@ -53,6 +55,7 @@ public class ReadymadeController {
 
     private final ReadymadeService readymadeService;
     private final VariantResolver variantResolver;
+    private final ReadymadeOrchestrator readymadeOrchestrator;
     private final ReadymadeFavouriteRepository favouriteRepo;
     private final ReadymadeSolutionRepository solutionRepo;
 
@@ -98,23 +101,34 @@ public class ReadymadeController {
     }
 
     /**
-     * R-329 STUB — instantiate a solution into a V2 run.  Wired
-     * properly in W5 after SlotValidator + SpecComposer ship + the
-     * V158 {@code pipeline_run.readymade_*} columns land.  Returns
-     * 501 in v1 so the UI can be authored against the contract
-     * shape without us pretending the pipeline integration works.
+     * R-331 — instantiate a solution into a V2 run.  Validates slot
+     * values, picks the variant (explicit > auto-resolve > first),
+     * composes the spec, and dispatches a multi-repo
+     * {@link com.navneet.executespec.execution.entity.ExecutionRun}
+     * via the existing
+     * {@link com.navneet.executespec.execution.service.ExecutionOrchestrator}.
+     *
+     * <p>The returned {@code executionRunId} is what the UI should
+     * navigate to (the run-detail surface handles the rest of the
+     * pipeline lifecycle).
      */
     @PostMapping("/{slug}/instantiate")
     public ResponseEntity<Map<String, Object>> instantiate(
             @PathVariable String slug,
-            @RequestBody Map<String, Object> body) {
-        log.info("[R-329] /api/library/{}/instantiate called — STUB (W5 wiring not yet shipped)", slug);
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).body(Map.of(
-            "status", "not_implemented",
-            "message", "Slot validation + spec composition + V2 pipeline wiring "
-                + "ship in Wave 5 of the Readymade Solutions plan. The contract "
-                + "shape is stable; the implementation lands then.",
-            "slug", slug
+            @RequestBody ReadymadeOrchestrator.InstantiateRequest req,
+            @AuthenticationPrincipal AppUserDetails userDetails) {
+        if (userDetails == null) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                .body(Map.of("status", "unauthenticated"));
+        }
+        ExecutionRun run = readymadeOrchestrator.instantiate(slug, req, userDetails.getUser().getId());
+        log.info("[R-331] solution {} instantiated — executionRun {}", slug, run.getId());
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(Map.of(
+            "executionRunId", run.getId(),
+            "status", run.getStatus(),
+            "message", "Solution instantiated across "
+                + (req.repoIds() == null ? 0 : req.repoIds().size())
+                + " repo(s). Track progress on the run detail page."
         ));
     }
 
