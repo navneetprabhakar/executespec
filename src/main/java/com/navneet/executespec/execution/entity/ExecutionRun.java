@@ -123,6 +123,18 @@ public class ExecutionRun {
     @Column(name = "migration_variant_id")
     private UUID migrationVariantId;
 
+    /** R-331 (V160) — when this run was instantiated from a
+     *  Readymade Solution via {@code ReadymadeOrchestrator}, the
+     *  solution id; NULL for non-readymade runs. */
+    @Column(name = "readymade_solution_id")
+    private UUID readymadeSolutionId;
+
+    /** R-331 (V160) — the specific (language, framework, options)
+     *  variant used.  May be NULL when the user explicitly bypassed
+     *  variant resolution. */
+    @Column(name = "readymade_variant_id")
+    private UUID readymadeVariantId;
+
     /** R-324 (V155) — JSON array of project_repo IDs the user selected at
      *  Launch time. NULL or {@code "[]"} means "every linked project repo
      *  is in scope" (today's pre-R-324 default). Persisted as a JSON string
