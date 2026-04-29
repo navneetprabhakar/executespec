@@ -1,12 +1,24 @@
-# Readymade Solutions Library — pending plan
+# Readymade Solutions Library — IN-FLIGHT (W1–W5 SHIPPED on `feature/readymades-and-migrations`)
 
-> **Status:** PENDING (scope approved 2026-04-29; not yet started).
-> **Branch when work begins:** `feature/v3-platform-expansion` (or
-> a new branch off it; TBD at execution time).
-> **R-### range reserved:** R-327 → R-335 (one per wave below;
-> may overflow as the catalog seeding work spans multiple commits).
-> **Author:** 2026-04-29 thread, after competitor analysis +
-> codebase audit + 6-question scope discussion.
+> **Status:** **W1–W5 shipped on `feature/readymades-and-migrations`
+> 2026-04-29.** End-to-end functional: gallery + detail + slot form
+> + variant resolution + instantiate via V2 pipeline.
+> **Branch:** `feature/readymades-and-migrations` (off fresh `dev`
+> at `902ce292`).
+> **R-### consumed:** R-327 (W1) → R-331 (W5).  R-332..R-335 reserved
+> for W6 catalog expansion / W7 community contribution / W8 tier-gating
+> polish / W9 search+recommendations follow-ups.
+> **Author:** 2026-04-29 thread.
+
+## Shipped commit trail (this branch)
+
+| Wave | R-### | Commit | What landed |
+|---|---|---|---|
+| W1 | R-327 | `44d8dff5` | V157 schema (5 tables) + entities + repos + DTOs |
+| W2 | R-328 | `00e9f05f` | Catalog YAML format + 3 POC seeds (login-with-google / stripe-checkout / openai-chat) + `ReadymadeSeeder` (`@PostConstruct` + `@Transactional` `reseed()`) + `ReadymadeAdminController` |
+| W3 | R-329 | `f81bbb24` | Library API + `StackNormalizer` + `VariantResolver` + `ReadymadeService` (list/detail/facets/tier-gating) + `ReadymadeController` read endpoints (instantiate stubbed 501) |
+| W4 | R-330 | `cb32f08f` | Frontend `/v3/library` gallery + `/v3/library/:slug` detail + 8 library helpers in `lib/api.ts` + macro-group tabs + tier-stratified cost framing chip |
+| W5 | R-331 | `a6c9f0a2` | V160 tracking columns on `execution_run` + `ReadymadeOrchestrator` (instantiate via existing `ExecutionOrchestrator`) + wired `POST /api/library/{slug}/instantiate` (was 501) — full end-to-end functional |
 
 ## One-line pitch
 
