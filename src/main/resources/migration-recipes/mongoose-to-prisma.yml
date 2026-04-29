@@ -1,0 +1,67 @@
+slug: mongoose-to-prisma
+name: Mongoose → Prisma
+tagline: Replace Mongoose ODM with Prisma's type-safe query builder
+description: |
+  Reads existing Mongoose schemas, generates equivalent Prisma
+  models, then rewrites every Mongoose call site to its Prisma
+  equivalent.  Target DB defaults to Postgres but variants ship for
+  MySQL + SQLite.
+source_stack:
+  language: typescript
+  framework: express
+target_stack:
+  language: typescript
+  framework: express
+  target_orm: prisma
+affected_files_glob: "src/**/*.{js,ts}"
+category: orm-migration
+tags: [mongoose, prisma, postgres, mysql, orm]
+tier: PRO
+source: FIRST_PARTY
+status: LISTED
+ai_fallback_prompt_path: prompts/migrations/mongoose-to-prisma-fallback.md
+preservation_contract:
+  preserve_query_semantics: true
+  preserve_index_definitions: true
+  preserve_validation_rules: true
+est_files: [8, 50]
+est_credits: [4.0, 25.0]
+slots:
+  - name: target_db
+    display_name: Target database
+    type: SELECT
+    required: true
+    default_value: postgres
+    options: [postgres, mysql, sqlite]
+    description: Prisma datasource provider for the new schema.
+    display_order: 0
+variants:
+  - options_signature: target_db=postgres
+    options: {target_db: postgres}
+    spec_template: |
+      Migrate this Express app's Mongoose ODM to Prisma with Postgres
+      as the datasource.
+      - Read every Mongoose schema in src/models/ and generate the
+        equivalent prisma/schema.prisma model with field types,
+        relations, and indexes preserved.
+      - Rewrite every `Model.find/findOne/findById/save/update/delete`
+        call site to its Prisma equivalent (`prisma.model.findMany`,
+        `prisma.model.create`, etc.).  Where the migration is
+        ambiguous, leave a TODO comment with the original Mongoose
+        call.
+      - Update package.json: remove mongoose, add @prisma/client.
+      - Generate a migration via `prisma migrate dev --name init`
+        (in the spec; do not actually run it during the worker).
+      - Preserve every existing query's semantics + index definitions.
+  - options_signature: target_db=mysql
+    options: {target_db: mysql}
+    spec_template: |
+      Same as the postgres variant, but datasource provider is mysql.
+      Note: Mongo's ObjectId fields map to @db.Char(24) in MySQL
+      Prisma — adjust foreign-key types accordingly.
+  - options_signature: target_db=sqlite
+    options: {target_db: sqlite}
+    spec_template: |
+      Same as the postgres variant, but datasource provider is sqlite.
+      SQLite has stricter schema constraints — flag any nested-object
+      Mongoose fields that don't translate cleanly.
