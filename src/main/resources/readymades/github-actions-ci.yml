@@ -1,0 +1,44 @@
+slug: github-actions-ci
+name: GitHub Actions CI pipeline
+tagline: Lint + test + build on every PR with caching
+description: |
+  Adds a .github/workflows/ci.yml that runs lint, type-check, tests,
+  and build on every push and PR.  Caches package manager state for
+  speed.  Includes path filters for monorepo-friendly skipping.
+category: ship-and-monitor
+macro_group: data-and-infra
+tags: [ci, github-actions, devops]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/github-actions.svg
+est_files: [1, 3]
+est_credits: [0.5, 1.5]
+slots:
+  - name: node_version
+    display_name: Node version
+    type: TEXT
+    required: false
+    default_value: "20"
+    description: Node major version to pin in CI.
+    display_order: 0
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Add .github/workflows/ci.yml that on push + pull_request runs:
+      checkout, setup-node {{node_version}} with npm cache, npm ci,
+      npm run lint, npm test, npm run build.  Matrix-test against
+      Node {{node_version}}.  Concurrency group cancels in-flight
+      runs on the same ref.
+    scaffold_key: node-backend
+  - language: python
+    framework: fastapi
+    options: {}
+    spec_template: |
+      Add a GitHub Actions workflow that runs on push + PR — install
+      Python 3.12, install dependencies (pip + cached), run ruff,
+      run pytest, run mypy.  Concurrency group on the ref.
+    scaffold_key: python

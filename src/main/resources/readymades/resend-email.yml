@@ -1,0 +1,49 @@
+slug: resend-email
+name: Transactional email via Resend
+tagline: Modern email API — single-call sends + React Email templates
+description: |
+  Wires Resend as the transactional-email provider.  Adds a
+  sendEmail() helper, two starter templates (welcome + password
+  reset), and a /test/email endpoint for smoke tests.
+category: send-messages
+macro_group: people-and-money
+tags: [email, resend, transactional, templates]
+kind: PRIMITIVE
+tier: FREE
+source: FIRST_PARTY
+status: LISTED
+icon_url: /icons/resend.svg
+est_files: [4, 7]
+est_credits: [1.0, 2.5]
+slots:
+  - name: api_key
+    display_name: Resend API Key
+    type: SECRET
+    required: true
+    description: From resend.com → API Keys.
+    display_order: 0
+  - name: from_email
+    display_name: Default sender
+    type: TEXT
+    required: true
+    default_value: noreply@example.com
+    description: Verified sending address (must match a domain you've added in Resend).
+    display_order: 1
+variants:
+  - language: typescript
+    framework: express
+    options: {}
+    spec_template: |
+      Wire Resend into this Express app.  Add lib/email.ts that
+      exports sendEmail({ to, subject, html }) using {{api_key}}.
+      Default sender: {{from_email}}.  Add two React Email templates
+      (welcome, password-reset).  POST /test/email to smoke-test.
+    scaffold_key: node-backend
+  - language: typescript
+    framework: nextjs
+    options: {router: app}
+    spec_template: |
+      Add Resend to this Next.js app.  Server-only lib/email.ts with
+      sendEmail() using {{api_key}}.  React Email templates under
+      emails/.  Default sender: {{from_email}}.
+    scaffold_key: node-frontend
