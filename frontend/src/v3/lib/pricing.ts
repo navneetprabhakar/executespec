@@ -67,8 +67,14 @@ export const PRICING_CARDS: PricingCard[] = [
     // explicitly instead of selling PRO as "Most popular".
     badge: 'Grandfathered',
     subhead: 'Existing subscribers only — new buyers, choose TEAM or MAX',
+    // [S-03] (coverage Sprint 3 follow-up to F-28, 2026-04-30) — bullet
+    // list reconciled with V145 cap. Pre-V145 PRO copy claimed
+    // "Unlimited runs / month"; V145 capped PRO at 20 credits/month
+    // (intentional, ladder-aligned with the more-attractive TEAM seat
+    // pool). Coverage Prompt C found the stale bullet contradicting
+    // both V145 and the F-28 "Grandfathered" badge on the same card.
     bullets: [
-      'Unlimited runs / month',
+      '20 credits / month (grandfathered cap)',
       'All providers (BYOK option)',
       'Unlimited projects + repos',
       'Plan & review gate',
