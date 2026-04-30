@@ -142,8 +142,10 @@ export default function V3Settings() {
         </Row>
       </Card>
 
-      {/* ── v3 opt-in (R-180) ──────────────────────────────────────────── */}
-      <V3OptInCard />
+      {/* R-342 (2026-04-29): the v3 opt-in card was retired here.  URL
+          unification dropped the /v3/ prefix entirely, so there's no
+          opt-in to toggle anymore — every user lands on the unified
+          surface by default. */}
 
       {/* ── Repos / integrations ────────────────────────────────────────── */}
       <Card title="Repos & integrations">
@@ -160,7 +162,7 @@ export default function V3Settings() {
         </Row>
         <Row label="More">
           <Link
-            to="/v3/integrations"
+            to="/integrations"
             style={{ color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none' }}
           >
             Slack · Bitbucket · Jira · Confluence →

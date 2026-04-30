@@ -210,7 +210,7 @@ export default function PlanCard({ runId, onApproved }: PlanCardProps) {
             </button>
             <button
               type="button"
-              onClick={() => navigate(`/v3/p/${detail.projectId ?? ''}/r/${runId}`)}
+              onClick={() => navigate(`/projects/${detail.projectId ?? ''}/r/${runId}`)}
               style={{
                 padding: '6px 14px',
                 fontSize: 12.5,

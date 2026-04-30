@@ -8,11 +8,11 @@ import NewRunModal from '@/components/runs/NewRunModal';
 
 const NAV_COMMANDS = [
   // Tier-coherence: terminology unified to "Runs"; "Plans" + "Pricing"
-  // collapsed onto /v3/pricing (single source of truth for tiers).
-  { label: 'Go to Runs',         path: '/',              icon: LayoutDashboard },
+  // collapsed onto /pricing (single source of truth for tiers).
+  { label: 'Go to Runs',         path: '/runs',          icon: LayoutDashboard },
   { label: 'Go to Projects',     path: '/projects',      icon: BarChart3 },
-  { label: 'Go to Pricing',      path: '/v3/pricing',    icon: DollarSign },
-  { label: 'Go to Billing',      path: '/v3/billing',    icon: DollarSign },
+  { label: 'Go to Pricing',      path: '/pricing',    icon: DollarSign },
+  { label: 'Go to Billing',      path: '/billing',    icon: DollarSign },
   { label: 'Go to Integrations', path: '/integrations',  icon: Plug },
   { label: 'Go to Invoices',     path: '/invoices',      icon: DollarSign },
   { label: 'Go to Settings',     path: '/settings',      icon: Settings },
@@ -54,7 +54,7 @@ export default function CommandPalette() {
                   <CmdItem
                     icon={<Wand2 className="h-4 w-4" />}
                     label="See pricing"
-                    onSelect={() => { setCommandPaletteOpen(false); navigate('/v3/pricing'); }}
+                    onSelect={() => { setCommandPaletteOpen(false); navigate('/pricing'); }}
                   />
                 </Command.Group>
 
@@ -78,7 +78,7 @@ export default function CommandPalette() {
                         label={`Run ${r.runId.slice(0, 8)} — ${(r.userRequest ?? '').slice(0, 40)}`}
                         onSelect={() => {
                           setCommandPaletteOpen(false);
-                          navigate('/');
+                          navigate('/runs');
                           setActiveRunId(r.runId);
                         }}
                       />

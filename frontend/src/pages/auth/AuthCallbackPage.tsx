@@ -34,11 +34,13 @@ export default function AuthCallbackPage() {
       isAuthenticated: true,
     });
 
-    // Load user profile, then redirect
+    // Load user profile, then redirect.  R-342: post-auth lands on
+    // /home (the V3HomeRedirect dispatcher) so the user ends up on
+    // their first project's chat thread, not the v2 RunsPage.
     loadMe().then(() => {
-      navigate('/', { replace: true });
+      navigate('/home', { replace: true });
     }).catch(() => {
-      navigate('/', { replace: true });
+      navigate('/home', { replace: true });
     });
   }, [searchParams, navigate, loadMe]);
 

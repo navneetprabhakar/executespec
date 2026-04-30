@@ -33,7 +33,7 @@ import { getRuns } from '@/lib/api';
  *   (a) Renders only for PRO with ≥ 5 completed runs
  *   (b) Dismiss persists across sessions
  *   (c) Doesn't render for non-PRO tiers
- *   (d) CTA → /v3/team upgrade flow
+ *   (d) CTA → /team upgrade flow
  */
 
 const DISMISS_KEY = 'v3.upgrade-nudge.dismissed';
@@ -114,7 +114,7 @@ export default function UpgradeNudge() {
         to share credits and review?
       </span>
       <Link
-        to="/v3/team"
+        to="/team"
         style={{
           padding: '6px 12px',
           background: 'var(--v3-brand)',

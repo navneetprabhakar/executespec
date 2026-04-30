@@ -14,7 +14,7 @@ import Pill from './Pill';
 /**
  * R-141 + R-150 — shared 3-tier pricing card grid.
  *
- * Used by /v3/billing (logged-in upgrade ladder) and /v3/pricing (public
+ * Used by /billing (logged-in upgrade ladder) and /pricing (public
  * marketing version). Differences are passed in as props — the cards
  * themselves render once.
  *
@@ -122,7 +122,7 @@ export default function PricingGrid({
           </div>
           <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
             For 50+ engineers. SAML/OIDC SSO, SOC 2 evidence, signed DPA, dedicated infrastructure region, audit-log retention, custom MSA. Procurement docs at{' '}
-            <Link to="/v3/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/trust</Link>.
+            <Link to="/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/trust</Link>.
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
