@@ -6,7 +6,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
  * Wraps protected routes. If not authenticated, redirects to /login.
  *
  * R-341 (2026-04-29): the bare-root `/` for anon used to redirect to
- * `/v3/landing` — the in-app conversion-optimized landing.  Now that
+ * `/` — the in-app conversion-optimized landing.  Now that
  * executespec.ai (the static marketing site) is the canonical public
  * landing surface, the bare `/` redirects to `/login` with any URL
  * query string preserved.  The website's hero composer hands off via

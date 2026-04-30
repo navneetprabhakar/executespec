@@ -113,7 +113,7 @@ export default function Header() {
       {/* Upgrade pill — only for FREE/PRO users, hidden at mobile to free space */}
       {(user?.tier === 'FREE' || user?.tier === 'PRO') && (
         <Link
-          to="/v3/pricing"
+          to="/pricing"
           className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-accent-blue/10 text-accent-blue text-xs font-medium hover:bg-accent-blue/20 transition-colors flex-shrink-0"
         >
           Upgrade
@@ -127,7 +127,7 @@ export default function Header() {
           concept. Only PRO sees this. */}
       {user?.tier === 'PRO' && (
         <Link
-          to="/v3/billing"
+          to="/billing"
           className="hidden md:flex items-center gap-1 px-2.5 py-1 rounded-full bg-status-success/10 text-status-success text-xs font-medium hover:bg-status-success/20 transition-colors flex-shrink-0"
         >
           <Plus className="h-3 w-3" />

@@ -62,16 +62,16 @@ export const NAV_ITEMS: {
   // "Run" is what the product calls the unit elsewhere). Sidebar Pricing
   // entry removed since /pricing is now an admin tool (per-1M-token model
   // rates) reachable at /admin/model-rates; consumer-facing pricing lives
-  // at /v3/pricing reachable via the Header Upgrade pill.
-  { path: '/',             label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
+  // at /pricing reachable via the Header Upgrade pill.
+  // R-342 — bare `/` redirects to /home (the dispatcher).  The v2
+  // RunsPage moved to /runs so the sidebar entry now points there.
+  { path: '/runs',         label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
   // R-330 / R-340 — first-class catalog surfaces.  Routes hop into the
-  // V3 chrome (V3TopBar) when clicked from the v2 sidebar — same
-  // one-way chrome-flip pattern as the Upgrade-to-Pro CTA at the bottom
-  // of this sidebar (which routes to /v3/pricing).  Visible to every
-  // tier — FREE sees locked rows with upgrade CTAs, which is the
-  // intended conversion moment.
-  { path: '/v3/library',   label: 'Library',      icon: 'Library',         adminOnly: false },
-  { path: '/v3/migrations', label: 'Migrations',  icon: 'GitBranch',       adminOnly: false },
+  // V3 chrome (V3TopBar) when clicked from the v2 sidebar — chrome
+  // flip is intentional until the v2 sidebar shell is fully retired.
+  // Visible to every tier — FREE sees locked rows with upgrade CTAs.
+  { path: '/library',      label: 'Library',      icon: 'Library',         adminOnly: false },
+  { path: '/migrations',   label: 'Migrations',   icon: 'GitBranch',       adminOnly: false },
   // v2.5.14 Phase 3.1 — exec summary for Business Owner persona.
   // Gated behind canViewCostBreakdown (PRO/TEAM/ENTERPRISE) — FREE can't
   // see the spend aggregate because that's a paid-tier analytics feature.
@@ -107,7 +107,7 @@ export const V2_LEGACY_UI = {
 } as const;
 
 export const ROUTE_PATHS = {
-  runs:         '/',
+  runs:         '/runs',
   dashboard:    '/dashboard',
   pricing:      '/pricing',
   integrations: '/integrations',

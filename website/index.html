@@ -1035,8 +1035,8 @@
             </p>
 
             <div class="hero-buttons" style="margin-top: 28px;">
-                <a href="https://dev.executespec.ai/v3/library" class="btn btn-ghost" target="_blank">Browse the catalog →</a>
-                <a href="https://dev.executespec.ai/v3/exec-demo" class="btn btn-ghost" target="_blank">See a team's last 30 days →</a>
+                <a href="https://dev.executespec.ai/library" class="btn btn-ghost" target="_blank">Browse the catalog →</a>
+                <a href="https://dev.executespec.ai/exec-demo" class="btn btn-ghost" target="_blank">See a team's last 30 days →</a>
             </div>
 
             <style>
@@ -1148,7 +1148,26 @@
                         return false;
                     }
                     var capped = raw.length > 4000 ? raw.slice(0, 4000) : raw;
-                    var url = 'https://dev.executespec.ai/?spec=' + encodeURIComponent(capped);
+                    var qs = new URLSearchParams();
+                    qs.set('spec', capped);
+                    // R-343 (cross-cutting fix from UX persona review) —
+                    // forward the marketing-site URL's UTM + ref params
+                    // through to the app domain so the post-signup
+                    // attribution funnel (RegisterPage's readSignupAttribution)
+                    // can persist them on the app_user record.  Without
+                    // this, every click from a campaign-tagged link to
+                    // the website lost its attribution at the domain
+                    // hop.  Forwarding only the well-known fields keeps
+                    // the URL clean.
+                    try {
+                        var siteParams = new URLSearchParams(window.location.search);
+                        ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'ref']
+                            .forEach(function (k) {
+                                var v = siteParams.get(k);
+                                if (v) qs.set(k, v);
+                            });
+                    } catch (_) { /* URLSearchParams not available — skip */ }
+                    var url = 'https://dev.executespec.ai/?' + qs.toString();
                     if (window.gtag) {
                         try { window.gtag('event', 'hero_composer_submit', { length: capped.length }); }
                         catch (_) { /* analytics is non-critical */ }
@@ -1215,8 +1234,8 @@
                  that closes that buyer-type's deal. -->
             <p style="margin-top:18px;font-size:0.85rem;color:var(--text-muted);">
                 For <a href="#pricing" style="color:var(--blue-light);text-decoration:none;">teams</a>
-                · for <a href="https://dev.executespec.ai/v3/trust" style="color:var(--blue-light);text-decoration:none;" target="_blank">enterprise</a>
-                · for <a href="https://dev.executespec.ai/v3/exec-demo" style="color:var(--blue-light);text-decoration:none;" target="_blank">PgM / CFO</a>
+                · for <a href="https://dev.executespec.ai/trust" style="color:var(--blue-light);text-decoration:none;" target="_blank">enterprise</a>
+                · for <a href="https://dev.executespec.ai/exec-demo" style="color:var(--blue-light);text-decoration:none;" target="_blank">PgM / CFO</a>
             </p>
         </div>
     </section>
@@ -1354,7 +1373,7 @@
                         <li><span class="check-icon">✓</span> <div><strong>Build the UI</strong> — shadcn/ui, dark-mode toggle</div></li>
                         <li><span class="check-icon">✓</span> <div><strong>+ 7 more categories</strong> — track usage, grow the user base, talk to users, location &amp; maps, booking, mobile (Expo), APIs (OpenAPI), security (rate-limiting)</div></li>
                     </ul>
-                    <a href="https://dev.executespec.ai/v3/library" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse the library →</a>
+                    <a href="https://dev.executespec.ai/library" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse the library →</a>
                 </div>
 
                 <!-- Migrations card -->
@@ -1370,7 +1389,7 @@
                         <li><span class="check-icon">✓</span> <div><strong>Halt-and-inspect dry-run</strong> — preview cost &amp; file count before applying</div></li>
                         <li><span class="check-icon">✓</span> <div><strong>Multi-repo fan-out</strong> — apply the same recipe to every repo in a project in one launch</div></li>
                     </ul>
-                    <a href="https://dev.executespec.ai/v3/migrations" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse migrations →</a>
+                    <a href="https://dev.executespec.ai/migrations" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse migrations →</a>
                 </div>
             </div>
 
@@ -2074,7 +2093,7 @@
                 <details class="faq-item">
                     <summary>What does "AI-written PRs you can actually merge" mean — what's the proof?</summary>
                     <div class="faq-answer">
-                        Every run goes through the same validation pipeline: planner emits a structured plan → you approve it → executor writes the code → reviewer reads the diff → final build + test gate → PR opens with a Ready / Needs review / Failed verdict attached. The verdict is computed from real signals — build status, test pass-rate, reviewer outcome (CLEAN / FIXED / UNRESOLVED / FAILED), and adherence to the original request. Across the platform, ~80% of real runs land Ready. <a href="https://dev.executespec.ai/v3/exec-demo" target="_blank">See the live anonymized 30-day snapshot →</a>. Cursor, Devin, and v0 don't publish a comparable number because they don't have the validation surface to measure it.
+                        Every run goes through the same validation pipeline: planner emits a structured plan → you approve it → executor writes the code → reviewer reads the diff → final build + test gate → PR opens with a Ready / Needs review / Failed verdict attached. The verdict is computed from real signals — build status, test pass-rate, reviewer outcome (CLEAN / FIXED / UNRESOLVED / FAILED), and adherence to the original request. Across the platform, ~80% of real runs land Ready. <a href="https://dev.executespec.ai/exec-demo" target="_blank">See the live anonymized 30-day snapshot →</a>. Cursor, Devin, and v0 don't publish a comparable number because they don't have the validation surface to measure it.
                     </div>
                 </details>
                 <details class="faq-item">

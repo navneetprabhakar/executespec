@@ -32,7 +32,7 @@ import {
  *      Needs review or Failed — points at the next action.
  *
  * "Open PR" link surfaces when run.githubPrUrl is set. "Re-run" routes
- * back to /v3/p/{slug} composer pre-filled with the spec.
+ * back to /projects/{slug} composer pre-filled with the spec.
  */
 export default function V3RunDetail() {
   const { slug, runShort } = useParams<{ slug: string; runShort: string }>();
@@ -134,7 +134,7 @@ export default function V3RunDetail() {
         <h1>Couldn't load run</h1>
         <p>{error}</p>
         {slug && (
-          <Link to={`/v3/p/${slug}`} style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
+          <Link to={`/projects/${slug}`} style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
             ← Back to project
           </Link>
         )}
@@ -147,7 +147,7 @@ export default function V3RunDetail() {
       {/* Back-link breadcrumb (the only one in v3) */}
       {slug && (
         <Link
-          to={`/v3/p/${slug}`}
+          to={`/projects/${slug}`}
           style={{
             display: 'inline-block',
             marginBottom: 12,
@@ -250,7 +250,7 @@ export default function V3RunDetail() {
             )}
             {slug && (
               <Link
-                to={`/v3/p/${slug}`}
+                to={`/projects/${slug}`}
                 style={{
                   padding: '5px 12px',
                   fontSize: 12,
