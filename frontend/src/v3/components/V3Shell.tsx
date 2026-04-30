@@ -59,7 +59,11 @@ export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean })
           PRO tier + ≥5 lifetime completed runs + not-dismissed. The
           component is render-cheap (returns null in 99% of cases). */}
       <UpgradeNudge />
-      <main className="v3-main">
+      {/* [A-01] (audit Sprint 4, 2026-05-01) — id="main" jump target
+          for the App-level "Skip to main content" link. WCAG 2.4.1
+          Bypass Blocks (Level A). tabIndex=-1 lets the link's target
+          receive programmatic focus without making <main> a tab stop. */}
+      <main id="main" tabIndex={-1} className="v3-main">
         <Outlet />
       </main>
       <CmdK />

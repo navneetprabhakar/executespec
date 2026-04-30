@@ -187,6 +187,37 @@ export default function App() {
   }, []);
 
   return (
+    <>
+      {/* [A-01] (audit Sprint 4, 2026-05-01) — Skip to main content link.
+          WCAG 2.4.1 (Bypass Blocks, Level A). Renders as the first
+          focusable element on every page; visually hidden until focused
+          (Tab from the URL bar) so it doesn't disturb the visual design.
+          Both V3Shell <main> and AppLayout <main> use #main as the
+          jump target. */}
+      <a
+        href="#main"
+        className="skip-link"
+        style={{
+          position: 'absolute',
+          top: 8,
+          left: 8,
+          zIndex: 100,
+          padding: '8px 16px',
+          background: 'var(--accent-blue, #5B8DEF)',
+          color: '#fff',
+          borderRadius: 6,
+          fontWeight: 600,
+          fontSize: 14,
+          textDecoration: 'none',
+          // Visually hide until focused — standard "skip-link" pattern.
+          transform: 'translateY(-200%)',
+          transition: 'transform 0.15s ease',
+        }}
+        onFocus={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
+        onBlur={(e) => { e.currentTarget.style.transform = 'translateY(-200%)'; }}
+      >
+        Skip to main content
+      </a>
     <Routes>
       {/* ── Public auth routes ── */}
       <Route path="/login" element={<LoginPage />} />
@@ -349,5 +380,6 @@ export default function App() {
         </Route>
       </Route>
     </Routes>
+    </>
   );
 }
