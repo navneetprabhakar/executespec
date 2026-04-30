@@ -75,11 +75,26 @@ public class MigrationService {
      * FREE &lt; PRO &lt; TEAM &lt; ENTERPRISE; null caller treated
      * as FREE.  Same shape as the readymades tier-gate so the UI
      * ladder is consistent across both products.
+     *
+     * [F-05] (audit Sprint 2, 2026-04-30): promoted to public so
+     * {@code MigrationController#dryRun} can enforce the tier gate at
+     * the dry-run boundary. Apply already enforced via the orchestrator;
+     * dry-run leaked the full applicability + cost + sample diff value
+     * to FREE users on locked recipes.
      */
-    static boolean isLocked(Tier requiredTier, Tier callerTier) {
+    public static boolean isLocked(Tier requiredTier, Tier callerTier) {
         if (requiredTier == null) return false;
         Tier effective = callerTier == null ? Tier.FREE : callerTier;
         return requiredTier.ordinal() > effective.ordinal();
+    }
+
+    /**
+     * Returns the recipe's required tier so the controller can enforce
+     * the tier gate at the dry-run boundary without re-querying the full
+     * detail DTO. Empty if the slug is unknown.
+     */
+    public Optional<Tier> requiredTierFor(String slug) {
+        return recipeRepo.findBySlug(slug).map(r -> r.getTier());
     }
 
     private MigrationListItemDto decorate(MigrationRecipe r, Tier callerTier) {

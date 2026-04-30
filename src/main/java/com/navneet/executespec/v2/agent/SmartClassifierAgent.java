@@ -220,7 +220,7 @@ public class SmartClassifierAgent {
                     AgentTier.LIGHTWEIGHT);
         } catch (Exception e) {
             log.warn("SmartClassifier model resolve failed: {} — using heuristic verdict", e.getMessage());
-            return fallback(heuristic);
+            return fallback(heuristic, "model resolve failed: " + e.getMessage());
         }
 
         String prompt;
@@ -241,7 +241,7 @@ public class SmartClassifierAgent {
                     ));
         } catch (Exception e) {
             log.warn("SmartClassifier prompt assembly failed: {} — using heuristic verdict", e.getMessage());
-            return fallback(heuristic);
+            return fallback(heuristic, "prompt assembly failed: " + e.getMessage());
         }
 
         // Split the assembled prompt into a system+user pair. The classifier
@@ -271,12 +271,12 @@ public class SmartClassifierAgent {
             String raw = resp.getResult().getOutput().getText();
             if (raw == null || raw.isBlank()) {
                 log.warn("SmartClassifier LLM returned empty body — using heuristic verdict");
-                return fallback(heuristic);
+                return fallback(heuristic, "LLM returned empty body");
             }
 
             ClassificationResult parsed = parseLlmJson(raw, heuristic, resp);
             if (parsed == null) {
-                return fallback(heuristic);
+                return fallback(heuristic, "LLM JSON parse failed");
             }
             log.info("SmartClassifier LLM → {} (heuristic was {}; tokens in/out={}/{}, ${})",
                     parsed.strategy(), heuristic.strategy,
@@ -285,8 +285,14 @@ public class SmartClassifierAgent {
             return parsed;
         } catch (Exception e) {
             log.warn("SmartClassifier LLM call failed: {} — using heuristic verdict", e.getMessage());
-            return fallback(heuristic);
+            return fallback(heuristic, "LLM call failed: " + truncForCopy(e.getMessage()));
         }
+    }
+
+    /** Truncate exception messages so the persisted classifierReasoning stays readable. */
+    private static String truncForCopy(String s) {
+        if (s == null) return "(no message)";
+        return s.length() > 80 ? s.substring(0, 77) + "…" : s;
     }
 
     private ClassificationResult parseLlmJson(String raw, HeuristicVerdict heuristic, ChatResponse resp) {
@@ -366,13 +372,27 @@ public class SmartClassifierAgent {
         };
     }
 
-    private ClassificationResult fallback(HeuristicVerdict heuristic) {
+    /**
+     * [B-N5] (audit Sprint 2, 2026-04-30) — copy + reason discriminator
+     * fix. Was: every fallback path persisted "LLM verifier unavailable"
+     * — sounds like an outage when in practice the cause is varied
+     * (model resolve, prompt assembly, LLM 401, JSON parse, empty body).
+     * The audit's MEDIUM Express run was misclassified as SMALL with
+     * exactly that copy, masking which subsystem failed. Now persists
+     * the actual failure mode + flags this as a fallback explicitly so
+     * the dashboard / reviewer can spot a wiring regression vs an
+     * intentional skip. Also adds a `[verifier-skipped]` marker for ops
+     * grep on the run logs.
+     */
+    private ClassificationResult fallback(HeuristicVerdict heuristic, String reason) {
+        String copy = "LLM verifier skipped (" + (reason == null || reason.isBlank() ? "unspecified" : reason)
+                + ") — heuristic verdict: " + heuristic.reasoning;
         return new ClassificationResult(
                 heuristic.strategy,
                 defaultTaskCount(heuristic.strategy),
                 heuristic.strategy == PlanStrategy.LARGE || heuristic.strategy == PlanStrategy.LEGACY ? 3 : 1,
                 heuristic.strategy == PlanStrategy.LEGACY,
-                "LLM verifier unavailable — heuristic verdict: " + heuristic.reasoning,
+                copy,
                 ClassificationResult.Source.LLM_FALLBACK_TO_HEURISTIC,
                 0L, 0L, 0.0
         );
