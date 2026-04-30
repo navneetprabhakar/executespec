@@ -73,12 +73,14 @@ import ExecutionViewPage from '@/pages/execution/ExecutionViewPage';
 // Admin pages
 import AdminPage from '@/pages/admin/AdminPage';
 import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
-// R-201 (Wave 4) — admin pages replaced with V3Placeholder until v3 admin
-// surface ships. Imports kept commented for fast restore once R-25x lands.
-// import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
+// [F-14] (audit Sprint 1 PR-1) — V3Placeholder pattern retired.
+// Admin sub-pages now mount their actual components directly under v3 URLs;
+// the AppLayout sidebar wrapper from ProtectedRoute keeps the chrome
+// consistent with /admin and /admin/feature-flags which always rendered live.
+import OrgAdminDashboard from '@/pages/admin/OrgAdminDashboard';
 import TeamMemberDashboard from '@/pages/admin/TeamMemberDashboard';
-// import PricingManager from '@/pages/admin/PricingManager';
-// import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
+import PricingManager from '@/pages/admin/PricingManager';
+import TierLifecyclePage from '@/pages/admin/TierLifecyclePage';
 
 // Audit page
 import AuditPage from '@/pages/AuditPage';
@@ -139,7 +141,9 @@ import V3EmptyProject from '@/v3/pages/V3EmptyProject';
 // v3 equivalent hasn't shipped yet (per cohabitation invariant in
 // docs/strict-ux-thread-handoff.md §8 — surface-not-allowed renders
 // an evaluate-then-commit panel, not 404).
-import V3Placeholder from '@/v3/components/V3Placeholder';
+// [F-14] V3Placeholder import removed; component file kept as a stub
+// in case external test harnesses still reference it (parallel to the
+// V2OptInGate pattern from R-342).
 
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
@@ -291,11 +295,11 @@ export default function App() {
           <Route path="invoices" element={<InvoicesPage />} />
           <Route path="accounting" element={<AccountingPage />} />
           <Route path="audit" element={<AuditPage />} />
-          {/* M-013 (Wave 2) — canonical "governance" alias for the unified
-              audit + activity page. Per parked decision #4, V22 (admin
-              audit) and V133 (project activity) live in separate tables
-              but render at one URL. */}
-          <Route path="governance/audit" element={<AuditPage />} />
+          {/* [F-26] (audit Sprint 1 PR-1) — collapse the duplicate.
+              `/audit` is canonical; `/governance/audit` redirects.
+              Was: both URLs rendered the same component (two surfaces,
+              one component, drift hazard). Now: one URL, one redirect. */}
+          <Route path="governance/audit" element={<Navigate to="/audit" replace />} />
           <Route path="deployments" element={<DeploymentsPage />} />
           {/* v2.5.14 Phase 3.1 — executive summary kept on the v2 sidebar
               shell.  /insights is the v3 equivalent; /exec stays as the
@@ -326,28 +330,19 @@ export default function App() {
 
           {/* Admin */}
           <Route path="admin" element={<AdminPage />} />
-          {/* R-201 (Wave 4) — admin/analytics, admin/tiers, admin/pricing
-              had v2 components but the fresh-eyes audit observed silent
-              fall-through to / (the runs page) for users hitting them
-              directly. Until a v3 admin surface ships, render a "coming
-              to v3" panel with an Open-in-v2 escape hatch — the v2
-              component is still reachable per the cohabitation invariant
-              (handoff §8). */}
-          <Route
-            path="admin/analytics"
-            element={<V3Placeholder pageName="Org analytics" v2Fallback="/admin" v2RouteLabel="admin console" futureV3Route="/insights" />}
-          />
+          {/* [F-14] (audit Sprint 1 PR-1) — V3Placeholder retired.
+              admin/analytics, admin/tiers, admin/pricing now mount their
+              actual v2 components directly. The placeholder pattern was
+              shipping a credibility tax (SUPER_ADMIN clicks "Tier Lifecycle"
+              → sees a "coming to v3" card with an Open-in-v2 escape hatch
+              → has to click again). Direct mount restores parity with
+              admin/feature-flags which always rendered the live page. */}
+          <Route path="admin/analytics" element={<OrgAdminDashboard />} />
           {/* M-022 (Wave 3) — per-team-member dashboard for ORG_ADMIN. */}
           <Route path="team/:userId" element={<TeamMemberDashboard />} />
-          <Route
-            path="admin/pricing"
-            element={<V3Placeholder pageName="Pricing manager" v2Fallback="/admin" v2RouteLabel="admin console" futureV3Route="/pricing" />}
-          />
+          <Route path="admin/pricing" element={<PricingManager />} />
           <Route path="admin/feature-flags" element={<FeatureFlagsPage />} />
-          <Route
-            path="admin/tiers"
-            element={<V3Placeholder pageName="Tier lifecycle" v2Fallback="/admin" v2RouteLabel="admin console" futureV3Route="/billing" />}
-          />
+          <Route path="admin/tiers" element={<TierLifecyclePage />} />
           <Route path="admin/*" element={<AdminPage />} />
 
           <Route path="*" element={<Navigate to="/" replace />} />

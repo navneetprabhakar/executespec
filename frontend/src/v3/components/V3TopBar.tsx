@@ -1,6 +1,7 @@
 import { Link, NavLink } from 'react-router-dom';
 import AvatarMenu from './AvatarMenu';
 import ProjectSwitcher from './ProjectSwitcher';
+import { UsageBadge } from '@/components/billing/UsageBadge';
 
 /**
  * R-101 — top-bar shell.
@@ -45,6 +46,9 @@ export default function V3TopBar() {
       </Link>
       <div className="v3-topbar__center" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <ProjectSwitcher />
+        <NavLink to="/runs" style={navLinkStyle} title="All runs across projects">
+          Runs
+        </NavLink>
         <NavLink to="/library" style={navLinkStyle} title="Readymade Solutions library">
           Library
         </NavLink>
@@ -52,7 +56,14 @@ export default function V3TopBar() {
           Migrations
         </NavLink>
       </div>
-      <div className="v3-topbar__right">
+      <div className="v3-topbar__right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        {/* [IA-Q4] (audit Sprint 1 PR-1) — quota chip in top-nav for
+            FREE/PRO. UsageBadge self-hides for TEAM/ENTERPRISE
+            (unlimited) and SUPER_ADMIN, so this is safe to render
+            unconditionally. Was: only visible in v2 Sidebar footer
+            (AppLayout-only routes), so v3-shell FREE/PRO users had no
+            quota visibility. */}
+        <UsageBadge />
         <AvatarMenu />
       </div>
     </header>

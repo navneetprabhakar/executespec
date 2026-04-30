@@ -6,6 +6,14 @@ import { useAuthStore } from '@/stores/useAuthStore';
  */
 export interface TierPermissions {
   canManageAiKeys: boolean;
+  /**
+   * @deprecated [F-09] (audit Sprint 2, 2026-04-30) — currently consumed
+   * by zero call sites in `frontend/src/`. Kept on the API contract so
+   * removing it doesn't break stale frontend bundles or third-party
+   * integrations that cached the shape, but new code should not branch
+   * on this. Pricing-page visibility is gated at the route-level (no
+   * runtime permission check) — anonymous users hit /pricing fine.
+   */
   canViewPricing: boolean;
   canManageIntegrations: boolean;
   canViewMetrics: boolean;
