@@ -252,6 +252,94 @@ public class OrgService {
         return org;
     }
 
+    /**
+     * V162 — bootstrap a personal org for a fresh self-registered user so
+     * downstream flows (project create, sandbox provisioning) that assume
+     * orgId-non-null work for solo users.
+     *
+     * <p>Why a separate method:
+     * <ul>
+     *   <li>{@link #createOrg} blocks FREE-tier with HTTP 403 ("Only paid
+     *       tiers can create an org") — a deliberate billing rule we don't
+     *       want to weaken. Personal orgs are not a business-billable scope.</li>
+     *   <li>{@link #createOrgAsAdmin} requires SUPER_ADMIN context and audits
+     *       as "Created by super admin" — wrong actor.</li>
+     * </ul>
+     *
+     * <p>Idempotent: if the user already has an orgId, return their org
+     * unchanged (callers don't have to pre-check). The user is set as
+     * {@code ORG_ADMIN} of their personal org so they pass the role-gate
+     * on {@code POST /api/projects} via {@link
+     * com.navneet.executespec.auth.security.AppUserDetails#getAuthorities}
+     * which composes {@code ROLE_USER + ROLE_ORG_ADMIN}.
+     *
+     * <p>Personal orgs are flagged {@code is_personal=true} so org switchers,
+     * invitation flows, and billing seat counts can filter them out (one-line
+     * follow-up in those callers, intentionally NOT in this hotfix to keep the
+     * blast radius minimal).
+     *
+     * <p>If called for a user who already has {@code orgId} set (e.g. they
+     * were invited into a real org by accept-invite), this is a no-op — we
+     * don't replace a real-org membership with a personal-org membership.
+     */
+    @Transactional
+    public Org bootstrapPersonalOrg(String userId) {
+        AppUser user = userRepo.findById(userId)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        // Idempotency: already a member of an org (personal or real) → return that one.
+        if (user.getOrgId() != null) {
+            return orgRepo.findById(user.getOrgId()).orElseGet(() -> {
+                // Stale reference — user.orgId points at a deleted org. Re-bootstrap.
+                log.warn("User {} had stale orgId={} — re-bootstrapping personal org",
+                        userId, user.getOrgId());
+                user.setOrgId(null);
+                userRepo.save(user);
+                return doBootstrapPersonal(user);
+            });
+        }
+
+        return doBootstrapPersonal(user);
+    }
+
+    private Org doBootstrapPersonal(AppUser user) {
+        String orgId = UUID.randomUUID().toString();
+        String displayName = (user.getFirstName() == null || user.getFirstName().isBlank()
+                ? user.getEmail().split("@")[0]
+                : user.getFirstName()) + "'s workspace";
+
+        Org org = Org.builder()
+                .id(orgId)
+                .name(displayName)
+                .domainPatterns("")  // personal orgs don't enforce domains
+                .tier(user.getTier())  // mirror the user's tier (FREE on signup)
+                .status("ACTIVE")
+                .adminEmail(user.getEmail())
+                .createdByUserId(user.getId())
+                .isPersonal(true)
+                .build();
+        orgRepo.save(org);
+
+        // Make the user ORG_ADMIN so they pass the project-create role gate.
+        orgMemberRepo.save(OrgMember.builder()
+                .id(UUID.randomUUID().toString())
+                .orgId(orgId)
+                .userId(user.getId())
+                .orgRole("ORG_ADMIN")
+                .build());
+
+        user.setOrgId(orgId);
+        user.setUpdatedAt(Instant.now());
+        userRepo.save(user);
+
+        auditOrgEvent("ORG_CREATED", orgId, user.getId(),
+                Map.of("name", displayName, "tier", user.getTier(), "isPersonal", true));
+
+        log.info("Personal org bootstrapped: userId={} orgId={} tier={}",
+                user.getId(), orgId, user.getTier());
+        return org;
+    }
+
     /** Update per-org run limit override. Pass null to clear the override (use tier default). */
     @Transactional
     public OrgDto updateRunLimitOverride(String orgId, Integer limit, String actorId) {

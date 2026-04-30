@@ -53,6 +53,7 @@ public class AuthService {
     private final BillingSubscriptionRepository billingSubscriptionRepo;
     private final EventTrackingService eventTracking;
     private final ReferralService referralService;
+    private final OrgService orgService;
 
     @Value("${app.mail.base-url:http://localhost:5173}")
     private String baseUrl;
@@ -84,6 +85,14 @@ public class AuthService {
 
         // Auto-create FREE billing subscription so usage checks pass
         createFreeSubscription(user.getId());
+
+        // V162 — solo-user bootstrap: every fresh user gets a personal org so
+        // POST /api/projects (which requires ORG_ADMIN/DEVELOPER role) and the
+        // sandbox provisioning flow (which writes project.org_id NOT NULL)
+        // both work without a paid-tier upgrade. Without this, the V3EmptyProject
+        // "Create my first project" button hits 403 and the alt sandbox path 500s.
+        // See OrgService.bootstrapPersonalOrg javadoc for the design notes.
+        orgService.bootstrapPersonalOrg(user.getId());
 
         // R-162 — claim any pending referral invite addressed to this email.
         // Best-effort: a missing or already-bound invite is a clean no-op.
@@ -434,6 +443,10 @@ public class AuthService {
 
         // Auto-create FREE billing subscription
         createFreeSubscription(user.getId());
+
+        // V162 — solo-user bootstrap (OAuth new-user branch). Same fix as the
+        // email-signup register() path. See OrgService.bootstrapPersonalOrg.
+        orgService.bootstrapPersonalOrg(user.getId());
 
         // R-162 — claim any pending referral invite addressed to this email
         // (OAuth new-user branch). Best-effort, idempotent.

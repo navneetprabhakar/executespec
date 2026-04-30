@@ -345,6 +345,19 @@ public class AccuracyAssessmentService {
      * Targets route handlers, controllers, models, and entry points — the files most
      * likely to contain endpoint implementations the spec auditor needs to verify.
      * Excludes test files, compiled output, and node_modules.
+     *
+     * <p>V162 (R-343 hotfix) — top-up logic. The previous implementation returned
+     * structuralMatches as-is when non-empty, even if it was just 1 file out of a
+     * 6-slot budget. For small projects with one structurally-named file (e.g.
+     * {@code main.py}) and the actual logic in a non-structural file (e.g.
+     * {@code wordfreq.py}), the LLM saw only {@code main.py}'s content + a
+     * file tree mentioning {@code wordfreq.py}, then emitted "file exists but
+     * content not readable in KEY SOURCE FILES" false-positives across every
+     * spec requirement. The R-343 v2 report mis-attributed this to "context
+     * exhaustion / truncation"; the actual cause was that wordfreq.py was
+     * never read because it didn't match a structural keyword. Fix: top up
+     * structural matches with remaining source files until we hit the 6-file
+     * read budget enforced by buildKeyFileSnippets.
      */
     private List<String> inferKeyFilePaths(String fileTree) {
         if (fileTree == null || fileTree.isBlank()) return List.of();
@@ -369,14 +382,30 @@ public class AccuracyAssessmentService {
 
         if (allSource.isEmpty()) return List.of();
 
-        // Prefer structurally-named files. If none match (e.g. a single-file CLI like
-        // fib.py or a script project), fall back to all source files — capped below.
+        // Prefer structurally-named files. Cap at 10 so a Spring Boot project
+        // with 30 controllers doesn't crowd out the budget.
         List<String> structuralMatches = allSource.stream()
                 .filter(l -> structural.matcher(l).matches())
                 .limit(10)
                 .toList();
-        if (!structuralMatches.isEmpty()) return structuralMatches;
-        return allSource.stream().limit(6).toList();
+
+        // V162 — Read budget is 6 files (enforced by buildKeyFileSnippets). If the
+        // structural list under-fills it, top up with the smallest non-structural
+        // files. Smallest-first ordering (allSource is already sorted by length)
+        // makes it likely the LLM gets to read entire files instead of truncated
+        // 2,500-char windows. LinkedHashSet de-dupes structural overlap and
+        // preserves insertion order so structural matches stay first.
+        final int READ_BUDGET = 6;
+        if (structuralMatches.size() >= READ_BUDGET) {
+            return structuralMatches;
+        }
+
+        java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>(structuralMatches);
+        for (String path : allSource) {
+            if (picked.size() >= READ_BUDGET) break;
+            picked.add(path);
+        }
+        return List.copyOf(picked);
     }
 
     // ──────────────────────────────────────────────────────────────────────────
