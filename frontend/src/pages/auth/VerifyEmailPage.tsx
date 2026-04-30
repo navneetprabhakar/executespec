@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { Loader2, CheckCircle2, XCircle } from 'lucide-react';
 import * as api from '@/lib/api';
 import { AuthShell } from './LoginPage';
+import { useAuthStore } from '@/stores/useAuthStore';
 
 export default function VerifyEmailPage() {
   const [searchParams] = useSearchParams();
@@ -10,15 +11,33 @@ export default function VerifyEmailPage() {
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [error, setError] = useState('');
   const calledRef = useRef(false);
+  const navigate = useNavigate();
+  const { loadMe } = useAuthStore();
 
   useEffect(() => {
     if (!token) { setStatus('error'); setError('Missing verification token.'); return; }
     if (calledRef.current) return;
     calledRef.current = true;
     api.authVerifyEmail(token)
-      .then(() => setStatus('success'))
+      .then(async (resp: any) => {
+        // [F-29] (audit Sprint 1 PR-2, 2026-04-30) — auto-session.
+        // Backend now returns {accessToken, user} on verify; store the
+        // token + load /me, then redirect to /home. V3HomeRedirect picks
+        // the right destination based on project count, so the user
+        // never has to retype their password after clicking the
+        // verification link in their inbox.
+        if (resp?.accessToken) {
+          localStorage.setItem('access_token', resp.accessToken);
+          useAuthStore.setState({ accessToken: resp.accessToken, isAuthenticated: true });
+          await loadMe().catch(() => {/* non-fatal — store has user from verify resp */});
+        }
+        setStatus('success');
+        // Brief success flash (1.2s) so the user sees "Email verified"
+        // before the dispatcher takes them to their home; then redirect.
+        setTimeout(() => navigate('/home', { replace: true }), 1200);
+      })
       .catch((err: any) => { setStatus('error'); setError(err.message ?? 'Verification failed.'); });
-  }, [token]);
+  }, [token, navigate, loadMe]);
 
   return (
     <AuthShell>

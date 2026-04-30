@@ -87,10 +87,21 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * [F-29] (audit Sprint 1 PR-2, 2026-04-30) — verify-email + auto-session.
+     * Was: returned just `{message}`; user clicked "Sign in →" link;
+     * had to retype password. Now: returns LoginResponse + sets refresh
+     * cookie identical to /api/auth/login. Frontend stores access_token
+     * + redirects to /home, eliminating the re-auth round trip and
+     * closing one of the audit's friction findings.
+     */
     @GetMapping("/verify-email")
-    public ResponseEntity<Map<String, String>> verifyEmail(@RequestParam String token) {
-        authService.verifyEmail(token);
-        return ResponseEntity.ok(Map.of("message", "Email verified successfully"));
+    public ResponseEntity<LoginResponse> verifyEmail(@RequestParam String token,
+                                                     HttpServletResponse response) {
+        LoginResponse loginResp = authService.verifyEmailAndAuthenticate(token);
+        String refreshToken = authService.generateRefreshToken(loginResp.user().id());
+        setRefreshCookie(response, refreshToken);
+        return ResponseEntity.ok(loginResp);
     }
 
     @PostMapping("/resend-verification")

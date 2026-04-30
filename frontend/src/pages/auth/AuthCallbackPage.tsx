@@ -34,13 +34,27 @@ export default function AuthCallbackPage() {
       isAuthenticated: true,
     });
 
-    // Load user profile, then redirect.  R-342: post-auth lands on
-    // /home (the V3HomeRedirect dispatcher) so the user ends up on
-    // their first project's chat thread, not the v2 RunsPage.
+    // [F-16] (audit Sprint 1 PR-2, 2026-04-30) — preserve the marketing-
+    // site spec stash across OAuth round-trip. The marketing site can
+    // pre-fill `?spec=<truncated>` on the OAuth init link or stash the
+    // full spec into `sessionStorage['v3-anon-spec']` (read by
+    // V3HomeRedirect / V3EmptyProject); both paths must survive the
+    // bounce through Google/GitHub OAuth without being clobbered by the
+    // bare `/home` redirect.
+    //
+    // Strategy: forward any `?spec=` query param from the callback URL
+    // through to /home. sessionStorage is browser-local and already
+    // survives the OAuth bounce; query params on the marketing-site
+    // OAuth-init URL flow through to the backend's OAuth init endpoint
+    // and back here as part of the state param (per OAuthInitController).
+    const stashedSpec = searchParams.get('spec');
+    const homeUrl = stashedSpec
+      ? `/home?spec=${encodeURIComponent(stashedSpec)}`
+      : '/home';
     loadMe().then(() => {
-      navigate('/home', { replace: true });
+      navigate(homeUrl, { replace: true });
     }).catch(() => {
-      navigate('/home', { replace: true });
+      navigate(homeUrl, { replace: true });
     });
   }, [searchParams, navigate, loadMe]);
 
