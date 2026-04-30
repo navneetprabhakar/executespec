@@ -40,23 +40,23 @@ export function setV3OptedIn(value: boolean): void {
  */
 export const V2_TO_V3_REDIRECTS: ReadonlyArray<readonly [v2: string, v3: string]> = [
   // Most-specific first.
-  // R-341 (2026-04-29): /v3/landing is now a redirect to root — the
+  // R-341 (2026-04-29): / is now a redirect to root — the
   // static marketing site at executespec.ai is the canonical public
   // landing surface.  v2 →  v3 entry points that previously aimed at
-  // /v3/landing now aim at /v3/home (the silent dispatcher).
-  ['/runs/new', '/v3/home'],
-  ['/welcome', '/v3/home'],
-  ['/dashboard', '/v3/insights'],
-  ['/exec', '/v3/insights'],
-  ['/admin/analytics', '/v3/insights'],
-  ['/projects', '/v3/home'],
-  ['/integrations', '/v3/integrations'],
-  ['/settings', '/v3/settings'],
-  ['/billing', '/v3/billing'],
-  ['/plans', '/v3/billing'],
-  ['/pricing', '/v3/pricing'],
+  // / now aim at /home (the silent dispatcher).
+  ['/runs/new', '/home'],
+  ['/welcome', '/home'],
+  ['/dashboard', '/insights'],
+  ['/exec', '/insights'],
+  ['/admin/analytics', '/insights'],
+  ['/projects', '/home'],
+  ['/integrations', '/integrations'],
+  ['/settings', '/settings'],
+  ['/billing', '/billing'],
+  ['/plans', '/billing'],
+  ['/pricing', '/pricing'],
   // Catch-all home — last so the more-specific entries above win.
-  ['/', '/v3/home'],
+  ['/', '/home'],
 ];
 
 /** Resolve the v3 destination for a v2 path, or null if no rule matches. */

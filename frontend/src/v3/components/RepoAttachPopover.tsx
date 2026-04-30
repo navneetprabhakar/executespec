@@ -30,10 +30,10 @@ import Pill from './Pill';
  *      → returns a project_repo row.
  *   5. If the user has no current project context, we createProject()
  *      auto-named after the repo's short name and linkProjectRepo().
- *   6. Navigate to /v3/p/{newProjectId}.
+ *   6. Navigate to /projects/{newProjectId}.
  *
  * If the user has no saved GitHub PAT yet, we surface a clear "Connect
- * GitHub" CTA that routes to /v3/integrations (R-144) — the user lands
+ * GitHub" CTA that routes to /integrations (R-144) — the user lands
  * there, configures, and comes back. The popover doesn't try to do
  * OAuth on its own (that's a Wave-3 follow-up that needs the GitHub
  * App install path designed end-to-end).
@@ -50,7 +50,7 @@ import Pill from './Pill';
  *      now renders an inline PAT form + an "Ask your admin"
  *      affordance (pre-filled mailto + copy-link button) inside the
  *      popover, so users can paste-and-go without a context switch
- *      to /v3/integrations. Q1(a) — org-wide GitHub App install
+ *      to /integrations. Q1(a) — org-wide GitHub App install
  *      flow — remains deferred until the App is registered.
  *
  *   2. Mono-repo subdirectory selection — design doesn't ask. Today
@@ -82,7 +82,7 @@ interface RepoAttachPopoverProps {
   /** R-324 Checkpoint 2 — fired right after a successful
    *  {@code linkProjectRepo}.  When set on the "attach another repo"
    *  flow (i.e. {@code targetProjectId} present), the popover invokes
-   *  this instead of navigating to `/v3/p/{projectId}` so the host
+   *  this instead of navigating to `/projects/{projectId}` so the host
    *  page can refresh its repo list in place rather than reload.
    *  Ignored on the new-project flow (where navigate is the right
    *  default behaviour). */
@@ -116,7 +116,7 @@ export default function RepoAttachPopover({
   // R-321 — inline PAT form state for the no-PAT panel. Mirrors
   // SettingsPage's PAT flow but condensed into the popover so users
   // who land here without a PAT can paste-and-go without a context
-  // switch to /v3/integrations.
+  // switch to /integrations.
   const [patInput, setPatInput] = useState('');
   const [patSaving, setPatSaving] = useState(false);
   const [patTesting, setPatTesting] = useState(false);
@@ -231,10 +231,10 @@ export default function RepoAttachPopover({
   // R-321 — copy a sharable install link to the clipboard so the user
   // can paste it into Slack/email for an admin. The (a) GitHub App
   // org-install path is deferred until the App is registered; for now
-  // the link points to /v3/integrations where the admin can paste a
+  // the link points to /integrations where the admin can paste a
   // PAT (and, eventually, click through the App install).
   async function onCopyInstallLink() {
-    const url = `${window.location.origin}/v3/integrations`;
+    const url = `${window.location.origin}/integrations`;
     try {
       await navigator.clipboard.writeText(url);
       setInstallLinkCopied(true);
@@ -293,7 +293,7 @@ export default function RepoAttachPopover({
       if (targetProjectId && onAttached) {
         onAttached(created.id, projectId!);
       } else {
-        navigate(`/v3/p/${projectId}`);
+        navigate(`/projects/${projectId}`);
       }
     } catch (e) {
       const msg = (e as Error)?.message ?? 'Attach failed';
@@ -577,7 +577,7 @@ export default function RepoAttachPopover({
                     href={`mailto:?subject=${encodeURIComponent(
                       'Please set up GitHub access for ExecuteSpec'
                     )}&body=${encodeURIComponent(
-                      `Hi — I'm trying to use ExecuteSpec but my account can't list our repos.\n\nCould you set up GitHub access for the org? Setup link: ${window.location.origin}/v3/integrations\n\nThanks.`
+                      `Hi — I'm trying to use ExecuteSpec but my account can't list our repos.\n\nCould you set up GitHub access for the org? Setup link: ${window.location.origin}/integrations\n\nThanks.`
                     )}`}
                     style={{
                       padding: '6px 12px',
@@ -621,7 +621,7 @@ export default function RepoAttachPopover({
                   type="button"
                   onClick={() => {
                     onClose();
-                    navigate('/v3/integrations');
+                    navigate('/integrations');
                   }}
                   style={{
                     background: 'transparent',
@@ -710,7 +710,7 @@ export default function RepoAttachPopover({
                   (Q1 option a) is still deferred until the App is
                   registered. Until then, users whose PAT can't see
                   all the repos they expect can fall through to the
-                  /v3/integrations link below for the full setup
+                  /integrations link below for the full setup
                   surface. */}
               <p
                 style={{
@@ -722,7 +722,7 @@ export default function RepoAttachPopover({
               >
                 Don't see your repo?{' '}
                 <a
-                  href="/v3/integrations"
+                  href="/integrations"
                   style={{ color: 'var(--v3-brand)' }}
                 >
                   Open Integrations →

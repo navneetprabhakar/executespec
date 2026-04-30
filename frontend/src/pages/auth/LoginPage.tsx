@@ -49,7 +49,13 @@ export default function LoginPage() {
   const { login } = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
-  const from = (location.state as any)?.from?.pathname ?? '/';
+  // R-342 (2026-04-29) — default post-login destination is /home (the
+  // V3HomeRedirect dispatcher).  Authed user without a `from` location
+  // (e.g. typed /login directly, or arrived from the marketing site)
+  // lands on their first project's chat thread, not the v2 RunsPage.
+  // Users bounced from a deep link (e.g. /audit → /login) still come
+  // back to the original `from` path after sign-in.
+  const from = (location.state as any)?.from?.pathname ?? '/home';
 
   // R-341 (2026-04-29) — marketing-site handoff.  When the user types
   // a spec on executespec.ai's hero composer and submits, they're

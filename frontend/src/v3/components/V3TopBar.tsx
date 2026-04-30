@@ -37,7 +37,7 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties 
 export default function V3TopBar() {
   return (
     <header className="v3-topbar" role="banner">
-      <Link to="/v3/home" className="v3-topbar__brand" aria-label="ExecuteSpec home">
+      <Link to="/home" className="v3-topbar__brand" aria-label="ExecuteSpec home">
         <span className="v3-topbar__brand-mark" aria-hidden="true">
           ES
         </span>
@@ -45,10 +45,10 @@ export default function V3TopBar() {
       </Link>
       <div className="v3-topbar__center" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <ProjectSwitcher />
-        <NavLink to="/v3/library" style={navLinkStyle} title="Readymade Solutions library">
+        <NavLink to="/library" style={navLinkStyle} title="Readymade Solutions library">
           Library
         </NavLink>
-        <NavLink to="/v3/migrations" style={navLinkStyle} title="Migration recipes">
+        <NavLink to="/migrations" style={navLinkStyle} title="Migration recipes">
           Migrations
         </NavLink>
       </div>

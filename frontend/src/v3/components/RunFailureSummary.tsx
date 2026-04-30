@@ -57,7 +57,7 @@ export default function RunFailureSummary({ detail, report }: RunFailureSummaryP
       text: 'Pre-filled the composer with the failure context.',
       createdAt: new Date().toISOString(),
     });
-    navigate(`/v3/p/${detail.projectId}`);
+    navigate(`/projects/${detail.projectId}`);
   }
 
   return (
@@ -169,7 +169,7 @@ export default function RunFailureSummary({ detail, report }: RunFailureSummaryP
         {detail.projectId && (
           <button
             type="button"
-            onClick={() => navigate(`/v3/p/${detail.projectId}`)}
+            onClick={() => navigate(`/projects/${detail.projectId}`)}
             style={{
               padding: '5px 12px',
               fontSize: 12,

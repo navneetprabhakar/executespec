@@ -4,7 +4,7 @@ import { authMe, type AuthUser } from '@/lib/api';
 import Pill from '../components/Pill';
 
 /**
- * R-144 — /v3/integrations grid.
+ * R-144 — /integrations grid.
  *
  * Greenfield §4.12: card grid by install state. v3 doesn't ship its
  * own OAuth wiring for every integration today — many of them already
@@ -193,7 +193,7 @@ export default function V3Integrations() {
         }}
       >
         Setting up SSO instead?{' '}
-        <Link to="/v3/team" style={{ color: 'var(--v3-brand)' }}>
+        <Link to="/team" style={{ color: 'var(--v3-brand)' }}>
           Open Team
         </Link>
         .

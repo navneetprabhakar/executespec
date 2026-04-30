@@ -116,7 +116,7 @@ export const getAnonymousRunStatus = (sessionToken: string) =>
 
 // ── Selling-point landing endpoints (anonymized, public, no auth) ───────────
 // Drive the public marketing surface: hero counter, sample-run gallery, and
-// the public /v3/exec-demo share page.
+// the public /exec-demo share page.
 
 export interface V3LandingStats {
   specsThisWeek: number;
@@ -125,7 +125,7 @@ export interface V3LandingStats {
 }
 
 export const getV3LandingStats = () =>
-  fetch(BASE + '/v3/landing/stats').then((r) => {
+  fetch(BASE + '//stats').then((r) => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json() as Promise<V3LandingStats>;
   });
@@ -140,7 +140,7 @@ export interface V3SampleRun {
 }
 
 export const getV3SampleRuns = () =>
-  fetch(BASE + '/v3/landing/sample-runs').then((r) => {
+  fetch(BASE + '//sample-runs').then((r) => {
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
     return r.json() as Promise<V3SampleRun[]>;
   });

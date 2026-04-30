@@ -34,7 +34,7 @@ export default function V3ExecDemo() {
           Demo unavailable
         </h1>
         <p style={{ fontSize: 13, color: 'var(--v3-text-muted)' }}>{error}</p>
-        <Link to="/v3/landing" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>← Back to landing</Link>
+        <Link to="/" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>← Back to landing</Link>
       </div>
     );
   }
@@ -199,7 +199,7 @@ export default function V3ExecDemo() {
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>
           <Link
-            to="/v3/landing"
+            to="/"
             style={{
               padding: '8px 16px',
               fontSize: 13,
@@ -213,7 +213,7 @@ export default function V3ExecDemo() {
             Try free →
           </Link>
           <Link
-            to="/v3/pricing"
+            to="/pricing"
             style={{
               padding: '8px 16px',
               fontSize: 13,

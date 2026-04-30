@@ -3,7 +3,7 @@ import { trackV3, V3_EVENTS } from '../lib/events';
 import Pill from '../components/Pill';
 
 /**
- * R-151 — /v3/trust page (Amara unlock).
+ * R-151 — /trust page (Amara unlock).
  *
  * Greenfield §4.13: bullet-dense, scannable, attachable to a vendor
  * risk packet in two clicks. Wave 7 follow-up: SOC 2 status reads
@@ -145,7 +145,80 @@ export default function V3Trust() {
           <strong>30 days</strong> from request to full erasure. Audit log
           retains the deletion event for compliance.
         </Row>
-        <Row label="DPA">Signable from any tier; shipped on Enterprise by default.</Row>
+        <Row label="DPA">
+          Signable from any tier; shipped on Enterprise by default.
+          {/* R-343 (P2) — public DPA template download.  Procurement
+              shouldn't have to schedule a call to read the template
+              before redlining.  Lives in /trust-pack alongside the
+              other vendor-risk artefacts. */}
+          {' '}
+          <a
+            href="/trust-pack/dpa-template.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: 'var(--v3-brand)', textDecoration: 'none', fontWeight: 500 }}
+          >
+            Read the template →
+          </a>
+        </Row>
+      </Section>
+
+      {/* R-343 (P2 from UX persona review) — direct evidence links.
+          Procurement (Priya / Devon) shouldn't have to schedule a
+          sales call to read DPA / sub-processor list / data-flow
+          diagram before redlining.  These all live as static PDFs
+          on the static marketing-site origin (publicly cacheable);
+          the SOC 2 Type II report is gated behind a sales contact
+          since it's only released under NDA today. */}
+      <Section title="Vendor-risk evidence (direct links)">
+        <Row label="DPA template">
+          <a
+            href="/trust-pack/dpa-template.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={evidenceLinkStyle}
+          >
+            Download (PDF) →
+          </a>
+        </Row>
+        <Row label="Sub-processor list">
+          <a
+            href="/trust-pack/sub-processors.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={evidenceLinkStyle}
+          >
+            Download (PDF) →
+          </a>
+        </Row>
+        <Row label="Data-flow diagram">
+          <a
+            href="/trust-pack/data-flow.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={evidenceLinkStyle}
+          >
+            Download (PDF) →
+          </a>
+        </Row>
+        <Row label="SOC 2 Type II report">
+          <span style={{ color: 'var(--v3-text-muted)' }}>
+            Released under NDA after audit completes.{' '}
+            <a href="#contact" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+              Request a copy →
+            </a>
+          </span>
+        </Row>
+        <Row label="Security questionnaire (CAIQ-Lite)">
+          <a
+            href="/trust-pack/caiq-lite.pdf"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={evidenceLinkStyle}
+          >
+            Download (PDF) →
+          </a>
+        </Row>
       </Section>
 
       {/* Contact + Trust Pack */}
@@ -208,7 +281,7 @@ export default function V3Trust() {
         </div>
         <p style={{ margin: '12px 0 0', fontSize: 11, color: 'var(--v3-text-subtle)' }}>
           Need an MSA, custom DPA, or sub-processor list addition?{' '}
-          <Link to="/v3/pricing" style={{ color: 'var(--v3-brand)' }}>
+          <Link to="/pricing" style={{ color: 'var(--v3-brand)' }}>
             See Enterprise →
           </Link>
         </p>
@@ -307,3 +380,12 @@ function SubProcRow({ name, purpose, region }: { name: string; purpose: string; 
     </div>
   );
 }
+
+// R-343 (P2) — shared style for the public evidence-download links
+// in the "Vendor-risk evidence" section.
+const evidenceLinkStyle: React.CSSProperties = {
+  color: 'var(--v3-brand)',
+  textDecoration: 'none',
+  fontSize: 12,
+  fontWeight: 500,
+};

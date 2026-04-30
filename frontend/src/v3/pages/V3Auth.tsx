@@ -199,7 +199,7 @@ export default function V3Auth() {
         {/* OAuth — reuses existing v2 routes */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           <a
-            href="/api/auth/oauth2/authorize?provider=github&returnTo=/v3/auth"
+            href="/api/auth/oauth2/authorize?provider=github&returnTo=/claim"
             style={oauthButtonStyle('#24292e')}
           >
             <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
@@ -208,7 +208,7 @@ export default function V3Auth() {
             Continue with GitHub
           </a>
           <a
-            href="/api/auth/oauth2/authorize?provider=google&returnTo=/v3/auth"
+            href="/api/auth/oauth2/authorize?provider=google&returnTo=/claim"
             style={oauthButtonStyle('#fff', '#1a1a1a')}
           >
             <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
@@ -357,7 +357,7 @@ const inputStyle: React.CSSProperties = {
 
 /**
  * Post-login: claim any anonymous-trial session token stashed in
- * sessionStorage, then forward to /v3/home. The referral-side claim is
+ * sessionStorage, then forward to /home. The referral-side claim is
  * automatic on the backend (AuthService.bindReferral fires inside
  * register / findOrCreateFromOAuth via email match), so we only need a
  * round-trip when there's an anonymous token to bind.
@@ -385,7 +385,7 @@ async function claimAndForward(navigate: (to: string) => void) {
     }
   }
 
-  navigate('/v3/home');
+  navigate('/home');
 }
 
 function oauthButtonStyle(bg: string, color = '#fff'): React.CSSProperties {

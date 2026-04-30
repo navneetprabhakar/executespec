@@ -11,7 +11,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import Pill from '../components/Pill';
 
 /**
- * R-143 — /v3/team page.
+ * R-143 — /team page.
  *
  * Greenfield §4.10: members list + seat picker + invite-by-email +
  * SSO panel for Enterprise. Reuses every existing v2 endpoint
@@ -35,7 +35,7 @@ export default function V3Team() {
 
   useEffect(() => {
     // R-315 (Wave 7) — gate org-data fetches on auth state. Pre-fix,
-    // anonymous visitors hitting /v3/team (e.g. via a shared link from
+    // anonymous visitors hitting /team (e.g. via a shared link from
     // Senior Priya to her tech-lead-pre-signup) saw 10 × 401 in their
     // DevTools console. F1 G-FOLLOW-UP-1 / F2 §2 Senior Priya called
     // it out as a perception problem at the exact wrong moment.
@@ -118,12 +118,12 @@ export default function V3Team() {
 
       {/* ── Free tier — dedicated upsell card ─────────────────────────── */}
       {!loading && isFreeTier && (
-        <FreeTierUpsellCard onUpgrade={() => navigate('/v3/pricing')} />
+        <FreeTierUpsellCard onUpgrade={() => navigate('/pricing')} />
       )}
 
       {/* ── Pro tier — different upsell (BYOK + collaboration framing) ── */}
       {!loading && isProTier && (
-        <ProTierUpsellCard onUpgrade={() => navigate('/v3/pricing')} />
+        <ProTierUpsellCard onUpgrade={() => navigate('/pricing')} />
       )}
 
       {/* ── Team / Enterprise — full team surface ──────────────────────── */}
@@ -182,7 +182,7 @@ function AnonymousTeamPreview() {
             </h2>
             <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
               Per-seat collaboration, shared run pool, audit log, RBAC, SSO.
-              Free 14-day trial — no card. Procurement docs at <Link to="/v3/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/trust</Link>.
+              Free 14-day trial — no card. Procurement docs at <Link to="/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/trust</Link>.
             </p>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
@@ -203,7 +203,7 @@ function AnonymousTeamPreview() {
               Request a demo →
             </a>
             <Link
-              to="/v3/auth"
+              to="/claim"
               style={{
                 padding: '8px 14px',
                 fontSize: 12.5,
@@ -239,8 +239,8 @@ function AnonymousTeamPreview() {
         }}
       >
         Procurement teams: SOC 2 (audit in progress), SAML/OIDC, EU sub-processor list,
-        DPA, audit-log retention 5 years — all at <Link to="/v3/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/trust</Link>.
-        Pricing at <Link to="/v3/pricing" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/v3/pricing</Link>.
+        DPA, audit-log retention 5 years — all at <Link to="/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/trust</Link>.
+        Pricing at <Link to="/pricing" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/pricing</Link>.
       </section>
     </div>
   );
@@ -453,7 +453,7 @@ function FreeTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
 // ─── Pro → Team upsell ─────────────────────────────────────────────────────
 // Different framing than Free → Pro: Pro already has unlimited managed
 // runs, so the value-prop is collaboration + BYOK economics, not raw run
-// volume. Per the audit fix: Pro on /v3/team must not see the same Free
+// volume. Per the audit fix: Pro on /team must not see the same Free
 // upsell card.
 
 function ProTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
@@ -535,7 +535,7 @@ function SeatsCard({ org, tier, memberCount }: { org: OrgDto | null; tier: strin
           </p>
         </div>
         <Link
-          to="/v3/billing"
+          to="/billing"
           style={{
             padding: '5px 12px',
             fontSize: 12,

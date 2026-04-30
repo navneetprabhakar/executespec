@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { createRun } from '@/lib/api';
 import { useV3ProjectStore } from '../stores/useV3ProjectStore';
 import { useV3Ui } from '../stores/useV3Ui';
@@ -46,9 +46,53 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // R-343 (P0 from UX persona review) — hydrate the composer with a
+  // spec the user typed on executespec.ai's marketing-site hero.
+  // The submit handler on the marketing site stashes the text under
+  // `sessionStorage["v3-anon-spec"]`, the auth flow preserves it,
+  // and V3Auth.claimAndForward routes the user to /home → first
+  // project (which mounts this Composer).  We read the key on mount
+  // and clear it so a refresh doesn't re-hydrate.  Empty composer
+  // only — never overwrite text the user has already typed.
+  useEffect(() => {
+    if (!isEmpty) return; // only hydrate the first-load empty composer
+    try {
+      const stashed = sessionStorage.getItem('v3-anon-spec');
+      if (stashed && stashed.trim().length > 0) {
+        setText(stashed.trim());
+        sessionStorage.removeItem('v3-anon-spec');
+      }
+    } catch (_) {
+      /* private mode — silent fallback */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const pushBubble = useV3ProjectStore((s) => s.pushBubble);
+  const bubbles = useV3ProjectStore((s) => s.bubbles);
   const cap = useV3Ui((s) => s.cap);
   const openCapModal = useV3Ui((s) => s.openCapModal);
+
+  // R-343 (P3 from UX persona review) — recent-specs re-launch chips.
+  // Marcus runs the same spec across forks often.  We pull the last
+  // 3 distinct user-typed text bubbles from the project's thread,
+  // deduped + reverse-chronological, and show them as compact chips
+  // above the textarea.  Click → seed the textarea (user can edit
+  // before submit).  Chips hide when the user has typed something
+  // (no point re-launching a stale spec while composing a new one).
+  const recentSpecs: string[] = (() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    for (let i = bubbles.length - 1; i >= 0 && out.length < 3; i--) {
+      const b = bubbles[i];
+      if (b.role !== 'user' || b.kind !== 'text') continue;
+      const t = (b.text ?? '').trim();
+      if (!t || seen.has(t)) continue;
+      seen.add(t);
+      out.push(t);
+    }
+    return out;
+  })();
 
   const placeholder = isEmpty
     ? 'What do you want to build? Describe it in plain English — we\'ll ship a draft PR you can merge.'
@@ -146,6 +190,63 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
           }}
         >
           {heroLabel}
+        </div>
+      )}
+
+      {/* R-343 (P3) — recent-specs chip rail.  Renders only when the
+          textarea is empty (so we don't suggest re-launching a stale
+          spec while the user composes a new one) and the project has
+          at least one prior user-text bubble.  Click → seed the
+          textarea; the user can edit + submit. */}
+      {recentSpecs.length > 0 && text.trim().length === 0 && !isEmpty && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+            marginBottom: 8,
+            alignItems: 'center',
+          }}
+        >
+          <span
+            style={{
+              fontSize: 10.5,
+              fontWeight: 600,
+              color: 'var(--v3-text-subtle)',
+              letterSpacing: 0.4,
+              textTransform: 'uppercase',
+              marginRight: 4,
+            }}
+          >
+            Re-launch
+          </span>
+          {recentSpecs.map((s, i) => {
+            const preview = s.length > 52 ? s.slice(0, 52) + '…' : s;
+            return (
+              <button
+                key={i}
+                type="button"
+                onClick={() => setText(s)}
+                title={s}
+                style={{
+                  padding: '4px 10px',
+                  background: 'var(--v3-bg)',
+                  color: 'var(--v3-text-muted)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 999,
+                  fontSize: 11.5,
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  maxWidth: 320,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {preview}
+              </button>
+            );
+          })}
         </div>
       )}
 

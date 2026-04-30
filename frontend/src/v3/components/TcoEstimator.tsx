@@ -4,7 +4,7 @@ import { Calculator } from 'lucide-react';
 import { PRICING_CARDS } from '../lib/pricing';
 
 /**
- * R-317 (Wave 7) — TCO mini-calculator on /v3/pricing.
+ * R-317 (Wave 7) — TCO mini-calculator on /pricing.
  *
  * **Why this exists.** F2 (VP Eng Dana, direct-Enterprise persona)
  * named "no on-page TCO calculator" as her #1 leak — she compares
@@ -13,13 +13,13 @@ import { PRICING_CARDS } from '../lib/pricing';
  * F2 P3-implied + week-4 watch metric.
  *
  * **What this fix is.** A pure-client, two-slider estimator that
- * sits between the Team and Enterprise cards on /v3/pricing:
+ * sits between the Team and Enterprise cards on /pricing:
  *   - Engineers slider (5 → 500, default 25)
  *   - Months slider (6 → 36, default 12)
  *   - Output: monthly + annual TCO at the live Team-tier rate
  *     (read from PRICING_CARDS so a price change in lib/pricing.ts
  *     updates this calculator in lockstep)
- *   - "Compare with Enterprise" CTA → /v3/trust (procurement docs)
+ *   - "Compare with Enterprise" CTA → /trust (procurement docs)
  *
  * No API call, no state persisted. Component is render-cheap and
  * doesn't fire any side-effects. The 5-engineer floor matches the
@@ -121,7 +121,7 @@ export default function TcoEstimator() {
           </div>
         </div>
         <Link
-          to="/v3/trust"
+          to="/trust"
           style={{
             padding: '8px 14px',
             background: 'transparent',
