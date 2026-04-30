@@ -6,6 +6,7 @@ import com.navneet.executespec.api.dto.DeploymentDetail;
 import com.navneet.executespec.api.dto.DeploymentSummary;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.auth.service.TierPermissionService;
 import com.navneet.executespec.deployment.DeploymentService;
 import com.navneet.executespec.deployment.WorkspaceRestoreService;
 import com.navneet.executespec.deployment.analyzer.DeploymentAnalyzer;
@@ -51,12 +52,31 @@ public class DeploymentController {
     private final StateStore stateStore;
     private final CredentialService credentialService;
     private final DeployEngineOrchestrator deployEngine;
+    private final TierPermissionService tierPermissionService;
 
     @PostMapping
     public ResponseEntity<DeploymentSummary> deploy(
             @RequestBody DeployRequest request,
             @AuthenticationPrincipal AppUserDetails userDetails) {
         guard.requireRunAccess(request.runId(), userDetails);
+        // [F-31] (audit Sprint 2, 2026-04-30) — server-side tier gate.
+        // Was: only `RunAccessGuard.requireRunAccess` ran, which only
+        // checks run ownership. With `freeUserPermissions` returning
+        // `canDeploy=true, maxDeployments=3` for FREE pre-PR-3 (now
+        // tier_config-driven via [F-03]), a curl-bypass deploy from a
+        // FREE-tier user with a valid runId would have succeeded even
+        // when `tier_config.FREE.can_deploy=false`. Sidebar-only gating
+        // hid this from the UI but not from the API. Now consults the
+        // permission map (which post-F-03 reads tier_config) and 403s
+        // on canDeploy=false. Quota enforcement stays in DeploymentService
+        // (per-user maxDeployments check).
+        if (userDetails != null) {
+            var perms = tierPermissionService.getPermissions(userDetails.getUser().getId());
+            if (!perms.canDeploy()) {
+                throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                    "Deployment is not available on your current tier. Upgrade to enable.");
+            }
+        }
         try {
             RunRepo.RepoMode mode = RunRepo.RepoMode.valueOf(request.repoMode().toUpperCase());
             Deployment d = deploymentService.deploy(
