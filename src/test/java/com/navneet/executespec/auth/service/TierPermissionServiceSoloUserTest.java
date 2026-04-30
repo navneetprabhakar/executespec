@@ -1,6 +1,7 @@
 package com.navneet.executespec.auth.service;
 
 import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.entity.TierConfig;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgMemberRepository;
@@ -32,6 +33,7 @@ import static org.mockito.Mockito.when;
 class TierPermissionServiceSoloUserTest {
 
     private AppUserRepository userRepo;
+    private OrgRepository orgRepo;
     private TierConfigRepository tierConfigRepo;
     private TierEnforcementService tierEnforcementService;
     private TierPermissionService svc;
@@ -39,7 +41,7 @@ class TierPermissionServiceSoloUserTest {
     @BeforeEach
     void setUp() {
         userRepo = mock(AppUserRepository.class);
-        OrgRepository orgRepo = mock(OrgRepository.class);
+        orgRepo = mock(OrgRepository.class);
         OrgMemberRepository orgMemberRepo = mock(OrgMemberRepository.class);
         tierConfigRepo = mock(TierConfigRepository.class);
         tierEnforcementService = mock(TierEnforcementService.class);
@@ -161,5 +163,71 @@ class TierPermissionServiceSoloUserTest {
         seed("ENTERPRISE", -1, true, -1, -1, -1);
         TierPermissionService.TierPermissions p = svc.getPermissions("u-ENTERPRISE");
         assertThat(p.monthlyRunLimit()).isEqualTo(-1);
+    }
+
+    // ── [J-01] (coverage Sprint 3 follow-up to F-03) ───────────────────────
+    // Personal-org users (V162 bootstrap) must resolve through the
+    // tier-driven solo path, not orgMemberPermissions, otherwise
+    // the F-03 fix is dead code post-V162.
+
+    private AppUser personalOrgUser(String tier, String orgId) {
+        AppUser u = new AppUser();
+        u.setId("p-" + tier);
+        u.setTier(tier);
+        u.setGlobalRole("USER");
+        u.setOrgId(orgId);
+        u.setPersonalRunCount(0);
+        when(userRepo.findById("p-" + tier)).thenReturn(Optional.of(u));
+        when(tierEnforcementService.effectiveUserLimit(u)).thenReturn(canonicalLimit(tier));
+        Org org = new Org();
+        org.setId(orgId);
+        org.setTier(tier);
+        org.setPersonal(true); // V162 personal-org marker (Lombok setter name)
+        when(orgRepo.findById(orgId)).thenReturn(Optional.of(org));
+        return u;
+    }
+
+    @Test
+    void personalOrgEnterpriseUser_resolvesThroughSoloPath() {
+        // Was: every fresh ENT user post-V162 went through orgMemberPermissions
+        // (org_id != null branch) which hardcodes booleans tier-blind, so the
+        // F-03 canViewCostBreakdown=isMaxOrEnterprise fix never fired.
+        // Now: personal-org guard (J-01) routes them through freeUserPermissions
+        // exactly like a no-org ENT user would.
+        personalOrgUser("ENTERPRISE", "personal-org-ent");
+        seed("ENTERPRISE", -1, true, -1, -1, -1);
+        TierPermissionService.TierPermissions p = svc.getPermissions("p-ENTERPRISE");
+
+        assertThat(p.canViewCostBreakdown()).as("personal-org ENT should see own cost").isTrue();
+        assertThat(p.canManageAiKeys()).as("personal-org ENT BYOK enabled").isTrue();
+        assertThat(p.maxDeployments()).as("personal-org ENT maxDeployments unlimited").isEqualTo(-1);
+    }
+
+    @Test
+    void personalOrgFreeUser_canDeployFollowsTierConfigFalse() {
+        // Personal-org FREE user must still respect tier_config.FREE.can_deploy=false.
+        // Pre-J-01: V162 bootstrap → ORG_ADMIN → orgMemberPermissions → canDeploy=true (wrong).
+        // Post-J-01: routes through freeUserPermissions → resolveCanDeploy("FREE")=false (correct).
+        personalOrgUser("FREE", "personal-org-free");
+        seed("FREE", 10, false, 0, 2, 2);
+        TierPermissionService.TierPermissions p = svc.getPermissions("p-FREE");
+
+        assertThat(p.canDeploy()).as("personal-org FREE canDeploy follows tier_config (false)").isFalse();
+        assertThat(p.maxDeployments()).isEqualTo(0);
+        assertThat(p.canManageAiKeys()).as("personal-org FREE BYOK still locked").isFalse();
+        assertThat(p.canManageBillingProfile()).as("personal-org FREE has no billing profile").isFalse();
+    }
+
+    @Test
+    void personalOrgProUser_canDeployButCantBYOK() {
+        // Same matrix as solo PRO but reached through the personal-org route.
+        personalOrgUser("PRO", "personal-org-pro");
+        seed("PRO", 20, true, 3, 10, 5);
+        TierPermissionService.TierPermissions p = svc.getPermissions("p-PRO");
+
+        assertThat(p.canDeploy()).isTrue();
+        assertThat(p.maxDeployments()).isEqualTo(3);
+        assertThat(p.canManageAiKeys()).as("personal-org PRO cannot BYOK").isFalse();
+        assertThat(p.canManageBillingProfile()).as("personal-org PRO has billing profile").isTrue();
     }
 }

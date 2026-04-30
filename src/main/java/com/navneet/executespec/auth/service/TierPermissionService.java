@@ -82,10 +82,33 @@ public class TierPermissionService {
 
         // User with org membership
         if (user.getOrgId() != null) {
+            // [J-01] (coverage Sprint 3 follow-up to F-03, 2026-04-30):
+            // route personal-org users through the tier-driven solo path,
+            // not orgMemberPermissions. V162's bootstrap auto-creates an
+            // is_personal=TRUE org for every fresh user (so they can
+            // create their first project), which means post-V162 every
+            // solo user has org_id != null. Without this guard, all the
+            // F-03 work in freeUserPermissions becomes dead code — the
+            // orgMemberPermissions / ORG_ADMIN branch hardcodes most
+            // booleans tier-blind, undoing the tier_config-driven fix
+            // for canDeploy / maxDeployments / canViewCostBreakdown /
+            // canManageBillingProfile. Coverage Prompt B [J-01]
+            // discovered this dead-code regression.
+            //
+            // Real (multi-member) orgs continue through orgMemberPermissions
+            // because their permission shape is genuinely role-driven
+            // (ORG_ADMIN vs DEVELOPER), not tier-driven.
+            Org org = orgRepo.findById(user.getOrgId()).orElse(null);
+            if (org != null && org.isPersonal()) {
+                return freeUserPermissions(user);
+            }
             return orgMemberPermissions(user);
         }
 
-        // FREE solo user (no org)
+        // Solo user (no org — only possible for users registered before
+        // V162's personal-org bootstrap shipped + not yet backfilled by
+        // V163. Should be rare on prod after V163; freshux-* test users
+        // are the typical case in dev).
         return freeUserPermissions(user);
     }
 
