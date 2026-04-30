@@ -166,16 +166,51 @@ public class AuthController {
      * Saves the user's personal GitHub PAT and owner (username or org).
      * The PAT is stored as-is (not returned in subsequent /me calls — only hasGithubPat flag is exposed).
      * Pass an empty string to clear the PAT.
+     *
+     * [D-06] (coverage Sprint 3, 2026-05-01) — server-side PAT
+     * validation. Was: PUT accepted any string (including the literal
+     * "ghp_invalidtokenforfailurepathtest") and returned 200 +
+     * hasGithubPat:true. Downstream operations (listRepoFiles,
+     * deploy, branch create) silently no-op'd or surfaced opaque 4xx
+     * to the user when the PAT was used. The AI-keys flow already
+     * validates against api.openai.com / api.anthropic.com before
+     * persisting (per CLAUDE.md Phase 1.2); this endpoint mirrors
+     * that pattern by calling api.github.com/user with the candidate
+     * PAT and refusing to persist on non-200. Empty/null PAT (clear
+     * intent) bypasses the check.
      */
     @PutMapping("/settings/github")
     public ResponseEntity<UserDto> updateGitHubSettings(
             @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestBody GitHubSettingsRequest req) {
         AppUser user = userDetails.getUser();
-        user.setGithubPat(blankToNull(req.githubPat()));
-        user.setGithubOwner(blankToNull(req.githubOwner()));
+        String newPat = blankToNull(req.githubPat());
+        String newOwner = blankToNull(req.githubOwner());
+
+        // [D-06] reject bogus PATs at the boundary instead of silently
+        // accepting them. Skip when the user is clearing the PAT (newPat
+        // null) or when the request keeps the existing PAT unchanged
+        // (idempotent owner-only edit).
+        boolean patChangedToNonEmpty = newPat != null && !newPat.equals(user.getGithubPat());
+        if (patChangedToNonEmpty) {
+            ResponseEntity<ValidationResult> probe = validateExternalConnection(
+                    "https://api.github.com/user",
+                    Map.of("Authorization", "Bearer " + newPat,
+                           "Accept", "application/vnd.github+json"),
+                    "GitHub PAT is valid",
+                    "GitHub rejected the PAT (status %d) — check your token has the right scopes (repo, read:user) and isn't expired");
+            ValidationResult result = probe.getBody();
+            if (result == null || !result.valid()) {
+                String msg = result == null ? "GitHub validation failed" : result.message();
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, msg);
+            }
+        }
+
+        user.setGithubPat(newPat);
+        user.setGithubOwner(newOwner);
         userRepo.save(user);
-        log.info("User {} updated GitHub settings — owner={}, hasPat={}", user.getId(), user.getGithubOwner(), user.getGithubPat() != null);
+        log.info("User {} updated GitHub settings — owner={}, hasPat={}, patValidated={}",
+                user.getId(), user.getGithubOwner(), user.getGithubPat() != null, patChangedToNonEmpty);
 
         recordSettingsAudit(user, "USER_GITHUB_SETTINGS_CHANGED",
                 "{\"hasToken\":" + (user.getGithubPat() != null) + ",\"owner\":\"" + user.getGithubOwner() + "\"}");

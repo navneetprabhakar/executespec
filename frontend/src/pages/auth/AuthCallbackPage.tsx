@@ -22,11 +22,19 @@ export default function AuthCallbackPage() {
       return;
     }
 
-    // Store tokens
+    // Store access token only. The refresh token lives in an HttpOnly
+    // cookie set by the backend on /api/auth/login + /api/auth/refresh
+    // — writing it to localStorage too is an XSS exfiltration surface
+    // (any injected script would slurp it and bypass the HttpOnly
+    // protection). [J-21] (coverage Sprint 3, 2026-05-01) strip the
+    // localStorage write; the OAuth callback flow's cookie is set via
+    // backend redirect Set-Cookie header before this page renders.
+    //
+    // Defensively also REMOVE any pre-existing refresh_token entry
+    // from prior buggy versions of this page — same security guarantee.
     localStorage.setItem('access_token', token);
-    if (refresh) {
-      localStorage.setItem('refresh_token', refresh);
-    }
+    localStorage.removeItem('refresh_token');
+    void refresh; // intentionally unused — cookie is authoritative
 
     // Update auth store and navigate
     useAuthStore.setState({

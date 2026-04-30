@@ -25,6 +25,10 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * Phase 1 of the hierarchical planner — produces a {@link PlanV2} for runs the
@@ -75,6 +79,23 @@ public class OutlinePlannerAgent {
     /** v2.6.2 slice 3 — skeleton outlines are tiny (id/title/complexity only)
      *  even for 50-task LARGE plans. 8k is plenty. */
     private static final int OUTLINE_MAX_TOKENS_SKELETON = 8_192;
+
+    /**
+     * [D-02] (coverage Sprint 3, 2026-05-01) — wall-clock timeout
+     * for the synchronous planner LLM call. Was: a stalled provider
+     * socket would leave the whole pipeline in PLANNING forever
+     * (Spring AI's default RestClient retry could compound on top
+     * of network hangs). Cap is 8 minutes — well above the
+     * observed-good MEDIUM Express run's 4m36s but below any
+     * reasonable user expectation for a "the planner has wedged"
+     * heuristic. The phase 2 expander pool already enforces a 20-min
+     * wall timeout; this closes the matching gap on phase 1.
+     *
+     * Hits raise an IllegalStateException so callers (V2RunOrchestrator)
+     * can fall back to the legacy planner OR mark the run FAILED with a
+     * clear reason instead of hanging indefinitely.
+     */
+    private static final long PLANNER_LLM_WALL_TIMEOUT_SECONDS = 8 * 60;
 
     /** v2.5.11 — gates strict v3 planner behaviour (requirement enumeration + validation). */
     private static final String FLAG_V3_STRICT = "validation.v3-strict";
@@ -236,17 +257,51 @@ public class OutlinePlannerAgent {
         String plannerModel = resolved.getModel();
         String plannerProviderName = resolved.providerName();
 
-        log.info("OutlinePlanner [{}] -> {} {} (classification={}, maxTokens={})",
-                mode, plannerProviderName, plannerModel, req.classification(), maxTokens);
-        ChatResponse resp = router.call(LlmRequestV2.builder()
-                .provider(plannerProviderName)
-                .model(plannerModel)
-                .messages(messages)
-                .context(req.context())
-                .temperature(0.0)
-                .maxTokens(maxTokens)
-                .toolsOverride(List.of(submitOutline))
-                .build());
+        log.info("OutlinePlanner [{}] -> {} {} (classification={}, maxTokens={}, wallTimeout={}s)",
+                mode, plannerProviderName, plannerModel, req.classification(), maxTokens,
+                PLANNER_LLM_WALL_TIMEOUT_SECONDS);
+
+        // [D-02] (coverage Sprint 3, 2026-05-01) — wall-clock timeout.
+        // CompletableFuture.supplyAsync runs the synchronous router.call
+        // on the common ForkJoinPool; .get(timeout) interrupts and
+        // propagates a TimeoutException if the LLM provider stalls. Was:
+        // a wedged provider socket (network partition, hung TCP keepalive,
+        // provider-side queue jam) left the run in PLANNING indefinitely
+        // because Spring AI's RestClient retry chain has no overall
+        // ceiling. The 8-minute cap matches "Phase 2 expander 20-min /
+        // 4 = per-call ceiling" rule of thumb already used in
+        // V2RunOrchestrator.runLargePipeline.
+        ChatResponse resp;
+        try {
+            CompletableFuture<ChatResponse> fut = CompletableFuture.supplyAsync(() ->
+                router.call(LlmRequestV2.builder()
+                        .provider(plannerProviderName)
+                        .model(plannerModel)
+                        .messages(messages)
+                        .context(req.context())
+                        .temperature(0.0)
+                        .maxTokens(maxTokens)
+                        .toolsOverride(List.of(submitOutline))
+                        .build())
+            );
+            resp = fut.get(PLANNER_LLM_WALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
+        } catch (TimeoutException te) {
+            log.error("OutlinePlanner [{}] WALL_TIMEOUT after {}s — provider {} may be stalled",
+                    mode, PLANNER_LLM_WALL_TIMEOUT_SECONDS, plannerProviderName);
+            throw new IllegalStateException(
+                "OutlinePlanner LLM call timed out after " + PLANNER_LLM_WALL_TIMEOUT_SECONDS
+                + "s. Provider may be stalled or rate-limited. Run can be retried.", te);
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            throw new IllegalStateException("OutlinePlanner interrupted", ie);
+        } catch (ExecutionException ee) {
+            // Unwrap to surface the original LLM error (401, 5xx, etc.) so
+            // callers / fallbacks see the same cause they would have without
+            // the timeout wrapper.
+            Throwable cause = ee.getCause() != null ? ee.getCause() : ee;
+            if (cause instanceof RuntimeException re) throw re;
+            throw new IllegalStateException("OutlinePlanner LLM call failed", cause);
+        }
 
         AssistantMessage.ToolCall planCall = null;
         for (var gen : resp.getResults()) {
