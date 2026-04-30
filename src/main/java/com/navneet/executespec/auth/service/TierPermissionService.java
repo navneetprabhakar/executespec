@@ -226,19 +226,35 @@ public class TierPermissionService {
     }
 
     private TierPermissions freeUserPermissions(AppUser user) {
+        // [F-03] (audit Sprint 1 PR-3) — solo-user permissions now resolve
+        // from tier_config instead of being hardcoded. Was: 5 fields
+        // (canDeploy, maxDeployments, canViewCostBreakdown, canManageAiKeys
+        // path, canManageBillingProfile) ignored their tier_config columns.
+        // Live API probes against the v2.5.11 audit baseline confirmed:
+        //   • ENTERPRISE solo got canDeploy=true / maxDeployments=3
+        //     (should be unlimited per tier_config.ENTERPRISE)
+        //   • ENTERPRISE solo got canViewCostBreakdown=false
+        //     (audit's headline contradiction)
+        //   • FREE solo got canDeploy=true (tier_config.FREE.can_deploy=false)
+        //   • FREE solo got canManageBillingProfile=true
+        //     (no org to attach a billing profile to — F-18)
+        // After this fix the API matches tier_config + role intent for solo
+        // users (no-org path); org-member users keep going through
+        // orgMemberPermissions() above.
         String tier = user.getTier() != null ? user.getTier() : "FREE";
         int limit = tierEnforcementService.effectiveUserLimit(user);
         int used = user.getPersonalRunCount();
         int maxApply = resolveMaxApplySuggestions(tier);
         int maxPreviews = resolveMaxPreviewStarts(tier);
         boolean isMaxOrEnterprise = "MAX".equals(tier) || "ENTERPRISE".equals(tier);
+        boolean isFree = "FREE".equals(tier);
 
         return new TierPermissions(
                 isMaxOrEnterprise, // canManageAiKeys — MAX/ENTERPRISE need BYOK
-                false, // canViewPricing
+                false, // canViewPricing — admin-only; consistent with admin-page gating
                 false, // canManageIntegrations
                 true,  // canViewMetrics — unlocked for all tiers
-                false, // canViewCostBreakdown
+                isMaxOrEnterprise, // [F-03] canViewCostBreakdown — MAX/ENT solo can see their own cost breakdown (was: false hardcoded)
                 true,  // canViewTokenUsage — unlocked for all tiers
                 true,  // canUseChat — unlocked for all tiers
                 false, // canCreateOrg
@@ -251,10 +267,10 @@ public class TierPermissionService {
                 false, // canManageCreditNotes
                 false, // canExportGstr
                 false, // canManageSellerConfig
-                true,  // canManageBillingProfile (own profile)
+                !isFree, // [F-18] canManageBillingProfile — paid tiers only; FREE has no billing context (was: true hardcoded for everyone)
                 limit, used, -1, 0, maxApply, maxPreviews,
-                true,  // canDeploy — unlocked for all tiers
-                3      // maxDeployments
+                resolveCanDeploy(tier),    // [F-03] from tier_config (was: true hardcoded)
+                resolveMaxDeployments(tier) // [F-03] from tier_config (was: 3 hardcoded)
         );
     }
 
