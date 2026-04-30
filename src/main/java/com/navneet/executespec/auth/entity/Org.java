@@ -172,6 +172,17 @@ public class Org {
     @Builder.Default
     private String productId = "executespec";
 
+    // ── V162 — solo-user bootstrap personal org ─────────────────────────────
+    /** True when this org was auto-provisioned by AuthService.register /
+     *  findOrCreateFromOAuth as a single-member personal scope so the user
+     *  has somewhere to put their first project. Filtered out of org switchers,
+     *  invitation flows, billing seat counts, and tier-aware listings — the
+     *  user shouldn't see "Smoke's personal org" alongside real orgs they
+     *  belong to. Cannot be invited into; OrgService.invite rejects with 422. */
+    @Column(name = "is_personal", nullable = false)
+    @Builder.Default
+    private boolean isPersonal = false;
+
     // ── V127 (Wave 3) — SSO/SAML on the org ─────────────────────────────────
     /** null | "GOOGLE_OIDC" | "OKTA_SAML" | "AZURE_AD_SAML" */
     @Column(name = "sso_provider", length = 32)
