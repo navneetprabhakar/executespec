@@ -9,7 +9,7 @@ import type { TierKey } from '../lib/pricing';
  * R-150 — public pricing page.
  *
  * Greenfield §4.14: hero · 3-card grid · Enterprise footer line · FAQ.
- * Same pricing source as /v3/billing (lib/pricing.ts) so the in-app
+ * Same pricing source as /billing (lib/pricing.ts) so the in-app
  * upsell and the public marketing prices stay in lockstep.
  *
  * Conversion event: v3_pricing_cta_clicked. Each card's CTA fires it
@@ -22,17 +22,17 @@ export default function V3Pricing() {
   function onPickTier(tier: TierKey) {
     trackV3(V3_EVENTS.PRICING_CTA_CLICKED, { tier });
     if (tier === 'FREE') {
-      navigate('/v3/landing');
+      navigate('/');
       return;
     }
     if (tier === 'ENTERPRISE') {
-      navigate('/v3/trust');
+      navigate('/trust');
       return;
     }
     // Pro / Team: route to billing (auto-redirects to v2 /plans
-    // checkout when authed, /v3/auth when not)
+    // checkout when authed, /claim when not)
     trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: 'public', toTier: tier });
-    navigate('/v3/billing');
+    navigate('/billing');
   }
 
   return (
@@ -112,11 +112,11 @@ export default function V3Pricing() {
           Sign in
         </Link>{' '}
         ·{' '}
-        <Link to="/v3/landing" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to="/" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
           Try without signing up
         </Link>{' '}
         ·{' '}
-        <Link to="/v3/trust" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to="/trust" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
           Trust & security
         </Link>
       </footer>
@@ -137,7 +137,7 @@ const FAQ: { q: string; a: string }[] = [
   },
   {
     q: 'What happens to my code?',
-    a: 'Workspaces are destroyed 24 hours after last access. We never train models on your code. Repository content is sent to the LLM provider you choose; we keep only the artifacts your run produced. Full data-flow on /v3/trust.',
+    a: 'Workspaces are destroyed 24 hours after last access. We never train models on your code. Repository content is sent to the LLM provider you choose; we keep only the artifacts your run produced. Full data-flow on /trust.',
   },
   {
     q: 'How does the free-tier referral work?',

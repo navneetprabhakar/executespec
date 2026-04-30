@@ -51,52 +51,90 @@ export default function ProjectRepoPicker({
   const [showNewProject, setShowNewProject] = useState(false);
   const [showNewRepo, setShowNewRepo] = useState(false);
 
-  // Load projects on mount.
+  // R-343 (P1 from UX persona review) — stale-while-revalidate cache
+  // for the project list + per-project repo lists.  Marcus ran into
+  // a ~300ms refetch on every navigation to a library/migrations
+  // detail page.  Most projects + repos don't change between
+  // sessions, so we hydrate from localStorage immediately (zero
+  // perceived latency) and refetch in the background to refresh the
+  // cache.  24h TTL on cached entries; cache key versioned so we
+  // can invalidate atomically by bumping it.
+  const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  const CACHE_VERSION = 1;
+  const projectsCacheKey = `v3-pic-projects-v${CACHE_VERSION}`;
+  const reposCacheKey = (pid: string) => `v3-pic-repos-${pid}-v${CACHE_VERSION}`;
+  function readCache<T>(key: string): T | null {
+    try {
+      const raw = localStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as { ts: number; data: T };
+      if (Date.now() - parsed.ts > CACHE_TTL_MS) return null;
+      return parsed.data;
+    } catch { return null; }
+  }
+  function writeCache<T>(key: string, data: T) {
+    try {
+      localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
+    } catch { /* quota exceeded — silent */ }
+  }
+
+  // Load projects on mount — cache-first, then revalidate.
   useEffect(() => {
+    // 1) Hydrate from cache for instant render.
+    const cached = readCache<ProjectDto[]>(projectsCacheKey);
+    if (cached && cached.length > 0) {
+      const active = cached.filter((row) => row.status === 'ACTIVE');
+      setProjects(active);
+      if (!projectId && active.length > 0) onProjectChange(active[0].id);
+    }
+    // 2) Revalidate in the background — replaces the cached list when
+    //    the network response lands.  Failure leaves the cached set
+    //    intact (graceful degradation when offline).
     let cancelled = false;
     getProjects()
       .then((p) => {
         if (cancelled) return;
         const active = p.filter((row) => row.status === 'ACTIVE');
         setProjects(active);
-        // Auto-select the first project if the caller hasn't already
-        // picked one — saves a click on the common "I have one project"
-        // case.
-        if (!projectId && active.length > 0) {
+        writeCache(projectsCacheKey, p);
+        if (!projectId && active.length > 0 && !cached) {
           onProjectChange(active[0].id);
         }
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setProjectsErr(e?.message ?? 'Failed to load projects');
+        if (!cached) setProjectsErr(e?.message ?? 'Failed to load projects');
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Reload repos when the chosen project changes.
+  // Reload repos when the chosen project changes — same SWR pattern.
   useEffect(() => {
     if (!projectId) {
       setRepos(null);
       return;
     }
+    const cacheKey = reposCacheKey(projectId);
+    const cached = readCache<ProjectRepoLink[]>(cacheKey);
+    if (cached) setRepos(cached);
     let cancelled = false;
     setReposErr(null);
     getProjectRepos(projectId)
       .then((r) => {
         if (cancelled) return;
         setRepos(r);
+        writeCache(cacheKey, r);
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setReposErr(e?.message ?? 'Failed to load repos');
-        setRepos([]);
+        if (!cached) {
+          setReposErr(e?.message ?? 'Failed to load repos');
+          setRepos([]);
+        }
       });
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   function toggleRepo(repoId: string) {

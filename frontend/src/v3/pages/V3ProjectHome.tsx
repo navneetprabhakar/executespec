@@ -47,7 +47,7 @@ export default function V3ProjectHome() {
     if (slug) void load(slug);
     return () => {
       // Don't reset on unmount — switching projects re-loads, and
-      // navigating to /v3/p/{slug}/r/{runId} should keep the thread
+      // navigating to /projects/{slug}/runs/{runId} should keep the thread
       // hot for fast back-navigation.
     };
   }, [slug, load]);
