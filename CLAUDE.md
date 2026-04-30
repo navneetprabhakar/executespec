@@ -1,7 +1,34 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
-> Last updated: 2026-04-26 (cleanup pass — workspace/, workspace-test/, scripts/{e2e-matrix-logs,eval-runs,project-view-results,v2-eval-results}, docs/test-scenarios/, docs/reports/ all removed; runs+projects+contracts+activity_feed truncated in DB; 5 shipped/preview-engine plans removed from docs/plans/; hierarchical-planner-plan.md moved into docs/plans/ then removed as shipped). 2026-04-25: enterprise-readiness eval shipped on `feature/enterprise-readiness-eval` — Phases E1+E2+E3+E4 (40 slices total) + V131-V139 + 8 new packages + 23 new endpoints; server-up sweep landed clean (3-provider low-band eval all CLEAN with verified 97-100, 23/23 API endpoints behaving correctly, V131-V139 schema verified). v2.6.2-track hierarchical-planner all 5 slices shipped on `feature/hierarchical-planner` — schema + SmartClassifierAgent in shadow mode + V130 migration; project-chat UX bundle + OSIV-off + Hikari handling-mode + async apply-suggestion all live on dev; v2.6.1 Waves 1-6: persona-driven roadmap; v2.6.0: UX overhaul v3 Graphite+Signal + LlmProvider GEMINI rename; v2.5.13: RN+Expo codegen; v2.5.12: 3-step architecture; v2.5.11: Validation v3 Pillar 1; v2.5.10: trustworthy verified score)
+>
+> **2026-04-30 — audit Sprint 1 fixes batch on `audit/v2-5-11-ux-product`:**
+> Version-string drift fix [F-22] (pom 2.5.1 → 2.5.11 + frontend
+> package.json + Version file). Permission map fix [F-03] in
+> `TierPermissionService.freeUserPermissions` — `canDeploy` /
+> `maxDeployments` / `canViewCostBreakdown` / `canManageBillingProfile`
+> now read from tier_config or tier identity instead of hardcoded values
+> + new `TierPermissionServiceSoloUserTest` (8 tests) pinning per-tier
+> expected map. v3 IA cleanup PR-1 — `Runs` link + `UsageBadge` chip
+> added to `V3TopBar.tsx` [F-01 + IA-Q4]; `V3Placeholder` retired in
+> favor of direct mounts of `OrgAdminDashboard` / `PricingManager` /
+> `TierLifecyclePage` for `/admin/{analytics,pricing,tiers}` [F-14];
+> `/governance/audit` now redirects to canonical `/audit` [F-26]. F-12
+> batch strike — V2 batch UI hidden in `RunDetail.tsx` plan-approval gate
+> + `RunCard.tsx` badge; USER_MANUAL §3.3 marked as not-shipped. README
+> pipeline diagram refreshed from V1 stale flow (`RequestTriageService`
+> separate, `CompilerAgent`, `SubtaskDecomposer`, `BatchClientRouter`,
+> merge gate, `PartialRunResumeService`, `ReviewerAgentV2`) to current
+> V2 reality (SmartClassifier → Outline/Skeleton+Expander+Coherence
+> branches by strategy, per-task buildProject smoke, ReviewerAgentV3
+> two-pass) [F-08]. Tier ladder authoritative against `tier_config`:
+> FREE / PRO (HIDDEN) / TEAM (per-seat $49) / MAX (BYOK unlimited $29) /
+> ENTERPRISE — V141 (rename MAX → TEAM) was reverted by V144
+> (reinstating per-seat TEAM), so the live ladder has BOTH TEAM and MAX
+> active. The "4-tier post-V141" claim in older entries below is
+> superseded.
+>
+> Last updated before today: 2026-04-26 (cleanup pass — workspace/, workspace-test/, scripts/{e2e-matrix-logs,eval-runs,project-view-results,v2-eval-results}, docs/test-scenarios/, docs/reports/ all removed; runs+projects+contracts+activity_feed truncated in DB; 5 shipped/preview-engine plans removed from docs/plans/; hierarchical-planner-plan.md moved into docs/plans/ then removed as shipped). 2026-04-25: enterprise-readiness eval shipped on `feature/enterprise-readiness-eval` — Phases E1+E2+E3+E4 (40 slices total) + V131-V139 + 8 new packages + 23 new endpoints; server-up sweep landed clean (3-provider low-band eval all CLEAN with verified 97-100, 23/23 API endpoints behaving correctly, V131-V139 schema verified). v2.6.2-track hierarchical-planner all 5 slices shipped on `feature/hierarchical-planner` — schema + SmartClassifierAgent in shadow mode + V130 migration; project-chat UX bundle + OSIV-off + Hikari handling-mode + async apply-suggestion all live on dev; v2.6.1 Waves 1-6: persona-driven roadmap; v2.6.0: UX overhaul v3 Graphite+Signal + LlmProvider GEMINI rename; v2.5.13: RN+Expo codegen; v2.5.12: 3-step architecture; v2.5.11: Validation v3 Pillar 1; v2.5.10: trustworthy verified score)
 >
 > **v2.6.3-track — Enterprise Readiness (in-flight on `feature/enterprise-readiness-eval`, NOT merged to dev/main):** 40-slice rewrite of the customer-facing project surface to make every persistent artefact live in a versioned `.executespec/` folder in customer git, gate every write through a single `ExecutespecFolderWriter` chokepoint, and add 4 new persistence stripes (contracts, engineering standards, ADRs, architecture invariants) + an activity feed + an export bundle + per-user notification preferences. 4 phases shipped on the branch:
 > - **E1 — folder + activity (8 slices, V131-V134):** `.executespec/` folder bootstrap (`BootstrapService`), 4-state status machine (MISSING/BOOTSTRAP_PENDING/PR_PENDING/READY) on `project_repo`, `ExecutespecFolderWriter` chokepoint with PR vs DIRECT_PUSH dispatch (`prModeEnum()`), per-project config namespacing decision tree (`ProjectConfigPathResolver`: FOLDER_FLAT vs FOLDER_NAMESPACED vs DATABASE), `activity_feed` partitioned-by-month table + `ActivityEventEmitter` (dual-writes to `activity_audit` for AUDIT-tagged events), `ActivityFeedRetentionJob` + `ActivityFeedPartitionJob` (`@Scheduled`, `@SchedulerLock`).
