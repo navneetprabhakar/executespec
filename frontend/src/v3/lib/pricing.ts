@@ -58,13 +58,15 @@ export const PRICING_CARDS: PricingCard[] = [
     priceUsd: 20,
     priceInr: 1700,
     priceUnit: '/ month',
-    badge: 'Most popular',
-    // R-314 (Wave 7) — F2 Solo Sam value-anchor. The previous subhead
-    // was clean but generic ("Unlimited runs for one developer"); this
-    // version names a Sam-shaped outcome ("a side-project shipping every
-    // week") that connects $20/mo to a recognisable life pattern, not
-    // a credit calculation.
-    subhead: 'Enough to keep a side-project shipping every week',
+    // [F-28] (audit Sprint 1 PR-4, 2026-04-30) — PRO is HIDDEN per
+    // `tier_config.PRO.lifecycle_state = 'HIDDEN'` (v2.6.1 Wave 1).
+    // New buyers should choose TEAM or MAX (latter is power-individual
+    // BYOK at $29). PRO continues to bill for grandfathered subscribers
+    // only — the card stays visible so existing users recognise their
+    // plan, but the badge + subhead now name the grandfathered status
+    // explicitly instead of selling PRO as "Most popular".
+    badge: 'Grandfathered',
+    subhead: 'Existing subscribers only — new buyers, choose TEAM or MAX',
     bullets: [
       'Unlimited runs / month',
       'All providers (BYOK option)',
@@ -72,7 +74,7 @@ export const PRICING_CARDS: PricingCard[] = [
       'Plan & review gate',
       'Priority email support',
     ],
-    ctaLabel: 'Get Pro →',
+    ctaLabel: 'Manage subscription →',
   },
   {
     tier: 'TEAM',
