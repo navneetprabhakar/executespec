@@ -113,6 +113,63 @@ class EntitlementResolverTest {
         assertThrows(IllegalArgumentException.class, () -> resolver.resolve("ghost"));
     }
 
+    /** R-2026-05-01 / Task 1: a PRO user whose backing org row still says
+     *  tier=FREE (e.g. a bootstrapped personal org from V162 that was never
+     *  upgraded) used to leak {@link Integer#MAX_VALUE} into
+     *  {@link EntitlementsResponse#lifetimeRunCreditBalance} because the
+     *  resolver gated on the org-resolved tier and called
+     *  {@link LifetimeCreditService#currentBalance} which returns the
+     *  unlimited sentinel for paid user.tier values. The bug surfaced as
+     *  "2147483647 of 25 lifetime runs left" on /billing. */
+    @Test
+    void pro_user_with_free_org_does_not_leak_max_value() {
+        AppUser u = AppUser.builder()
+                .id("u4").email("u@p").firstName("P")
+                .tier("PRO")              // user is paid …
+                .orgId("org4")
+                .lifetimeRunCreditCap(25)
+                .build();
+        when(userRepo.findById("u4")).thenReturn(Optional.of(u));
+        Org freeOrg = new Org();
+        freeOrg.setId("org4");
+        freeOrg.setTier("FREE");          // … but backing org is FREE
+        when(orgRepo.findById("org4")).thenReturn(Optional.of(freeOrg));
+        when(tierRepo.findById("FREE")).thenReturn(Optional.of(tierCfg("FREE", "Free", 10)));
+        // currentBalance would return Integer.MAX_VALUE for a paid user.
+        // The resolver must NOT call it and must NOT pass that value through.
+        when(credit.currentBalance("u4")).thenReturn(Integer.MAX_VALUE);
+
+        EntitlementsResponse e = resolver.resolve("u4");
+
+        assertEquals(-1, e.lifetimeRunCreditBalance(),
+                "paid user must surface as -1, not Integer.MAX_VALUE");
+        assertEquals(-1, e.lifetimeRunCreditCap(),
+                "paid user must surface no lifetime cap");
+        // Defence-in-depth: even if currentBalance is called, the clamp
+        // catches MAX_VALUE so /billing never renders 2147483647.
+        verify(credit, never()).currentBalance("u4");
+    }
+
+    /** Defence-in-depth: if a future regression makes the resolver call
+     *  currentBalance() on a FREE-marked user and the credit service
+     *  returns the sentinel, the clamp must still pin the response to -1. */
+    @Test
+    void clamp_catches_sentinel_balance_from_credit_service() {
+        AppUser u = AppUser.builder()
+                .id("u5").email("u@s").firstName("S")
+                .tier("FREE").orgId(null)
+                .lifetimeRunCreditCap(25)
+                .build();
+        when(userRepo.findById("u5")).thenReturn(Optional.of(u));
+        when(tierRepo.findById("FREE")).thenReturn(Optional.of(tierCfg("FREE", "Free", 10)));
+        when(credit.currentBalance("u5")).thenReturn(Integer.MAX_VALUE);
+
+        EntitlementsResponse e = resolver.resolve("u5");
+
+        assertEquals(-1, e.lifetimeRunCreditBalance(),
+                "MAX_VALUE from credit service must clamp to -1");
+    }
+
     @Test
     void normalize_handles_null_and_blank() {
         assertEquals("FREE", EntitlementResolver.normalize(null));
