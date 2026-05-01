@@ -57,9 +57,16 @@
   --gray-900:           var(--c-ink-200);        /* #C9D1DB */
   --gray-1000:          var(--c-ink-100);        /* #ECEEF2 */
 
-  /* Borders */
-  --border-default:     var(--c-graphite-4);
-  --border-hover:       var(--c-graphite-5);
+  /* Borders
+     R12 (2026-05-01 follow-up) — bumped default + hover one rung up the
+     graphite ramp. Default at graphite-4 (#242A33) gave 1.35 contrast vs
+     bg, which fails WCAG SC 1.4.11 (≥1.5 for non-text UI components) and
+     made every card / divider read frameless. graphite-5 (#333B46) gives
+     ~1.71 — visibly framed without overpowering the surface. Hover steps
+     up to graphite-6 (#4C5662) so the rest→hover delta stays equivalent
+     to before. */
+  --border-default:     var(--c-graphite-5);
+  --border-hover:       var(--c-graphite-6);
 
   /* Text */
   --text-primary:       var(--c-ink-100);
@@ -80,7 +87,11 @@
    * Wave-6 keeps #F5A524 literal because it's between --c-warning #F59E0B
    * and --c-pop-amber #FBBF24 — needs its own slot if we promote it. */
   --status-success:     var(--c-success);
-  --status-executing:   var(--c-signal-blue);    /* accidentally aligned to brand per E.2 — fine */
+  /* R11 (2026-05-01 follow-up) — split status-executing from brand
+     blue so a "running" status pill isn't visually identical to a
+     primary CTA. Slightly desaturated blue (#4A77D6) reads as "in
+     motion / waiting" while staying in the same family. */
+  --status-executing:   #4A77D6;
   --status-thinking:    var(--c-accent-purple);
   --status-waiting:     var(--c-warning);
   --status-partial:     #F5A524;                 /* see comment above — uniquely positioned */
