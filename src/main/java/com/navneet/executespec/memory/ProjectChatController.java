@@ -119,8 +119,10 @@ public class ProjectChatController {
                 .map(TierConfig::isExecutionViewEnabled)
                 .orElse(false);
         if (!allowed) {
+            // R4 (2026-05-01 follow-up Task 7) — V165 retired MAX; gating
+            // copy now names the post-V165 ladder.
             throw new ResponseStatusException(HttpStatus.FORBIDDEN,
-                    "Project chat requires ENTERPRISE or MAX tier");
+                    "Project chat requires Team or Enterprise tier");
         }
         return user;
     }

@@ -228,25 +228,29 @@ export default function RunList() {
             <button
               onClick={() => setPage(page - 1)}
               disabled={!hasPrevious}
+              aria-label="Previous page"
+              title="Previous page"
               className={cn(
                 'p-1 rounded transition-colors',
                 hasPrevious ? 'text-secondary hover:text-primary hover:bg-[var(--gray-200)]' : 'text-[var(--gray-500)] cursor-not-allowed'
               )}
             >
-              <ChevronLeft className="h-4 w-4" />
+              <ChevronLeft className="h-4 w-4" aria-hidden="true" />
             </button>
-            <span className="text-xs text-secondary min-w-[4rem] text-center">
+            <span className="text-xs text-secondary min-w-[4rem] text-center" aria-live="polite">
               {page + 1} / {totalPages}
             </span>
             <button
               onClick={() => setPage(page + 1)}
               disabled={!hasNext}
+              aria-label="Next page"
+              title="Next page"
               className={cn(
                 'p-1 rounded transition-colors',
                 hasNext ? 'text-secondary hover:text-primary hover:bg-[var(--gray-200)]' : 'text-[var(--gray-500)] cursor-not-allowed'
               )}
             >
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         </div>

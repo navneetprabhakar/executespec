@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { BillingPlan } from '@/lib/billing-api';
 
-// v2.6.0 — TEAM sits between PRO and MAX. Fractional rank keeps existing
-// upgrade/downgrade math correct without re-renumbering.
+// V165 — MAX dropped; ladder is FREE / STARTER / PRO / TEAM / ENTERPRISE.
 const TIER_RANK: Record<string, number> = {
-  FREE: 0, STARTER: 1, PRO: 2, TEAM: 2.5, MAX: 3, ENTERPRISE: 4
+  FREE: 0, STARTER: 1, PRO: 2, TEAM: 3, ENTERPRISE: 4
 };
 
 interface PlanCardProps {
@@ -64,21 +63,18 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, ini
     : `$${(totalUsdCents / 100).toFixed(0)}`;
 
   const isPopular = plan.tier === 'PRO';
-  const isMax = plan.tier === 'MAX';
+  // V165 — TEAM is now the BYOK-first headline plan ($39/seat).
+  const isHeadline = isTeam && plan.keyMode === 'BYOK';
   const runsLabel = plan.runLimit === -1
     ? 'Unlimited runs/month'
-    : isTeam
-      ? `${50 * effectiveSeats} credits/mo (shared pool)`
-      : `${plan.runLimit} runs/month`;
-  const keyModeLabel = isTeam
-    ? 'Managed keys · all 3 providers'
-    : plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Managed Keys';
+    : `${plan.runLimit} runs/month`;
+  const keyModeLabel = plan.keyMode === 'BYOK' ? 'Bring Your Own Keys' : 'Managed Keys';
 
   return (
     <div
       ref={cardRef}
       className={`relative rounded-md border p-4 sm:p-6 flex flex-col ${
-      isMax ? 'border-status-success' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
+      isHeadline ? 'border-status-success' : isPopular ? 'border-accent-blue' : 'border-[var(--border-default)]'
     } ${isCurrentPlan ? 'ring-2 ring-accent-blue' : ''} ${highlight && !isCurrentPlan ? 'ring-2 ring-accent-blue' : ''}`}>
 
       {isPopular && (
@@ -87,13 +83,10 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, ini
         </span>
       )}
 
-      {/* M-027 (Wave 2) — BEST VALUE chip currently fires on MAX (BYOK
-          $29 unlimited; pre-V144 ladder placement). Post-V144 the choice
-          is ambiguous — TEAM ($49/seat managed-key shared pool) is the
-          higher-ARPU upsell for orgs with 2+ engineers. Keeping on MAX
-          for now (lowest-cost-of-entry headline) until product confirms
-          which tier should wear the chip. Decision tracked in checkpoint. */}
-      {isMax && !isCurrentPlan && (
+      {/* V165 — BEST VALUE chip moves to TEAM-BYOK ($39/seat, unlimited
+          on the customer's own keys). MAX deprecated; the lowest-cost-of-
+          entry headline is now the BYOK Team plan. */}
+      {isHeadline && !isCurrentPlan && (
         <span className="absolute -top-3 left-1/2 -translate-x-1/2 bg-status-success text-white text-xs font-semibold px-3 py-1 rounded-sm">
           BEST VALUE
         </span>
@@ -106,7 +99,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, ini
       )}
 
       <h3 className="text-lg font-semibold text-primary">
-        {plan.tier === 'MAX' ? 'Max' : plan.tier === 'TEAM' ? 'Team' : 'Pro'}
+        {plan.tier === 'TEAM' ? 'Team' : 'Pro'}
       </h3>
       <p className="text-sm text-muted mt-1">{keyModeLabel}</p>
 
@@ -186,11 +179,11 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, ini
           <span className="text-accent-blue">&#10003;</span>
           All products included
         </li>
-        {isMax && (
+        {isHeadline && (
           <>
             <li className="flex items-center gap-2">
               <span className="text-accent-blue">&#10003;</span>
-              3 concurrent runs
+              3 concurrent runs per seat
             </li>
             <li className="flex items-center gap-2">
               <span className="text-accent-blue">&#10003;</span>
@@ -220,7 +213,7 @@ export function PlanCard({ plan, isCurrentPlan, showInr, onSelect, userTier, ini
             ? 'bg-accent-blue/10 text-accent-blue cursor-default'
             : isDowngrade
               ? 'bg-[var(--gray-200)] text-muted cursor-not-allowed'
-              : isMax
+              : isHeadline
                 ? 'bg-status-success text-white hover:bg-status-success/80'
                 : isPopular
                   ? 'bg-accent-blue text-primary hover:bg-accent-blue-hover'

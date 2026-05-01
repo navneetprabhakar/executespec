@@ -33,6 +33,15 @@ export default function Sidebar() {
   const isAdmin = useAuthStore(selectIsOrgAdmin);
   const isOrgMember = useAuthStore(selectIsOrgMember);
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  // Task 6 (2026-05-01 fix list): source the sidebar's tier from the
+  // canonical user.tier (useAuthStore), NOT from billing.plan.tier. The
+  // billing endpoint returns "FREE" for any user without an active
+  // subscription record (PRO/TEAM/ENT test fixtures all hit this), which
+  // made the upgrade CTA pitch "Upgrade to Pro · 0/5 runs" to TEAM and
+  // ENTERPRISE users — exact mirror of the /billing tier bug fixed in
+  // Tasks 1+4. The billing status fetch is kept as a fallback for unauth
+  // / loading states.
+  const userTier = useAuthStore((s) => s.user?.tier ?? null);
   const permissions = useTierPermissions();
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,7 +50,7 @@ export default function Sidebar() {
   const setProjectFilter = useRunStore((s) => s.setProjectFilter);
 
   const [projects, setProjects] = useState<ProjectDto[]>([]);
-  const [tier, setTier] = useState<string>('');
+  const [billingTier, setBillingTier] = useState<string>('');
 
   useEffect(() => {
     if (!isOrgMember) return;
@@ -51,8 +60,13 @@ export default function Sidebar() {
   }, [isOrgMember]);
 
   useEffect(() => {
-    fetchBillingStatus().then((s) => setTier(s.plan?.tier ?? 'FREE')).catch(() => {});
+    fetchBillingStatus().then((s) => setBillingTier(s.plan?.tier ?? 'FREE')).catch(() => {});
   }, []);
+
+  // Prefer the canonical user tier; fall back to billing.plan.tier only
+  // when the auth store hasn't hydrated yet. Legacy "MAX" rows collapse
+  // to TEAM (V141 path).
+  const tier = ((userTier ?? billingTier ?? '') || '').toUpperCase().replace(/^MAX$/, 'TEAM');
 
   useEffect(() => {
     if (isMobile && mobileSidebarOpen) {

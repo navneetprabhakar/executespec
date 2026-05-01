@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate } from 'react-router-dom';
 import { AlertTriangle, Layers } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
-import { useAuthStore, selectIsSuperAdmin } from '@/stores/useAuthStore';
+import RoleGuard from '@/components/auth/RoleGuard';
 import {
   fetchTiersLifecycle, updateTierLifecycle,
   type TierLifecycleDto, type LifecycleState,
@@ -14,9 +13,23 @@ import {
  * Implements the 3-state state machine (LISTED / HIDDEN / SUNSETTING) with
  * an MRR-aware confirmation modal for SUNSETTING transitions. Full design
  * at docs/plans/tier-lifecycle-plan.md.
+ *
+ * Task 21 (2026-05-01 fix list) — wrapped with RoleGuard so the page
+ * doesn't bounce to "/" (and thence to the home-redirect's first-project
+ * dispatch) before the auth store hydrates. The previous gate
+ * (`if (!isSuperAdmin) return <Navigate to="/" replace />`) fired on the
+ * very first render when `user` was still null, treating "loading" as
+ * "denied" and breaking direct deep-links to /admin/tiers.
  */
 export default function TierLifecyclePage() {
-  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  return (
+    <RoleGuard requireSuperAdmin featureName="Tier lifecycle">
+      <TierLifecyclePageInner />
+    </RoleGuard>
+  );
+}
+
+function TierLifecyclePageInner() {
   const [tiers, setTiers] = useState<TierLifecycleDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
@@ -41,8 +54,6 @@ export default function TierLifecyclePage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData, reload]);
-
-  if (!isSuperAdmin) return <Navigate to="/" replace />;
 
   const openTransition = (tier: TierLifecycleDto, target: LifecycleState) => {
     setModalTier(tier);
@@ -134,11 +145,17 @@ export default function TierLifecyclePage() {
                     </td>
                     <td className="py-2 px-2 text-right font-mono">{t.activeSubscribers}</td>
                     <td className="py-2 px-2 text-right font-mono">${mrr}</td>
+                    {/* F-20 (round-3 audit) — show date only by default,
+                        reason moved to hover. The previous inline-truncated
+                        reason ("TEAM tier reinstated (V144) — pro...")
+                        leaked migration-version churn into screenshots
+                        whenever a screen-cap of this admin view escaped
+                        SUPER_ADMIN scope. The full reason stays accessible
+                        via tooltip for operators who actually need it. */}
                     <td className="py-2 px-2 text-[11px] text-muted">
-                      {changedAt}
-                      {t.reason && (
-                        <span className="block truncate max-w-[180px]" title={t.reason}>{t.reason}</span>
-                      )}
+                      <span title={t.reason || undefined} className={t.reason ? 'border-b border-dashed border-[var(--border-default)] cursor-help' : ''}>
+                        {changedAt}
+                      </span>
                     </td>
                     <td className="py-2 px-2 text-right space-x-1">
                       {t.state !== 'LISTED' && (

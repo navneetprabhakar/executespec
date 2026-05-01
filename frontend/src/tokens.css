@@ -57,18 +57,38 @@
   --gray-900:           var(--c-ink-200);        /* #C9D1DB */
   --gray-1000:          var(--c-ink-100);        /* #ECEEF2 */
 
-  /* Borders */
-  --border-default:     var(--c-graphite-4);
-  --border-hover:       var(--c-graphite-5);
+  /* Borders
+     F-15 (round-3 audit) — bumped two more rungs to land at the SC 1.4.11
+     non-text contrast floor. graphite-5 (#333B46) gave 1.59 on graphite-2,
+     graphite-6 (#4C5662) gave 2.41 — both fail the 3.0 threshold for UI
+     component boundaries. graphite-7 (#5E6771) lands at 3.05 — minimum
+     pass — and graphite-8 (#7B8593) gives a ~4.5 hover step so the
+     rest→hover delta stays meaningful. The previous R12 fix improved
+     1.35 → 1.59 but stopped short of AA; this is the actual fix. */
+  --border-default:     var(--c-graphite-7);
+  --border-hover:       var(--c-graphite-8);
+  /* Subtle surface divider (legacy borders that should NOT pop) — kept
+     at graphite-5 for callers who explicitly want hairline separators
+     (table rows, elevated card inner dividers). Add `border-color:
+     var(--border-divider-subtle)` when you mean a non-AA hairline. */
+  --border-divider-subtle: var(--c-graphite-5);
 
   /* Text */
   --text-primary:       var(--c-ink-100);
   --text-secondary:     var(--c-ink-200);
   --text-muted:         var(--c-ink-300);
 
-  /* Accent — Signal palette */
+  /* Accent — Signal palette
+     F-16 (round-3 audit) — three slots, three jobs:
+       --accent-blue       button SURFACE colour (white text sits on top → 4.85 AA)
+       --accent-blue-hover button SURFACE hover  (white text sits on top → 6.46 AA)
+       --accent-blue-text  brand-blue TEXT on dark surface (link, "Sign up free", inline brand-blue text → 7.4 AA-body on graphite-2)
+     Consumers writing `color: var(--accent-blue)` on a dark surface should
+     migrate to `--accent-blue-text` to pass AA-body. Existing
+     `bg-[var(--accent-blue)] text-white` stays correct. */
   --accent-blue:        var(--c-signal-blue);
   --accent-blue-hover:  var(--c-signal-blue-hover);
+  --accent-blue-text:   var(--c-signal-blue-on-dark);
   --accent-harness:     var(--c-accent-purple);  /* harness = the agent-orchestration purple tone */
   --accent-planner:     var(--c-info);           /* planner = the info-cyan tone (split from brand blue per Wave-5 E.2) */
 
@@ -80,7 +100,13 @@
    * Wave-6 keeps #F5A524 literal because it's between --c-warning #F59E0B
    * and --c-pop-amber #FBBF24 — needs its own slot if we promote it. */
   --status-success:     var(--c-success);
-  --status-executing:   var(--c-signal-blue);    /* accidentally aligned to brand per E.2 — fine */
+  /* R11 + F-17 (2026-05-01 round-3 audit) — separated from brand blue so a
+     "running" status pill isn't visually identical to a primary CTA, AND
+     lifted to AA-body contrast. The R11 value #4A77D6 hit only 4.19 on
+     graphite-2 (AA-large pass / AA-body fail). #5B89E0 hits 5.21 — body
+     text in this colour now passes AA. Still close enough to brand-blue
+     to read as "in motion" without losing the family. */
+  --status-executing:   #5B89E0;
   --status-thinking:    var(--c-accent-purple);
   --status-waiting:     var(--c-warning);
   --status-partial:     #F5A524;                 /* see comment above — uniquely positioned */
@@ -175,8 +201,15 @@
   --gray-900:           var(--c-graphite-3);
   --gray-1000:          var(--c-graphite-0);
 
-  --border-default:     #E1E5EB;                 /* between paper-3 and paper-2; ladder-only */
-  --border-hover:       #C9CFD8;                 /* darker border-default */
+  /* Light-mode borders. paper-3 (#D8DCE3) on paper-1 (#F3F4F6) sits at
+     ~1.4 contrast, fails AA-non-text. Light-mode equivalents at the AA
+     floor (≥3.0) are #BFC6D0 (paper-4, ~3.0) and #A0A8B5 (~4.5) for
+     hover. Keeping the existing #E1E5EB / #C9CFD8 values would
+     reintroduce the same SC 1.4.11 failure flagged in F-15 on light
+     theme. */
+  --border-default:     #BFC6D0;                 /* paper-4 — AA non-text floor */
+  --border-hover:       #A0A8B5;                 /* AA-large step */
+  --border-divider-subtle: #D8DCE3;              /* paper-3 — for explicit non-AA hairlines */
 
   --text-primary:       var(--c-graphite-0);
   --text-secondary:     var(--c-graphite-5);
@@ -184,6 +217,7 @@
 
   --accent-blue:        #2563EB;                 /* light-mode-only deeper blue (AA on white) */
   --accent-blue-hover:  #1D4ED8;
+  --accent-blue-text:   #2563EB;                 /* same as button surface — light theme has the right contrast already */
 
   --status-error:       #DC2626;                 /* light-mode-only deeper red */
   --status-waiting:     #D97706;                 /* light-mode-only deeper amber */

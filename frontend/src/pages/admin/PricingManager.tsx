@@ -1,14 +1,15 @@
 import { useState, useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
 import { Save, Loader2, Check } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import PageShell from '@/components/shared/PageShell';
+import AccessDenied from '@/components/shared/AccessDenied';
 import { useAuthStore, selectIsSuperAdmin } from '@/stores/useAuthStore';
 import { getAllPricing, updateModelPricing, type PricingRow  } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
 export default function PricingManager() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  const userLoaded = useAuthStore((s) => s.user !== null);
   const [rows, setRows] = useState<PricingRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [edits, setEdits] = useState<Record<string, Partial<PricingRow>>>({});
@@ -22,7 +23,19 @@ export default function PricingManager() {
       .finally(() => setLoading(false));
   }, []);
 
-  if (!isSuperAdmin) return <Navigate to="/" replace />;
+  // R1 (2026-05-01 follow-up) — render AccessDenied in place instead of
+  // redirecting to "/" (which bounces to /projects/empty for non-admins
+  // via V3HomeRedirect, leaving them confused). The userLoaded check
+  // prevents a flash of AccessDenied during auth hydration.
+  if (userLoaded && !isSuperAdmin) {
+    return (
+      <AccessDenied
+        feature="Pricing manager"
+        requiredRole="SUPER_ADMIN"
+      />
+    );
+  }
+  if (!userLoaded) return null;
 
   const key = (r: PricingRow) => `${r.provider}/${r.model}`;
 

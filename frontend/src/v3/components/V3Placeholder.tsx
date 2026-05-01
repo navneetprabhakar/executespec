@@ -111,7 +111,9 @@ export default function V3Placeholder({
             textDecoration: 'none',
           }}
         >
-          {v2RouteLabel ? `Open ${v2RouteLabel} (v2) →` : 'Open in v2 →'}
+          {/* Task 13 (2026-05-01 fix list) — drop user-facing "v2" label;
+              the route prefix is an implementation detail. */}
+          {v2RouteLabel ? `Open ${v2RouteLabel} →` : 'Open the full page →'}
           <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
         </Link>
       )}

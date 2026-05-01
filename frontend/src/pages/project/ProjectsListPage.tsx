@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Link, Navigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { Sparkles, ChevronRight, FolderGit2 } from 'lucide-react';
 import PageShell from '@/components/shared/PageShell';
+import AccessDenied from '@/components/shared/AccessDenied';
 import { getProjects, type ProjectDto } from '@/lib/api';
 import { useViewMode } from '@/hooks/useViewMode';
 import { cn } from '@/lib/utils';
@@ -15,7 +16,7 @@ const STATUS_COLOR: Record<string, string> = {
 /**
  * Landing page for PROJECT view mode (v2.4.0). Lists projects the user has
  * access to; clicking a project opens its dashboard with Launches + PRs +
- * Overview tabs. ENTERPRISE / MAX tiers only — lower tiers bounce to /.
+ * Overview tabs. TEAM / ENTERPRISE tiers only — lower tiers bounce to /.
  */
 export default function ProjectsListPage() {
   const { canUseProjectMode } = useViewMode();
@@ -29,11 +30,24 @@ export default function ProjectsListPage() {
         .catch((e: any) => setError(e?.message ?? 'Failed to load projects'));
   }, [canUseProjectMode]);
 
-  if (!canUseProjectMode) return <Navigate to="/" replace />;
+  // R1 (2026-05-01 follow-up) — render AccessDenied in place instead of
+  // redirecting to "/" (which V3HomeRedirect bounces to /projects/empty,
+  // confusing users about WHY they were sent there). canUseProjectMode
+  // is a tier gate (TEAM / ENTERPRISE); the message names the required
+  // tier so the user knows it's an upgrade path, not a permission gap.
+  if (!canUseProjectMode) {
+    return (
+      <AccessDenied
+        feature="Multi-repo projects"
+        requiredRole="ORG_ADMIN"
+        contactHint="Multi-repo projects are part of our Team and Enterprise plans. Upgrade to start linking multiple repositories into one workspace."
+      />
+    );
+  }
 
   return (
     <PageShell
-      eyebrow="Projects · Enterprise / Max"
+      eyebrow="Projects · Team / Enterprise"
       eyebrowTone="purple"
       title="Multi-repo workspaces."
       accent="Multi-repo"

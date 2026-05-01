@@ -92,7 +92,12 @@ export default function V3Settings() {
           Settings
         </h1>
         <p style={{ fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0' }}>
-          Account · AI provider · Repos · Danger zone — all in one place.
+          {/* R9 (2026-05-01 follow-up Option B) — "Danger zone" was
+              misleading: the section only contains Sign out, which
+              isn't destructive. Renamed to "Account actions" to match
+              the actual contents until/unless real destructive ops
+              (Delete account, Revoke sessions) ship. */}
+          Account · AI provider · Repos · Account actions — all in one place.
         </p>
       </div>
 
@@ -116,7 +121,10 @@ export default function V3Settings() {
             {tierDisplay}
           </Pill>
         </Row>
-        <Row label="Theme (v2 surfaces)">
+        {/* Task 13 (2026-05-01 fix list) — user-facing label dropped the
+            "(v2 surfaces)" qualifier; users don't care about internal
+            version branches. */}
+        <Row label="Theme">
           <ThemeChooser current={theme} onPick={(t) => { setTheme(t); flashSaved(); }} />
         </Row>
       </Card>
@@ -157,7 +165,7 @@ export default function V3Settings() {
             to="/integrations"
             style={{ color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none' }}
           >
-            Open v2 integrations →
+            Manage integrations →
           </Link>
         </Row>
         <Row label="More">
@@ -170,8 +178,13 @@ export default function V3Settings() {
         </Row>
       </Card>
 
-      {/* ── Danger zone ─────────────────────────────────────────────────── */}
-      <Card title="Danger zone" tone="warn">
+      {/* ── Account actions ─────────────────────────────────────────────
+       *  R9 (2026-05-01 follow-up Option B) — was "Danger zone", but
+       *  Sign-out is not destructive. Stripe/GitHub/shadcn reserve
+       *  "Danger zone" for delete-account / revoke-tokens / transfer-
+       *  ownership. Rename today; promote back to "Danger zone" the
+       *  moment real destructive ops land in this section. */}
+      <Card title="Account actions" tone="warn">
         <button
           type="button"
           onClick={async () => {

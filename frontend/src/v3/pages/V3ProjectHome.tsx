@@ -163,8 +163,23 @@ export default function V3ProjectHome() {
       )}
 
       {/* Thread */}
+      {/* [A-04] (audit Sprint 4, 2026-05-01) — aria-live region for
+          SSE-driven run state changes (PLANNING → WORKING → REVIEWING →
+          COMPLETE). Without this, screen-reader users hear no
+          announcement when a run progresses or a new bubble appears.
+          aria-live="polite" so updates queue behind the current
+          announcement instead of interrupting; aria-relevant="additions"
+          limits noise to new bubbles (not text edits inside existing ones);
+          aria-busy mirrors the loading flag so AT can suppress the
+          inevitable "thread updated" chatter while the initial fetch
+          paints. WCAG 4.1.3 Level AA. */}
       <div
         ref={threadRef}
+        role="log"
+        aria-live="polite"
+        aria-relevant="additions"
+        aria-busy={loading || undefined}
+        aria-label="Run conversation thread"
         style={{
           flex: 1,
           display: 'flex',

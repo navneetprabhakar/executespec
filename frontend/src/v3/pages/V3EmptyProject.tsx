@@ -117,12 +117,18 @@ export default function V3EmptyProject() {
           lineHeight: 1.2,
         }}
       >
-        {firstName ? `Welcome, ${firstName}.` : 'Welcome to ExecuteSpec.'}
+        {/* D3 (round-3 audit) — outcome-led question instead of "Welcome".
+            Matches the login hero ("Ship AI-written PRs you can actually
+            merge.") which leads with outcome, and v0/Lovable/Bolt's
+            zero-state which open with a question, not a noun. */}
+        {firstName
+          ? `What do you want to build, ${firstName}?`
+          : 'What do you want to build?'}
       </h1>
       <p
         style={{
           marginTop: 10,
-          maxWidth: 460,
+          maxWidth: 480,
           fontSize: 14,
           lineHeight: 1.55,
           color: 'var(--v3-text-muted)',
@@ -130,7 +136,7 @@ export default function V3EmptyProject() {
       >
         {stashedSpec
           ? "Your spec is ready — let's create a project to ship it into."
-          : "You don't have any projects yet — let's create your first one. Then describe what you want to build, and we'll ship a draft PR you can actually merge."}
+          : tierBlurb(user?.tier)}
       </p>
 
       {/* R-343 — spec-ready card.  Rendered when V3Auth.claimAndForward
@@ -258,7 +264,10 @@ export default function V3EmptyProject() {
           color: 'var(--v3-text-subtle)',
         }}
       >
-        Want to attach a GitHub repo first?{' '}
+        {/* D3 (round-3 audit) — "long way" framed the primary CTA as a
+            shortcut. Renamed to a positive outcome path so the secondary
+            choice is "attach a repo first" not "do it the slow way". */}
+        Already have a GitHub repo?{' '}
         <Link
           to="/org/projects"
           style={{
@@ -267,9 +276,28 @@ export default function V3EmptyProject() {
             fontWeight: 500,
           }}
         >
-          Set up a project the long way →
+          Attach it first →
         </Link>
       </div>
     </div>
   );
+}
+
+/**
+ * D3 (round-3 audit) — tier-aware "what does this plan get me" framing.
+ * Surfaces the run quota in human terms ("≈ 10 small or 6 large PRs / month")
+ * instead of the bare "10 runs / month" the persona-test report flagged
+ * as too restrictive-feeling next to consumer competitors. Paid tiers get
+ * a neutral framing because the run cap is unlimited.
+ */
+function tierBlurb(tier?: string): string {
+  const normalized = (tier || 'FREE').toUpperCase();
+  if (normalized === 'ENTERPRISE' || normalized === 'TEAM' || normalized === 'MAX') {
+    return "Describe what you want to build and we'll ship a draft PR you can actually merge — across one repo or twenty.";
+  }
+  if (normalized === 'PRO') {
+    return "Describe what you want to build and we'll ship a draft PR you can actually merge. Your Pro plan covers 20 runs / month (≈ 20 small or 6 large PRs).";
+  }
+  // FREE (and everything unrecognised) — surface what 10 runs actually buys.
+  return "Describe what you want to build and we'll ship a draft PR you can actually merge. Your free plan covers 10 PRs / month — about 10 small features or 6 large refactors.";
 }

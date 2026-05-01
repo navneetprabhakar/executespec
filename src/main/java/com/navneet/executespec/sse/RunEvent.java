@@ -297,11 +297,14 @@ public record RunEvent(
     }
 
     public static RunEvent budgetExceeded(String runId, String tier, double budgetUsd) {
+        // R4 (2026-05-01 follow-up Task 7) — V165 retired MAX from the
+        // ladder; the user-facing string still named it. Updated to the
+        // post-V165 ladder (FREE → PRO grandfathered → TEAM → ENTERPRISE).
         String message = switch (tier != null ? tier.toUpperCase() : "FREE") {
             case "PRO" -> "Run stopped — $" + String.format("%.0f", budgetUsd) +
                     " cost limit reached. Add your own API keys (BYOK) for unlimited runs.";
             default -> "Run stopped — $" + String.format("%.0f", budgetUsd) +
-                    " cost limit reached. Upgrade to Pro for 10 runs/month or MAX for unlimited BYOK.";
+                    " cost limit reached. Upgrade to Team for unlimited BYOK runs.";
         };
         return new RunEvent("BUDGET_EXCEEDED", runId, null,
                 tier + "|" + String.format("%.2f", budgetUsd) + "|" + message, Instant.now());

@@ -34,6 +34,7 @@ executed until an engineer clicks approve.
 | Where is customer data stored? | GCP us-east4 (PostgreSQL on Cloud SQL, Redis on GCE VMs, file workspaces on GCS `executespec-workspaces` bucket) |
 | Who has access to customer data? | Engineering team (Navneet as sole operator today; CSM role opening Q4 2026). Access logged to `activity_audit`. |
 | How is customer code isolated? | Each run gets a dedicated Docker container (read-only filesystem, `--cap-drop ALL`, memory/CPU limits, env-var whitelist); container destroyed at run end. |
+| Multi-tenant data isolation | **Application-layer `org_id` stamping** — every JPA query filters by the caller's `org_id`; PostgreSQL row-level security policies are NOT applied. Defense in depth at the DB layer is on the roadmap; today's protection is application-layer + WAF + per-tenant rate limits. (Audit Sprint 1 [F-11]: prior versions of this doc implied database-layer isolation; this row makes the actual model explicit so procurement can ask the right follow-up questions.) |
 | Do you train models on customer data? | No. Model providers (Anthropic, OpenAI, Google) are reached via API with zero-retention prompts on paid plans; ExecuteSpec does not fine-tune models on customer content. |
 | Sub-processors | Anthropic API, OpenAI API, Google GenAI, Stripe (US/global billing), Razorpay (India billing), GCP (infra), PostHog (product analytics; opt-out available) |
 | Incident response | Operator notification within 2 hours for P1 (security incident); customer notification within 24 hours per ENTERPRISE SLA |
