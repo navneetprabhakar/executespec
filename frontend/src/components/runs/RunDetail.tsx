@@ -356,52 +356,24 @@ export default function RunDetail() {
           {/* Gate banner */}
           {activeRun.status === 'AWAITING_APPROVAL' && (
             <div className="flex-shrink-0">
-              {/* Batch option cards — show when batch is available */}
-              {activeRun.batchAvailable && (
-                <div className="px-4 pt-3 pb-1">
-                  <div className="grid grid-cols-2 gap-2">
-                    <button
-                      onClick={() => handle(
-                        () => approveRun(activeRun.runId, true, activeRun.creditsCharged ?? undefined, 'REALTIME'),
-                        'Run approved (real-time)'
-                      )}
-                      className="rounded-lg border border-[var(--border-default)] bg-[var(--gray-100)] p-3 text-left hover:border-accent-blue/50 transition-colors"
-                    >
-                      <div className="text-xs font-semibold text-primary">Real-time</div>
-                      <div className="text-xs text-muted mt-1">
-                        {activeRun.creditsCharged ?? 1} credit{(activeRun.creditsCharged ?? 1) > 1 ? 's' : ''}
-                      </div>
-                      <div className="text-[10px] text-muted mt-0.5">Results in minutes</div>
-                    </button>
-                    <button
-                      onClick={() => handle(
-                        () => approveRun(activeRun.runId, true, activeRun.batchCredits ?? undefined, 'BATCH'),
-                        'Run approved (batch)'
-                      )}
-                      className="rounded-lg border border-accent-emerald/30 bg-accent-emerald/5 p-3 text-left hover:border-accent-emerald/50 transition-colors"
-                    >
-                      <div className="text-xs font-semibold text-primary flex items-center gap-1.5">
-                        Batch
-                        <span className="text-[10px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full">
-                          Save {activeRun.creditSavings ?? 0}
-                        </span>
-                      </div>
-                      <div className="text-xs text-muted mt-1">
-                        {activeRun.batchCredits ?? 1} credit{(activeRun.batchCredits ?? 1) > 1 ? 's' : ''}
-                      </div>
-                      <div className="text-[10px] text-muted mt-0.5">Results in ~4 hours</div>
-                    </button>
-                  </div>
-                  <button
-                    onClick={() => handle(() => approveRun(activeRun.runId, false), 'Run rejected')}
-                    className="mt-2 text-xs text-muted hover:text-status-error w-full text-center"
-                  >
-                    Reject Plan
-                  </button>
-                </div>
+              {/* [F-12] (audit Sprint 1 PR-4) — Batch dual-option cards
+                  hidden. V2 backend has not implemented batch dispatch
+                  (V1 batch was deleted 2026-04-13; the V2 re-impl is
+                  scoped in docs/plans/pending-v2-batch-execution-plan.md
+                  but not shipped). Showing the "Batch · Save N · Results
+                  in ~4 hours" card promised a feature the user couldn't
+                  actually use — every batch-approved run failed at submit.
+                  Standard REALTIME gate banner is the only path until V2
+                  batch lands. The `batchAvailable` condition is force-false
+                  here so the standard banner always wins; backend-side
+                  `batchAvailable` flag still lives on RunDetail DTO for
+                  the eventual re-enable. */}
+              {/* eslint-disable-next-line @typescript-eslint/no-unused-expressions */}
+              {false && activeRun?.batchAvailable && (
+                <div />
               )}
-              {/* Standard gate banner — shown when batch not available */}
-              {!activeRun.batchAvailable && (
+              {/* Standard gate banner — only path under V2 today */}
+              {true && (
               <GateBanner
                 message={
                   activeRun.creditsCharged && activeRun.creditsCharged > 1

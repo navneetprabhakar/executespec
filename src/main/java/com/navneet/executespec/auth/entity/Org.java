@@ -6,6 +6,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.ColumnTransformer;
 
 import java.time.Instant;
 
@@ -167,8 +168,37 @@ public class Org {
     private String confluenceApiToken;
 
     // ── V143 (Plan 1 #1) — product surface discriminator ────────────────────
-    /** "vibe" (consumer) | "executespec" (B2B). Defaulted to 'executespec' on legacy rows. */
-    @Column(name = "product_id", nullable = false)
+    /**
+     * "vibe" (consumer) | "executespec" (B2B). Defaulted to 'executespec' on legacy rows.
+     *
+     * [J-02] (audit Sprint 3, 2026-05-01) — root-cause fix for the
+     * `org` UPDATE 500 that blocked POST /api/runs for any user
+     * whose org row got touched (every fresh user post-V162 hit this
+     * via personal-org bootstrap → /api/runs → org-state side-effect
+     * → UPDATE org SET ... product_id=? → 500).
+     *
+     * V143 created `product_id` as Postgres ENUM type `product_surface`,
+     * but the JPA `@Column` annotation didn't tell Hibernate to cast
+     * the String parameter to the enum type. Hibernate's default
+     * setString binding produced
+     *   ERROR: column "product_id" is of type product_surface but
+     *          expression is of type character varying
+     * because Postgres refuses the implicit varchar → enum cast on
+     * UPDATE.
+     *
+     * Fix: keep the Java field as String (no cascading entity refactor
+     * across BillingService, OrgService, AuthService, V143 backfill)
+     * + use {@code @ColumnTransformer} to wrap every read/write with
+     * the explicit cast. This is the recommended Hibernate-6 pattern
+     * for "Postgres ENUM column whose Java side is a free-form String"
+     * — `@JdbcType(PostgreSQLEnumJdbcType.class)` would require a Java
+     * enum to introspect (NPE on String).
+     */
+    @ColumnTransformer(
+        read = "product_id::text",
+        write = "?::product_surface"
+    )
+    @Column(name = "product_id", nullable = false, columnDefinition = "product_surface")
     @Builder.Default
     private String productId = "executespec";
 

@@ -82,10 +82,33 @@ public class TierPermissionService {
 
         // User with org membership
         if (user.getOrgId() != null) {
+            // [J-01] (coverage Sprint 3 follow-up to F-03, 2026-04-30):
+            // route personal-org users through the tier-driven solo path,
+            // not orgMemberPermissions. V162's bootstrap auto-creates an
+            // is_personal=TRUE org for every fresh user (so they can
+            // create their first project), which means post-V162 every
+            // solo user has org_id != null. Without this guard, all the
+            // F-03 work in freeUserPermissions becomes dead code — the
+            // orgMemberPermissions / ORG_ADMIN branch hardcodes most
+            // booleans tier-blind, undoing the tier_config-driven fix
+            // for canDeploy / maxDeployments / canViewCostBreakdown /
+            // canManageBillingProfile. Coverage Prompt B [J-01]
+            // discovered this dead-code regression.
+            //
+            // Real (multi-member) orgs continue through orgMemberPermissions
+            // because their permission shape is genuinely role-driven
+            // (ORG_ADMIN vs DEVELOPER), not tier-driven.
+            Org org = orgRepo.findById(user.getOrgId()).orElse(null);
+            if (org != null && org.isPersonal()) {
+                return freeUserPermissions(user);
+            }
             return orgMemberPermissions(user);
         }
 
-        // FREE solo user (no org)
+        // Solo user (no org — only possible for users registered before
+        // V162's personal-org bootstrap shipped + not yet backfilled by
+        // V163. Should be rare on prod after V163; freshux-* test users
+        // are the typical case in dev).
         return freeUserPermissions(user);
     }
 
@@ -226,35 +249,63 @@ public class TierPermissionService {
     }
 
     private TierPermissions freeUserPermissions(AppUser user) {
+        // [F-03] (audit Sprint 1 PR-3) — solo-user permissions now resolve
+        // from tier_config instead of being hardcoded. Was: 5 fields
+        // (canDeploy, maxDeployments, canViewCostBreakdown, canManageAiKeys
+        // path, canManageBillingProfile) ignored their tier_config columns.
+        // Live API probes against the v2.5.11 audit baseline confirmed:
+        //   • ENTERPRISE solo got canDeploy=true / maxDeployments=3
+        //     (should be unlimited per tier_config.ENTERPRISE)
+        //   • ENTERPRISE solo got canViewCostBreakdown=false
+        //     (audit's headline contradiction)
+        //   • FREE solo got canDeploy=true (tier_config.FREE.can_deploy=false)
+        //   • FREE solo got canManageBillingProfile=true
+        //     (no org to attach a billing profile to — F-18)
+        // After this fix the API matches tier_config + role intent for solo
+        // users (no-org path); org-member users keep going through
+        // orgMemberPermissions() above.
         String tier = user.getTier() != null ? user.getTier() : "FREE";
         int limit = tierEnforcementService.effectiveUserLimit(user);
         int used = user.getPersonalRunCount();
         int maxApply = resolveMaxApplySuggestions(tier);
         int maxPreviews = resolveMaxPreviewStarts(tier);
-        boolean isMaxOrEnterprise = "MAX".equals(tier) || "ENTERPRISE".equals(tier);
+        // V165 — MAX deprecated, BYOK now lives on TEAM + ENTERPRISE.
+        boolean isTeamOrEnterprise = "TEAM".equals(tier) || "ENTERPRISE".equals(tier);
+        boolean isFree = "FREE".equals(tier);
+
+        // R8 (2026-05-01 follow-up Task 9 + R8) — solo TEAM/ENT users
+        // (which is everyone in a personal org per V162) were getting
+        // canViewAudit / canManageIntegrations / canInviteMembers /
+        // canViewOrgMembers all hardcoded false here, even though they
+        // pay for an Enterprise plan. The procurement-evaluator persona
+        // explicitly asked for audit-log + member-management surfaces.
+        // Grant them when tier ≥ TEAM since the user is by definition
+        // the admin of their own personal org. FREE/PRO stay locked
+        // (FREE has no billing; PRO is single-developer grandfathered).
+        boolean canManageOrgAsTeamOrEnt = isTeamOrEnterprise;
 
         return new TierPermissions(
-                isMaxOrEnterprise, // canManageAiKeys — MAX/ENTERPRISE need BYOK
-                false, // canViewPricing
-                false, // canManageIntegrations
+                isTeamOrEnterprise, // canManageAiKeys — TEAM/ENTERPRISE can configure BYOK
+                canManageOrgAsTeamOrEnt, // [R8] canViewPricing — TEAM/ENT need to see plans they're paying for
+                canManageOrgAsTeamOrEnt, // [R8] canManageIntegrations — connect GitHub App, Slack, etc.
                 true,  // canViewMetrics — unlocked for all tiers
-                false, // canViewCostBreakdown
+                isTeamOrEnterprise, // [F-03] canViewCostBreakdown — TEAM/ENT solo can see their own cost breakdown (was: false hardcoded)
                 true,  // canViewTokenUsage — unlocked for all tiers
                 true,  // canUseChat — unlocked for all tiers
-                false, // canCreateOrg
-                false, // canInviteMembers
-                false, // canViewOrgMembers
-                false, // canViewAudit
+                false, // canCreateOrg — secondary-org creation reserved for SUPER_ADMIN
+                canManageOrgAsTeamOrEnt, // [R8] canInviteMembers — TEAM/ENT need to grow their team
+                canManageOrgAsTeamOrEnt, // [R8] canViewOrgMembers — TEAM/ENT need to see who's on their plan
+                canManageOrgAsTeamOrEnt, // [R8] canViewAudit — Enterprise-grade audit-log access; procurement requires it
                 true,  // canViewLiveLog — unlocked for all tiers
                 true,  // canViewInvoices (own invoices)
-                false, // canViewAccounting
-                false, // canManageCreditNotes
-                false, // canExportGstr
-                false, // canManageSellerConfig
-                true,  // canManageBillingProfile (own profile)
+                false, // canViewAccounting (finance + super admin)
+                false, // canManageCreditNotes (finance + super admin)
+                false, // canExportGstr (finance + super admin)
+                false, // canManageSellerConfig (super admin only)
+                !isFree, // [F-18] canManageBillingProfile — paid tiers only; FREE has no billing context (was: true hardcoded for everyone)
                 limit, used, -1, 0, maxApply, maxPreviews,
-                true,  // canDeploy — unlocked for all tiers
-                3      // maxDeployments
+                resolveCanDeploy(tier),    // [F-03] from tier_config (was: true hardcoded)
+                resolveMaxDeployments(tier) // [F-03] from tier_config (was: 3 hardcoded)
         );
     }
 

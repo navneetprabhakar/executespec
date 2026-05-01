@@ -87,10 +87,21 @@ public class AuthController {
         return ResponseEntity.noContent().build();
     }
 
+    /**
+     * [F-29] (audit Sprint 1 PR-2, 2026-04-30) — verify-email + auto-session.
+     * Was: returned just `{message}`; user clicked "Sign in →" link;
+     * had to retype password. Now: returns LoginResponse + sets refresh
+     * cookie identical to /api/auth/login. Frontend stores access_token
+     * + redirects to /home, eliminating the re-auth round trip and
+     * closing one of the audit's friction findings.
+     */
     @GetMapping("/verify-email")
-    public ResponseEntity<Map<String, String>> verifyEmail(@RequestParam String token) {
-        authService.verifyEmail(token);
-        return ResponseEntity.ok(Map.of("message", "Email verified successfully"));
+    public ResponseEntity<LoginResponse> verifyEmail(@RequestParam String token,
+                                                     HttpServletResponse response) {
+        LoginResponse loginResp = authService.verifyEmailAndAuthenticate(token);
+        String refreshToken = authService.generateRefreshToken(loginResp.user().id());
+        setRefreshCookie(response, refreshToken);
+        return ResponseEntity.ok(loginResp);
     }
 
     @PostMapping("/resend-verification")
@@ -155,16 +166,51 @@ public class AuthController {
      * Saves the user's personal GitHub PAT and owner (username or org).
      * The PAT is stored as-is (not returned in subsequent /me calls — only hasGithubPat flag is exposed).
      * Pass an empty string to clear the PAT.
+     *
+     * [D-06] (coverage Sprint 3, 2026-05-01) — server-side PAT
+     * validation. Was: PUT accepted any string (including the literal
+     * "ghp_invalidtokenforfailurepathtest") and returned 200 +
+     * hasGithubPat:true. Downstream operations (listRepoFiles,
+     * deploy, branch create) silently no-op'd or surfaced opaque 4xx
+     * to the user when the PAT was used. The AI-keys flow already
+     * validates against api.openai.com / api.anthropic.com before
+     * persisting (per CLAUDE.md Phase 1.2); this endpoint mirrors
+     * that pattern by calling api.github.com/user with the candidate
+     * PAT and refusing to persist on non-200. Empty/null PAT (clear
+     * intent) bypasses the check.
      */
     @PutMapping("/settings/github")
     public ResponseEntity<UserDto> updateGitHubSettings(
             @AuthenticationPrincipal AppUserDetails userDetails,
             @RequestBody GitHubSettingsRequest req) {
         AppUser user = userDetails.getUser();
-        user.setGithubPat(blankToNull(req.githubPat()));
-        user.setGithubOwner(blankToNull(req.githubOwner()));
+        String newPat = blankToNull(req.githubPat());
+        String newOwner = blankToNull(req.githubOwner());
+
+        // [D-06] reject bogus PATs at the boundary instead of silently
+        // accepting them. Skip when the user is clearing the PAT (newPat
+        // null) or when the request keeps the existing PAT unchanged
+        // (idempotent owner-only edit).
+        boolean patChangedToNonEmpty = newPat != null && !newPat.equals(user.getGithubPat());
+        if (patChangedToNonEmpty) {
+            ResponseEntity<ValidationResult> probe = validateExternalConnection(
+                    "https://api.github.com/user",
+                    Map.of("Authorization", "Bearer " + newPat,
+                           "Accept", "application/vnd.github+json"),
+                    "GitHub PAT is valid",
+                    "GitHub rejected the PAT (status %d) — check your token has the right scopes (repo, read:user) and isn't expired");
+            ValidationResult result = probe.getBody();
+            if (result == null || !result.valid()) {
+                String msg = result == null ? "GitHub validation failed" : result.message();
+                throw new ResponseStatusException(HttpStatus.BAD_REQUEST, msg);
+            }
+        }
+
+        user.setGithubPat(newPat);
+        user.setGithubOwner(newOwner);
         userRepo.save(user);
-        log.info("User {} updated GitHub settings — owner={}, hasPat={}", user.getId(), user.getGithubOwner(), user.getGithubPat() != null);
+        log.info("User {} updated GitHub settings — owner={}, hasPat={}, patValidated={}",
+                user.getId(), user.getGithubOwner(), user.getGithubPat() != null, patChangedToNonEmpty);
 
         recordSettingsAudit(user, "USER_GITHUB_SETTINGS_CHANGED",
                 "{\"hasToken\":" + (user.getGithubPat() != null) + ",\"owner\":\"" + user.getGithubOwner() + "\"}");

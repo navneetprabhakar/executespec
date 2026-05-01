@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Navigate } from 'react-router-dom';
+// R1 (2026-05-01 follow-up) — Navigate replaced by AccessDenied for
+// permission-gated routes; import retained as comment in case future
+// surfaces need a real redirect. Removed to keep imports clean.
 import { ChevronLeft, ChevronRight, Filter, RefreshCw, Activity as ActivityIcon } from 'lucide-react';
 import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
 import { useTierPermissions } from '@/hooks/useTierPermissions';
@@ -115,14 +117,16 @@ function fromDatetimeLocal(val: string): string {
 // ── Component ────────────────────────────────────────────────────────────
 
 export default function AuditPage() {
+  // ── Hooks block: every useState / useEffect / useCallback / custom hook
+  // must run unconditionally on every render. Conditional returns and
+  // permission gates live BELOW this block. Task 2 (2026-05-01 fix list)
+  // — the previous layout interleaved a `<Navigate>` early-return between
+  // two `useState` clusters, which fired React's "Rendered fewer hooks
+  // than expected" rule and white-screened /audit for any user with
+  // canViewAudit=false (FREE / PRO / TEAM / ENTERPRISE all qualify).
   const permissions = useTierPermissions();
   const isSuperAdmin = useAuthStore((s) => s.user?.globalRole === 'SUPER_ADMIN');
   const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
-
-  // Redirect users without audit permission
-  if (permissions && !permissions.canViewAudit) {
-    return <Navigate to="/" replace />;
-  }
 
   // Filter state
   const [entityFilter, setEntityFilter] = useState('ALL');
@@ -141,7 +145,13 @@ export default function AuditPage() {
   // a "?"-headed page; this flips it to "Audit log requires org admin".
   const [accessDenied, setAccessDenied] = useState(false);
 
+  // Permission-denied users skip the network fetch — we'll redirect after
+  // the hook block. Computing `permissionsBlocked` here keeps fetchLogs's
+  // dependency array stable across renders.
+  const permissionsBlocked = !!permissions && !permissions.canViewAudit;
+
   const fetchLogs = useCallback(async () => {
+    if (permissionsBlocked) return;
     setLoading(true);
     setError(null);
     setAccessDenied(false);
@@ -165,9 +175,26 @@ export default function AuditPage() {
     } finally {
       setLoading(false);
     }
-  }, [isSuperAdmin, entityFilter, eventFilter, fromDate, toDate, page]);
+  }, [permissionsBlocked, isSuperAdmin, entityFilter, eventFilter, fromDate, toDate, page]);
 
   useEffect(() => { fetchLogs(); }, [fetchLogs]);
+
+  // ── Permission-gate — runs AFTER all hooks above. R1 (2026-05-01
+  // follow-up) — render AccessDenied in place instead of redirecting
+  // to "/", which V3HomeRedirect then bounced to /projects/empty
+  // ("Welcome, Reval, you don't have any projects yet"). Users clicked
+  // an Audit link and ended up on an onboarding screen with no
+  // explanation. Now they see a clear 403 frame that names the
+  // feature + the required role + offers a back affordance.
+  if (permissionsBlocked) {
+    return (
+      <AccessDenied
+        feature="Audit log"
+        requiredRole="ORG_ADMIN"
+        backTo="/"
+      />
+    );
+  }
 
   // R-311 — render AccessDenied component on 403 instead of letting the
   // page render with empty data + a faceless error toast.

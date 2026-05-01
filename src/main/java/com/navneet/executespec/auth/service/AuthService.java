@@ -169,6 +169,64 @@ public class AuthService {
         mailService.sendWelcomeEmail(user.getEmail(), user.getFirstName(), user.getTier());
     }
 
+    /**
+     * [F-29] (audit Sprint 1 PR-2, 2026-04-30) — verify-email + auto-session.
+     *
+     * Runs the same activation steps as {@link #verifyEmail(String)} but
+     * additionally returns a {@link LoginResponse} so the controller can
+     * issue a JWT + refresh cookie. The frontend then redirects straight
+     * to /home (or /welcome once F-02 is wired) instead of forcing the user
+     * to re-enter their password at the LoginPage.
+     *
+     * Idempotent on the verification side — once the token has been used,
+     * subsequent calls fail with 400 "Token already used" same as the void
+     * variant. This preserves the security property that a stolen email
+     * link cannot be used twice.
+     */
+    @Transactional
+    public LoginResponse verifyEmailAndAuthenticate(String token) {
+        EmailToken emailToken = emailTokenRepo.findByTokenAndType(token, "EMAIL_VERIFICATION")
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.BAD_REQUEST, "Invalid or expired token"));
+        if (emailToken.getUsedAt() != null) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token already used");
+        }
+        if (emailToken.getExpiresAt().isBefore(Instant.now())) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Token expired");
+        }
+        AppUser user = userRepo.findById(emailToken.getUserId())
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "User not found"));
+
+        user.setEmailVerified(true);
+        user.setStatus("ACTIVE");
+        user.setLastLoginAt(Instant.now());
+        user.setUpdatedAt(Instant.now());
+        userRepo.save(user);
+
+        emailToken.setUsedAt(Instant.now());
+        emailTokenRepo.save(emailToken);
+
+        auditService.record(ActivityAudit.builder()
+                .eventType("EMAIL_VERIFIED")
+                .entityType("USER").entityId(user.getId())
+                .newValue("{\"email\":\"" + user.getEmail() + "\",\"autoSession\":true}")
+                .build());
+
+        // Send welcome email (non-fatal if SMTP fails)
+        try {
+            mailService.sendWelcomeEmail(user.getEmail(), user.getFirstName(), user.getTier());
+        } catch (Exception e) {
+            log.warn("[verifyEmailAndAuthenticate] welcome email send failed for {} — continuing", user.getEmail(), e);
+        }
+
+        // Build the same LoginResponse shape as login() so the frontend's
+        // existing auth-store handler can consume it without branching.
+        OrgMember orgMember = (user.getOrgId() != null)
+                ? orgMemberRepo.findByOrgIdAndUserId(user.getOrgId(), user.getId()).orElse(null)
+                : null;
+        String accessToken = jwtUtil.generateAccessToken(user, orgMember);
+        return new LoginResponse(accessToken, UserDto.from(user, orgMember));
+    }
+
     // ── Login ─────────────────────────────────────────────────────────────────
 
     public LoginResponse login(LoginRequest req) {

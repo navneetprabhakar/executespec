@@ -10,6 +10,33 @@ import {
 import { useAuthStore } from '@/stores/useAuthStore';
 import Pill from '../components/Pill';
 
+/** Tier ranking used for the user-vs-org reconciliation in V3Team.
+ *  Higher rank wins — see {@link pickHigherTier} below. Mirrors the
+ *  backend's EntitlementResolver "effectivePaid" gate so that a paid
+ *  user.tier can't be downgraded by a personal-org default. */
+const TIER_RANK: Record<string, number> = {
+  FREE: 0,
+  PRO: 1,
+  TEAM: 2,
+  ENTERPRISE: 3,
+};
+
+/** Returns the higher-rank of `user.tier` and `org.tier`. Both inputs
+ *  may be lowercase, mixed case, or null. Legacy "MAX" coerces to TEAM
+ *  (V141 path). Defaults to "FREE" when both are absent / unrecognised. */
+function pickHigherTier(userTier?: string | null, orgTier?: string | null): string {
+  const norm = (s?: string | null) => {
+    if (!s) return 'FREE';
+    const u = s.trim().toUpperCase();
+    return u === 'MAX' ? 'TEAM' : u;
+  };
+  const a = norm(userTier);
+  const b = norm(orgTier);
+  const ra = TIER_RANK[a] ?? 0;
+  const rb = TIER_RANK[b] ?? 0;
+  return rb > ra ? b : a;
+}
+
 /**
  * R-143 — /team page.
  *
@@ -65,7 +92,12 @@ export default function V3Team() {
     };
   }, [user]);
 
-  const tier = (org?.tier ?? user?.tier ?? 'FREE').toUpperCase();
+  // Task 5 (2026-05-01 fix list): prefer the higher-rank of user.tier
+  // and org.tier. The previous logic was org-wins, which broke for
+  // personal orgs (org.tier=FREE by default) whose owner has a paid
+  // user.tier — TEAM users were seeing "Upgrade to bring teammates in"
+  // because org.tier=FREE took precedence.
+  const tier = pickHigherTier(user?.tier, org?.tier);
   const isFreeTier = tier === 'FREE';
   // Tier-coherence: PRO is single-developer (no seats), so the team
   // surface must show a Pro→Team upsell — not the Free→Pro one. TEAM
@@ -421,11 +453,15 @@ function FreeTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
         </h2>
       </div>
       <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
-        Free is a one-developer plan. Pro ($20/mo) gives you unlimited managed
-        runs solo. Team ($39/seat) adds per-seat collaboration with shared
-        spec templates, audit log, SSO — and runs go through your own
-        Anthropic / OpenAI / Google keys (BYOK), so there's no per-run charge
-        from us beyond the seat fee.
+        {/* Task 5 (2026-05-01 fix list) — V145 capped PRO at 20 runs / month
+            (grandfathered, hidden from new buyers). Previous copy claimed
+            "unlimited managed runs" which contradicted /pricing. */}
+        Free is a one-developer plan with 10 runs / month. Pro ($20/mo,
+        grandfathered) gives 20 runs / month for one developer. Team
+        ($39/seat) adds per-seat collaboration with shared spec templates,
+        audit log, SSO — and runs go through your own Anthropic / OpenAI /
+        Google keys (BYOK), so there's no per-run charge from us beyond the
+        seat fee.
       </p>
       <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
         <button
@@ -529,8 +565,14 @@ function SeatsCard({ org, tier, memberCount }: { org: OrgDto | null; tier: strin
             {org?.name ?? 'Your team'}
           </h2>
           <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--v3-text-muted)' }}>
+            {/* R3 (2026-05-01 follow-up) — TEAM and ENT used different
+                phrasings for the same workspace state ("1 of 1 seat used"
+                vs "1 member"). Standardised on "X of N seats used" for
+                bounded plans and "N members · unlimited seats" for ENT,
+                so both reads stay billing-aware and grammatically the
+                same. */}
             {isUnlimited
-              ? `${memberCount} member${memberCount === 1 ? '' : 's'}`
+              ? `${memberCount} member${memberCount === 1 ? '' : 's'} · unlimited seats`
               : `${used} of ${seatCount} seat${seatCount === 1 ? '' : 's'} used`}
           </p>
         </div>
@@ -746,7 +788,7 @@ function SsoPanel() {
             textDecoration: 'none',
           }}
         >
-          Open admin (v2) →
+          Open admin →
         </Link>
       </div>
     </section>

@@ -5,6 +5,13 @@ import PricingGrid from '../components/PricingGrid';
 import Pill from './../components/Pill';
 import { trackV3, V3_EVENTS } from '../lib/events';
 import type { TierKey } from '../lib/pricing';
+import { useAuthStore } from '@/stores/useAuthStore';
+import {
+  canonicalDisplayName,
+  canonicalTier,
+  formatRunUsage,
+  isPaidTier,
+} from '../lib/tierDisplay';
 
 /**
  * R-141 — billing & plan, v3.
@@ -22,6 +29,10 @@ export default function V3Billing() {
   const [ent, setEnt] = useState<V3Entitlements | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Task 4 (2026-05-01 fix list): canonical tier comes from /api/auth/me,
+  // not from /api/v3/entitlements which can lag behind for users whose
+  // backing org has no real subscription record.
+  const meTier = useAuthStore((s) => s.user?.tier ?? null);
 
   useEffect(() => {
     let cancelled = false;
@@ -92,7 +103,7 @@ export default function V3Billing() {
       {ent && (
         <>
           {/* ── Plan card ──────────────────────────────────────────────── */}
-          <PlanCard ent={ent} />
+          <PlanCard ent={ent} meTier={meTier} />
 
           {/* ── Usage card ─────────────────────────────────────────────── */}
           <UsageCard ent={ent} />
@@ -127,7 +138,13 @@ export default function V3Billing() {
                 Pick what fits — change any time.
               </p>
             </div>
-            <PricingGrid currentTier={ent.tierKey as TierKey} onPickTier={onPickTier} />
+            {/* Task 4: Pricing-grid "Current" badge sources from canonical tier
+             * (me.tier) so PRO users see the Pro card highlighted instead of
+             * Free when entitlements drift. */}
+            <PricingGrid
+              currentTier={canonicalTier(meTier, ent.tierKey) as TierKey}
+              onPickTier={onPickTier}
+            />
           </section>
 
           {/* ── Receipts + tax (collapsed by default) ──────────────────── */}
@@ -140,14 +157,17 @@ export default function V3Billing() {
 
 // ─── Plan card ──────────────────────────────────────────────────────────────
 
-function PlanCard({ ent }: { ent: V3Entitlements }) {
-  const isFree = ent.tierKey === 'FREE';
-  const isUnlimited = ent.isUnlimited;
-  const displayLine = isUnlimited
-    ? `Unlimited runs · ${ent.currentPeriodRunCount} this period`
-    : isFree
-    ? `${ent.lifetimeRunCreditBalance ?? 0} of ${ent.lifetimeRunCreditCap ?? 25} lifetime runs left`
-    : `${ent.currentPeriodRunCount} of ${ent.runLimitMonthly} runs this month`;
+function PlanCard({ ent, meTier }: { ent: V3Entitlements; meTier: string | null }) {
+  // Task 1 + Task 4 (2026-05-01 fix list): canonical tier comes from me.tier;
+  // run-usage line is computed defensively so MAX_VALUE leaks from the
+  // backend's unlimited sentinel never reach the UI.
+  const tier = canonicalTier(meTier, ent.tierKey);
+  const displayName = canonicalDisplayName(tier);
+  const usage = formatRunUsage(ent, tier);
+  const showFreeUpgrade = !isPaidTier(tier);
+  // Pill tone: paid tiers always get "brand" (the unlimited badge);
+  // FREE gets "neutral".
+  const pillTone = isPaidTier(tier) ? 'brand' : 'neutral';
 
   return (
     <section
@@ -179,16 +199,16 @@ function PlanCard({ ent }: { ent: V3Entitlements }) {
               gap: 8,
             }}
           >
-            You're on {ent.displayName}.
-            <Pill tone={isFree ? 'neutral' : isUnlimited ? 'brand' : 'info'} size="sm">
-              {ent.displayName}
+            You're on {displayName}.
+            <Pill tone={pillTone} size="sm">
+              {displayName}
             </Pill>
           </h2>
           <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--v3-text-muted)' }}>
-            {displayLine}
+            {usage.line}
           </p>
         </div>
-        {isFree && (
+        {showFreeUpgrade && (
           <a
             href="#plans-grid"
             style={{
@@ -208,8 +228,14 @@ function PlanCard({ ent }: { ent: V3Entitlements }) {
         )}
       </div>
 
-      {/* Free-tier balance bar — only renders when meaningful */}
-      {isFree && ent.lifetimeRunCreditCap > 0 && (
+      {/* Free-tier balance bar — only renders when meaningful (FREE
+       * tier with a sane monthly cap; paid tiers and sentinel-leak
+       * cases are filtered out by formatRunUsage). The bar tracks
+       * the monthly cap (tier_config.monthly_run_limit, V145=10) so
+       * the four FREE-user surfaces (top-bar, billing hero,
+       * sidebar, pricing card) all agree on one number — see
+       * Task 3 of the 2026-05-01 fix list. */}
+      {usage.showBalanceBar && ent.runLimitMonthly > 0 && (
         <div style={{ marginTop: 10 }}>
           <div
             style={{
@@ -225,24 +251,17 @@ function PlanCard({ ent }: { ent: V3Entitlements }) {
                 height: '100%',
                 width: `${Math.min(
                   100,
-                  (ent.lifetimeRunCreditBalance / ent.lifetimeRunCreditCap) * 100
+                  ((ent.runLimitMonthly - Math.min(ent.currentPeriodRunCount, ent.runLimitMonthly)) /
+                    ent.runLimitMonthly) *
+                    100
                 )}%`,
                 background:
-                  ent.lifetimeRunCreditBalance <= 1
+                  ent.runLimitMonthly - ent.currentPeriodRunCount <= 1
                     ? 'var(--v3-warning)'
                     : 'var(--v3-brand)',
               }}
             />
           </div>
-          <p
-            style={{
-              margin: '6px 0 0',
-              fontSize: 10.5,
-              color: 'var(--v3-text-subtle)',
-            }}
-          >
-            Invite a friend for +5 runs — cap {ent.lifetimeRunCreditCap}.
-          </p>
         </div>
       )}
     </section>

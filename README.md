@@ -29,51 +29,64 @@ Default admin: `admin@executespec.ai` / `Admin@123` (forced password change on f
 
 ---
 
-## Pipeline
+## Pipeline (V2 — current as of v2.5.11)
 
 ```
-POST /api/runs  →  RequestTriageService (SINGLE_SHOT / MEDIUM / MULTI_TASK)
-                      ↓ (if MEDIUM or MULTI_TASK)
-                ReferenceExtractor (JIRA/Confluence context)
+POST /api/runs  →  V2RunOrchestrator
                       ↓
-                Clarification Gate  (if ambiguous references detected)
+                SmartClassifierAgent (LIGHTWEIGHT — heuristic fast-path
+                   for ≤150-char single-feature specs; LLM verifier
+                   otherwise; verdict: SINGLE_SHOT | SMALL | MEDIUM |
+                   LARGE | LEGACY)
                       ↓
-                PlannerAgent (PLANNING tier, retry up to 3 attempts on transient failure)
-                   → outputs project_type → .agent-context/project.json
+                Strategy router:
+                   • SINGLE_SHOT → OutlinePlannerAgent.synthesizeSingleShot
+                                   (1-task plan, no LLM)
+                   • SMALL/MEDIUM → OutlinePlannerAgent FULL_PLAN (PLANNING
+                                    tier, 32k cap, submitPlan tool)
+                   • LARGE → skeleton outline → parallel TaskExpanderAgent
+                             (WORKHORSE) → CoherencePlannerAgent
+                             (LIGHTWEIGHT, patchPlan tool)
+                   • LEGACY → LARGE pipeline + recursive depth-2 EPIC
+                              expansion
                       ↓
-                Plan Approval Gate  (or auto-bypass with skipApproval)
+                Plan Approval Gate (PRODUCTION pauses at AWAITING_APPROVAL;
+                   PROTOTYPE/skipApproval bypasses)
                       ↓
-                SequentialTaskExecutor (tiered parallel groups)
-                   → SubtaskDecomposer (splits multi-file tasks into per-file subtasks)
-                   → WorkerAgent per task (WORKHORSE tier, 25-min limit, self-play prevention)
-                   → Retry with model escalation on stall (WORKHORSE → PLANNING)
-                   → Progressive merge to main after each task
-                   (Batch mode: BatchClientRouter → BatchPollService → BatchResumeService
-                    → auto-retry failed batch tasks in real-time → compile)
+                SequentialExecutorV2 (one task at a time, tier-routed
+                   per-task — LOW=LIGHTWEIGHT, MEDIUM=WORKHORSE,
+                   HIGH=PLANNING)
+                   → WorkerAgentV2 (multi-turn, native tool calling via
+                     LlmRouterV2; CompleteTaskTool terminates the loop)
+                   → buildProject smoke test (final task only on
+                     multi-task plans)
+                   → ONE retry with build error injected on smoke fail
                       ↓
-                CompilerAgent (full project build, 3 rounds)
+                Auto-merge per task — no merge gate
                       ↓
-                Auto-merge all task branches
+                ReviewerAgentV3 — general pass + wiring pass
+                                  (project-type-aware)
                       ↓
-                ★ COMPLETE  →  Auto-preview (30-min TTL, skipped for batch runs)
-                      ↓ (background virtual thread)
-                ReviewerAgentV2 — Phase 1: inspect + auto-fix (CRITICAL/MINOR issues)
-                                — Phase 2: targeted re-reads + fix verification
-                                — Phase 3: AccuracyAssessmentService (spec adherence scoring)
-                      ↓
+                ★ COMPLETE / PARTIAL / FAILED
+                   ↓ (background)
+                AccuracyAssessmentService → ValidationReport
+                                          (verifiedScore deterministic,
+                                           accuracyScore as Est. demoted)
+                   ↓
                 TestGenOrchestrator (plan → generate → compile → execute)
-                   → ApiProber (live endpoint probe before test gen)
-                   → ApiSurfaceExtractor (route extraction from workspace)
-                      ↓
-                ValidationReport + TestReport
-                      ↓
-                MergeCompleted event → JIRA/Confluence/Slack outbound
-                      ↓
-                GitHub branch + PR (if existing repo configured)
-
-PARTIAL recovery: PartialRunResumeService scans every 5 min, retries failed/stuck tasks,
-                  resets PARTIAL → WORKING (cap: 3 tasks per run per invocation)
+                   ↓
+                Auto-preview (5-min TTL) + GitHub branch + PR
+                   (if existing repo configured)
 ```
+
+> Pipeline diagram refreshed for [F-08] (audit Sprint 1 PR-4, 2026-04-30).
+> V1 references (`RequestTriageService` as a separate service,
+> `CompilerAgent`, `SubtaskDecomposer`, `BatchClientRouter`, merge gate,
+> `PartialRunResumeService`, `ReviewerAgentV2`) deleted on 2026-04-13;
+> V2 has folded triage into the SmartClassifier+Outline pair, smoke-tests
+> per-task instead of running a separate compile pass, no merge gate,
+> uses ReviewerAgentV3, and uses `StartupRunResumerV2` to mark interrupted
+> runs FAILED on boot (full replay is a planned follow-up).
 
 ---
 
@@ -85,19 +98,18 @@ PARTIAL recovery: PartialRunResumeService scans every 5 min, retries failed/stuc
 - **Automatic merge** — no manual merge gate; pipeline auto-merges after compile
 - **PlannerAgent retry** — up to 3 attempts (5s/15s backoff) on transient LLM failure; prevents 0/0-task thread death
 - **PARTIAL run auto-recovery** — `PartialRunResumeService` (@Scheduled 5-min, @SchedulerLock) retries failed/stuck tasks and resets run to WORKING
-- **Batch execution** — dual-option plan approval (real-time vs batch with 50% discount), all 3 LLM providers, auto-retry failed batch tasks in real-time, batch model/provider attribution
-- **Manual test execution (Beta)** — "Run Tests" button in PreviewTab for batch runs (preview must be running)
+- **Manual test execution (Beta)** — "Run Tests" button in PreviewTab for any run with a running preview
 - **Background validation** — three-phase review (inspect → fix → spec adherence scoring), test gen, test exec, and report run after COMPLETE
 - **Spec adherence scoring** — `AccuracyAssessmentService` evaluates functional, API, persistence, UI, and security dimensions; stores grade + score on ValidationReport
 - **Prompt architecture** — composable fragment system via `PromptAssembler` (`{{include:name}}` markers), scaffold templates per project type, SHA-256 prompt version tracking to `prompt_audit` table, failure pattern injection into planner
 - **Code validation** — language toolchains for Java, TypeScript, Python, React (syntax → type → lint → test)
-- **ReviewerAgentV2** — two-phase inspection + auto-fix (CRITICAL/MINOR issues, 2 attempts per issue, max 8), plus Phase 3 spec adherence
+- **ReviewerAgentV3** — two-pass review (general + project-type-aware wiring) backed by `WorkerAgentV2`, 30-iter cap each. Verdict: CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED. The deterministic `verifiedScore` (build + tests + reviewer outcome) is the canonical run-quality anchor; `accuracyScore` from `AccuracyAssessmentService` is rendered as a demoted "Est." chip per v2.5.10.
 - **Test generation** — language-agnostic pipeline: plan → generate → compile → execute against live preview; live API probe via `ApiProber`
 - **Validation report** — LLM-generated quality summary with accuracy score/grade, shareable via public URL, downloadable as PDF
 - **Container console** — terminal panel in PreviewTab; executes allowlisted commands inside the running preview container via `docker compose exec -T` (no sidecar binary required)
 - **Request triage** — 3-tier classification (SINGLE_SHOT / MEDIUM / MULTI_TASK) with workspace context injection, confidence scoring (< 0.7 → escalates), and full-stack safety check
 - **Model routing** — 3-provider fallback (Anthropic/Google/OpenAI) with Redis-backed circuit breaker (5 failures → open, 60s recovery)
-- **Auth** — JWT (1h access / 7d refresh) + OAuth2 (Google, GitHub), RBAC, orgs, projects, tiers (FREE/PRO/ENTERPRISE)
+- **Auth** — JWT (1h access / 7d refresh) + OAuth2 (Google, GitHub), RBAC, orgs, projects, tiers (FREE / PRO [HIDDEN — grandfathered] / TEAM [per-seat $49] / MAX [BYOK unlimited $29] / ENTERPRISE [contract])
 - **Billing** — Multi-gateway (Razorpay + Stripe) via `PaymentGatewayRouter`, subscriptions + run top-up credits + invoicing with GST
 - **Payment audit** — Full audit trail with CSV export, webhook event log (admin)
 - **Feature flags** — DB-backed with Redis pub/sub cache invalidation, admin-manageable

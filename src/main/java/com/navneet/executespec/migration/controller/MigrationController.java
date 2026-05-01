@@ -61,12 +61,31 @@ public class MigrationController {
      * call; safe to invoke on every page load of the recipe-detail
      * page.  Returns per-repo applicability + cost/file estimates +
      * sample diff (when cached).
+     *
+     * [F-05] (audit Sprint 2, 2026-04-30) — tier gate added. The audit
+     * found that dry-run had no tier check while apply did, so a FREE
+     * user could compute applicability + cost + sample diff for any
+     * locked recipe (e.g. the TEAM-locked Mongoose→Prisma migration)
+     * without paying. Dry-run is the buying signal — leaking it is the
+     * classic SaaS-buyer mistake. Now mirrors apply's tier gate: 403
+     * when the caller's tier is below the recipe's required tier, with
+     * the same upgrade-to-tier message shape MigrationOrchestrator
+     * already returns.
      */
     @PostMapping("/{slug}/dry-run")
     public MigrationDryRunDto dryRun(@PathVariable String slug,
-                                     @RequestBody DryRunRequest body) {
+                                     @RequestBody DryRunRequest body,
+                                     @AuthenticationPrincipal AppUserDetails userDetails) {
         if (body == null || body.projectId() == null || body.projectId().isBlank()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "projectId required");
+        }
+        // [F-05] tier gate — refuse dry-run on locked recipes.
+        Tier required = migrationService.requiredTierFor(slug)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "recipe not found"));
+        Tier caller = callerTier(userDetails);
+        if (MigrationService.isLocked(required, caller)) {
+            throw new ResponseStatusException(HttpStatus.FORBIDDEN,
+                "This migration recipe requires the " + required.name() + " tier.");
         }
         return dryRunService.dryRun(slug, body.projectId(), body.repoIds());
     }

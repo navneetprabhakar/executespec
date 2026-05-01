@@ -141,6 +141,42 @@ public class V2Metrics {
                 .record(elapsed);
     }
 
+    /**
+     * V165 BYOK fix — counts every dispatched LLM call by which side
+     * provided the API key (USER / ORG / PLATFORM). Dashboards filter by
+     * tier to spot regressions: e.g. a TEAM/ENT row showing PLATFORM
+     * counts is the gap that the audit deep-dive identified. Source
+     * label comes from {@link com.navneet.executespec.v2.agent.V2RunKeyContext.Source}.
+     */
+    public void recordKeySource(String provider, String source) {
+        Counter.builder(NS + "llm.key_source")
+                .tags(Tags.of(
+                        Tag.of("provider", nonNull(provider)),
+                        Tag.of("source", nonNull(source))))
+                .register(registry).increment();
+    }
+
+    /**
+     * [Q-NEW-07] (audit Sprint 4 follow-up, 2026-05-01) — counts every
+     * SmartClassifier verifier engagement by outcome:
+     *   * OK                       — verifier ran and produced a parsed verdict
+     *   * SKIPPED_MODEL_RESOLVE    — ModelResolver couldn't pick a model
+     *   * SKIPPED_PROMPT           — PromptAssembler failed (template / variables)
+     *   * SKIPPED_LLM_CALL         — router.call threw (4xx/5xx/timeout/etc)
+     *   * SKIPPED_EMPTY_BODY       — model returned whitespace-only response
+     *   * SKIPPED_JSON_PARSE       — model output didn't yield a parseable JSON object
+     *
+     * <p>Dashboards filter by `result` to spot silent skips. The audit
+     * caught this issue via spec-row inspection only (every row had
+     * "LLM verifier unavailable") — with this counter, future skips
+     * surface immediately in Grafana / Prometheus alerts.
+     */
+    public void recordClassifierVerifier(String result) {
+        Counter.builder(NS + "classifier.verifier.engaged")
+                .tag("result", nonNull(result))
+                .register(registry).increment();
+    }
+
     // ─── reviewer ───────────────────────────────────────────────────────────
 
     public void recordReviewerVerdict(String verdict) {

@@ -81,8 +81,33 @@ public class SsoConfigController {
         // login first" hint.
         boolean transitionsToEnforced =
                 Boolean.TRUE.equals(body.enforced) && !org.isSsoEnforced();
+
+        // [J-14] (audit Sprint 3, 2026-05-01) — refuse enforcement on
+        // SAML providers until the actual handshake ships. Per
+        // docs/sso-saml-wiring.md the OKTA_SAML / AZURE_AD_SAML handshake
+        // is schema-only (V127 columns + this controller); the
+        // assertion-validation + AssertionConsumerService wiring is ~3-5
+        // days of unscoped work that hasn't landed. Today only
+        // GOOGLE_OIDC is a functional SSO route (it piggybacks on the
+        // existing OAuth2 flow). Allowing enforced=TRUE on SAML providers
+        // creates a setting the platform cannot honor — the IdP redirect
+        // never fires, users hit the regular login form, and either the
+        // M-016 guard locks the calling admin out (best case) or the
+        // setting silently no-ops (worst case). Reject up-front.
+        String effectiveProvider = body.provider != null ? body.provider : org.getSsoProvider();
+        if (transitionsToEnforced && effectiveProvider != null
+                && !"GOOGLE_OIDC".equals(effectiveProvider)) {
+            throw new ResponseStatusException(HttpStatus.CONFLICT,
+                "Enforcement is currently only supported for GOOGLE_OIDC. The "
+                    + "SAML2 handshake for OKTA_SAML / AZURE_AD_SAML is on the "
+                    + "roadmap (see docs/sso-saml-wiring.md). Configure the "
+                    + "provider as GOOGLE_OIDC, or contact support to schedule "
+                    + "SAML enablement.");
+        }
+
         if (transitionsToEnforced && !"SAML".equals(principal.getUser().getOauthProvider())
-                && !"SSO".equals(principal.getUser().getOauthProvider())) {
+                && !"SSO".equals(principal.getUser().getOauthProvider())
+                && !"GOOGLE".equals(principal.getUser().getOauthProvider())) {
             throw new ResponseStatusException(HttpStatus.CONFLICT,
                 "Verify your own SSO login first. Sign out, sign back in via the "
                     + "configured IdP, then re-attempt enforcement. This guard "

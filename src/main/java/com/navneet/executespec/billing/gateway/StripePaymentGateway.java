@@ -331,11 +331,11 @@ public class StripePaymentGateway implements PaymentGateway {
                 planRepo.findById(uuid).orElse(null);
             return plan != null ? plan.getTier() : null;
         } catch (IllegalArgumentException ignore) {
-            // legacy string planId — pattern match
+            // legacy string planId — pattern match. V165 — "max" rolls up to TEAM.
             String lower = planId.toLowerCase();
             if (lower.contains("enterprise")) return "ENTERPRISE";
             if (lower.contains("team")) return "TEAM";
-            if (lower.contains("max"))  return "MAX";
+            if (lower.contains("max"))  return "TEAM";
             if (lower.contains("pro"))  return "PRO";
             return null;
         }

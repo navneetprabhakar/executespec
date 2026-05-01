@@ -28,6 +28,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Phase 0 of the hierarchical planner — chooses the planning strategy for
@@ -61,6 +63,7 @@ public class SmartClassifierAgent {
     private final StringRedisTemplate redis;
     private final PromptAssembler promptAssembler;
     private final ObjectMapper objectMapper;
+    private final com.navneet.executespec.v2.observability.V2Metrics metrics;
 
     /** Char cap for the heuristic fast path. Longer specs always hit the LLM verifier. */
     private static final int HEURISTIC_FAST_PATH_CHAR_CAP = 150;
@@ -94,6 +97,28 @@ public class SmartClassifierAgent {
             " and also ", " plus ", " across ", " for each ", " all repos ",
             " system-wide ", " everywhere ", " every service ", " each repo "
     );
+
+    /**
+     * [Q-NEW-04] (audit Sprint 4 follow-up, 2026-05-01) — structural signal
+     * for HTTP API specs: counts lines that look like
+     * {@code "POST /todos"} / {@code "- GET /users/:id"} / {@code "* DELETE /v1/orders/:id"}.
+     * 4+ endpoints in a single spec is a reliable "this is at least MEDIUM"
+     * signal even when the total length is below the SMALL/MEDIUM 800-char
+     * boundary. Closes the audit gap where a 698-char 5-endpoint Express
+     * spec was bucketed as SMALL on length alone.
+     */
+    private static final Pattern ENDPOINT_LINE = Pattern.compile(
+            "(?m)^\\s*[-*]?\\s*(?:POST|GET|PUT|DELETE|PATCH)\\s+/\\S+",
+            Pattern.CASE_INSENSITIVE
+    );
+
+    private static int countEndpoints(String spec) {
+        if (spec == null) return 0;
+        Matcher m = ENDPOINT_LINE.matcher(spec);
+        int n = 0;
+        while (m.find()) n++;
+        return n;
+    }
 
     public ClassificationResult classify(
             String spec,
@@ -187,6 +212,19 @@ public class SmartClassifierAgent {
                     "2 repos in scope → at least MEDIUM");
         }
 
+        // [Q-NEW-04] Endpoint-count override — 4+ HTTP endpoints means
+        // multi-feature scope regardless of total length, since each
+        // endpoint typically expands to ≥1 task. Checked BEFORE the
+        // SINGLE_SHOT fast-path so a tight 4-endpoint API spec doesn't
+        // get misclassified as a one-shot just because it's short.
+        // Capped at ≤2000 chars so >2000-char specs (where length carries
+        // a lot of supporting context) still flow through the LARGE bucket.
+        int endpoints = countEndpoints(trimmed);
+        if (endpoints >= 4 && len <= 2000) {
+            return new HeuristicVerdict(PlanStrategy.MEDIUM, false,
+                    endpoints + " HTTP endpoints → MEDIUM (multi-feature scope)");
+        }
+
         // Length-driven defaults for single-repo specs.
         if (len <= HEURISTIC_FAST_PATH_CHAR_CAP && !hasMultiFeature && !hasDomainExplosive) {
             return new HeuristicVerdict(PlanStrategy.SINGLE_SHOT, true,
@@ -220,7 +258,8 @@ public class SmartClassifierAgent {
                     AgentTier.LIGHTWEIGHT);
         } catch (Exception e) {
             log.warn("SmartClassifier model resolve failed: {} — using heuristic verdict", e.getMessage());
-            return fallback(heuristic);
+            metrics.recordClassifierVerifier("SKIPPED_MODEL_RESOLVE");
+            return fallback(heuristic, "model resolve failed: " + e.getMessage());
         }
 
         String prompt;
@@ -241,7 +280,8 @@ public class SmartClassifierAgent {
                     ));
         } catch (Exception e) {
             log.warn("SmartClassifier prompt assembly failed: {} — using heuristic verdict", e.getMessage());
-            return fallback(heuristic);
+            metrics.recordClassifierVerifier("SKIPPED_PROMPT");
+            return fallback(heuristic, "prompt assembly failed: " + e.getMessage());
         }
 
         // Split the assembled prompt into a system+user pair. The classifier
@@ -271,13 +311,16 @@ public class SmartClassifierAgent {
             String raw = resp.getResult().getOutput().getText();
             if (raw == null || raw.isBlank()) {
                 log.warn("SmartClassifier LLM returned empty body — using heuristic verdict");
-                return fallback(heuristic);
+                metrics.recordClassifierVerifier("SKIPPED_EMPTY_BODY");
+                return fallback(heuristic, "LLM returned empty body");
             }
 
             ClassificationResult parsed = parseLlmJson(raw, heuristic, resp);
             if (parsed == null) {
-                return fallback(heuristic);
+                metrics.recordClassifierVerifier("SKIPPED_JSON_PARSE");
+                return fallback(heuristic, "LLM JSON parse failed");
             }
+            metrics.recordClassifierVerifier("OK");
             log.info("SmartClassifier LLM → {} (heuristic was {}; tokens in/out={}/{}, ${})",
                     parsed.strategy(), heuristic.strategy,
                     parsed.inputTokens(), parsed.outputTokens(),
@@ -285,8 +328,15 @@ public class SmartClassifierAgent {
             return parsed;
         } catch (Exception e) {
             log.warn("SmartClassifier LLM call failed: {} — using heuristic verdict", e.getMessage());
-            return fallback(heuristic);
+            metrics.recordClassifierVerifier("SKIPPED_LLM_CALL");
+            return fallback(heuristic, "LLM call failed: " + truncForCopy(e.getMessage()));
         }
+    }
+
+    /** Truncate exception messages so the persisted classifierReasoning stays readable. */
+    private static String truncForCopy(String s) {
+        if (s == null) return "(no message)";
+        return s.length() > 80 ? s.substring(0, 77) + "…" : s;
     }
 
     private ClassificationResult parseLlmJson(String raw, HeuristicVerdict heuristic, ChatResponse resp) {
@@ -366,13 +416,27 @@ public class SmartClassifierAgent {
         };
     }
 
-    private ClassificationResult fallback(HeuristicVerdict heuristic) {
+    /**
+     * [B-N5] (audit Sprint 2, 2026-04-30) — copy + reason discriminator
+     * fix. Was: every fallback path persisted "LLM verifier unavailable"
+     * — sounds like an outage when in practice the cause is varied
+     * (model resolve, prompt assembly, LLM 401, JSON parse, empty body).
+     * The audit's MEDIUM Express run was misclassified as SMALL with
+     * exactly that copy, masking which subsystem failed. Now persists
+     * the actual failure mode + flags this as a fallback explicitly so
+     * the dashboard / reviewer can spot a wiring regression vs an
+     * intentional skip. Also adds a `[verifier-skipped]` marker for ops
+     * grep on the run logs.
+     */
+    private ClassificationResult fallback(HeuristicVerdict heuristic, String reason) {
+        String copy = "LLM verifier skipped (" + (reason == null || reason.isBlank() ? "unspecified" : reason)
+                + ") — heuristic verdict: " + heuristic.reasoning;
         return new ClassificationResult(
                 heuristic.strategy,
                 defaultTaskCount(heuristic.strategy),
                 heuristic.strategy == PlanStrategy.LARGE || heuristic.strategy == PlanStrategy.LEGACY ? 3 : 1,
                 heuristic.strategy == PlanStrategy.LEGACY,
-                "LLM verifier unavailable — heuristic verdict: " + heuristic.reasoning,
+                copy,
                 ClassificationResult.Source.LLM_FALLBACK_TO_HEURISTIC,
                 0L, 0L, 0.0
         );

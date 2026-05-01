@@ -115,7 +115,12 @@ export default function RunCard({ run, isActive, onClick, index, compact }: RunC
                 statusReason={run.statusReason ?? null}
               />
             )}
-            {run.approvedExecutionMode === 'BATCH' && (
+            {/* [F-12] (audit Sprint 1 PR-4) — Batch badge hidden because
+                V2 batch dispatch is not implemented; pre-V2 runs with
+                approvedExecutionMode='BATCH' still exist in DB but
+                surfacing the badge in the v2.5.11 UI implies the feature
+                works today. Re-enable when the V2 batch path lands. */}
+            {false && run.approvedExecutionMode === 'BATCH' && (
               <span className="text-[9px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full leading-none">Batch</span>
             )}
             {run.isRetry && (

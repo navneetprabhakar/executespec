@@ -182,16 +182,21 @@ When submitting a run, choose an execution mode:
 
 PROTOTYPE runs skip some validation phases and are significantly faster.
 
-### 3.3 Real-Time vs Batch Execution
+### 3.3 Real-Time Execution
 
-After your plan is generated and approved, choose how tasks execute:
+> **[F-12] (audit Sprint 1 PR-4, 2026-04-30):** Batch execution is **not
+> available** under V2. The V1 batch path was deleted on 2026-04-13; the
+> V2 re-implementation is scoped in
+> `docs/plans/pending-v2-batch-execution-plan.md` but has not shipped.
+> Until it does, every approved run dispatches in real-time and is
+> billed at standard credit cost. The in-app dual-option "Real-time vs
+> Batch" plan-approval card has been hidden in the v2.5.11 UI; the
+> RunCard "Batch" badge has been hidden as well. This section will be
+> reinstated when V2 batch lands.
 
-| Option | Description | Cost |
-|--------|-------------|------|
-| **Real-time** | Tasks execute immediately, in order | Standard credit cost |
-| **Batch** | Tasks submitted to provider batch APIs overnight | 50% credit discount |
-
-Batch execution is ideal for large, non-urgent runs. You receive an in-app notification and email when batch results are ready. Failed batch tasks are automatically retried in real-time.
+After your plan is generated and approved, tasks execute in real-time —
+immediately, in order, billed at the standard credit cost shown at the
+plan-approval gate.
 
 ### 3.4 Repository Mode
 

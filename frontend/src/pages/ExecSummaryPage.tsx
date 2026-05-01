@@ -90,7 +90,7 @@ export default function ExecSummaryPage() {
           </div>
           <p className="text-sm text-secondary leading-relaxed mb-4">
             Executive Summary rolls up spend, success rate, and wins across every project.
-            It's included on <strong className="text-primary">Pro</strong>, <strong className="text-primary">Max</strong>,
+            It's included on <strong className="text-primary">Pro</strong>, <strong className="text-primary">Team</strong>,
             and <strong className="text-primary">Enterprise</strong> plans.
           </p>
           <p className="text-xs text-muted mb-4">You're on the <span className="font-mono text-secondary">{userTier}</span> plan today.</p>

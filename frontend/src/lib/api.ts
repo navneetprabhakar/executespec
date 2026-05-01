@@ -1021,8 +1021,11 @@ export const authMe = () =>
 export const getMyPermissions = () =>
   req<import('@/hooks/useTierPermissions').TierPermissions>('/auth/me/permissions');
 
+// [F-29] (audit Sprint 1 PR-2, 2026-04-30) — verify-email returns
+// LoginResponse-shaped payload now (auto-session). Caller stores
+// `accessToken` and redirects, no password re-entry.
 export const authVerifyEmail = (token: string) =>
-  req<{ message: string }>(`/auth/verify-email?token=${token}`);
+  req<{ accessToken: string; user: AuthUser }>(`/auth/verify-email?token=${token}`);
 
 export const authResendVerification = (email: string) =>
   req<{ message: string }>('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });

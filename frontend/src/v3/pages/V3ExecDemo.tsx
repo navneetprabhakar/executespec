@@ -194,7 +194,7 @@ export default function V3ExecDemo() {
           See your team's numbers here.
         </h2>
         <p style={{ margin: 0, fontSize: 13, color: 'var(--v3-text-muted)', maxWidth: 520, lineHeight: 1.55 }}>
-          Sign up free — 5 lifetime runs, no card. Your verified-score and spend
+          Sign up free — 10 runs / month, no card. Your verified-score and spend
           show up in your own /exec dashboard within minutes.
         </p>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center' }}>

@@ -1,4 +1,4 @@
-import { Briefcase, Receipt, Server, Globe } from 'lucide-react';
+import { CreditCard, GitMerge, Boxes, Zap } from 'lucide-react';
 
 interface Suggestion {
   icon: React.ReactNode;
@@ -7,30 +7,36 @@ interface Suggestion {
   goal: string;
 }
 
+// R14 (2026-05-01 follow-up) — replaced four CS101-tier templates
+// (Portfolio Website / Expense Tracker / REST API / SaaS Landing Page)
+// with recipe-shaped templates that demonstrate ExecuteSpec's actual
+// strength: migrations + Library compositions across real repos.
+// Each template seeds the run goal with a specific, ship-able task
+// rather than a "build me a generic web app" prompt.
 const SUGGESTIONS: Suggestion[] = [
   {
-    icon: <Briefcase className="h-5 w-5 text-accent-blue" />,
-    title: 'Portfolio Website',
-    description: 'Personal portfolio with projects, about, and contact sections',
-    goal: 'Build a modern personal portfolio website with a hero section, projects grid, about page, and contact form. Use a clean dark theme with smooth animations.',
+    icon: <CreditCard className="h-5 w-5 text-accent-blue" />,
+    title: 'Add Stripe Checkout',
+    description: 'Wire Stripe-hosted Checkout into your auth + DB stack',
+    goal: 'Add Stripe Checkout to the existing app: a /checkout endpoint that creates a Checkout Session with line items + customer email, a /webhook handler that listens for checkout.session.completed and marks orders paid in the database, and an env-var section in README for STRIPE_SECRET_KEY + STRIPE_WEBHOOK_SECRET. Use the Stripe Node SDK.',
   },
   {
-    icon: <Receipt className="h-5 w-5 text-accent-green" />,
-    title: 'Expense Tracker',
-    description: 'Track spending with categories, charts, and monthly summaries',
-    goal: 'Build an expense tracker app with add/edit/delete transactions, category tagging, monthly summary dashboard with charts, and local storage persistence.',
+    icon: <GitMerge className="h-5 w-5 text-status-success" />,
+    title: 'Migrate Express → Fastify',
+    description: '2-3× throughput; same routes, different framework',
+    goal: 'Migrate the Express server to Fastify. Convert every existing route to Fastify\'s plugin + handler pattern, port middleware (auth, CORS, body parsing) to Fastify equivalents, update the test suite to use Fastify\'s inject() helper instead of supertest, and update the start script + Dockerfile entrypoint.',
   },
   {
-    icon: <Server className="h-5 w-5 text-accent-amber" />,
-    title: 'REST API',
-    description: 'CRUD API with authentication, validation, and docs',
-    goal: 'Build a RESTful API with user authentication (JWT), CRUD endpoints for a "tasks" resource, input validation, error handling, and auto-generated API documentation.',
+    icon: <Boxes className="h-5 w-5 text-c-info" />,
+    title: 'Convert REST → tRPC',
+    description: 'End-to-end type-safety with no schema drift',
+    goal: 'Convert the REST API to tRPC. Define a router with the existing endpoints as procedures (queries vs mutations as appropriate), generate the typed client for the frontend, replace each fetch() call with the tRPC client, and remove the REST endpoints + their tests.',
   },
   {
-    icon: <Globe className="h-5 w-5 text-secondary" />,
-    title: 'SaaS Landing Page',
-    description: 'Marketing page with pricing, features, and testimonials',
-    goal: 'Build a modern SaaS landing page with hero section, feature grid, pricing table (3 tiers), testimonials carousel, FAQ accordion, and a call-to-action footer. Responsive design.',
+    icon: <Zap className="h-5 w-5 text-c-pop-amber" />,
+    title: 'Add feature flags via GrowthBook',
+    description: 'A/B-test-ready gating with a self-hosted option',
+    goal: 'Integrate GrowthBook for feature flag gating. Install the SDK, add a GrowthBookProvider to the React tree, create a useFeature("flag-key") hook, gate one example feature behind a flag, and document how to rollout flags via the GrowthBook dashboard. Include the self-hosted option in the README.',
   },
 ];
 

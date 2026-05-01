@@ -106,7 +106,7 @@ export default function UpgradeNudge() {
     >
       <Users
         className="h-4 w-4"
-        style={{ color: 'var(--c-pop-orange, #F97316)', flexShrink: 0 }}
+        style={{ color: 'var(--c-pop-orange, #EC4899)', flexShrink: 0 }}
         aria-hidden="true"
       />
       <span style={{ flex: 1, lineHeight: 1.5 }}>
