@@ -56,8 +56,11 @@ public class TierEnforcementService {
   private static final double QUOTA_WARNING_THRESHOLD = 0.80;
 
   /** Safe fallback limits if tier_config rows are missing. */
-  /** V145 (Phase 1.3 #33 — loosened) — matches tier_config.FREE.monthly_run_limit. */
-  private static final int FALLBACK_FREE = 10;
+  /**
+   * V167 (2026-05-04 — held at 5) — matches tier_config.FREE.monthly_run_limit. The V145 bump 5 →
+   * 10 was reverted as a positioning decision ("free tier will always remain 5").
+   */
+  private static final int FALLBACK_FREE = 5;
 
   /** V140 — matches tier_config.PRO.monthly_run_limit (was 50, now 20 per the website). */
   private static final int FALLBACK_PRO = 20;
