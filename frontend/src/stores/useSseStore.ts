@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 
 export type SseConnectionStatus = 'DISCONNECTED' | 'CONNECTING' | 'CONNECTED' | 'RECONNECTING';
 
@@ -24,8 +24,8 @@ export const useSseStore = create<SseStore>((set) => ({
   entries: [],
   currentRunId: null,
 
-  setStatus: (status) => set({ status }),
-  setRunId: (currentRunId) => set({ currentRunId }),
-  addEntry: (e) => set((state) => ({ entries: [...state.entries.slice(-500), e] })),
-  clearEntries: () => set({ entries: [] }),
+  setStatus: (status) => set({status}),
+  setRunId: (currentRunId) => set({currentRunId}),
+  addEntry: (e) => set((state) => ({entries: [...state.entries.slice(-500), e]})),
+  clearEntries: () => set({entries: []}),
 }));

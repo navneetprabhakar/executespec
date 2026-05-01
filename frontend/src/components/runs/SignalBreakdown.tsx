@@ -39,11 +39,11 @@ type Tone = 'green' | 'amber' | 'red' | 'muted';
 const TONES: Record<Tone, string> = {
   green: 'text-status-success border-status-success/30 bg-status-success/10',
   amber: 'text-status-waiting border-status-waiting/30 bg-status-waiting/10',
-  red:   'text-status-error   border-status-error/30   bg-status-error/10',
+  red: 'text-status-error   border-status-error/30   bg-status-error/10',
   muted: 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]',
 };
 
-function Segment({ tone, label, title }: { tone: Tone; label: string; title?: string }) {
+function Segment({tone, label, title}: {tone: Tone; label: string; title?: string}) {
   return (
     <span
       className={`inline-flex items-center rounded-sm border px-1.5 py-0.5 text-[10px] font-medium tracking-wide ${TONES[tone]}`}
@@ -56,11 +56,16 @@ function Segment({ tone, label, title }: { tone: Tone; label: string; title?: st
 
 function verdictTone(v: SignalBreakdownProps['reviewerVerdict']): Tone {
   switch (v) {
-    case 'CLEAN': return 'green';
-    case 'FIXED_ISSUES': return 'green';
-    case 'UNRESOLVED_ISSUES': return 'amber';
-    case 'REVIEW_FAILED': return 'red';
-    default: return 'muted';
+    case 'CLEAN':
+      return 'green';
+    case 'FIXED_ISSUES':
+      return 'green';
+    case 'UNRESOLVED_ISSUES':
+      return 'amber';
+    case 'REVIEW_FAILED':
+      return 'red';
+    default:
+      return 'muted';
   }
 }
 
@@ -74,10 +79,7 @@ export default function SignalBreakdown({
   className,
 }: SignalBreakdownProps) {
   // Hide the chip entirely on runs that have none of the (now 3) signals.
-  const hasAny =
-    finalBuildPassed != null ||
-    testsTotal != null ||
-    reviewerVerdict != null;
+  const hasAny = finalBuildPassed != null || testsTotal != null || reviewerVerdict != null;
   if (!hasAny) return null;
 
   return (
@@ -86,9 +88,11 @@ export default function SignalBreakdown({
         <Segment
           tone={finalBuildPassed ? 'green' : 'red'}
           label={`Build ${finalBuildPassed ? '✓' : '✗'}`}
-          title={finalBuildPassed
-            ? 'Final build passed (reviewer confirmed)'
-            : 'Final build failed — code may not run'}
+          title={
+            finalBuildPassed
+              ? 'Final build passed (reviewer confirmed)'
+              : 'Final build failed — code may not run'
+          }
         />
       )}
       {testsTotal != null && testsTotal >= 0 && (
@@ -102,14 +106,12 @@ export default function SignalBreakdown({
                   ? 'amber'
                   : 'red'
           }
-          label={
+          label={testsTotal === 0 ? 'No tests' : `Tests ${testsPassed ?? 0}/${testsTotal}`}
+          title={
             testsTotal === 0
-              ? 'No tests'
-              : `Tests ${testsPassed ?? 0}/${testsTotal}`
+              ? 'Test generation did not run or produced no tests'
+              : `${testsPassed ?? 0} of ${testsTotal} test cases passed in the async test-gen phase`
           }
-          title={testsTotal === 0
-            ? 'Test generation did not run or produced no tests'
-            : `${testsPassed ?? 0} of ${testsTotal} test cases passed in the async test-gen phase`}
         />
       )}
       {reviewerVerdict && (

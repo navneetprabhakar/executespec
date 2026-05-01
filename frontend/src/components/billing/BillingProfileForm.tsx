@@ -1,27 +1,45 @@
-import { useEffect, useState } from 'react';
-import { Save } from 'lucide-react';
-import { getBillingProfile, updateBillingProfile, type BillingProfile } from '@/lib/invoice-api';
+import {useEffect, useState} from 'react';
+import {Save} from 'lucide-react';
+import {getBillingProfile, updateBillingProfile, type BillingProfile} from '@/lib/invoice-api';
 
 const INDIAN_STATES = [
-  { code: '01', name: 'Jammu & Kashmir' }, { code: '02', name: 'Himachal Pradesh' },
-  { code: '03', name: 'Punjab' }, { code: '04', name: 'Chandigarh' },
-  { code: '05', name: 'Uttarakhand' }, { code: '06', name: 'Haryana' },
-  { code: '07', name: 'Delhi' }, { code: '08', name: 'Rajasthan' },
-  { code: '09', name: 'Uttar Pradesh' }, { code: '10', name: 'Bihar' },
-  { code: '11', name: 'Sikkim' }, { code: '12', name: 'Arunachal Pradesh' },
-  { code: '13', name: 'Nagaland' }, { code: '14', name: 'Manipur' },
-  { code: '15', name: 'Mizoram' }, { code: '16', name: 'Tripura' },
-  { code: '17', name: 'Meghalaya' }, { code: '18', name: 'Assam' },
-  { code: '19', name: 'West Bengal' }, { code: '20', name: 'Jharkhand' },
-  { code: '21', name: 'Odisha' }, { code: '22', name: 'Chhattisgarh' },
-  { code: '23', name: 'Madhya Pradesh' }, { code: '24', name: 'Gujarat' },
-  { code: '26', name: 'Dadra & Nagar Haveli and Daman & Diu' },
-  { code: '27', name: 'Maharashtra' }, { code: '28', name: 'Andhra Pradesh (old)' },
-  { code: '29', name: 'Karnataka' }, { code: '30', name: 'Goa' },
-  { code: '31', name: 'Lakshadweep' }, { code: '32', name: 'Kerala' },
-  { code: '33', name: 'Tamil Nadu' }, { code: '34', name: 'Puducherry' },
-  { code: '35', name: 'Andaman & Nicobar' }, { code: '36', name: 'Telangana' },
-  { code: '37', name: 'Andhra Pradesh' }, { code: '38', name: 'Ladakh' },
+  {code: '01', name: 'Jammu & Kashmir'},
+  {code: '02', name: 'Himachal Pradesh'},
+  {code: '03', name: 'Punjab'},
+  {code: '04', name: 'Chandigarh'},
+  {code: '05', name: 'Uttarakhand'},
+  {code: '06', name: 'Haryana'},
+  {code: '07', name: 'Delhi'},
+  {code: '08', name: 'Rajasthan'},
+  {code: '09', name: 'Uttar Pradesh'},
+  {code: '10', name: 'Bihar'},
+  {code: '11', name: 'Sikkim'},
+  {code: '12', name: 'Arunachal Pradesh'},
+  {code: '13', name: 'Nagaland'},
+  {code: '14', name: 'Manipur'},
+  {code: '15', name: 'Mizoram'},
+  {code: '16', name: 'Tripura'},
+  {code: '17', name: 'Meghalaya'},
+  {code: '18', name: 'Assam'},
+  {code: '19', name: 'West Bengal'},
+  {code: '20', name: 'Jharkhand'},
+  {code: '21', name: 'Odisha'},
+  {code: '22', name: 'Chhattisgarh'},
+  {code: '23', name: 'Madhya Pradesh'},
+  {code: '24', name: 'Gujarat'},
+  {code: '26', name: 'Dadra & Nagar Haveli and Daman & Diu'},
+  {code: '27', name: 'Maharashtra'},
+  {code: '28', name: 'Andhra Pradesh (old)'},
+  {code: '29', name: 'Karnataka'},
+  {code: '30', name: 'Goa'},
+  {code: '31', name: 'Lakshadweep'},
+  {code: '32', name: 'Kerala'},
+  {code: '33', name: 'Tamil Nadu'},
+  {code: '34', name: 'Puducherry'},
+  {code: '35', name: 'Andaman & Nicobar'},
+  {code: '36', name: 'Telangana'},
+  {code: '37', name: 'Andhra Pradesh'},
+  {code: '38', name: 'Ladakh'},
 ];
 
 export default function BillingProfileForm() {
@@ -30,7 +48,9 @@ export default function BillingProfileForm() {
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
-    getBillingProfile().then(setProfile).catch(() => {});
+    getBillingProfile()
+      .then(setProfile)
+      .catch(() => {});
   }, []);
 
   const handleSave = async () => {
@@ -50,8 +70,8 @@ export default function BillingProfileForm() {
   };
 
   const handleStateChange = (code: string) => {
-    const state = INDIAN_STATES.find(s => s.code === code);
-    setProfile(p => p ? { ...p, stateCode: code, stateName: state?.name || '' } : p);
+    const state = INDIAN_STATES.find((s) => s.code === code);
+    setProfile((p) => (p ? {...p, stateCode: code, stateName: state?.name || ''} : p));
   };
 
   if (!profile) return null;
@@ -67,7 +87,7 @@ export default function BillingProfileForm() {
       <label className={labelClasses}>{label}</label>
       <input
         value={(profile[key] as string) || ''}
-        onChange={(e) => setProfile({ ...profile, [key]: e.target.value })}
+        onChange={(e) => setProfile({...profile, [key]: e.target.value})}
         placeholder={placeholder}
         className={inputClasses}
       />
@@ -75,24 +95,24 @@ export default function BillingProfileForm() {
   );
 
   return (
-    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6 mt-6">
-      <div className="mb-5 flex items-center justify-between">
+    <div className='rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-6 mt-6'>
+      <div className='mb-5 flex items-center justify-between'>
         <div>
-          <h3 className="text-base font-semibold text-primary">Billing Details</h3>
-          <p className="text-xs text-muted mt-0.5">GST and invoicing information</p>
+          <h3 className='text-base font-semibold text-primary'>Billing Details</h3>
+          <p className='text-xs text-muted mt-0.5'>GST and invoicing information</p>
         </div>
         <button
           onClick={handleSave}
           disabled={saving}
-          className="flex items-center gap-1.5 rounded-sm bg-accent-blue px-3.5 py-1.5 text-xs font-semibold
-                     text-primary hover:bg-accent-blue/80 disabled:opacity-50 transition-colors"
+          className='flex items-center gap-1.5 rounded-sm bg-accent-blue px-3.5 py-1.5 text-xs font-semibold
+                     text-primary hover:bg-accent-blue/80 disabled:opacity-50 transition-colors'
         >
-          <Save className="h-3.5 w-3.5" />
+          <Save className='h-3.5 w-3.5' />
           {saving ? 'Saving...' : saved ? 'Saved!' : 'Save'}
         </button>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      <div className='grid grid-cols-1 gap-4 sm:grid-cols-2'>
         {field('Legal Name', 'legalName', 'Business / Individual name')}
         {field('GSTIN', 'gstin', '22AAAAA0000A1Z5')}
         {field('PAN', 'pan', 'AAAAA0000A')}
@@ -107,9 +127,11 @@ export default function BillingProfileForm() {
             onChange={(e) => handleStateChange(e.target.value)}
             className={inputClasses}
           >
-            <option value="">Select state</option>
-            {INDIAN_STATES.map(s => (
-              <option key={s.code} value={s.code}>{s.name} ({s.code})</option>
+            <option value=''>Select state</option>
+            {INDIAN_STATES.map((s) => (
+              <option key={s.code} value={s.code}>
+                {s.name} ({s.code})
+              </option>
             ))}
           </select>
         </div>
@@ -120,13 +142,13 @@ export default function BillingProfileForm() {
           <label className={labelClasses}>Country</label>
           <select
             value={profile.country || 'IN'}
-            onChange={(e) => setProfile({ ...profile, country: e.target.value })}
+            onChange={(e) => setProfile({...profile, country: e.target.value})}
             className={inputClasses}
           >
-            <option value="IN">India</option>
-            <option value="US">United States</option>
-            <option value="GB">United Kingdom</option>
-            <option value="SG">Singapore</option>
+            <option value='IN'>India</option>
+            <option value='US'>United States</option>
+            <option value='GB'>United Kingdom</option>
+            <option value='SG'>Singapore</option>
           </select>
         </div>
 
@@ -134,11 +156,11 @@ export default function BillingProfileForm() {
           <label className={labelClasses}>Preferred Currency</label>
           <select
             value={profile.preferredCurrency || 'INR'}
-            onChange={(e) => setProfile({ ...profile, preferredCurrency: e.target.value })}
+            onChange={(e) => setProfile({...profile, preferredCurrency: e.target.value})}
             className={inputClasses}
           >
-            <option value="INR">INR (Indian Rupee)</option>
-            <option value="USD">USD (US Dollar)</option>
+            <option value='INR'>INR (Indian Rupee)</option>
+            <option value='USD'>USD (US Dollar)</option>
           </select>
         </div>
       </div>

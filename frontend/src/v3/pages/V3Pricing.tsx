@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import {useState} from 'react';
+import {Link, useNavigate} from 'react-router-dom';
 import PricingGrid from '../components/PricingGrid';
 import TcoEstimator from '../components/TcoEstimator';
-import { trackV3, V3_EVENTS } from '../lib/events';
-import type { TierKey } from '../lib/pricing';
+import {trackV3, V3_EVENTS} from '../lib/events';
+import type {TierKey} from '../lib/pricing';
 
 /**
  * R-150 — public pricing page.
@@ -20,7 +20,7 @@ export default function V3Pricing() {
   const navigate = useNavigate();
 
   function onPickTier(tier: TierKey) {
-    trackV3(V3_EVENTS.PRICING_CTA_CLICKED, { tier });
+    trackV3(V3_EVENTS.PRICING_CTA_CLICKED, {tier});
     if (tier === 'FREE') {
       navigate('/');
       return;
@@ -31,12 +31,12 @@ export default function V3Pricing() {
     }
     // Pro / Team: route to billing (auto-redirects to v2 /plans
     // checkout when authed, /claim when not)
-    trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: 'public', toTier: tier });
+    trackV3(V3_EVENTS.TIER_UPGRADED, {fromTier: 'public', toTier: tier});
     navigate('/billing');
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 48 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 24, paddingBottom: 48}}>
       {/* ── Hero ───────────────────────────────────────────────────────── */}
       <section
         style={{
@@ -68,8 +68,7 @@ export default function V3Pricing() {
             lineHeight: 1.55,
           }}
         >
-          Your runs are real PRs — pay for what works. Cancel any time.
-          Free tier is forever.
+          Your runs are real PRs — pay for what works. Cancel any time. Free tier is forever.
         </p>
       </section>
 
@@ -88,10 +87,10 @@ export default function V3Pricing() {
           padding: 16,
         }}
       >
-        <h2 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--v3-text)' }}>
+        <h2 style={{margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--v3-text)'}}>
           Frequently asked questions
         </h2>
-        <div style={{ marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <div style={{marginTop: 10, display: 'flex', flexDirection: 'column', gap: 4}}>
           {FAQ.map((q, i) => (
             <FaqItem key={i} q={q.q} a={q.a} />
           ))}
@@ -108,15 +107,15 @@ export default function V3Pricing() {
         }}
       >
         Already have an account?{' '}
-        <Link to="/login" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+        <Link to='/login' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
           Sign in
         </Link>{' '}
         ·{' '}
-        <Link to="/" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to='/' style={{color: 'var(--v3-text-subtle)', textDecoration: 'none'}}>
           Try without signing up
         </Link>{' '}
         ·{' '}
-        <Link to="/trust" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to='/trust' style={{color: 'var(--v3-text-subtle)', textDecoration: 'none'}}>
           Trust & security
         </Link>
       </footer>
@@ -126,7 +125,7 @@ export default function V3Pricing() {
 
 // ─── FAQ ────────────────────────────────────────────────────────────────────
 
-const FAQ: { q: string; a: string }[] = [
+const FAQ: {q: string; a: string}[] = [
   {
     q: 'What counts as a "run"?',
     a: 'One submit-to-result cycle. ExecuteSpec reads your spec, plans the change, writes the code, runs the build and tests, and hands you a draft pull request. The whole loop counts as one run, regardless of how many files were touched.',
@@ -147,8 +146,8 @@ const FAQ: { q: string; a: string }[] = [
     a: 'You get 10 runs per month, no credit card required. Quota resets at the start of each month. Upgrade any time for more runs and BYOK billing.',
   },
   {
-    q: 'What\'s the cancellation policy?',
-    a: 'Cancel any time. You keep your current period\'s access; no proration. Your projects, runs, and PRs remain in your account; you can re-subscribe or stay on the free tier.',
+    q: "What's the cancellation policy?",
+    a: "Cancel any time. You keep your current period's access; no proration. Your projects, runs, and PRs remain in your account; you can re-subscribe or stay on the free tier.",
   },
   {
     q: 'Do you offer SOC 2 / DPA / a custom MSA?',
@@ -156,7 +155,7 @@ const FAQ: { q: string; a: string }[] = [
   },
 ];
 
-function FaqItem({ q, a }: { q: string; a: string }) {
+function FaqItem({q, a}: {q: string; a: string}) {
   const [open, setOpen] = useState(false);
   return (
     <details
@@ -180,9 +179,7 @@ function FaqItem({ q, a }: { q: string; a: string }) {
         }}
       >
         <span>{q}</span>
-        <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>
-          {open ? '▴' : '▾'}
-        </span>
+        <span style={{color: 'var(--v3-text-subtle)', fontSize: 11}}>{open ? '▴' : '▾'}</span>
       </summary>
       <p
         style={{

@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { BookOpen, Download, FileText, RefreshCw, Sparkles } from 'lucide-react';
+import {useEffect, useState} from 'react';
+import {BookOpen, Download, FileText, RefreshCw, Sparkles} from 'lucide-react';
 import Button from '@/components/shared/Button';
-import { MarkdownContent } from '@/components/shared/MarkdownContent';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {
   generateProjectDoc,
   getProjectDoc,
@@ -9,8 +9,8 @@ import {
   type GeneratedDocRow,
   type GeneratedDocType,
 } from '@/lib/api';
-import { useUiStore } from '@/stores/useUiStore';
-import { relativeTime } from '@/lib/utils';
+import {useUiStore} from '@/stores/useUiStore';
+import {relativeTime} from '@/lib/utils';
 
 interface Props {
   projectId: string;
@@ -23,7 +23,7 @@ type DocState = {
   error: string | null;
 };
 
-const initial: DocState = { loading: true, generating: false, doc: null, error: null };
+const initial: DocState = {loading: true, generating: false, doc: null, error: null};
 
 /**
  * v2.5.12 — project-level generated docs panel. Lets the user generate two
@@ -33,11 +33,11 @@ const initial: DocState = { loading: true, generating: false, doc: null, error: 
  * Shows the latest generated version if one exists; otherwise surfaces a
  * Generate CTA. A Regenerate button bumps the version.
  */
-export default function GeneratedDocsPanel({ projectId }: Props) {
+export default function GeneratedDocsPanel({projectId}: Props) {
   const [explanation, setExplanation] = useState<DocState>(initial);
   const [setup, setSetup] = useState<DocState>(initial);
   const [expanded, setExpanded] = useState<GeneratedDocType | null>(null);
-  const { addToast } = useUiStore();
+  const {addToast} = useUiStore();
 
   useEffect(() => {
     loadDoc('EXPLANATION');
@@ -47,27 +47,30 @@ export default function GeneratedDocsPanel({ projectId }: Props) {
 
   const loadDoc = async (docType: GeneratedDocType) => {
     const setter = docType === 'EXPLANATION' ? setExplanation : setSetup;
-    setter((s) => ({ ...s, loading: true, error: null }));
+    setter((s) => ({...s, loading: true, error: null}));
     try {
       const row = await getProjectDoc(projectId, docType);
-      setter({ loading: false, generating: false, doc: row, error: null });
+      setter({loading: false, generating: false, doc: row, error: null});
     } catch (e: any) {
-      setter({ loading: false, generating: false, doc: null, error: e.message ?? String(e) });
+      setter({loading: false, generating: false, doc: null, error: e.message ?? String(e)});
     }
   };
 
   const generate = async (docType: GeneratedDocType) => {
     const setter = docType === 'EXPLANATION' ? setExplanation : setSetup;
-    setter((s) => ({ ...s, generating: true, error: null }));
+    setter((s) => ({...s, generating: true, error: null}));
     try {
       const row = await generateProjectDoc(projectId, docType);
-      setter({ loading: false, generating: false, doc: row, error: null });
-      addToast({ type: 'success', message: `${docType === 'EXPLANATION' ? 'Explanation' : 'Setup'} doc generated (v${row.version})` });
+      setter({loading: false, generating: false, doc: row, error: null});
+      addToast({
+        type: 'success',
+        message: `${docType === 'EXPLANATION' ? 'Explanation' : 'Setup'} doc generated (v${row.version})`,
+      });
       setExpanded(docType);
     } catch (e: any) {
       const msg = e.message ?? String(e);
-      setter((s) => ({ ...s, generating: false, error: msg }));
-      addToast({ type: 'error', message: msg });
+      setter((s) => ({...s, generating: false, error: msg}));
+      addToast({type: 'error', message: msg});
     }
   };
 
@@ -75,23 +78,23 @@ export default function GeneratedDocsPanel({ projectId }: Props) {
     try {
       await downloadProjectDoc(projectId, docType);
     } catch (e: any) {
-      addToast({ type: 'error', message: e.message ?? String(e) });
+      addToast({type: 'error', message: e.message ?? String(e)});
     }
   };
 
   return (
-    <section className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3">
-      <header className="flex items-center justify-between">
-        <h3 className="text-[11px] font-mono font-medium uppercase tracking-wider text-secondary">
+    <section className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3'>
+      <header className='flex items-center justify-between'>
+        <h3 className='text-[11px] font-mono font-medium uppercase tracking-wider text-secondary'>
           Generated Docs
         </h3>
-        <span className="text-[10px] text-muted">Project-level onboarding + setup</span>
+        <span className='text-[10px] text-muted'>Project-level onboarding + setup</span>
       </header>
 
       <DocRow
-        icon={<BookOpen className="h-3.5 w-3.5 text-accent-blue" />}
-        label="Explanation"
-        sub="Narrative onboarding doc for new teammates."
+        icon={<BookOpen className='h-3.5 w-3.5 text-accent-blue' />}
+        label='Explanation'
+        sub='Narrative onboarding doc for new teammates.'
         state={explanation}
         expanded={expanded === 'EXPLANATION'}
         onGenerate={() => generate('EXPLANATION')}
@@ -100,9 +103,9 @@ export default function GeneratedDocsPanel({ projectId }: Props) {
       />
 
       <DocRow
-        icon={<FileText className="h-3.5 w-3.5 text-accent-green" />}
-        label="Setup"
-        sub="Local-dev README: clone, env vars, first-run commands."
+        icon={<FileText className='h-3.5 w-3.5 text-accent-green' />}
+        label='Setup'
+        sub='Local-dev README: clone, env vars, first-run commands.'
         state={setup}
         expanded={expanded === 'SETUP'}
         onGenerate={() => generate('SETUP')}
@@ -110,17 +113,24 @@ export default function GeneratedDocsPanel({ projectId }: Props) {
         onToggleExpand={() => setExpanded(expanded === 'SETUP' ? null : 'SETUP')}
       />
 
-      <p className="text-[10px] text-muted leading-relaxed">
+      <p className='text-[10px] text-muted leading-relaxed'>
         Both docs are derived from the latest architecture + codemaps. Run
-        <span className="mx-1 text-secondary">Analyse</span> first to refresh
-        source material, then generate.
+        <span className='mx-1 text-secondary'>Analyse</span> first to refresh source material, then
+        generate.
       </p>
     </section>
   );
 }
 
 function DocRow({
-  icon, label, sub, state, expanded, onGenerate, onDownload, onToggleExpand,
+  icon,
+  label,
+  sub,
+  state,
+  expanded,
+  onGenerate,
+  onDownload,
+  onToggleExpand,
 }: {
   icon: React.ReactNode;
   label: string;
@@ -131,51 +141,51 @@ function DocRow({
   onDownload: () => void;
   onToggleExpand: () => void;
 }) {
-  const { loading, generating, doc, error } = state;
+  const {loading, generating, doc, error} = state;
 
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] p-3 space-y-2">
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-sm font-medium text-primary">
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] p-3 space-y-2'>
+      <div className='flex items-start justify-between gap-3'>
+        <div className='min-w-0'>
+          <div className='flex items-center gap-2 text-sm font-medium text-primary'>
             {icon}
             {label}
-            {doc && <span className="text-[10px] font-mono text-muted">v{doc.version}</span>}
+            {doc && <span className='text-[10px] font-mono text-muted'>v{doc.version}</span>}
           </div>
-          <p className="text-[11px] text-muted mt-0.5">{sub}</p>
+          <p className='text-[11px] text-muted mt-0.5'>{sub}</p>
           {doc && (
-            <p className="text-[10px] text-muted mt-1">
+            <p className='text-[10px] text-muted mt-1'>
               Generated {relativeTime(doc.generatedAt)}
-              {doc.modelUsed && <span className="ml-1">· model: {doc.modelUsed}</span>}
+              {doc.modelUsed && <span className='ml-1'>· model: {doc.modelUsed}</span>}
             </p>
           )}
-          {error && <p className="text-[11px] text-accent-red mt-1">{error}</p>}
+          {error && <p className='text-[11px] text-accent-red mt-1'>{error}</p>}
         </div>
 
-        <div className="flex items-center gap-1.5 shrink-0">
+        <div className='flex items-center gap-1.5 shrink-0'>
           {doc ? (
             <>
-              <Button variant="ghost" size="sm" onClick={onToggleExpand}>
+              <Button variant='ghost' size='sm' onClick={onToggleExpand}>
                 {expanded ? 'Collapse' : 'View'}
               </Button>
-              <Button variant="tertiary" size="sm" onClick={onDownload}>
-                <Download className="h-3 w-3" />
+              <Button variant='tertiary' size='sm' onClick={onDownload}>
+                <Download className='h-3 w-3' />
                 .md
               </Button>
-              <Button variant="secondary" size="sm" loading={generating} onClick={onGenerate}>
-                <RefreshCw className="h-3 w-3" />
+              <Button variant='secondary' size='sm' loading={generating} onClick={onGenerate}>
+                <RefreshCw className='h-3 w-3' />
                 Regenerate
               </Button>
             </>
           ) : (
             <Button
-              variant="primary"
-              size="sm"
+              variant='primary'
+              size='sm'
               loading={generating || loading}
               disabled={loading}
               onClick={onGenerate}
             >
-              <Sparkles className="h-3 w-3" />
+              <Sparkles className='h-3 w-3' />
               {loading ? 'Checking…' : 'Generate'}
             </Button>
           )}
@@ -183,7 +193,7 @@ function DocRow({
       </div>
 
       {expanded && doc && (
-        <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 max-h-[400px] overflow-y-auto">
+        <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 max-h-[400px] overflow-y-auto'>
           <MarkdownContent content={doc.content} />
         </div>
       )}

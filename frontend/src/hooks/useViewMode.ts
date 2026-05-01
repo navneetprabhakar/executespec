@@ -1,7 +1,7 @@
-import { useCallback } from 'react';
-import { useUiStore } from '../stores/useUiStore';
-import { useAuthStore } from '../stores/useAuthStore';
-import { updateViewMode as apiUpdateViewMode } from '../lib/api';
+import {useCallback} from 'react';
+import {useUiStore} from '../stores/useUiStore';
+import {useAuthStore} from '../stores/useAuthStore';
+import {updateViewMode as apiUpdateViewMode} from '../lib/api';
 
 /**
  * R-190 (post-cutover) — Vibe view-mode removed. Two modes remain:
@@ -28,11 +28,12 @@ export function useViewMode() {
   // On login we read user.viewMode from the server but coerce any stored
   // 'project' back to 'pro' so the toggle and the view agree. The local
   // uiViewMode wins when the user explicitly enters project mode this session.
-  const rawViewMode: ViewMode = (uiViewMode === 'project')
-    ? 'project'
-    : (user?.viewMode && user.viewMode !== 'project')
-      ? user.viewMode as ViewMode
-      : 'pro';
+  const rawViewMode: ViewMode =
+    uiViewMode === 'project'
+      ? 'project'
+      : user?.viewMode && user.viewMode !== 'project'
+        ? (user.viewMode as ViewMode)
+        : 'pro';
   const viewMode: ViewMode = rawViewMode;
   const tier: Tier = user?.tier ?? 'FREE';
 
@@ -43,9 +44,9 @@ export function useViewMode() {
 
       // Persist 'pro' to backend; 'project' is opt-in per session only.
       if (user && mode !== 'project') {
-        setUser({ ...user, viewMode: mode });
+        setUser({...user, viewMode: mode});
         apiUpdateViewMode(mode).catch(() => {
-          setUser({ ...user, viewMode: viewMode });
+          setUser({...user, viewMode: viewMode});
           setUiViewMode(viewMode);
         });
       }

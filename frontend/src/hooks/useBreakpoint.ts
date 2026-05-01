@@ -1,12 +1,12 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import {useState, useEffect, useRef, useCallback} from 'react';
 
 type Breakpoint = 'xs' | 'sm' | 'md' | 'lg' | 'xl';
 
-const BREAKPOINTS: { name: Breakpoint; minWidth: number }[] = [
-  { name: 'xl', minWidth: 1280 },
-  { name: 'lg', minWidth: 1024 },
-  { name: 'md', minWidth: 768 },
-  { name: 'sm', minWidth: 640 },
+const BREAKPOINTS: {name: Breakpoint; minWidth: number}[] = [
+  {name: 'xl', minWidth: 1280},
+  {name: 'lg', minWidth: 1024},
+  {name: 'md', minWidth: 768},
+  {name: 'sm', minWidth: 640},
 ];
 
 function getBreakpoint(): Breakpoint {

@@ -1,5 +1,5 @@
-import { ReactNode } from 'react';
-import { cn } from '@/lib/utils';
+import {ReactNode} from 'react';
+import {cn} from '@/lib/utils';
 
 /**
  * v2.5.13 UX overhaul — "Login aesthetic" rebuild.
@@ -21,13 +21,23 @@ import { cn } from '@/lib/utils';
  */
 
 // ── Page widths ────────────────────────────────────────────────────────────
-export type PageShellWidth = 'sm' | 'md' | 'lg' | 'xl' | '2xl' | '3xl' | '4xl' | '5xl' | '6xl' | 'full';
+export type PageShellWidth =
+  | 'sm'
+  | 'md'
+  | 'lg'
+  | 'xl'
+  | '2xl'
+  | '3xl'
+  | '4xl'
+  | '5xl'
+  | '6xl'
+  | 'full';
 
 const WIDTH_CLASS: Record<PageShellWidth, string> = {
-  sm:   'max-w-sm',
-  md:   'max-w-md',
-  lg:   'max-w-lg',
-  xl:   'max-w-xl',
+  sm: 'max-w-sm',
+  md: 'max-w-md',
+  lg: 'max-w-lg',
+  xl: 'max-w-xl',
   '2xl': 'max-w-2xl',
   '3xl': 'max-w-3xl',
   '4xl': 'max-w-4xl',
@@ -39,17 +49,45 @@ const WIDTH_CLASS: Record<PageShellWidth, string> = {
 // ── Eyebrow pill ───────────────────────────────────────────────────────────
 type EyebrowTone = 'brand' | 'neutral' | 'success' | 'warn' | 'danger' | 'purple' | 'warm';
 
-const EYEBROW_TONE: Record<EyebrowTone, { color: string; bg: string; border: string }> = {
-  brand:   { color: 'var(--accent-blue)',      bg: 'color-mix(in srgb, var(--accent-blue) 12%, transparent)',    border: 'color-mix(in srgb, var(--accent-blue) 40%, transparent)' },
-  neutral: { color: 'var(--text-secondary)',   bg: 'var(--gray-200)',                                             border: 'var(--border-default)' },
-  success: { color: 'var(--status-success)',   bg: 'color-mix(in srgb, var(--status-success) 12%, transparent)',  border: 'color-mix(in srgb, var(--status-success) 40%, transparent)' },
-  warn:    { color: 'var(--status-waiting)',   bg: 'color-mix(in srgb, var(--status-waiting) 12%, transparent)',  border: 'color-mix(in srgb, var(--status-waiting) 40%, transparent)' },
-  danger:  { color: 'var(--status-error)',     bg: 'color-mix(in srgb, var(--status-error) 12%, transparent)',    border: 'color-mix(in srgb, var(--status-error) 40%, transparent)' },
-  purple:  { color: 'var(--accent-harness)',   bg: 'color-mix(in srgb, var(--accent-harness) 12%, transparent)',  border: 'color-mix(in srgb, var(--accent-harness) 40%, transparent)' },
-  warm:    { color: '#fb923c',                 bg: 'rgba(251, 146, 60, 0.12)',                                    border: 'rgba(251, 146, 60, 0.40)' },
+const EYEBROW_TONE: Record<EyebrowTone, {color: string; bg: string; border: string}> = {
+  brand: {
+    color: 'var(--accent-blue)',
+    bg: 'color-mix(in srgb, var(--accent-blue) 12%, transparent)',
+    border: 'color-mix(in srgb, var(--accent-blue) 40%, transparent)',
+  },
+  neutral: {color: 'var(--text-secondary)', bg: 'var(--gray-200)', border: 'var(--border-default)'},
+  success: {
+    color: 'var(--status-success)',
+    bg: 'color-mix(in srgb, var(--status-success) 12%, transparent)',
+    border: 'color-mix(in srgb, var(--status-success) 40%, transparent)',
+  },
+  warn: {
+    color: 'var(--status-waiting)',
+    bg: 'color-mix(in srgb, var(--status-waiting) 12%, transparent)',
+    border: 'color-mix(in srgb, var(--status-waiting) 40%, transparent)',
+  },
+  danger: {
+    color: 'var(--status-error)',
+    bg: 'color-mix(in srgb, var(--status-error) 12%, transparent)',
+    border: 'color-mix(in srgb, var(--status-error) 40%, transparent)',
+  },
+  purple: {
+    color: 'var(--accent-harness)',
+    bg: 'color-mix(in srgb, var(--accent-harness) 12%, transparent)',
+    border: 'color-mix(in srgb, var(--accent-harness) 40%, transparent)',
+  },
+  warm: {color: '#fb923c', bg: 'rgba(251, 146, 60, 0.12)', border: 'rgba(251, 146, 60, 0.40)'},
 };
 
-export function Eyebrow({ tone = 'brand', children, className }: { tone?: EyebrowTone; children: ReactNode; className?: string }) {
+export function Eyebrow({
+  tone = 'brand',
+  children,
+  className,
+}: {
+  tone?: EyebrowTone;
+  children: ReactNode;
+  className?: string;
+}) {
   const t = EYEBROW_TONE[tone];
   return (
     <span
@@ -57,7 +95,7 @@ export function Eyebrow({ tone = 'brand', children, className }: { tone?: Eyebro
         'inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] border',
         className,
       )}
-      style={{ color: t.color, background: t.bg, borderColor: t.border }}
+      style={{color: t.color, background: t.bg, borderColor: t.border}}
     >
       {children}
     </span>
@@ -76,7 +114,15 @@ interface PageHeaderProps {
   className?: string;
 }
 
-export function PageHeader({ eyebrow, eyebrowTone = 'brand', title, accent, description, actions, className }: PageHeaderProps) {
+export function PageHeader({
+  eyebrow,
+  eyebrowTone = 'brand',
+  title,
+  accent,
+  description,
+  actions,
+  className,
+}: PageHeaderProps) {
   const renderTitle = () => {
     if (!accent || typeof title !== 'string' || !title.includes(accent)) {
       return title;
@@ -85,32 +131,40 @@ export function PageHeader({ eyebrow, eyebrowTone = 'brand', title, accent, desc
     return (
       <>
         {parts[0]}
-        <span className="font-serif italic font-normal" style={{ fontFamily: "'Instrument Serif', 'Georgia', serif" }}>{accent}</span>
+        <span
+          className='font-serif italic font-normal'
+          style={{fontFamily: "'Instrument Serif', 'Georgia', serif"}}
+        >
+          {accent}
+        </span>
         {parts.slice(1).join(accent)}
       </>
     );
   };
 
   return (
-    <header className={cn('flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6', className)}>
-      <div className="min-w-0 flex-1 space-y-2">
+    <header
+      className={cn(
+        'flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between sm:gap-6',
+        className,
+      )}
+    >
+      <div className='min-w-0 flex-1 space-y-2'>
         {eyebrow && <Eyebrow tone={eyebrowTone}>{eyebrow}</Eyebrow>}
-        <h1 className="text-xl sm:text-2xl lg:text-[28px] font-semibold text-primary tracking-[-0.02em] leading-[1.15]">
+        <h1 className='text-xl sm:text-2xl lg:text-[28px] font-semibold text-primary tracking-[-0.02em] leading-[1.15]'>
           {renderTitle()}
         </h1>
-        {description && <p className="text-sm text-secondary max-w-2xl">{description}</p>}
+        {description && <p className='text-sm text-secondary max-w-2xl'>{description}</p>}
       </div>
       {actions && (
-        <div className="flex flex-wrap items-center gap-2 sm:flex-shrink-0">
-          {actions}
-        </div>
+        <div className='flex flex-wrap items-center gap-2 sm:flex-shrink-0'>{actions}</div>
       )}
     </header>
   );
 }
 
 // ── Gradient backdrop (optional — same radial mix used in AuthShell) ─────
-export function HeroBackdrop({ className }: { className?: string }) {
+export function HeroBackdrop({className}: {className?: string}) {
   return (
     <div
       aria-hidden
@@ -228,17 +282,19 @@ export function Section({
       )}
     >
       {(title || eyebrow || actions || description) && (
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4 mb-3 sm:mb-4">
-          <div className="min-w-0 space-y-1">
+        <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4 mb-3 sm:mb-4'>
+          <div className='min-w-0 space-y-1'>
             {eyebrow && <Eyebrow tone={eyebrowTone}>{eyebrow}</Eyebrow>}
             {title && (
-              <h2 className="text-[13px] sm:text-sm font-semibold text-primary uppercase tracking-[0.06em]">
+              <h2 className='text-[13px] sm:text-sm font-semibold text-primary uppercase tracking-[0.06em]'>
                 {title}
               </h2>
             )}
-            {description && <p className="text-xs text-muted max-w-xl">{description}</p>}
+            {description && <p className='text-xs text-muted max-w-xl'>{description}</p>}
           </div>
-          {actions && <div className="flex flex-wrap items-center gap-2 flex-shrink-0">{actions}</div>}
+          {actions && (
+            <div className='flex flex-wrap items-center gap-2 flex-shrink-0'>{actions}</div>
+          )}
         </div>
       )}
       {children}
@@ -247,14 +303,23 @@ export function Section({
 }
 
 // ── Stats ──────────────────────────────────────────────────────────────────
-export function StatGrid({ cols = 4, children, className }: { cols?: 2 | 3 | 4 | 6; children: ReactNode; className?: string }) {
-  const gridClass = cols === 2
-    ? 'grid-cols-1 sm:grid-cols-2'
-    : cols === 3
-      ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
-      : cols === 4
-        ? 'grid-cols-2 sm:grid-cols-2 lg:grid-cols-4'
-        : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6';
+export function StatGrid({
+  cols = 4,
+  children,
+  className,
+}: {
+  cols?: 2 | 3 | 4 | 6;
+  children: ReactNode;
+  className?: string;
+}) {
+  const gridClass =
+    cols === 2
+      ? 'grid-cols-1 sm:grid-cols-2'
+      : cols === 3
+        ? 'grid-cols-1 sm:grid-cols-2 lg:grid-cols-3'
+        : cols === 4
+          ? 'grid-cols-2 sm:grid-cols-2 lg:grid-cols-4'
+          : 'grid-cols-2 sm:grid-cols-3 lg:grid-cols-6';
   return <div className={cn('grid gap-3 sm:gap-4', gridClass, className)}>{children}</div>;
 }
 
@@ -268,24 +333,27 @@ interface StatProps {
 
 const STAT_TONE: Record<NonNullable<StatProps['tone']>, string> = {
   neutral: 'var(--text-primary)',
-  brand:   'var(--accent-blue)',
+  brand: 'var(--accent-blue)',
   success: 'var(--status-success)',
-  warn:    'var(--status-waiting)',
-  danger:  'var(--status-error)',
-  purple:  'var(--accent-harness)',
+  warn: 'var(--status-waiting)',
+  danger: 'var(--status-error)',
+  purple: 'var(--accent-harness)',
 };
 
-export function Stat({ label, value, hint, tone = 'neutral', pulse = false }: StatProps) {
+export function Stat({label, value, hint, tone = 'neutral', pulse = false}: StatProps) {
   return (
-    <div className="relative rounded-lg border border-[var(--border-default)] bg-[var(--gray-100)] p-3 sm:p-4 overflow-hidden">
-      <p className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted">{label}</p>
+    <div className='relative rounded-lg border border-[var(--border-default)] bg-[var(--gray-100)] p-3 sm:p-4 overflow-hidden'>
+      <p className='font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted'>{label}</p>
       <p
-        className={cn('mt-1 text-2xl sm:text-[28px] font-semibold tracking-[-0.02em] font-mono tabular-nums leading-none', pulse && 'animate-pulse')}
-        style={{ color: STAT_TONE[tone] }}
+        className={cn(
+          'mt-1 text-2xl sm:text-[28px] font-semibold tracking-[-0.02em] font-mono tabular-nums leading-none',
+          pulse && 'animate-pulse',
+        )}
+        style={{color: STAT_TONE[tone]}}
       >
         {value}
       </p>
-      {hint && <p className="mt-1.5 text-[11px] text-muted">{hint}</p>}
+      {hint && <p className='mt-1.5 text-[11px] text-muted'>{hint}</p>}
     </div>
   );
 }

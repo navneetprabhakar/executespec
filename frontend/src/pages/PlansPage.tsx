@@ -1,15 +1,21 @@
-import { useState, useEffect } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { fetchPlans, subscribe, verifyPayment, type BillingPlan, type SubscriptionInitResult } from '@/lib/billing-api';
-import { PlanCard } from '@/components/billing/PlanCard';
-import { DisclaimerModal } from '@/components/billing/DisclaimerModal';
-import { RazorpayCheckout } from '@/components/billing/RazorpayCheckout';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useState, useEffect} from 'react';
+import {useNavigate, useSearchParams} from 'react-router-dom';
+import {
+  fetchPlans,
+  subscribe,
+  verifyPayment,
+  type BillingPlan,
+  type SubscriptionInitResult,
+} from '@/lib/billing-api';
+import {PlanCard} from '@/components/billing/PlanCard';
+import {DisclaimerModal} from '@/components/billing/DisclaimerModal';
+import {RazorpayCheckout} from '@/components/billing/RazorpayCheckout';
+import {useAuthStore} from '@/stores/useAuthStore';
 import PageShell from '@/components/shared/PageShell';
 
 export default function PlansPage() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const {user} = useAuthStore();
   const [searchParams] = useSearchParams();
   // M-009 (Wave 1) — when arriving from /legacy/billing the redirect carries
   // ?legacy=1. Show a soft banner explaining grandfathered Pro continues +
@@ -80,8 +86,8 @@ export default function PlansPage() {
     // promoted BYOK to canonical pricing at $39/seat; managed $49 plans
     // remain in the DB for billing-history continuity but are inactive).
     return tierOrder
-      .filter(t => byTier[t])
-      .map(t => {
+      .filter((t) => byTier[t])
+      .map((t) => {
         const variants = byTier[t];
         const currency = showInr ? 'INR' : 'USD';
         // For TEAM, the active plan after V165 is the BYOK one; only one row per
@@ -135,7 +141,7 @@ export default function PlansPage() {
       await verifyPayment(
         response.razorpay_subscription_id,
         response.razorpay_payment_id,
-        response.razorpay_signature
+        response.razorpay_signature,
       );
       // Force full page reload so auth state (tier, permissions) refreshes everywhere
       window.location.href = '/billing?status=success';
@@ -154,28 +160,29 @@ export default function PlansPage() {
   };
 
   if (loading) {
-    return <div className="flex justify-center items-center h-64">Loading plans...</div>;
+    return <div className='flex justify-center items-center h-64'>Loading plans...</div>;
   }
 
   return (
     <PageShell
-      maxWidth="5xl"
+      maxWidth='5xl'
       hero
-      eyebrow="Plans"
-      title="Simple, transparent pricing."
-      accent="transparent"
-      description="No credits to translate. No token markups. Every tier shows you what ExecuteSpec really is."
+      eyebrow='Plans'
+      title='Simple, transparent pricing.'
+      accent='transparent'
+      description='No credits to translate. No token markups. Every tier shows you what ExecuteSpec really is.'
     >
       {/* M-002 (Wave 1) — soft landing banner for the OrgAdmin "+seat"
           on-ramp. Tells the buyer they came here from /admin to add seats and
           confirms the seat count was carried across. */}
       {fromAdmin && targetTier === 'TEAM' && (
-        <div className="mb-6 p-4 bg-status-success/10 border border-status-success/30 rounded-md text-sm">
-          <p className="font-medium text-primary mb-1">
+        <div className='mb-6 p-4 bg-status-success/10 border border-status-success/30 rounded-md text-sm'>
+          <p className='font-medium text-primary mb-1'>
             Adding {targetSeats ?? 'team'} seats — start your Team plan to unlock seat management.
           </p>
-          <p className="text-muted text-xs leading-relaxed">
-            We pre-selected the Team tier with {targetSeats ?? 'your chosen'} seats. Adjust below if needed, then continue to checkout.
+          <p className='text-muted text-xs leading-relaxed'>
+            We pre-selected the Team tier with {targetSeats ?? 'your chosen'} seats. Adjust below if
+            needed, then continue to checkout.
           </p>
         </div>
       )}
@@ -183,20 +190,27 @@ export default function PlansPage() {
       {/* M-009 (Wave 1) — soft landing banner for grandfathered PRO subscribers
           arriving via /legacy/billing → /plans?legacy=1 redirect. */}
       {legacyView && (
-        <div className="mb-6 p-4 bg-accent-blue/10 border border-accent-blue/30 rounded-md text-sm">
-          <p className="font-medium text-primary mb-1">Your Pro plan continues — same price, same features.</p>
-          <p className="text-muted text-xs leading-relaxed">
+        <div className='mb-6 p-4 bg-accent-blue/10 border border-accent-blue/30 rounded-md text-sm'>
+          <p className='font-medium text-primary mb-1'>
+            Your Pro plan continues — same price, same features.
+          </p>
+          <p className='text-muted text-xs leading-relaxed'>
             {/* Task 7 (2026-05-01 fix list): MAX retired in V165 — copy must
                 not name a tier we no longer sell. */}
-            Pro is no longer offered to new buyers, but existing subscriptions renew untouched. Your current plan is shown below alongside our newer Team and Enterprise tiers.
-            Need to manage billing details? Visit <a href="/billing" className="text-accent-blue underline">Billing</a>.
+            Pro is no longer offered to new buyers, but existing subscriptions renew untouched. Your
+            current plan is shown below alongside our newer Team and Enterprise tiers. Need to
+            manage billing details? Visit{' '}
+            <a href='/billing' className='text-accent-blue underline'>
+              Billing
+            </a>
+            .
           </p>
         </div>
       )}
 
       {/* Toggle row — currency + period (M-007). */}
-      <div className="flex justify-center gap-3 flex-wrap">
-        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]">
+      <div className='flex justify-center gap-3 flex-wrap'>
+        <div className='flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]'>
           <button
             onClick={() => setShowInr(true)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
@@ -214,7 +228,7 @@ export default function PlansPage() {
             USD
           </button>
         </div>
-        <div className="flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]">
+        <div className='flex items-center gap-2 bg-[var(--gray-200)] rounded-md p-1 border border-[var(--border-default)]'>
           <button
             onClick={() => setShowAnnual(false)}
             className={`px-4 py-1.5 rounded-md text-sm font-medium transition ${
@@ -230,21 +244,23 @@ export default function PlansPage() {
             }`}
           >
             Annual
-            <span className="text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-status-success/15 text-status-success border border-status-success/30">Save 17%</span>
+            <span className='text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-status-success/15 text-status-success border border-status-success/30'>
+              Save 17%
+            </span>
           </button>
         </div>
       </div>
 
       {/* Error message */}
       {checkoutError && (
-        <div className="mb-6 p-4 bg-status-error/10 border border-status-error/30 text-status-error rounded-sm text-sm text-center">
+        <div className='mb-6 p-4 bg-status-error/10 border border-status-error/30 text-status-error rounded-sm text-sm text-center'>
           {checkoutError}
         </div>
       )}
 
       {/* Plan cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 max-w-3xl mx-auto">
-        {displayPlans.map(plan => (
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 max-w-3xl mx-auto'>
+        {displayPlans.map((plan) => (
           <PlanCard
             key={plan.id}
             plan={plan}
@@ -259,10 +275,13 @@ export default function PlansPage() {
       </div>
 
       {/* Enterprise CTA */}
-      <div className="mt-10 text-center">
-        <p className="text-secondary">
+      <div className='mt-10 text-center'>
+        <p className='text-secondary'>
           Need more?{' '}
-          <a href="mailto:admin@executespec.ai" className="text-accent-blue font-medium hover:underline">
+          <a
+            href='mailto:admin@executespec.ai'
+            className='text-accent-blue font-medium hover:underline'
+          >
             Contact us for Enterprise pricing
           </a>
         </p>
@@ -271,17 +290,22 @@ export default function PlansPage() {
       {/* Key mode explainer
           Task 7 (2026-05-01 fix list): "Max" was retired in V165; the
           BYOK story is now part of Team ($39/seat). */}
-      <div className="mt-8 max-w-2xl mx-auto text-center text-sm text-muted space-y-2">
-        <p><strong>Pro:</strong> Managed keys — we handle LLM infrastructure. Zero setup required.</p>
-        <p><strong>Team:</strong> Bring your own Anthropic/OpenAI/Gemini keys. Unlimited runs, full control, $39/seat.</p>
+      <div className='mt-8 max-w-2xl mx-auto text-center text-sm text-muted space-y-2'>
+        <p>
+          <strong>Pro:</strong> Managed keys — we handle LLM infrastructure. Zero setup required.
+        </p>
+        <p>
+          <strong>Team:</strong> Bring your own Anthropic/OpenAI/Gemini keys. Unlimited runs, full
+          control, $39/seat.
+        </p>
       </div>
 
       {/* Subscribing overlay */}
       {subscribing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
-          <div className="flex flex-col items-center gap-3">
-            <span className="h-8 w-8 rounded-full border-3 border-white/20 border-t-accent-blue animate-spin" />
-            <span className="text-sm text-secondary font-medium">Preparing checkout…</span>
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm'>
+          <div className='flex flex-col items-center gap-3'>
+            <span className='h-8 w-8 rounded-full border-3 border-white/20 border-t-accent-blue animate-spin' />
+            <span className='text-sm text-secondary font-medium'>Preparing checkout…</span>
           </div>
         </div>
       )}
@@ -290,25 +314,29 @@ export default function PlansPage() {
       <DisclaimerModal
         isOpen={showDisclaimer}
         onAccept={handleDisclaimerAccept}
-        onCancel={() => { setShowDisclaimer(false); setSelectedPlanId(null); }}
+        onCancel={() => {
+          setShowDisclaimer(false);
+          setSelectedPlanId(null);
+        }}
       />
 
       {/* Razorpay Checkout */}
-      {checkoutData && (() => {
-        const selectedPlan = plans.find(p => p.id === selectedPlanId);
-        return (
-          <RazorpayCheckout
-            subscriptionId={checkoutData.gatewaySubscriptionId}
-            razorpayKeyId={checkoutData.razorpayKeyId}
-            onSuccess={handleCheckoutSuccess}
-            onFailure={handleCheckoutFailure}
-            userName={user ? `${user.firstName} ${user.lastName}` : undefined}
-            userEmail={user?.email}
-            planName={selectedPlan?.name}
-            amountPaise={selectedPlan?.baseAmountInr}
-          />
-        );
-      })()}
+      {checkoutData &&
+        (() => {
+          const selectedPlan = plans.find((p) => p.id === selectedPlanId);
+          return (
+            <RazorpayCheckout
+              subscriptionId={checkoutData.gatewaySubscriptionId}
+              razorpayKeyId={checkoutData.razorpayKeyId}
+              onSuccess={handleCheckoutSuccess}
+              onFailure={handleCheckoutFailure}
+              userName={user ? `${user.firstName} ${user.lastName}` : undefined}
+              userEmail={user?.email}
+              planName={selectedPlan?.name}
+              amountPaise={selectedPlan?.baseAmountInr}
+            />
+          );
+        })()}
     </PageShell>
   );
 }

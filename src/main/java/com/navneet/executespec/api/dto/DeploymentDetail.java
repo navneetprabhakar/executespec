@@ -23,25 +23,34 @@ public record DeploymentDetail(
     String deployedAt,
     String ttlExpiresAt,
     String deletedAt,
-    RepoInfo repo
-) {
-    public record RepoInfo(String repoUrl, String repoMode, String pushedAt) {}
+    RepoInfo repo) {
+  public record RepoInfo(String repoUrl, String repoMode, String pushedAt) {}
 
-    public static DeploymentDetail from(Deployment d, RunRepo repo) {
-        RepoInfo ri = null;
-        if (repo != null && repo.getRepoMode() != RunRepo.RepoMode.NONE) {
-            ri = new RepoInfo(repo.getRepoUrl(), repo.getRepoMode().name(), repo.getPushedAt());
-        }
-        return new DeploymentDetail(
-            d.getId(), d.getRunId(), d.getVersionTag(),
-            d.getStrategy() != null ? d.getStrategy().name() : null,
-            d.getStatus().name(), d.getImageUri(), d.getServiceName(),
-            d.getRevisionName(), d.getServiceUrl(),
-            d.getGcpProject(), d.getGcpRegion(),
-            d.getEstimatedCostUsd(), d.getActualCostUsd(),
-            d.getErrorMessage(), d.getBuildLog(),
-            d.getCreatedAt(), d.getDeployedAt(), d.getTtlExpiresAt(), d.getDeletedAt(),
-            ri
-        );
+  public static DeploymentDetail from(Deployment d, RunRepo repo) {
+    RepoInfo ri = null;
+    if (repo != null && repo.getRepoMode() != RunRepo.RepoMode.NONE) {
+      ri = new RepoInfo(repo.getRepoUrl(), repo.getRepoMode().name(), repo.getPushedAt());
     }
+    return new DeploymentDetail(
+        d.getId(),
+        d.getRunId(),
+        d.getVersionTag(),
+        d.getStrategy() != null ? d.getStrategy().name() : null,
+        d.getStatus().name(),
+        d.getImageUri(),
+        d.getServiceName(),
+        d.getRevisionName(),
+        d.getServiceUrl(),
+        d.getGcpProject(),
+        d.getGcpRegion(),
+        d.getEstimatedCostUsd(),
+        d.getActualCostUsd(),
+        d.getErrorMessage(),
+        d.getBuildLog(),
+        d.getCreatedAt(),
+        d.getDeployedAt(),
+        d.getTtlExpiresAt(),
+        d.getDeletedAt(),
+        ri);
+  }
 }

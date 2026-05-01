@@ -23,7 +23,13 @@ export function extractRepoShortName(...texts: (string | null | undefined)[]): s
   return null;
 }
 
-export default function RepoChip({ name, className = '' }: { name: string | null; className?: string }) {
+export default function RepoChip({
+  name,
+  className = '',
+}: {
+  name: string | null;
+  className?: string;
+}) {
   if (!name) return null;
   return (
     <span

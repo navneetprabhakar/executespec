@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import {useEffect, useState} from 'react';
 import ResponsiveModal from './ResponsiveModal';
 
 /**
@@ -67,25 +67,26 @@ export default function TypedConfirmModal({
       open={open}
       onClose={busy ? () => {} : onCancel}
       title={title}
-      maxWidth="max-w-md"
+      maxWidth='max-w-md'
       disableDismiss={busy}
     >
-      <div style={{ padding: 16, display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary, #C9D1DB)' }}>
+      <div style={{padding: 16, display: 'flex', flexDirection: 'column', gap: 14}}>
+        <div style={{fontSize: 13, lineHeight: 1.55, color: 'var(--text-secondary, #C9D1DB)'}}>
           {description}
         </div>
 
         {reasonLabel && (
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted, #8A94A6)' }}>
-              {reasonLabel}{reasonRequired ? ' (required)' : ' (optional)'}
+          <label style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+            <span style={{fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted, #8A94A6)'}}>
+              {reasonLabel}
+              {reasonRequired ? ' (required)' : ' (optional)'}
             </span>
             <input
-              type="text"
+              type='text'
               value={reason}
               onChange={(e) => setReason(e.target.value)}
               disabled={busy}
-              placeholder="One-line reason for the audit log"
+              placeholder='One-line reason for the audit log'
               style={{
                 padding: '8px 10px',
                 fontSize: 12.5,
@@ -99,19 +100,23 @@ export default function TypedConfirmModal({
           </label>
         )}
 
-        <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted, #8A94A6)' }}>
-            Type <code style={{ color: 'var(--status-error, #EF4444)', fontWeight: 700 }}>{confirmKeyword}</code> to confirm
+        <label style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+          <span style={{fontSize: 11.5, fontWeight: 600, color: 'var(--text-muted, #8A94A6)'}}>
+            Type{' '}
+            <code style={{color: 'var(--status-error, #EF4444)', fontWeight: 700}}>
+              {confirmKeyword}
+            </code>{' '}
+            to confirm
           </span>
           <input
-            type="text"
+            type='text'
             value={typed}
             onChange={(e) => setTyped(e.target.value)}
             disabled={busy}
             autoFocus
             spellCheck={false}
-            autoCapitalize="none"
-            autoCorrect="off"
+            autoCapitalize='none'
+            autoCorrect='off'
             placeholder={confirmKeyword}
             aria-label={`Type ${confirmKeyword} to confirm`}
             style={{
@@ -126,9 +131,9 @@ export default function TypedConfirmModal({
           />
         </label>
 
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+        <div style={{display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4}}>
           <button
-            type="button"
+            type='button'
             onClick={onCancel}
             disabled={busy}
             style={{
@@ -146,7 +151,7 @@ export default function TypedConfirmModal({
             Cancel
           </button>
           <button
-            type="button"
+            type='button'
             onClick={() => onConfirm(reason.trim() || undefined)}
             disabled={!canSubmit}
             style={{
@@ -162,7 +167,7 @@ export default function TypedConfirmModal({
               fontFamily: 'inherit',
             }}
           >
-            {busy ? 'Working…' : submitLabel ?? confirmKeyword}
+            {busy ? 'Working…' : (submitLabel ?? confirmKeyword)}
           </button>
         </div>
       </div>

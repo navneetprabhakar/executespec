@@ -1,5 +1,5 @@
-import { ReactNode, useEffect, useRef, useState } from 'react';
-import { cn } from '@/lib/utils';
+import {ReactNode, useEffect, useRef, useState} from 'react';
+import {cn} from '@/lib/utils';
 
 interface TooltipProps {
   /** Text to display. If empty, no tooltip is rendered. */
@@ -55,9 +55,12 @@ export function Tooltip({
     setOpen(false);
   };
 
-  useEffect(() => () => {
-    if (timerRef.current) clearTimeout(timerRef.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
 
   if (!text) return <>{children}</>;
 
@@ -72,7 +75,7 @@ export function Tooltip({
       {children}
       {open && (
         <span
-          role="tooltip"
+          role='tooltip'
           className={cn(
             'absolute z-50 px-2 py-1 text-[11px] font-medium pointer-events-none',
             wrap ? `${maxWidthClass} leading-snug whitespace-normal` : 'whitespace-nowrap',

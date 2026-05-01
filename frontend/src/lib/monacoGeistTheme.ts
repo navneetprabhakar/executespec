@@ -1,4 +1,4 @@
-import type { editor } from 'monaco-editor';
+import type {editor} from 'monaco-editor';
 
 /**
  * Geist-inspired Monaco editor theme matching Vercel's code viewer.
@@ -11,59 +11,59 @@ export const geistDarkTheme: editor.IStandaloneThemeData = {
   inherit: true,
   rules: [
     // Comments — muted
-    { token: 'comment', foreground: '555555', fontStyle: 'italic' },
-    { token: 'comment.block', foreground: '555555', fontStyle: 'italic' },
+    {token: 'comment', foreground: '555555', fontStyle: 'italic'},
+    {token: 'comment.block', foreground: '555555', fontStyle: 'italic'},
 
     // Keywords — white (not colored)
-    { token: 'keyword', foreground: 'ededed' },
-    { token: 'keyword.control', foreground: 'ededed' },
-    { token: 'storage', foreground: 'ededed' },
-    { token: 'storage.type', foreground: 'ededed' },
+    {token: 'keyword', foreground: 'ededed'},
+    {token: 'keyword.control', foreground: 'ededed'},
+    {token: 'storage', foreground: 'ededed'},
+    {token: 'storage.type', foreground: 'ededed'},
 
     // Strings — subtle blue
-    { token: 'string', foreground: '79c0ff' },
-    { token: 'string.escape', foreground: '79c0ff' },
+    {token: 'string', foreground: '79c0ff'},
+    {token: 'string.escape', foreground: '79c0ff'},
 
     // Numbers
-    { token: 'number', foreground: '79c0ff' },
-    { token: 'constant.numeric', foreground: '79c0ff' },
+    {token: 'number', foreground: '79c0ff'},
+    {token: 'constant.numeric', foreground: '79c0ff'},
 
     // Types — secondary gray
-    { token: 'type', foreground: 'a1a1a1' },
-    { token: 'type.identifier', foreground: 'a1a1a1' },
-    { token: 'entity.name.type', foreground: 'a1a1a1' },
-    { token: 'support.type', foreground: 'a1a1a1' },
+    {token: 'type', foreground: 'a1a1a1'},
+    {token: 'type.identifier', foreground: 'a1a1a1'},
+    {token: 'entity.name.type', foreground: 'a1a1a1'},
+    {token: 'support.type', foreground: 'a1a1a1'},
 
     // Functions — primary white
-    { token: 'entity.name.function', foreground: 'ededed' },
-    { token: 'support.function', foreground: 'ededed' },
+    {token: 'entity.name.function', foreground: 'ededed'},
+    {token: 'support.function', foreground: 'ededed'},
 
     // Variables
-    { token: 'variable', foreground: 'ededed' },
-    { token: 'variable.parameter', foreground: 'a1a1a1' },
+    {token: 'variable', foreground: 'ededed'},
+    {token: 'variable.parameter', foreground: 'a1a1a1'},
 
     // Tags (HTML/JSX)
-    { token: 'tag', foreground: 'ededed' },
-    { token: 'metatag', foreground: '666666' },
+    {token: 'tag', foreground: 'ededed'},
+    {token: 'metatag', foreground: '666666'},
 
     // Attributes
-    { token: 'attribute.name', foreground: 'a1a1a1' },
-    { token: 'attribute.value', foreground: '79c0ff' },
+    {token: 'attribute.name', foreground: 'a1a1a1'},
+    {token: 'attribute.value', foreground: '79c0ff'},
 
     // Operators & punctuation
-    { token: 'delimiter', foreground: '666666' },
-    { token: 'delimiter.bracket', foreground: '888888' },
-    { token: 'operator', foreground: '888888' },
+    {token: 'delimiter', foreground: '666666'},
+    {token: 'delimiter.bracket', foreground: '888888'},
+    {token: 'operator', foreground: '888888'},
 
     // Constants
-    { token: 'constant', foreground: '79c0ff' },
-    { token: 'constant.language', foreground: 'ededed' },
+    {token: 'constant', foreground: '79c0ff'},
+    {token: 'constant.language', foreground: 'ededed'},
 
     // Annotations / decorators
-    { token: 'annotation', foreground: '888888' },
+    {token: 'annotation', foreground: '888888'},
 
     // Regex
-    { token: 'regexp', foreground: '79c0ff' },
+    {token: 'regexp', foreground: '79c0ff'},
   ],
   colors: {
     // Editor background — pure black
@@ -110,7 +110,7 @@ export const geistDarkTheme: editor.IStandaloneThemeData = {
     'editorGutter.foldingControlForeground': '#555555',
 
     // Borders
-    'contrastBorder': '#00000000',
-    'focusBorder': '#0070F3',
+    contrastBorder: '#00000000',
+    focusBorder: '#0070F3',
   },
 };

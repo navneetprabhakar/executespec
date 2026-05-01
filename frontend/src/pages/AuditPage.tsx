@@ -1,19 +1,27 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import {useCallback, useEffect, useMemo, useState} from 'react';
 // R1 (2026-05-01 follow-up) — Navigate replaced by AccessDenied for
 // permission-gated routes; import retained as comment in case future
 // surfaces need a real redirect. Removed to keep imports clean.
-import { ChevronLeft, ChevronRight, Filter, RefreshCw, Activity as ActivityIcon } from 'lucide-react';
-import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
-import { useTierPermissions } from '@/hooks/useTierPermissions';
+import {ChevronLeft, ChevronRight, Filter, RefreshCw, Activity as ActivityIcon} from 'lucide-react';
+import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
+import {useTierPermissions} from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
-import { ApiError } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import {ApiError} from '@/lib/api';
+import {cn} from '@/lib/utils';
 import PageShell from '@/components/shared/PageShell';
 import AccessDenied from '@/components/shared/AccessDenied';
 
 // ── Human-readable labels ────────────────────────────────────────────────
 
-const ENTITY_TYPES = ['ALL', 'USER', 'ORG', 'ORG_MEMBER', 'INVITATION', 'PROJECT', 'BILLING'] as const;
+const ENTITY_TYPES = [
+  'ALL',
+  'USER',
+  'ORG',
+  'ORG_MEMBER',
+  'INVITATION',
+  'PROJECT',
+  'BILLING',
+] as const;
 
 const EVENT_TYPE_LABELS: Record<string, string> = {
   USER_REGISTERED: 'User Registered',
@@ -65,20 +73,31 @@ function humanLabel(eventType: string): string {
 
 function entityBadgeColor(entityType: string): string {
   switch (entityType) {
-    case 'USER': return 'bg-accent-blue/20 text-accent-blue';
-    case 'ORG': return 'bg-[var(--gray-500)]/20 text-secondary';
-    case 'ORG_MEMBER': return 'bg-accent-amber/20 text-accent-amber';
-    case 'INVITATION': return 'bg-blue-500/20 text-accent-blue';
-    case 'PROJECT': return 'bg-accent-green/20 text-accent-green';
-    case 'BILLING': return 'bg-[var(--status-success)]/20 text-[var(--status-success)]';
-    default: return 'bg-[var(--gray-200)] text-secondary';
+    case 'USER':
+      return 'bg-accent-blue/20 text-accent-blue';
+    case 'ORG':
+      return 'bg-[var(--gray-500)]/20 text-secondary';
+    case 'ORG_MEMBER':
+      return 'bg-accent-amber/20 text-accent-amber';
+    case 'INVITATION':
+      return 'bg-blue-500/20 text-accent-blue';
+    case 'PROJECT':
+      return 'bg-accent-green/20 text-accent-green';
+    case 'BILLING':
+      return 'bg-[var(--status-success)]/20 text-[var(--status-success)]';
+    default:
+      return 'bg-[var(--gray-200)] text-secondary';
   }
 }
 
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleString(undefined, {
-    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
   });
 }
 
@@ -177,7 +196,9 @@ export default function AuditPage() {
     }
   }, [permissionsBlocked, isSuperAdmin, entityFilter, eventFilter, fromDate, toDate, page]);
 
-  useEffect(() => { fetchLogs(); }, [fetchLogs]);
+  useEffect(() => {
+    fetchLogs();
+  }, [fetchLogs]);
 
   // ── Permission-gate — runs AFTER all hooks above. R1 (2026-05-01
   // follow-up) — render AccessDenied in place instead of redirecting
@@ -187,86 +208,86 @@ export default function AuditPage() {
   // explanation. Now they see a clear 403 frame that names the
   // feature + the required role + offers a back affordance.
   if (permissionsBlocked) {
-    return (
-      <AccessDenied
-        feature="Audit log"
-        requiredRole="ORG_ADMIN"
-        backTo="/"
-      />
-    );
+    return <AccessDenied feature='Audit log' requiredRole='ORG_ADMIN' backTo='/' />;
   }
 
   // R-311 — render AccessDenied component on 403 instead of letting the
   // page render with empty data + a faceless error toast.
   if (accessDenied) {
-    return (
-      <AccessDenied
-        feature="Audit log"
-        requiredRole="ORG_ADMIN"
-        backTo="/"
-      />
-    );
+    return <AccessDenied feature='Audit log' requiredRole='ORG_ADMIN' backTo='/' />;
   }
 
   const entries = data?.content ?? [];
 
   return (
     <PageShell
-      eyebrow="Governance"
-      eyebrowTone="warm"
-      title="Audit & activity, time-stamped."
-      accent="activity"
-      description="Forensic audit log (every billing/identity/admin change) plus per-project activity feed (every run, PR, contract, ADR event) — both surfaces, one page. Per parked decision #4."
+      eyebrow='Governance'
+      eyebrowTone='warm'
+      title='Audit & activity, time-stamped.'
+      accent='activity'
+      description='Forensic audit log (every billing/identity/admin change) plus per-project activity feed (every run, PR, contract, ADR event) — both surfaces, one page. Per parked decision #4.'
       hero
       actions={
         <button
           onClick={fetchLogs}
           disabled={loading}
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors disabled:opacity-40 border border-[var(--border-default)]"
+          className='inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-200)] text-secondary text-xs font-medium hover:bg-[var(--border-default)] transition-colors disabled:opacity-40 border border-[var(--border-default)]'
         >
           <RefreshCw className={cn('h-3.5 w-3.5', loading && 'animate-spin')} />
           Refresh
         </button>
       }
     >
-
       {/* Filters */}
-      <div className="flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-3">
-        <Filter className="h-4 w-4 text-muted hidden sm:block mt-5" />
+      <div className='flex flex-col sm:flex-row sm:flex-wrap sm:items-end gap-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-3'>
+        <Filter className='h-4 w-4 text-muted hidden sm:block mt-5' />
 
         {/* Date range */}
-        <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">From</label>
+        <div className='space-y-1'>
+          <label className='text-[10px] font-medium uppercase tracking-wider text-muted'>
+            From
+          </label>
           <input
-            type="datetime-local"
+            type='datetime-local'
             value={toDatetimeLocal(fromDate)}
-            onChange={(e) => { setFromDate(fromDatetimeLocal(e.target.value)); setPage(0); }}
-            className="block w-full sm:w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+            onChange={(e) => {
+              setFromDate(fromDatetimeLocal(e.target.value));
+              setPage(0);
+            }}
+            className='block w-full sm:w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue'
           />
         </div>
-        <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">To</label>
+        <div className='space-y-1'>
+          <label className='text-[10px] font-medium uppercase tracking-wider text-muted'>To</label>
           <input
-            type="datetime-local"
+            type='datetime-local'
             value={toDatetimeLocal(toDate)}
-            onChange={(e) => { setToDate(fromDatetimeLocal(e.target.value)); setPage(0); }}
-            className="block w-full sm:w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+            onChange={(e) => {
+              setToDate(fromDatetimeLocal(e.target.value));
+              setPage(0);
+            }}
+            className='block w-full sm:w-48 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue'
           />
         </div>
 
         {/* Entity type chips */}
-        <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Entity</label>
-          <div className="flex flex-wrap gap-1">
+        <div className='space-y-1'>
+          <label className='text-[10px] font-medium uppercase tracking-wider text-muted'>
+            Entity
+          </label>
+          <div className='flex flex-wrap gap-1'>
             {ENTITY_TYPES.map((t) => (
               <button
                 key={t}
-                onClick={() => { setEntityFilter(t); setPage(0); }}
+                onClick={() => {
+                  setEntityFilter(t);
+                  setPage(0);
+                }}
                 className={cn(
                   'px-2.5 py-1 rounded-sm text-xs font-medium whitespace-nowrap transition-colors',
                   entityFilter === t
                     ? 'bg-accent-blue text-primary'
-                    : 'text-muted hover:text-secondary bg-[var(--gray-200)] hover:bg-[var(--gray-200)]'
+                    : 'text-muted hover:text-secondary bg-[var(--gray-200)] hover:bg-[var(--gray-200)]',
                 )}
               >
                 {t === 'ALL' ? 'All' : t.replace(/_/g, ' ')}
@@ -276,16 +297,23 @@ export default function AuditPage() {
         </div>
 
         {/* Event type search */}
-        <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Event Type</label>
+        <div className='space-y-1'>
+          <label className='text-[10px] font-medium uppercase tracking-wider text-muted'>
+            Event Type
+          </label>
           <select
             value={eventFilter}
-            onChange={(e) => { setEventFilter(e.target.value); setPage(0); }}
-            className="block w-full sm:w-56 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+            onChange={(e) => {
+              setEventFilter(e.target.value);
+              setPage(0);
+            }}
+            className='block w-full sm:w-56 px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue'
           >
-            <option value="">All Events</option>
+            <option value=''>All Events</option>
             {Object.entries(EVENT_TYPE_LABELS).map(([key, label]) => (
-              <option key={key} value={key}>{label}</option>
+              <option key={key} value={key}>
+                {label}
+              </option>
             ))}
           </select>
         </div>
@@ -293,70 +321,104 @@ export default function AuditPage() {
 
       {/* Error */}
       {error && (
-        <div className="rounded-sm bg-accent-red/10 border border-accent-red/20 px-4 py-2 text-sm text-accent-red">
+        <div className='rounded-sm bg-accent-red/10 border border-accent-red/20 px-4 py-2 text-sm text-accent-red'>
           {error}
         </div>
       )}
 
       {/* Results — table on md+, cards on mobile so Actor + Changes never get dropped */}
-      <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden">
-        <div className="hidden md:block overflow-x-auto">
-          <table className="w-full text-sm">
+      <div className='rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden'>
+        <div className='hidden md:block overflow-x-auto'>
+          <table className='w-full text-sm'>
             <thead>
-              <tr className="border-b border-[var(--border-default)] text-left">
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Time</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Event</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted">Entity</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted hidden md:table-cell">Actor</th>
-                <th className="px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted hidden lg:table-cell">Changes</th>
+              <tr className='border-b border-[var(--border-default)] text-left'>
+                <th className='px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted'>
+                  Time
+                </th>
+                <th className='px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted'>
+                  Event
+                </th>
+                <th className='px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted'>
+                  Entity
+                </th>
+                <th className='px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted hidden md:table-cell'>
+                  Actor
+                </th>
+                <th className='px-4 py-2.5 text-xs font-medium uppercase tracking-wider text-muted hidden lg:table-cell'>
+                  Changes
+                </th>
               </tr>
             </thead>
             <tbody>
               {loading && entries.length === 0 ? (
-                <tr><td colSpan={5} className="px-4 py-12 text-center text-muted">Loading...</td></tr>
+                <tr>
+                  <td colSpan={5} className='px-4 py-12 text-center text-muted'>
+                    Loading...
+                  </td>
+                </tr>
               ) : entries.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-4 py-12 text-center">
+                  <td colSpan={5} className='px-4 py-12 text-center'>
                     {/* Phase 1.1 #12 — empty-state hero (B2B sweep). */}
-                    <p className="text-sm font-medium text-secondary">No audit events for these filters</p>
-                    <p className="text-xs text-muted mt-1">Audit events appear here as users sign in, change tiers, edit org settings, or trigger billable actions. Try widening the date range or clearing the actor filter.</p>
+                    <p className='text-sm font-medium text-secondary'>
+                      No audit events for these filters
+                    </p>
+                    <p className='text-xs text-muted mt-1'>
+                      Audit events appear here as users sign in, change tiers, edit org settings, or
+                      trigger billable actions. Try widening the date range or clearing the actor
+                      filter.
+                    </p>
                   </td>
                 </tr>
               ) : (
                 entries.map((entry) => (
-                  <tr key={entry.id} className="border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors">
-                    <td className="px-4 py-2.5 text-secondary whitespace-nowrap text-xs">
+                  <tr
+                    key={entry.id}
+                    className='border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors'
+                  >
+                    <td className='px-4 py-2.5 text-secondary whitespace-nowrap text-xs'>
                       {formatTime(entry.createdAt)}
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className="text-primary text-xs font-medium">{humanLabel(entry.eventType)}</span>
+                    <td className='px-4 py-2.5'>
+                      <span className='text-primary text-xs font-medium'>
+                        {humanLabel(entry.eventType)}
+                      </span>
                     </td>
-                    <td className="px-4 py-2.5">
-                      <span className={cn(
-                        'inline-block px-2 py-0.5 rounded-sm text-[10px] font-semibold uppercase',
-                        entityBadgeColor(entry.entityType)
-                      )}>
+                    <td className='px-4 py-2.5'>
+                      <span
+                        className={cn(
+                          'inline-block px-2 py-0.5 rounded-sm text-[10px] font-semibold uppercase',
+                          entityBadgeColor(entry.entityType),
+                        )}
+                      >
                         {entry.entityType}
                       </span>
-                      <span className="ml-1.5 text-xs text-muted font-mono" title={entry.entityId}>
-                        {entry.entityId.length > 12 ? entry.entityId.slice(0, 8) + '...' : entry.entityId}
+                      <span className='ml-1.5 text-xs text-muted font-mono' title={entry.entityId}>
+                        {entry.entityId.length > 12
+                          ? entry.entityId.slice(0, 8) + '...'
+                          : entry.entityId}
                       </span>
                     </td>
-                    <td className="px-4 py-2.5 text-xs text-secondary whitespace-nowrap hidden md:table-cell">
-                      {entry.actorEmail ?? (entry.actorId ? entry.actorId.slice(0, 8) + '...' : 'SYSTEM')}
+                    <td className='px-4 py-2.5 text-xs text-secondary whitespace-nowrap hidden md:table-cell'>
+                      {entry.actorEmail ??
+                        (entry.actorId ? entry.actorId.slice(0, 8) + '...' : 'SYSTEM')}
                     </td>
-                    <td className="px-4 py-2.5 text-xs max-w-xs hidden lg:table-cell">
+                    <td className='px-4 py-2.5 text-xs max-w-xs hidden lg:table-cell'>
                       {entry.oldValue && entry.newValue ? (
-                        <div className="space-y-0.5">
-                          <div className="text-muted line-through">{renderJsonValue(entry.oldValue)}</div>
-                          <div className="text-accent-green">{renderJsonValue(entry.newValue)}</div>
+                        <div className='space-y-0.5'>
+                          <div className='text-muted line-through'>
+                            {renderJsonValue(entry.oldValue)}
+                          </div>
+                          <div className='text-accent-green'>{renderJsonValue(entry.newValue)}</div>
                         </div>
                       ) : entry.newValue ? (
-                        <span className="text-accent-green">{renderJsonValue(entry.newValue)}</span>
+                        <span className='text-accent-green'>{renderJsonValue(entry.newValue)}</span>
                       ) : entry.oldValue ? (
-                        <span className="text-accent-red line-through">{renderJsonValue(entry.oldValue)}</span>
+                        <span className='text-accent-red line-through'>
+                          {renderJsonValue(entry.oldValue)}
+                        </span>
                       ) : (
-                        <span className="text-muted">-</span>
+                        <span className='text-muted'>-</span>
                       )}
                     </td>
                   </tr>
@@ -367,50 +429,65 @@ export default function AuditPage() {
         </div>
 
         {/* Mobile cards — preserves Actor + Changes that the table drops on small screens */}
-        <ul className="md:hidden divide-y divide-[var(--border-default)]">
+        <ul className='md:hidden divide-y divide-[var(--border-default)]'>
           {loading && entries.length === 0 ? (
-            <li className="px-4 py-12 text-center text-muted text-sm">Loading...</li>
+            <li className='px-4 py-12 text-center text-muted text-sm'>Loading...</li>
           ) : entries.length === 0 ? (
-            <li className="px-4 py-12 text-center">
+            <li className='px-4 py-12 text-center'>
               {/* Phase 1.1 #12 — empty-state hero (mobile). */}
-              <p className="text-sm font-medium text-secondary">No audit events for these filters</p>
-              <p className="text-xs text-muted mt-1">Audit events appear here for sign-ins, tier changes, billable actions.</p>
+              <p className='text-sm font-medium text-secondary'>
+                No audit events for these filters
+              </p>
+              <p className='text-xs text-muted mt-1'>
+                Audit events appear here for sign-ins, tier changes, billable actions.
+              </p>
             </li>
           ) : (
             entries.map((entry) => (
-              <li key={entry.id} className="px-4 py-3 space-y-1.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-primary truncate">{humanLabel(entry.eventType)}</p>
-                    <p className="text-[11px] text-muted mt-0.5">{formatTime(entry.createdAt)}</p>
+              <li key={entry.id} className='px-4 py-3 space-y-1.5'>
+                <div className='flex items-start justify-between gap-3'>
+                  <div className='min-w-0'>
+                    <p className='text-sm font-medium text-primary truncate'>
+                      {humanLabel(entry.eventType)}
+                    </p>
+                    <p className='text-[11px] text-muted mt-0.5'>{formatTime(entry.createdAt)}</p>
                   </div>
-                  <span className={cn(
-                    'inline-block px-2 py-0.5 rounded-sm text-[10px] font-semibold uppercase whitespace-nowrap flex-shrink-0',
-                    entityBadgeColor(entry.entityType)
-                  )}>
+                  <span
+                    className={cn(
+                      'inline-block px-2 py-0.5 rounded-sm text-[10px] font-semibold uppercase whitespace-nowrap flex-shrink-0',
+                      entityBadgeColor(entry.entityType),
+                    )}
+                  >
                     {entry.entityType}
                   </span>
                 </div>
-                <div className="flex items-center gap-1.5 text-[11px] text-muted">
-                  <span className="font-mono" title={entry.entityId}>
-                    {entry.entityId.length > 16 ? entry.entityId.slice(0, 12) + '…' : entry.entityId}
+                <div className='flex items-center gap-1.5 text-[11px] text-muted'>
+                  <span className='font-mono' title={entry.entityId}>
+                    {entry.entityId.length > 16
+                      ? entry.entityId.slice(0, 12) + '…'
+                      : entry.entityId}
                   </span>
                   <span>·</span>
-                  <span className="truncate">
-                    {entry.actorEmail ?? (entry.actorId ? entry.actorId.slice(0, 12) + '…' : 'SYSTEM')}
+                  <span className='truncate'>
+                    {entry.actorEmail ??
+                      (entry.actorId ? entry.actorId.slice(0, 12) + '…' : 'SYSTEM')}
                   </span>
                 </div>
                 {(entry.oldValue || entry.newValue) && (
-                  <div className="text-[11px] space-y-0.5 pt-0.5 break-words">
+                  <div className='text-[11px] space-y-0.5 pt-0.5 break-words'>
                     {entry.oldValue && entry.newValue ? (
                       <>
-                        <div className="text-muted line-through">{renderJsonValue(entry.oldValue)}</div>
-                        <div className="text-accent-green">{renderJsonValue(entry.newValue)}</div>
+                        <div className='text-muted line-through'>
+                          {renderJsonValue(entry.oldValue)}
+                        </div>
+                        <div className='text-accent-green'>{renderJsonValue(entry.newValue)}</div>
                       </>
                     ) : entry.newValue ? (
-                      <div className="text-accent-green">{renderJsonValue(entry.newValue)}</div>
+                      <div className='text-accent-green'>{renderJsonValue(entry.newValue)}</div>
                     ) : (
-                      <div className="text-accent-red line-through">{renderJsonValue(entry.oldValue!)}</div>
+                      <div className='text-accent-red line-through'>
+                        {renderJsonValue(entry.oldValue!)}
+                      </div>
                     )}
                   </div>
                 )}
@@ -421,24 +498,24 @@ export default function AuditPage() {
 
         {/* Pagination */}
         {data && data.totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-2.5 border-t border-[var(--border-default)]">
-            <span className="text-xs text-muted">
+          <div className='flex items-center justify-between px-4 py-2.5 border-t border-[var(--border-default)]'>
+            <span className='text-xs text-muted'>
               Page {data.number + 1} of {data.totalPages} ({data.totalElements} total)
             </span>
-            <div className="flex gap-1">
+            <div className='flex gap-1'>
               <button
                 onClick={() => setPage(Math.max(0, page - 1))}
                 disabled={page === 0}
-                className="p-1.5 rounded bg-[var(--gray-200)] hover:bg-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className='p-1.5 rounded bg-[var(--gray-200)] hover:bg-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
               >
-                <ChevronLeft className="h-4 w-4 text-secondary" />
+                <ChevronLeft className='h-4 w-4 text-secondary' />
               </button>
               <button
                 onClick={() => setPage(Math.min(data.totalPages - 1, page + 1))}
                 disabled={page >= data.totalPages - 1}
-                className="p-1.5 rounded bg-[var(--gray-200)] hover:bg-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                className='p-1.5 rounded bg-[var(--gray-200)] hover:bg-[var(--border-default)] disabled:opacity-30 disabled:cursor-not-allowed transition-colors'
               >
-                <ChevronRight className="h-4 w-4 text-secondary" />
+                <ChevronRight className='h-4 w-4 text-secondary' />
               </button>
             </div>
           </div>
@@ -483,47 +560,59 @@ function ProjectActivityPanel() {
     }
   }, [appliedProjectId, sinceDays, includeAdmin]);
 
-  useEffect(() => { fetchActivity(); }, [fetchActivity]);
+  useEffect(() => {
+    fetchActivity();
+  }, [fetchActivity]);
 
   const entries = page?.entries ?? [];
-  const tierColor = useMemo(() => (tier: string) => {
-    if (tier === 'HIGH_SIGNAL') return 'bg-accent-blue/20 text-accent-blue';
-    if (tier === 'ADMIN_TOGGLE') return 'bg-accent-amber/20 text-accent-amber';
-    return 'bg-[var(--gray-200)] text-secondary';
-  }, []);
+  const tierColor = useMemo(
+    () => (tier: string) => {
+      if (tier === 'HIGH_SIGNAL') return 'bg-accent-blue/20 text-accent-blue';
+      if (tier === 'ADMIN_TOGGLE') return 'bg-accent-amber/20 text-accent-amber';
+      return 'bg-[var(--gray-200)] text-secondary';
+    },
+    [],
+  );
 
   return (
-    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 space-y-3">
-      <div className="flex items-baseline justify-between gap-3 flex-wrap">
-        <div className="flex items-center gap-2">
-          <ActivityIcon className="h-4 w-4 text-secondary" />
-          <h3 className="text-sm font-medium text-primary">Project activity feed</h3>
+    <div className='rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 space-y-3'>
+      <div className='flex items-baseline justify-between gap-3 flex-wrap'>
+        <div className='flex items-center gap-2'>
+          <ActivityIcon className='h-4 w-4 text-secondary' />
+          <h3 className='text-sm font-medium text-primary'>Project activity feed</h3>
         </div>
-        <p className="text-[11px] text-muted">
+        <p className='text-[11px] text-muted'>
           V133 surface · per-project · run / PR / contract / ADR events
         </p>
       </div>
 
       <form
-        onSubmit={(e) => { e.preventDefault(); setAppliedProjectId(projectId.trim()); }}
-        className="flex items-end gap-3 flex-wrap"
+        onSubmit={(e) => {
+          e.preventDefault();
+          setAppliedProjectId(projectId.trim());
+        }}
+        className='flex items-end gap-3 flex-wrap'
       >
-        <div className="space-y-1 flex-1 min-w-[240px]">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Project ID</label>
+        <div className='space-y-1 flex-1 min-w-[240px]'>
+          <label className='text-[10px] font-medium uppercase tracking-wider text-muted'>
+            Project ID
+          </label>
           <input
-            type="text"
+            type='text'
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
-            placeholder="b3a2c1d4-…"
-            className="block w-full px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue font-mono"
+            placeholder='b3a2c1d4-…'
+            className='block w-full px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue font-mono'
           />
         </div>
-        <div className="space-y-1">
-          <label className="text-[10px] font-medium uppercase tracking-wider text-muted">Window</label>
+        <div className='space-y-1'>
+          <label className='text-[10px] font-medium uppercase tracking-wider text-muted'>
+            Window
+          </label>
           <select
             value={sinceDays}
             onChange={(e) => setSinceDays(Number(e.target.value))}
-            className="block w-full px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue"
+            className='block w-full px-2 py-1.5 rounded-md bg-[var(--gray-200)] border border-[var(--border-default)] text-sm text-primary focus:outline-none focus:ring-1 focus:ring-accent-blue'
           >
             <option value={1}>Last 24h</option>
             <option value={7}>Last 7 days</option>
@@ -531,60 +620,74 @@ function ProjectActivityPanel() {
             <option value={90}>Last 90 days</option>
           </select>
         </div>
-        <label className="flex items-center gap-2 text-xs text-secondary cursor-pointer pb-1.5">
+        <label className='flex items-center gap-2 text-xs text-secondary cursor-pointer pb-1.5'>
           <input
-            type="checkbox"
+            type='checkbox'
             checked={includeAdmin}
             onChange={(e) => setIncludeAdmin(e.target.checked)}
-            className="accent-accent-blue"
+            className='accent-accent-blue'
           />
           <span>Include admin-tier events</span>
         </label>
         <button
-          type="submit"
+          type='submit'
           disabled={!projectId.trim() || loading}
-          className="rounded-md bg-accent-blue px-3 py-1.5 text-xs font-medium text-primary hover:bg-accent-blue/80 disabled:opacity-50"
+          className='rounded-md bg-accent-blue px-3 py-1.5 text-xs font-medium text-primary hover:bg-accent-blue/80 disabled:opacity-50'
         >
           {loading ? 'Loading…' : 'Load activity'}
         </button>
       </form>
 
       {error && (
-        <div className="rounded-sm bg-status-error/10 border border-status-error/30 px-3 py-2 text-xs text-status-error">
+        <div className='rounded-sm bg-status-error/10 border border-status-error/30 px-3 py-2 text-xs text-status-error'>
           {error}
         </div>
       )}
 
       {appliedProjectId && entries.length === 0 && !loading && !error && (
-        <p className="text-xs text-muted py-6 text-center">No activity for this project in the chosen window.</p>
+        <p className='text-xs text-muted py-6 text-center'>
+          No activity for this project in the chosen window.
+        </p>
       )}
 
       {entries.length > 0 && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-xs">
+        <div className='overflow-x-auto'>
+          <table className='w-full text-xs'>
             <thead>
-              <tr className="text-left text-muted">
-                <th className="px-2 py-2 font-medium">Time</th>
-                <th className="px-2 py-2 font-medium">Event</th>
-                <th className="px-2 py-2 font-medium">Tier</th>
-                <th className="px-2 py-2 font-medium">Target</th>
-                <th className="px-2 py-2 font-medium">Summary</th>
+              <tr className='text-left text-muted'>
+                <th className='px-2 py-2 font-medium'>Time</th>
+                <th className='px-2 py-2 font-medium'>Event</th>
+                <th className='px-2 py-2 font-medium'>Tier</th>
+                <th className='px-2 py-2 font-medium'>Target</th>
+                <th className='px-2 py-2 font-medium'>Summary</th>
               </tr>
             </thead>
             <tbody>
               {entries.map((e) => (
-                <tr key={e.id} className="border-t border-[var(--border-default)]">
-                  <td className="px-2 py-2 text-muted whitespace-nowrap">{formatTime(e.occurredAt)}</td>
-                  <td className="px-2 py-2 text-primary font-mono">{e.eventType}</td>
-                  <td className="px-2 py-2">
-                    <span className={cn('inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wider', tierColor(e.tier))}>
-                      {e.tier === 'HIGH_SIGNAL' ? 'High' : e.tier === 'ADMIN_TOGGLE' ? 'Admin' : 'Audit'}
+                <tr key={e.id} className='border-t border-[var(--border-default)]'>
+                  <td className='px-2 py-2 text-muted whitespace-nowrap'>
+                    {formatTime(e.occurredAt)}
+                  </td>
+                  <td className='px-2 py-2 text-primary font-mono'>{e.eventType}</td>
+                  <td className='px-2 py-2'>
+                    <span
+                      className={cn(
+                        'inline-block px-1.5 py-0.5 rounded-sm text-[10px] uppercase tracking-wider',
+                        tierColor(e.tier),
+                      )}
+                    >
+                      {e.tier === 'HIGH_SIGNAL'
+                        ? 'High'
+                        : e.tier === 'ADMIN_TOGGLE'
+                          ? 'Admin'
+                          : 'Audit'}
                     </span>
                   </td>
-                  <td className="px-2 py-2 text-secondary font-mono">
-                    {e.targetType ?? '—'}{e.targetId ? ` · ${e.targetId.slice(0, 8)}…` : ''}
+                  <td className='px-2 py-2 text-secondary font-mono'>
+                    {e.targetType ?? '—'}
+                    {e.targetId ? ` · ${e.targetId.slice(0, 8)}…` : ''}
                   </td>
-                  <td className="px-2 py-2 text-secondary">{e.summary}</td>
+                  <td className='px-2 py-2 text-secondary'>{e.summary}</td>
                 </tr>
               ))}
             </tbody>

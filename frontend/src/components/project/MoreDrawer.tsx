@@ -8,15 +8,15 @@
  * Slides in from the right. Body scrolls; header pinned. Closes on backdrop
  * click, ESC, or X. Body scroll lock while open.
  */
-import { useEffect, useState, useRef } from 'react';
-import { X } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import {useEffect, useState, useRef} from 'react';
+import {X} from 'lucide-react';
+import {cn} from '@/lib/utils';
 import GeneratedDocsPanel from './GeneratedDocsPanel';
 import ProjectMemoryPanel from './ProjectMemoryPanel';
 import ProjectDocumentsPanel from './ProjectDocumentsPanel';
 import ActivityTab from './ActivityTab';
 import * as api from '@/lib/api';
-import { useState as useReactState } from 'react';
+import {useState as useReactState} from 'react';
 
 export type DrawerPanel = 'settings' | 'docs' | 'memory' | 'activity' | 'team' | 'documents';
 
@@ -69,38 +69,46 @@ export default function MoreDrawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-40" role="dialog" aria-modal="true" aria-label="More project surfaces">
+    <div
+      className='fixed inset-0 z-40'
+      role='dialog'
+      aria-modal='true'
+      aria-label='More project surfaces'
+    >
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/40 backdrop-blur-[1px]"
+        className='absolute inset-0 bg-black/40 backdrop-blur-[1px]'
         onClick={onClose}
-        aria-hidden="true"
+        aria-hidden='true'
       />
       {/* Panel */}
       <aside
-        className="absolute right-0 top-0 bottom-0 w-full sm:w-[480px] bg-[var(--bg-primary)] border-l border-[var(--border-default)] shadow-xl flex flex-col"
-        role="document"
+        className='absolute right-0 top-0 bottom-0 w-full sm:w-[480px] bg-[var(--bg-primary)] border-l border-[var(--border-default)] shadow-xl flex flex-col'
+        role='document'
       >
         {/* Header */}
-        <header className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0">
-          <div className="font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted">More</div>
+        <header className='flex items-center justify-between px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0'>
+          <div className='font-mono text-[10.5px] uppercase tracking-[0.08em] text-muted'>More</div>
           <button
             ref={closeBtnRef}
             onClick={onClose}
-            aria-label="Close"
-            title="Close (Esc)"
-            className="text-muted hover:text-primary p-1 rounded-sm hover:bg-[var(--gray-200)]"
+            aria-label='Close'
+            title='Close (Esc)'
+            className='text-muted hover:text-primary p-1 rounded-sm hover:bg-[var(--gray-200)]'
           >
-            <X className="h-4 w-4" />
+            <X className='h-4 w-4' />
           </button>
         </header>
 
         {/* Panel chips */}
-        <nav className="flex flex-wrap gap-1 px-4 py-2 border-b border-[var(--border-default)] flex-shrink-0" role="tablist">
+        <nav
+          className='flex flex-wrap gap-1 px-4 py-2 border-b border-[var(--border-default)] flex-shrink-0'
+          role='tablist'
+        >
           {(Object.keys(PANEL_LABELS) as DrawerPanel[]).map((p) => (
             <button
               key={p}
-              role="tab"
+              role='tab'
               aria-selected={panel === p}
               onClick={() => onPanelChange(p)}
               className={cn(
@@ -116,16 +124,20 @@ export default function MoreDrawer({
         </nav>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto p-4">
+        <div className='flex-1 overflow-y-auto p-4'>
           {panel === 'settings' && project && (
-            <DrawerSettingsPanel projectId={projectId} project={project} onUpdate={onProjectUpdate} />
+            <DrawerSettingsPanel
+              projectId={projectId}
+              project={project}
+              onUpdate={onProjectUpdate}
+            />
           )}
           {panel === 'docs' && <GeneratedDocsPanel projectId={projectId} />}
           {panel === 'memory' && <ProjectMemoryPanel projectId={projectId} />}
           {panel === 'activity' && <ActivityTab projectId={projectId} />}
           {panel === 'documents' && <ProjectDocumentsPanel projectId={projectId} />}
           {panel === 'team' && (
-            <div className="text-xs text-muted">
+            <div className='text-xs text-muted'>
               Team management is available via the existing Project members page.
             </div>
           )}
@@ -165,47 +177,47 @@ function DrawerSettingsPanel({
     }
   };
   return (
-    <div className="space-y-3">
+    <div className='space-y-3'>
       <div>
-        <h3 className="text-xs font-medium text-secondary mb-2">Project settings</h3>
-        <label className="block text-[11px] text-muted mb-1">GitHub Owner</label>
-        <div className="flex items-center gap-2">
+        <h3 className='text-xs font-medium text-secondary mb-2'>Project settings</h3>
+        <label className='block text-[11px] text-muted mb-1'>GitHub Owner</label>
+        <div className='flex items-center gap-2'>
           <input
-            type="text"
+            type='text'
             value={owner}
             onChange={(e) => setOwner(e.target.value)}
-            placeholder="e.g. my-org"
-            className="flex-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--bg-primary)] text-primary placeholder:text-muted/50 focus:outline-none focus:border-accent-blue"
+            placeholder='e.g. my-org'
+            className='flex-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--bg-primary)] text-primary placeholder:text-muted/50 focus:outline-none focus:border-accent-blue'
           />
           {dirty && (
             <button
               onClick={save}
               disabled={saving}
-              className="text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50"
+              className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50'
             >
               {saving ? 'Saving...' : 'Save'}
             </button>
           )}
         </div>
-        <p className="text-[10px] text-muted mt-1">
+        <p className='text-[10px] text-muted mt-1'>
           Default GitHub org/owner for new repos created during a Launch.
         </p>
       </div>
 
-      <div className="pt-2 border-t border-[var(--border-default)]">
-        <h3 className="text-xs font-medium text-secondary mb-2">Project metadata</h3>
-        <dl className="text-[11px] space-y-1">
-          <div className="flex justify-between">
-            <dt className="text-muted">Status</dt>
-            <dd className="text-secondary font-mono">{project.status}</dd>
+      <div className='pt-2 border-t border-[var(--border-default)]'>
+        <h3 className='text-xs font-medium text-secondary mb-2'>Project metadata</h3>
+        <dl className='text-[11px] space-y-1'>
+          <div className='flex justify-between'>
+            <dt className='text-muted'>Status</dt>
+            <dd className='text-secondary font-mono'>{project.status}</dd>
           </div>
-          <div className="flex justify-between">
-            <dt className="text-muted">Provider</dt>
-            <dd className="text-secondary font-mono">{project.aiProvider ?? '—'}</dd>
+          <div className='flex justify-between'>
+            <dt className='text-muted'>Provider</dt>
+            <dd className='text-secondary font-mono'>{project.aiProvider ?? '—'}</dd>
           </div>
-          <div className="flex justify-between">
-            <dt className="text-muted">Project ID</dt>
-            <dd className="text-secondary font-mono text-[10px]">{projectId}</dd>
+          <div className='flex justify-between'>
+            <dt className='text-muted'>Project ID</dt>
+            <dd className='text-secondary font-mono text-[10px]'>{projectId}</dd>
           </div>
         </dl>
       </div>
@@ -246,5 +258,5 @@ export function useDrawerState(): {
     };
   }, []);
 
-  return { open, panel, setOpen, setPanel };
+  return {open, panel, setOpen, setPanel};
 }

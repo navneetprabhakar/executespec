@@ -44,18 +44,18 @@
    *     just sourced from the info primitive — splits brand from info
    *     per Wave 5 §E.2 decision).
    */
-  --geist-bg:           var(--c-graphite-0);
+  --geist-bg: var(--c-graphite-0);
   --geist-bg-secondary: var(--c-graphite-2);
-  --gray-100:           var(--c-graphite-2);
-  --gray-200:           var(--c-graphite-3);
-  --gray-300:           var(--c-graphite-4);
-  --gray-400:           var(--c-graphite-5);
-  --gray-500:           var(--c-graphite-6);
-  --gray-600:           var(--c-graphite-6);     /* was #66707D — collapsed onto graphite-6; rare consumer */
-  --gray-700:           var(--c-ink-300);        /* #8A94A6 */
-  --gray-800:           #AAB2BF;                 /* no primitive — used in 1 place; left literal */
-  --gray-900:           var(--c-ink-200);        /* #C9D1DB */
-  --gray-1000:          var(--c-ink-100);        /* #ECEEF2 */
+  --gray-100: var(--c-graphite-2);
+  --gray-200: var(--c-graphite-3);
+  --gray-300: var(--c-graphite-4);
+  --gray-400: var(--c-graphite-5);
+  --gray-500: var(--c-graphite-6);
+  --gray-600: var(--c-graphite-6); /* was #66707D — collapsed onto graphite-6; rare consumer */
+  --gray-700: var(--c-ink-300); /* #8A94A6 */
+  --gray-800: #aab2bf; /* no primitive — used in 1 place; left literal */
+  --gray-900: var(--c-ink-200); /* #C9D1DB */
+  --gray-1000: var(--c-ink-100); /* #ECEEF2 */
 
   /* Borders
      F-15 (round-3 audit) — bumped two more rungs to land at the SC 1.4.11
@@ -65,8 +65,8 @@
      pass — and graphite-8 (#7B8593) gives a ~4.5 hover step so the
      rest→hover delta stays meaningful. The previous R12 fix improved
      1.35 → 1.59 but stopped short of AA; this is the actual fix. */
-  --border-default:     var(--c-graphite-7);
-  --border-hover:       var(--c-graphite-8);
+  --border-default: var(--c-graphite-7);
+  --border-hover: var(--c-graphite-8);
   /* Subtle surface divider (legacy borders that should NOT pop) — kept
      at graphite-5 for callers who explicitly want hairline separators
      (table rows, elevated card inner dividers). Add `border-color:
@@ -74,9 +74,9 @@
   --border-divider-subtle: var(--c-graphite-5);
 
   /* Text */
-  --text-primary:       var(--c-ink-100);
-  --text-secondary:     var(--c-ink-200);
-  --text-muted:         var(--c-ink-300);
+  --text-primary: var(--c-ink-100);
+  --text-secondary: var(--c-ink-200);
+  --text-muted: var(--c-ink-300);
 
   /* Accent — Signal palette
      F-16 (round-3 audit) — three slots, three jobs:
@@ -86,91 +86,93 @@
      Consumers writing `color: var(--accent-blue)` on a dark surface should
      migrate to `--accent-blue-text` to pass AA-body. Existing
      `bg-[var(--accent-blue)] text-white` stays correct. */
-  --accent-blue:        var(--c-signal-blue);
-  --accent-blue-hover:  var(--c-signal-blue-hover);
-  --accent-blue-text:   var(--c-signal-blue-on-dark);
-  --accent-harness:     var(--c-accent-purple);  /* harness = the agent-orchestration purple tone */
-  --accent-planner:     var(--c-info);           /* planner = the info-cyan tone (split from brand blue per Wave-5 E.2) */
+  --accent-blue: var(--c-signal-blue);
+  --accent-blue-hover: var(--c-signal-blue-hover);
+  --accent-blue-text: var(--c-signal-blue-on-dark);
+  --accent-harness: var(--c-accent-purple); /* harness = the agent-orchestration purple tone */
+  --accent-planner: var(
+    --c-info
+  ); /* planner = the info-cyan tone (split from brand blue per Wave-5 E.2) */
 
   /* Brand gradient (logo, primary CTAs, scorecard highlight) */
-  --brand-grad:         linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
+  --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
 
   /* Status — distinct color per semantic group. v2.6.0 (UI polish v1):
    * PARTIAL nudged from #F97316 → #F5A524 (softer amber, not red-adjacent).
    * Wave-6 keeps #F5A524 literal because it's between --c-warning #F59E0B
    * and --c-pop-amber #FBBF24 — needs its own slot if we promote it. */
-  --status-success:     var(--c-success);
+  --status-success: var(--c-success);
   /* R11 + F-17 (2026-05-01 round-3 audit) — separated from brand blue so a
      "running" status pill isn't visually identical to a primary CTA, AND
      lifted to AA-body contrast. The R11 value #4A77D6 hit only 4.19 on
      graphite-2 (AA-large pass / AA-body fail). #5B89E0 hits 5.21 — body
      text in this colour now passes AA. Still close enough to brand-blue
      to read as "in motion" without losing the family. */
-  --status-executing:   #5B89E0;
-  --status-thinking:    var(--c-accent-purple);
-  --status-waiting:     var(--c-warning);
-  --status-partial:     #F5A524;                 /* see comment above — uniquely positioned */
-  --status-error:       var(--c-error);          /* was #F26D6D — drift resolved to v3's #EF4444 */
-  --status-blocked:     var(--c-accent-pink);
-  --status-queued:      #66707D;                 /* historic literal; ~half-step between graphite-5 and ink-300 */
+  --status-executing: #5b89e0;
+  --status-thinking: var(--c-accent-purple);
+  --status-waiting: var(--c-warning);
+  --status-partial: #f5a524; /* see comment above — uniquely positioned */
+  --status-error: var(--c-error); /* was #F26D6D — drift resolved to v3's #EF4444 */
+  --status-blocked: var(--c-accent-pink);
+  --status-queued: #66707d; /* historic literal; ~half-step between graphite-5 and ink-300 */
 
   /* Numeric neutral — money/tokens/stats. Was amber (collided with warning). */
-  --numeric-neutral:    var(--c-ink-200);
+  --numeric-neutral: var(--c-ink-200);
 
   /* Legacy aliases */
-  --status-building:    var(--c-warning);
+  --status-building: var(--c-warning);
 
   /* Radius */
-  --radius-sm:          4px;       /* was 2px — less crunchy */
-  --radius-md:          6px;       /* was 4px */
-  --radius-lg:          8px;       /* was 6px */
-  --radius-xl:          12px;
-  --radius-2xl:         16px;
-  --radius-full:        9999px;
+  --radius-sm: 4px; /* was 2px — less crunchy */
+  --radius-md: 6px; /* was 4px */
+  --radius-lg: 8px; /* was 6px */
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
+  --radius-full: 9999px;
 
   /* Spacing scale (rem) — unchanged */
-  --space-0:  0;
-  --space-1:  0.25rem;
-  --space-2:  0.5rem;
-  --space-3:  0.75rem;
-  --space-4:  1rem;
-  --space-5:  1.25rem;
-  --space-6:  1.5rem;
-  --space-8:  2rem;
+  --space-0: 0;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
   --space-10: 2.5rem;
   --space-12: 3rem;
   --space-16: 4rem;
 
-  --page-gutter-mobile:  var(--space-4);
-  --page-gutter-tablet:  var(--space-6);
+  --page-gutter-mobile: var(--space-4);
+  --page-gutter-tablet: var(--space-6);
   --page-gutter-desktop: var(--space-8);
-  --page-stack:          var(--space-6);
+  --page-stack: var(--space-6);
 
   /* Elevation */
-  --elevation-1: 0 1px 2px 0 rgba(0,0,0,0.4);
-  --elevation-2: 0 4px 12px 0 rgba(0,0,0,0.5);
-  --elevation-3: 0 12px 32px 0 rgba(0,0,0,0.6);
+  --elevation-1: 0 1px 2px 0 rgba(0, 0, 0, 0.4);
+  --elevation-2: 0 4px 12px 0 rgba(0, 0, 0, 0.5);
+  --elevation-3: 0 12px 32px 0 rgba(0, 0, 0, 0.6);
 
   /* Motion */
-  --ease-out:    cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
-  --duration-fast:   120ms;
-  --duration-base:   200ms;
-  --duration-slow:   320ms;
+  --duration-fast: 120ms;
+  --duration-base: 200ms;
+  --duration-slow: 320ms;
 
   /* Focus ring — must be visible on every dark-theme control */
   --focus-ring: 0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue);
 
   /* Font scale */
-  --text-xs:    0.75rem;
-  --text-sm:    0.8125rem;
-  --text-base:  0.9375rem;
-  --text-lg:    1.0625rem;
-  --text-xl:    1.25rem;
-  --text-2xl:   1.5rem;
-  --text-3xl:   1.875rem;
-  --text-4xl:   2.5rem;
-  --text-5xl:   3.25rem;
+  --text-xs: 0.75rem;
+  --text-sm: 0.8125rem;
+  --text-base: 0.9375rem;
+  --text-lg: 1.0625rem;
+  --text-xl: 1.25rem;
+  --text-2xl: 1.5rem;
+  --text-3xl: 1.875rem;
+  --text-4xl: 2.5rem;
+  --text-5xl: 3.25rem;
 }
 
 /* ── Light theme override (v2.5.14 Phase 2) ─────────────────────────────
@@ -188,18 +190,18 @@
    * stay literal here because primitives.css doesn't carry their
    * darker variants — they're light-mode-only and only used in two
    * places. */
-  --geist-bg:           var(--c-paper-0);
+  --geist-bg: var(--c-paper-0);
   --geist-bg-secondary: var(--c-paper-1);
-  --gray-100:           var(--c-paper-1);
-  --gray-200:           var(--c-paper-2);
-  --gray-300:           var(--c-paper-3);
-  --gray-400:           var(--c-paper-4);
-  --gray-500:           #959EAB;                 /* between paper-4 and graphite-6, ladder-only */
-  --gray-600:           #6E7785;
-  --gray-700:           var(--c-graphite-6);
-  --gray-800:           var(--c-graphite-5);
-  --gray-900:           var(--c-graphite-3);
-  --gray-1000:          var(--c-graphite-0);
+  --gray-100: var(--c-paper-1);
+  --gray-200: var(--c-paper-2);
+  --gray-300: var(--c-paper-3);
+  --gray-400: var(--c-paper-4);
+  --gray-500: #959eab; /* between paper-4 and graphite-6, ladder-only */
+  --gray-600: #6e7785;
+  --gray-700: var(--c-graphite-6);
+  --gray-800: var(--c-graphite-5);
+  --gray-900: var(--c-graphite-3);
+  --gray-1000: var(--c-graphite-0);
 
   /* Light-mode borders. paper-3 (#D8DCE3) on paper-1 (#F3F4F6) sits at
      ~1.4 contrast, fails AA-non-text. Light-mode equivalents at the AA
@@ -207,25 +209,25 @@
      hover. Keeping the existing #E1E5EB / #C9CFD8 values would
      reintroduce the same SC 1.4.11 failure flagged in F-15 on light
      theme. */
-  --border-default:     #BFC6D0;                 /* paper-4 — AA non-text floor */
-  --border-hover:       #A0A8B5;                 /* AA-large step */
-  --border-divider-subtle: #D8DCE3;              /* paper-3 — for explicit non-AA hairlines */
+  --border-default: #bfc6d0; /* paper-4 — AA non-text floor */
+  --border-hover: #a0a8b5; /* AA-large step */
+  --border-divider-subtle: #d8dce3; /* paper-3 — for explicit non-AA hairlines */
 
-  --text-primary:       var(--c-graphite-0);
-  --text-secondary:     var(--c-graphite-5);
-  --text-muted:         #6E7785;
+  --text-primary: var(--c-graphite-0);
+  --text-secondary: var(--c-graphite-5);
+  --text-muted: #6e7785;
 
-  --accent-blue:        #2563EB;                 /* light-mode-only deeper blue (AA on white) */
-  --accent-blue-hover:  #1D4ED8;
-  --accent-blue-text:   #2563EB;                 /* same as button surface — light theme has the right contrast already */
+  --accent-blue: #2563eb; /* light-mode-only deeper blue (AA on white) */
+  --accent-blue-hover: #1d4ed8;
+  --accent-blue-text: #2563eb; /* same as button surface — light theme has the right contrast already */
 
-  --status-error:       #DC2626;                 /* light-mode-only deeper red */
-  --status-waiting:     #D97706;                 /* light-mode-only deeper amber */
-  --numeric-neutral:    var(--c-graphite-6);
+  --status-error: #dc2626; /* light-mode-only deeper red */
+  --status-waiting: #d97706; /* light-mode-only deeper amber */
+  --numeric-neutral: var(--c-graphite-6);
 
-  --elevation-1: 0 1px 2px 0 rgba(15,23,42,0.05);
-  --elevation-2: 0 4px 12px 0 rgba(15,23,42,0.08);
-  --elevation-3: 0 12px 32px 0 rgba(15,23,42,0.12);
+  --elevation-1: 0 1px 2px 0 rgba(15, 23, 42, 0.05);
+  --elevation-2: 0 4px 12px 0 rgba(15, 23, 42, 0.08);
+  --elevation-3: 0 12px 32px 0 rgba(15, 23, 42, 0.12);
 
   --focus-ring: 0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue);
 }

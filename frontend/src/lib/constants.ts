@@ -1,52 +1,64 @@
-export const STATUS_COLORS: Record<string, { dot: string; text: string }> = {
+export const STATUS_COLORS: Record<string, {dot: string; text: string}> = {
   // Gray — inactive
-  QUEUED:                 { dot: 'bg-status-queued',    text: 'text-muted' },
-  PAUSED:                { dot: 'bg-status-queued',    text: 'text-muted' },
-  CANCELLED:             { dot: 'bg-status-queued',    text: 'text-muted' },
-  PENDING:               { dot: 'bg-status-queued',    text: 'text-muted' },
-  LOCKED:                { dot: 'bg-status-queued',    text: 'text-muted' },
+  QUEUED: {dot: 'bg-status-queued', text: 'text-muted'},
+  PAUSED: {dot: 'bg-status-queued', text: 'text-muted'},
+  CANCELLED: {dot: 'bg-status-queued', text: 'text-muted'},
+  PENDING: {dot: 'bg-status-queued', text: 'text-muted'},
+  LOCKED: {dot: 'bg-status-queued', text: 'text-muted'},
   // Blue — executing
-  WORKING:               { dot: 'bg-status-executing', text: 'text-status-executing' },
-  EXECUTING:             { dot: 'bg-status-executing', text: 'text-status-executing' },
+  WORKING: {dot: 'bg-status-executing', text: 'text-status-executing'},
+  EXECUTING: {dot: 'bg-status-executing', text: 'text-status-executing'},
   // Purple — thinking/review (PLANNING family)
-  PLANNING:              { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
-  REVIEWING:             { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
+  PLANNING: {dot: 'bg-status-thinking', text: 'text-status-thinking'},
+  REVIEWING: {dot: 'bg-status-thinking', text: 'text-status-thinking'},
   // ExecutionRun-only statuses (project Launches) — same family as Planning
-  SETUP:                 { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
-  ANALYSING:             { dot: 'bg-status-thinking',  text: 'text-status-thinking' },
-  ARCH_REVIEW:           { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
+  SETUP: {dot: 'bg-status-thinking', text: 'text-status-thinking'},
+  ANALYSING: {dot: 'bg-status-thinking', text: 'text-status-thinking'},
+  ARCH_REVIEW: {dot: 'bg-status-waiting', text: 'text-status-waiting'},
   // Amber — waiting (PipelineRun family)
-  AWAITING_APPROVAL:     { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
-  AWAITING_CLARIFICATION:{ dot: 'bg-status-waiting',   text: 'text-status-waiting' },
+  AWAITING_APPROVAL: {dot: 'bg-status-waiting', text: 'text-status-waiting'},
+  AWAITING_CLARIFICATION: {dot: 'bg-status-waiting', text: 'text-status-waiting'},
   // Green — success
-  COMPLETE:              { dot: 'bg-status-success',   text: 'text-status-success' },
+  COMPLETE: {dot: 'bg-status-success', text: 'text-status-success'},
   // Orange — partial
-  PARTIAL:               { dot: 'bg-status-partial',   text: 'text-status-partial' },
+  PARTIAL: {dot: 'bg-status-partial', text: 'text-status-partial'},
   // Red — failure
-  FAILED:                { dot: 'bg-status-error',     text: 'text-status-error' },
-  STUCK:                 { dot: 'bg-status-error',     text: 'text-status-error' },
+  FAILED: {dot: 'bg-status-error', text: 'text-status-error'},
+  STUCK: {dot: 'bg-status-error', text: 'text-status-error'},
   // Pink — blocked
-  BLOCKED:               { dot: 'bg-status-blocked',   text: 'text-status-blocked' },
+  BLOCKED: {dot: 'bg-status-blocked', text: 'text-status-blocked'},
   // Batch
-  QUEUED_BATCH:          { dot: 'bg-status-waiting',   text: 'text-status-waiting' },
-  IN_PROGRESS_BATCH:     { dot: 'bg-status-executing', text: 'text-status-executing' },
-  BATCH_COMPLETE:        { dot: 'bg-status-success',   text: 'text-status-success' },
+  QUEUED_BATCH: {dot: 'bg-status-waiting', text: 'text-status-waiting'},
+  IN_PROGRESS_BATCH: {dot: 'bg-status-executing', text: 'text-status-executing'},
+  BATCH_COMPLETE: {dot: 'bg-status-success', text: 'text-status-success'},
 };
 
 // V1 dead enums removed (COMPILING / MERGING / AWAITING_MERGE — V2 backend never emits them)
 // *_BATCH retained — V2 batch path is on the roadmap (see docs/plans/v2-batch-execution-plan.md)
 export const ACTIVE_STATUSES = new Set([
-  'PLANNING', 'WORKING', 'EXECUTING', 'STUCK',
-  'SETUP', 'ANALYSING', 'REVIEWING',
-  'QUEUED_BATCH', 'IN_PROGRESS_BATCH',
+  'PLANNING',
+  'WORKING',
+  'EXECUTING',
+  'STUCK',
+  'SETUP',
+  'ANALYSING',
+  'REVIEWING',
+  'QUEUED_BATCH',
+  'IN_PROGRESS_BATCH',
 ]);
-export const GATE_STATUSES   = new Set([
-  'AWAITING_APPROVAL', 'AWAITING_CLARIFICATION', 'ARCH_REVIEW',
+export const GATE_STATUSES = new Set([
+  'AWAITING_APPROVAL',
+  'AWAITING_CLARIFICATION',
+  'ARCH_REVIEW',
 ]);
 
 export const PIPELINE_STEPS = [
-  'QUEUED', 'PLANNING', 'AWAITING_APPROVAL', 'WORKING',
-  'REVIEWING', 'COMPLETE',
+  'QUEUED',
+  'PLANNING',
+  'AWAITING_APPROVAL',
+  'WORKING',
+  'REVIEWING',
+  'COMPLETE',
 ];
 
 export const NAV_ITEMS: {
@@ -65,25 +77,55 @@ export const NAV_ITEMS: {
   // at /pricing reachable via the Header Upgrade pill.
   // R-342 — bare `/` redirects to /home (the dispatcher).  The v2
   // RunsPage moved to /runs so the sidebar entry now points there.
-  { path: '/runs',         label: 'Runs',         icon: 'LayoutDashboard', adminOnly: false },
+  {path: '/runs', label: 'Runs', icon: 'LayoutDashboard', adminOnly: false},
   // R-330 / R-340 — first-class catalog surfaces.  Routes hop into the
   // V3 chrome (V3TopBar) when clicked from the v2 sidebar — chrome
   // flip is intentional until the v2 sidebar shell is fully retired.
   // Visible to every tier — FREE sees locked rows with upgrade CTAs.
-  { path: '/library',      label: 'Library',      icon: 'Library',         adminOnly: false },
-  { path: '/migrations',   label: 'Migrations',   icon: 'GitBranch',       adminOnly: false },
+  {path: '/library', label: 'Library', icon: 'Library', adminOnly: false},
+  {path: '/migrations', label: 'Migrations', icon: 'GitBranch', adminOnly: false},
   // v2.5.14 Phase 3.1 — exec summary for Business Owner persona.
   // Gated behind canViewCostBreakdown (PRO/TEAM/ENTERPRISE) — FREE can't
   // see the spend aggregate because that's a paid-tier analytics feature.
-  { path: '/exec',         label: 'Exec summary', icon: 'TrendingUp',      adminOnly: false, requiredPermission: 'canViewCostBreakdown' },
-  { path: '/dashboard',    label: 'Dashboard',    icon: 'BarChart3',       adminOnly: true  },
-  { path: '/integrations', label: 'Integrations', icon: 'Plug',           adminOnly: false, requiredPermission: 'canManageIntegrations' },
-  { path: '/invoices',     label: 'Invoices',     icon: 'Receipt',        adminOnly: false, requiredPermission: 'canViewInvoices' },
-  { path: '/accounting',   label: 'Accounting',   icon: 'Calculator',     adminOnly: false, requiredPermission: 'canViewAccounting' },
-  { path: '/audit',        label: 'Audit',        icon: 'ClipboardList',  adminOnly: false, requiredPermission: 'canViewAudit' },
-  { path: '/deployments', label: 'Deploy',       icon: 'Rocket',         adminOnly: false, superAdminOnly: true },
-  { path: '/admin/analytics', label: 'Analytics',  icon: 'BarChart3',      adminOnly: true  },
-  { path: '/settings',     label: 'Settings',     icon: 'Settings',       adminOnly: false },
+  {
+    path: '/exec',
+    label: 'Exec summary',
+    icon: 'TrendingUp',
+    adminOnly: false,
+    requiredPermission: 'canViewCostBreakdown',
+  },
+  {path: '/dashboard', label: 'Dashboard', icon: 'BarChart3', adminOnly: true},
+  {
+    path: '/integrations',
+    label: 'Integrations',
+    icon: 'Plug',
+    adminOnly: false,
+    requiredPermission: 'canManageIntegrations',
+  },
+  {
+    path: '/invoices',
+    label: 'Invoices',
+    icon: 'Receipt',
+    adminOnly: false,
+    requiredPermission: 'canViewInvoices',
+  },
+  {
+    path: '/accounting',
+    label: 'Accounting',
+    icon: 'Calculator',
+    adminOnly: false,
+    requiredPermission: 'canViewAccounting',
+  },
+  {
+    path: '/audit',
+    label: 'Audit',
+    icon: 'ClipboardList',
+    adminOnly: false,
+    requiredPermission: 'canViewAudit',
+  },
+  {path: '/deployments', label: 'Deploy', icon: 'Rocket', adminOnly: false, superAdminOnly: true},
+  {path: '/admin/analytics', label: 'Analytics', icon: 'BarChart3', adminOnly: true},
+  {path: '/settings', label: 'Settings', icon: 'Settings', adminOnly: false},
 ];
 
 /**
@@ -98,22 +140,22 @@ export const NAV_ITEMS: {
  */
 export const V2_LEGACY_UI = {
   // feasibility dropped 2026-04-18 — component + API client deleted; endpoint stays permanent-410.
-  runConversation:      true,   // POST/GET /api/runs/{id}/chat wired to V2ChatService (2026-04-19). /iterate + /apply still 410.
-  editRunPlan:          false,  // POST /api/runs/{id}/edit-plan — deferred
-  applyTestFixes:       false,  // POST /api/runs/{id}/apply-test-fixes — deferred (wire with V2 test-gen)
-  implementSuggestions: false,  // POST /api/runs/{id}/implement-suggestions — deferred
-  rework:               false,  // POST /api/runs/{id}/rework — deferred
-  mergeApproval:        false,  // POST /api/runs/{id}/merge + /reopen-merge — permanent 410 (V2 auto-merges)
+  runConversation: true, // POST/GET /api/runs/{id}/chat wired to V2ChatService (2026-04-19). /iterate + /apply still 410.
+  editRunPlan: false, // POST /api/runs/{id}/edit-plan — deferred
+  applyTestFixes: false, // POST /api/runs/{id}/apply-test-fixes — deferred (wire with V2 test-gen)
+  implementSuggestions: false, // POST /api/runs/{id}/implement-suggestions — deferred
+  rework: false, // POST /api/runs/{id}/rework — deferred
+  mergeApproval: false, // POST /api/runs/{id}/merge + /reopen-merge — permanent 410 (V2 auto-merges)
 } as const;
 
 export const ROUTE_PATHS = {
-  runs:         '/runs',
-  dashboard:    '/dashboard',
-  pricing:      '/pricing',
+  runs: '/runs',
+  dashboard: '/dashboard',
+  pricing: '/pricing',
   integrations: '/integrations',
-  invoices:     '/invoices',
-  accounting:   '/accounting',
-  audit:        '/audit',
-  deployments:  '/deployments',
-  settings:     '/settings',
+  invoices: '/invoices',
+  accounting: '/accounting',
+  audit: '/audit',
+  deployments: '/deployments',
+  settings: '/settings',
 };

@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useState } from 'react';
-import { fetchBillingStatus, type BillingStatus } from '@/lib/billing-api';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useCallback, useEffect, useState} from 'react';
+import {fetchBillingStatus, type BillingStatus} from '@/lib/billing-api';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /** Dispatch this event anywhere to force UsageBadge to refresh. */
-export const refreshUsageBadge = () =>
-  window.dispatchEvent(new CustomEvent('usage-badge:refresh'));
+export const refreshUsageBadge = () => window.dispatchEvent(new CustomEvent('usage-badge:refresh'));
 
 export function UsageBadge() {
   const [status, setStatus] = useState<BillingStatus | null>(null);
   const user = useAuthStore((s) => s.user);
 
   const refresh = useCallback(() => {
-    fetchBillingStatus().then(setStatus).catch(() => {});
+    fetchBillingStatus()
+      .then(setStatus)
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export function UsageBadge() {
 
   if (!status) return null;
 
-  const runsUsage = status.usage.find(u => u.metric === 'RUNS');
+  const runsUsage = status.usage.find((u) => u.metric === 'RUNS');
   if (!runsUsage) return null;
 
   // Hide entirely for unlimited tiers (ENTERPRISE: max = -1)
@@ -46,15 +47,17 @@ export function UsageBadge() {
 
   return (
     <div className={`flex items-center gap-1.5 text-xs ${color}`}>
-      <div className="w-16 h-1.5 bg-[var(--gray-400)] rounded-full overflow-hidden">
+      <div className='w-16 h-1.5 bg-[var(--gray-400)] rounded-full overflow-hidden'>
         <div
           className={`h-full rounded-full ${
             pct > 90 ? 'bg-status-error' : pct > 70 ? 'bg-status-waiting' : 'bg-accent-blue'
           }`}
-          style={{ width: `${Math.min(pct, 100)}%` }}
+          style={{width: `${Math.min(pct, 100)}%`}}
         />
       </div>
-      <span>{runsUsage.current}/{runsUsage.max} runs</span>
+      <span>
+        {runsUsage.current}/{runsUsage.max} runs
+      </span>
     </div>
   );
 }

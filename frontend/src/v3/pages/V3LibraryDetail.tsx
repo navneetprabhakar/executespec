@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import {useEffect, useState} from 'react';
+import {Link, useNavigate, useParams} from 'react-router-dom';
 import {
   getLibraryDetail,
   instantiateLibrarySolution,
@@ -9,7 +9,7 @@ import {
   type ReadymadeSlot,
   type VariantResolutionResult,
 } from '@/lib/api';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useAuthStore} from '@/stores/useAuthStore';
 import ProjectRepoPicker from '../components/ProjectRepoPicker';
 import StackPicker from '../components/StackPicker';
 
@@ -39,7 +39,7 @@ import StackPicker from '../components/StackPicker';
  * upgrade CTA instead of the slot form.
  */
 export default function V3LibraryDetail() {
-  const { slug } = useParams<{ slug: string }>();
+  const {slug} = useParams<{slug: string}>();
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const showCostCap = requiresCostCap(user);
@@ -151,18 +151,18 @@ export default function V3LibraryDetail() {
 
   if (loading) {
     return (
-      <div style={{ padding: 32, textAlign: 'center', color: 'var(--v3-text-subtle)' }}>
+      <div style={{padding: 32, textAlign: 'center', color: 'var(--v3-text-subtle)'}}>
         Loading solution…
       </div>
     );
   }
   if (error || !detail) {
     return (
-      <div style={{ padding: 16 }}>
+      <div style={{padding: 16}}>
         <div style={errorBoxStyle}>
           {error ?? 'Solution not found.'}
-          <div style={{ marginTop: 8 }}>
-            <Link to="/library" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
+          <div style={{marginTop: 8}}>
+            <Link to='/library' style={{color: 'var(--v3-brand)', fontSize: 12}}>
               ← back to library
             </Link>
           </div>
@@ -174,18 +174,22 @@ export default function V3LibraryDetail() {
   const s = detail.solution;
 
   return (
-    <div style={{ padding: 16, paddingBottom: 48, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div
+      style={{padding: 16, paddingBottom: 48, display: 'flex', flexDirection: 'column', gap: 20}}
+    >
       {/* Breadcrumb */}
-      <div style={{ fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-        <Link to="/library" style={{ color: 'var(--v3-text-subtle)' }}>library</Link>
+      <div style={{fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+        <Link to='/library' style={{color: 'var(--v3-text-subtle)'}}>
+          library
+        </Link>
         {' / '}
-        <span style={{ color: 'var(--v3-text)' }}>{s.slug}</span>
+        <span style={{color: 'var(--v3-text)'}}>{s.slug}</span>
       </div>
 
       {/* Hero */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--v3-text)', margin: 0 }}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
+          <h1 style={{fontSize: 22, fontWeight: 700, color: 'var(--v3-text)', margin: 0}}>
             {s.name}
           </h1>
           {detail.locked && (
@@ -193,42 +197,46 @@ export default function V3LibraryDetail() {
           )}
         </div>
         {s.tagline && (
-          <p style={{ fontSize: 13, color: 'var(--v3-text-subtle)', margin: 0 }}>{s.tagline}</p>
+          <p style={{fontSize: 13, color: 'var(--v3-text-subtle)', margin: 0}}>{s.tagline}</p>
         )}
       </div>
 
       {/* Description */}
       {s.description && (
-        <div style={{
-          fontSize: 13,
-          color: 'var(--v3-text)',
-          lineHeight: 1.6,
-          whiteSpace: 'pre-wrap',
-          padding: 12,
-          background: 'var(--v3-surface)',
-          border: '1px solid var(--v3-border)',
-          borderRadius: 6,
-        }}>
+        <div
+          style={{
+            fontSize: 13,
+            color: 'var(--v3-text)',
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+            padding: 12,
+            background: 'var(--v3-surface)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+          }}
+        >
           {s.description}
         </div>
       )}
 
       {/* Dependencies hint */}
       {detail.dependencies.length > 0 && (
-        <div style={{
-          padding: 10,
-          background: 'rgba(91,141,239,0.08)',
-          border: '1px solid rgba(91,141,239,0.30)',
-          borderRadius: 6,
-          fontSize: 12,
-          color: 'var(--v3-text)',
-        }}>
+        <div
+          style={{
+            padding: 10,
+            background: 'rgba(91,141,239,0.08)',
+            border: '1px solid rgba(91,141,239,0.30)',
+            borderRadius: 6,
+            fontSize: 12,
+            color: 'var(--v3-text)',
+          }}
+        >
           ↪ This solution composes with{' '}
           {detail.dependencies.map((d, i) => (
             <span key={d.dependsOnId}>
               {i > 0 && ', '}
               <strong>{d.required ? 'requires' : 'recommends'}</strong>{' '}
-              <code style={{ fontSize: 11 }}>{d.dependsOnId.slice(0, 8)}</code>
+              <code style={{fontSize: 11}}>{d.dependsOnId.slice(0, 8)}</code>
             </span>
           ))}
           .
@@ -237,26 +245,31 @@ export default function V3LibraryDetail() {
 
       {/* Locked path */}
       {detail.locked && (
-        <div style={{
-          padding: 16,
-          background: 'rgba(245,158,11,0.12)',
-          border: '1px solid rgba(245,158,11,0.4)',
-          borderRadius: 6,
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#FBBF24', marginBottom: 6 }}>
+        <div
+          style={{
+            padding: 16,
+            background: 'rgba(245,158,11,0.12)',
+            border: '1px solid rgba(245,158,11,0.4)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{fontSize: 14, fontWeight: 600, color: '#FBBF24', marginBottom: 6}}>
             This solution requires the {detail.unlockTier} tier.
           </div>
-          <Link to="/pricing" style={{
-            display: 'inline-block',
-            marginTop: 6,
-            padding: '6px 12px',
-            background: 'var(--v3-brand)',
-            color: 'var(--v3-text-on-brand)',
-            borderRadius: 4,
-            textDecoration: 'none',
-            fontSize: 12,
-            fontWeight: 600,
-          }}>
+          <Link
+            to='/pricing'
+            style={{
+              display: 'inline-block',
+              marginTop: 6,
+              padding: '6px 12px',
+              background: 'var(--v3-brand)',
+              color: 'var(--v3-text-on-brand)',
+              borderRadius: 4,
+              textDecoration: 'none',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
             See pricing →
           </Link>
         </div>
@@ -265,21 +278,25 @@ export default function V3LibraryDetail() {
       {/* Use form (gated on lock state) */}
       {!detail.locked && (
         <>
-          <FormSection title="1. Where will this run?">
+          <FormSection title='1. Where will this run?'>
             <ProjectRepoPicker
               projectId={projectId}
               repoIds={repoIds}
               onProjectChange={setProjectId}
               onRepoIdsChange={setRepoIds}
             />
-            <FormField label="Branch (optional)" hint="Defaults to the project's target branch.">
-              <input value={branch} onChange={(e) => setBranch(e.target.value)}
-                     placeholder="feature/add-stripe-checkout" style={inputStyle} />
+            <FormField label='Branch (optional)' hint="Defaults to the project's target branch.">
+              <input
+                value={branch}
+                onChange={(e) => setBranch(e.target.value)}
+                placeholder='feature/add-stripe-checkout'
+                style={inputStyle}
+              />
             </FormField>
           </FormSection>
 
           {/* Stack — language + framework chips, with silent auto-detection */}
-          <FormSection title="2. Stack">
+          <FormSection title='2. Stack'>
             <StackPicker
               variants={detail.variants}
               selectedVariantId={selectedVariantId}
@@ -290,38 +307,47 @@ export default function V3LibraryDetail() {
 
           {/* Slots */}
           {detail.slots.length > 0 && (
-            <FormSection title="3. Solution parameters">
+            <FormSection title='3. Solution parameters'>
               {detail.slots.map((slot) => (
-                <SlotInput key={slot.name} slot={slot}
-                           value={slotValues[slot.name] ?? ''}
-                           onChange={(v) => setSlotValues({ ...slotValues, [slot.name]: v })} />
+                <SlotInput
+                  key={slot.name}
+                  slot={slot}
+                  value={slotValues[slot.name] ?? ''}
+                  onChange={(v) => setSlotValues({...slotValues, [slot.name]: v})}
+                />
               ))}
             </FormSection>
           )}
 
           {/* Tier-stratified cost framing */}
-          <div style={{
-            padding: '6px 10px',
-            background: showCostCap ? 'rgba(91,141,239,0.10)' : 'rgba(122,209,200,0.10)',
-            border: `1px solid ${showCostCap ? 'rgba(91,141,239,0.35)' : 'rgba(122,209,200,0.35)'}`,
-            borderRadius: 4,
-            fontSize: 11.5,
-            color: 'var(--v3-text)',
-            lineHeight: 1.5,
-          }}>
+          <div
+            style={{
+              padding: '6px 10px',
+              background: showCostCap ? 'rgba(91,141,239,0.10)' : 'rgba(122,209,200,0.10)',
+              border: `1px solid ${showCostCap ? 'rgba(91,141,239,0.35)' : 'rgba(122,209,200,0.35)'}`,
+              borderRadius: 4,
+              fontSize: 11.5,
+              color: 'var(--v3-text)',
+              lineHeight: 1.5,
+            }}
+          >
             {showCostCap
-              ? '💳 Will use platform credits — capped at your tier\'s per-run budget.'
+              ? "💳 Will use platform credits — capped at your tier's per-run budget."
               : '🔑 Will use your own LLM provider keys (BYOK) — billed direct by the provider.'}
           </div>
 
-          <FormSection title="4. Use this solution">
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-              Submits this solution as an ExecutionRun.  We'll pre-fill the spec from the variant's
+          <FormSection title='4. Use this solution'>
+            <p style={{margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+              Submits this solution as an ExecutionRun. We'll pre-fill the spec from the variant's
               template + your slot values, run it through the existing pipeline, and open a PR.
             </p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
-              <button type="button" onClick={onInstantiate} disabled={applyBusy}
-                      style={primaryButton(applyBusy)}>
+            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
+              <button
+                type='button'
+                onClick={onInstantiate}
+                disabled={applyBusy}
+                style={primaryButton(applyBusy)}
+              >
                 {applyBusy ? 'Submitting…' : 'Use this solution'}
               </button>
             </div>
@@ -336,36 +362,62 @@ export default function V3LibraryDetail() {
 // R-335: ResolutionBanner + variantLabel removed.  Their roles moved
 // into the StackPicker component (DetectionHint + variantFrameworkLabel).
 
-function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+function FormSection({title, children}: {title: string; children: React.ReactNode}) {
   return (
-    <div style={{
-      padding: 14,
-      border: '1px solid var(--v3-border)',
-      borderRadius: 6,
-      background: 'var(--v3-surface)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10,
-    }}>
-      <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>{title}</h3>
+    <div
+      style={{
+        padding: 14,
+        border: '1px solid var(--v3-border)',
+        borderRadius: 6,
+        background: 'var(--v3-surface)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <h3 style={{fontSize: 13, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>{title}</h3>
       {children}
     </div>
   );
 }
 
-function FormField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function FormField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--v3-text-subtle)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 4}}>
+      <label
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--v3-text-subtle)',
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+        }}
+      >
         {label}
       </label>
       {children}
-      {hint && <span style={{ fontSize: 10.5, color: 'var(--v3-text-subtle)', lineHeight: 1.4 }}>{hint}</span>}
+      {hint && (
+        <span style={{fontSize: 10.5, color: 'var(--v3-text-subtle)', lineHeight: 1.4}}>
+          {hint}
+        </span>
+      )}
     </div>
   );
 }
 
-function SlotInput({ slot, value, onChange }: {
+function SlotInput({
+  slot,
+  value,
+  onChange,
+}: {
   slot: ReadymadeSlot;
   value: string;
   onChange: (v: string) => void;
@@ -376,12 +428,18 @@ function SlotInput({ slot, value, onChange }: {
     try {
       const parsed = JSON.parse(slot.options);
       if (Array.isArray(parsed)) options = parsed;
-    } catch { /* fallthrough */ }
+    } catch {
+      /* fallthrough */
+    }
     return (
       <FormField label={label} hint={slot.description ?? undefined}>
         <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-          {!slot.required && <option value="">(none)</option>}
-          {options.map((o) => <option key={o} value={o}>{o}</option>)}
+          {!slot.required && <option value=''>(none)</option>}
+          {options.map((o) => (
+            <option key={o} value={o}>
+              {o}
+            </option>
+          ))}
         </select>
       </FormField>
     );
@@ -390,9 +448,9 @@ function SlotInput({ slot, value, onChange }: {
     return (
       <FormField label={label} hint={slot.description ?? undefined}>
         <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-          <option value="">(unset)</option>
-          <option value="true">true</option>
-          <option value="false">false</option>
+          <option value=''>(unset)</option>
+          <option value='true'>true</option>
+          <option value='false'>false</option>
         </select>
       </FormField>
     );
@@ -401,7 +459,7 @@ function SlotInput({ slot, value, onChange }: {
   return (
     <FormField label={label} hint={slot.description ?? undefined}>
       <input
-        type={isPassword ? 'password' : (slot.type === 'NUMBER' ? 'number' : 'text')}
+        type={isPassword ? 'password' : slot.type === 'NUMBER' ? 'number' : 'text'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={slot.defaultValue ?? ''}

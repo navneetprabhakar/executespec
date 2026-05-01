@@ -95,7 +95,7 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
   awaiting_approval: {
     term: 'Plan ready',
     definition:
-      "The state where ExecuteSpec has finished planning and is waiting for you to approve before writing code. In v3, this appears as an inline plan card in the conversation, not a blocking modal.",
+      'The state where ExecuteSpec has finished planning and is waiting for you to approve before writing code. In v3, this appears as an inline plan card in the conversation, not a blocking modal.',
   },
 };
 

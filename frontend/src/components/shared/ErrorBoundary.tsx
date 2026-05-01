@@ -1,4 +1,4 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import {Component, type ErrorInfo, type ReactNode} from 'react';
 
 /**
  * Page-level error boundary — Task 2 of the 2026-05-01 fix list.
@@ -27,10 +27,10 @@ interface ErrorBoundaryState {
 }
 
 export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
-  state: ErrorBoundaryState = { error: null };
+  state: ErrorBoundaryState = {error: null};
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { error };
+    return {error};
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
@@ -49,7 +49,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               stack: error.stack,
               componentStack: info.componentStack,
             },
-          })
+          }),
         );
       }
     } catch {
@@ -57,7 +57,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
     }
   }
 
-  reset = () => this.setState({ error: null });
+  reset = () => this.setState({error: null});
 
   render() {
     if (this.state.error) {
@@ -68,12 +68,12 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 }
 
-function DefaultFallback({ error, onReset }: { error: Error; onReset: () => void }) {
+function DefaultFallback({error, onReset}: {error: Error; onReset: () => void}) {
   // Inline styles intentionally — this fallback must render even if
   // the CSS pipeline is part of what crashed.
   return (
     <div
-      role="alert"
+      role='alert'
       style={{
         minHeight: '60vh',
         display: 'flex',
@@ -84,17 +84,16 @@ function DefaultFallback({ error, onReset }: { error: Error; onReset: () => void
         padding: 32,
         color: '#ECEEF2',
         background: 'transparent',
-        fontFamily:
-          '"Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+        fontFamily: '"Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
       }}
     >
-      <div style={{ textAlign: 'center', maxWidth: 480 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 600, margin: 0, color: '#ECEEF2' }}>
+      <div style={{textAlign: 'center', maxWidth: 480}}>
+        <h2 style={{fontSize: 18, fontWeight: 600, margin: 0, color: '#ECEEF2'}}>
           Something went wrong on this page.
         </h2>
-        <p style={{ fontSize: 13, color: '#8A94A6', margin: '8px 0 0', lineHeight: 1.5 }}>
-          The rest of the app is fine — you can retry below or head home and try again. If
-          this keeps happening, share the error message with support.
+        <p style={{fontSize: 13, color: '#8A94A6', margin: '8px 0 0', lineHeight: 1.5}}>
+          The rest of the app is fine — you can retry below or head home and try again. If this
+          keeps happening, share the error message with support.
         </p>
         <code
           style={{
@@ -113,9 +112,9 @@ function DefaultFallback({ error, onReset }: { error: Error; onReset: () => void
           {error.message || 'Unknown error'}
         </code>
       </div>
-      <div style={{ display: 'flex', gap: 8 }}>
+      <div style={{display: 'flex', gap: 8}}>
         <button
-          type="button"
+          type='button'
           onClick={onReset}
           style={{
             padding: '8px 16px',
@@ -132,7 +131,7 @@ function DefaultFallback({ error, onReset }: { error: Error; onReset: () => void
           Retry
         </button>
         <a
-          href="/"
+          href='/'
           style={{
             padding: '8px 16px',
             fontSize: 13,

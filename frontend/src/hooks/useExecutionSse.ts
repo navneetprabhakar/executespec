@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
-import { executionApi } from '@/lib/execution-api';
-import { useExecutionStore } from '@/stores/useExecutionStore';
+import {useEffect, useRef} from 'react';
+import {executionApi} from '@/lib/execution-api';
+import {useExecutionStore} from '@/stores/useExecutionStore';
 
 /**
  * SSE hook for the Execution View. Connects to /api/executions/{id}/events with
@@ -25,14 +25,18 @@ export function useExecutionSse(executionId: string | null) {
 
     async function connect() {
       try {
-        const { token } = await executionApi.getSseToken(executionId!);
+        const {token} = await executionApi.getSseToken(executionId!);
         if (cancelled) return;
         const es = new EventSource(
           `/api/executions/${executionId}/events?token=${encodeURIComponent(token)}`,
         );
         esRef.current = es;
         es.onmessage = (e) => {
-          try { handleEvent(JSON.parse(e.data)); } catch { /* ignore */ }
+          try {
+            handleEvent(JSON.parse(e.data));
+          } catch {
+            /* ignore */
+          }
         };
         es.onerror = () => {
           es.close();
@@ -43,7 +47,7 @@ export function useExecutionSse(executionId: string | null) {
       }
     }
 
-    function handleEvent(evt: { type: string; taskId?: string | null; payload?: string | null }) {
+    function handleEvent(evt: {type: string; taskId?: string | null; payload?: string | null}) {
       const solutionId = evt.taskId ?? undefined;
       const repoId = evt.payload ?? undefined;
       switch (evt.type) {
@@ -113,12 +117,20 @@ export function useExecutionSse(executionId: string | null) {
           break;
         case 'EXEC_COMPENSATION_UPDATE':
           if (evt.payload) {
-            try { applyCompensationUpdate(JSON.parse(evt.payload)); } catch { /* ignore */ }
+            try {
+              applyCompensationUpdate(JSON.parse(evt.payload));
+            } catch {
+              /* ignore */
+            }
           }
           break;
         case 'EXEC_COMPENSATION_DONE':
           if (evt.payload) {
-            try { setCompensationDone(JSON.parse(evt.payload)); } catch { /* ignore */ }
+            try {
+              setCompensationDone(JSON.parse(evt.payload));
+            } catch {
+              /* ignore */
+            }
           }
           break;
       }
@@ -129,5 +141,14 @@ export function useExecutionSse(executionId: string | null) {
       cancelled = true;
       esRef.current?.close();
     };
-  }, [executionId, fetchExecution, updateStatus, updateSolutionStatus, updateAnalysisProgress, appendSolutionLog, applyCompensationUpdate, setCompensationDone]);
+  }, [
+    executionId,
+    fetchExecution,
+    updateStatus,
+    updateSolutionStatus,
+    updateAnalysisProgress,
+    appendSolutionLog,
+    applyCompensationUpdate,
+    setCompensationDone,
+  ]);
 }

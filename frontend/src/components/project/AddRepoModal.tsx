@@ -1,9 +1,9 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Lock, RefreshCw } from 'lucide-react';
+import {useEffect, useMemo, useState} from 'react';
+import {Lock, RefreshCw} from 'lucide-react';
 import * as api from '@/lib/api';
-import type { ProjectRepo, RepoScope } from '@/types/project';
-import type { GitHubRemoteRepo } from '@/lib/api';
-import { cn } from '@/lib/utils';
+import type {ProjectRepo, RepoScope} from '@/types/project';
+import type {GitHubRemoteRepo} from '@/lib/api';
+import {cn} from '@/lib/utils';
 import ResponsiveModal from '@/components/shared/ResponsiveModal';
 import Button from '@/components/shared/Button';
 
@@ -89,7 +89,7 @@ export default function AddRepoModal({
       return;
     }
     try {
-      const repo = await api.createRepo({ scope, githubRepoFullName: fullName, defaultBranch });
+      const repo = await api.createRepo({scope, githubRepoFullName: fullName, defaultBranch});
       await api.linkProjectRepo(projectId, repo.id);
       onLinked();
       onClose();
@@ -105,13 +105,15 @@ export default function AddRepoModal({
       const existing = available.find(
         (a) => a.githubRepoFullName.toLowerCase() === r.fullName.toLowerCase(),
       );
-      const repoId = existing?.id ?? (
-        await api.createRepo({
-          scope: 'USER',
-          githubRepoFullName: r.fullName,
-          defaultBranch: r.defaultBranch || 'main',
-        })
-      ).id;
+      const repoId =
+        existing?.id ??
+        (
+          await api.createRepo({
+            scope: 'USER',
+            githubRepoFullName: r.fullName,
+            defaultBranch: r.defaultBranch || 'main',
+          })
+        ).id;
       await api.linkProjectRepo(projectId, repoId);
       onLinked();
       onClose();
@@ -122,9 +124,7 @@ export default function AddRepoModal({
     }
   };
 
-  type PickRow =
-    | { kind: 'registered'; repo: ProjectRepo }
-    | { kind: 'remote'; repo: GitHubRemoteRepo };
+  type PickRow = {kind: 'registered'; repo: ProjectRepo} | {kind: 'remote'; repo: GitHubRemoteRepo};
 
   const linkedFullNames = useMemo(() => {
     const names = new Set<string>();
@@ -142,13 +142,13 @@ export default function AddRepoModal({
       const key = a.githubRepoFullName.toLowerCase();
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ kind: 'registered', repo: a });
+      out.push({kind: 'registered', repo: a});
     }
     for (const r of remote) {
       const key = r.fullName.toLowerCase();
       if (seen.has(key) || linkedFullNames.has(key)) continue;
       seen.add(key);
-      out.push({ kind: 'remote', repo: r });
+      out.push({kind: 'remote', repo: r});
     }
     const f = filter.trim().toLowerCase();
     if (!f) return out;
@@ -159,13 +159,15 @@ export default function AddRepoModal({
   }, [available, remote, alreadyLinkedRepoIds, linkedFullNames, filter]);
 
   return (
-    <ResponsiveModal open={true} onClose={onClose} title="Add repository" maxWidth="max-w-lg">
-      <nav className="flex gap-4 border-b border-[var(--border-default)] mb-3 text-xs">
+    <ResponsiveModal open={true} onClose={onClose} title='Add repository' maxWidth='max-w-lg'>
+      <nav className='flex gap-4 border-b border-[var(--border-default)] mb-3 text-xs'>
         <button
           onClick={() => setTab('pick')}
           className={cn(
             'pb-1.5 border-b-2 transition-colors',
-            tab === 'pick' ? 'border-accent-blue text-accent-blue' : 'border-transparent text-muted hover:text-secondary',
+            tab === 'pick'
+              ? 'border-accent-blue text-accent-blue'
+              : 'border-transparent text-muted hover:text-secondary',
           )}
         >
           Pick existing
@@ -174,68 +176,73 @@ export default function AddRepoModal({
           onClick={() => setTab('create')}
           className={cn(
             'pb-1.5 border-b-2 transition-colors',
-            tab === 'create' ? 'border-accent-blue text-accent-blue' : 'border-transparent text-muted hover:text-secondary',
+            tab === 'create'
+              ? 'border-accent-blue text-accent-blue'
+              : 'border-transparent text-muted hover:text-secondary',
           )}
         >
           Create new
         </button>
       </nav>
 
-      {error && <div className="mb-2 text-xs text-accent-red">{error}</div>}
+      {error && <div className='mb-2 text-xs text-accent-red'>{error}</div>}
 
       {tab === 'pick' && (
-        <div className="space-y-2">
-          <div className="flex gap-2">
+        <div className='space-y-2'>
+          <div className='flex gap-2'>
             <input
-              type="text"
+              type='text'
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter…"
-              className="flex-1 px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
+              placeholder='Filter…'
+              className='flex-1 px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue'
             />
             <input
-              type="text"
+              type='text'
               value={ownerOverride}
               onChange={(e) => setOwnerOverride(e.target.value)}
-              placeholder="owner / org"
-              className="w-28 px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
-              title="Override the owner used for the GitHub query (defaults to your saved owner)"
+              placeholder='owner / org'
+              className='w-28 px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue'
+              title='Override the owner used for the GitHub query (defaults to your saved owner)'
             />
             <Button
-              variant="tertiary"
-              size="sm"
+              variant='tertiary'
+              size='sm'
               onClick={refreshRemote}
               disabled={refreshingRemote}
-              title="Re-fetch repos from GitHub using your saved PAT"
+              title='Re-fetch repos from GitHub using your saved PAT'
             >
               <RefreshCw className={cn('h-3 w-3', refreshingRemote && 'animate-spin')} />
               Refresh
             </Button>
           </div>
-          <div className="max-h-80 overflow-y-auto space-y-1.5">
-            {loading && <div className="text-xs text-muted">Loading…</div>}
+          <div className='max-h-80 overflow-y-auto space-y-1.5'>
+            {loading && <div className='text-xs text-muted'>Loading…</div>}
             {!loading && rows.length === 0 && (
-              <div className="text-xs text-muted">
-                No repos visible. Set a GitHub PAT + owner under Settings → GitHub, then Refresh. Or switch to "Create new" to register a repo by name.
+              <div className='text-xs text-muted'>
+                No repos visible. Set a GitHub PAT + owner under Settings → GitHub, then Refresh. Or
+                switch to "Create new" to register a repo by name.
               </div>
             )}
             {rows.map((row) => {
-              const name = row.kind === 'registered' ? row.repo.githubRepoFullName : row.repo.fullName;
+              const name =
+                row.kind === 'registered' ? row.repo.githubRepoFullName : row.repo.fullName;
               const isPrivate = row.kind === 'remote' ? row.repo.isPrivate : false;
-              const branch = row.kind === 'registered' ? row.repo.defaultBranch : row.repo.defaultBranch;
+              const branch =
+                row.kind === 'registered' ? row.repo.defaultBranch : row.repo.defaultBranch;
               const busy = linkingFullName === name;
               return (
                 <div
                   key={`${row.kind}:${name}`}
-                  className="flex items-center justify-between rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2.5 py-1.5"
+                  className='flex items-center justify-between rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2.5 py-1.5'
                 >
-                  <div className="min-w-0 flex items-center gap-2">
-                    <div className="min-w-0">
-                      <div className="font-mono text-xs truncate text-primary flex items-center gap-1">
+                  <div className='min-w-0 flex items-center gap-2'>
+                    <div className='min-w-0'>
+                      <div className='font-mono text-xs truncate text-primary flex items-center gap-1'>
                         {name}
-                        {isPrivate && <Lock className="h-2.5 w-2.5 text-muted" />}
+                        {isPrivate && <Lock className='h-2.5 w-2.5 text-muted' />}
                       </div>
-                      <div className="text-[11px] text-muted">
+                      <div className='text-[11px] text-muted'>
                         {row.kind === 'registered'
                           ? `registered · ${row.repo.scope} · branch: ${branch}`
                           : `from GitHub · branch: ${branch}`}
@@ -243,8 +250,8 @@ export default function AddRepoModal({
                     </div>
                   </div>
                   <Button
-                    variant="tertiary"
-                    size="sm"
+                    variant='tertiary'
+                    size='sm'
                     onClick={() =>
                       row.kind === 'registered' ? link(row.repo.id) : linkRemote(row.repo)
                     }
@@ -260,13 +267,15 @@ export default function AddRepoModal({
       )}
 
       {tab === 'create' && (
-        <div className="space-y-2.5">
+        <div className='space-y-2.5'>
           <div>
-            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">Scope</label>
-            <div className="flex gap-2">
+            <label className='block text-[11px] uppercase tracking-wide text-muted mb-1'>
+              Scope
+            </label>
+            <div className='flex gap-2'>
               <Button
                 variant={scope === 'USER' ? 'primary' : 'tertiary'}
-                size="sm"
+                size='sm'
                 fullWidth
                 onClick={() => setScope('USER')}
               >
@@ -274,7 +283,7 @@ export default function AddRepoModal({
               </Button>
               <Button
                 variant={scope === 'ORG' ? 'primary' : 'tertiary'}
-                size="sm"
+                size='sm'
                 fullWidth
                 disabled={!isOrgAdmin}
                 onClick={() => setScope('ORG')}
@@ -285,33 +294,33 @@ export default function AddRepoModal({
             </div>
           </div>
           <div>
-            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
+            <label className='block text-[11px] uppercase tracking-wide text-muted mb-1'>
               GitHub repo (owner/name)
             </label>
             <input
-              type="text"
+              type='text'
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              placeholder="acme/api-server"
-              className="w-full px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue"
+              placeholder='acme/api-server'
+              className='w-full px-2 py-1 text-xs font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue'
             />
           </div>
           <div>
-            <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
+            <label className='block text-[11px] uppercase tracking-wide text-muted mb-1'>
               Default branch
             </label>
             <input
-              type="text"
+              type='text'
               value={defaultBranch}
               onChange={(e) => setDefaultBranch(e.target.value)}
-              className="w-full px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary focus:outline-none focus:border-accent-blue"
+              className='w-full px-2 py-1 text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary focus:outline-none focus:border-accent-blue'
             />
           </div>
-          <div className="flex justify-end gap-2 pt-1">
-            <Button variant="secondary" size="sm" onClick={onClose}>
+          <div className='flex justify-end gap-2 pt-1'>
+            <Button variant='secondary' size='sm' onClick={onClose}>
               Cancel
             </Button>
-            <Button variant="primary" size="sm" onClick={create}>
+            <Button variant='primary' size='sm' onClick={create}>
               Create &amp; link
             </Button>
           </div>

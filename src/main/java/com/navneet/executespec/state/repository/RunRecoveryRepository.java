@@ -1,26 +1,28 @@
 package com.navneet.executespec.state.repository;
 
+import java.time.Instant;
+import java.util.List;
+
 import com.navneet.executespec.state.entity.RunRecovery;
+
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
-import java.time.Instant;
-import java.util.List;
-
 public interface RunRecoveryRepository extends JpaRepository<RunRecovery, String> {
 
-    /** Used by OrphanedRunWatchdog to prevent recovery loops — checks if a run was recovered recently. */
-    boolean existsByOriginalRunIdAndRecoveredAtAfter(String originalRunId, Instant after);
+  /**
+   * Used by OrphanedRunWatchdog to prevent recovery loops — checks if a run was recovered recently.
+   */
+  boolean existsByOriginalRunIdAndRecoveredAtAfter(String originalRunId, Instant after);
 
-    List<RunRecovery> findByOriginalRunIdOrRestartRunId(String originalRunId, String restartRunId);
+  List<RunRecovery> findByOriginalRunIdOrRestartRunId(String originalRunId, String restartRunId);
 
-    List<RunRecovery> findByOriginalRunId(String originalRunId);
+  List<RunRecovery> findByOriginalRunId(String originalRunId);
 
-    @Query("SELECT r FROM RunRecovery r WHERE r.classification IN :classifications " +
-           "AND r.originalRunId IN :runIds")
-    List<RunRecovery> findByClassificationIn(
-        @Param("classifications") List<String> classifications,
-        @Param("runIds") List<String> runIds
-    );
+  @Query(
+      "SELECT r FROM RunRecovery r WHERE r.classification IN :classifications "
+          + "AND r.originalRunId IN :runIds")
+  List<RunRecovery> findByClassificationIn(
+      @Param("classifications") List<String> classifications, @Param("runIds") List<String> runIds);
 }
