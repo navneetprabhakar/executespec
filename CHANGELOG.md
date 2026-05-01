@@ -7,6 +7,33 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and [Sem
 
 ## [Unreleased]
 
+### 2026-05-01 — audit r3 + Google-style refactor + CI lint enforcement (shipped to main via PRs #55 + #56 + #57)
+
+**Audit r3 fix batch (PR #55 → main):**
+- **F-14 (P1):** `EntitlementResolver.resolveTier` picks the higher rank between `app_user.tier` and `org.tier` instead of "org always wins". Paid users (operator-promoted accounts, expired-but-not-demoted subs, all test fixtures) no longer leak as FREE on `/api/v3/entitlements`. Three new regression tests pin ENT/TEAM/PRO with FREE org all resolving to their paid tier (10/10 green).
+- **F-15:** `--border-default` 1.59 → **3.13** on graphite-2 via new `--c-graphite-7 #5e6771` (passes WCAG SC 1.4.11 non-text contrast). `--border-hover` to graphite-8 `#7b8593` for the AA-large hover step.
+- **F-16:** new `--c-signal-blue-on-dark #7aa5f5` (7.29 contrast on graphite-2) for body-text-on-dark links. Tailwind utility `text-accent-blue-text`. LoginPage's two visible failing links migrated; canonical `--accent-blue` retained for button surfaces.
+- **F-17:** `--status-executing #4a77d6` → `#5b89e0` (4.19 → 5.22 — AA-body pass).
+- **F-21:** V3 billing `formatRunUsage` was hardcoding "Unlimited runs" for any paid tier. F-14 exposed it because PRO has a 20-cap per `tier_config`; now reads `runLimitMonthly` per tier — PRO renders "20 of 20 runs left this month", TEAM/ENT keep "Unlimited".
+- **D3:** `V3EmptyProject` H1 reframe ("Welcome, Reval." → "What do you want to build, Reval?" — outcome-led, matches login hero). Body is tier-aware: FREE surfaces the 10-PR/month cap in human terms ("about 10 small features or 6 large refactors"); paid tiers omit the line. Secondary link reframed: "Set up a project the long way →" → "Already have a GitHub repo? Attach it first →".
+- **Tier-lifecycle reason hover-only:** `TierLifecyclePage` shows date-only column with reason on hover via dashed-underline tooltip. Migration-version churn ("TEAM tier reinstated (V144)") no longer leaks into screenshots.
+- **Process-gap closure:** `frontend/src/design-system/contrast.{ts,test.ts}` (vitest-shape, dormant) pins every (token, surface) ratio fixed in this batch + 3 counter-examples that must still fail. `frontend/.pa11yci.json` for the public surface. `frontend/A11Y.md` documenting how to wire both.
+
+**Google Java + TypeScript style refactor (PR #56 → dev → main):**
+- `spotless-maven-plugin` 2.43.0 + `googleJavaFormat` 1.22.0 (GOOGLE profile, reflowLongStrings) wired into `mvn verify`. Steps: googleJavaFormat → removeUnusedImports → importOrder (java → javax → jakarta → com → org → other) → formatAnnotations. 1043 .java files reformatted.
+- Frontend: `prettier` 3.3.3 + `eslint` 8.57 + `@typescript-eslint/*` 7.18 + react / react-hooks plugins + `eslint-config-prettier`. New `.prettierrc.json` (100-col, single quotes, semis, trailing commas) + `.prettierignore` + `.eslintrc.cjs`. New scripts: `format` / `format:check` / `lint` / `lint:fix`. 260 .ts/.tsx/.css files reformatted.
+- Pure mechanical pass — zero semantic changes. `mvn test` 839/839 green throughout. `npm run build` clean.
+- Seven documented deviations in `docs/design/code-style.md`: D-J1 wildcard imports retained (217 files; OpenRewrite recipe available for follow-up cleanup), D-J2 Javadoc only on top-level classes + REST controllers, D-J3 `// VisibleForTesting` comment vs annotation, D-T1 default exports OK for `*.tsx` (React community convention), D-T2 `any` warn-mode (existing usage stays; new code requires explicit eslint-disable + reason), D-T3 interface vs type both accepted, D-T4 JSDoc on internal types skipped (signal-to-noise).
+
+**CI lint enforcement (PR #56 → dev → main):**
+- `.github/workflows/deploy.yml`: `mvn package -q` → `mvn verify -q` (fires the spotless binding); added `npm run format:check` + `npm run lint` between `npm ci` and `npm run build`. Style drift now fails the deploy job before the JAR ships.
+- `.github/workflows/lint.yml` (NEW): runs on every PR to dev/main. Two parallel jobs — Java `mvn -B spotless:check` + frontend `npm ci` + `format:check` + `lint`. Cheap feedback (<2min) so violations are caught before merge, not after.
+- Failure messages point at the local fix command + the deviations doc.
+
+**Round-4 dev-deployment verification:** `docs/audits/dev-verification-2026-05-04.md` — 31 screenshots of every super-admin surface on `https://dev.executespec.ai` post-deploy + live API + token-contrast probe. All audit fixes confirmed live; both CI gates (Lint workflow + Build & Deploy) succeeded on first run after merge.
+
+**Website + docs sync:** `website/index.html` + `website/llms.txt` FREE tier copy "5 lifetime runs + 5 per friend (cap 25)" → "10 runs / month, no credit card" (matches V145+V166 backend behaviour). Root `CLAUDE.md` + `README.md` 2026-05-01 entries. `docs/design/code-style.md` (NEW). `docs/audits/persona-test-2026-05-01-r3.md` (replaced by 2026-05-04-r4) + `docs/audits/persona-test-2026-05-04-r4.md` + `docs/audits/dev-verification-2026-05-04.md`.
+
 ### Added — v2.7 Foundation execution batch (on `feature/v2.7-foundation`)
 
 Multi-week M-* execution covering Wave 1 + Wave 2 + Wave 3 + Backlog.
@@ -65,7 +92,7 @@ wave below.
 - **M-053 + M-054** RunCompletionNotifier failure body now leads with cost/duration signals (mirrors completion path).
 - **M-056 + M-057 + M-064** Tour-helper cleanup + vite.config.ts env-var docs + sr-only `<h1>Missions</h1>`.
 - **Logged-and-skipped:** M-055 (user-owned migration resequencing), M-058 (defer to M-067 doc refresh), M-065 + M-066 (verified-shipped, no action).
-- **Documented-deferred:** [`docs/backlog-deferred-items.md`](docs/backlog-deferred-items.md) covers M-035 multi-org / M-036 custom roles / M-037 SCIM / M-040 per-team RBAC / M-041 security questionnaire / M-048 conversational A/B / M-050 multi-tenant seed / M-052 ENT floor pricing — each with first-slice + owner-needed + when-to-re-open.
+- **Documented-deferred:** [`docs/backlog-deferred-items.md`](docs/plans/backlog-deferred-items.md) covers M-035 multi-org / M-036 custom roles / M-037 SCIM / M-040 per-team RBAC / M-041 security questionnaire / M-048 conversational A/B / M-050 multi-tenant seed / M-052 ENT floor pricing — each with first-slice + owner-needed + when-to-re-open.
 
 #### Migrations added in this batch
 - **V147** — `activity_audit` hash chain (M-019). 3 nullable columns (`prev_hash`, `row_hash`, `chain_seq`) + Postgres sequence + 2 partial indexes for the verifier walk.
@@ -74,7 +101,7 @@ wave below.
 - **V150** — Activity retention flag seed (M-038). 1 `feature_flag` row.
 
 #### New docs added in this batch
-- [`docs/backlog-deferred-items.md`](docs/backlog-deferred-items.md), [`docs/cookie-domain-switch.md`](docs/cookie-domain-switch.md), [`docs/dpa-flow.md`](docs/dpa-flow.md), [`docs/payment-history.md`](docs/payment-history.md), [`docs/sso-saml-wiring.md`](docs/sso-saml-wiring.md), [`docs/stripe-price-ids-ops.md`](docs/stripe-price-ids-ops.md), `docs/execution-checkpoint.md` (running execution log).
+- [`docs/backlog-deferred-items.md`](docs/plans/backlog-deferred-items.md), [`docs/cookie-domain-switch.md`](docs/cookie-domain-switch.md), [`docs/dpa-flow.md`](docs/dpa-flow.md), [`docs/payment-history.md`](docs/payment-history.md), [`docs/sso-saml-wiring.md`](docs/sso-saml-wiring.md), [`docs/stripe-price-ids-ops.md`](docs/stripe-price-ids-ops.md), `docs/execution-checkpoint.md` (running execution log).
 - [`docs/status-page.md`](docs/status-page.md) extended with the M-018 Better Stack runbook.
 
 ### Added — Hierarchical planner (v2.6.2-track, on `feature/hierarchical-planner`)

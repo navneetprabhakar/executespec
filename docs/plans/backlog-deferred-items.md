@@ -5,7 +5,7 @@
 > path so the next engineer can pick the work up cold without
 > re-deriving the analysis.
 >
-> All other Backlog items shipped — see [`execution-checkpoint.md`](execution-checkpoint.md).
+> All other Backlog items shipped — see [`execution-checkpoint.md`](../execution-checkpoint.md).
 
 ## Why these are deferred
 
@@ -155,7 +155,7 @@ lands, which is wasted effort.
 ## M-052 — ENTERPRISE floor public pricing
 
 **What it would do:** publish a hard floor on the
-[`/plans`](../frontend/src/pages/PlansPage.tsx) ENTERPRISE card
+[`/plans`](../../frontend/src/pages/PlansPage.tsx) ENTERPRISE card
 (e.g. "from $24,000/year") instead of the current "Contact sales".
 
 **Why deferred:** parked decision #3 — until we have 5 paying ENT

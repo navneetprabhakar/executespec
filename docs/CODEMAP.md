@@ -4,6 +4,8 @@
 > Companion to [ARCHITECTURE.md](ARCHITECTURE.md) (deep-dive) and [JAVADOC.md](JAVADOC.md) (class-level reference).
 > When a new top-level package is added, update this file and `document_map.md`.
 >
+> **Style enforcement (2026-05-01, on main):** Java code is formatted by `spotless-maven-plugin` 2.43.0 + `googleJavaFormat` 1.22.0 (GOOGLE profile). The plugin is bound to the `verify` phase so `mvn verify` fails on drift; CI runs `mvn -B spotless:check` on every PR via `.github/workflows/lint.yml`. Local fix: `mvn spotless:apply`. See [design/code-style.md](design/code-style.md) for the seven documented deviations (D-J1 wildcard imports retained, D-J2 Javadoc only on top-level + REST controllers, D-J3 `// VisibleForTesting` comment, etc.) and [README.md](../README.md) for the audit r3 batch summary.
+>
 > **v2.6.3-track** is on `feature/enterprise-readiness-eval` (49+ commits ahead of `dev`,
 > not yet merged). 8 new top-level packages — `folder/`, `activity/`, `contracts/`,
 > `standards/`, `adr/`, `arch/invariants/`, `export/`, `notification/pref/` — wired
