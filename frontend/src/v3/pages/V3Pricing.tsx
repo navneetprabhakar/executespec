@@ -140,8 +140,11 @@ const FAQ: { q: string; a: string }[] = [
     a: 'Workspaces are destroyed 24 hours after last access. We never train models on your code. Repository content is sent to the LLM provider you choose; we keep only the artifacts your run produced. Full data-flow on /trust.',
   },
   {
-    q: 'How does the free-tier referral work?',
-    a: 'You start with 5 lifetime runs. Invite a friend who signs up and ships their first run — you both get +5 runs each. Cap at 25 lifetime runs (5 base + 4 invites × 5).',
+    q: 'How does the free tier work?',
+    // Task 8 (2026-05-01 fix list) — V145 collapsed the lifetime model
+    // into a flat 10-runs-per-month cap. Referrals are out of scope until
+    // product confirms whether the +5/friend mechanic still ships.
+    a: 'You get 10 runs per month, no credit card required. Quota resets at the start of each month. Upgrade any time for more runs and BYOK billing.',
   },
   {
     q: 'What\'s the cancellation policy?',

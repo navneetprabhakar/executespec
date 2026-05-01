@@ -320,13 +320,18 @@ export default function SettingsPage() {
               : planTier === 'TEAM' ? { cls: 'bg-status-success/20 text-status-success', letter: 'T' }
               : planTier === 'PRO' ? { cls: 'bg-accent-blue/20 text-accent-blue', letter: 'P' }
               : { cls: 'bg-[var(--gray-400)] text-secondary', letter: 'F' };
+            // Task 5+8 (2026-05-01 fix list) — PRO subtitle previously
+            // claimed "Unlimited managed runs" which contradicts /pricing
+            // (V145 capped PRO at 20/month, grandfathered). FREE subtitle
+            // pre-V145 promised lifetime runs; the canonical message is
+            // now "10 runs / month".
             const subtitle = planTier === 'ENTERPRISE'
               ? 'Unlimited runs, priority support, dedicated infrastructure'
               : planTier === 'TEAM'
               ? 'BYOK + per-seat collaboration, audit log, SSO'
               : planTier === 'PRO'
-              ? 'Unlimited managed runs for one developer'
-              : '5 lifetime runs · invite friends for +5 each';
+              ? '20 runs / month (grandfathered) — managed keys, plan & review gate'
+              : '10 runs / month · no credit card';
             return (
               <>
                 <div className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${badge.cls}`}>

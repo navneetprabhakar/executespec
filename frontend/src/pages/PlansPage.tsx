@@ -186,7 +186,9 @@ export default function PlansPage() {
         <div className="mb-6 p-4 bg-accent-blue/10 border border-accent-blue/30 rounded-md text-sm">
           <p className="font-medium text-primary mb-1">Your Pro plan continues — same price, same features.</p>
           <p className="text-muted text-xs leading-relaxed">
-            Pro is no longer offered to new buyers, but existing subscriptions renew untouched. Your current plan is shown below alongside our newer Team and Max tiers.
+            {/* Task 7 (2026-05-01 fix list): MAX retired in V165 — copy must
+                not name a tier we no longer sell. */}
+            Pro is no longer offered to new buyers, but existing subscriptions renew untouched. Your current plan is shown below alongside our newer Team and Enterprise tiers.
             Need to manage billing details? Visit <a href="/billing" className="text-accent-blue underline">Billing</a>.
           </p>
         </div>
@@ -266,10 +268,12 @@ export default function PlansPage() {
         </p>
       </div>
 
-      {/* Key mode explainer */}
+      {/* Key mode explainer
+          Task 7 (2026-05-01 fix list): "Max" was retired in V165; the
+          BYOK story is now part of Team ($39/seat). */}
       <div className="mt-8 max-w-2xl mx-auto text-center text-sm text-muted space-y-2">
         <p><strong>Pro:</strong> Managed keys — we handle LLM infrastructure. Zero setup required.</p>
-        <p><strong>Max:</strong> Bring your own Anthropic/OpenAI keys. Unlimited runs, full control.</p>
+        <p><strong>Team:</strong> Bring your own Anthropic/OpenAI/Gemini keys. Unlimited runs, full control, $39/seat.</p>
       </div>
 
       {/* Subscribing overlay */}
