@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Lock } from 'lucide-react';
-import { getAvailableModels, ProviderEntry } from '@/lib/api';
-import { useAuthStore } from '@/stores/useAuthStore';
-import { cn } from '@/lib/utils';
+import {useEffect, useState} from 'react';
+import {Lock} from 'lucide-react';
+import {getAvailableModels, ProviderEntry} from '@/lib/api';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {cn} from '@/lib/utils';
 
 const LS_PROVIDER = 'es:preferredProvider';
 const LS_MODEL = 'es:preferredModel';
@@ -25,7 +25,12 @@ interface Props {
   onModelChange: (model: string) => void;
 }
 
-export default function ProviderModelSelector({ provider, model, onProviderChange, onModelChange }: Props) {
+export default function ProviderModelSelector({
+  provider,
+  model,
+  onProviderChange,
+  onModelChange,
+}: Props) {
   const [providers, setProviders] = useState<ProviderEntry[]>([]);
   const user = useAuthStore((s) => s.user);
   // Tier-coherence: BYOK is TEAM + ENTERPRISE (Pro is managed-keys).
@@ -65,20 +70,24 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
   };
 
   return (
-    <div className="space-y-3">
+    <div className='space-y-3'>
       {/* Provider pills — stack on mobile to avoid horizontal overflow */}
       <div>
-        <label className="block text-sm text-secondary mb-1.5">AI Provider</label>
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+        <label className='block text-sm text-secondary mb-1.5'>AI Provider</label>
+        <div className='grid grid-cols-1 sm:grid-cols-3 gap-2'>
           {providers.map((p) => {
             const hasKey = hasKeyForProvider(p.id);
             return (
               <button
                 key={p.id}
-                type="button"
+                type='button'
                 onClick={() => handleProviderChange(p.id)}
                 disabled={!hasKey}
-                title={!hasKey ? `Add your ${p.label} API key in Settings to use this provider` : undefined}
+                title={
+                  !hasKey
+                    ? `Add your ${p.label} API key in Settings to use this provider`
+                    : undefined
+                }
                 className={cn(
                   'w-full py-2 px-3 rounded-sm text-sm font-medium transition-all border',
                   'flex items-center justify-center gap-1.5',
@@ -90,28 +99,29 @@ export default function ProviderModelSelector({ provider, model, onProviderChang
                 )}
               >
                 <span>{p.label}</span>
-                {!hasKey && <Lock className="h-3 w-3" />}
+                {!hasKey && <Lock className='h-3 w-3' />}
                 {hasKey && p.tag && (
-                  <span className="text-[10px] font-normal text-muted opacity-70">{p.tag}</span>
+                  <span className='text-[10px] font-normal text-muted opacity-70'>{p.tag}</span>
                 )}
               </button>
             );
           })}
         </div>
         {isByokTier && (
-          <p className="text-[11px] text-muted mt-1">
+          <p className='text-[11px] text-muted mt-1'>
             Only providers with configured API keys are available.{' '}
-            <a href="/settings#ai-keys" className="text-accent-blue underline">Manage keys</a>
+            <a href='/settings#ai-keys' className='text-accent-blue underline'>
+              Manage keys
+            </a>
           </p>
         )}
       </div>
-
     </div>
   );
 }
 
 /** Read persisted provider/model from localStorage. */
-export function getPersistedSelection(): { provider: string; model: string } {
+export function getPersistedSelection(): {provider: string; model: string} {
   return {
     provider: 'OPENAI',
     model: '',

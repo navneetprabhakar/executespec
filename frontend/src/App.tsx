@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import {useEffect} from 'react';
+import {Routes, Route, Navigate, useLocation} from 'react-router-dom';
 import AppLayout from '@/components/layout/AppLayout';
 import ProtectedRoute from '@/components/auth/ProtectedRoute';
 
@@ -145,12 +145,12 @@ import V3EmptyProject from '@/v3/pages/V3EmptyProject';
 // in case external test harnesses still reference it (parallel to the
 // V2OptInGate pattern from R-342).
 
-import { useAuthStore } from '@/stores/useAuthStore';
-import { useKeyboardScroll } from '@/hooks/useKeyboardScroll';
-import { initAnalytics, identify, page, reset as resetAnalytics } from '@/lib/analytics';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {useKeyboardScroll} from '@/hooks/useKeyboardScroll';
+import {initAnalytics, identify, page, reset as resetAnalytics} from '@/lib/analytics';
 
 export default function App() {
-  const { loadMe, user } = useAuthStore();
+  const {loadMe, user} = useAuthStore();
 
   // iOS Safari: scroll focused input into view when soft keyboard opens
   useKeyboardScroll();
@@ -195,8 +195,8 @@ export default function App() {
           Both V3Shell <main> and AppLayout <main> use #main as the
           jump target. */}
       <a
-        href="#main"
-        className="skip-link"
+        href='#main'
+        className='skip-link'
         style={{
           position: 'absolute',
           top: 8,
@@ -213,30 +213,34 @@ export default function App() {
           transform: 'translateY(-200%)',
           transition: 'transform 0.15s ease',
         }}
-        onFocus={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
-        onBlur={(e) => { e.currentTarget.style.transform = 'translateY(-200%)'; }}
+        onFocus={(e) => {
+          e.currentTarget.style.transform = 'translateY(0)';
+        }}
+        onBlur={(e) => {
+          e.currentTarget.style.transform = 'translateY(-200%)';
+        }}
       >
         Skip to main content
       </a>
-    <Routes>
-      {/* ── Public auth routes ── */}
-      <Route path="/login" element={<LoginPage />} />
-      <Route path="/register" element={<RegisterPage />} />
-      <Route path="/forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="/reset-password" element={<ResetPasswordPage />} />
-      <Route path="/verify-email" element={<VerifyEmailPage />} />
-      <Route path="/accept-invite" element={<AcceptInvitePage />} />
-      <Route path="/auth/callback" element={<AuthCallbackPage />} />
+      <Routes>
+        {/* ── Public auth routes ── */}
+        <Route path='/login' element={<LoginPage />} />
+        <Route path='/register' element={<RegisterPage />} />
+        <Route path='/forgot-password' element={<ForgotPasswordPage />} />
+        <Route path='/reset-password' element={<ResetPasswordPage />} />
+        <Route path='/verify-email' element={<VerifyEmailPage />} />
+        <Route path='/accept-invite' element={<AcceptInvitePage />} />
+        <Route path='/auth/callback' element={<AuthCallbackPage />} />
 
-      {/* ── Public shared pages ── */}
-      <Route path="/reports/shared/:shareToken" element={<SharedReportPage />} />
+        {/* ── Public shared pages ── */}
+        <Route path='/reports/shared/:shareToken' element={<SharedReportPage />} />
 
-      {/* ── Public legal pages ── */}
-      <Route path="/terms" element={<TermsPage />} />
-      <Route path="/privacy" element={<PrivacyPage />} />
-      <Route path="/dpa" element={<DpaPage />} />
+        {/* ── Public legal pages ── */}
+        <Route path='/terms' element={<TermsPage />} />
+        <Route path='/privacy' element={<PrivacyPage />} />
+        <Route path='/dpa' element={<DpaPage />} />
 
-      {/* ── Greenfield surfaces — clean URLs without the /v3/ prefix ──
+        {/* ── Greenfield surfaces — clean URLs without the /v3/ prefix ──
           R-342 (2026-04-29): unified the URL surface.  The V3Shell-wrapped
           routes (top-bar layout) used to live under `/v3/*`; now they
           live at root paths.  Where v2 had a competing route on the same
@@ -249,49 +253,49 @@ export default function App() {
           Every `/v3/*` URL still routes via the `<V3LegacyRedirect>`
           catch-all below so existing bookmarks, marketing copy, email
           deep-links, and shared run URLs keep working. */}
-      <Route element={<V3Shell />}>
-        {/* R-310 (Wave 7) — explicit empty-state route MUST come before
+        <Route element={<V3Shell />}>
+          {/* R-310 (Wave 7) — explicit empty-state route MUST come before
             the catch-all `projects/:slug` so V3ProjectHome doesn't fire
             a 404 GET on /api/projects/empty. */}
-        <Route path="/projects/empty" element={<V3EmptyProject />} />
-        <Route path="/projects/:slug" element={<V3ProjectHome />} />
-        <Route path="/projects/:slug/runs/:runShort" element={<V3RunDetail />} />
-        <Route path="/settings" element={<V3Settings />} />
-        <Route path="/billing" element={<V3Billing />} />
-        <Route path="/pricing" element={<V3Pricing />} />
-        <Route path="/integrations" element={<V3Integrations />} />
-        <Route path="/team" element={<V3Team />} />
-        <Route path="/trust" element={<V3Trust />} />
-        <Route path="/insights" element={<V3Insights />} />
-        {/* R-340 — Migrations product gallery + detail. */}
-        <Route path="/migrations" element={<V3Migrations />} />
-        <Route path="/migrations/:slug" element={<V3MigrationDetail />} />
-        {/* R-330 — Readymade Solutions library gallery + detail. */}
-        <Route path="/library" element={<V3Library />} />
-        <Route path="/library/:slug" element={<V3LibraryDetail />} />
-        {/* Selling-point #6 — public exec snapshot. No auth required. */}
-        <Route path="/exec-demo" element={<V3ExecDemo />} />
-        {/* V3HomeRedirect — the silent dispatcher.  /home for users
+          <Route path='/projects/empty' element={<V3EmptyProject />} />
+          <Route path='/projects/:slug' element={<V3ProjectHome />} />
+          <Route path='/projects/:slug/runs/:runShort' element={<V3RunDetail />} />
+          <Route path='/settings' element={<V3Settings />} />
+          <Route path='/billing' element={<V3Billing />} />
+          <Route path='/pricing' element={<V3Pricing />} />
+          <Route path='/integrations' element={<V3Integrations />} />
+          <Route path='/team' element={<V3Team />} />
+          <Route path='/trust' element={<V3Trust />} />
+          <Route path='/insights' element={<V3Insights />} />
+          {/* R-340 — Migrations product gallery + detail. */}
+          <Route path='/migrations' element={<V3Migrations />} />
+          <Route path='/migrations/:slug' element={<V3MigrationDetail />} />
+          {/* R-330 — Readymade Solutions library gallery + detail. */}
+          <Route path='/library' element={<V3Library />} />
+          <Route path='/library/:slug' element={<V3LibraryDetail />} />
+          {/* Selling-point #6 — public exec snapshot. No auth required. */}
+          <Route path='/exec-demo' element={<V3ExecDemo />} />
+          {/* V3HomeRedirect — the silent dispatcher.  /home for users
             who deep-link to it; the bare `/` is handled by ProtectedRoute
             (anon → /login) + the protected index Route below (authed →
             V3HomeRedirect dispatches to /projects/{first} or /projects/empty). */}
-        <Route path="/home" element={<V3HomeRedirect />} />
-        {/* Post-signup spec-claim screen (was /claim). */}
-        <Route path="/claim" element={<V3Auth />} />
-      </Route>
+          <Route path='/home' element={<V3HomeRedirect />} />
+          {/* Post-signup spec-claim screen (was /claim). */}
+          <Route path='/claim' element={<V3Auth />} />
+        </Route>
 
-      {/* Legacy /v3/* paths — redirect to the unified URLs.  Single
+        {/* Legacy /v3/* paths — redirect to the unified URLs.  Single
           catch-all keeps existing bookmarks + marketing copy working. */}
-      <Route path="/v3/*" element={<V3LegacyRedirect />} />
+        <Route path='/v3/*' element={<V3LegacyRedirect />} />
 
-      {/* ── Protected app routes ── */}
-      <Route element={<ProtectedRoute />}>
-        {/* Wave 2.2 — welcome/onboarding (chrome-free, before AppLayout). */}
-        <Route path="welcome" element={<WelcomePage />} />
+        {/* ── Protected app routes ── */}
+        <Route element={<ProtectedRoute />}>
+          {/* Wave 2.2 — welcome/onboarding (chrome-free, before AppLayout). */}
+          <Route path='welcome' element={<WelcomePage />} />
 
-        {/* Wave 2.2 — sandbox → run-submit prefill landing (inside AppLayout for nav consistency) */}
-        <Route element={<AppLayout />}>
-          {/* R-201 (Wave 4) — /runs/new used to chain through /projects which
+          {/* Wave 2.2 — sandbox → run-submit prefill landing (inside AppLayout for nav consistency) */}
+          <Route element={<AppLayout />}>
+            {/* R-201 (Wave 4) — /runs/new used to chain through /projects which
               then routed to v2 ProjectsListPage.
               R-341 (2026-04-29): the / redirect target was
               retired (V3Landing is now a redirect to root since the
@@ -301,85 +305,91 @@ export default function App() {
               with intent — send them to the v3 home which dispatches
               to their first project.  Anon hits would have already been
               caught by ProtectedRoute and bounced to /login. */}
-          {/* R-342 (2026-04-29): unified URLs — /runs/new now sends users
+            {/* R-342 (2026-04-29): unified URLs — /runs/new now sends users
               to the home dispatcher (which lands on the user's first
               project + composer). */}
-          <Route path="runs/new" element={<Navigate to="/home" replace />} />
-          <Route path="runs/new/sandbox" element={<RunsNewLanding />} />
-          {/* Phase 1.1 #9: /legacy/billing — soft landing for grandfathered
+            <Route path='runs/new' element={<Navigate to='/home' replace />} />
+            <Route path='runs/new/sandbox' element={<RunsNewLanding />} />
+            {/* Phase 1.1 #9: /legacy/billing — soft landing for grandfathered
               PRO subscribers whose tier-state-changed email links here. */}
-          <Route path="legacy/billing" element={<Navigate to="/billing" replace />} />
-          {/* R-342 — v2 RunsPage stays at /runs (the legacy admin/dev
+            <Route path='legacy/billing' element={<Navigate to='/billing' replace />} />
+            {/* R-342 — v2 RunsPage stays at /runs (the legacy admin/dev
               run-list view).  The bare `/` is now ALSO the home
               dispatcher (V3HomeRedirect) so authed users with projects
               land on their first project, not the v2 runs list. */}
-          <Route index element={<Navigate to="/home" replace />} />
-          <Route path="runs" element={<RunsPage />} />
-          {/* /dashboard → /insights (the v3 dashboard equivalent; same
+            <Route index element={<Navigate to='/home' replace />} />
+            <Route path='runs' element={<RunsPage />} />
+            {/* /dashboard → /insights (the v3 dashboard equivalent; same
               URL the AppLayout sidebar links to today). */}
-          <Route path="dashboard" element={<Navigate to="/insights" replace />} />
-          {/* Legacy redirects — preserve old bookmarks. */}
-          <Route path="plans" element={<Navigate to="/pricing" replace />} />
-          <Route path="admin/model-rates" element={<PricingPage />} />
-          {/* v2-only admin / finance surfaces (no v3 equivalents — keep
+            <Route path='dashboard' element={<Navigate to='/insights' replace />} />
+            {/* Legacy redirects — preserve old bookmarks. */}
+            <Route path='plans' element={<Navigate to='/pricing' replace />} />
+            <Route path='admin/model-rates' element={<PricingPage />} />
+            {/* v2-only admin / finance surfaces (no v3 equivalents — keep
               the AppLayout sidebar shell for these routes). */}
-          <Route path="invoices" element={<InvoicesPage />} />
-          <Route path="accounting" element={<AccountingPage />} />
-          <Route path="audit" element={<AuditPage />} />
-          {/* [F-26] (audit Sprint 1 PR-1) — collapse the duplicate.
+            <Route path='invoices' element={<InvoicesPage />} />
+            <Route path='accounting' element={<AccountingPage />} />
+            <Route path='audit' element={<AuditPage />} />
+            {/* [F-26] (audit Sprint 1 PR-1) — collapse the duplicate.
               `/audit` is canonical; `/governance/audit` redirects.
               Was: both URLs rendered the same component (two surfaces,
               one component, drift hazard). Now: one URL, one redirect. */}
-          <Route path="governance/audit" element={<Navigate to="/audit" replace />} />
-          <Route path="deployments" element={<DeploymentsPage />} />
-          {/* v2.5.14 Phase 3.1 — executive summary kept on the v2 sidebar
+            <Route path='governance/audit' element={<Navigate to='/audit' replace />} />
+            <Route path='deployments' element={<DeploymentsPage />} />
+            {/* v2.5.14 Phase 3.1 — executive summary kept on the v2 sidebar
               shell.  /insights is the v3 equivalent; /exec stays as the
               admin-flavoured cost-breakdown view. */}
-          <Route path="exec" element={<ExecSummaryPage />} />
+            <Route path='exec' element={<ExecSummaryPage />} />
 
-          {/* Org pages */}
-          <Route path="org/settings" element={<OrgSettingsPage />} />
-          <Route path="org/projects" element={<OrgProjectsPage />} />
-          {/* `/projects` redirects to /home so the user lands on the
+            {/* Org pages */}
+            <Route path='org/settings' element={<OrgSettingsPage />} />
+            <Route path='org/projects' element={<OrgProjectsPage />} />
+            {/* `/projects` redirects to /home so the user lands on the
               dispatcher (first project) instead of an empty list page.
               For project-management UI (members, repos), /org/projects
               stays as the explicit URL. */}
-          <Route path="projects" element={<Navigate to="/home" replace />} />
-          {/* `/projects/:id/dashboard` — v2 multi-tab project dashboard.
+            <Route path='projects' element={<Navigate to='/home' replace />} />
+            {/* `/projects/:id/dashboard` — v2 multi-tab project dashboard.
               Kept at this URL so existing bookmarks survive; the unified
               `/projects/:slug` URL now serves V3ProjectHome (top-bar
               chrome).  Long-term: port the dashboard's panels to the
               v3 project surface and retire this route. */}
-          <Route path="projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
-          {/* M-034 (Wave 2) — deep-linkable URL for the project activity
+            <Route path='projects/:projectId/dashboard' element={<ProjectDashboardPage />} />
+            {/* M-034 (Wave 2) — deep-linkable URL for the project activity
               feed. Opens the dashboard with ?drawer=activity pre-set so
               the existing MoreDrawer ActivityTab full-page mount picks
               up. Keeps the v2.6.4 IA cleanup intact (no new top tab). */}
-          <Route path="projects/:projectId/activity" element={<Navigate to="../dashboard?drawer=activity" replace relative="path" />} />
-          <Route path="projects/:projectId/executions/new" element={<ExecutionViewPage />} />
-          <Route path="projects/:projectId/executions/:executionId" element={<ExecutionViewPage />} />
+            <Route
+              path='projects/:projectId/activity'
+              element={<Navigate to='../dashboard?drawer=activity' replace relative='path' />}
+            />
+            <Route path='projects/:projectId/executions/new' element={<ExecutionViewPage />} />
+            <Route
+              path='projects/:projectId/executions/:executionId'
+              element={<ExecutionViewPage />}
+            />
 
-          {/* Admin */}
-          <Route path="admin" element={<AdminPage />} />
-          {/* [F-14] (audit Sprint 1 PR-1) — V3Placeholder retired.
+            {/* Admin */}
+            <Route path='admin' element={<AdminPage />} />
+            {/* [F-14] (audit Sprint 1 PR-1) — V3Placeholder retired.
               admin/analytics, admin/tiers, admin/pricing now mount their
               actual v2 components directly. The placeholder pattern was
               shipping a credibility tax (SUPER_ADMIN clicks "Tier Lifecycle"
               → sees a "coming to v3" card with an Open-in-v2 escape hatch
               → has to click again). Direct mount restores parity with
               admin/feature-flags which always rendered the live page. */}
-          <Route path="admin/analytics" element={<OrgAdminDashboard />} />
-          {/* M-022 (Wave 3) — per-team-member dashboard for ORG_ADMIN. */}
-          <Route path="team/:userId" element={<TeamMemberDashboard />} />
-          <Route path="admin/pricing" element={<PricingManager />} />
-          <Route path="admin/feature-flags" element={<FeatureFlagsPage />} />
-          <Route path="admin/tiers" element={<TierLifecyclePage />} />
-          <Route path="admin/*" element={<AdminPage />} />
+            <Route path='admin/analytics' element={<OrgAdminDashboard />} />
+            {/* M-022 (Wave 3) — per-team-member dashboard for ORG_ADMIN. */}
+            <Route path='team/:userId' element={<TeamMemberDashboard />} />
+            <Route path='admin/pricing' element={<PricingManager />} />
+            <Route path='admin/feature-flags' element={<FeatureFlagsPage />} />
+            <Route path='admin/tiers' element={<TierLifecyclePage />} />
+            <Route path='admin/*' element={<AdminPage />} />
 
-          <Route path="*" element={<Navigate to="/" replace />} />
+            <Route path='*' element={<Navigate to='/' replace />} />
+          </Route>
         </Route>
-      </Route>
-    </Routes>
+      </Routes>
     </>
   );
 }

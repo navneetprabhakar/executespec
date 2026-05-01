@@ -1,7 +1,7 @@
 import Editor from '@monaco-editor/react';
-import { useState } from 'react';
-import { GEIST_THEME_NAME } from '@/lib/monacoGeistTheme';
-import { MarkdownContent } from '@/components/shared/MarkdownContent';
+import {useState} from 'react';
+import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import '@/lib/monacoSetup';
 
 interface FileViewerProps {
@@ -10,7 +10,7 @@ interface FileViewerProps {
   language?: string;
 }
 
-export function FileViewer({ fileName, content, language }: FileViewerProps) {
+export function FileViewer({fileName, content, language}: FileViewerProps) {
   const [copied, setCopied] = useState(false);
   const [mdPreview, setMdPreview] = useState(true);
 
@@ -24,14 +24,14 @@ export function FileViewer({ fileName, content, language }: FileViewerProps) {
   };
 
   return (
-    <div className="border border-[var(--border-default)] rounded-sm overflow-hidden">
+    <div className='border border-[var(--border-default)] rounded-sm overflow-hidden'>
       {/* Header */}
-      <div className="flex items-center justify-between px-4 py-2 bg-[var(--gray-200)] border-b border-[var(--border-default)]">
-        <span className="text-sm font-mono text-secondary truncate">{fileName}</span>
-        <div className="flex items-center gap-2">
+      <div className='flex items-center justify-between px-4 py-2 bg-[var(--gray-200)] border-b border-[var(--border-default)]'>
+        <span className='text-sm font-mono text-secondary truncate'>{fileName}</span>
+        <div className='flex items-center gap-2'>
           {/* Markdown preview toggle */}
           {isMarkdown && (
-            <div className="flex items-center bg-[var(--gray-100)] border border-[var(--border-default)] rounded text-xs overflow-hidden">
+            <div className='flex items-center bg-[var(--gray-100)] border border-[var(--border-default)] rounded text-xs overflow-hidden'>
               <button
                 onClick={() => setMdPreview(true)}
                 className={`px-2 py-1 transition-colors ${mdPreview ? 'bg-[var(--gray-300)] text-primary' : 'text-muted hover:text-secondary'}`}
@@ -48,7 +48,7 @@ export function FileViewer({ fileName, content, language }: FileViewerProps) {
           )}
           <button
             onClick={handleCopy}
-            className="text-xs text-muted hover:text-secondary px-2 py-1 rounded hover:bg-[var(--gray-200)]"
+            className='text-xs text-muted hover:text-secondary px-2 py-1 rounded hover:bg-[var(--gray-200)]'
           >
             {copied ? 'Copied!' : 'Copy'}
           </button>
@@ -57,7 +57,7 @@ export function FileViewer({ fileName, content, language }: FileViewerProps) {
 
       {/* Markdown rendered preview */}
       {isMarkdown && mdPreview ? (
-        <div className="px-5 py-4 overflow-y-auto max-h-[600px] bg-[var(--geist-bg)]">
+        <div className='px-5 py-4 overflow-y-auto max-h-[600px] bg-[var(--geist-bg)]'>
           <MarkdownContent content={content} />
         </div>
       ) : (
@@ -69,7 +69,7 @@ export function FileViewer({ fileName, content, language }: FileViewerProps) {
           theme={GEIST_THEME_NAME}
           options={{
             readOnly: true,
-            minimap: { enabled: false },
+            minimap: {enabled: false},
             scrollBeyondLastLine: false,
             fontSize: 13,
             lineNumbers: 'on',

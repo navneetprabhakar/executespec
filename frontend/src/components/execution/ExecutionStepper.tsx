@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { cn } from '@/lib/utils';
-import type { ExecutionRunStatus } from '@/types/execution';
+import {useEffect, useState} from 'react';
+import {cn} from '@/lib/utils';
+import type {ExecutionRunStatus} from '@/types/execution';
 
 /**
  * v2.5.2 (UX-3.2) — progress breadcrumb with user-facing labels, descriptions,
@@ -19,20 +19,48 @@ interface Step {
 }
 
 const STEPS: Step[] = [
-  { key: 'setup',    label: 'Setup',               match: ['SETUP'],
-    description: 'Creating repos and linking them to your project.' },
-  { key: 'analysis', label: 'Analysing codebase',  match: ['ANALYSING'],
-    description: 'Reading your repos and mapping the architecture.' },
-  { key: 'arch',     label: 'Review architecture', match: ['ARCH_REVIEW'],
-    description: 'Check the generated architecture before planning starts.' },
-  { key: 'plan',     label: 'Planning',            match: ['PLANNING'],
-    description: 'Breaking your requirement into tasks across repos.' },
-  { key: 'exec',     label: 'Building',            match: ['EXECUTING'],
-    description: 'Agents are writing code across your repos.' },
-  { key: 'paused',   label: 'Action needed',       match: ['PAUSED'],
-    description: 'A task hit an issue. Choose how to proceed.' },
-  { key: 'done',     label: 'Done',                match: ['COMPLETE', 'ABORTED'],
-    description: 'All tasks complete, PRs raised.' },
+  {
+    key: 'setup',
+    label: 'Setup',
+    match: ['SETUP'],
+    description: 'Creating repos and linking them to your project.',
+  },
+  {
+    key: 'analysis',
+    label: 'Analysing codebase',
+    match: ['ANALYSING'],
+    description: 'Reading your repos and mapping the architecture.',
+  },
+  {
+    key: 'arch',
+    label: 'Review architecture',
+    match: ['ARCH_REVIEW'],
+    description: 'Check the generated architecture before planning starts.',
+  },
+  {
+    key: 'plan',
+    label: 'Planning',
+    match: ['PLANNING'],
+    description: 'Breaking your requirement into tasks across repos.',
+  },
+  {
+    key: 'exec',
+    label: 'Building',
+    match: ['EXECUTING'],
+    description: 'Agents are writing code across your repos.',
+  },
+  {
+    key: 'paused',
+    label: 'Action needed',
+    match: ['PAUSED'],
+    description: 'A task hit an issue. Choose how to proceed.',
+  },
+  {
+    key: 'done',
+    label: 'Done',
+    match: ['COMPLETE', 'ABORTED'],
+    description: 'All tasks complete, PRs raised.',
+  },
 ];
 
 export default function ExecutionStepper({
@@ -46,42 +74,40 @@ export default function ExecutionStepper({
   // Collapse PAUSED into EXECUTING so the breadcrumb doesn't add an extra
   // column mid-run; the PAUSED state is surfaced via the label swap instead.
   const visible = STEPS.filter((s) => s.key !== 'paused');
-  const currentIdx = visible.findIndex((s) =>
-    s.match.includes(status) ||
-    (status === 'PAUSED' && s.key === 'exec'),
+  const currentIdx = visible.findIndex(
+    (s) => s.match.includes(status) || (status === 'PAUSED' && s.key === 'exec'),
   );
 
   const elapsed = useElapsed(activeSince);
 
   return (
-    <div className="flex items-center gap-1 text-xs text-muted flex-wrap">
+    <div className='flex items-center gap-1 text-xs text-muted flex-wrap'>
       {visible.map((step, i) => {
         const isCurrent = i === currentIdx;
         const isDone = i < currentIdx;
-        const label = status === 'PAUSED' && step.key === 'exec'
-          ? 'Paused — action needed'
-          : step.label;
+        const label =
+          status === 'PAUSED' && step.key === 'exec' ? 'Paused — action needed' : step.label;
         return (
-          <div key={step.key} className="flex items-center gap-1" title={step.description}>
+          <div key={step.key} className='flex items-center gap-1' title={step.description}>
             <span
               className={cn(
                 'inline-flex items-center justify-center w-5 h-5 rounded-full border text-[11px] font-mono',
                 isCurrent
-                  ? (status === 'PAUSED'
-                      ? 'bg-accent-amber text-white border-accent-amber'
-                      : 'bg-accent-blue text-white border-accent-blue')
+                  ? status === 'PAUSED'
+                    ? 'bg-accent-amber text-white border-accent-amber'
+                    : 'bg-accent-blue text-white border-accent-blue'
                   : isDone
-                  ? 'bg-status-success/20 text-status-success border-status-success/40'
-                  : 'text-muted border-[var(--border-default)]',
+                    ? 'bg-status-success/20 text-status-success border-status-success/40'
+                    : 'text-muted border-[var(--border-default)]',
               )}
             >
               {isDone ? '✓' : isCurrent ? <Spinner paused={status === 'PAUSED'} /> : i + 1}
             </span>
             <span className={cn(isCurrent && 'text-primary font-medium')}>{label}</span>
             {isCurrent && elapsed && (
-              <span className="text-[9px] font-mono text-muted">({elapsed})</span>
+              <span className='text-[9px] font-mono text-muted'>({elapsed})</span>
             )}
-            {i < visible.length - 1 && <span className="mx-1 text-muted">›</span>}
+            {i < visible.length - 1 && <span className='mx-1 text-muted'>›</span>}
           </div>
         );
       })}
@@ -89,10 +115,10 @@ export default function ExecutionStepper({
   );
 }
 
-function Spinner({ paused }: { paused: boolean }) {
+function Spinner({paused}: {paused: boolean}) {
   // Paused steps shouldn't pulse — the user's action is what unblocks them.
   if (paused) return <span>⏸</span>;
-  return <span className="inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse" />;
+  return <span className='inline-block w-1.5 h-1.5 rounded-full bg-white animate-pulse' />;
 }
 
 /**

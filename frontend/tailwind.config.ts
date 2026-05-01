@@ -1,4 +1,4 @@
-import type { Config } from 'tailwindcss';
+import type {Config} from 'tailwindcss';
 
 export default {
   darkMode: 'class',
@@ -47,15 +47,15 @@ export default {
         },
         // Status colors — semantic groups
         status: {
-          success:   'var(--status-success)',    // green
-          executing: 'var(--status-executing)',   // blue
-          thinking:  'var(--status-thinking)',    // purple
-          waiting:   'var(--status-waiting)',     // amber
-          partial:   'var(--status-partial)',     // orange
-          error:     'var(--status-error)',       // red
-          blocked:   'var(--status-blocked)',     // pink
-          queued:    'var(--status-queued)',       // gray
-          building:  'var(--status-building)',    // legacy alias
+          success: 'var(--status-success)', // green
+          executing: 'var(--status-executing)', // blue
+          thinking: 'var(--status-thinking)', // purple
+          waiting: 'var(--status-waiting)', // amber
+          partial: 'var(--status-partial)', // orange
+          error: 'var(--status-error)', // red
+          blocked: 'var(--status-blocked)', // pink
+          queued: 'var(--status-queued)', // gray
+          building: 'var(--status-building)', // legacy alias
         },
         // Border
         border: {
@@ -107,24 +107,24 @@ export default {
       },
       keyframes: {
         'slide-in-right': {
-          '0%': { transform: 'translateX(100%)', opacity: '0' },
-          '100%': { transform: 'translateX(0)', opacity: '1' },
+          '0%': {transform: 'translateX(100%)', opacity: '0'},
+          '100%': {transform: 'translateX(0)', opacity: '1'},
         },
         'fade-in-up': {
-          '0%': { transform: 'translateY(8px)', opacity: '0' },
-          '100%': { transform: 'translateY(0)', opacity: '1' },
+          '0%': {transform: 'translateY(8px)', opacity: '0'},
+          '100%': {transform: 'translateY(0)', opacity: '1'},
         },
         shimmer: {
-          '0%': { backgroundPosition: '-200% 0' },
-          '100%': { backgroundPosition: '200% 0' },
+          '0%': {backgroundPosition: '-200% 0'},
+          '100%': {backgroundPosition: '200% 0'},
         },
         'log-line': {
-          '0%': { opacity: '0' },
-          '100%': { opacity: '1' },
+          '0%': {opacity: '0'},
+          '100%': {opacity: '1'},
         },
         'status-pulse': {
-          '0%, 100%': { opacity: '1' },
-          '50%': { opacity: '0.4' },
+          '0%, 100%': {opacity: '1'},
+          '50%': {opacity: '0.4'},
         },
       },
     },

@@ -1,12 +1,13 @@
 package com.navneet.executespec.billing.entity;
 
+import java.util.UUID;
+
 import jakarta.persistence.*;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
-import java.util.UUID;
 
 @Entity
 @Table(name = "billing_plan_limit")
@@ -16,17 +17,17 @@ import java.util.UUID;
 @AllArgsConstructor
 public class BillingPlanLimit {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+  @Id
+  @GeneratedValue(strategy = GenerationType.UUID)
+  private UUID id;
 
-    @Column(name = "billing_plan_id", nullable = false)
-    private UUID billingPlanId;
+  @Column(name = "billing_plan_id", nullable = false)
+  private UUID billingPlanId;
 
-    /** RUNS, PROJECTS, STORAGE_MB */
-    @Column(nullable = false, length = 50)
-    private String metric;
+  /** RUNS, PROJECTS, STORAGE_MB */
+  @Column(nullable = false, length = 50)
+  private String metric;
 
-    @Column(name = "max_value", nullable = false)
-    private long maxValue;
+  @Column(name = "max_value", nullable = false)
+  private long maxValue;
 }

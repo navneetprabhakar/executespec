@@ -10,7 +10,7 @@
  */
 
 // @ts-expect-error — test runner not yet installed; types resolve once vitest is added
-import { describe, expect, it } from 'vitest';
+import {describe, expect, it} from 'vitest';
 import {
   MAX_DISPLAYABLE_BALANCE,
   canonicalDisplayName,
@@ -19,7 +19,7 @@ import {
   isPaidTier,
   normalizeTier,
 } from './tierDisplay';
-import type { V3Entitlements } from './api';
+import type {V3Entitlements} from './api';
 
 const baseEnt: V3Entitlements = {
   tierKey: 'FREE',
@@ -85,34 +85,34 @@ describe('isPaidTier', () => {
 
 describe('formatRunUsage', () => {
   it('FREE with sane monthly cap renders remaining over cap', () => {
-    const out = formatRunUsage({ ...baseEnt, runLimitMonthly: 10, currentPeriodRunCount: 3 }, 'FREE');
+    const out = formatRunUsage({...baseEnt, runLimitMonthly: 10, currentPeriodRunCount: 3}, 'FREE');
     expect(out.line).toBe('7 of 10 runs left this month');
     expect(out.unlimited).toBe(false);
     expect(out.showBalanceBar).toBe(true);
   });
 
   it('FREE clamps used > cap (used at full)', () => {
-    const out = formatRunUsage({ ...baseEnt, runLimitMonthly: 10, currentPeriodRunCount: 50 }, 'FREE');
+    const out = formatRunUsage(
+      {...baseEnt, runLimitMonthly: 10, currentPeriodRunCount: 50},
+      'FREE',
+    );
     expect(out.line).toBe('0 of 10 runs left this month');
   });
 
   it('FREE renders Loading state when cap is 0', () => {
-    const out = formatRunUsage({ ...baseEnt, runLimitMonthly: 0 }, 'FREE');
+    const out = formatRunUsage({...baseEnt, runLimitMonthly: 0}, 'FREE');
     expect(out.line).toBe('Loading run balance…');
     expect(out.showBalanceBar).toBe(false);
   });
 
   it('FREE cap = -1 (unlimited sentinel) renders Unlimited', () => {
-    const out = formatRunUsage({ ...baseEnt, runLimitMonthly: -1 }, 'FREE');
+    const out = formatRunUsage({...baseEnt, runLimitMonthly: -1}, 'FREE');
     expect(out.line).toBe('Unlimited runs · 0 this period');
     expect(out.unlimited).toBe(true);
   });
 
   it('FREE cap at MAX_VALUE-shape is treated as unlimited (sentinel guard)', () => {
-    const out = formatRunUsage(
-      { ...baseEnt, runLimitMonthly: 2147483647 },
-      'FREE'
-    );
+    const out = formatRunUsage({...baseEnt, runLimitMonthly: 2147483647}, 'FREE');
     expect(out.line).toBe('Unlimited runs · 0 this period');
     expect(out.unlimited).toBe(true);
     expect(out.showBalanceBar).toBe(false);
@@ -127,29 +127,32 @@ describe('formatRunUsage', () => {
 
   it('TEAM renders Unlimited even when ent payload says FREE', () => {
     const out = formatRunUsage(
-      { ...baseEnt, tierKey: 'FREE', displayName: 'Free', runLimitMonthly: 5, lifetimeRunCreditBalance: 2147483647 },
-      'TEAM'
+      {
+        ...baseEnt,
+        tierKey: 'FREE',
+        displayName: 'Free',
+        runLimitMonthly: 5,
+        lifetimeRunCreditBalance: 2147483647,
+      },
+      'TEAM',
     );
     expect(out.line).toBe('Unlimited runs · 0 this period');
     expect(out.unlimited).toBe(true);
   });
 
   it('ENTERPRISE renders Unlimited and includes period count', () => {
-    const out = formatRunUsage({ ...baseEnt, currentPeriodRunCount: 42 }, 'ENTERPRISE');
+    const out = formatRunUsage({...baseEnt, currentPeriodRunCount: 42}, 'ENTERPRISE');
     expect(out.line).toBe('Unlimited runs · 42 this period');
   });
 
   it('non-numeric currentPeriodRunCount is coerced to 0', () => {
-    const ent = { ...baseEnt, currentPeriodRunCount: NaN as unknown as number };
+    const ent = {...baseEnt, currentPeriodRunCount: NaN as unknown as number};
     const out = formatRunUsage(ent, 'PRO');
     expect(out.line).toBe('Unlimited runs · 0 this period');
   });
 
   it('threshold sanity — cap just under MAX_DISPLAYABLE_BALANCE keeps fractional render', () => {
-    const out = formatRunUsage(
-      { ...baseEnt, runLimitMonthly: MAX_DISPLAYABLE_BALANCE - 1 },
-      'FREE'
-    );
+    const out = formatRunUsage({...baseEnt, runLimitMonthly: MAX_DISPLAYABLE_BALANCE - 1}, 'FREE');
     expect(out.unlimited).toBe(false);
     expect(out.showBalanceBar).toBe(true);
   });

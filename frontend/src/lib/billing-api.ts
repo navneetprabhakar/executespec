@@ -1,17 +1,17 @@
 // Billing API client — Razorpay subscription endpoints
 
-import { req } from './api';
+import {req} from './api';
 
 // ─── Types ───
 
 export interface BillingPlan {
   id: string;
   name: string;
-  tier: string;   // FREE, STARTER, PRO, ENTERPRISE
+  tier: string; // FREE, STARTER, PRO, ENTERPRISE
   keyMode: string; // BYOK, PLATFORM, NONE
-  period: string;  // MONTHLY, ANNUAL, NONE
-  baseAmountInr: number;  // paise
-  baseAmountUsd: number;  // cents
+  period: string; // MONTHLY, ANNUAL, NONE
+  baseAmountInr: number; // paise
+  baseAmountUsd: number; // cents
   perSeatInr: number;
   perSeatUsd: number;
   includedSeats: number;
@@ -19,12 +19,12 @@ export interface BillingPlan {
   annualDiscountPct: number;
   founderPricing: boolean;
   active: boolean;
-  limits: Record<string, number>;  // { RUNS: 50, PROJECTS: 10, STORAGE_MB: 500 }
+  limits: Record<string, number>; // { RUNS: 50, PROJECTS: 10, STORAGE_MB: 500 }
 }
 
 export interface SubscriptionInfo {
   id: string | null;
-  status: string;   // FREE, ACTIVE, PAST_DUE, CANCELLED, DOWNGRADED
+  status: string; // FREE, ACTIVE, PAST_DUE, CANCELLED, DOWNGRADED
   paymentGateway: string;
   currentPeriodEnd: string | null;
   totalSeats: number;
@@ -35,7 +35,7 @@ export interface SubscriptionInfo {
 }
 
 export interface UsageInfo {
-  metric: string;   // RUNS, PROJECTS, STORAGE_MB
+  metric: string; // RUNS, PROJECTS, STORAGE_MB
   current: number;
   max: number;
   pctUsed: number;
@@ -45,8 +45,8 @@ export interface TopupInfo {
   id: string;
   quantity: number;
   remaining: number;
-  source: string;   // PURCHASE | ADMIN_GRANT
-  status: string;   // ACTIVE | EXHAUSTED | EXPIRED
+  source: string; // PURCHASE | ADMIN_GRANT
+  status: string; // ACTIVE | EXHAUSTED | EXPIRED
   expiresAt: string | null;
   createdAt: string;
 }
@@ -69,8 +69,8 @@ export interface TopupPackage {
   id: string;
   name: string;
   runCount: number;
-  amountInr: number;   // paise
-  amountUsd: number;   // cents
+  amountInr: number; // paise
+  amountUsd: number; // cents
   active: boolean;
   sortOrder: number;
 }
@@ -106,8 +106,7 @@ export const fetchPlans = (keyMode?: string) => {
 /**
  * Get current billing status for the authenticated user.
  */
-export const fetchBillingStatus = () =>
-  req<BillingStatus>('/billing/status');
+export const fetchBillingStatus = () => req<BillingStatus>('/billing/status');
 
 /**
  * Initiate subscription. Returns gateway-specific checkout data.
@@ -116,10 +115,16 @@ export const fetchBillingStatus = () =>
  * v2.6.0 — `seats` is used for TEAM tier (2-20). Omitting it defaults to 1
  * for PRO (per-plan tier).
  */
-export const subscribe = (planId: string, gateway?: string, successUrl?: string, cancelUrl?: string, seats?: number) =>
+export const subscribe = (
+  planId: string,
+  gateway?: string,
+  successUrl?: string,
+  cancelUrl?: string,
+  seats?: number,
+) =>
   req<SubscriptionInitResult>('/billing/subscribe', {
     method: 'POST',
-    body: JSON.stringify({ planId, gateway, successUrl, cancelUrl, seats }),
+    body: JSON.stringify({planId, gateway, successUrl, cancelUrl, seats}),
   });
 
 /**
@@ -132,14 +137,13 @@ export const verifyPayment = (
 ) =>
   req<BillingStatus>('/billing/verify', {
     method: 'POST',
-    body: JSON.stringify({ razorpaySubscriptionId, razorpayPaymentId, razorpaySignature }),
+    body: JSON.stringify({razorpaySubscriptionId, razorpayPaymentId, razorpaySignature}),
   });
 
 /**
  * Cancel subscription at end of billing period.
  */
-export const cancelSubscription = () =>
-  req<void>('/billing/cancel', { method: 'POST' });
+export const cancelSubscription = () => req<void>('/billing/cancel', {method: 'POST'});
 
 /**
  * Update seat count (Pro tier only).
@@ -147,7 +151,7 @@ export const cancelSubscription = () =>
 export const updateSeats = (totalSeats: number) =>
   req<BillingStatus>('/billing/seats', {
     method: 'POST',
-    body: JSON.stringify({ totalSeats }),
+    body: JSON.stringify({totalSeats}),
   });
 
 // ─── Run Top-Up ───
@@ -155,8 +159,7 @@ export const updateSeats = (totalSeats: number) =>
 /**
  * List available top-up packages for purchase.
  */
-export const fetchTopupPackages = () =>
-  req<TopupPackage[]>('/billing/topup/packages');
+export const fetchTopupPackages = () => req<TopupPackage[]>('/billing/topup/packages');
 
 /**
  * Initiate a top-up purchase. Returns Razorpay order data for checkout.
@@ -164,7 +167,7 @@ export const fetchTopupPackages = () =>
 export const purchaseTopup = (packageId: string) =>
   req<TopupOrderResult>('/billing/topup/purchase', {
     method: 'POST',
-    body: JSON.stringify({ packageId }),
+    body: JSON.stringify({packageId}),
   });
 
 /**
@@ -177,5 +180,5 @@ export const verifyTopup = (
 ) =>
   req<BillingStatus>('/billing/topup/verify', {
     method: 'POST',
-    body: JSON.stringify({ razorpayOrderId, razorpayPaymentId, razorpaySignature }),
+    body: JSON.stringify({razorpayOrderId, razorpayPaymentId, razorpaySignature}),
   });

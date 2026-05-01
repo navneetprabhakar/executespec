@@ -1,16 +1,12 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { useV3ProjectStore, type Bubble } from '../stores/useV3ProjectStore';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {useNavigate, useParams} from 'react-router-dom';
+import {useV3ProjectStore, type Bubble} from '../stores/useV3ProjectStore';
 import Composer from '../components/Composer';
 import PlanCard from '../components/PlanCard';
 import ResultCard from '../components/ResultCard';
 import Pill from '../components/Pill';
 import RepoAttachPopover from '../components/RepoAttachPopover';
-import {
-  PROJECT_PLURAL,
-  PROVIDER_DISPLAY,
-  STATUS_LABELS,
-} from '../lib/terminology';
+import {PROJECT_PLURAL, PROVIDER_DISPLAY, STATUS_LABELS} from '../lib/terminology';
 
 /**
  * R-120 — the dominant screen.
@@ -32,9 +28,9 @@ import {
  * feedback even without SSE).
  */
 export default function V3ProjectHome() {
-  const { slug } = useParams<{ slug: string }>();
+  const {slug} = useParams<{slug: string}>();
   const navigate = useNavigate();
-  const { loaded, loading, project, bubbles, error, load, reset } = useV3ProjectStore();
+  const {loaded, loading, project, bubbles, error, load, reset} = useV3ProjectStore();
   const threadRef = useRef<HTMLDivElement>(null);
   // R-324 Checkpoint 2 — "Attach another repo" affordance state.
   // The popover handles the actual link call; we just rehydrate the
@@ -63,11 +59,14 @@ export default function V3ProjectHome() {
 
   if (error && !loading) {
     return (
-      <div className="v3-placeholder" style={{ borderColor: 'var(--v3-error)', color: 'var(--v3-error)' }}>
+      <div
+        className='v3-placeholder'
+        style={{borderColor: 'var(--v3-error)', color: 'var(--v3-error)'}}
+      >
         <h1>Couldn't load project</h1>
         <p>{error}</p>
         <button
-          type="button"
+          type='button'
           onClick={() => slug && load(slug)}
           style={{
             marginTop: 16,
@@ -88,7 +87,7 @@ export default function V3ProjectHome() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 56px - 48px)' }}>
+    <div style={{display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 56px - 48px)'}}>
       {/* Pulse summary — single row */}
       {project && (
         <div
@@ -105,18 +104,15 @@ export default function V3ProjectHome() {
             fontSize: 12,
           }}
         >
-          <span style={{ color: 'var(--v3-text)', fontWeight: 600 }}>{project.name}</span>
-          <Pill tone="brand" size="sm">
+          <span style={{color: 'var(--v3-text)', fontWeight: 600}}>{project.name}</span>
+          <Pill tone='brand' size='sm'>
             {PROVIDER_DISPLAY[project.aiProvider] ?? project.aiProvider}
           </Pill>
-          <Pill
-            tone={project.status === 'ACTIVE' ? 'ok' : 'neutral'}
-            size="sm"
-          >
+          <Pill tone={project.status === 'ACTIVE' ? 'ok' : 'neutral'} size='sm'>
             {project.status?.toLowerCase()}
           </Pill>
           {bubbles.length > 0 && (
-            <span style={{ color: 'var(--v3-text-subtle)' }}>
+            <span style={{color: 'var(--v3-text-subtle)'}}>
               · {Math.floor(bubbles.length / 2)} runs in thread
             </span>
           )}
@@ -126,7 +122,7 @@ export default function V3ProjectHome() {
               than spawning a new one. */}
           {slug && (
             <button
-              type="button"
+              type='button'
               onClick={() => setAttachOpen(true)}
               style={{
                 marginLeft: 'auto',
@@ -139,7 +135,7 @@ export default function V3ProjectHome() {
                 fontSize: 11.5,
                 fontFamily: 'inherit',
               }}
-              title="Attach another GitHub repo to this project"
+              title='Attach another GitHub repo to this project'
             >
               + Attach repo
             </button>
@@ -175,11 +171,11 @@ export default function V3ProjectHome() {
           paints. WCAG 4.1.3 Level AA. */}
       <div
         ref={threadRef}
-        role="log"
-        aria-live="polite"
-        aria-relevant="additions"
+        role='log'
+        aria-live='polite'
+        aria-relevant='additions'
         aria-busy={loading || undefined}
-        aria-label="Run conversation thread"
+        aria-label='Run conversation thread'
         style={{
           flex: 1,
           display: 'flex',
@@ -190,7 +186,9 @@ export default function V3ProjectHome() {
         }}
       >
         {loading && (
-          <div style={{ color: 'var(--v3-text-subtle)', fontSize: 12, textAlign: 'center', padding: 32 }}>
+          <div
+            style={{color: 'var(--v3-text-subtle)', fontSize: 12, textAlign: 'center', padding: 32}}
+          >
             Loading conversation…
           </div>
         )}
@@ -200,18 +198,14 @@ export default function V3ProjectHome() {
       </div>
 
       {/* Composer */}
-      <Composer
-        projectId={slug ?? ''}
-        isEmpty={isEmpty}
-        defaultProvider={project?.aiProvider}
-      />
+      <Composer projectId={slug ?? ''} isEmpty={isEmpty} defaultProvider={project?.aiProvider} />
     </div>
   );
 }
 
 // ─── Bubble renderer ─────────────────────────────────────────────────────────
 
-function BubbleView({ bubble }: { bubble: Bubble }) {
+function BubbleView({bubble}: {bubble: Bubble}) {
   const isUser = bubble.role === 'user';
 
   if (bubble.kind === 'run' && bubble.runId) {
@@ -257,8 +251,8 @@ function BubbleView({ bubble }: { bubble: Bubble }) {
         }}
       >
         {bubble.kind === 'status' && bubble.status === 'planning' ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Pill tone="info" dot size="sm">
+          <span style={{display: 'inline-flex', alignItems: 'center', gap: 6}}>
+            <Pill tone='info' dot size='sm'>
               {STATUS_LABELS.PLANNING}…
             </Pill>
           </span>

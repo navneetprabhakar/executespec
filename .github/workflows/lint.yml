@@ -1,0 +1,82 @@
+name: Lint
+
+# 2026-05-01 — Google Java + TypeScript style guide enforcement on PRs.
+# Catches format / lint violations before merge so the deploy pipeline
+# (deploy.yml) never has to fail on style. Cheap, fast feedback loop:
+# typically <2min vs. ~12min for the full deploy job.
+#
+# Triggers:
+#   - Every pull request opened against dev or main
+#   - Manual workflow_dispatch for ad-hoc runs (debugging the workflow itself)
+#
+# Reference: docs/design/code-style.md (lists the deviations the configs
+# already encode — D-J1 wildcards, D-T1 default exports for *.tsx, etc.)
+
+on:
+  pull_request:
+    branches: [dev, main]
+  workflow_dispatch:
+
+env:
+  JAVA_VERSION: '21'
+
+jobs:
+  java-lint:
+    name: Java · spotless:check (google-java-format)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java ${{ env.JAVA_VERSION }}
+        uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.JAVA_VERSION }}
+          distribution: temurin
+          cache: maven
+
+      # spotless:check fails on any drift. Run via spotless-maven-plugin
+      # directly (not the full verify phase) so this job stays fast — the
+      # check itself completes in seconds; the cost is Maven download + the
+      # google-java-format jar fetch (cached after the first PR).
+      - name: Run spotless:check
+        run: mvn -B spotless:check
+
+      - name: Failure hint
+        if: failure()
+        run: |
+          echo "::error::Run 'mvn spotless:apply' locally and commit the result."
+          echo "::error::See docs/design/code-style.md for the documented deviations."
+
+  frontend-lint:
+    name: Frontend · prettier + eslint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: cd frontend && npm ci
+
+      # Prettier first (the cheap gate). ESLint second (slower but catches
+      # the Google TS Style guide rules that aren't whitespace).
+      - name: Prettier format check
+        run: cd frontend && npm run format:check
+
+      - name: ESLint
+        run: cd frontend && npm run lint
+
+      - name: Failure hint
+        if: failure()
+        run: |
+          echo "::error::Run the following locally to fix:"
+          echo "::error::  npm --prefix frontend run format"
+          echo "::error::  npm --prefix frontend run lint:fix"
+          echo "::error::See docs/design/code-style.md for the documented deviations."

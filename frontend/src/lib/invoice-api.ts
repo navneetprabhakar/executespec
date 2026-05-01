@@ -1,4 +1,4 @@
-import { req } from './api';
+import {req} from './api';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -101,8 +101,7 @@ interface Page<T> {
 
 // ── Billing Profile ──────────────────────────────────────────────────────────
 
-export const getBillingProfile = () =>
-  req<BillingProfile>('/billing/profile');
+export const getBillingProfile = () => req<BillingProfile>('/billing/profile');
 
 export const updateBillingProfile = (profile: BillingProfile) =>
   req<BillingProfile>('/billing/profile', {
@@ -115,8 +114,7 @@ export const updateBillingProfile = (profile: BillingProfile) =>
 export const getMyInvoices = (page = 0, size = 20) =>
   req<Page<Invoice>>(`/billing/invoices?page=${page}&size=${size}`);
 
-export const getInvoiceDetail = (id: string) =>
-  req<InvoiceDetail>(`/billing/invoices/${id}`);
+export const getInvoiceDetail = (id: string) => req<InvoiceDetail>(`/billing/invoices/${id}`);
 
 // ── Admin invoices ───────────────────────────────────────────────────────────
 
@@ -124,12 +122,11 @@ export const getAllInvoices = (page = 0, size = 20) =>
   req<Page<Invoice>>(`/admin/invoices?page=${page}&size=${size}`);
 
 export const resendInvoice = (invoiceId: string) =>
-  req<void>(`/admin/invoices/${invoiceId}/send`, { method: 'POST' });
+  req<void>(`/admin/invoices/${invoiceId}/send`, {method: 'POST'});
 
 // ── Seller config ────────────────────────────────────────────────────────────
 
-export const getSellerConfig = () =>
-  req<SellerConfig>('/admin/seller-config');
+export const getSellerConfig = () => req<SellerConfig>('/admin/seller-config');
 
 export const updateSellerConfig = (config: SellerConfig) =>
   req<SellerConfig>('/admin/seller-config', {
@@ -154,7 +151,7 @@ export async function downloadInvoicePdf(id: string, invoiceNumber: string, admi
   const url = admin ? `/api/admin/invoices/${id}/pdf` : `/api/billing/invoices/${id}/pdf`;
   const token = localStorage.getItem('access_token');
   const res = await fetch(url, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
     credentials: 'include',
   });
   if (!res.ok) throw new Error('PDF download failed');

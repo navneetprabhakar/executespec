@@ -7,5 +7,4 @@ public record MetricsResponse(
     long activeRuns,
     long queuedRuns,
     long totalInputTokens,
-    long totalOutputTokens
-) {}
+    long totalOutputTokens) {}

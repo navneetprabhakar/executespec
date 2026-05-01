@@ -1,10 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useUiStore } from '@/stores/useUiStore';
-import { useAuthStore } from '@/stores/useAuthStore';
-import { useRunStore } from '@/stores/useRunStore';
-import { useV3Ui } from '../stores/useV3Ui';
-import { GLOSSARY } from '../lib/glossary';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {useNavigate} from 'react-router-dom';
+import {useUiStore} from '@/stores/useUiStore';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {useRunStore} from '@/stores/useRunStore';
+import {useV3Ui} from '../stores/useV3Ui';
+import {GLOSSARY} from '../lib/glossary';
 
 /**
  * R-103 — command palette skeleton.
@@ -41,7 +41,7 @@ export default function CmdK() {
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
-  const { theme, toggleTheme } = useUiStore();
+  const {theme, toggleTheme} = useUiStore();
   const user = useAuthStore((s) => s.user);
   const logout = useAuthStore((s) => s.logout);
   // R-343 (P0 from UX persona review) — wire the v2 useRunStore into
@@ -56,16 +56,57 @@ export default function CmdK() {
   // /home so nothing breaks (real targets wired by R-104+).
   const actions = useMemo<Action[]>(() => {
     const all: Action[] = [
-      { id: 'home', label: 'Go to home', hint: 'Home', run: () => navigate('/home') },
-      { id: 'settings', label: 'Open settings', hint: 'Account · keys · theme', run: () => navigate('/settings') },
-      { id: 'billing', label: 'Open billing & plan', hint: 'Plan · usage · pricing', run: () => navigate('/billing') },
-      { id: 'team', label: 'Open team', hint: 'Members · seats · invites', run: () => navigate('/team') },
-      { id: 'integrations', label: 'Open integrations', hint: 'GitHub · Slack · Jira', run: () => navigate('/integrations') },
-      { id: 'pricing', label: 'View pricing', hint: 'Free · Pro · Team', run: () => navigate('/pricing') },
-      { id: 'trust', label: 'View Trust & Security', hint: 'SOC 2 · DPA', run: () => navigate('/trust') },
-      { id: 'help', label: 'Show keyboard shortcuts', hint: '?', run: () => navigate('/home') },
-      { id: 'theme', label: `Switch theme (currently ${theme})`, hint: 'Light · Dark', run: () => toggleTheme() },
-      { id: 'logout', label: 'Sign out', run: () => { void logout(); } },
+      {id: 'home', label: 'Go to home', hint: 'Home', run: () => navigate('/home')},
+      {
+        id: 'settings',
+        label: 'Open settings',
+        hint: 'Account · keys · theme',
+        run: () => navigate('/settings'),
+      },
+      {
+        id: 'billing',
+        label: 'Open billing & plan',
+        hint: 'Plan · usage · pricing',
+        run: () => navigate('/billing'),
+      },
+      {
+        id: 'team',
+        label: 'Open team',
+        hint: 'Members · seats · invites',
+        run: () => navigate('/team'),
+      },
+      {
+        id: 'integrations',
+        label: 'Open integrations',
+        hint: 'GitHub · Slack · Jira',
+        run: () => navigate('/integrations'),
+      },
+      {
+        id: 'pricing',
+        label: 'View pricing',
+        hint: 'Free · Pro · Team',
+        run: () => navigate('/pricing'),
+      },
+      {
+        id: 'trust',
+        label: 'View Trust & Security',
+        hint: 'SOC 2 · DPA',
+        run: () => navigate('/trust'),
+      },
+      {id: 'help', label: 'Show keyboard shortcuts', hint: '?', run: () => navigate('/home')},
+      {
+        id: 'theme',
+        label: `Switch theme (currently ${theme})`,
+        hint: 'Light · Dark',
+        run: () => toggleTheme(),
+      },
+      {
+        id: 'logout',
+        label: 'Sign out',
+        run: () => {
+          void logout();
+        },
+      },
       // Admin-only — [S-01] (audit Sprint 4, 2026-05-01) wired to real
       // routes. Was: all 4 navigated to /home (false advertising in the
       // most visible power-user surface). Routes are real now post-F-14
@@ -73,15 +114,31 @@ export default function CmdK() {
       // /admin/feature-flags mounts FeatureFlagsPage, /audit mounts
       // AuditPage. The "halt all runs" entry is removed because no
       // backing endpoint exists (POST /api/admin/runs/halt unimplemented).
-      { id: 'admin-tiers', label: 'Admin · Tier lifecycle', requireRole: 'SUPER_ADMIN', run: () => navigate('/admin/tiers') },
-      { id: 'admin-flags', label: 'Admin · Feature flags', requireRole: 'SUPER_ADMIN', run: () => navigate('/admin/feature-flags') },
-      { id: 'admin-audit', label: 'Admin · Audit log', requireRole: 'SUPER_ADMIN', run: () => navigate('/audit') },
+      {
+        id: 'admin-tiers',
+        label: 'Admin · Tier lifecycle',
+        requireRole: 'SUPER_ADMIN',
+        run: () => navigate('/admin/tiers'),
+      },
+      {
+        id: 'admin-flags',
+        label: 'Admin · Feature flags',
+        requireRole: 'SUPER_ADMIN',
+        run: () => navigate('/admin/feature-flags'),
+      },
+      {
+        id: 'admin-audit',
+        label: 'Admin · Audit log',
+        requireRole: 'SUPER_ADMIN',
+        run: () => navigate('/audit'),
+      },
     ];
     const role = user?.globalRole;
     const filteredByRole = all.filter((a) => {
       if (!a.requireRole) return true;
       if (a.requireRole === 'SUPER_ADMIN') return role === 'SUPER_ADMIN';
-      if (a.requireRole === 'ORG_ADMIN') return role === 'SUPER_ADMIN' || user?.orgRole === 'ORG_ADMIN';
+      if (a.requireRole === 'ORG_ADMIN')
+        return role === 'SUPER_ADMIN' || user?.orgRole === 'ORG_ADMIN';
       return false;
     });
     // R-343 — append Recent runs as virtual actions.  Top 5 from the
@@ -91,9 +148,7 @@ export default function CmdK() {
     // collide with the static action ids above.
     const runActions: Action[] = (recentRuns ?? []).slice(0, 5).map((r) => {
       const preview = (r.userRequest ?? '').trim().slice(0, 50) || '(no spec text)';
-      const target = r.projectId
-        ? `/projects/${r.projectId}/runs/${r.runId}`
-        : `/runs`;
+      const target = r.projectId ? `/projects/${r.projectId}/runs/${r.runId}` : `/runs`;
       return {
         id: `run-${r.runId}`,
         label: `Recent · ${preview}${(r.userRequest?.length ?? 0) > 50 ? '…' : ''}`,
@@ -127,7 +182,7 @@ export default function CmdK() {
       ([key, e]) =>
         key.toLowerCase().includes(needle) ||
         e.term.toLowerCase().includes(needle) ||
-        e.definition.toLowerCase().includes(needle)
+        e.definition.toLowerCase().includes(needle),
     );
   }, [query, isGlossaryMode]);
 
@@ -143,7 +198,8 @@ export default function CmdK() {
       // already focused inside an input).
       const target = e.target as HTMLElement | null;
       const inField =
-        target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+        target &&
+        (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
       if (e.key === '?' && !isMod && !inField && !open) {
         e.preventDefault();
         openCmdK();
@@ -194,9 +250,9 @@ export default function CmdK() {
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Command palette"
+      role='dialog'
+      aria-modal='true'
+      aria-label='Command palette'
       onClick={(e) => {
         if (e.target === e.currentTarget) setOpen(false);
       }}
@@ -224,14 +280,14 @@ export default function CmdK() {
           overflow: 'hidden',
         }}
       >
-        <div style={{ padding: '12px 14px', borderBottom: '1px solid var(--v3-border)' }}>
+        <div style={{padding: '12px 14px', borderBottom: '1px solid var(--v3-border)'}}>
           <input
             ref={inputRef}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Type > for actions, ? for glossary, or search…"
-            aria-label="Command palette input"
+            placeholder='Type > for actions, ? for glossary, or search…'
+            aria-label='Command palette input'
             style={{
               width: '100%',
               padding: '8px 10px',
@@ -246,8 +302,8 @@ export default function CmdK() {
         </div>
         {isGlossaryMode ? (
           <ul
-            role="list"
-            aria-label="Glossary"
+            role='list'
+            aria-label='Glossary'
             style={{
               flex: 1,
               margin: 0,
@@ -314,66 +370,66 @@ export default function CmdK() {
             ))}
           </ul>
         ) : (
-        <ul
-          role="listbox"
-          aria-label="Command results"
-          style={{
-            flex: 1,
-            margin: 0,
-            padding: 6,
-            overflowY: 'auto',
-            listStyle: 'none',
-          }}
-        >
-          {filtered.length === 0 && (
-            <li
-              style={{
-                padding: '16px 14px',
-                color: 'var(--v3-text-subtle)',
-                fontSize: 12,
-                textAlign: 'center',
-              }}
-            >
-              No matches. Type <code>&gt;</code> to see all actions, <code>?</code> for glossary.
-            </li>
-          )}
-          {filtered.map((a, idx) => (
-            <li
-              key={a.id}
-              role="option"
-              aria-selected={idx === cursor}
-              onMouseEnter={() => setCursor(idx)}
-              onClick={() => {
-                a.run();
-                setOpen(false);
-              }}
-              style={{
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                padding: '8px 12px',
-                borderRadius: 6,
-                cursor: 'pointer',
-                background: idx === cursor ? 'var(--v3-surface-elevated)' : 'transparent',
-                color: 'var(--v3-text)',
-                fontSize: 13,
-              }}
-            >
-              <span>{a.label}</span>
-              {a.hint && (
-                <span
-                  style={{
-                    color: 'var(--v3-text-subtle)',
-                    fontSize: 11,
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                  }}
-                >
-                  {a.hint}
-                </span>
-              )}
-            </li>
-          ))}
-        </ul>
+          <ul
+            role='listbox'
+            aria-label='Command results'
+            style={{
+              flex: 1,
+              margin: 0,
+              padding: 6,
+              overflowY: 'auto',
+              listStyle: 'none',
+            }}
+          >
+            {filtered.length === 0 && (
+              <li
+                style={{
+                  padding: '16px 14px',
+                  color: 'var(--v3-text-subtle)',
+                  fontSize: 12,
+                  textAlign: 'center',
+                }}
+              >
+                No matches. Type <code>&gt;</code> to see all actions, <code>?</code> for glossary.
+              </li>
+            )}
+            {filtered.map((a, idx) => (
+              <li
+                key={a.id}
+                role='option'
+                aria-selected={idx === cursor}
+                onMouseEnter={() => setCursor(idx)}
+                onClick={() => {
+                  a.run();
+                  setOpen(false);
+                }}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  padding: '8px 12px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  background: idx === cursor ? 'var(--v3-surface-elevated)' : 'transparent',
+                  color: 'var(--v3-text)',
+                  fontSize: 13,
+                }}
+              >
+                <span>{a.label}</span>
+                {a.hint && (
+                  <span
+                    style={{
+                      color: 'var(--v3-text-subtle)',
+                      fontSize: 11,
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    }}
+                  >
+                    {a.hint}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
         )}
         <div
           style={{

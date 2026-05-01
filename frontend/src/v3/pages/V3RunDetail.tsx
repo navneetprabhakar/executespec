@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
+import {useEffect, useMemo, useState} from 'react';
+import {Link, useParams} from 'react-router-dom';
 import {
   getRun,
   getValidationReport,
@@ -35,7 +35,7 @@ import {
  * back to /projects/{slug} composer pre-filled with the spec.
  */
 export default function V3RunDetail() {
-  const { slug, runShort } = useParams<{ slug: string; runShort: string }>();
+  const {slug, runShort} = useParams<{slug: string; runShort: string}>();
   const runId = runShort ?? '';
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -76,10 +76,7 @@ export default function V3RunDetail() {
     if (!files || files.length === 0 || active) return;
     const first =
       files.find(
-        (p) =>
-          !p.endsWith('/') &&
-          !p.includes('/node_modules/') &&
-          !p.endsWith('.lock')
+        (p) => !p.endsWith('/') && !p.includes('/node_modules/') && !p.endsWith('.lock'),
       ) ?? files[0];
     setActive(first);
   }, [files, active]);
@@ -126,15 +123,25 @@ export default function V3RunDetail() {
     return 'NEEDS_REVIEW';
   }, [detail, report]);
 
-  const headerTone = verdict === 'READY' ? 'ok' : verdict === 'NEEDS_REVIEW' ? 'warn' : verdict === 'FAILED' ? 'err' : 'neutral';
+  const headerTone =
+    verdict === 'READY'
+      ? 'ok'
+      : verdict === 'NEEDS_REVIEW'
+        ? 'warn'
+        : verdict === 'FAILED'
+          ? 'err'
+          : 'neutral';
 
   if (error) {
     return (
-      <div className="v3-placeholder" style={{ borderColor: 'var(--v3-error)', color: 'var(--v3-error)' }}>
+      <div
+        className='v3-placeholder'
+        style={{borderColor: 'var(--v3-error)', color: 'var(--v3-error)'}}
+      >
         <h1>Couldn't load run</h1>
         <p>{error}</p>
         {slug && (
-          <Link to={`/projects/${slug}`} style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
+          <Link to={`/projects/${slug}`} style={{color: 'var(--v3-brand)', fontSize: 12}}>
             ← Back to project
           </Link>
         )}
@@ -181,12 +188,12 @@ export default function V3RunDetail() {
             }}
           >
             <Pill tone={headerTone}>
-              {verdict ? VERDICT_LABELS[verdict] : STATUS_LABELS[detail.status] ?? detail.status}
+              {verdict ? VERDICT_LABELS[verdict] : (STATUS_LABELS[detail.status] ?? detail.status)}
             </Pill>
-            <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+            <span style={{fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
               {detail.runTitle ?? 'Untitled run'}
             </span>
-            <span style={{ fontSize: 11, color: 'var(--v3-text-subtle)' }}>
+            <span style={{fontSize: 11, color: 'var(--v3-text-subtle)'}}>
               · {runId.slice(0, 8)} ·{' '}
               {detail.completedAt
                 ? new Date(detail.completedAt).toLocaleString()
@@ -195,43 +202,56 @@ export default function V3RunDetail() {
           </div>
 
           {/* Evidence chip row */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-            {report?.finalBuildPassed === true && <Pill tone="ok" size="sm">Build ✓</Pill>}
-            {report?.finalBuildPassed === false && <Pill tone="err" size="sm">Build ✗</Pill>}
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
+            {report?.finalBuildPassed === true && (
+              <Pill tone='ok' size='sm'>
+                Build ✓
+              </Pill>
+            )}
+            {report?.finalBuildPassed === false && (
+              <Pill tone='err' size='sm'>
+                Build ✗
+              </Pill>
+            )}
             {report?.testsTotal != null && report.testsTotal > 0 && (
-              <Pill
-                tone={report.testsPassed === report.testsTotal ? 'ok' : 'warn'}
-                size="sm"
-              >
+              <Pill tone={report.testsPassed === report.testsTotal ? 'ok' : 'warn'} size='sm'>
                 {report.testsPassed}/{report.testsTotal} tests
               </Pill>
             )}
             {report?.reviewerVerdict === 'CLEAN' && (
-              <Pill tone="ok" size="sm">Reviewer 0 issues</Pill>
+              <Pill tone='ok' size='sm'>
+                Reviewer 0 issues
+              </Pill>
             )}
             {report?.reviewerVerdict === 'FIXED_ISSUES' && (
-              <Pill tone="warn" size="sm">Reviewer auto-fixed</Pill>
+              <Pill tone='warn' size='sm'>
+                Reviewer auto-fixed
+              </Pill>
             )}
             {report?.reviewerVerdict === 'UNRESOLVED_ISSUES' && (
-              <Pill tone="err" size="sm">Reviewer unresolved</Pill>
+              <Pill tone='err' size='sm'>
+                Reviewer unresolved
+              </Pill>
             )}
             {detail.aiProvider && (
-              <Pill tone="brand" size="sm">{PROVIDER_DISPLAY[detail.aiProvider] ?? detail.aiProvider}</Pill>
+              <Pill tone='brand' size='sm'>
+                {PROVIDER_DISPLAY[detail.aiProvider] ?? detail.aiProvider}
+              </Pill>
             )}
             {detail.actualCostUsd != null && (
-              <Pill tone="neutral" size="sm">
+              <Pill tone='neutral' size='sm'>
                 {COST_PREFIX} ${detail.actualCostUsd.toFixed(2)}
               </Pill>
             )}
           </div>
 
           {/* Action row */}
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
             {detail.githubPrUrl && (
               <a
                 href={detail.githubPrUrl}
-                target="_blank"
-                rel="noreferrer"
+                target='_blank'
+                rel='noreferrer'
                 style={{
                   padding: '5px 12px',
                   fontSize: 12,
@@ -284,7 +304,7 @@ export default function V3RunDetail() {
           gap: 16,
           alignItems: 'start',
         }}
-        className="v3-rundetail-grid"
+        className='v3-rundetail-grid'
       >
         <aside
           style={{
@@ -308,18 +328,20 @@ export default function V3RunDetail() {
           >
             Files {files ? `(${files.length})` : ''}
           </div>
-          {!files && <div style={{ padding: 8, fontSize: 12, color: 'var(--v3-text-subtle)' }}>Loading…</div>}
+          {!files && (
+            <div style={{padding: 8, fontSize: 12, color: 'var(--v3-text-subtle)'}}>Loading…</div>
+          )}
           {files && files.length === 0 && (
-            <div style={{ padding: 8, fontSize: 12, color: 'var(--v3-text-subtle)' }}>
+            <div style={{padding: 8, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
               No workspace files for this run.
             </div>
           )}
           {files && (
-            <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+            <ul style={{margin: 0, padding: 0, listStyle: 'none'}}>
               {files.map((f) => (
                 <li key={f}>
                   <button
-                    type="button"
+                    type='button'
                     onClick={() => setActive(f)}
                     style={{
                       display: 'block',
@@ -371,7 +393,9 @@ export default function V3RunDetail() {
             </div>
           )}
           {contentLoading && (
-            <div style={{ padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)' }}>Loading file…</div>
+            <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+              Loading file…
+            </div>
           )}
           {!contentLoading && content && (
             <pre
@@ -391,7 +415,7 @@ export default function V3RunDetail() {
             </pre>
           )}
           {!loading && !active && !contentLoading && (
-            <div style={{ padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)' }}>
+            <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
               Select a file from the left to view its contents.
             </div>
           )}

@@ -5,15 +5,15 @@ const BASE = '/api';
 /** Returns the stored access token for authenticated requests. */
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem('access_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? {Authorization: `Bearer ${token}`} : {};
 }
 
 /** Status code → human-readable fallback messages */
 const STATUS_MESSAGES: Record<number, string> = {
   400: 'Invalid request. Please check your input and try again.',
   401: 'Your session has expired. Please log in again.',
-  402: 'You\'ve reached your plan limit. Please upgrade or purchase additional runs.',
-  403: 'You don\'t have permission to perform this action.',
+  402: "You've reached your plan limit. Please upgrade or purchase additional runs.",
+  403: "You don't have permission to perform this action.",
   404: 'The requested resource was not found.',
   409: 'This action conflicts with the current state. Please refresh and try again.',
   410: 'This feature is not available in the current harness. It may be coming back — reach out if you need it.',
@@ -55,7 +55,13 @@ function parseErrorMessage(status: number, raw: string): string {
       // Spring's BillingException / ResponseStatusException include 'message'
       if (json.message && typeof json.message === 'string') return json.message;
       // Some endpoints return { error: "..." }
-      if (json.error && typeof json.error === 'string' && json.error !== 'Payment Required' && json.error !== 'Forbidden') return json.error;
+      if (
+        json.error &&
+        typeof json.error === 'string' &&
+        json.error !== 'Payment Required' &&
+        json.error !== 'Forbidden'
+      )
+        return json.error;
     } catch {
       // Not JSON — use raw text if it's short and readable
       if (raw.length < 200 && !raw.startsWith('<') && !raw.startsWith('{')) return raw;
@@ -67,8 +73,8 @@ function parseErrorMessage(status: number, raw: string): string {
 
 export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(BASE + url, {
-    headers: { 'Content-Type': 'application/json', ...authHeader(), ...opts?.headers },
-    credentials: 'include',  // send refresh_token cookie
+    headers: {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers},
+    credentials: 'include', // send refresh_token cookie
     ...opts,
   });
   if (!res.ok) {
@@ -85,7 +91,7 @@ export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
 /** Fetch a plain-text endpoint (e.g. file content served as text/plain). */
 async function reqText(url: string): Promise<string> {
   const res = await fetch(BASE + url, {
-    headers: { ...authHeader() },  // include JWT so protected endpoints return 200 not 403
+    headers: {...authHeader()}, // include JWT so protected endpoints return 200 not 403
     credentials: 'include',
   });
   if (!res.ok) {
@@ -211,7 +217,16 @@ export interface ReviewReport {
   recommendationCompat?: string;
   summary: string;
   taskReviews?: TaskReview[];
-  issues?: { id: string; severity: string; category: string; file: string; description: string; fixInstruction: string; autoFixed: boolean; fixSucceeded: boolean }[];
+  issues?: {
+    id: string;
+    severity: string;
+    category: string;
+    file: string;
+    description: string;
+    fixInstruction: string;
+    autoFixed: boolean;
+    fixSucceeded: boolean;
+  }[];
   mergeBlockers: string[];
   postMergeSuggestions: string[];
   readmeUpdated: boolean;
@@ -230,7 +245,7 @@ export interface RunDetail extends RunSummary {
   tasks: TaskSummary[];
   planJson: string;
   reviewJson: string;
-  integrationSource: { sourceType: string; sourceId: string; sourceUrl: string } | null;
+  integrationSource: {sourceType: string; sourceId: string; sourceUrl: string} | null;
   failureReason?: string | null;
   currentGate?: string | null;
   /** Pre-run cost estimate range (USD). Set at plan creation. */
@@ -398,11 +413,24 @@ export interface DeployAnalysisResult {
 }
 
 export interface TimelineData {
-  tasks: Array<{ taskId: string; title: string; startedAt: string; completedAt: string; status: string }>;
+  tasks: Array<{
+    taskId: string;
+    title: string;
+    startedAt: string;
+    completedAt: string;
+    status: string;
+  }>;
 }
 
 export interface ModelComparisonData {
-  models: Array<{ provider: string; model: string; taskCount: number; totalInputTokens: number; totalOutputTokens: number; avgDurationMs: number }>;
+  models: Array<{
+    provider: string;
+    model: string;
+    taskCount: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    avgDurationMs: number;
+  }>;
 }
 
 // ── Runs ────────────────────────────────────────────────────────────────────
@@ -417,12 +445,19 @@ export interface PagedResponse<T> {
   hasPrevious: boolean;
 }
 
-export const getRuns = (params?: { status?: string; projectId?: string; scope?: string; archived?: boolean; page?: number; size?: number }) => {
+export const getRuns = (params?: {
+  status?: string;
+  projectId?: string;
+  scope?: string;
+  archived?: boolean;
+  page?: number;
+  size?: number;
+}) => {
   const qs = new URLSearchParams();
-  if (params?.status)    qs.set('status',    params.status);
+  if (params?.status) qs.set('status', params.status);
   if (params?.projectId) qs.set('projectId', params.projectId);
-  if (params?.scope)     qs.set('scope',     params.scope);
-  if (params?.archived)  qs.set('archived',  'true');
+  if (params?.scope) qs.set('scope', params.scope);
+  if (params?.archived) qs.set('archived', 'true');
   if (params?.page !== undefined) qs.set('page', String(params.page));
   if (params?.size !== undefined) qs.set('size', String(params.size));
   const q = qs.toString();
@@ -430,7 +465,7 @@ export const getRuns = (params?: { status?: string; projectId?: string; scope?: 
 };
 
 export const archiveRun = (runId: string) =>
-  req<{ message: string }>(`/runs/${runId}/archive`, { method: 'POST' });
+  req<{message: string}>(`/runs/${runId}/archive`, {method: 'POST'});
 
 /**
  * Phase 1.3 #35 — fork a teammate's run. Creates a new run owned by the
@@ -438,14 +473,16 @@ export const archiveRun = (runId: string) =>
  * Optional `overrides.userRequest` lets the user tweak the spec before
  * the fork lands; otherwise it's an exact copy of the source spec.
  */
-export const forkRun = (runId: string, overrides?: { userRequest?: string; executionMode?: string }) =>
+export const forkRun = (
+  runId: string,
+  overrides?: {userRequest?: string; executionMode?: string},
+) =>
   req<RunSummary>(`/runs/${runId}/fork`, {
     method: 'POST',
     body: JSON.stringify(overrides ?? {}),
   });
 
-export const getRun = (id: string) =>
-  req<RunDetail>(`/runs/${id}`);
+export const getRun = (id: string) => req<RunDetail>(`/runs/${id}`);
 
 export const createRun = (body: {
   userRequest: string;
@@ -463,20 +500,41 @@ export const createRun = (body: {
   figmaUrl?: string;
   /** v2.5.2 (Phase 4.3) — when true, planner emits test tasks first. */
   tddMode?: boolean;
-}) =>
-  req<{ runId: string }>('/runs', { method: 'POST', body: JSON.stringify(body) });
+}) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
 // ── Model matrix ────────────────────────────────────────────────────────────
 
-export interface ModelEntry { id: string; tier: string; label: string; }
-export interface ProviderEntry { id: string; label: string; tag?: string; models: ModelEntry[]; }
-export interface AvailableModelsResponse { providers: ProviderEntry[]; }
+export interface ModelEntry {
+  id: string;
+  tier: string;
+  label: string;
+}
+export interface ProviderEntry {
+  id: string;
+  label: string;
+  tag?: string;
+  models: ModelEntry[];
+}
+export interface AvailableModelsResponse {
+  providers: ProviderEntry[];
+}
 
-export const getAvailableModels = () =>
-  req<AvailableModelsResponse>('/models/available');
+export const getAvailableModels = () => req<AvailableModelsResponse>('/models/available');
 
-export const approveRun = (id: string, approved: boolean, creditsConfirmed?: number, executionMode?: string) =>
-  req<void>(`/runs/${id}/approve`, { method: 'POST', body: JSON.stringify({ approved, creditsConfirmed: creditsConfirmed ?? null, executionMode: executionMode ?? null }) });
+export const approveRun = (
+  id: string,
+  approved: boolean,
+  creditsConfirmed?: number,
+  executionMode?: string,
+) =>
+  req<void>(`/runs/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({
+      approved,
+      creditsConfirmed: creditsConfirmed ?? null,
+      executionMode: executionMode ?? null,
+    }),
+  });
 
 // v2.5.12 — V1-only endpoints removed (clarifyRun, mergeRun, retryRun,
 // reopenMergeGate, implementSuggestions, reworkRun, editAndRestartRun).
@@ -486,17 +544,14 @@ export const approveRun = (id: string, approved: boolean, creditsConfirmed?: num
 // (docs/plans/harness-v2-remaining-work.md Gap 2) and they'll light back up
 // when that lands.
 
-export const cancelRun = (id: string) =>
-  req<void>(`/runs/${id}`, { method: 'DELETE' });
+export const cancelRun = (id: string) => req<void>(`/runs/${id}`, {method: 'DELETE'});
 
 export const retryTask = (runId: string, taskId: string) =>
-  req<void>(`/runs/${runId}/tasks/${taskId}/retry`, { method: 'POST' });
+  req<void>(`/runs/${runId}/tasks/${taskId}/retry`, {method: 'POST'});
 
-export const pauseRun = (runId: string) =>
-  req<void>(`/runs/${runId}/pause`, { method: 'POST' });
+export const pauseRun = (runId: string) => req<void>(`/runs/${runId}/pause`, {method: 'POST'});
 
-export const resumeRun = (runId: string) =>
-  req<void>(`/runs/${runId}/resume`, { method: 'POST' });
+export const resumeRun = (runId: string) => req<void>(`/runs/${runId}/resume`, {method: 'POST'});
 
 // ── Metrics ─────────────────────────────────────────────────────────────────
 
@@ -530,12 +585,14 @@ export const getUserRunsSummary = (days = 30) =>
 export const getPricing = () => req<PricingRow[]>('/pricing');
 
 export const updatePricing = (provider: string, model: string, body: Partial<PricingRow>) =>
-  req<PricingRow>(`/pricing/${provider}/${model}`, { method: 'PUT', body: JSON.stringify(body) });
+  req<PricingRow>(`/pricing/${provider}/${model}`, {method: 'PUT', body: JSON.stringify(body)});
 
 // ── Live cost ───────────────────────────────────────────────────────────────
 
 export const getLiveCost = (runId: string) =>
-  req<{ runId: string; costUsd: number; inputTokens?: number; outputTokens?: number }>(`/runs/${runId}/cost`);
+  req<{runId: string; costUsd: number; inputTokens?: number; outputTokens?: number}>(
+    `/runs/${runId}/cost`,
+  );
 
 // v2.5.13 — feasibility() client retired; POST /api/feasibility is permanently
 // 410 Gone on V2. Use the plan-approval cost estimate
@@ -545,19 +602,20 @@ export const getLiveCost = (runId: string) =>
 
 export const getDeployments = () => req<DeploymentSummary[]>('/deployments');
 
-export const createDeployment = (body: { runId: string; strategy?: string }) =>
-  req<DeploymentSummary>('/deployments', { method: 'POST', body: JSON.stringify(body) });
+export const createDeployment = (body: {runId: string; strategy?: string}) =>
+  req<DeploymentSummary>('/deployments', {method: 'POST', body: JSON.stringify(body)});
 
-export const deleteDeployment = (id: string) =>
-  req<void>(`/deployments/${id}`, { method: 'DELETE' });
+export const deleteDeployment = (id: string) => req<void>(`/deployments/${id}`, {method: 'DELETE'});
 
 export const rollbackDeployment = (id: string) =>
-  req<DeploymentSummary>(`/deployments/${id}/rollback`, { method: 'POST' });
+  req<DeploymentSummary>(`/deployments/${id}/rollback`, {method: 'POST'});
 
 // ── Deploy Engine ────────────────────────────────────────────────────────────
 
 export const analyzeForDeploy = (runId: string) =>
-  req<DeployAnalysisResult>(`/deployments/analyze?runId=${encodeURIComponent(runId)}`, { method: 'POST' });
+  req<DeployAnalysisResult>(`/deployments/analyze?runId=${encodeURIComponent(runId)}`, {
+    method: 'POST',
+  });
 
 export const confirmDeploy = (body: {
   runId: string;
@@ -567,17 +625,15 @@ export const confirmDeploy = (body: {
   manifestJson?: string;
   healthCheckPath?: string;
   appPort?: number;
-}) =>
-  req<DeploymentSummary>('/deployments/confirm', { method: 'POST', body: JSON.stringify(body) });
+}) => req<DeploymentSummary>('/deployments/confirm', {method: 'POST', body: JSON.stringify(body)});
 
 export const engineRollback = (id: string) =>
-  req<void>(`/deployments/${id}/engine-rollback`, { method: 'POST' });
+  req<void>(`/deployments/${id}/engine-rollback`, {method: 'POST'});
 
 export const engineDestroy = (id: string) =>
-  req<void>(`/deployments/${id}/engine-destroy`, { method: 'DELETE' });
+  req<void>(`/deployments/${id}/engine-destroy`, {method: 'DELETE'});
 
-export const getDeploymentDetail = (id: string) =>
-  req<DeploymentSummary>(`/deployments/${id}`);
+export const getDeploymentDetail = (id: string) => req<DeploymentSummary>(`/deployments/${id}`);
 
 // ── GCP Credentials ──────────────────────────────────────────────────────────
 
@@ -597,8 +653,7 @@ export const getGcpCredential = (projectId?: string) => {
   return req<CredentialSummary | null>(`/credentials/gcp${qs}`);
 };
 
-export const listGcpCredentials = () =>
-  req<CredentialSummary[]>('/credentials/gcp/all');
+export const listGcpCredentials = () => req<CredentialSummary[]>('/credentials/gcp/all');
 
 export const validateGcpCredential = (projectId?: string) => {
   const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
@@ -607,21 +662,24 @@ export const validateGcpCredential = (projectId?: string) => {
 
 export const deleteGcpCredential = (projectId?: string) => {
   const qs = projectId ? `?projectId=${encodeURIComponent(projectId)}` : '';
-  return req<{ message: string }>(`/credentials/gcp${qs}`, { method: 'DELETE' });
+  return req<{message: string}>(`/credentials/gcp${qs}`, {method: 'DELETE'});
 };
 
 // ── Integrations ─────────────────────────────────────────────────────────────
 
-export const getIntegrationStatus = () => req<{ enabledSources: string[] }>('/integrations/status');
+export const getIntegrationStatus = () => req<{enabledSources: string[]}>('/integrations/status');
 
 export const getIntegrationRuns = (source?: string) =>
   req<RunSummary[]>(`/integrations/runs${source ? `?source=${source}` : ''}`);
 
-export const triggerConfluence = (body: { pageId: string; goal: string }) =>
-  req<{ runId: string }>('/integrations/confluence/trigger', { method: 'POST', body: JSON.stringify(body) });
+export const triggerConfluence = (body: {pageId: string; goal: string}) =>
+  req<{runId: string}>('/integrations/confluence/trigger', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 
-export const triggerJira = (body: { issueKey: string; goal?: string }) =>
-  req<{ runId: string }>('/integrations/jira/trigger', { method: 'POST', body: JSON.stringify(body) });
+export const triggerJira = (body: {issueKey: string; goal?: string}) =>
+  req<{runId: string}>('/integrations/jira/trigger', {method: 'POST', body: JSON.stringify(body)});
 
 // ── Slack integration ─────────────────────────────────────────────────────────
 
@@ -645,52 +703,55 @@ export interface ProjectSlackChannelDto {
   verbosity: 'MINIMAL' | 'STANDARD' | 'VERBOSE';
 }
 
-export const getSlackStatus = () =>
-  req<SlackStatus>('/integrations/slack/status');
+export const getSlackStatus = () => req<SlackStatus>('/integrations/slack/status');
 
-export const getSlackInstallUrl = () =>
-  req<{ installUrl: string }>('/integrations/slack/install');
+export const getSlackInstallUrl = () => req<{installUrl: string}>('/integrations/slack/install');
 
 export const disconnectSlack = () =>
-  req<void>('/integrations/slack/disconnect', { method: 'DELETE' });
+  req<void>('/integrations/slack/disconnect', {method: 'DELETE'});
 
-export const listSlackChannels = () =>
-  req<SlackChannel[]>('/integrations/slack/channels');
+export const listSlackChannels = () => req<SlackChannel[]>('/integrations/slack/channels');
 
 export const getProjectSlackChannels = (projectId: string) =>
   req<ProjectSlackChannelDto[]>(`/integrations/slack/projects/${projectId}/channels`);
 
 export const addProjectSlackChannel = (
-  projectId: string, channelId: string, channelName: string, verbosity: string,
+  projectId: string,
+  channelId: string,
+  channelName: string,
+  verbosity: string,
 ) =>
   req<ProjectSlackChannelDto>(`/integrations/slack/projects/${projectId}/channels`, {
-    method: 'POST', body: JSON.stringify({ channelId, channelName, verbosity }),
+    method: 'POST',
+    body: JSON.stringify({channelId, channelName, verbosity}),
   });
 
 export const removeProjectSlackChannel = (projectId: string, channelId: string) =>
-  req<void>(`/integrations/slack/projects/${projectId}/channels/${channelId}`, { method: 'DELETE' });
+  req<void>(`/integrations/slack/projects/${projectId}/channels/${channelId}`, {method: 'DELETE'});
 
 export const updateSlackChannelVerbosity = (
-  projectId: string, channelId: string, verbosity: string,
+  projectId: string,
+  channelId: string,
+  verbosity: string,
 ) =>
   req<void>(`/integrations/slack/projects/${projectId}/channels/${channelId}/verbosity`, {
-    method: 'PUT', body: JSON.stringify({ verbosity }),
+    method: 'PUT',
+    body: JSON.stringify({verbosity}),
   });
 
 export const sendSlackTestMessage = (channelId: string) =>
-  req<{ ok: boolean; message: string }>('/integrations/slack/test', {
-    method: 'POST', body: JSON.stringify({ channelId }),
+  req<{ok: boolean; message: string}>('/integrations/slack/test', {
+    method: 'POST',
+    body: JSON.stringify({channelId}),
   });
 
 // ── Timeline ──────────────────────────────────────────────────────────────────
 
-export const getTimeline = (runId: string) =>
-  req<TimelineData>(`/runs/${runId}/timeline`);
+export const getTimeline = (runId: string) => req<TimelineData>(`/runs/${runId}/timeline`);
 
 // ── Files ─────────────────────────────────────────────────────────────────────
 
-export const getFiles = (runId: string) =>
-  req<string[]>(`/runs/${runId}/files`);
+export const getFiles = (runId: string) => req<string[]>(`/runs/${runId}/files`);
 
 /**
  * Trigger a browser download of the workspace zip.
@@ -698,7 +759,7 @@ export const getFiles = (runId: string) =>
  */
 export async function downloadWorkspace(runId: string): Promise<void> {
   const res = await fetch(`${BASE}/runs/${runId}/download`, {
-    headers: { ...authHeader() },
+    headers: {...authHeader()},
   });
   if (!res.ok) throw new Error(`Download failed: ${res.status}`);
   const blob = await res.blob();
@@ -713,15 +774,13 @@ export async function downloadWorkspace(runId: string): Promise<void> {
 }
 
 export const pushToGitHub = (runId: string, repoMode = 'NEW') =>
-  req<{ status: string; repoUrl: string }>(
-    `/runs/${runId}/push-github?repoMode=${repoMode}`, { method: 'POST' }
-  );
+  req<{status: string; repoUrl: string}>(`/runs/${runId}/push-github?repoMode=${repoMode}`, {
+    method: 'POST',
+  });
 
 /** SCM-agnostic push — routes to the user's configured SCM provider (GitHub or Bitbucket). */
 export const pushToScm = (runId: string) =>
-  req<{ status: string; repoUrl: string }>(
-    `/runs/${runId}/push-scm`, { method: 'POST' }
-  );
+  req<{status: string; repoUrl: string}>(`/runs/${runId}/push-scm`, {method: 'POST'});
 
 /** File content is served as text/plain — must NOT use res.json(). */
 export const getFile = (runId: string, filePath: string) =>
@@ -735,29 +794,27 @@ export interface MessageResponse {
   sentAt: string;
 }
 
-export const getMessages = (runId: string) =>
-  req<MessageResponse[]>(`/runs/${runId}/messages`);
+export const getMessages = (runId: string) => req<MessageResponse[]>(`/runs/${runId}/messages`);
 
 // ── Contact ─────────────────────────────────────────────────────────────────
 
 export const submitContactForm = (subject: string, body: string) =>
-  req<{ message: string }>('/contact', {
+  req<{message: string}>('/contact', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ subject, body }),
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({subject, body}),
   });
 
 // ── OpenAPI spec ─────────────────────────────────────────────────────────────
 
 /** Fetch the generated OpenAPI YAML for a run (served as text/plain). */
-export const getOpenApiSpec = (runId: string) =>
-  reqText(`/runs/${runId}/openapi.yaml`);
+export const getOpenApiSpec = (runId: string) => reqText(`/runs/${runId}/openapi.yaml`);
 
 /** Probe the preview container for API documentation endpoints (server-side proxy). */
 export interface ApiDocsProbeResult {
   found: boolean;
   path: string | null;
-  contentType: string | null;  // 'json' | 'html' | 'other'
+  contentType: string | null; // 'json' | 'html' | 'other'
 }
 export const probeApiDocs = (runId: string): Promise<ApiDocsProbeResult> =>
   req<ApiDocsProbeResult>(`/runs/${runId}/preview/probe-api-docs`);
@@ -766,7 +823,17 @@ export const probeApiDocs = (runId: string): Promise<ApiDocsProbeResult> =>
 
 export interface LocalPreviewStatus {
   runId: string;
-  status: 'IDLE' | 'ANALYZING' | 'BUILDING' | 'PUSHING' | 'DEPLOYING' | 'STARTING' | 'RUNNING' | 'FAILED' | 'STOPPED' | 'TIMED_OUT';
+  status:
+    | 'IDLE'
+    | 'ANALYZING'
+    | 'BUILDING'
+    | 'PUSHING'
+    | 'DEPLOYING'
+    | 'STARTING'
+    | 'RUNNING'
+    | 'FAILED'
+    | 'STOPPED'
+    | 'TIMED_OUT';
   url: string | null;
   projectType: string | null;
   databaseType: string | null;
@@ -805,19 +872,20 @@ export const getPreviewStatus = (runId: string) =>
 export const startPreview = (runId: string, envVars?: Record<string, string>) =>
   req<LocalPreviewStatus>(`/runs/${runId}/preview/start`, {
     method: 'POST',
-    body: envVars && Object.keys(envVars).length > 0
-      ? JSON.stringify({ envVars })
-      : undefined,
+    body: envVars && Object.keys(envVars).length > 0 ? JSON.stringify({envVars}) : undefined,
   });
 
 export const stopPreview = (runId: string) =>
-  req<void>(`/runs/${runId}/preview/stop`, { method: 'DELETE' });
+  req<void>(`/runs/${runId}/preview/stop`, {method: 'DELETE'});
 
 export const rebuildPreview = (runId: string) =>
-  req<LocalPreviewStatus>(`/runs/${runId}/preview/rebuild`, { method: 'POST' });
+  req<LocalPreviewStatus>(`/runs/${runId}/preview/rebuild`, {method: 'POST'});
 
-export const getPreviewLogs = (runId: string, lines = 0, filter: 'all' | 'backend' | 'frontend' | 'db' = 'all') =>
-  req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}&filter=${filter}`);
+export const getPreviewLogs = (
+  runId: string,
+  lines = 0,
+  filter: 'all' | 'backend' | 'frontend' | 'db' = 'all',
+) => req<PreviewLogs>(`/runs/${runId}/preview/logs?lines=${lines}&filter=${filter}`);
 
 export interface ExecResult {
   stdout: string;
@@ -828,7 +896,7 @@ export interface ExecResult {
 export const execPreviewCommand = (runId: string, cmd: string, args: string[] = []) =>
   req<ExecResult>(`/runs/${runId}/preview/exec`, {
     method: 'POST',
-    body: JSON.stringify({ cmd, args }),
+    body: JSON.stringify({cmd, args}),
   });
 
 // ── Conversation (pre-flight chat) ────────────────────────────────────────────
@@ -839,9 +907,9 @@ export interface ConversationMessage {
 }
 
 export const conversationChat = (messages: ConversationMessage[]) =>
-  req<{ reply: string }>('/conversation', {
+  req<{reply: string}>('/conversation', {
     method: 'POST',
-    body: JSON.stringify({ messages }),
+    body: JSON.stringify({messages}),
   });
 
 // ── Post-run conversation & iteration ──────────────────────────────────────────
@@ -862,35 +930,38 @@ export interface ChatResponse {
 }
 
 /** Returns the full conversation history for a completed run. */
-export const getRunChat = (runId: string) =>
-  req<RunChatMessage[]>(`/runs/${runId}/chat`);
+export const getRunChat = (runId: string) => req<RunChatMessage[]>(`/runs/${runId}/chat`);
 
 /** Sends a user message and returns the assistant reply. */
 export const sendRunChatMessage = (runId: string, message: string) =>
   req<ChatResponse>(`/runs/${runId}/chat`, {
     method: 'POST',
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({message}),
   });
 
 /** Creates a new iteration run that starts from the source run's codebase. */
 export const iterateRun = (runId: string, userRequest: string) =>
-  req<{ runId: string }>(`/runs/${runId}/iterate`, {
+  req<{runId: string}>(`/runs/${runId}/iterate`, {
     method: 'POST',
-    body: JSON.stringify({ userRequest }),
+    body: JSON.stringify({userRequest}),
   });
 
 // ── Apply Suggestion (Chat Copilot / Review) ──────────────────────────────
 
 export interface ApplyResult {
   taskCount: number;
-  tasks: { taskId: string; title: string }[];
+  tasks: {taskId: string; title: string}[];
 }
 
 /** Apply a chat copilot suggestion or review fixes to an existing run. */
-export const applyToRun = (runId: string, suggestion: string, source: 'COPILOT' | 'REVIEW' = 'COPILOT') =>
+export const applyToRun = (
+  runId: string,
+  suggestion: string,
+  source: 'COPILOT' | 'REVIEW' = 'COPILOT',
+) =>
   req<ApplyResult>(`/runs/${runId}/apply`, {
     method: 'POST',
-    body: JSON.stringify({ suggestion, source }),
+    body: JSON.stringify({suggestion, source}),
   });
 
 // ── Auth types & endpoints ────────────────────────────────────────────────────
@@ -946,9 +1017,9 @@ export interface AuthUser {
  * narrowed `viewMode?: 'pro' | 'project'` type matches what the rest of
  * the frontend ever sees.
  */
-export function normalizeAuthUser<T extends { viewMode?: unknown }>(u: T): T {
-  if (u && (u as { viewMode?: unknown }).viewMode === 'vibe') {
-    return { ...u, viewMode: 'pro' as const };
+export function normalizeAuthUser<T extends {viewMode?: unknown}>(u: T): T {
+  if (u && (u as {viewMode?: unknown}).viewMode === 'vibe') {
+    return {...u, viewMode: 'pro' as const};
   }
   return u;
 }
@@ -970,7 +1041,7 @@ export interface RegisterPayload {
 }
 
 export const authRegister = (body: RegisterPayload) =>
-  req<AuthUser>('/auth/register', { method: 'POST', body: JSON.stringify(body) });
+  req<AuthUser>('/auth/register', {method: 'POST', body: JSON.stringify(body)});
 
 // Wave 2.2 — onboarding (sandbox + sample specs on signup)
 export interface SampleSpecDto {
@@ -994,29 +1065,24 @@ export interface SandboxStatus {
   hasSandbox: boolean;
 }
 
-export const listOnboardingSamples = () =>
-  req<SampleSpecDto[]>('/onboarding/sample-specs');
+export const listOnboardingSamples = () => req<SampleSpecDto[]>('/onboarding/sample-specs');
 
 export const pickOnboardingSample = (sampleId: string) =>
   req<PickSampleResponse>('/onboarding/pick-sample', {
     method: 'POST',
-    body: JSON.stringify({ sampleId }),
+    body: JSON.stringify({sampleId}),
   });
 
-export const getSandboxStatus = () =>
-  req<SandboxStatus>('/onboarding/sandbox-status');
+export const getSandboxStatus = () => req<SandboxStatus>('/onboarding/sandbox-status');
 
-export const authLogin = (body: { email: string; password: string }) =>
-  req<LoginResponse>('/auth/login', { method: 'POST', body: JSON.stringify(body) });
+export const authLogin = (body: {email: string; password: string}) =>
+  req<LoginResponse>('/auth/login', {method: 'POST', body: JSON.stringify(body)});
 
-export const authRefresh = () =>
-  req<LoginResponse>('/auth/refresh', { method: 'POST' });
+export const authRefresh = () => req<LoginResponse>('/auth/refresh', {method: 'POST'});
 
-export const authLogout = () =>
-  req<void>('/auth/logout', { method: 'DELETE' });
+export const authLogout = () => req<void>('/auth/logout', {method: 'DELETE'});
 
-export const authMe = () =>
-  req<AuthUser>('/auth/me');
+export const authMe = () => req<AuthUser>('/auth/me');
 
 export const getMyPermissions = () =>
   req<import('@/hooks/useTierPermissions').TierPermissions>('/auth/me/permissions');
@@ -1025,21 +1091,27 @@ export const getMyPermissions = () =>
 // LoginResponse-shaped payload now (auto-session). Caller stores
 // `accessToken` and redirects, no password re-entry.
 export const authVerifyEmail = (token: string) =>
-  req<{ accessToken: string; user: AuthUser }>(`/auth/verify-email?token=${token}`);
+  req<{accessToken: string; user: AuthUser}>(`/auth/verify-email?token=${token}`);
 
 export const authResendVerification = (email: string) =>
-  req<{ message: string }>('/auth/resend-verification', { method: 'POST', body: JSON.stringify({ email }) });
+  req<{message: string}>('/auth/resend-verification', {
+    method: 'POST',
+    body: JSON.stringify({email}),
+  });
 
 export const authForgotPassword = (email: string) =>
-  req<{ message: string }>('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+  req<{message: string}>('/auth/forgot-password', {method: 'POST', body: JSON.stringify({email})});
 
 export const authResetPassword = (token: string, newPassword: string) =>
-  req<{ message: string }>('/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, newPassword }) });
+  req<{message: string}>('/auth/reset-password', {
+    method: 'POST',
+    body: JSON.stringify({token, newPassword}),
+  });
 
 export const authChangePassword = (currentPassword: string | null, newPassword: string) =>
-  req<{ message: string }>('/auth/change-password', {
+  req<{message: string}>('/auth/change-password', {
     method: 'POST',
-    body: JSON.stringify({ currentPassword, newPassword }),
+    body: JSON.stringify({currentPassword, newPassword}),
   });
 
 /**
@@ -1049,42 +1121,60 @@ export const authChangePassword = (currentPassword: string | null, newPassword: 
 export const updateGithubSettings = (githubPat: string, githubOwner: string) =>
   req<AuthUser>('/auth/settings/github', {
     method: 'PUT',
-    body: JSON.stringify({ githubPat, githubOwner }),
+    body: JSON.stringify({githubPat, githubOwner}),
   });
 
 /** Saves per-user AI provider API keys. Pass empty string to clear. */
-export const updateAiKeySettings = (openAiApiKey: string, anthropicApiKey: string, geminiApiKey: string) =>
+export const updateAiKeySettings = (
+  openAiApiKey: string,
+  anthropicApiKey: string,
+  geminiApiKey: string,
+) =>
   req<AuthUser>('/auth/settings/ai-keys', {
     method: 'PUT',
-    body: JSON.stringify({ openAiApiKey, anthropicApiKey, geminiApiKey }),
+    body: JSON.stringify({openAiApiKey, anthropicApiKey, geminiApiKey}),
   });
 
 /** Saves per-user JIRA credentials. Pass empty strings to clear. */
 export const updateJiraSettings = (jiraBaseUrl: string, jiraEmail: string, jiraApiToken: string) =>
   req<AuthUser>('/auth/settings/jira', {
     method: 'PUT',
-    body: JSON.stringify({ jiraBaseUrl, jiraEmail, jiraApiToken }),
+    body: JSON.stringify({jiraBaseUrl, jiraEmail, jiraApiToken}),
   });
 
 /** Saves per-user Confluence credentials. Pass empty strings to clear. */
-export const updateConfluenceSettings = (confluenceBaseUrl: string, confluenceEmail: string, confluenceApiToken: string) =>
+export const updateConfluenceSettings = (
+  confluenceBaseUrl: string,
+  confluenceEmail: string,
+  confluenceApiToken: string,
+) =>
   req<AuthUser>('/auth/settings/confluence', {
     method: 'PUT',
-    body: JSON.stringify({ confluenceBaseUrl, confluenceEmail, confluenceApiToken }),
+    body: JSON.stringify({confluenceBaseUrl, confluenceEmail, confluenceApiToken}),
   });
 
 /** Saves per-user Bitbucket credentials. Pass empty strings to clear. */
-export const updateBitbucketSettings = (username: string, appPassword: string, workspace: string, repoSlug: string) =>
+export const updateBitbucketSettings = (
+  username: string,
+  appPassword: string,
+  workspace: string,
+  repoSlug: string,
+) =>
   req<AuthUser>('/auth/settings/bitbucket', {
     method: 'PUT',
-    body: JSON.stringify({ username, appPassword, workspace, repoSlug }),
+    body: JSON.stringify({username, appPassword, workspace, repoSlug}),
   });
 
 /** Tests Bitbucket credentials by calling the Bitbucket API. */
-export const validateBitbucket = (username: string, appPassword: string, workspace: string, repoSlug: string) =>
+export const validateBitbucket = (
+  username: string,
+  appPassword: string,
+  workspace: string,
+  repoSlug: string,
+) =>
   req<ValidationResult>('/auth/settings/bitbucket/validate', {
     method: 'POST',
-    body: JSON.stringify({ username, appPassword, workspace, repoSlug }),
+    body: JSON.stringify({username, appPassword, workspace, repoSlug}),
   });
 
 /** Updates the user's UI view mode preference. R-190 (post-cutover) —
@@ -1093,25 +1183,28 @@ export const validateBitbucket = (username: string, appPassword: string, workspa
 export const updateViewMode = (viewMode: 'pro' | 'project') =>
   req<AuthUser>('/auth/settings/view-mode', {
     method: 'PUT',
-    body: JSON.stringify({ viewMode }),
+    body: JSON.stringify({viewMode}),
   });
 
 // ── Credential Validation ──────────────────────────────────────────────────────
 
-export interface ValidationResult { valid: boolean; message: string; }
+export interface ValidationResult {
+  valid: boolean;
+  message: string;
+}
 
 /** Tests a GitHub PAT by calling the GitHub API. */
 export const validateGitHub = (pat: string) =>
   req<ValidationResult>('/auth/settings/github/validate', {
     method: 'POST',
-    body: JSON.stringify({ pat }),
+    body: JSON.stringify({pat}),
   });
 
 /** Phase 1.2 #24 — Tests a BYOK AI provider key by pinging the provider's models endpoint. */
 export const validateAiKey = (provider: 'OPENAI' | 'ANTHROPIC' | 'GEMINI', apiKey: string) =>
   req<ValidationResult>('/auth/settings/ai-keys/validate', {
     method: 'POST',
-    body: JSON.stringify({ provider, apiKey }),
+    body: JSON.stringify({provider, apiKey}),
   });
 
 /** M-005 (Wave 1) — GitHub App install URL + status. Org-admin gated. */
@@ -1124,25 +1217,23 @@ export interface GitHubAppInstallUrl {
   installUrl: string;
   appName: string;
 }
-export const getGitHubAppStatus = () =>
-  req<GitHubAppStatus>('/auth/github-app/status');
+export const getGitHubAppStatus = () => req<GitHubAppStatus>('/auth/github-app/status');
 export const getGitHubAppInstallUrl = () =>
   req<GitHubAppInstallUrl>('/auth/github-app/install-url');
-export const uninstallGitHubApp = () =>
-  req<void>('/auth/github-app/install', { method: 'DELETE' });
+export const uninstallGitHubApp = () => req<void>('/auth/github-app/install', {method: 'DELETE'});
 
 /** Tests JIRA credentials by calling the JIRA REST API. */
 export const validateJira = (baseUrl: string, email: string, apiToken: string) =>
   req<ValidationResult>('/auth/settings/jira/validate', {
     method: 'POST',
-    body: JSON.stringify({ baseUrl, email, apiToken }),
+    body: JSON.stringify({baseUrl, email, apiToken}),
   });
 
 /** Tests Confluence credentials by calling the Confluence REST API. */
 export const validateConfluence = (baseUrl: string, email: string, apiToken: string) =>
   req<ValidationResult>('/auth/settings/confluence/validate', {
     method: 'POST',
-    body: JSON.stringify({ baseUrl, email, apiToken }),
+    body: JSON.stringify({baseUrl, email, apiToken}),
   });
 
 // ── Org endpoints ─────────────────────────────────────────────────────────────
@@ -1199,11 +1290,11 @@ export interface OrgInvitation {
 
 export const getMyOrg = () => req<OrgDto>('/org/me');
 
-export const createOrg = (body: { name: string; domains: string[]; adminEmail: string }) =>
-  req<OrgDto>('/org', { method: 'POST', body: JSON.stringify(body) });
+export const createOrg = (body: {name: string; domains: string[]; adminEmail: string}) =>
+  req<OrgDto>('/org', {method: 'POST', body: JSON.stringify(body)});
 
-export const updateOrg = (body: { name?: string; domains?: string[] }) =>
-  req<OrgDto>('/org/me', { method: 'PUT', body: JSON.stringify(body) });
+export const updateOrg = (body: {name?: string; domains?: string[]}) =>
+  req<OrgDto>('/org/me', {method: 'PUT', body: JSON.stringify(body)});
 
 // v2.6.0 — TEAM tier seat management
 export interface SeatsAdjustResponse {
@@ -1235,8 +1326,7 @@ export interface TierLifecycleUpdateRequest {
   confirmTierName?: string;
 }
 
-export const fetchTiersLifecycle = () =>
-  req<TierLifecycleDto[]>('/admin/tiers');
+export const fetchTiersLifecycle = () => req<TierLifecycleDto[]>('/admin/tiers');
 
 export const updateTierLifecycle = (tier: string, body: TierLifecycleUpdateRequest) =>
   req<unknown>(`/admin/tiers/${tier}/lifecycle`, {
@@ -1253,69 +1343,79 @@ export const updateTierLifecycle = (tier: string, body: TierLifecycleUpdateReque
 export const adjustOrgSeats = (newSeats: number) =>
   req<SeatsAdjustResponse>('/org/me/seats/adjust', {
     method: 'POST',
-    body: JSON.stringify({ newSeats }),
+    body: JSON.stringify({newSeats}),
   });
 
 /** Saves org-wide AI provider API keys (ORG_ADMIN only). Pass empty string to clear. */
-export const updateOrgAiKeySettings = (anthropicApiKey: string, openAiApiKey: string, geminiApiKey: string) =>
+export const updateOrgAiKeySettings = (
+  anthropicApiKey: string,
+  openAiApiKey: string,
+  geminiApiKey: string,
+) =>
   req<OrgDto>('/org/me/settings/ai-keys', {
     method: 'PUT',
-    body: JSON.stringify({ anthropicApiKey, openAiApiKey, geminiApiKey }),
+    body: JSON.stringify({anthropicApiKey, openAiApiKey, geminiApiKey}),
   });
 
 /** Updates org key source mode and provider restrictions (ORG_ADMIN only). */
-export const updateOrgKeySourceSettings = (keySourceMode: string, enabledProviders: string[] | null) =>
+export const updateOrgKeySourceSettings = (
+  keySourceMode: string,
+  enabledProviders: string[] | null,
+) =>
   req<OrgDto>('/org/me/settings/key-source', {
     method: 'PUT',
-    body: JSON.stringify({ keySourceMode, enabledProviders }),
+    body: JSON.stringify({keySourceMode, enabledProviders}),
   });
 
 /** Saves org-level JIRA credentials (ORG_ADMIN only). Pass empty strings to clear. */
 export const updateOrgJiraSettings = (baseUrl: string, email: string, apiToken: string) =>
   req<OrgDto>('/org/me/settings/jira', {
     method: 'PUT',
-    body: JSON.stringify({ baseUrl, email, apiToken }),
+    body: JSON.stringify({baseUrl, email, apiToken}),
   });
 
 /** Tests JIRA credentials at org level. */
 export const validateOrgJira = (baseUrl: string, email: string, apiToken: string) =>
   req<ValidationResult>('/org/me/settings/jira/validate', {
     method: 'POST',
-    body: JSON.stringify({ baseUrl, email, apiToken }),
+    body: JSON.stringify({baseUrl, email, apiToken}),
   });
 
 /** Saves org-level Confluence credentials (ORG_ADMIN only). Pass empty strings to clear. */
 export const updateOrgConfluenceSettings = (baseUrl: string, email: string, apiToken: string) =>
   req<OrgDto>('/org/me/settings/confluence', {
     method: 'PUT',
-    body: JSON.stringify({ baseUrl, email, apiToken }),
+    body: JSON.stringify({baseUrl, email, apiToken}),
   });
 
 /** Tests Confluence credentials at org level. */
 export const validateOrgConfluence = (baseUrl: string, email: string, apiToken: string) =>
   req<ValidationResult>('/org/me/settings/confluence/validate', {
     method: 'POST',
-    body: JSON.stringify({ baseUrl, email, apiToken }),
+    body: JSON.stringify({baseUrl, email, apiToken}),
   });
 
 export const getOrgMembers = () => req<OrgMemberDto[]>('/org/me/members');
 
 export const removeMember = (userId: string) =>
-  req<void>(`/org/me/members/${userId}`, { method: 'DELETE' });
+  req<void>(`/org/me/members/${userId}`, {method: 'DELETE'});
 
 export const changeMemberRole = (userId: string, role: string) =>
-  req<void>(`/org/me/members/${userId}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
+  req<void>(`/org/me/members/${userId}/role`, {method: 'PUT', body: JSON.stringify({role})});
 
-export const inviteMember = (body: { email: string; orgRole?: string; projectIds?: string[] }) =>
-  req<{ message: string; status: string }>('/org/invite', { method: 'POST', body: JSON.stringify(body) });
+export const inviteMember = (body: {email: string; orgRole?: string; projectIds?: string[]}) =>
+  req<{message: string; status: string}>('/org/invite', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 
 export const getOrgInvitations = () => req<OrgInvitation[]>('/org/me/invitations');
 
 export const resendInvitation = (id: string) =>
-  req<{ message: string }>(`/org/me/invitations/${id}/resend`, { method: 'POST' });
+  req<{message: string}>(`/org/me/invitations/${id}/resend`, {method: 'POST'});
 
 export const acceptInvite = (token: string) =>
-  req<{ message: string }>(`/org/accept-invite?token=${token}`, { method: 'POST' });
+  req<{message: string}>(`/org/accept-invite?token=${token}`, {method: 'POST'});
 
 // ── Project endpoints ─────────────────────────────────────────────────────────
 
@@ -1348,18 +1448,26 @@ export const getProjects = () => req<ProjectDto[]>('/projects');
 
 export const getProject = (id: string) => req<ProjectDto>(`/projects/${id}`);
 
-export const createProject = (body: { name: string; description?: string; aiProvider?: string; githubOwner?: string }) =>
-  req<ProjectDto>('/projects', { method: 'POST', body: JSON.stringify(body) });
+export const createProject = (body: {
+  name: string;
+  description?: string;
+  aiProvider?: string;
+  githubOwner?: string;
+}) => req<ProjectDto>('/projects', {method: 'POST', body: JSON.stringify(body)});
 
-export const updateProjectSettings = (id: string, body: { aiProvider?: string; githubOwner?: string }) =>
-  req<ProjectDto>(`/projects/${id}/settings`, { method: 'PATCH', body: JSON.stringify(body) });
+export const updateProjectSettings = (
+  id: string,
+  body: {aiProvider?: string; githubOwner?: string},
+) => req<ProjectDto>(`/projects/${id}/settings`, {method: 'PATCH', body: JSON.stringify(body)});
 
 export const archiveProject = (id: string) =>
-  req<ProjectDto>(`/projects/${id}/archive`, { method: 'PUT' });
+  req<ProjectDto>(`/projects/${id}/archive`, {method: 'PUT'});
 
 /** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
 export const fetchPrReviewComments = (projectId: string, prNumber: number, repoFullName: string) =>
-  req<{ comments: string }>(`/projects/${projectId}/prs/${prNumber}/reviews?repo=${encodeURIComponent(repoFullName)}`);
+  req<{comments: string}>(
+    `/projects/${projectId}/prs/${prNumber}/reviews?repo=${encodeURIComponent(repoFullName)}`,
+  );
 
 export const getProjectMembers = (projectId: string) =>
   req<ProjectMemberDto[]>(`/projects/${projectId}/members`);
@@ -1367,22 +1475,22 @@ export const getProjectMembers = (projectId: string) =>
 export const addProjectMember = (projectId: string, userId: string, role: string) =>
   req<void>(`/projects/${projectId}/members`, {
     method: 'POST',
-    body: JSON.stringify({ userId, role }),
+    body: JSON.stringify({userId, role}),
   });
 
 export const removeProjectMember = (projectId: string, userId: string) =>
-  req<void>(`/projects/${projectId}/members/${userId}`, { method: 'DELETE' });
+  req<void>(`/projects/${projectId}/members/${userId}`, {method: 'DELETE'});
 
 // ── Admin endpoints ───────────────────────────────────────────────────────────
 
 export const adminListUsers = () => req<AuthUser[]>('/admin/users');
 export const adminGetUser = (id: string) => req<AuthUser>(`/admin/users/${id}`);
 export const adminUpdateUserStatus = (id: string, status: string) =>
-  req<AuthUser>(`/admin/users/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+  req<AuthUser>(`/admin/users/${id}/status`, {method: 'PUT', body: JSON.stringify({status})});
 export const adminUpdateUserTier = (id: string, tier: string) =>
-  req<AuthUser>(`/admin/users/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
+  req<AuthUser>(`/admin/users/${id}/tier`, {method: 'PUT', body: JSON.stringify({tier})});
 export const adminUpdateUserRole = (id: string, role: string) =>
-  req<AuthUser>(`/admin/users/${id}/role`, { method: 'PUT', body: JSON.stringify({ role }) });
+  req<AuthUser>(`/admin/users/${id}/role`, {method: 'PUT', body: JSON.stringify({role})});
 
 // M-010 (Wave 2) — emergency halt-all-runs button on AdminPage.
 export interface HaltAllRunsResult {
@@ -1393,7 +1501,7 @@ export interface HaltAllRunsResult {
 export const haltAllActiveRuns = (reason?: string) =>
   req<HaltAllRunsResult>('/admin/runs/halt-all', {
     method: 'POST',
-    body: JSON.stringify(reason ? { reason } : {}),
+    body: JSON.stringify(reason ? {reason} : {}),
   });
 
 // M-019 (Wave 3) + M-042 (Backlog) — activity_audit hash-chain verifier.
@@ -1408,8 +1516,7 @@ export interface AuditChainVerifyReport {
   clean: boolean;
   firstBreak: AuditChainBreak | null;
 }
-export const verifyAuditChain = () =>
-  req<AuditChainVerifyReport>('/admin/audit-chain/verify');
+export const verifyAuditChain = () => req<AuditChainVerifyReport>('/admin/audit-chain/verify');
 
 // M-049 (Backlog) — activation funnel headline counts (V125 ledger).
 export interface ActivationStageCounts {
@@ -1426,52 +1533,79 @@ export const getActivationFunnel = (sinceDays = 30) =>
 
 export const adminListOrgs = () => req<OrgDto[]>('/admin/orgs');
 export const adminUpdateOrgTier = (id: string, tier: string) =>
-  req<OrgDto>(`/admin/orgs/${id}/tier`, { method: 'PUT', body: JSON.stringify({ tier }) });
+  req<OrgDto>(`/admin/orgs/${id}/tier`, {method: 'PUT', body: JSON.stringify({tier})});
 export const adminUpdateOrgStatus = (id: string, status: string) =>
-  req<OrgDto>(`/admin/orgs/${id}/status`, { method: 'PUT', body: JSON.stringify({ status }) });
+  req<OrgDto>(`/admin/orgs/${id}/status`, {method: 'PUT', body: JSON.stringify({status})});
 
 export const adminListEscalated = () => req<OrgInvitation[]>('/admin/invitations/escalated');
 export const adminApproveInvite = (id: string) =>
-  req<{ message: string }>(`/admin/invitations/${id}/approve`, { method: 'POST' });
+  req<{message: string}>(`/admin/invitations/${id}/approve`, {method: 'POST'});
 export const adminRejectInvite = (id: string) =>
-  req<{ message: string }>(`/admin/invitations/${id}/reject`, { method: 'POST' });
+  req<{message: string}>(`/admin/invitations/${id}/reject`, {method: 'POST'});
 
 // Tier config
-export interface TierConfig { tier: string; displayName: string; monthlyRunLimit: number; isFixed: boolean; description: string; }
+export interface TierConfig {
+  tier: string;
+  displayName: string;
+  monthlyRunLimit: number;
+  isFixed: boolean;
+  description: string;
+}
 export const adminGetTierConfig = () => req<TierConfig[]>('/admin/tier-config');
 export const adminUpdateTierConfig = (tier: string, monthlyRunLimit: number) =>
-  req<TierConfig>(`/admin/tier-config/${tier}`, { method: 'PUT', body: JSON.stringify({ monthlyRunLimit }) });
+  req<TierConfig>(`/admin/tier-config/${tier}`, {
+    method: 'PUT',
+    body: JSON.stringify({monthlyRunLimit}),
+  });
 
 // Per-org overrides
 export const adminUpdateOrgRunLimit = (id: string, limit: number | null) =>
-  req<OrgDto>(`/admin/orgs/${id}/run-limit`, { method: 'PUT', body: JSON.stringify({ limit }) });
+  req<OrgDto>(`/admin/orgs/${id}/run-limit`, {method: 'PUT', body: JSON.stringify({limit})});
 export const adminUpdateOrgApiKeys = (id: string, provided: boolean) =>
-  req<OrgDto>(`/admin/orgs/${id}/api-keys`, { method: 'PUT', body: JSON.stringify({ provided }) });
+  req<OrgDto>(`/admin/orgs/${id}/api-keys`, {method: 'PUT', body: JSON.stringify({provided})});
 
 // Admin invite
 export interface AdminInviteRequest {
-  email: string; firstName: string; lastName: string;
-  tier: string; orgId?: string; newOrgName?: string; orgRole?: string;
+  email: string;
+  firstName: string;
+  lastName: string;
+  tier: string;
+  orgId?: string;
+  newOrgName?: string;
+  orgRole?: string;
 }
 export const adminInviteUser = (body: AdminInviteRequest) =>
-  req<{ message: string }>('/admin/invite', { method: 'POST', body: JSON.stringify(body) });
+  req<{message: string}>('/admin/invite', {method: 'POST', body: JSON.stringify(body)});
 
 // Org member suspend
 export const orgSuspendMember = (userId: string, suspended: boolean) =>
-  req<void>(`/org/me/members/${userId}/suspend`, { method: 'PUT', body: JSON.stringify({ suspended }) });
+  req<void>(`/org/me/members/${userId}/suspend`, {
+    method: 'PUT',
+    body: JSON.stringify({suspended}),
+  });
 
 // ── Admin Grant Runs & Top-Up Packages ────────────────────────────────────
 
-export const adminGrantUserRuns = (userId: string, quantity: number, expiryDays?: number | null, reason?: string) =>
+export const adminGrantUserRuns = (
+  userId: string,
+  quantity: number,
+  expiryDays?: number | null,
+  reason?: string,
+) =>
   req<any>(`/admin/users/${userId}/grant-runs`, {
     method: 'POST',
-    body: JSON.stringify({ quantity, expiryDays, reason }),
+    body: JSON.stringify({quantity, expiryDays, reason}),
   });
 
-export const adminGrantOrgRuns = (orgId: string, quantity: number, expiryDays?: number | null, reason?: string) =>
+export const adminGrantOrgRuns = (
+  orgId: string,
+  quantity: number,
+  expiryDays?: number | null,
+  reason?: string,
+) =>
   req<any>(`/admin/orgs/${orgId}/grant-runs`, {
     method: 'POST',
-    body: JSON.stringify({ quantity, expiryDays, reason }),
+    body: JSON.stringify({quantity, expiryDays, reason}),
   });
 
 export interface TopupPackageAdmin {
@@ -1485,17 +1619,26 @@ export interface TopupPackageAdmin {
 }
 
 export const adminListTopupPackages = () => req<TopupPackageAdmin[]>('/admin/topup-packages');
-export const adminCreateTopupPackage = (body: { name: string; runCount: number; amountInr: number; amountUsd?: number; sortOrder?: number }) =>
-  req<TopupPackageAdmin>('/admin/topup-packages', { method: 'POST', body: JSON.stringify(body) });
+export const adminCreateTopupPackage = (body: {
+  name: string;
+  runCount: number;
+  amountInr: number;
+  amountUsd?: number;
+  sortOrder?: number;
+}) => req<TopupPackageAdmin>('/admin/topup-packages', {method: 'POST', body: JSON.stringify(body)});
 export const adminUpdateTopupPackage = (id: string, body: Partial<TopupPackageAdmin>) =>
-  req<TopupPackageAdmin>(`/admin/topup-packages/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+  req<TopupPackageAdmin>(`/admin/topup-packages/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
 export const adminDeleteTopupPackage = (id: string) =>
-  req<{ message: string }>(`/admin/topup-packages/${id}`, { method: 'DELETE' });
+  req<{message: string}>(`/admin/topup-packages/${id}`, {method: 'DELETE'});
 
 // ── Usage Reports ─────────────────────────────────────────────────────────
 export const adminTriggerUsageReport = (period: 'WEEKLY' | 'MONTHLY') =>
-  req<{ emailsSent: number; period: string }>('/admin/usage-reports/trigger', {
-    method: 'POST', body: JSON.stringify({ period }),
+  req<{emailsSent: number; period: string}>('/admin/usage-reports/trigger', {
+    method: 'POST',
+    body: JSON.stringify({period}),
   });
 
 // ── Feature Flags (Admin) ────────────────────────────────────────────────────
@@ -1520,19 +1663,18 @@ export const getPublicFeatureFlags = () =>
 export const adminUpdateFeatureFlag = (key: string, value: string) =>
   req<FeatureFlagDto>(`/admin/feature-flags/${encodeURIComponent(key)}`, {
     method: 'PUT',
-    body: JSON.stringify({ value }),
+    body: JSON.stringify({value}),
   });
 
 // ── Plan Editing & Versioning ──────────────────────────────────────────────
 
 export const editRunPlan = (runId: string, feedback: string) =>
-  req<{ status: string; version: number }>(`/runs/${runId}/edit-plan`, {
+  req<{status: string; version: number}>(`/runs/${runId}/edit-plan`, {
     method: 'POST',
-    body: JSON.stringify({ feedback }),
+    body: JSON.stringify({feedback}),
   });
 
-export const getPlanVersions = (runId: string) =>
-  req<any[]>(`/runs/${runId}/plan-versions`);
+export const getPlanVersions = (runId: string) => req<any[]>(`/runs/${runId}/plan-versions`);
 
 // Task execution graph
 export interface TaskGraphNode {
@@ -1553,7 +1695,7 @@ export const getTaskGraph = (runId: string) => req<TaskGraphNode[]>(`/runs/${run
 export const updateRunProject = (runId: string, projectId: string | null) =>
   req<RunSummary>(`/runs/${runId}/project`, {
     method: 'PATCH',
-    body: JSON.stringify({ projectId: projectId ?? '' }),
+    body: JSON.stringify({projectId: projectId ?? ''}),
   });
 
 // ── Audit Logs ────────────────────────────────────────────────────────────
@@ -1670,7 +1812,7 @@ export const getValidationReport = async (runId: string): Promise<ValidationRepo
 };
 
 export const shareValidationReport = (runId: string) =>
-  req<{ shareToken: string; shareUrl: string }>(`/runs/${runId}/report/share`, { method: 'POST' });
+  req<{shareToken: string; shareUrl: string}>(`/runs/${runId}/report/share`, {method: 'POST'});
 
 /**
  * Kick the background validation-report regeneration for a terminal run.
@@ -1679,7 +1821,7 @@ export const shareValidationReport = (runId: string) =>
  * seconds later to see the fresh row.
  */
 export const retryValidationReport = (runId: string) =>
-  req<void>(`/runs/${runId}/retry-validation`, { method: 'POST' });
+  req<void>(`/runs/${runId}/retry-validation`, {method: 'POST'});
 
 export const getSharedReport = async (shareToken: string): Promise<SharedReportData | null> => {
   try {
@@ -1755,12 +1897,12 @@ export interface TestPlanData {
 
 export interface TestGraphData {
   planStatus: string;
-  nodes: Array<{ id: string; label: string; type: string; status: string; category?: string }>;
-  edges: Array<{ from: string; to: string }>;
+  nodes: Array<{id: string; label: string; type: string; status: string; category?: string}>;
+  edges: Array<{from: string; to: string}>;
   totalTasks: number;
   completedTasks: number;
   failedTasks: number;
-  testResults: { total: number; passed: number; failed: number };
+  testResults: {total: number; passed: number; failed: number};
 }
 
 export const getTestReport = async (runId: string): Promise<TestReportData | null> => {
@@ -1788,13 +1930,18 @@ export const getTestGraph = async (runId: string): Promise<TestGraphData | null>
 };
 
 export const markTestInvalid = (testResultId: number) =>
-  req<void>(`/test-results/${testResultId}/mark-invalid`, { method: 'PUT' });
+  req<void>(`/test-results/${testResultId}/mark-invalid`, {method: 'PUT'});
 
 export const applyTestFixes = (runId: string, signature?: string) =>
-  req<void>(`/runs/${runId}/apply-test-fixes${signature ? `?signature=${encodeURIComponent(signature)}` : ''}`, { method: 'POST' });
+  req<void>(
+    `/runs/${runId}/apply-test-fixes${signature ? `?signature=${encodeURIComponent(signature)}` : ''}`,
+    {method: 'POST'},
+  );
 
 export const runTests = (runId: string) =>
-  req<{ runId: string; testPlanId: number; previewUrl: string }>(`/runs/${runId}/run-tests`, { method: 'POST' });
+  req<{runId: string; testPlanId: number; previewUrl: string}>(`/runs/${runId}/run-tests`, {
+    method: 'POST',
+  });
 
 // ── Admin Analytics ──────────────────────────────────────────────────────────
 
@@ -1803,7 +1950,7 @@ export interface UsageMetrics {
   successfulRuns: number;
   failedRuns: number;
   partialRuns: number;
-  runsByDay: { date: string; count: number; successRate: number }[];
+  runsByDay: {date: string; count: number; successRate: number}[];
   runsByProject: Record<string, number>;
   avgTimeToCompleteSeconds: number;
   totalCost: number;
@@ -1831,26 +1978,39 @@ export interface BillingOverviewData {
   runLimit: number;
   gateway: string | null;
   topupCredits: number;
-  recentInvoices: { invoiceNumber: string; amount: number; currency: string; status: string; issuedAt: string }[];
+  recentInvoices: {
+    invoiceNumber: string;
+    amount: number;
+    currency: string;
+    status: string;
+    issuedAt: string;
+  }[];
 }
 
 export const getAnalyticsUsage = (entityType: string, entityId: string, period = 30) =>
-  req<UsageMetrics>(`/admin/analytics/usage?entityType=${entityType}&entityId=${entityId}&period=${period}`);
+  req<UsageMetrics>(
+    `/admin/analytics/usage?entityType=${entityType}&entityId=${entityId}&period=${period}`,
+  );
 
 export const getAnalyticsMembers = (orgId: string, period = 30) =>
   req<MemberUsage[]>(`/admin/analytics/members?orgId=${orgId}&period=${period}`);
 
 export const getAnalyticsBilling = (entityType: string, entityId: string) =>
-  req<BillingOverviewData>(`/admin/analytics/billing?entityType=${entityType}&entityId=${entityId}`);
+  req<BillingOverviewData>(
+    `/admin/analytics/billing?entityType=${entityType}&entityId=${entityId}`,
+  );
 
-export const updateModelPricing = (provider: string, model: string, data: { inputCostPer1m: number; outputCostPer1m: number; notes?: string }) =>
-  req<PricingRow>(`/pricing/${provider}/${model}`, { method: 'PUT', body: JSON.stringify(data) });
+export const updateModelPricing = (
+  provider: string,
+  model: string,
+  data: {inputCostPer1m: number; outputCostPer1m: number; notes?: string},
+) => req<PricingRow>(`/pricing/${provider}/${model}`, {method: 'PUT', body: JSON.stringify(data)});
 
 export const getAllPricing = () => req<PricingRow[]>('/pricing');
 
 export const downloadValidationReportPdf = async (runId: string): Promise<void> => {
   const res = await fetch(`${BASE}/runs/${runId}/report/pdf`, {
-    headers: { ...authHeader() },
+    headers: {...authHeader()},
     credentials: 'include',
   });
   if (!res.ok) {
@@ -1903,7 +2063,7 @@ export interface WebhookEventEntry {
 }
 
 export const adminListPaymentAudit = (page = 0, size = 50, orgId?: string, userId?: string) => {
-  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  const params = new URLSearchParams({page: String(page), size: String(size)});
   if (orgId) params.set('orgId', orgId);
   if (userId) params.set('userId', userId);
   return req<PagedResponse<PaymentAuditEntry>>(`/admin/payment-audit?${params}`);
@@ -1911,7 +2071,7 @@ export const adminListPaymentAudit = (page = 0, size = 50, orgId?: string, userI
 
 export const adminExportPaymentAuditCsv = async () => {
   const res = await fetch(`${BASE}/admin/payment-audit/export`, {
-    headers: { ...authHeader() },
+    headers: {...authHeader()},
   });
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
@@ -1929,7 +2089,7 @@ export const adminExportPaymentAuditCsv = async () => {
 };
 
 export const adminListWebhookEvents = (page = 0, size = 50, gateway?: string) => {
-  const params = new URLSearchParams({ page: String(page), size: String(size) });
+  const params = new URLSearchParams({page: String(page), size: String(size)});
   if (gateway) params.set('gateway', gateway);
   return req<PagedResponse<WebhookEventEntry>>(`/admin/webhook-events?${params}`);
 };
@@ -1950,24 +2110,23 @@ export interface NotificationItem {
 export const getNotifications = (page = 0, size = 20) =>
   req<PagedResponse<NotificationItem>>(`/notifications?page=${page}&size=${size}`);
 
-export const getUnreadCount = () =>
-  req<{ count: number }>('/notifications/unread-count');
+export const getUnreadCount = () => req<{count: number}>('/notifications/unread-count');
 
 export const markNotificationRead = (id: string) =>
-  req<void>(`/notifications/${id}/read`, { method: 'POST' });
+  req<void>(`/notifications/${id}/read`, {method: 'POST'});
 
 export const markAllNotificationsRead = () =>
-  req<void>('/notifications/read-all', { method: 'POST' });
+  req<void>('/notifications/read-all', {method: 'POST'});
 
 // ── Notification preferences (M-003 Wave 2) ─────────────────────────────────
 
 export interface NotificationPrefRow {
-  eventType: string;       // canonical ActivityEventType name
+  eventType: string; // canonical ActivityEventType name
   tier: 'HIGH_SIGNAL' | 'ADMIN_TOGGLE';
   channel: 'IN_APP' | 'EMAIL';
-  enabled: boolean;        // effective (override → override; else default)
+  enabled: boolean; // effective (override → override; else default)
   defaultEnabled: boolean;
-  override: boolean;       // true if the user has an explicit row
+  override: boolean; // true if the user has an explicit row
 }
 
 export const getNotificationPreferences = () =>
@@ -1980,7 +2139,7 @@ export const updateNotificationPreference = (
 ) =>
   req<NotificationPrefRow>('/notifications/preferences', {
     method: 'PUT',
-    body: JSON.stringify({ eventType, channel, enabled }),
+    body: JSON.stringify({eventType, channel, enabled}),
   });
 
 // ── SSO config (M-004 Wave 2) ───────────────────────────────────────────────
@@ -1995,28 +2154,27 @@ export interface SsoConfig {
   configured: boolean;
 }
 
-export const getSsoConfig = () =>
-  req<SsoConfig>('/auth/sso/config');
+export const getSsoConfig = () => req<SsoConfig>('/auth/sso/config');
 
-export const updateSsoConfig = (body: Partial<{
-  provider: SsoProvider | null;
-  enforced: boolean;
-  metadataUrl: string | null;
-  domain: string | null;
-}>) =>
+export const updateSsoConfig = (
+  body: Partial<{
+    provider: SsoProvider | null;
+    enforced: boolean;
+    metadataUrl: string | null;
+    domain: string | null;
+  }>,
+) =>
   req<SsoConfig>('/auth/sso/config', {
     method: 'PUT',
     body: JSON.stringify(body),
   });
 
-export const clearSsoConfig = () =>
-  req<void>('/auth/sso/config', { method: 'DELETE' });
+export const clearSsoConfig = () => req<void>('/auth/sso/config', {method: 'DELETE'});
 
 // ── SSE ────────────────────────────────────────────────────────────────────
 
 /** Fetch a short-lived scoped SSE token for a specific run. */
-export const getSseToken = (runId: string) =>
-  req<{ token: string }>(`/runs/${runId}/sse-token`);
+export const getSseToken = (runId: string) => req<{token: string}>(`/runs/${runId}/sse-token`);
 
 // ── Pilot v3.0: Project workspace, repos, architecture, scoring ───────────
 import type {
@@ -2050,23 +2208,22 @@ export const listGitHubRepos = (owner?: string) =>
   req<GitHubRemoteRepo[]>(`/repos/github${owner ? `?owner=${encodeURIComponent(owner)}` : ''}`);
 
 export const createRepo = (data: LinkRepoRequest) =>
-  req<ProjectRepo>('/repos', { method: 'POST', body: JSON.stringify(data) });
+  req<ProjectRepo>('/repos', {method: 'POST', body: JSON.stringify(data)});
 
-export const deleteRepo = (repoId: string) =>
-  req<void>(`/repos/${repoId}`, { method: 'DELETE' });
+export const deleteRepo = (repoId: string) => req<void>(`/repos/${repoId}`, {method: 'DELETE'});
 
 export const syncRepo = (repoId: string) =>
-  req<ProjectRepo>(`/repos/${repoId}/sync`, { method: 'POST' });
+  req<ProjectRepo>(`/repos/${repoId}/sync`, {method: 'POST'});
 
 // Repos — project link
 export const getProjectRepos = (projectId: string) =>
   req<ProjectRepoLink[]>(`/projects/${projectId}/repos`);
 
 export const linkProjectRepo = (projectId: string, repoId: string) =>
-  req<ProjectRepoLink>(`/projects/${projectId}/repos/${repoId}`, { method: 'POST' });
+  req<ProjectRepoLink>(`/projects/${projectId}/repos/${repoId}`, {method: 'POST'});
 
 export const unlinkProjectRepo = (projectId: string, repoId: string) =>
-  req<void>(`/projects/${projectId}/repos/${repoId}`, { method: 'DELETE' });
+  req<void>(`/projects/${projectId}/repos/${repoId}`, {method: 'DELETE'});
 
 export const updateRepoRelationships = (
   projectId: string,
@@ -2075,24 +2232,26 @@ export const updateRepoRelationships = (
 ) =>
   req<ProjectRepoLink>(`/projects/${projectId}/repos/${repoId}/relationships`, {
     method: 'PUT',
-    body: JSON.stringify({ relationships }),
+    body: JSON.stringify({relationships}),
   });
 
 // Architecture docs (R3)
 export const generateArchitecture = (projectId: string) =>
-  req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, { method: 'POST' });
+  req<ArchitectureDoc>(`/projects/${projectId}/architecture/generate`, {method: 'POST'});
 
 // Project workspace analyse (regenerates codemaps + architecture.md + summary.md on disk)
 export const analyseProject = (projectId: string, branch?: string) =>
   req<ArchitectureDoc>(
     `/projects/${projectId}/analyse${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
-    { method: 'POST' });
+    {method: 'POST'},
+  );
 
 // Sync a terminal run's workspace from a branch (post-merge re-review).
 export const syncRun = (runId: string, branch?: string) =>
-  req<{ status: string; reposSynced: number; details: string[] }>(
+  req<{status: string; reposSynced: number; details: string[]}>(
     `/runs/${runId}/sync${branch ? `?branch=${encodeURIComponent(branch)}` : ''}`,
-    { method: 'POST' });
+    {method: 'POST'},
+  );
 
 // v2.5.2 — Spec templates (Phase 4.2 / UX-2.3).
 export interface SpecTemplate {
@@ -2108,7 +2267,7 @@ export const listSpecTemplates = (projectId: string) =>
   req<SpecTemplate[]>(`/projects/${projectId}/templates`);
 export const createProjectSpecTemplate = (
   projectId: string,
-  body: { name: string; description?: string; requirementTemplate: string },
+  body: {name: string; description?: string; requirementTemplate: string},
 ) =>
   req<SpecTemplate>(`/projects/${projectId}/templates`, {
     method: 'POST',
@@ -2116,14 +2275,14 @@ export const createProjectSpecTemplate = (
   });
 export const createOrgSpecTemplate = (
   orgId: string,
-  body: { name: string; description?: string; requirementTemplate: string },
+  body: {name: string; description?: string; requirementTemplate: string},
 ) =>
   req<SpecTemplate>(`/orgs/${orgId}/templates`, {
     method: 'POST',
     body: JSON.stringify(body),
   });
 export const deleteSpecTemplate = (projectId: string, templateId: string) =>
-  req<void>(`/projects/${projectId}/templates/${templateId}`, { method: 'DELETE' });
+  req<void>(`/projects/${projectId}/templates/${templateId}`, {method: 'DELETE'});
 
 // v2.5.5 (UX-4.2) — architecture diff source-file correlation.
 // The text diff of architecture.md stays client-side (LCS); this call
@@ -2132,32 +2291,30 @@ export const deleteSpecTemplate = (projectId: string, templateId: string) =>
 // generate-time on each ProjectArchitectureDoc row.
 export interface ArchChangedFile {
   filename: string;
-  status: string;        // added | modified | removed | renamed
+  status: string; // added | modified | removed | renamed
   additions: number;
   deletions: number;
 }
 export interface ArchDiffReport {
   fromVersion: number;
   toVersion: number;
-  perRepo: { repoFullName: string; files: ArchChangedFile[] }[];
+  perRepo: {repoFullName: string; files: ArchChangedFile[]}[];
   totalFiles: number;
 }
 export const getArchitectureDiff = (projectId: string, from: number, to: number) =>
-  req<ArchDiffReport>(
-    `/projects/${projectId}/architecture/diff?from=${from}&to=${to}`);
+  req<ArchDiffReport>(`/projects/${projectId}/architecture/diff?from=${from}&to=${to}`);
 
 // v2.5.2 — Tech Debt rollup for Project Overview. All DB-derived, no LLM.
 export interface TechDebtReport {
   issuesByCategory: Record<string, number>;
   issuesBySeverity: Record<string, number>;
-  topFiles: { filePath: string; issueCount: number }[];
-  scoreTrend: { dimension: string; score: number; at: string }[];
+  topFiles: {filePath: string; issueCount: number}[];
+  scoreTrend: {dimension: string; score: number; at: string}[];
   averageAccuracyScore: number;
   totalRunsAnalyzed: number;
 }
 export const getTechDebt = (projectId: string, sinceDays?: number) =>
-  req<TechDebtReport>(
-    `/projects/${projectId}/tech-debt${sinceDays ? `?since=${sinceDays}` : ''}`);
+  req<TechDebtReport>(`/projects/${projectId}/tech-debt${sinceDays ? `?since=${sinceDays}` : ''}`);
 
 // v2.5.2 — heuristic pre-submit Launch estimate (no LLM call).
 export interface LaunchEstimate {
@@ -2169,7 +2326,8 @@ export interface LaunchEstimate {
 }
 export const estimateRun = (projectId: string, requirement: string) =>
   req<LaunchEstimate>(
-    `/projects/${projectId}/estimate?requirement=${encodeURIComponent(requirement)}`);
+    `/projects/${projectId}/estimate?requirement=${encodeURIComponent(requirement)}`,
+  );
 
 // v2.5.2 — "Continue building" banner after a PR merge. Absent (null body)
 // means no banner; entry lives 10 min in Redis post-merge.
@@ -2181,7 +2339,7 @@ export interface PostMergeBar {
 export const getPostMergeBar = (projectId: string) =>
   req<PostMergeBar[]>(`/projects/${projectId}/post-merge-bar`);
 export const dismissPostMergeBar = (projectId: string) =>
-  req<void>(`/projects/${projectId}/post-merge-bar`, { method: 'DELETE' });
+  req<void>(`/projects/${projectId}/post-merge-bar`, {method: 'DELETE'});
 
 // v2.5.2 — per-repo workspace health for the Project Overview tab.
 export interface RepoHealth {
@@ -2205,7 +2363,12 @@ export const getWorkspaceHealth = (projectId: string) =>
 // E2.3 — contract coverage panel (UX-preserved: drives ContractCoveragePanel.tsx
 // which reuses the WorkspaceHealthPanel layout + 4-band semantic tokens).
 export type ContractType =
-  | 'OPENAPI' | 'PROTO' | 'GRAPHQL' | 'JSON_SCHEMA' | 'ASYNCAPI' | 'EVENT_SCHEMA';
+  | 'OPENAPI'
+  | 'PROTO'
+  | 'GRAPHQL'
+  | 'JSON_SCHEMA'
+  | 'ASYNCAPI'
+  | 'EVENT_SCHEMA';
 export type DetectorStatus = 'SCANNED' | 'FAILED' | 'SKIPPED';
 export interface DetectorSummary {
   detector: string;
@@ -2227,12 +2390,11 @@ export interface ContractCoverageResponse {
   knownGaps: KnownGap[];
 }
 export const getContractCoverage = (projectId: string, repoId: string) =>
-  req<ContractCoverageResponse>(
-    `/projects/${projectId}/repos/${repoId}/contract-coverage`);
+  req<ContractCoverageResponse>(`/projects/${projectId}/repos/${repoId}/contract-coverage`);
 export const rescanContractCoverage = (projectId: string, repoId: string) =>
-  req<ContractCoverageResponse>(
-    `/projects/${projectId}/repos/${repoId}/contract-coverage/rescan`,
-    { method: 'POST' });
+  req<ContractCoverageResponse>(`/projects/${projectId}/repos/${repoId}/contract-coverage/rescan`, {
+    method: 'POST',
+  });
 
 // E2.8 — contract drift detection
 export interface DriftCheckResult {
@@ -2242,27 +2404,23 @@ export interface DriftCheckResult {
   eventId?: string | null;
 }
 export const checkContractDrift = (projectId: string, contractId: string) =>
-  req<DriftCheckResult>(
-    `/projects/${projectId}/contracts/${contractId}/check-drift`,
-    { method: 'POST' });
+  req<DriftCheckResult>(`/projects/${projectId}/contracts/${contractId}/check-drift`, {
+    method: 'POST',
+  });
 export const checkRepoDrift = (projectId: string, repoId: string) =>
-  req<DriftCheckResult[]>(
-    `/projects/${projectId}/repos/${repoId}/check-drift`,
-    { method: 'POST' });
+  req<DriftCheckResult[]>(`/projects/${projectId}/repos/${repoId}/check-drift`, {method: 'POST'});
 export const checkProjectDrift = (projectId: string) =>
-  req<DriftCheckResult[]>(
-    `/projects/${projectId}/check-drift`,
-    { method: 'POST' });
+  req<DriftCheckResult[]>(`/projects/${projectId}/check-drift`, {method: 'POST'});
 export const refreshContractFromSource = (projectId: string, contractId: string) =>
-  req<{ prUrl: string; branchName: string }>(
+  req<{prUrl: string; branchName: string}>(
     `/projects/${projectId}/contracts/${contractId}/refresh-from-source`,
-    { method: 'POST' });
-export const dismissContractDrift = (
-  projectId: string, contractId: string, rationale: string,
-) =>
-  req<{ dismissedCount: number }>(
-    `/projects/${projectId}/contracts/${contractId}/dismiss-drift`,
-    { method: 'POST', body: JSON.stringify({ rationale }) });
+    {method: 'POST'},
+  );
+export const dismissContractDrift = (projectId: string, contractId: string, rationale: string) =>
+  req<{dismissedCount: number}>(`/projects/${projectId}/contracts/${contractId}/dismiss-drift`, {
+    method: 'POST',
+    body: JSON.stringify({rationale}),
+  });
 
 // E3.16 — standards compliance report
 export interface StandardEntry {
@@ -2303,7 +2461,8 @@ export interface ComplianceReport {
 }
 export const getStandardsReport = (projectId: string, orgId: string, sinceDays = 30) =>
   req<ComplianceReport>(
-    `/projects/${projectId}/standards/report?orgId=${encodeURIComponent(orgId)}&sinceDays=${sinceDays}`);
+    `/projects/${projectId}/standards/report?orgId=${encodeURIComponent(orgId)}&sinceDays=${sinceDays}`,
+  );
 
 // E4.1 — activity feed
 export interface ActivityEntry {
@@ -2356,7 +2515,7 @@ export interface AdrSummary {
   id: string;
   adrIdInRepo: number;
   title: string;
-  status: string;          // PROPOSED | ACCEPTED | DEPRECATED | SUPERSEDED
+  status: string; // PROPOSED | ACCEPTED | DEPRECATED | SUPERSEDED
   decisionDate: string | null;
   repoId: string | null;
   filePath: string | null;
@@ -2381,8 +2540,8 @@ export const getProjectAdr = (projectId: string, id: string) =>
 // M-015 (Wave 2) — V138 architectural invariants
 export interface InvariantSummary {
   id: string;
-  invariantId: string;       // human-readable id from invariants.yaml
-  status: string;            // ACTIVE | RETIRED
+  invariantId: string; // human-readable id from invariants.yaml
+  status: string; // ACTIVE | RETIRED
   invariantYaml: string;
   createdAt: string;
 }
@@ -2391,8 +2550,8 @@ export interface InvariantViolation {
   id: string;
   invariantUuid: string | null;
   detectedAt: string;
-  phase: string;             // PLAN | ARCH_REGEN
-  detail: string | null;     // jsonb body
+  phase: string; // PLAN | ARCH_REGEN
+  detail: string | null; // jsonb body
 }
 
 export const listProjectInvariants = (projectId: string) =>
@@ -2422,12 +2581,14 @@ export const listOrgStandards = (orgId: string) =>
 
 export const createOrgStandard = (orgId: string, body: OrgStandardUpsert) =>
   req<OrgStandardDto>(`/orgs/${orgId}/standards`, {
-    method: 'POST', body: JSON.stringify(body),
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 
 export const updateOrgStandard = (orgId: string, standardId: string, body: OrgStandardUpsert) =>
   req<OrgStandardDto>(`/orgs/${orgId}/standards/${encodeURIComponent(standardId)}`, {
-    method: 'PUT', body: JSON.stringify(body),
+    method: 'PUT',
+    body: JSON.stringify(body),
   });
 
 export const deleteOrgStandard = (orgId: string, standardId: string) =>
@@ -2437,18 +2598,18 @@ export const deleteOrgStandard = (orgId: string, standardId: string) =>
 
 // v2.5.2 — install a PR webhook on a repo the user linked (rather than created).
 export const installRepoWebhook = (repoId: string) =>
-  req<{ installed: boolean; reason?: string }>(
-    `/repos/${repoId}/webhook`, { method: 'POST' });
+  req<{installed: boolean; reason?: string}>(`/repos/${repoId}/webhook`, {method: 'POST'});
 
 // v2.5.2 — reset workspace to the exact commit SHAs captured at run start.
 // Returns { reposSynced: 0, details: ["no snapshot — run predates v2.5.2"] }
 // for runs clone before the snapshot rollout.
 export const syncRunToOriginal = (runId: string) =>
-  req<{ status: string; reposSynced: number; details: string[] }>(
-    `/runs/${runId}/sync/original`, { method: 'POST' });
+  req<{status: string; reposSynced: number; details: string[]}>(`/runs/${runId}/sync/original`, {
+    method: 'POST',
+  });
 
 export const getProjectSummary = (projectId: string) =>
-  req<{ content: string }>(`/projects/${projectId}/summary`);
+  req<{content: string}>(`/projects/${projectId}/summary`);
 
 // v2.5.12 — project-level generated docs (EXPLANATION + SETUP)
 export type GeneratedDocType = 'EXPLANATION' | 'SETUP';
@@ -2466,8 +2627,7 @@ export interface GeneratedDocRow {
 }
 
 export const generateProjectDoc = (projectId: string, docType: GeneratedDocType) =>
-  req<GeneratedDocRow>(
-    `/projects/${projectId}/docs/${docType}/generate`, { method: 'POST' });
+  req<GeneratedDocRow>(`/projects/${projectId}/docs/${docType}/generate`, {method: 'POST'});
 
 /**
  * Returns null (204) when the doc hasn't been generated yet. Callers should
@@ -2475,10 +2635,10 @@ export const generateProjectDoc = (projectId: string, docType: GeneratedDocType)
  * which we normalise to null at the call site.
  */
 export const getProjectDoc = async (
-  projectId: string, docType: GeneratedDocType,
+  projectId: string,
+  docType: GeneratedDocType,
 ): Promise<GeneratedDocRow | null> => {
-  const row = await req<GeneratedDocRow | undefined>(
-    `/projects/${projectId}/docs/${docType}`);
+  const row = await req<GeneratedDocRow | undefined>(`/projects/${projectId}/docs/${docType}`);
   return row ?? null;
 };
 
@@ -2487,11 +2647,12 @@ export const getProjectDoc = async (
  * because the endpoint returns text/markdown, not JSON.
  */
 export const downloadProjectDoc = async (
-  projectId: string, docType: GeneratedDocType,
+  projectId: string,
+  docType: GeneratedDocType,
 ): Promise<void> => {
   const token = localStorage.getItem('access_token');
   const res = await fetch(`/api/projects/${projectId}/docs/${docType}/download`, {
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
   });
   if (!res.ok) {
     const raw = await res.text().catch(() => res.statusText);
@@ -2524,13 +2685,16 @@ export interface ProjectDocumentRow {
 export const listProjectDocuments = (projectId: string) =>
   req<ProjectDocumentRow[]>(`/projects/${projectId}/documents`);
 
-export const uploadProjectDocument = async (projectId: string, file: File): Promise<ProjectDocumentRow> => {
+export const uploadProjectDocument = async (
+  projectId: string,
+  file: File,
+): Promise<ProjectDocumentRow> => {
   const form = new FormData();
   form.append('file', file);
   const token = localStorage.getItem('token');
   const res = await fetch(`/api/projects/${projectId}/documents`, {
     method: 'POST',
-    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    headers: token ? {Authorization: `Bearer ${token}`} : {},
     body: form,
   });
   if (!res.ok) throw new Error(`Upload failed: ${res.status}`);
@@ -2538,12 +2702,14 @@ export const uploadProjectDocument = async (projectId: string, file: File): Prom
 };
 
 export const deleteProjectDocument = (projectId: string, documentId: string) =>
-  req<{ status: string }>(`/projects/${projectId}/documents/${documentId}`, { method: 'DELETE' });
+  req<{status: string}>(`/projects/${projectId}/documents/${documentId}`, {method: 'DELETE'});
 
 // PR refresh — polls GitHub for the latest state of every project PR.
 export const refreshProjectPrs = (projectId: string) =>
-  req<{ checked: number; updated: number; newlyMerged: number }>(
-    `/projects/${projectId}/prs/refresh`, { method: 'POST' });
+  req<{checked: number; updated: number; newlyMerged: number}>(
+    `/projects/${projectId}/prs/refresh`,
+    {method: 'POST'},
+  );
 
 export const getArchitectureDoc = (projectId: string) =>
   req<ArchitectureDoc>(`/projects/${projectId}/architecture`);
@@ -2554,11 +2720,11 @@ export const getArchitectureVersions = (projectId: string) =>
 export const annotateArchitecture = (projectId: string, annotation: string) =>
   req<ArchitectureDoc>(`/projects/${projectId}/architecture/annotate`, {
     method: 'PUT',
-    body: JSON.stringify({ annotation }),
+    body: JSON.stringify({annotation}),
   });
 
 export const getRepoCodeMap = (projectId: string, repoId: string) =>
-  req<{ content: string }>(`/projects/${projectId}/repos/${repoId}/codemap`);
+  req<{content: string}>(`/projects/${projectId}/repos/${repoId}/codemap`);
 
 // PR list for a run (R5)
 export const getRunPrs = (runId: string) =>
@@ -2609,10 +2775,9 @@ export const getProjectLedger = (projectId: string) =>
   req<RunLedgerEntry[]>(`/projects/${projectId}/memory/ledger`);
 
 export const compactProjectMemory = (projectId: string) =>
-  req<{ snapshotVersion: number; compacted: boolean }>(
-    `/projects/${projectId}/memory/compact`,
-    { method: 'POST' },
-  );
+  req<{snapshotVersion: number; compacted: boolean}>(`/projects/${projectId}/memory/compact`, {
+    method: 'POST',
+  });
 
 export interface PullRequestSnapshot {
   title: string;
@@ -2632,15 +2797,15 @@ export const getPullRequestSnapshot = (repoFullName: string, prNumber: number, m
   );
 
 export const compileProjectChatToSpec = (projectId: string) =>
-  req<{ spec: string }>(`/projects/${projectId}/chat/compile`, { method: 'POST' });
+  req<{spec: string}>(`/projects/${projectId}/chat/compile`, {method: 'POST'});
 
 export const clearProjectChat = (projectId: string) =>
-  req<{ deleted: number }>(`/projects/${projectId}/chat`, { method: 'DELETE' });
+  req<{deleted: number}>(`/projects/${projectId}/chat`, {method: 'DELETE'});
 
 export const compactProjectChat = (projectId: string) =>
-  req<{ compactedFrom: number; kept: number; totalAfter: number }>(
+  req<{compactedFrom: number; kept: number; totalAfter: number}>(
     `/projects/${projectId}/chat/compact`,
-    { method: 'POST' },
+    {method: 'POST'},
   );
 
 // ── Migrations product (R-336..R-339) ─────────────────────────────────────
@@ -2743,7 +2908,7 @@ export interface MigrationApplyResponse {
 }
 
 export const listMigrations = (
-  filters: { category?: string; tier?: string; search?: string } = {},
+  filters: {category?: string; tier?: string; search?: string} = {},
 ) => {
   const qs = new URLSearchParams();
   if (filters.category) qs.set('category', filters.category);
@@ -2756,10 +2921,7 @@ export const listMigrations = (
 export const getMigrationDetail = (slug: string) =>
   req<MigrationDetail>(`/migrations/${encodeURIComponent(slug)}`);
 
-export const migrationDryRun = (
-  slug: string,
-  body: { projectId: string; repoIds: string[] },
-) =>
+export const migrationDryRun = (slug: string, body: {projectId: string; repoIds: string[]}) =>
   req<MigrationDryRunResult>(`/migrations/${encodeURIComponent(slug)}/dry-run`, {
     method: 'POST',
     body: JSON.stringify(body),
@@ -2869,7 +3031,7 @@ export interface LibraryFacets {
 }
 
 export const listLibrary = (
-  filters: { category?: string; macroGroup?: string; tier?: string; search?: string } = {},
+  filters: {category?: string; macroGroup?: string; tier?: string; search?: string} = {},
 ) => {
   const qs = new URLSearchParams();
   if (filters.category) qs.set('category', filters.category);
@@ -2883,13 +3045,12 @@ export const listLibrary = (
 export const getLibraryDetail = (slug: string) =>
   req<ReadymadeDetail>(`/library/${encodeURIComponent(slug)}`);
 
-export const getLibraryFacets = () =>
-  req<LibraryFacets>(`/library/categories`);
+export const getLibraryFacets = () => req<LibraryFacets>(`/library/categories`);
 
 export const resolveLibraryVariant = (slug: string, projectId: string, repoId: string) =>
   req<VariantResolutionResult>(
     `/library/${encodeURIComponent(slug)}/resolve?projectId=${encodeURIComponent(projectId)}&repoId=${encodeURIComponent(repoId)}`,
-    { method: 'POST' },
+    {method: 'POST'},
   );
 
 /** R-331 — instantiate a solution into a V2 run (slot-substituted spec → ExecutionOrchestrator). */
@@ -2903,16 +3064,16 @@ export const instantiateLibrarySolution = (
     branch?: string;
   },
 ) =>
-  req<{ executionRunId: string; status: string; message: string }>(
+  req<{executionRunId: string; status: string; message: string}>(
     `/library/${encodeURIComponent(slug)}/instantiate`,
-    { method: 'POST', body: JSON.stringify(body) },
+    {method: 'POST', body: JSON.stringify(body)},
   );
 
 export const favouriteLibrarySolution = (slug: string) =>
-  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, { method: 'POST' });
+  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, {method: 'POST'});
 
 export const unfavouriteLibrarySolution = (slug: string) =>
-  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, { method: 'DELETE' });
+  req<void>(`/library/favourite/${encodeURIComponent(slug)}`, {method: 'DELETE'});
 
 /**
  * R-341 — tier-stratified cost-cap predicate.  Mirrors the backend's
@@ -2929,4 +3090,3 @@ export function requiresCostCap(user: AuthUser | null | undefined): boolean {
   if (tier === 'PRO') return !hasByok;
   return true; // FREE
 }
-

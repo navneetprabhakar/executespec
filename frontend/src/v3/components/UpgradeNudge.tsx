@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { Users, X } from 'lucide-react';
-import { useAuthStore } from '@/stores/useAuthStore';
-import { getRuns } from '@/lib/api';
+import {useEffect, useState} from 'react';
+import {Link} from 'react-router-dom';
+import {Users, X} from 'lucide-react';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {getRuns} from '@/lib/api';
 
 /**
  * R-312 (Wave 7) — Pro → Team upgrade nudge banner.
@@ -56,7 +56,7 @@ export default function UpgradeNudge() {
   useEffect(() => {
     if (!isProTier || dismissed) return;
     let cancelled = false;
-    getRuns({ status: 'COMPLETE', page: 0, size: 1 })
+    getRuns({status: 'COMPLETE', page: 0, size: 1})
       .then((p) => {
         if (cancelled) return;
         setRunCount(p?.totalElements ?? 0);
@@ -87,14 +87,13 @@ export default function UpgradeNudge() {
 
   return (
     <div
-      role="region"
-      aria-label="Upgrade suggestion"
+      role='region'
+      aria-label='Upgrade suggestion'
       style={{
         margin: '0 auto 12px',
         maxWidth: 1140,
         padding: '10px 14px',
-        background:
-          'linear-gradient(90deg, rgba(249,115,22,0.10) 0%, rgba(251,191,36,0.10) 100%)',
+        background: 'linear-gradient(90deg, rgba(249,115,22,0.10) 0%, rgba(251,191,36,0.10) 100%)',
         border: '1px solid rgba(249,115,22,0.32)',
         borderRadius: 8,
         display: 'flex',
@@ -105,16 +104,16 @@ export default function UpgradeNudge() {
       }}
     >
       <Users
-        className="h-4 w-4"
-        style={{ color: 'var(--c-pop-orange, #EC4899)', flexShrink: 0 }}
-        aria-hidden="true"
+        className='h-4 w-4'
+        style={{color: 'var(--c-pop-orange, #EC4899)', flexShrink: 0}}
+        aria-hidden='true'
       />
-      <span style={{ flex: 1, lineHeight: 1.5 }}>
-        You've shipped <strong>{runCount} PRs</strong> solo on Pro. Want to invite your team
-        to share credits and review?
+      <span style={{flex: 1, lineHeight: 1.5}}>
+        You've shipped <strong>{runCount} PRs</strong> solo on Pro. Want to invite your team to
+        share credits and review?
       </span>
       <Link
-        to="/team"
+        to='/team'
         style={{
           padding: '6px 12px',
           background: 'var(--v3-brand)',
@@ -129,10 +128,10 @@ export default function UpgradeNudge() {
         Invite team →
       </Link>
       <button
-        type="button"
+        type='button'
         onClick={dismiss}
-        aria-label="Dismiss upgrade suggestion"
-        title="Dismiss"
+        aria-label='Dismiss upgrade suggestion'
+        title='Dismiss'
         style={{
           background: 'transparent',
           border: 'none',
@@ -143,7 +142,7 @@ export default function UpgradeNudge() {
           alignItems: 'center',
         }}
       >
-        <X className="h-4 w-4" aria-hidden="true" />
+        <X className='h-4 w-4' aria-hidden='true' />
       </button>
     </div>
   );

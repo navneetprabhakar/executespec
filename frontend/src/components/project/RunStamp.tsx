@@ -10,9 +10,9 @@
  * Also exposes an embed-ready HTML snippet for blogs / Slack, hidden
  * behind a "Get embed" disclosure.
  */
-import { useState } from 'react';
-import { Check, Copy, Share2, Code2 } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import {useState} from 'react';
+import {Check, Copy, Share2, Code2} from 'lucide-react';
+import {cn} from '@/lib/utils';
 import * as api from '@/lib/api';
 import VerdictPill from '@/components/runs/VerdictPill';
 
@@ -38,7 +38,7 @@ export default function RunStamp({
   const [showEmbed, setShowEmbed] = useState(false);
   const [creatingShare, setCreatingShare] = useState(false);
 
-  const stamp = formatStamp({ durationMs, verifiedScore, tasksTotal, tasksComplete, provider });
+  const stamp = formatStamp({durationMs, verifiedScore, tasksTotal, tasksComplete, provider});
 
   const copy = async (kind: 'text' | 'link' | 'embed', value: string) => {
     try {
@@ -78,28 +78,32 @@ export default function RunStamp({
     : '';
 
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
-      <div className="flex items-center gap-2 flex-wrap">
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
+      <div className='flex items-center gap-2 flex-wrap'>
         {/* Plan 1 (this-week #3): verdict leads the share row. The numeric
             "Verified N" stays inside the stamp text so the copyable string
             is still informative on Slack / blogs. */}
-        <VerdictPill size="sm" verifiedScore={verifiedScore} />
-        <span className="text-[11px] font-mono text-secondary truncate flex-1">{stamp}</span>
+        <VerdictPill size='sm' verifiedScore={verifiedScore} />
+        <span className='text-[11px] font-mono text-secondary truncate flex-1'>{stamp}</span>
         <button
           onClick={() => copy('text', stamp)}
-          className="text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary inline-flex items-center gap-1"
-          title="Copy stamp text"
+          className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary inline-flex items-center gap-1'
+          title='Copy stamp text'
         >
-          {copied === 'text' ? <Check className="h-3 w-3 text-status-success" /> : <Copy className="h-3 w-3" />}
+          {copied === 'text' ? (
+            <Check className='h-3 w-3 text-status-success' />
+          ) : (
+            <Copy className='h-3 w-3' />
+          )}
           {copied === 'text' ? 'Copied' : 'Copy'}
         </button>
         <button
           onClick={onShareClick}
           disabled={creatingShare}
-          className="text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 inline-flex items-center gap-1"
-          title="Create a public share link and copy"
+          className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 inline-flex items-center gap-1'
+          title='Create a public share link and copy'
         >
-          {copied === 'link' ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
+          {copied === 'link' ? <Check className='h-3 w-3' /> : <Share2 className='h-3 w-3' />}
           {creatingShare ? '…' : copied === 'link' ? 'Link copied' : 'Share'}
         </button>
         <button
@@ -107,17 +111,19 @@ export default function RunStamp({
             await ensureShare();
             setShowEmbed((s) => !s);
           }}
-          className="text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary inline-flex items-center gap-1"
-          title="Get embed HTML"
+          className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary inline-flex items-center gap-1'
+          title='Get embed HTML'
         >
-          <Code2 className="h-3 w-3" />
+          <Code2 className='h-3 w-3' />
           Embed
         </button>
       </div>
 
       {showEmbed && shareUrl && (
-        <div className="space-y-1">
-          <label className="text-[10px] font-mono uppercase tracking-wider text-muted">Embed HTML</label>
+        <div className='space-y-1'>
+          <label className='text-[10px] font-mono uppercase tracking-wider text-muted'>
+            Embed HTML
+          </label>
           <textarea
             readOnly
             value={embedHtml}
@@ -129,7 +135,7 @@ export default function RunStamp({
           />
           <button
             onClick={() => copy('embed', embedHtml)}
-            className="text-[10px] text-accent-blue hover:underline"
+            className='text-[10px] text-accent-blue hover:underline'
           >
             {copied === 'embed' ? 'Copied' : 'Copy embed HTML'}
           </button>

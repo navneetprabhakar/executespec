@@ -5,11 +5,8 @@
     "runners": ["axe", "htmlcs"],
     "timeout": 30000,
     "wait": 1500,
-    "viewport": { "width": 1440, "height": 900 },
-    "ignore": [
-      "warning",
-      "notice"
-    ],
+    "viewport": {"width": 1440, "height": 900},
+    "ignore": ["warning", "notice"],
     "chromeLaunchConfig": {
       "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       "args": ["--no-sandbox", "--disable-dev-shm-usage"]

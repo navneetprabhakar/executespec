@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import type { ReadymadeVariant, VariantResolutionResult } from '@/lib/api';
+import {useMemo} from 'react';
+import type {ReadymadeVariant, VariantResolutionResult} from '@/lib/api';
 
 /**
  * R-335 — language + framework chip picker for Readymades detail
@@ -52,7 +52,7 @@ export default function StackPicker({
   if (variants.length === 1) {
     const v = variants[0];
     return (
-      <div style={{ fontSize: 12.5, color: 'var(--v3-text)' }}>
+      <div style={{fontSize: 12.5, color: 'var(--v3-text)'}}>
         Variant:&nbsp;
         <code style={codeStyle}>
           {v.language} · {v.framework}
@@ -62,7 +62,7 @@ export default function StackPicker({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 10}}>
       {resolution && <DetectionHint resolution={resolution} />}
 
       <FieldLabel>Language</FieldLabel>
@@ -106,14 +106,14 @@ export default function StackPicker({
   );
 }
 
-function DetectionHint({ resolution }: { resolution: VariantResolutionResult }) {
+function DetectionHint({resolution}: {resolution: VariantResolutionResult}) {
   // Only surface the hint when we actually detected something.
   // REPO_NOT_LINKED + STACK_NOT_DETECTED are silent — the user just
   // picks manually.
   if (resolution.reason === 'REPO_NOT_LINKED') return null;
   if (resolution.reason === 'STACK_NOT_DETECTED') {
     return (
-      <span style={{ ...hintLineStyle, color: 'var(--v3-text-subtle)' }}>
+      <span style={{...hintLineStyle, color: 'var(--v3-text-subtle)'}}>
         Stack not detected — pick manually.
       </span>
     );
@@ -123,15 +123,16 @@ function DetectionHint({ resolution }: { resolution: VariantResolutionResult }) 
     .join(' · ');
   if (resolution.reason === 'OK') {
     return (
-      <span style={{ ...hintLineStyle, color: '#4ADE80' }}>
+      <span style={{...hintLineStyle, color: '#4ADE80'}}>
         ✓ Detected from your repo: <code style={codeStyle}>{detected}</code>
       </span>
     );
   }
   // NO_VARIANT_FOR_STACK
   return (
-    <span style={{ ...hintLineStyle, color: '#FBBF24' }}>
-      Detected <code style={codeStyle}>{detected}</code>, but no matching variant — pick another below.
+    <span style={{...hintLineStyle, color: '#FBBF24'}}>
+      Detected <code style={codeStyle}>{detected}</code>, but no matching variant — pick another
+      below.
     </span>
   );
 }
@@ -152,7 +153,7 @@ function variantFrameworkLabel(v: ReadymadeVariant): string {
   return `${v.framework}${optsLabel}`;
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
+function FieldLabel({children}: {children: React.ReactNode}) {
   return (
     <label
       style={{
@@ -168,10 +169,8 @@ function FieldLabel({ children }: { children: React.ReactNode }) {
   );
 }
 
-function ChipRow({ children }: { children: React.ReactNode }) {
-  return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>{children}</div>
-  );
+function ChipRow({children}: {children: React.ReactNode}) {
+  return <div style={{display: 'flex', flexWrap: 'wrap', gap: 6}}>{children}</div>;
 }
 
 function Chip({
@@ -185,7 +184,7 @@ function Chip({
 }) {
   return (
     <button
-      type="button"
+      type='button'
       onClick={onClick}
       style={{
         padding: '4px 10px',

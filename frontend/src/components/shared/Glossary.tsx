@@ -1,6 +1,6 @@
-import { ReactNode } from 'react';
-import { Tooltip } from './Tooltip';
-import { lookupTerm } from '@/lib/glossary';
+import {ReactNode} from 'react';
+import {Tooltip} from './Tooltip';
+import {lookupTerm} from '@/lib/glossary';
 
 interface GlossaryProps {
   /** Lookup key (case-insensitive). See `lib/glossary.ts` for the dictionary. */
@@ -33,12 +33,12 @@ interface GlossaryProps {
  * dotted underline to signal the affordance, which screen-readers also
  * announce via `aria-describedby` on the inner Tooltip.
  */
-export function Glossary({ term, children, side = 'top', className }: GlossaryProps) {
+export function Glossary({term, children, side = 'top', className}: GlossaryProps) {
   const entry = lookupTerm(term);
   const label = children ?? entry?.display ?? term;
   if (!entry) return <>{label}</>;
   return (
-    <Tooltip text={entry.definition} side={side} wrap maxWidthClass="max-w-72">
+    <Tooltip text={entry.definition} side={side} wrap maxWidthClass='max-w-72'>
       <span
         className={`underline decoration-dotted decoration-muted/60 underline-offset-[3px] cursor-help ${className ?? ''}`}
         tabIndex={0}

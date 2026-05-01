@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import {useEffect, useMemo, useState} from 'react';
+import {useNavigate} from 'react-router-dom';
 import {
   getMetrics,
   getProjects,
@@ -8,7 +8,7 @@ import {
   type ProjectDto,
   type RunSummary,
 } from '@/lib/api';
-import { useAuthStore, selectIsOrgAdmin } from '@/stores/useAuthStore';
+import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
 import Pill from '../components/Pill';
 
 /**
@@ -50,11 +50,15 @@ export default function V3Insights() {
       const v = raw ? parseInt(raw, 10) : 30;
       if (v === 90 || v === 365) return v;
       return 30;
-    } catch { return 30; }
+    } catch {
+      return 30;
+    }
   });
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    try { localStorage.setItem('v3-insights-window-days', String(windowDays)); } catch {}
+    try {
+      localStorage.setItem('v3-insights-window-days', String(windowDays));
+    } catch {}
   }, [windowDays]);
   // R-343 (P1 from UX persona review) — multi-project filter.  Riley
   // (team-lead) wants to see metrics across N specific projects, not
@@ -74,7 +78,9 @@ export default function V3Insights() {
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('v3-insights-project-filter', JSON.stringify(Array.from(projectFilter)));
-    } catch (_) { /* ignore */ }
+    } catch (_) {
+      /* ignore */
+    }
   }, [projectFilter]);
   function toggleProject(id: string) {
     setProjectFilter((prev) => {
@@ -104,7 +110,7 @@ export default function V3Insights() {
     Promise.all([
       getMetrics(windowDays).catch(() => null),
       getProjects().catch(() => [] as ProjectDto[]),
-      getRuns({ page: 0, size: pageSize }).catch(() => ({ content: [] as RunSummary[] })),
+      getRuns({page: 0, size: pageSize}).catch(() => ({content: [] as RunSummary[]})),
     ]).then(([m, p, r]) => {
       if (cancelled) return;
       setMetrics(m);
@@ -146,23 +152,31 @@ export default function V3Insights() {
       const completed = filteredRuns.filter((r) => r.status === 'COMPLETE').length;
       const successRate = total > 0 ? Math.round((completed / total) * 100) : null;
       const totalSpend = filteredRuns.reduce((sum, r) => sum + (r.actualCostUsd ?? 0), 0);
-      const needsAttention = filteredRuns.filter((r) => r.status === 'PARTIAL' || r.status === 'FAILED').length;
-      return { successRate, totalSpend, needsAttention, totalRuns: total, completedRuns: completed };
+      const needsAttention = filteredRuns.filter(
+        (r) => r.status === 'PARTIAL' || r.status === 'FAILED',
+      ).length;
+      return {successRate, totalSpend, needsAttention, totalRuns: total, completedRuns: completed};
     }
     const successRate =
-      metrics.totalRuns > 0
-        ? Math.round((metrics.completedRuns / metrics.totalRuns) * 100)
-        : null;
+      metrics.totalRuns > 0 ? Math.round((metrics.completedRuns / metrics.totalRuns) * 100) : null;
     const totalSpend = filteredRuns.reduce((sum, r) => sum + (r.actualCostUsd ?? 0), 0);
-    const needsAttention = filteredRuns.filter((r) => r.status === 'PARTIAL' || r.status === 'FAILED').length;
-    return { successRate, totalSpend, needsAttention, totalRuns: metrics.totalRuns, completedRuns: metrics.completedRuns };
+    const needsAttention = filteredRuns.filter(
+      (r) => r.status === 'PARTIAL' || r.status === 'FAILED',
+    ).length;
+    return {
+      successRate,
+      totalSpend,
+      needsAttention,
+      totalRuns: metrics.totalRuns,
+      completedRuns: metrics.completedRuns,
+    };
   }, [metrics, filteredRuns, projectFilter]);
 
   // Spend per project
   const spendByProject = useMemo(() => {
     if (!projects || !filteredRuns) return [];
-    const map = new Map<string, { project: ProjectDto; runCount: number; spend: number }>();
-    for (const p of projects) map.set(p.id, { project: p, runCount: 0, spend: 0 });
+    const map = new Map<string, {project: ProjectDto; runCount: number; spend: number}>();
+    for (const p of projects) map.set(p.id, {project: p, runCount: 0, spend: 0});
     for (const r of filteredRuns) {
       if (!r.projectId) continue;
       const e = map.get(r.projectId);
@@ -180,7 +194,9 @@ export default function V3Insights() {
     if (!filteredRuns) return [];
     return filteredRuns
       .filter((r) => r.status === 'COMPLETE')
-      .sort((a, b) => +new Date(b.completedAt ?? b.startedAt) - +new Date(a.completedAt ?? a.startedAt))
+      .sort(
+        (a, b) => +new Date(b.completedAt ?? b.startedAt) - +new Date(a.completedAt ?? a.startedAt),
+      )
       .slice(0, 5);
   }, [filteredRuns]);
 
@@ -188,24 +204,35 @@ export default function V3Insights() {
     if (!filteredRuns) return [];
     return filteredRuns
       .filter((r) => r.status === 'PARTIAL' || r.status === 'FAILED')
-      .sort((a, b) => +new Date(b.completedAt ?? b.startedAt) - +new Date(a.completedAt ?? a.startedAt))
+      .sort(
+        (a, b) => +new Date(b.completedAt ?? b.startedAt) - +new Date(a.completedAt ?? a.startedAt),
+      )
       .slice(0, 3);
   }, [filteredRuns]);
 
   const maxSpend = spendByProject.length ? spendByProject[0].spend : 0;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, justifyContent: 'space-between', flexWrap: 'wrap' }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32}}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'flex-start',
+          gap: 16,
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+        }}
+      >
         <div>
-          <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
+          <h1 style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>
             Insights
           </h1>
-          <p style={{ fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0' }}>
+          <p style={{fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0'}}>
             Last {windowDays} days · runs · spend · success rate · what's shipping
             {projectFilter.size > 0 && (
-              <span style={{ color: 'var(--v3-brand)' }}>
-                {' '}· filtered to {projectFilter.size} project{projectFilter.size === 1 ? '' : 's'}
+              <span style={{color: 'var(--v3-brand)'}}>
+                {' '}
+                · filtered to {projectFilter.size} project{projectFilter.size === 1 ? '' : 's'}
               </span>
             )}
           </p>
@@ -214,11 +241,20 @@ export default function V3Insights() {
             picker is a flat 3-up segmented control; selecting refetches
             the metrics + runs.  Choice persists to localStorage so
             Pat's preferred window survives page reloads. */}
-        <div style={{ display: 'flex', gap: 0, border: '1px solid var(--v3-border)', borderRadius: 6, overflow: 'hidden', flexShrink: 0 }}>
+        <div
+          style={{
+            display: 'flex',
+            gap: 0,
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+            overflow: 'hidden',
+            flexShrink: 0,
+          }}
+        >
           {([30, 90, 365] as const).map((d, i) => (
             <button
               key={d}
-              type="button"
+              type='button'
               onClick={() => setWindowDays(d)}
               aria-pressed={windowDays === d}
               style={{
@@ -245,12 +281,21 @@ export default function V3Insights() {
           projects" chip clears the selection.  Filter state is
           persisted to localStorage so reloads keep the picked set. */}
       {projects && projects.length >= 2 && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 11, color: 'var(--v3-text-subtle)', fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase', marginRight: 4 }}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}>
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--v3-text-subtle)',
+              fontWeight: 600,
+              letterSpacing: 0.4,
+              textTransform: 'uppercase',
+              marginRight: 4,
+            }}
+          >
             Filter
           </span>
           <button
-            type="button"
+            type='button'
             onClick={() => setProjectFilter(new Set())}
             aria-pressed={projectFilter.size === 0}
             style={{
@@ -272,7 +317,7 @@ export default function V3Insights() {
             return (
               <button
                 key={p.id}
-                type="button"
+                type='button'
                 onClick={() => toggleProject(p.id)}
                 aria-pressed={active}
                 style={{
@@ -296,7 +341,7 @@ export default function V3Insights() {
       )}
 
       {loading && (
-        <div className="v3-placeholder">
+        <div className='v3-placeholder'>
           <p>Loading insights…</p>
         </div>
       )}
@@ -305,7 +350,7 @@ export default function V3Insights() {
         <>
           {/* ── Tiles ─────────────────────────────────────────────────── */}
           <div
-            className="v3-insights-tiles"
+            className='v3-insights-tiles'
             style={{
               display: 'grid',
               gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))',
@@ -315,19 +360,22 @@ export default function V3Insights() {
             {/* R-343 — `stats.totalRuns` falls back to `metrics.totalRuns`
                 when no project filter is set; when filtered it reflects
                 the filtered run count.  Same for active-projects. */}
-            <Tile label="Runs" value={String(stats.totalRuns)} />
+            <Tile label='Runs' value={String(stats.totalRuns)} />
             <Tile
-              label="Spend"
+              label='Spend'
               value={stats.totalSpend > 0 ? `$${stats.totalSpend.toFixed(2)}` : '—'}
             />
             <Tile
-              label="Success rate"
+              label='Success rate'
               value={stats.successRate != null ? `${stats.successRate}%` : '—'}
               tone={stats.successRate != null && stats.successRate >= 80 ? 'ok' : 'warn'}
             />
-            <Tile label="Active projects" value={String(projectFilter.size > 0 ? projectFilter.size : (projects?.length ?? 0))} />
             <Tile
-              label="Needs attention"
+              label='Active projects'
+              value={String(projectFilter.size > 0 ? projectFilter.size : (projects?.length ?? 0))}
+            />
+            <Tile
+              label='Needs attention'
               value={String(stats.needsAttention)}
               tone={stats.needsAttention > 0 ? 'warn' : 'ok'}
             />
@@ -335,7 +383,7 @@ export default function V3Insights() {
 
           {/* ── Spend by project ──────────────────────────────────────── */}
           {spendByProject.length > 0 && (
-            <Section title="Spend by project">
+            <Section title='Spend by project'>
               {spendByProject.map((e) => (
                 <div
                   key={e.project.id}
@@ -347,10 +395,8 @@ export default function V3Insights() {
                     fontSize: 12,
                   }}
                 >
-                  <div style={{ flex: '0 0 160px', color: 'var(--v3-text)' }}>
-                    {e.project.name}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{flex: '0 0 160px', color: 'var(--v3-text)'}}>{e.project.name}</div>
+                  <div style={{flex: 1, minWidth: 0}}>
                     <div
                       style={{
                         height: 8,
@@ -369,7 +415,9 @@ export default function V3Insights() {
                       />
                     </div>
                   </div>
-                  <div style={{ flex: '0 0 100px', textAlign: 'right', color: 'var(--v3-text-muted)' }}>
+                  <div
+                    style={{flex: '0 0 100px', textAlign: 'right', color: 'var(--v3-text-muted)'}}
+                  >
                     {e.runCount} runs · ${e.spend.toFixed(2)}
                   </div>
                 </div>
@@ -379,23 +427,23 @@ export default function V3Insights() {
 
           {/* ── Top wins ──────────────────────────────────────────────── */}
           {topWins.length > 0 && (
-            <Section title="Top wins this period">
+            <Section title='Top wins this period'>
               {topWins.map((r) => (
-                <RunRow key={r.runId} run={r} tone="ok" />
+                <RunRow key={r.runId} run={r} tone='ok' />
               ))}
             </Section>
           )}
 
           {/* ── Needs attention ───────────────────────────────────────── */}
           {attention.length > 0 ? (
-            <Section title="Needs attention">
+            <Section title='Needs attention'>
               {attention.map((r) => (
-                <RunRow key={r.runId} run={r} tone="warn" />
+                <RunRow key={r.runId} run={r} tone='warn' />
               ))}
             </Section>
           ) : (
-            <Section title="Needs attention">
-              <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-success)' }}>
+            <Section title='Needs attention'>
+              <p style={{margin: 0, fontSize: 12, color: 'var(--v3-success)'}}>
                 ✓ All clear in the last 30 days.
               </p>
             </Section>
@@ -408,21 +456,9 @@ export default function V3Insights() {
 
 // ─── primitives ─────────────────────────────────────────────────────────────
 
-function Tile({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone?: 'ok' | 'warn';
-}) {
+function Tile({label, value, tone}: {label: string; value: string; tone?: 'ok' | 'warn'}) {
   const accent =
-    tone === 'ok'
-      ? 'var(--v3-success)'
-      : tone === 'warn'
-      ? 'var(--v3-warning)'
-      : 'var(--v3-text)';
+    tone === 'ok' ? 'var(--v3-success)' : tone === 'warn' ? 'var(--v3-warning)' : 'var(--v3-text)';
   return (
     <div
       style={{
@@ -432,13 +468,13 @@ function Tile({
         padding: 12,
       }}
     >
-      <div style={{ fontSize: 11, color: 'var(--v3-text-muted)' }}>{label}</div>
-      <div style={{ fontSize: 22, fontWeight: 600, color: accent, marginTop: 2 }}>{value}</div>
+      <div style={{fontSize: 11, color: 'var(--v3-text-muted)'}}>{label}</div>
+      <div style={{fontSize: 22, fontWeight: 600, color: accent, marginTop: 2}}>{value}</div>
     </div>
   );
 }
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({title, children}: {title: string; children: React.ReactNode}) {
   return (
     <section
       style={{
@@ -448,7 +484,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
         padding: 16,
       }}
     >
-      <h2 style={{ margin: '0 0 8px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+      <h2 style={{margin: '0 0 8px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         {title}
       </h2>
       <div>{children}</div>
@@ -456,12 +492,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function RunRow({ run, tone }: { run: RunSummary; tone: 'ok' | 'warn' }) {
+function RunRow({run, tone}: {run: RunSummary; tone: 'ok' | 'warn'}) {
   const navigate = useNavigate();
   const target = run.projectId ? `/projects/${run.projectId}/runs/${run.runId}` : '#';
   return (
     <div
-      role="button"
+      role='button'
       tabIndex={0}
       onClick={() => target !== '#' && navigate(target)}
       onKeyDown={(e) => {
@@ -477,7 +513,7 @@ function RunRow({ run, tone }: { run: RunSummary; tone: 'ok' | 'warn' }) {
         cursor: target !== '#' ? 'pointer' : 'default',
       }}
     >
-      <Pill tone={tone} size="sm">
+      <Pill tone={tone} size='sm'>
         {tone === 'ok' ? 'Ready' : 'Needs review'}
       </Pill>
       <span
@@ -492,11 +528,11 @@ function RunRow({ run, tone }: { run: RunSummary; tone: 'ok' | 'warn' }) {
         {run.runTitle ?? run.userRequest?.slice(0, 60) ?? run.runId.slice(0, 8)}
       </span>
       {run.actualCostUsd != null && (
-        <span style={{ color: 'var(--v3-text-muted)', fontSize: 11 }}>
+        <span style={{color: 'var(--v3-text-muted)', fontSize: 11}}>
           ${run.actualCostUsd.toFixed(2)}
         </span>
       )}
-      <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>
+      <span style={{color: 'var(--v3-text-subtle)', fontSize: 11}}>
         {new Date(run.completedAt ?? run.startedAt).toLocaleDateString()}
       </span>
     </div>

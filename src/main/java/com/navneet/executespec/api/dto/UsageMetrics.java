@@ -12,7 +12,6 @@ public record UsageMetrics(
     Map<String, Integer> runsByProject,
     double avgTimeToCompleteSeconds,
     double totalCost,
-    Map<String, Double> costByModel
-) {
-    public record DailyRunStat(String date, int count, double successRate) {}
+    Map<String, Double> costByModel) {
+  public record DailyRunStat(String date, int count, double successRate) {}
 }

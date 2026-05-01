@@ -69,21 +69,34 @@ jobs:
           cache: 'npm'
           cache-dependency-path: frontend/package-lock.json
 
+      # ── Frontend dependencies (split out so lint can use them) ───────────
+      - name: Install frontend dependencies
+        run: cd frontend && npm ci
+
+      # ── Frontend lint gate ───────────────────────────────────────────────
+      # 2026-05-01 — code-style refactor wired prettier + eslint into the
+      # codebase. Format-check is the cheap gate (no compilation needed);
+      # eslint runs after with `--max-warnings 9999` so existing warnings
+      # don't block the build but new errors do (config in
+      # `frontend/.eslintrc.cjs` keeps `react-hooks/rules-of-hooks` and
+      # `no-var` / `eqeqeq` as errors). See docs/design/code-style.md.
+      - name: Frontend format check
+        run: cd frontend && npm run format:check
+      - name: Frontend lint
+        run: cd frontend && npm run lint
+
       # ── Frontend build ────────────────────────────────────────────────────
       - name: Build frontend
-        run: |
-          cd frontend
-          npm ci
-          npm run build
+        run: cd frontend && npm run build
 
-      # ── Backend build ─────────────────────────────────────────────────────
-      # v2.5.12 (Gap #3) — drop -DskipTests so unit tests actually run.
-      # Surefire is configured (pom.xml) to skip the `e2e` + `integration`
-      # groups so only fast non-DB tests execute. The earlier -DskipTests
-      # was hiding the V113 schema mismatch + the PlannerAgentV2ValidationTest
-      # constructor-drift compile error, both of which crashed dev on boot.
-      - name: Build JAR (run unit tests)
-        run: mvn package -q
+      # ── Backend build + lint + tests ─────────────────────────────────────
+      # `mvn verify` (vs. earlier `mvn package`) picks up the
+      # spotless-maven-plugin binding (phase=verify) added in the
+      # 2026-05-01 style refactor — so any drift from googleJavaFormat
+      # fails CI before the JAR ships. surefire still runs unit tests with
+      # `e2e,integration,chaos` excluded (pom.xml).
+      - name: Build JAR (lint + run unit tests)
+        run: mvn verify -q
 
       # ── Authenticate to GCP (Workload Identity Federation — no keys) ─────
       - name: Authenticate to GCP
