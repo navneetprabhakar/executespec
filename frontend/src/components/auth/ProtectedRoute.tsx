@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
-import { Navigate, Outlet, useLocation } from 'react-router-dom';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useEffect} from 'react';
+import {Navigate, Outlet, useLocation} from 'react-router-dom';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
  * Wraps protected routes. If not authenticated, redirects to /login.
@@ -22,7 +22,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
  * When used as a route element wrapper, renders <Outlet /> for nested routes.
  */
 export default function ProtectedRoute() {
-  const { isAuthenticated, isLoading, loadMe, user } = useAuthStore();
+  const {isAuthenticated, isLoading, loadMe, user} = useAuthStore();
   const location = useLocation();
 
   useEffect(() => {
@@ -33,8 +33,8 @@ export default function ProtectedRoute() {
 
   if (isLoading) {
     return (
-      <div className="flex h-screen items-center justify-center bg-[#0f1117]">
-        <div className="h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent" />
+      <div className='flex h-screen items-center justify-center bg-[#0f1117]'>
+        <div className='h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent' />
       </div>
     );
   }
@@ -46,7 +46,7 @@ export default function ProtectedRoute() {
       // user's typed spec for post-auth hydration.
       return <Navigate to={`/login${location.search}`} replace />;
     }
-    return <Navigate to="/login" state={{ from: location }} replace />;
+    return <Navigate to='/login' state={{from: location}} replace />;
   }
 
   return <Outlet />;

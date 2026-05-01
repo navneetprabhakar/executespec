@@ -7,5 +7,4 @@ public record TaskFeasibility(
     int estimatedIterationsMin,
     int estimatedIterationsMax,
     double estimatedCostLow,
-    double estimatedCostHigh
-) {}
+    double estimatedCostHigh) {}

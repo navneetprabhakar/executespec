@@ -1,19 +1,19 @@
 package com.navneet.executespec.api.dto;
 
+import java.time.Instant;
+import java.util.List;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.time.Instant;
-import java.util.List;
-
 /**
  * Full detail DTO for a single pipeline run, including task list and review data.
  *
- * <p>Converted from a record to a {@code @Builder} class to support Tier 8's
- * optional {@code hasFrontend}, {@code hasApiSpec}, and {@code previewStatus} fields
- * without requiring every constructor callsite to pass them.
+ * <p>Converted from a record to a {@code @Builder} class to support Tier 8's optional {@code
+ * hasFrontend}, {@code hasApiSpec}, and {@code previewStatus} fields without requiring every
+ * constructor callsite to pass them.
  */
 @Data
 @Builder
@@ -21,180 +21,197 @@ import java.util.List;
 @AllArgsConstructor
 public class RunDetail {
 
-    String runId;
-    String status;
-    String userRequest;
-    String currentGate;
-    Integer queuePosition;
-    String plannerModel;
-    String workerModel;
-    String reviewerModel;
-    Integer totalInputTokens;
-    Integer totalOutputTokens;
-    Instant startedAt;
-    Instant completedAt;
-    String repoUrl;
-    String repoMode;
-    String failureReason;
-    /** v2.5.10 — explicit terminal-status reason. See RunSummary.statusReason. */
-    String statusReason;
-    String planJson;
-    String reviewJson;
-    List<TaskSummary> tasks;
-    IntegrationSource integrationSource;   // null for manual runs
+  String runId;
+  String status;
+  String userRequest;
+  String currentGate;
+  Integer queuePosition;
+  String plannerModel;
+  String workerModel;
+  String reviewerModel;
+  Integer totalInputTokens;
+  Integer totalOutputTokens;
+  Instant startedAt;
+  Instant completedAt;
+  String repoUrl;
+  String repoMode;
+  String failureReason;
 
-    // ── Tier 8: Compile, API spec, preview ───────────────────────────────────
-    Boolean hasFrontend;     // true once PreviewService builds the frontend
-    Boolean hasApiSpec;      // true once ApiTestSuiteAgent writes openapi.yaml
-    String  previewStatus;   // null | "READY" | "FAILED"
+  /** v2.5.10 — explicit terminal-status reason. See RunSummary.statusReason. */
+  String statusReason;
 
-    /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
-    String keySource;
+  String planJson;
+  String reviewJson;
+  List<TaskSummary> tasks;
+  IntegrationSource integrationSource; // null for manual runs
 
-    /** Pre-run cost estimate range (USD). Set at plan creation, shown at approval gate. */
-    Double costEstimateLow;
-    Double costEstimateHigh;
+  // ── Tier 8: Compile, API spec, preview ───────────────────────────────────
+  Boolean hasFrontend; // true once PreviewService builds the frontend
+  Boolean hasApiSpec; // true once ApiTestSuiteAgent writes openapi.yaml
+  String previewStatus; // null | "READY" | "FAILED"
 
-    /** Actual cost in USD computed after run completion. Null until complete. */
-    Double actualCostUsd;
+  /** Billing flag: SYSTEM | OWN_KEYS | HYBRID. Null for pre-migration runs. */
+  String keySource;
 
-    /** Run credits charged (proportional to estimated cost). */
-    Integer creditsCharged;
+  /** Pre-run cost estimate range (USD). Set at plan creation, shown at approval gate. */
+  Double costEstimateLow;
 
-    /** Hard cap in USD (safety ceiling). */
-    Double hardCapUsd;
+  Double costEstimateHigh;
 
-    /**
-     * v2.6.2-track — hierarchical-planner strategy chosen by SmartClassifierAgent.
-     * SINGLE_SHOT | SMALL | MEDIUM | LARGE | LEGACY. Null for runs that submitted
-     * before slice 1 of the rollout.
-     */
-    String planStrategy;
+  /** Actual cost in USD computed after run completion. Null until complete. */
+  Double actualCostUsd;
 
-    /** v2.6.2-track — one-line classifier rationale (heuristic vs LLM verdict). */
-    String classifierReasoning;
+  /** Run credits charged (proportional to estimated cost). */
+  Integer creditsCharged;
 
-    /** v2.6.2-track — phase 0 cost (USD). Null when phase didn't run. */
-    Double classifierCostUsd;
-    Long classifierInputTokens;
-    Long classifierOutputTokens;
+  /** Hard cap in USD (safety ceiling). */
+  Double hardCapUsd;
 
-    /** v2.6.2-track — phase 1 cost. */
-    Double outlineCostUsd;
-    Long outlineInputTokens;
-    Long outlineOutputTokens;
+  /**
+   * v2.6.2-track — hierarchical-planner strategy chosen by SmartClassifierAgent. SINGLE_SHOT |
+   * SMALL | MEDIUM | LARGE | LEGACY. Null for runs that submitted before slice 1 of the rollout.
+   */
+  String planStrategy;
 
-    /** v2.6.2-track — phase 2 cost (sum across parallel expansion calls). */
-    Double expansionCostUsd;
-    Long expansionInputTokens;
-    Long expansionOutputTokens;
+  /** v2.6.2-track — one-line classifier rationale (heuristic vs LLM verdict). */
+  String classifierReasoning;
 
-    /** v2.6.2-track — phase 3 cost. */
-    Double coherenceCostUsd;
-    Long coherenceInputTokens;
-    Long coherenceOutputTokens;
+  /** v2.6.2-track — phase 0 cost (USD). Null when phase didn't run. */
+  Double classifierCostUsd;
 
-    /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). */
-    String techStack;
+  Long classifierInputTokens;
+  Long classifierOutputTokens;
 
-    /** Human-readable project name. Null if projectId is null or project was deleted. */
-    String projectName;
+  /** v2.6.2-track — phase 1 cost. */
+  Double outlineCostUsd;
 
-    /** Display name of the user who created this run (e.g. "John Doe"). Null for pre-ownership runs. */
-    String createdByName;
+  Long outlineInputTokens;
+  Long outlineOutputTokens;
 
-    /** Number of apply-suggestion actions used on this run (chat copilot + review combined). */
-    Integer applySuggestionCount;
+  /** v2.6.2-track — phase 2 cost (sum across parallel expansion calls). */
+  Double expansionCostUsd;
 
-    /** Short 3-8 word title generated by the planner. Null until planning completes. */
-    String runTitle;
+  Long expansionInputTokens;
+  Long expansionOutputTokens;
 
-    /** One-sentence plan summary from the planner. Null until planning completes. */
-    String runSummary;
+  /** v2.6.2-track — phase 3 cost. */
+  Double coherenceCostUsd;
 
-    /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
-    String executionMode;
+  Long coherenceInputTokens;
+  Long coherenceOutputTokens;
 
-    /** URL of the pull request created for existing-repo runs. Null for NEW/NONE repos. */
-    String githubPrUrl;
+  /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). */
+  String techStack;
 
-    /** Canonical PR URL — works for GitHub and Bitbucket. Null for NEW/NONE repos or legacy runs. */
-    String scmPrUrl;
+  /** Human-readable project name. Null if projectId is null or project was deleted. */
+  String projectName;
 
-    /** Which SCM provider was used for this run (GITHUB, BITBUCKET, or null for legacy runs). */
-    String scmProvider;
+  /**
+   * Display name of the user who created this run (e.g. "John Doe"). Null for pre-ownership runs.
+   */
+  String createdByName;
 
-    /** Pilot R4 — JSON {@code AssessmentResult}. Null when no project context. */
-    String assessmentResult;
+  /** Number of apply-suggestion actions used on this run (chat copilot + review combined). */
+  Integer applySuggestionCount;
 
-    /** Pilot R7 — Figma URL captured at submission. */
-    String figmaUrl;
+  /** Short 3-8 word title generated by the planner. Null until planning completes. */
+  String runTitle;
 
-    /** Codemap stats for paid existing-repo runs (null when not generated). */
-    Integer codemapFileCount;
-    Integer codemapRouteCount;
-    Integer codemapInputTokens;
-    Integer codemapOutputTokens;
+  /** One-sentence plan summary from the planner. Null until planning completes. */
+  String runSummary;
 
-    /** Timestamp when the run was archived by the user. Null for active runs. */
-    Instant archivedAt;
+  /** "PROTOTYPE" | "PRODUCTION". Null for pre-V40 runs. */
+  String executionMode;
 
-    /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
-    String aiProvider;
+  /** URL of the pull request created for existing-repo runs. Null for NEW/NONE repos. */
+  String githubPrUrl;
 
-    /** Which harness produced this run: "v1" (default) or "v2". Null for pre-V76 rows. */
-    String harnessVersion;
+  /** Canonical PR URL — works for GitHub and Bitbucket. Null for NEW/NONE repos or legacy runs. */
+  String scmPrUrl;
 
-    // ── Retry tracking ──────────────────────────────────────────────────────
-    /** True if this run is a retry of a previous run. */
-    Boolean isRetry;
-    /** RunId of the original run this was retried from. Null for original runs. */
-    String sourceRunId;
-    /** Number of auto-retry attempts on this run chain (0 = original run). */
-    Integer runRetryCount;
+  /** Which SCM provider was used for this run (GITHUB, BITBUCKET, or null for legacy runs). */
+  String scmProvider;
 
-    // ── Batch execution ──────────────────────────────────────────────────────
-    /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
-    String approvedExecutionMode;
-    /** Batch credits (with 50% discount). Null if batch not available. */
-    Integer batchCredits;
-    /** True if this run qualifies for batch execution. */
-    Boolean batchAvailable;
-    /** Credits saved by choosing batch over real-time. */
-    Integer creditSavings;
-    /** Batch progress: tasks completed so far. */
-    Integer batchProgressCompleted;
-    /** Batch progress: total tasks in batch. */
-    Integer batchProgressTotal;
+  /** Pilot R4 — JSON {@code AssessmentResult}. Null when no project context. */
+  String assessmentResult;
 
-    // ── Per-agent token breakdown (V19) ─────────────────────────────────────
-    /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
-    List<AgentTokenEntry> agentTokens;
+  /** Pilot R7 — Figma URL captured at submission. */
+  String figmaUrl;
 
-    // ── Background validation (V64) ─────────────────────────────────────────
-    /** Status of the background validation thread: PENDING, RUNNING, COMPLETED, FAILED, or null. */
-    String validationStatus;
-    /** Current phase of background validation (TEST_GEN, REVIEW, RE_VALIDATE, REPORT). */
-    String validationPhase;
+  /** Codemap stats for paid existing-repo runs (null when not generated). */
+  Integer codemapFileCount;
 
-    // ── Validation report scoring snapshot (v2.5.10 + adversarial-report Finding 13) ──
-    /**
-     * Mirrors the corresponding fields on the {@code ValidationReport} so clients
-     * rendering run detail don't have to issue a second request to
-     * {@code GET /api/runs/{id}/report} just to show the headline score.
-     * Null until the report is written.
-     */
-    Integer verifiedScore;
-    Integer accuracyScore;
-    String reviewerVerdict;
-    Boolean finalBuildPassed;
-    Integer testsPassed;
-    Integer testsTotal;
+  Integer codemapRouteCount;
+  Integer codemapInputTokens;
+  Integer codemapOutputTokens;
 
-    /** Present if this run was triggered by an external integration. */
-    public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
+  /** Timestamp when the run was archived by the user. Null for active runs. */
+  Instant archivedAt;
 
-    /** Token usage for a non-task agent (planner, reviewer, compiler). */
-    public record AgentTokenEntry(String role, String provider, String model,
-                                  int inputTokens, int outputTokens) {}
+  /** AI provider used for this run (ANTHROPIC, OPENAI, GOOGLE). */
+  String aiProvider;
+
+  /** Which harness produced this run: "v1" (default) or "v2". Null for pre-V76 rows. */
+  String harnessVersion;
+
+  // ── Retry tracking ──────────────────────────────────────────────────────
+  /** True if this run is a retry of a previous run. */
+  Boolean isRetry;
+
+  /** RunId of the original run this was retried from. Null for original runs. */
+  String sourceRunId;
+
+  /** Number of auto-retry attempts on this run chain (0 = original run). */
+  Integer runRetryCount;
+
+  // ── Batch execution ──────────────────────────────────────────────────────
+  /** "REALTIME" or "BATCH". Null for pre-V61 runs. */
+  String approvedExecutionMode;
+
+  /** Batch credits (with 50% discount). Null if batch not available. */
+  Integer batchCredits;
+
+  /** True if this run qualifies for batch execution. */
+  Boolean batchAvailable;
+
+  /** Credits saved by choosing batch over real-time. */
+  Integer creditSavings;
+
+  /** Batch progress: tasks completed so far. */
+  Integer batchProgressCompleted;
+
+  /** Batch progress: total tasks in batch. */
+  Integer batchProgressTotal;
+
+  // ── Per-agent token breakdown (V19) ─────────────────────────────────────
+  /** Token usage + actual provider/model for pipeline agents (planner, reviewer, compiler). */
+  List<AgentTokenEntry> agentTokens;
+
+  // ── Background validation (V64) ─────────────────────────────────────────
+  /** Status of the background validation thread: PENDING, RUNNING, COMPLETED, FAILED, or null. */
+  String validationStatus;
+
+  /** Current phase of background validation (TEST_GEN, REVIEW, RE_VALIDATE, REPORT). */
+  String validationPhase;
+
+  // ── Validation report scoring snapshot (v2.5.10 + adversarial-report Finding 13) ──
+  /**
+   * Mirrors the corresponding fields on the {@code ValidationReport} so clients rendering run
+   * detail don't have to issue a second request to {@code GET /api/runs/{id}/report} just to show
+   * the headline score. Null until the report is written.
+   */
+  Integer verifiedScore;
+
+  Integer accuracyScore;
+  String reviewerVerdict;
+  Boolean finalBuildPassed;
+  Integer testsPassed;
+  Integer testsTotal;
+
+  /** Present if this run was triggered by an external integration. */
+  public record IntegrationSource(String sourceType, String sourceId, String sourceUrl) {}
+
+  /** Token usage for a non-task agent (planner, reviewer, compiler). */
+  public record AgentTokenEntry(
+      String role, String provider, String model, int inputTokens, int outputTokens) {}
 }

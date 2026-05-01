@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import {useState, useMemo} from 'react';
 
 interface FileEntry {
   path: string;
@@ -20,12 +20,12 @@ interface TreeNode {
   size?: number;
 }
 
-export function FileTree({ files, onSelectFile, selectedFile }: FileTreeProps) {
+export function FileTree({files, onSelectFile, selectedFile}: FileTreeProps) {
   const tree = useMemo(() => buildTree(files), [files]);
 
   return (
-    <div className="text-sm font-mono">
-      {tree.map(node => (
+    <div className='text-sm font-mono'>
+      {tree.map((node) => (
         <TreeNodeView
           key={node.path}
           node={node}
@@ -39,22 +39,26 @@ export function FileTree({ files, onSelectFile, selectedFile }: FileTreeProps) {
 }
 
 function TreeNodeView({
-  node, depth, onSelectFile, selectedFile
+  node,
+  depth,
+  onSelectFile,
+  selectedFile,
 }: {
-  node: TreeNode; depth: number; onSelectFile: (path: string) => void; selectedFile?: string;
+  node: TreeNode;
+  depth: number;
+  onSelectFile: (path: string) => void;
+  selectedFile?: string;
 }) {
   const [expanded, setExpanded] = useState(depth < 2); // auto-expand first 2 levels
 
-  const icon = node.isDirectory
-    ? (expanded ? '\u{1F4C2}' : '\u{1F4C1}')
-    : getFileIcon(node.name);
+  const icon = node.isDirectory ? (expanded ? '\u{1F4C2}' : '\u{1F4C1}') : getFileIcon(node.name);
 
   return (
     <div>
       <div
         className={`flex items-center gap-1.5 py-0.5 px-2 cursor-pointer rounded hover:bg-[var(--gray-200)]
           ${selectedFile === node.path ? 'bg-accent-blue/10 text-accent-blue' : 'text-secondary'}`}
-        style={{ paddingLeft: `${depth * 16 + 8}px` }}
+        style={{paddingLeft: `${depth * 16 + 8}px`}}
         onClick={() => {
           if (node.isDirectory) {
             setExpanded(!expanded);
@@ -63,18 +67,20 @@ function TreeNodeView({
           }
         }}
       >
-        <span className="text-xs">{icon}</span>
-        <span className="truncate">{node.name}</span>
+        <span className='text-xs'>{icon}</span>
+        <span className='truncate'>{node.name}</span>
       </div>
-      {node.isDirectory && expanded && node.children.map(child => (
-        <TreeNodeView
-          key={child.path}
-          node={child}
-          depth={depth + 1}
-          onSelectFile={onSelectFile}
-          selectedFile={selectedFile}
-        />
-      ))}
+      {node.isDirectory &&
+        expanded &&
+        node.children.map((child) => (
+          <TreeNodeView
+            key={child.path}
+            node={child}
+            depth={depth + 1}
+            onSelectFile={onSelectFile}
+            selectedFile={selectedFile}
+          />
+        ))}
     </div>
   );
 }
@@ -96,7 +102,7 @@ function buildTree(files: FileEntry[]): TreeNode[] {
       const path = parts.slice(0, i + 1).join('/');
       const isLast = i === parts.length - 1;
 
-      let existing = current.find(n => n.name === name);
+      let existing = current.find((n) => n.name === name);
       if (!existing) {
         existing = {
           name,
@@ -117,10 +123,28 @@ function buildTree(files: FileEntry[]): TreeNode[] {
 function getFileIcon(name: string): string {
   const ext = name.split('.').pop()?.toLowerCase();
   const icons: Record<string, string> = {
-    java: '\u2615', kt: '\u{1F7E3}', py: '\u{1F40D}', js: '\u{1F7E8}', jsx: '\u269B\uFE0F', ts: '\u{1F537}', tsx: '\u269B\uFE0F',
-    html: '\u{1F310}', css: '\u{1F3A8}', json: '\u{1F4CB}', yml: '\u2699\uFE0F', yaml: '\u2699\uFE0F', xml: '\u{1F4C4}',
-    md: '\u{1F4DD}', sql: '\u{1F5C4}\uFE0F', sh: '\u{1F5A5}\uFE0F', dockerfile: '\u{1F433}', toml: '\u2699\uFE0F',
-    rs: '\u{1F980}', go: '\u{1F439}', rb: '\u{1F48E}', gradle: '\u{1F418}',
+    java: '\u2615',
+    kt: '\u{1F7E3}',
+    py: '\u{1F40D}',
+    js: '\u{1F7E8}',
+    jsx: '\u269B\uFE0F',
+    ts: '\u{1F537}',
+    tsx: '\u269B\uFE0F',
+    html: '\u{1F310}',
+    css: '\u{1F3A8}',
+    json: '\u{1F4CB}',
+    yml: '\u2699\uFE0F',
+    yaml: '\u2699\uFE0F',
+    xml: '\u{1F4C4}',
+    md: '\u{1F4DD}',
+    sql: '\u{1F5C4}\uFE0F',
+    sh: '\u{1F5A5}\uFE0F',
+    dockerfile: '\u{1F433}',
+    toml: '\u2699\uFE0F',
+    rs: '\u{1F980}',
+    go: '\u{1F439}',
+    rb: '\u{1F48E}',
+    gradle: '\u{1F418}',
   };
   return icons[ext || ''] || '\u{1F4C4}';
 }

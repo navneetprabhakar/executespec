@@ -1,11 +1,16 @@
 package com.navneet.executespec.auth.oauth;
 
+import java.io.IOException;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
+
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
+
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.security.JwtUtil;
 import com.navneet.executespec.auth.service.AuthService;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnExpression;
 import org.springframework.context.annotation.Lazy;
@@ -17,109 +22,133 @@ import org.springframework.security.oauth2.core.user.OAuth2User;
 import org.springframework.security.web.authentication.AuthenticationSuccessHandler;
 import org.springframework.stereotype.Component;
 
-import java.io.IOException;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * Handles successful OAuth2 login — extracts profile, finds or creates user,
- * generates JWT tokens, and redirects to the frontend callback page.
+ * Handles successful OAuth2 login — extracts profile, finds or creates user, generates JWT tokens,
+ * and redirects to the frontend callback page.
  *
- * <p>{@code @Lazy} on AuthService breaks the circular dependency:
- * SecurityConfig → OAuthSuccessHandler → AuthService → SecurityConfig.
+ * <p>{@code @Lazy} on AuthService breaks the circular dependency: SecurityConfig →
+ * OAuthSuccessHandler → AuthService → SecurityConfig.
  */
 @Component
-@ConditionalOnExpression("!'none'.equals('${spring.security.oauth2.client.registration.google.client-id:none}') or !'none'.equals('${spring.security.oauth2.client.registration.github.client-id:none}')")
+@ConditionalOnExpression(
+    "!'none'.equals('${spring.security.oauth2.client.registration.google.client-id:none}') or"
+        + " !'none'.equals('${spring.security.oauth2.client.registration.github.client-id:none}')")
 @Slf4j
 public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
 
-    private final OAuthUserMapper oAuthUserMapper;
-    private final AuthService authService;
-    private final JwtUtil jwtUtil;
-    private final OAuth2AuthorizedClientService authorizedClientService;
-    private final OAuthSurfaceResolver surfaceResolver;
+  private final OAuthUserMapper oAuthUserMapper;
+  private final AuthService authService;
+  private final JwtUtil jwtUtil;
+  private final OAuth2AuthorizedClientService authorizedClientService;
+  private final OAuthSurfaceResolver surfaceResolver;
 
-    public OAuthSuccessHandler(OAuthUserMapper oAuthUserMapper,
-                               @Lazy AuthService authService,
-                               JwtUtil jwtUtil,
-                               OAuth2AuthorizedClientService authorizedClientService,
-                               OAuthSurfaceResolver surfaceResolver) {
-        this.oAuthUserMapper = oAuthUserMapper;
-        this.authService = authService;
-        this.jwtUtil = jwtUtil;
-        this.authorizedClientService = authorizedClientService;
-        this.surfaceResolver = surfaceResolver;
+  public OAuthSuccessHandler(
+      OAuthUserMapper oAuthUserMapper,
+      @Lazy AuthService authService,
+      JwtUtil jwtUtil,
+      OAuth2AuthorizedClientService authorizedClientService,
+      OAuthSurfaceResolver surfaceResolver) {
+    this.oAuthUserMapper = oAuthUserMapper;
+    this.authService = authService;
+    this.jwtUtil = jwtUtil;
+    this.authorizedClientService = authorizedClientService;
+    this.surfaceResolver = surfaceResolver;
+  }
+
+  @Value("${app.mail.base-url:http://localhost:5173}")
+  private String dashboardUrl;
+
+  @Override
+  public void onAuthenticationSuccess(
+      HttpServletRequest request, HttpServletResponse response, Authentication authentication)
+      throws IOException {
+    try {
+      OAuth2AuthenticationToken oauthToken = (OAuth2AuthenticationToken) authentication;
+      OAuth2User oAuth2User = oauthToken.getPrincipal();
+      String registrationId = oauthToken.getAuthorizedClientRegistrationId();
+
+      // Retrieve the authorized client to access the access token (needed for GitHub email
+      // fallback)
+      OAuth2AuthorizedClient authorizedClient =
+          authorizedClientService.loadAuthorizedClient(registrationId, oauthToken.getName());
+
+      // Map provider-specific attributes to a unified profile
+      OAuthProfile profile =
+          oAuthUserMapper.toProfile(registrationId, oAuth2User, authorizedClient);
+
+      // Phase 1.0 (Plan 1 #5): per-surface return URL for the post-login bounce.
+      // Pre-split (= today): no session attribute → null → fall back to dashboardUrl.
+      // Post-split: app.executespec.ai vs build.executespec.ai get their own callbacks.
+      String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
+      String baseRedirectUrl =
+          surfaceReturn != null ? surfaceReturn : dashboardUrl + "/auth/callback";
+      String baseLoginErrorUrl =
+          surfaceReturn != null
+              ? surfaceReturn.replace("/auth/callback", "/login")
+              : dashboardUrl + "/login";
+
+      if (profile.email() == null || profile.email().isBlank()) {
+        log.warn("OAuth login failed: no email returned from provider {}", registrationId);
+        response.sendRedirect(
+            baseLoginErrorUrl
+                + "?error="
+                + URLEncoder.encode("oauth_no_email", StandardCharsets.UTF_8));
+        return;
+      }
+
+      // Find existing user or create new one
+      AppUser user =
+          authService.findOrCreateFromOAuth(
+              profile.provider(),
+              profile.oauthId(),
+              profile.email(),
+              profile.name(),
+              profile.avatarUrl());
+
+      // Generate JWT tokens
+      String accessToken = jwtUtil.generateAccessToken(user, null);
+      String refreshToken = jwtUtil.generateRefreshToken(user);
+
+      log.info(
+          "OAuth login success: provider={}, email={}, userId={}, surfaceReturn={}",
+          profile.provider(),
+          profile.email(),
+          user.getId(),
+          surfaceReturn != null ? "set" : "default");
+
+      // Redirect to frontend callback with tokens
+      String redirectUrl =
+          baseRedirectUrl
+              + "?token="
+              + URLEncoder.encode(accessToken, StandardCharsets.UTF_8)
+              + "&refresh="
+              + URLEncoder.encode(refreshToken, StandardCharsets.UTF_8);
+      response.sendRedirect(redirectUrl);
+
+    } catch (OAuthEmailConflictException e) {
+      log.warn("OAuth email conflict: {}", e.getMessage());
+      String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
+      String baseLoginErrorUrl =
+          surfaceReturn != null
+              ? surfaceReturn.replace("/auth/callback", "/login")
+              : dashboardUrl + "/login";
+      response.sendRedirect(
+          baseLoginErrorUrl
+              + "?error="
+              + URLEncoder.encode("oauth_email_conflict", StandardCharsets.UTF_8));
+    } catch (Exception e) {
+      log.error("OAuth login error", e);
+      String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
+      String baseLoginErrorUrl =
+          surfaceReturn != null
+              ? surfaceReturn.replace("/auth/callback", "/login")
+              : dashboardUrl + "/login";
+      response.sendRedirect(
+          baseLoginErrorUrl
+              + "?error="
+              + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
     }
-
-    @Value("${app.mail.base-url:http://localhost:5173}")
-    private String dashboardUrl;
-
-    @Override
-    public void onAuthenticationSuccess(HttpServletRequest request, HttpServletResponse response,
-                                        Authentication authentication) throws IOException {
-        try {
-            OAuth2AuthenticationToken oauthToken = (OAuth2AuthenticationToken) authentication;
-            OAuth2User oAuth2User = oauthToken.getPrincipal();
-            String registrationId = oauthToken.getAuthorizedClientRegistrationId();
-
-            // Retrieve the authorized client to access the access token (needed for GitHub email fallback)
-            OAuth2AuthorizedClient authorizedClient = authorizedClientService.loadAuthorizedClient(
-                    registrationId, oauthToken.getName());
-
-            // Map provider-specific attributes to a unified profile
-            OAuthProfile profile = oAuthUserMapper.toProfile(registrationId, oAuth2User, authorizedClient);
-
-            // Phase 1.0 (Plan 1 #5): per-surface return URL for the post-login bounce.
-            // Pre-split (= today): no session attribute → null → fall back to dashboardUrl.
-            // Post-split: app.executespec.ai vs build.executespec.ai get their own callbacks.
-            String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
-            String baseRedirectUrl = surfaceReturn != null ? surfaceReturn : dashboardUrl + "/auth/callback";
-            String baseLoginErrorUrl = surfaceReturn != null
-                    ? surfaceReturn.replace("/auth/callback", "/login")
-                    : dashboardUrl + "/login";
-
-            if (profile.email() == null || profile.email().isBlank()) {
-                log.warn("OAuth login failed: no email returned from provider {}", registrationId);
-                response.sendRedirect(baseLoginErrorUrl + "?error=" +
-                        URLEncoder.encode("oauth_no_email", StandardCharsets.UTF_8));
-                return;
-            }
-
-            // Find existing user or create new one
-            AppUser user = authService.findOrCreateFromOAuth(
-                    profile.provider(), profile.oauthId(), profile.email(),
-                    profile.name(), profile.avatarUrl());
-
-            // Generate JWT tokens
-            String accessToken = jwtUtil.generateAccessToken(user, null);
-            String refreshToken = jwtUtil.generateRefreshToken(user);
-
-            log.info("OAuth login success: provider={}, email={}, userId={}, surfaceReturn={}",
-                    profile.provider(), profile.email(), user.getId(),
-                    surfaceReturn != null ? "set" : "default");
-
-            // Redirect to frontend callback with tokens
-            String redirectUrl = baseRedirectUrl + "?token=" +
-                    URLEncoder.encode(accessToken, StandardCharsets.UTF_8) +
-                    "&refresh=" + URLEncoder.encode(refreshToken, StandardCharsets.UTF_8);
-            response.sendRedirect(redirectUrl);
-
-        } catch (OAuthEmailConflictException e) {
-            log.warn("OAuth email conflict: {}", e.getMessage());
-            String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
-            String baseLoginErrorUrl = surfaceReturn != null
-                    ? surfaceReturn.replace("/auth/callback", "/login")
-                    : dashboardUrl + "/login";
-            response.sendRedirect(baseLoginErrorUrl + "?error=" +
-                    URLEncoder.encode("oauth_email_conflict", StandardCharsets.UTF_8));
-        } catch (Exception e) {
-            log.error("OAuth login error", e);
-            String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
-            String baseLoginErrorUrl = surfaceReturn != null
-                    ? surfaceReturn.replace("/auth/callback", "/login")
-                    : dashboardUrl + "/login";
-            response.sendRedirect(baseLoginErrorUrl + "?error=" +
-                    URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
-        }
-    }
+  }
 }

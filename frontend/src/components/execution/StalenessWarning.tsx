@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { getWorkspaceHealth, analyseProject, type RepoHealth } from '@/lib/api';
+import {useEffect, useState} from 'react';
+import {getWorkspaceHealth, analyseProject, type RepoHealth} from '@/lib/api';
 
 /**
  * v2.5.2 (UX-2.1) — pre-Launch codemap freshness warning.
@@ -29,21 +29,23 @@ export default function StalenessWarning({
   useEffect(() => {
     let alive = true;
     getWorkspaceHealth(projectId)
-      .then((r) => { if (alive) setHealth(r.repos); })
+      .then((r) => {
+        if (alive) setHealth(r.repos);
+      })
       .catch(() => {});
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [projectId]);
 
   if (dismissed) return null;
   if (!health || selectedRepoIds.length === 0) return null;
 
-  const staleSelected = health.filter(
-    (h) => selectedRepoIds.includes(h.repoId) && h.isStale,
-  );
+  const staleSelected = health.filter((h) => selectedRepoIds.includes(h.repoId) && h.isStale);
   if (staleSelected.length === 0) {
     if (just) {
       return (
-        <div className="rounded-sm border border-status-success/40 bg-status-success/10 px-3 py-1.5 text-xs text-status-success">
+        <div className='rounded-sm border border-status-success/40 bg-status-success/10 px-3 py-1.5 text-xs text-status-success'>
           ✓ Codemaps refreshed — ready to plan.
         </div>
       );
@@ -64,42 +66,39 @@ export default function StalenessWarning({
   };
 
   return (
-    <div className="rounded-sm border border-accent-amber/40 bg-accent-amber/10 p-3 space-y-2">
-      <div className="flex items-start gap-2">
-        <span className="text-accent-amber text-sm leading-none">⚠</span>
-        <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium text-accent-amber">
-            Codemaps may be outdated
-          </div>
-          <ul className="mt-1 space-y-0.5">
+    <div className='rounded-sm border border-accent-amber/40 bg-accent-amber/10 p-3 space-y-2'>
+      <div className='flex items-start gap-2'>
+        <span className='text-accent-amber text-sm leading-none'>⚠</span>
+        <div className='flex-1 min-w-0'>
+          <div className='text-xs font-medium text-accent-amber'>Codemaps may be outdated</div>
+          <ul className='mt-1 space-y-0.5'>
             {staleSelected.map((h) => {
               const old7 = h.lastCodeMapSha ? h.lastCodeMapSha.slice(0, 7) : 'never analysed';
               const cur7 = h.currentOriginSha ? h.currentOriginSha.slice(0, 7) : '?';
               return (
-                <li key={h.repoId} className="text-[11px] text-muted font-mono">
+                <li key={h.repoId} className='text-[11px] text-muted font-mono'>
                   {h.repoName} — {old7} → {cur7}
                 </li>
               );
             })}
           </ul>
-          <div className="text-[11px] text-muted mt-1">
-            Planning against stale codemaps may plan tasks against code that no
-            longer exists. The system will auto-refresh on your first task, but
-            you can front-load the wait here.
+          <div className='text-[11px] text-muted mt-1'>
+            Planning against stale codemaps may plan tasks against code that no longer exists. The
+            system will auto-refresh on your first task, but you can front-load the wait here.
           </div>
         </div>
       </div>
-      <div className="flex items-center gap-2 pl-5">
+      <div className='flex items-center gap-2 pl-5'>
         <button
           onClick={doAnalyse}
           disabled={busy}
-          className="text-[11px] font-medium px-2 py-0.5 rounded-sm bg-accent-amber/20 text-accent-amber hover:bg-accent-amber/30 disabled:opacity-50"
+          className='text-[11px] font-medium px-2 py-0.5 rounded-sm bg-accent-amber/20 text-accent-amber hover:bg-accent-amber/30 disabled:opacity-50'
         >
           {busy ? 'Analysing…' : 'Analyse before planning'}
         </button>
         <button
           onClick={() => setDismissed(true)}
-          className="text-[11px] text-muted hover:text-primary"
+          className='text-[11px] text-muted hover:text-primary'
         >
           Proceed anyway
         </button>

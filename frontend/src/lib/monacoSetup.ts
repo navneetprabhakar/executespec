@@ -1,5 +1,5 @@
-import { loader } from '@monaco-editor/react';
-import { GEIST_THEME_NAME, geistDarkTheme } from './monacoGeistTheme';
+import {loader} from '@monaco-editor/react';
+import {GEIST_THEME_NAME, geistDarkTheme} from './monacoGeistTheme';
 
 /**
  * Centralized Monaco editor initialization.

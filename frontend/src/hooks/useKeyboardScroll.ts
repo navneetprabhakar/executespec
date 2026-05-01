@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import {useEffect} from 'react';
 
 /**
  * On iOS Safari, the soft keyboard pushes the viewport up but doesn't scroll
@@ -25,8 +25,13 @@ export function useKeyboardScroll() {
         // Give the browser a tick to finish layout, then scroll focused element into view
         requestAnimationFrame(() => {
           const el = document.activeElement;
-          if (el && (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement)) {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          if (
+            el &&
+            (el instanceof HTMLInputElement ||
+              el instanceof HTMLTextAreaElement ||
+              el instanceof HTMLSelectElement)
+          ) {
+            el.scrollIntoView({behavior: 'smooth', block: 'center'});
           }
         });
       }

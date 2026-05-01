@@ -1,10 +1,10 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { MarkdownContent } from '@/components/shared/MarkdownContent';
-import { useExecutionStore } from '@/stores/useExecutionStore';
+import {useState} from 'react';
+import {useNavigate} from 'react-router-dom';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
+import {useExecutionStore} from '@/stores/useExecutionStore';
 
-export default function ArchReviewGate({ executionId }: { executionId: string }) {
-  const { executionRun, approveArch, generatePlan, abort } = useExecutionStore();
+export default function ArchReviewGate({executionId}: {executionId: string}) {
+  const {executionRun, approveArch, generatePlan, abort} = useExecutionStore();
   const [annotations, setAnnotations] = useState('');
   const [approved, setApproved] = useState(false);
   const [cancelling, setCancelling] = useState(false);
@@ -13,9 +13,11 @@ export default function ArchReviewGate({ executionId }: { executionId: string })
   const doc = executionRun?.unifiedArchDoc ?? '(no architecture doc generated yet)';
 
   return (
-    <div className="space-y-3">
-      <h3 className="text-sm font-medium text-primary">Unified architecture — review before planning</h3>
-      <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 max-h-[400px] overflow-y-auto">
+    <div className='space-y-3'>
+      <h3 className='text-sm font-medium text-primary'>
+        Unified architecture — review before planning
+      </h3>
+      <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 max-h-[400px] overflow-y-auto'>
         <MarkdownContent content={doc} />
       </div>
       <textarea
@@ -23,10 +25,10 @@ export default function ArchReviewGate({ executionId }: { executionId: string })
         onChange={(e) => setAnnotations(e.target.value)}
         rows={3}
         disabled={approved}
-        placeholder="Optional: add corrections or highlights the planner should respect"
-        className="w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm font-mono disabled:opacity-60"
+        placeholder='Optional: add corrections or highlights the planner should respect'
+        className='w-full rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-sm font-mono disabled:opacity-60'
       />
-      <div className="flex items-center gap-2">
+      <div className='flex items-center gap-2'>
         <button
           disabled={approved}
           onClick={async () => {
@@ -39,7 +41,7 @@ export default function ArchReviewGate({ executionId }: { executionId: string })
               throw e;
             }
           }}
-          className="rounded-sm border border-status-success/40 bg-status-success/10 text-status-success px-3 py-1.5 text-sm disabled:opacity-60"
+          className='rounded-sm border border-status-success/40 bg-status-success/10 text-status-success px-3 py-1.5 text-sm disabled:opacity-60'
         >
           {approved ? 'Generating plan…' : 'Approve & continue'}
         </button>
@@ -52,9 +54,11 @@ export default function ArchReviewGate({ executionId }: { executionId: string })
               await abort(executionId);
               const pid = executionRun?.projectId;
               if (pid) navigate(`/projects/${pid}/dashboard`);
-            } finally { setCancelling(false); }
+            } finally {
+              setCancelling(false);
+            }
           }}
-          className="rounded-sm border border-[var(--border-default)] text-muted hover:text-accent-red px-3 py-1.5 text-sm disabled:opacity-50"
+          className='rounded-sm border border-[var(--border-default)] text-muted hover:text-accent-red px-3 py-1.5 text-sm disabled:opacity-50'
         >
           {cancelling ? 'Cancelling…' : 'Cancel'}
         </button>

@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from 'react';
+import {useEffect, useCallback} from 'react';
 
 // Razorpay global type (shared with RazorpayCheckout)
 declare global {
@@ -36,7 +36,6 @@ export function RazorpayOrderCheckout({
   userEmail,
   description = 'Run Top-Up',
 }: RazorpayOrderCheckoutProps) {
-
   // Load Razorpay script dynamically
   useEffect(() => {
     if (document.getElementById('razorpay-script')) return;

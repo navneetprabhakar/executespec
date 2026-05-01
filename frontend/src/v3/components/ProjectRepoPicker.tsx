@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import {useEffect, useState} from 'react';
 import {
   createProject,
   createRepo,
@@ -9,7 +9,7 @@ import {
   type GitHubRemoteRepo,
   type ProjectDto,
 } from '@/lib/api';
-import type { ProjectRepoLink } from '@/types/project';
+import type {ProjectRepoLink} from '@/types/project';
 
 /**
  * R-335 — shared project + repo picker for Library + Migrations
@@ -67,15 +67,19 @@ export default function ProjectRepoPicker({
     try {
       const raw = localStorage.getItem(key);
       if (!raw) return null;
-      const parsed = JSON.parse(raw) as { ts: number; data: T };
+      const parsed = JSON.parse(raw) as {ts: number; data: T};
       if (Date.now() - parsed.ts > CACHE_TTL_MS) return null;
       return parsed.data;
-    } catch { return null; }
+    } catch {
+      return null;
+    }
   }
   function writeCache<T>(key: string, data: T) {
     try {
-      localStorage.setItem(key, JSON.stringify({ ts: Date.now(), data }));
-    } catch { /* quota exceeded — silent */ }
+      localStorage.setItem(key, JSON.stringify({ts: Date.now(), data}));
+    } catch {
+      /* quota exceeded — silent */
+    }
   }
 
   // Load projects on mount — cache-first, then revalidate.
@@ -105,7 +109,9 @@ export default function ProjectRepoPicker({
         if (cancelled) return;
         if (!cached) setProjectsErr(e?.message ?? 'Failed to load projects');
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -133,7 +139,9 @@ export default function ProjectRepoPicker({
           setRepos([]);
         }
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -146,9 +154,9 @@ export default function ProjectRepoPicker({
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
       {/* Project picker */}
-      <FormField label="Project">
+      <FormField label='Project'>
         {projects === null && !projectsErr ? (
           <span style={hintStyle}>Loading…</span>
         ) : projectsErr ? (
@@ -159,7 +167,7 @@ export default function ProjectRepoPicker({
               setProjects([p]);
               onProjectChange(p.id);
             }}
-            label="Create your first project"
+            label='Create your first project'
           />
         ) : (
           <>
@@ -176,13 +184,13 @@ export default function ProjectRepoPicker({
               }}
               style={inputStyle}
             >
-              <option value="">— Pick a project —</option>
+              <option value=''>— Pick a project —</option>
               {projects?.map((p) => (
                 <option key={p.id} value={p.id}>
                   {p.name}
                 </option>
               ))}
-              <option value="__new__">+ Create new project…</option>
+              <option value='__new__'>+ Create new project…</option>
             </select>
             {showNewProject && (
               <NewProjectInline
@@ -202,7 +210,7 @@ export default function ProjectRepoPicker({
       {/* Repo multi-picker — only when a project is chosen */}
       {projectId && (
         <FormField
-          label="Repositories"
+          label='Repositories'
           hint={
             repos && repos.length === 0
               ? 'No repos linked to this project yet — add one below.'
@@ -244,14 +252,14 @@ export default function ProjectRepoPicker({
                       }}
                     >
                       <input
-                        type="checkbox"
+                        type='checkbox'
                         checked={repoIds.includes(link.repo.id)}
                         onChange={() => toggleRepo(link.repo.id)}
                       />
-                      <span style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace' }}>
+                      <span style={{fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace'}}>
                         {link.repo.githubRepoFullName}
                       </span>
-                      <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>
+                      <span style={{color: 'var(--v3-text-subtle)', fontSize: 11}}>
                         @ {link.repo.defaultBranch}
                       </span>
                     </label>
@@ -259,11 +267,7 @@ export default function ProjectRepoPicker({
                 </div>
               )}
               {!showNewRepo && (
-                <button
-                  type="button"
-                  onClick={() => setShowNewRepo(true)}
-                  style={linkButtonStyle}
-                >
+                <button type='button' onClick={() => setShowNewRepo(true)} style={linkButtonStyle}>
                   + Add repo to this project
                 </button>
               )}
@@ -307,7 +311,7 @@ function NewProjectInline({
     setBusy(true);
     setErr(null);
     try {
-      const p = await createProject({ name: name.trim() });
+      const p = await createProject({name: name.trim()});
       onCreated(p);
     } catch (e) {
       setErr((e as Error)?.message ?? 'Failed to create project');
@@ -329,22 +333,22 @@ function NewProjectInline({
         gap: 6,
       }}
     >
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--v3-text-subtle)' }}>
+      <div style={{fontSize: 11, fontWeight: 600, color: 'var(--v3-text-subtle)'}}>
         {label ?? 'New project'}
       </div>
       <input
         autoFocus
         value={name}
         onChange={(e) => setName(e.target.value)}
-        placeholder="Project name (e.g. Acme web app)"
+        placeholder='Project name (e.g. Acme web app)'
         style={inputStyle}
       />
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button type="button" onClick={submit} disabled={busy} style={primaryButtonSm(busy)}>
+      <div style={{display: 'flex', gap: 6}}>
+        <button type='button' onClick={submit} disabled={busy} style={primaryButtonSm(busy)}>
           {busy ? 'Creating…' : 'Create'}
         </button>
         {onCancel && (
-          <button type="button" onClick={onCancel} style={ghostButtonSm}>
+          <button type='button' onClick={onCancel} style={ghostButtonSm}>
             Cancel
           </button>
         )}
@@ -445,7 +449,8 @@ function NewRepoInline({
   // R-336 — manual mode is the fallback when the GitHub list call
   // fails OR the user toggles it (e.g. for a forked repo outside
   // their default owner's catalogue).
-  const useManual = manualMode || ghLoadErr !== null || (githubRepos !== null && githubRepos.length === 0);
+  const useManual =
+    manualMode || ghLoadErr !== null || (githubRepos !== null && githubRepos.length === 0);
 
   return (
     <div
@@ -460,31 +465,28 @@ function NewRepoInline({
         gap: 6,
       }}
     >
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--v3-text-subtle)' }}>
-        Add repo
-      </div>
+      <div style={{fontSize: 11, fontWeight: 600, color: 'var(--v3-text-subtle)'}}>Add repo</div>
 
       {ghLoading ? (
         <span style={hintStyle}>Loading your GitHub repos…</span>
       ) : useManual ? (
         <>
           {ghLoadErr && (
-            <span style={{ ...hintStyle, color: '#FBBF24' }}>
+            <span style={{...hintStyle, color: '#FBBF24'}}>
               Couldn't fetch from GitHub ({ghLoadErr}) — type the repo name below.
             </span>
           )}
           {!ghLoadErr && githubRepos && githubRepos.length === 0 && (
-            <span style={{ ...hintStyle, color: '#FBBF24' }}>
+            <span style={{...hintStyle, color: '#FBBF24'}}>
               No repos returned from GitHub — your PAT may be missing the
-              <code style={{ margin: '0 4px' }}>repo</code>scope. Type the
-              repo name manually below.
+              <code style={{margin: '0 4px'}}>repo</code>scope. Type the repo name manually below.
             </span>
           )}
           <input
             autoFocus
             value={fullName}
             onChange={(e) => setFullName(e.target.value)}
-            placeholder="owner/repo (e.g. navneetprabhakar/executespec)"
+            placeholder='owner/repo (e.g. navneetprabhakar/executespec)'
             style={inputStyle}
           />
         </>
@@ -496,7 +498,7 @@ function NewRepoInline({
             onChange={(e) => pickGithubRepo(e.target.value)}
             style={inputStyle}
           >
-            <option value="">— Pick a repo from GitHub —</option>
+            <option value=''>— Pick a repo from GitHub —</option>
             {githubRepos?.map((r) => (
               <option key={r.fullName} value={r.fullName}>
                 {r.fullName}
@@ -505,7 +507,7 @@ function NewRepoInline({
             ))}
           </select>
           <button
-            type="button"
+            type='button'
             onClick={() => setManualMode(true)}
             style={{
               alignSelf: 'flex-start',
@@ -524,27 +526,32 @@ function NewRepoInline({
         </>
       )}
 
-      <div style={{ display: 'flex', gap: 6 }}>
+      <div style={{display: 'flex', gap: 6}}>
         <select
           value={scope}
           onChange={(e) => setScope(e.target.value as 'ORG' | 'USER')}
-          style={{ ...inputStyle, flex: 1 }}
+          style={{...inputStyle, flex: 1}}
         >
-          <option value="USER">Personal repo</option>
-          <option value="ORG">Org-scoped repo</option>
+          <option value='USER'>Personal repo</option>
+          <option value='ORG'>Org-scoped repo</option>
         </select>
         <input
           value={defaultBranch}
           onChange={(e) => setDefaultBranch(e.target.value)}
-          placeholder="default branch"
-          style={{ ...inputStyle, flex: 1 }}
+          placeholder='default branch'
+          style={{...inputStyle, flex: 1}}
         />
       </div>
-      <div style={{ display: 'flex', gap: 6 }}>
-        <button type="button" onClick={submit} disabled={busy || !fullName} style={primaryButtonSm(busy || !fullName)}>
+      <div style={{display: 'flex', gap: 6}}>
+        <button
+          type='button'
+          onClick={submit}
+          disabled={busy || !fullName}
+          style={primaryButtonSm(busy || !fullName)}
+        >
           {busy ? 'Adding…' : 'Add + link'}
         </button>
-        <button type="button" onClick={onCancel} style={ghostButtonSm}>
+        <button type='button' onClick={onCancel} style={ghostButtonSm}>
           Cancel
         </button>
       </div>
@@ -563,7 +570,7 @@ function FormField({
   children: React.ReactNode;
 }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 4}}>
       <label
         style={{
           fontSize: 11,
@@ -577,7 +584,7 @@ function FormField({
       </label>
       {children}
       {hint && (
-        <span style={{ fontSize: 10.5, color: 'var(--v3-text-subtle)', lineHeight: 1.4 }}>
+        <span style={{fontSize: 10.5, color: 'var(--v3-text-subtle)', lineHeight: 1.4}}>
           {hint}
         </span>
       )}

@@ -1,0 +1,20 @@
+node_modules
+dist
+build
+.vite
+public
+
+# Build output (mirrors src/main/resources/static/)
+src/main/resources/static
+
+# Hashed asset bundles inside the repo root's static dir
+*.min.js
+*.min.css
+
+# Lockfiles — managed by their tooling, not Prettier
+package-lock.json
+yarn.lock
+
+# Generated typings
+*.d.ts.map
+*.tsbuildinfo

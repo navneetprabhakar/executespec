@@ -82,8 +82,8 @@ export const RUN_MODE_PLAN_REVIEW = 'Plan & review';
 export const RUN_MODE_QUICK = 'Quick run';
 
 // ── Cost copy (plain English; no "soft budget" / "hard cap" jargon) ───────────
-export const COST_PREFIX = 'About';     // "About $0.40"
-export const TIME_PREFIX = '~';         // "~3 min"
+export const COST_PREFIX = 'About'; // "About $0.40"
+export const TIME_PREFIX = '~'; // "~3 min"
 
 // ── Misc ──────────────────────────────────────────────────────────────────────
 export const SAMPLE_PROMPT_LABEL = 'Try a prompt';

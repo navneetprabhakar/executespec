@@ -11,5 +11,4 @@ public record ContextAgentInput(
     String reviewerSummary,
     String recentDecisions,
     String runId,
-    String runGoal
-) {}
+    String runGoal) {}

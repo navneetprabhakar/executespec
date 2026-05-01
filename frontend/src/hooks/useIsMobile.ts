@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import {useState, useEffect} from 'react';
 
 const COMPACT_BREAKPOINT = '(max-width: 1023px)';
-const MOBILE_BREAKPOINT  = '(max-width: 767px)';
+const MOBILE_BREAKPOINT = '(max-width: 767px)';
 
 function useMatch(query: string): boolean {
   const [matches, setMatches] = useState(() =>

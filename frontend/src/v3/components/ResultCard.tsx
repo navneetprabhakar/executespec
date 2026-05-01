@@ -1,13 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-  getRun,
-  getValidationReport,
-  type RunDetail,
-  type ValidationReportData,
-} from '@/lib/api';
+import {useEffect, useState} from 'react';
+import {useNavigate} from 'react-router-dom';
+import {getRun, getValidationReport, type RunDetail, type ValidationReportData} from '@/lib/api';
 import Pill from './Pill';
-import { STATUS_LABELS, VERDICT_LABELS, type V3Verdict, COST_PREFIX } from '../lib/terminology';
+import {STATUS_LABELS, VERDICT_LABELS, type V3Verdict, COST_PREFIX} from '../lib/terminology';
 
 /**
  * R-122 — inline run-result card.
@@ -31,7 +26,10 @@ interface ResultCardProps {
   initialStatus?: string;
 }
 
-function deriveVerdict(detail: RunDetail | null, report: ValidationReportData | null): V3Verdict | null {
+function deriveVerdict(
+  detail: RunDetail | null,
+  report: ValidationReportData | null,
+): V3Verdict | null {
   if (!detail) return null;
   const status = detail.status;
   if (status === 'FAILED' || status === 'CANCELLED' || status === 'ABORTED') return 'FAILED';
@@ -59,7 +57,7 @@ function verdictTone(v: V3Verdict | null): 'ok' | 'warn' | 'err' | 'neutral' {
   return 'neutral';
 }
 
-export default function ResultCard({ runId, initialStatus }: ResultCardProps) {
+export default function ResultCard({runId, initialStatus}: ResultCardProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [report, setReport] = useState<ValidationReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -94,9 +92,7 @@ export default function ResultCard({ runId, initialStatus }: ResultCardProps) {
   const verdict = deriveVerdict(detail, report);
   const isInFlight = !['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED'].includes(status);
 
-  const headerLabel = verdict
-    ? VERDICT_LABELS[verdict]
-    : STATUS_LABELS[status] ?? status;
+  const headerLabel = verdict ? VERDICT_LABELS[verdict] : (STATUS_LABELS[status] ?? status);
   const headerTone = verdict ? verdictTone(verdict) : isInFlight ? 'info' : 'neutral';
 
   return (
@@ -122,53 +118,60 @@ export default function ResultCard({ runId, initialStatus }: ResultCardProps) {
           {headerLabel}
         </Pill>
         {detail?.runTitle && (
-          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--v3-text)' }}>
+          <span style={{fontSize: 13, fontWeight: 600, color: 'var(--v3-text)'}}>
             {detail.runTitle}
           </span>
         )}
       </div>
 
       {loading && !detail && (
-        <div style={{ fontSize: 12, color: 'var(--v3-text-subtle)' }}>Loading…</div>
+        <div style={{fontSize: 12, color: 'var(--v3-text-subtle)'}}>Loading…</div>
       )}
 
       {detail && (
         <>
           {/* Evidence chips — only what we can stand behind */}
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+          <div style={{display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10}}>
             {report?.finalBuildPassed === true && (
-              <Pill tone="ok" size="sm">Build ✓</Pill>
+              <Pill tone='ok' size='sm'>
+                Build ✓
+              </Pill>
             )}
             {report?.finalBuildPassed === false && (
-              <Pill tone="err" size="sm">Build ✗</Pill>
+              <Pill tone='err' size='sm'>
+                Build ✗
+              </Pill>
             )}
             {report?.testsTotal != null && report.testsTotal > 0 && (
-              <Pill
-                tone={report.testsPassed === report.testsTotal ? 'ok' : 'warn'}
-                size="sm"
-              >
+              <Pill tone={report.testsPassed === report.testsTotal ? 'ok' : 'warn'} size='sm'>
                 {report.testsPassed}/{report.testsTotal} tests
               </Pill>
             )}
             {report?.reviewerVerdict === 'CLEAN' && (
-              <Pill tone="ok" size="sm">Reviewer 0 issues</Pill>
+              <Pill tone='ok' size='sm'>
+                Reviewer 0 issues
+              </Pill>
             )}
             {report?.reviewerVerdict === 'FIXED_ISSUES' && (
-              <Pill tone="warn" size="sm">Reviewer fixed N issues</Pill>
+              <Pill tone='warn' size='sm'>
+                Reviewer fixed N issues
+              </Pill>
             )}
             {report?.reviewerVerdict === 'UNRESOLVED_ISSUES' && (
-              <Pill tone="err" size="sm">Reviewer unresolved</Pill>
+              <Pill tone='err' size='sm'>
+                Reviewer unresolved
+              </Pill>
             )}
             {detail.actualCostUsd != null && (
-              <Pill tone="neutral" size="sm">
+              <Pill tone='neutral' size='sm'>
                 {COST_PREFIX} ${detail.actualCostUsd.toFixed(2)}
               </Pill>
             )}
           </div>
 
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
             <button
-              type="button"
+              type='button'
               onClick={() => navigate(`/projects/${detail.projectId ?? ''}/r/${runId}`)}
               style={{
                 padding: '5px 12px',
@@ -187,8 +190,8 @@ export default function ResultCard({ runId, initialStatus }: ResultCardProps) {
             {detail.githubPrUrl && (
               <a
                 href={detail.githubPrUrl}
-                target="_blank"
-                rel="noreferrer"
+                target='_blank'
+                rel='noreferrer'
                 style={{
                   padding: '5px 12px',
                   fontSize: 12,

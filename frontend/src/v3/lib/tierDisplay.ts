@@ -19,7 +19,7 @@
  *      raw integer can never reach the user.
  */
 
-import type { V3Entitlements } from './api';
+import type {V3Entitlements} from './api';
 
 /** Anything at or above this threshold is treated as the
  * "unlimited sentinel" leaking through. 1M runs would already be
@@ -49,7 +49,7 @@ export function normalizeTier(raw: string | null | undefined): CanonicalTier {
  * `entitlements.tierKey`, default to FREE. */
 export function canonicalTier(
   meTier: string | null | undefined,
-  entTierKey: string | null | undefined
+  entTierKey: string | null | undefined,
 ): CanonicalTier {
   return normalizeTier(meTier ?? entTierKey);
 }
@@ -98,13 +98,8 @@ export interface RunUsageDisplay {
  * (top-bar badge, billing hero, pricing card, sidebar) agree on
  * one number.
  */
-export function formatRunUsage(
-  ent: V3Entitlements,
-  tier: CanonicalTier
-): RunUsageDisplay {
-  const periodRuns = Number.isFinite(ent.currentPeriodRunCount)
-    ? ent.currentPeriodRunCount
-    : 0;
+export function formatRunUsage(ent: V3Entitlements, tier: CanonicalTier): RunUsageDisplay {
+  const periodRuns = Number.isFinite(ent.currentPeriodRunCount) ? ent.currentPeriodRunCount : 0;
 
   // F-21 (round-3 audit follow-on): trust `runLimitMonthly` as the
   // source of truth for paid tiers too. The previous code hardcoded
@@ -152,9 +147,6 @@ export function formatRunUsage(
 /** True iff the lifetime balance bar should render — FREE only,
  * with a sane balance and cap. Wraps {@link formatRunUsage} for
  * call sites that just need the boolean. */
-export function shouldShowBalanceBar(
-  ent: V3Entitlements,
-  tier: CanonicalTier
-): boolean {
+export function shouldShowBalanceBar(ent: V3Entitlements, tier: CanonicalTier): boolean {
   return formatRunUsage(ent, tier).showBalanceBar;
 }

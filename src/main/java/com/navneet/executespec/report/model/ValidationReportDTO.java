@@ -1,9 +1,9 @@
 package com.navneet.executespec.report.model;
 
-import com.navneet.executespec.report.entity.PipelineResult;
-
 import java.time.Instant;
 import java.util.List;
+
+import com.navneet.executespec.report.entity.PipelineResult;
 
 public record ValidationReportDTO(
     String id,
@@ -25,9 +25,9 @@ public record ValidationReportDTO(
     String shareUrl,
     boolean generatedAfterImprovements,
     // Phase 3: Accuracy assessment fields (nullable — older runs won't have these)
-    Integer accuracyScore,     // 0-100 spec adherence score
-    String accuracyGrade,      // A/B/C/D/F
-    String accuracyJson,       // full AccuracyReport JSON for frontend detail view
+    Integer accuracyScore, // 0-100 spec adherence score
+    String accuracyGrade, // A/B/C/D/F
+    String accuracyJson, // full AccuracyReport JSON for frontend detail view
     // Pilot R6 — multi-dimension scores (nullable for runs before V83).
     Integer codeQualityScore,
     Integer testCoverageScore,
@@ -40,8 +40,8 @@ public record ValidationReportDTO(
     Boolean finalBuildPassed,
     Integer testsPassed,
     Integer testsTotal,
-    String reviewerVerdict,   // CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED
-    Integer verifiedScore,    // 0-100 deterministic score; primary UI badge
-    // Preview URL at time of report generation (nullable — batch runs and expired previews won't have this)
-    String previewUrl
-) {}
+    String reviewerVerdict, // CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED
+    Integer verifiedScore, // 0-100 deterministic score; primary UI badge
+    // Preview URL at time of report generation (nullable — batch runs and expired previews won't
+    // have this)
+    String previewUrl) {}

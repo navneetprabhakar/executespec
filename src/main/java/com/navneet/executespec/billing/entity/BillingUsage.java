@@ -1,13 +1,14 @@
 package com.navneet.executespec.billing.entity;
 
+import java.time.Instant;
+import java.util.UUID;
+
 import jakarta.persistence.*;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
-import java.time.Instant;
-import java.util.UUID;
 
 @Entity
 @Table(name = "billing_usage")
@@ -17,39 +18,39 @@ import java.util.UUID;
 @AllArgsConstructor
 public class BillingUsage {
 
-    @Id
-    @GeneratedValue(strategy = GenerationType.UUID)
-    private UUID id;
+  @Id
+  @GeneratedValue(strategy = GenerationType.UUID)
+  private UUID id;
 
-    @Column(name = "user_id", nullable = false)
-    private String userId;
+  @Column(name = "user_id", nullable = false)
+  private String userId;
 
-    @Column(name = "org_id")
-    private String orgId;
+  @Column(name = "org_id")
+  private String orgId;
 
-    /** RUNS, PROJECTS, STORAGE_MB */
-    @Column(nullable = false, length = 50)
-    private String metric;
+  /** RUNS, PROJECTS, STORAGE_MB */
+  @Column(nullable = false, length = 50)
+  private String metric;
 
-    @Column(name = "current_value", nullable = false)
-    private long currentValue;
+  @Column(name = "current_value", nullable = false)
+  private long currentValue;
 
-    @Column(name = "period_start", nullable = false)
-    private Instant periodStart;
+  @Column(name = "period_start", nullable = false)
+  private Instant periodStart;
 
-    @Column(name = "period_end", nullable = false)
-    private Instant periodEnd;
+  @Column(name = "period_end", nullable = false)
+  private Instant periodEnd;
 
-    @Column(name = "last_updated", nullable = false)
-    private Instant lastUpdated;
+  @Column(name = "last_updated", nullable = false)
+  private Instant lastUpdated;
 
-    @PrePersist
-    void prePersist() {
-        if (lastUpdated == null) lastUpdated = Instant.now();
-    }
+  @PrePersist
+  void prePersist() {
+    if (lastUpdated == null) lastUpdated = Instant.now();
+  }
 
-    @PreUpdate
-    void preUpdate() {
-        lastUpdated = Instant.now();
-    }
+  @PreUpdate
+  void preUpdate() {
+    lastUpdated = Instant.now();
+  }
 }

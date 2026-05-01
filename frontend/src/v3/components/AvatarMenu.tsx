@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import { useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin } from '@/stores/useAuthStore';
+import {useEffect, useRef, useState} from 'react';
+import {Link, useNavigate} from 'react-router-dom';
+import {useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin} from '@/stores/useAuthStore';
 
 /**
  * R-104 — avatar dropdown.
@@ -48,7 +48,8 @@ export default function AvatarMenu() {
   }, [open]);
 
   const initials = user
-    ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() || (user.email?.[0] ?? '?').toUpperCase()
+    ? `${user.firstName?.[0] ?? ''}${user.lastName?.[0] ?? ''}`.toUpperCase() ||
+      (user.email?.[0] ?? '?').toUpperCase()
     : '?';
 
   // Logged-out: show Sign in + Pricing
@@ -66,20 +67,30 @@ export default function AvatarMenu() {
       whiteSpace: 'nowrap',
     };
     return (
-      <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+      <div style={{display: 'flex', gap: 4, alignItems: 'center'}}>
         {/* R-330 / R-340 — public catalog surfaces.  Casey (FREE
             tier explorer) is the persona that converts on browsing
             the catalog *before* signing up; the lock icons + tier
             copy on the catalog rows do the upgrade selling.  Keeping
             these in the marketing rail closes the
             "I can't find the products" gap. */}
-        <Link to="/library" style={navLinkStyle}>Library</Link>
-        <Link to="/migrations" style={navLinkStyle}>Migrations</Link>
-        <Link to="/team" style={navLinkStyle}>For teams</Link>
-        <Link to="/trust" style={navLinkStyle}>For enterprise</Link>
-        <Link to="/pricing" style={navLinkStyle}>Pricing</Link>
+        <Link to='/library' style={navLinkStyle}>
+          Library
+        </Link>
+        <Link to='/migrations' style={navLinkStyle}>
+          Migrations
+        </Link>
+        <Link to='/team' style={navLinkStyle}>
+          For teams
+        </Link>
+        <Link to='/trust' style={navLinkStyle}>
+          For enterprise
+        </Link>
+        <Link to='/pricing' style={navLinkStyle}>
+          Pricing
+        </Link>
         <Link
-          to="/login"
+          to='/login'
           style={{
             color: 'var(--v3-text)',
             fontSize: 12,
@@ -98,18 +109,18 @@ export default function AvatarMenu() {
   }
 
   // Logged-in: avatar dropdown
-  const items: { label: string; onClick: () => void; subtle?: boolean }[] = [
-    { label: 'Account', onClick: () => navigate('/settings') },
-    { label: 'Billing & plan', onClick: () => navigate('/billing') },
+  const items: {label: string; onClick: () => void; subtle?: boolean}[] = [
+    {label: 'Account', onClick: () => navigate('/settings')},
+    {label: 'Billing & plan', onClick: () => navigate('/billing')},
   ];
   if (user.tier && user.tier !== 'FREE') {
-    items.push({ label: 'Team', onClick: () => navigate('/team') });
+    items.push({label: 'Team', onClick: () => navigate('/team')});
   }
-  items.push({ label: 'Integrations', onClick: () => navigate('/integrations') });
+  items.push({label: 'Integrations', onClick: () => navigate('/integrations')});
   if (isOrgAdmin || isSuperAdmin) {
-    items.push({ label: 'Insights', onClick: () => navigate('/insights') });
+    items.push({label: 'Insights', onClick: () => navigate('/insights')});
   }
-  items.push({ label: 'Help', onClick: () => navigate('/home?dest=help') });
+  items.push({label: 'Help', onClick: () => navigate('/home?dest=help')});
   items.push({
     label: 'Sign out',
     subtle: true,
@@ -120,13 +131,13 @@ export default function AvatarMenu() {
   });
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{position: 'relative'}}>
       <button
-        type="button"
+        type='button'
         onClick={() => setOpen((o) => !o)}
-        aria-label="Account menu"
+        aria-label='Account menu'
         aria-expanded={open}
-        aria-haspopup="menu"
+        aria-haspopup='menu'
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -148,8 +159,8 @@ export default function AvatarMenu() {
 
       {open && (
         <ul
-          role="menu"
-          aria-label="Account"
+          role='menu'
+          aria-label='Account'
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
@@ -172,10 +183,10 @@ export default function AvatarMenu() {
               marginBottom: 4,
             }}
           >
-            <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--v3-text)' }}>
+            <div style={{fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
               {user.firstName ?? user.email}
             </div>
-            <div style={{ fontSize: 10.5, color: 'var(--v3-text-subtle)' }}>
+            <div style={{fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
               {user.email} · {user.tier ?? 'FREE'}
             </div>
             {/* Conversion-fix #A3 — Pro is HIDDEN from new buyers (V122
@@ -198,18 +209,18 @@ export default function AvatarMenu() {
                   fontWeight: 500,
                   color: 'var(--v3-brand)',
                 }}
-                title="Pro tier is closed to new buyers. Your subscription is locked at this price for as long as you stay subscribed."
+                title='Pro tier is closed to new buyers. Your subscription is locked at this price for as long as you stay subscribed.'
               >
-                <span style={{ fontSize: 10 }}>🔒</span>
+                <span style={{fontSize: 10}}>🔒</span>
                 Pro · grandfathered · locked rate
               </div>
             )}
           </li>
           {items.map((item, idx) => (
-            <li key={idx} role="none">
+            <li key={idx} role='none'>
               <button
-                role="menuitem"
-                type="button"
+                role='menuitem'
+                type='button'
                 onClick={() => {
                   item.onClick();
                   setOpen(false);

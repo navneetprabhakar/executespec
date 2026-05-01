@@ -11,7 +11,7 @@ const BASE = '/api';
 
 function authHeader(): Record<string, string> {
   const token = localStorage.getItem('access_token');
-  return token ? { Authorization: `Bearer ${token}` } : {};
+  return token ? {Authorization: `Bearer ${token}`} : {};
 }
 
 async function v3Req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -32,7 +32,7 @@ async function v3Req<T>(path: string, init?: RequestInit): Promise<T> {
     }
     const msg =
       typeof body === 'object' && body && 'message' in body
-        ? String((body as { message: unknown }).message)
+        ? String((body as {message: unknown}).message)
         : `HTTP ${res.status}`;
     throw new Error(msg);
   }
@@ -59,8 +59,7 @@ export interface V3Entitlements {
 }
 
 /** R-142 — single-source entitlements read for the current user. */
-export const getV3Entitlements = () =>
-  v3Req<V3Entitlements>('/v3/entitlements');
+export const getV3Entitlements = () => v3Req<V3Entitlements>('/v3/entitlements');
 
 // ── Referrals (R-162) ───────────────────────────────────────────────────────
 
@@ -79,7 +78,7 @@ export interface V3InviteState {
 export const sendV3Referral = (email: string) =>
   v3Req<V3ReferralRecord>('/v3/referrals/invite', {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({email}),
   });
 
 export const getV3InviteState = () => v3Req<V3InviteState>('/v3/referrals/state');
@@ -101,8 +100,8 @@ export interface AnonymousRunResponse {
 export const submitAnonymousRun = async (spec: string): Promise<AnonymousRunResponse> => {
   const res = await fetch(BASE + '/v3/anonymous-runs', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ spec }),
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({spec}),
   });
   // 202 + 429 + 4xx all return the same shape; treat 5xx as a hard error.
   if (res.status >= 500) throw new Error(`HTTP ${res.status}`);
@@ -110,8 +109,8 @@ export const submitAnonymousRun = async (spec: string): Promise<AnonymousRunResp
 };
 
 export const getAnonymousRunStatus = (sessionToken: string) =>
-  fetch(BASE + '/v3/anonymous-runs/' + encodeURIComponent(sessionToken)).then(
-    (r) => (r.status >= 500 ? Promise.reject(new Error(`HTTP ${r.status}`)) : r.json())
+  fetch(BASE + '/v3/anonymous-runs/' + encodeURIComponent(sessionToken)).then((r) =>
+    r.status >= 500 ? Promise.reject(new Error(`HTTP ${r.status}`)) : r.json(),
   ) as Promise<AnonymousRunResponse>;
 
 // ── Selling-point landing endpoints (anonymized, public, no auth) ───────────
@@ -152,8 +151,8 @@ export interface V3ExecSnapshot {
   totalSpendUsd: number | null;
   activeProjects: number;
   needsAttentionCount: number;
-  spendByProject: { anonymousName: string; runs: number; spendUsd: number | null }[];
-  topWins: { spec: string; verifiedScore: number | null; costUsd: number | null; when: string }[];
+  spendByProject: {anonymousName: string; runs: number; spendUsd: number | null}[];
+  topWins: {spec: string; verifiedScore: number | null; costUsd: number | null; when: string}[];
 }
 
 export const getV3ExecSnapshot = () =>

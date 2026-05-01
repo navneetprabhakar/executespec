@@ -19,17 +19,17 @@
  * UX-preservation contract: reuses existing primitives + 4-band semantic
  * tokens. No new colors, no new fonts, no new component primitives.
  */
-import { Link } from 'react-router-dom';
-import { ArrowRight, Activity, Heart } from 'lucide-react';
+import {Link} from 'react-router-dom';
+import {ArrowRight, Activity, Heart} from 'lucide-react';
 import ScoreRing from '@/components/runs/ScoreRing';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
-import { Rocket, FolderGit2, Plus } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useEffect, useState } from 'react';
+import {Rocket, FolderGit2, Plus} from 'lucide-react';
+import {cn} from '@/lib/utils';
+import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
-import type { TaskSummary, PrSummary } from '@/types/project';
-import type { ActivityEntry } from '@/lib/api';
+import type {TaskSummary, PrSummary} from '@/types/project';
+import type {ActivityEntry} from '@/lib/api';
 
 interface PulseTabProps {
   projectId: string;
@@ -82,7 +82,7 @@ export default function PulseTab({
   useEffect(() => {
     setActivityLoading(true);
     api
-      .getActivityFeed(projectId, { sinceDays: 30, limit: 5 })
+      .getActivityFeed(projectId, {sinceDays: 30, limit: 5})
       .then((p) => setActivity(p.entries))
       .catch(() => setActivity([]))
       .finally(() => setActivityLoading(false));
@@ -90,10 +90,10 @@ export default function PulseTab({
 
   if (!lastRun) {
     return (
-      <div className="space-y-4 w-full">
+      <div className='space-y-4 w-full'>
         <EmptyState
           icon={Rocket}
-          title="No runs yet"
+          title='No runs yet'
           description='Click "Launch" up top to kick off your first execution. Pulse will populate with your last run, score signals, health rollup, and recent activity once you have one.'
         />
       </div>
@@ -105,25 +105,25 @@ export default function PulseTab({
   const heroScore = verified ?? accuracy;
 
   return (
-    <div className="space-y-3 w-full">
+    <div className='space-y-3 w-full'>
       {/* v2.7.2 — inline "no repos linked" banner. Renders only when the
           parent passes onLinkRepo (which is only when repoCount === 0).
           Click pops AddRepoModal directly via the shared openAddRepoFlow
           plumbing in ProjectDashboardPage. */}
       {onLinkRepo && (
-        <div className="rounded-md border border-status-waiting/40 bg-status-waiting/10 p-3 flex items-center gap-3">
-          <FolderGit2 className="h-4 w-4 text-status-waiting flex-shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-sm font-medium text-primary">No repositories linked</div>
-            <div className="text-[11px] text-muted">
+        <div className='rounded-md border border-status-waiting/40 bg-status-waiting/10 p-3 flex items-center gap-3'>
+          <FolderGit2 className='h-4 w-4 text-status-waiting flex-shrink-0' />
+          <div className='flex-1 min-w-0'>
+            <div className='text-sm font-medium text-primary'>No repositories linked</div>
+            <div className='text-[11px] text-muted'>
               You have runs but no repos. Launches will be blocked until you link at least one.
             </div>
           </div>
           <button
             onClick={onLinkRepo}
-            className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-sm border border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20"
+            className='inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-sm border border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className='h-3.5 w-3.5' />
             Add repository
           </button>
         </div>
@@ -134,17 +134,17 @@ export default function PulseTab({
           gives the hero row LastRun cols 1-8 + ScoreRing cols 9-12 on
           md+ (tablet 768px and wider); collapses to a single column on
           phones (<768px) so the ScoreRing isn't squeezed. */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-        <div className="md:col-span-8 min-w-0">
+      <div className='grid grid-cols-1 md:grid-cols-12 gap-3'>
+        <div className='md:col-span-8 min-w-0'>
           <LastRunCard task={lastRun} report={report} onOpenRun={() => onOpenRun(lastRun.runId)} />
         </div>
-        <div className="md:col-span-4">
+        <div className='md:col-span-4'>
           <ScoreCardCompact score={heroScore} report={report} />
         </div>
       </div>
 
       {/* Health & activity row — full-width 2-col split on md+ */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
         <HealthCard projectId={projectId} onOpenCode={() => onSwitchTab('code')} />
         <ActivityCard
           entries={activity}
@@ -162,29 +162,32 @@ export default function PulseTab({
 
       {/* Recent PRs — compact list (full list under Runs tab → PRs sub) */}
       {recentPrs.length > 0 && (
-        <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
-          <div className="flex items-center justify-between mb-2">
-            <h3 className="text-xs font-medium text-secondary">Recent pull requests</h3>
+        <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3'>
+          <div className='flex items-center justify-between mb-2'>
+            <h3 className='text-xs font-medium text-secondary'>Recent pull requests</h3>
             <button
               onClick={() => onSwitchTab('runs')}
-              className="text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5"
+              className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
             >
-              View all <ArrowRight className="h-3 w-3" />
+              View all <ArrowRight className='h-3 w-3' />
             </button>
           </div>
-          <ul className="space-y-1">
+          <ul className='space-y-1'>
             {recentPrs.slice(0, 3).map((pr) => (
-              <li key={`${pr.repoFullName}-${pr.prNumber}`} className="flex items-center gap-2 text-[11px]">
+              <li
+                key={`${pr.repoFullName}-${pr.prNumber}`}
+                className='flex items-center gap-2 text-[11px]'
+              >
                 <StatusBadge status={pr.status} />
                 <a
                   href={pr.prUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary hover:text-accent-blue truncate flex-1"
+                  target='_blank'
+                  rel='noreferrer'
+                  className='text-primary hover:text-accent-blue truncate flex-1'
                 >
                   {pr.repoFullName} {pr.headBranch ? `· ${pr.headBranch}` : ''}
                 </a>
-                <span className="text-muted font-mono">#{pr.prNumber}</span>
+                <span className='text-muted font-mono'>#{pr.prNumber}</span>
               </li>
             ))}
           </ul>
@@ -205,54 +208,57 @@ function LastRunCard({
 }) {
   const buildOk = report?.finalBuildPassed === true;
   const buildBad = report?.finalBuildPassed === false;
-  const tests = report?.testsPassed != null && report?.testsTotal != null
-    ? `${report.testsPassed}/${report.testsTotal}`
-    : null;
+  const tests =
+    report?.testsPassed != null && report?.testsTotal != null
+      ? `${report.testsPassed}/${report.testsTotal}`
+      : null;
   const reviewer = report?.reviewerVerdict ?? null;
 
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] font-mono uppercase tracking-wider text-muted">
-          Last run
-        </span>
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
+      <div className='flex items-center gap-2'>
+        <span className='text-[10px] font-mono uppercase tracking-wider text-muted'>Last run</span>
         <StatusBadge status={task.status} />
       </div>
-      <div className="font-semibold text-primary text-sm leading-tight truncate">
+      <div className='font-semibold text-primary text-sm leading-tight truncate'>
         {task.name || task.runId.slice(0, 8)}
       </div>
-      <div className="text-[11px] text-muted font-mono">
+      <div className='text-[11px] text-muted font-mono'>
         {task.runId.slice(0, 8)} · {task.createdAt ? timeAgo(task.createdAt) : '—'}
       </div>
 
       {/* Signal chips — only show when we have data */}
       {(buildOk || buildBad || tests || reviewer) && (
-        <div className="flex flex-wrap gap-1 pt-1">
-          {buildOk && <Chip color="success">build ✓</Chip>}
-          {buildBad && <Chip color="error">build ✗</Chip>}
+        <div className='flex flex-wrap gap-1 pt-1'>
+          {buildOk && <Chip color='success'>build ✓</Chip>}
+          {buildBad && <Chip color='error'>build ✗</Chip>}
           {tests && (
             <Chip color={report?.testsPassed === report?.testsTotal ? 'success' : 'waiting'}>
               tests {tests}
             </Chip>
           )}
           {reviewer && (
-            <Chip color={reviewer === 'CLEAN' ? 'success' : reviewer === 'FIXED_ISSUES' ? 'waiting' : 'error'}>
+            <Chip
+              color={
+                reviewer === 'CLEAN' ? 'success' : reviewer === 'FIXED_ISSUES' ? 'waiting' : 'error'
+              }
+            >
               reviewer {reviewer.toLowerCase().replace('_', ' ')}
             </Chip>
           )}
         </div>
       )}
 
-      <div className="flex gap-2 pt-1">
+      <div className='flex gap-2 pt-1'>
         <button
           onClick={onOpenRun}
-          className="text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20"
+          className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20'
         >
           View report
         </button>
         <Link
           to={`/runs/${task.runId}`}
-          className="text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary"
+          className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary'
         >
           Open run
         </Link>
@@ -270,35 +276,32 @@ function ScoreCardCompact({
 }) {
   if (score == null) {
     return (
-      <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 flex flex-col items-center justify-center min-w-[180px]">
-        <div className="text-[11px] text-muted">No score yet</div>
-        <div className="text-[10px] text-muted mt-1">Awaiting validation report</div>
+      <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 flex flex-col items-center justify-center min-w-[180px]'>
+        <div className='text-[11px] text-muted'>No score yet</div>
+        <div className='text-[10px] text-muted mt-1'>Awaiting validation report</div>
       </div>
     );
   }
   const isVerified = report?.verifiedScore != null;
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 flex flex-col items-center justify-center min-w-[180px]">
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 flex flex-col items-center justify-center min-w-[180px]'>
       <ScoreRing score={score} label={isVerified ? 'verified / 100' : 'est / 100'} size={120} />
-      {isVerified && report?.accuracyScore != null && report.accuracyScore !== report.verifiedScore && (
-        <div className="text-[10px] text-muted mt-1.5 font-mono">
-          est. {Math.round(report.accuracyScore)}
-        </div>
-      )}
+      {isVerified &&
+        report?.accuracyScore != null &&
+        report.accuracyScore !== report.verifiedScore && (
+          <div className='text-[10px] text-muted mt-1.5 font-mono'>
+            est. {Math.round(report.accuracyScore)}
+          </div>
+        )}
     </div>
   );
 }
 
-function HealthCard({
-  projectId,
-  onOpenCode,
-}: {
-  projectId: string;
-  onOpenCode: () => void;
-}) {
+function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () => void}) {
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null>(null);
   useEffect(() => {
-    api.getWorkspaceHealth(projectId)
+    api
+      .getWorkspaceHealth(projectId)
       .then(setHealth)
       .catch(() => setHealth(null));
   }, [projectId]);
@@ -309,28 +312,28 @@ function HealthCard({
   const lastAnalysed = health?.lastRefreshedAt ?? null;
 
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <Heart className="h-3.5 w-3.5 text-status-success" />
-        <h3 className="text-xs font-medium text-secondary">Health & debt</h3>
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
+      <div className='flex items-center gap-2'>
+        <Heart className='h-3.5 w-3.5 text-status-success' />
+        <h3 className='text-xs font-medium text-secondary'>Health & debt</h3>
       </div>
       {!health ? (
-        <div className="text-[11px] text-muted">Loading…</div>
+        <div className='text-[11px] text-muted'>Loading…</div>
       ) : totalRepos === 0 ? (
-        <div className="text-[11px] text-muted">No repos linked yet.</div>
+        <div className='text-[11px] text-muted'>No repos linked yet.</div>
       ) : (
-        <ul className="text-[11px] space-y-1">
-          <li className="text-secondary">
+        <ul className='text-[11px] space-y-1'>
+          <li className='text-secondary'>
             {totalRepos} repo{totalRepos === 1 ? '' : 's'} linked
           </li>
           <li className={cn(stale > 0 ? 'text-status-waiting' : 'text-status-success')}>
             {stale === 0 ? 'codemaps current' : `${stale} stale codemap${stale === 1 ? '' : 's'}`}
           </li>
-          <li className="text-secondary">
+          <li className='text-secondary'>
             {openPrs} open PR{openPrs === 1 ? '' : 's'}
           </li>
           {lastAnalysed && (
-            <li className="text-muted text-[10px] font-mono">
+            <li className='text-muted text-[10px] font-mono'>
               last analysed {timeAgo(lastAnalysed)}
             </li>
           )}
@@ -338,9 +341,9 @@ function HealthCard({
       )}
       <button
         onClick={onOpenCode}
-        className="text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5"
+        className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
       >
-        Drill into Code <ArrowRight className="h-3 w-3" />
+        Drill into Code <ArrowRight className='h-3 w-3' />
       </button>
     </div>
   );
@@ -356,38 +359,44 @@ function ActivityCard({
   onShowAll: () => void;
 }) {
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2">
-      <div className="flex items-center gap-2">
-        <Activity className="h-3.5 w-3.5 text-accent-blue" />
-        <h3 className="text-xs font-medium text-secondary">Activity</h3>
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
+      <div className='flex items-center gap-2'>
+        <Activity className='h-3.5 w-3.5 text-accent-blue' />
+        <h3 className='text-xs font-medium text-secondary'>Activity</h3>
       </div>
       {loading ? (
-        <div className="text-[11px] text-muted">Loading…</div>
+        <div className='text-[11px] text-muted'>Loading…</div>
       ) : entries.length === 0 ? (
-        <div className="text-[11px] text-muted">No events in the last 30 days.</div>
+        <div className='text-[11px] text-muted'>No events in the last 30 days.</div>
       ) : (
-        <ul className="space-y-1 text-[11px]">
+        <ul className='space-y-1 text-[11px]'>
           {entries.slice(0, 5).map((e) => (
-            <li key={e.id} className="flex items-baseline gap-2">
-              <span className="text-muted font-mono text-[10px] w-12 flex-shrink-0">
+            <li key={e.id} className='flex items-baseline gap-2'>
+              <span className='text-muted font-mono text-[10px] w-12 flex-shrink-0'>
                 {timeAgoShort(e.occurredAt)}
               </span>
-              <span className="text-secondary truncate">{e.summary || e.eventType}</span>
+              <span className='text-secondary truncate'>{e.summary || e.eventType}</span>
             </li>
           ))}
         </ul>
       )}
       <button
         onClick={onShowAll}
-        className="text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5"
+        className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
       >
-        Show all <ArrowRight className="h-3 w-3" />
+        Show all <ArrowRight className='h-3 w-3' />
       </button>
     </div>
   );
 }
 
-function Chip({ children, color }: { children: React.ReactNode; color: 'success' | 'waiting' | 'error' }) {
+function Chip({
+  children,
+  color,
+}: {
+  children: React.ReactNode;
+  color: 'success' | 'waiting' | 'error';
+}) {
   const colorMap = {
     success: 'border-status-success/40 text-status-success',
     waiting: 'border-status-waiting/40 text-status-waiting',
@@ -428,5 +437,5 @@ function timeAgoShort(iso: string): string {
   if (h < 24) return `${h}h`;
   const days = Math.round(h / 24);
   if (days < 7) return `${days}d`;
-  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+  return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
 }

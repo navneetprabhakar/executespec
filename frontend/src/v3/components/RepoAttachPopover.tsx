@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {useNavigate} from 'react-router-dom';
 import {
   listGitHubRepos,
   createRepo,
@@ -9,7 +9,7 @@ import {
   updateGithubSettings,
   type GitHubRemoteRepo,
 } from '@/lib/api';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useAuthStore} from '@/stores/useAuthStore';
 import Pill from './Pill';
 
 /**
@@ -89,12 +89,7 @@ interface RepoAttachPopoverProps {
   onAttached?: (newRepoId: string, projectId: string) => void;
 }
 
-type Phase =
-  | 'loading'
-  | 'no-pat'
-  | 'list'
-  | 'attaching'
-  | 'error';
+type Phase = 'loading' | 'no-pat' | 'list' | 'attaching' | 'error';
 
 export default function RepoAttachPopover({
   open,
@@ -120,7 +115,7 @@ export default function RepoAttachPopover({
   const [patInput, setPatInput] = useState('');
   const [patSaving, setPatSaving] = useState(false);
   const [patTesting, setPatTesting] = useState(false);
-  const [patMsg, setPatMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [patMsg, setPatMsg] = useState<{ok: boolean; text: string} | null>(null);
   const [installLinkCopied, setInstallLinkCopied] = useState(false);
   // R-325 — track the repo the user just tried to attach so we can
   // surface a single-click "Attach anyway" retry on size-gate
@@ -191,16 +186,16 @@ export default function RepoAttachPopover({
   // R-321 — test PAT against GitHub before save. Mirrors SettingsPage.
   async function onTestPat() {
     if (!patInput.trim()) {
-      setPatMsg({ ok: false, text: 'Paste a PAT first.' });
+      setPatMsg({ok: false, text: 'Paste a PAT first.'});
       return;
     }
     setPatTesting(true);
     setPatMsg(null);
     try {
       const result = await validateGitHub(patInput.trim());
-      setPatMsg({ ok: result.valid, text: result.message });
+      setPatMsg({ok: result.valid, text: result.message});
     } catch (e) {
-      setPatMsg({ ok: false, text: (e as Error)?.message ?? 'Validation failed.' });
+      setPatMsg({ok: false, text: (e as Error)?.message ?? 'Validation failed.'});
     } finally {
       setPatTesting(false);
     }
@@ -211,7 +206,7 @@ export default function RepoAttachPopover({
   // setUser() naturally re-runs the listing.
   async function onSavePat() {
     if (!patInput.trim()) {
-      setPatMsg({ ok: false, text: 'Paste a PAT first.' });
+      setPatMsg({ok: false, text: 'Paste a PAT first.'});
       return;
     }
     setPatSaving(true);
@@ -220,9 +215,9 @@ export default function RepoAttachPopover({
       const updated = await updateGithubSettings(patInput.trim(), user?.githubOwner ?? '');
       setUser(updated);
       setPatInput('');
-      setPatMsg({ ok: true, text: 'Saved. Listing your repos…' });
+      setPatMsg({ok: true, text: 'Saved. Listing your repos…'});
     } catch (e) {
-      setPatMsg({ ok: false, text: (e as Error)?.message ?? 'Failed to save.' });
+      setPatMsg({ok: false, text: (e as Error)?.message ?? 'Failed to save.'});
     } finally {
       setPatSaving(false);
     }
@@ -301,8 +296,7 @@ export default function RepoAttachPopover({
       // repo so we can surface an "Attach anyway" CTA. The message
       // contract is owned by ProjectRepoService.createRepo.
       const looksLikeSizeGate =
-        msg.includes('larger than the platform') ||
-        msg.includes('clone-time budget');
+        msg.includes('larger than the platform') || msg.includes('clone-time budget');
       if (looksLikeSizeGate && !attachAnyway) {
         setOversizedRepo(repo);
       }
@@ -317,9 +311,9 @@ export default function RepoAttachPopover({
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Connect a GitHub repo"
+      role='dialog'
+      aria-modal='true'
+      aria-label='Connect a GitHub repo'
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -379,9 +373,9 @@ export default function RepoAttachPopover({
             </p>
           </div>
           <button
-            type="button"
+            type='button'
             onClick={onClose}
-            aria-label="Close"
+            aria-label='Close'
             style={{
               padding: '4px 8px',
               background: 'transparent',
@@ -395,17 +389,24 @@ export default function RepoAttachPopover({
           </button>
         </header>
 
-        <div style={{ padding: 12, flex: 1, overflowY: 'auto' }}>
+        <div style={{padding: 12, flex: 1, overflowY: 'auto'}}>
           {phase === 'loading' && (
-            <div style={{ padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)', textAlign: 'center' }}>
+            <div
+              style={{
+                padding: 16,
+                fontSize: 12,
+                color: 'var(--v3-text-subtle)',
+                textAlign: 'center',
+              }}
+            >
               Loading your GitHub repositories…
             </div>
           )}
 
           {phase === 'no-pat' && (
-            <div style={{ padding: '4px 2px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{padding: '4px 2px', display: 'flex', flexDirection: 'column', gap: 14}}>
               <div>
-                <Pill tone="warn">GitHub not connected</Pill>
+                <Pill tone='warn'>GitHub not connected</Pill>
                 <p
                   style={{
                     marginTop: 8,
@@ -415,8 +416,8 @@ export default function RepoAttachPopover({
                     lineHeight: 1.55,
                   }}
                 >
-                  Paste a personal access token (PAT) to list your repos —
-                  or send the install link to a teammate who can.
+                  Paste a personal access token (PAT) to list your repos — or send the install link
+                  to a teammate who can.
                 </p>
               </div>
 
@@ -432,7 +433,7 @@ export default function RepoAttachPopover({
                 }}
               >
                 <label
-                  htmlFor="repo-attach-pat"
+                  htmlFor='repo-attach-pat'
                   style={{
                     display: 'block',
                     fontSize: 11,
@@ -446,12 +447,12 @@ export default function RepoAttachPopover({
                   Paste a PAT
                 </label>
                 <input
-                  id="repo-attach-pat"
-                  type="password"
-                  autoComplete="off"
+                  id='repo-attach-pat'
+                  type='password'
+                  autoComplete='off'
                   value={patInput}
                   onChange={(e) => setPatInput(e.target.value)}
-                  placeholder="ghp_xxxxxxxxxxxxxxxxxxxx"
+                  placeholder='ghp_xxxxxxxxxxxxxxxxxxxx'
                   disabled={patSaving || patTesting}
                   style={{
                     width: '100%',
@@ -465,9 +466,9 @@ export default function RepoAttachPopover({
                     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
                   }}
                 />
-                <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+                <div style={{marginTop: 8, display: 'flex', gap: 8}}>
                   <button
-                    type="button"
+                    type='button'
                     onClick={onSavePat}
                     disabled={patSaving || patTesting || !patInput.trim()}
                     style={{
@@ -476,7 +477,8 @@ export default function RepoAttachPopover({
                       color: 'var(--v3-text-on-brand)',
                       border: 'none',
                       borderRadius: 4,
-                      cursor: patSaving || patTesting || !patInput.trim() ? 'not-allowed' : 'pointer',
+                      cursor:
+                        patSaving || patTesting || !patInput.trim() ? 'not-allowed' : 'pointer',
                       fontSize: 12,
                       fontWeight: 600,
                       fontFamily: 'inherit',
@@ -486,7 +488,7 @@ export default function RepoAttachPopover({
                     {patSaving ? 'Saving…' : 'Save & list repos'}
                   </button>
                   <button
-                    type="button"
+                    type='button'
                     onClick={onTestPat}
                     disabled={patSaving || patTesting || !patInput.trim()}
                     style={{
@@ -495,7 +497,8 @@ export default function RepoAttachPopover({
                       color: 'var(--v3-text)',
                       border: '1px solid var(--v3-border)',
                       borderRadius: 4,
-                      cursor: patSaving || patTesting || !patInput.trim() ? 'not-allowed' : 'pointer',
+                      cursor:
+                        patSaving || patTesting || !patInput.trim() ? 'not-allowed' : 'pointer',
                       fontSize: 12,
                       fontFamily: 'inherit',
                       opacity: patSaving || patTesting || !patInput.trim() ? 0.6 : 1,
@@ -528,10 +531,10 @@ export default function RepoAttachPopover({
                 >
                   Needs the <code>repo</code> scope.{' '}
                   <a
-                    href="https://github.com/settings/tokens/new?scopes=repo&description=ExecuteSpec"
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    style={{ color: 'var(--v3-brand)' }}
+                    href='https://github.com/settings/tokens/new?scopes=repo&description=ExecuteSpec'
+                    target='_blank'
+                    rel='noopener noreferrer'
+                    style={{color: 'var(--v3-brand)'}}
                   >
                     Generate one →
                   </a>
@@ -572,12 +575,12 @@ export default function RepoAttachPopover({
                 >
                   No PAT for this org? Send a teammate the setup link.
                 </p>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div style={{display: 'flex', gap: 8, flexWrap: 'wrap'}}>
                   <a
                     href={`mailto:?subject=${encodeURIComponent(
-                      'Please set up GitHub access for ExecuteSpec'
+                      'Please set up GitHub access for ExecuteSpec',
                     )}&body=${encodeURIComponent(
-                      `Hi — I'm trying to use ExecuteSpec but my account can't list our repos.\n\nCould you set up GitHub access for the org? Setup link: ${window.location.origin}/integrations\n\nThanks.`
+                      `Hi — I'm trying to use ExecuteSpec but my account can't list our repos.\n\nCould you set up GitHub access for the org? Setup link: ${window.location.origin}/integrations\n\nThanks.`,
                     )}`}
                     style={{
                       padding: '6px 12px',
@@ -596,7 +599,7 @@ export default function RepoAttachPopover({
                     Email admin
                   </a>
                   <button
-                    type="button"
+                    type='button'
                     onClick={onCopyInstallLink}
                     style={{
                       padding: '6px 12px',
@@ -616,9 +619,9 @@ export default function RepoAttachPopover({
 
               {/* Tertiary fallback — full Integrations page if neither
                   affordance fits the user's situation. */}
-              <div style={{ textAlign: 'center' }}>
+              <div style={{textAlign: 'center'}}>
                 <button
-                  type="button"
+                  type='button'
                   onClick={() => {
                     onClose();
                     navigate('/integrations');
@@ -644,7 +647,7 @@ export default function RepoAttachPopover({
               <input
                 value={filter}
                 onChange={(e) => setFilter(e.target.value)}
-                placeholder="Search owner/repo…"
+                placeholder='Search owner/repo…'
                 style={{
                   width: '100%',
                   padding: '7px 10px',
@@ -658,15 +661,22 @@ export default function RepoAttachPopover({
                 }}
               />
               {filtered.length === 0 && (
-                <div style={{ padding: 12, fontSize: 12, color: 'var(--v3-text-subtle)', textAlign: 'center' }}>
+                <div
+                  style={{
+                    padding: 12,
+                    fontSize: 12,
+                    color: 'var(--v3-text-subtle)',
+                    textAlign: 'center',
+                  }}
+                >
                   No repositories match your filter.
                 </div>
               )}
-              <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+              <ul style={{margin: 0, padding: 0, listStyle: 'none'}}>
                 {filtered.map((r) => (
                   <li key={r.fullName}>
                     <button
-                      type="button"
+                      type='button'
                       onClick={() => onPick(r)}
                       disabled={selecting !== null}
                       style={{
@@ -693,13 +703,22 @@ export default function RepoAttachPopover({
                         (e.currentTarget as HTMLButtonElement).style.background = 'transparent';
                       }}
                     >
-                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span
+                        style={{overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}
+                      >
                         {r.isPrivate && (
-                          <span style={{ marginRight: 6, color: 'var(--v3-text-subtle)' }}>🔒</span>
+                          <span style={{marginRight: 6, color: 'var(--v3-text-subtle)'}}>🔒</span>
                         )}
                         {r.fullName}
                       </span>
-                      <span style={{ color: 'var(--v3-text-subtle)', fontSize: 10, marginLeft: 8, flexShrink: 0 }}>
+                      <span
+                        style={{
+                          color: 'var(--v3-text-subtle)',
+                          fontSize: 10,
+                          marginLeft: 8,
+                          flexShrink: 0,
+                        }}
+                      >
                         {r.defaultBranch}
                       </span>
                     </button>
@@ -721,10 +740,7 @@ export default function RepoAttachPopover({
                 }}
               >
                 Don't see your repo?{' '}
-                <a
-                  href="/integrations"
-                  style={{ color: 'var(--v3-brand)' }}
-                >
+                <a href='/integrations' style={{color: 'var(--v3-brand)'}}>
                   Open Integrations →
                 </a>
               </p>
@@ -732,7 +748,7 @@ export default function RepoAttachPopover({
           )}
 
           {phase === 'attaching' && (
-            <div style={{ padding: 16, fontSize: 12, color: 'var(--v3-text)', textAlign: 'center' }}>
+            <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text)', textAlign: 'center'}}>
               Attaching <code>{selecting}</code>…
             </div>
           )}
@@ -749,15 +765,15 @@ export default function RepoAttachPopover({
               }}
             >
               {error ?? 'Something went wrong. Try again.'}
-              <div style={{ marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <div style={{marginTop: 8, display: 'flex', gap: 6, flexWrap: 'wrap'}}>
                 {/* R-325 — opt-in CTA shown only when the most recent
                     attach hit the size gate. One click re-submits the
                     same repo with attachAnyway=true. */}
                 {oversizedRepo && (
                   <button
-                    type="button"
+                    type='button'
                     onClick={() => onPick(oversizedRepo, true)}
-                    title="Attach this repo despite its size. Runs touching it count more credits."
+                    title='Attach this repo despite its size. Runs touching it count more credits.'
                     style={{
                       padding: '4px 10px',
                       background: 'rgba(245,158,11,0.18)',
@@ -774,7 +790,7 @@ export default function RepoAttachPopover({
                   </button>
                 )}
                 <button
-                  type="button"
+                  type='button'
                   onClick={() => {
                     setPhase('loading');
                     setOversizedRepo(null);

@@ -1,18 +1,24 @@
-import { useCallback, useEffect, useRef } from 'react';
+import {useCallback, useEffect, useRef} from 'react';
 import RunList from '@/components/runs/RunList';
 import RunDetail from '@/components/runs/RunDetail';
-import { useRunStore } from '@/stores/useRunStore';
-import { useSse } from '@/hooks/useSse';
-import { useUiStore } from '@/stores/useUiStore';
-import { useIsMobile } from '@/hooks/useIsMobile';
-import { cn } from '@/lib/utils';
-import { ACTIVE_STATUSES, GATE_STATUSES } from '@/lib/constants';
+import {useRunStore} from '@/stores/useRunStore';
+import {useSse} from '@/hooks/useSse';
+import {useUiStore} from '@/stores/useUiStore';
+import {useIsMobile} from '@/hooks/useIsMobile';
+import {cn} from '@/lib/utils';
+import {ACTIVE_STATUSES, GATE_STATUSES} from '@/lib/constants';
 
 const MIN_WIDTH = 260;
 const MAX_WIDTH = 720;
 
 /** Statuses that indicate the run is still in progress — safety-net poll only. */
-const POLL_STATUSES = new Set([...ACTIVE_STATUSES, ...GATE_STATUSES, 'REVIEWING', 'MERGING', 'QUEUED']);
+const POLL_STATUSES = new Set([
+  ...ACTIVE_STATUSES,
+  ...GATE_STATUSES,
+  'REVIEWING',
+  'MERGING',
+  'QUEUED',
+]);
 /** Safety-net poll at 60s (primary updates come via SSE RUN_DETAIL push). */
 const POLL_INTERVAL_MS = 60_000;
 
@@ -49,40 +55,43 @@ export default function RunsPage() {
   // ── Drag resize logic ──────────────────────────────────────────────────
   const dragging = useRef(false);
 
-  const onPointerDown = useCallback((e: React.PointerEvent) => {
-    e.preventDefault();
-    dragging.current = true;
-    const startX = e.clientX;
-    const startW = runListWidth;
+  const onPointerDown = useCallback(
+    (e: React.PointerEvent) => {
+      e.preventDefault();
+      dragging.current = true;
+      const startX = e.clientX;
+      const startW = runListWidth;
 
-    const onMove = (ev: PointerEvent) => {
-      if (!dragging.current) return;
-      const delta = ev.clientX - startX;
-      const newW = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + delta));
-      setRunListWidth(newW);
-    };
+      const onMove = (ev: PointerEvent) => {
+        if (!dragging.current) return;
+        const delta = ev.clientX - startX;
+        const newW = Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, startW + delta));
+        setRunListWidth(newW);
+      };
 
-    const onUp = () => {
-      dragging.current = false;
-      document.removeEventListener('pointermove', onMove);
-      document.removeEventListener('pointerup', onUp);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    };
+      const onUp = () => {
+        dragging.current = false;
+        document.removeEventListener('pointermove', onMove);
+        document.removeEventListener('pointerup', onUp);
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+      };
 
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp);
-  }, [runListWidth, setRunListWidth]);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp);
+    },
+    [runListWidth, setRunListWidth],
+  );
 
   return (
-    <div className="flex h-full overflow-hidden">
+    <div className='flex h-full overflow-hidden'>
       {/* M-064 (Backlog) — page-header h1 for a11y. The visible chrome
           is the breadcrumb + the run-list panel; screen readers expect
           a top-level heading on the route. sr-only keeps the layout
           unchanged. */}
-      <h1 className="sr-only">Runs</h1>
+      <h1 className='sr-only'>Runs</h1>
       {/* Left panel — run list (collapsible, resizable).
           Mobile: full viewport width so the scope toggle + status filter can
           scroll horizontally inside the column instead of stretching the
@@ -93,9 +102,9 @@ export default function RunsPage() {
           className={cn(
             'relative flex-shrink-0 border-r border-[var(--border-default)] overflow-hidden transition-[width] duration-200',
             isMobile ? 'w-full' : '',
-            runListCollapsed && 'w-0 border-r-0'
+            runListCollapsed && 'w-0 border-r-0',
           )}
-          style={!isMobile && !runListCollapsed ? { width: runListWidth } : undefined}
+          style={!isMobile && !runListCollapsed ? {width: runListWidth} : undefined}
         >
           <RunList />
         </div>
@@ -105,20 +114,20 @@ export default function RunsPage() {
       {!isMobile && !runListCollapsed && (
         <div
           onPointerDown={onPointerDown}
-          className="relative z-10 w-1 flex-shrink-0 cursor-col-resize group"
+          className='relative z-10 w-1 flex-shrink-0 cursor-col-resize group'
         >
-          <div className="absolute inset-y-0 -left-0.5 w-2 group-hover:bg-accent-blue/20 transition-colors" />
+          <div className='absolute inset-y-0 -left-0.5 w-2 group-hover:bg-accent-blue/20 transition-colors' />
         </div>
       )}
 
       {/* Right panel — run detail */}
       {(!isMobile || mobileShowDetail) && (
-        <div className="flex-1 overflow-hidden relative min-w-0">
+        <div className='flex-1 overflow-hidden relative min-w-0'>
           {activeRun ? (
             <RunDetail />
           ) : (
-            <div className="h-full flex flex-col items-center justify-center gap-3">
-              <p className="text-sm text-muted">Select a run to view details</p>
+            <div className='h-full flex flex-col items-center justify-center gap-3'>
+              <p className='text-sm text-muted'>Select a run to view details</p>
             </div>
           )}
         </div>

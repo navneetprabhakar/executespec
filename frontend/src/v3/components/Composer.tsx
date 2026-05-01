@@ -1,13 +1,9 @@
-import { useEffect, useState } from 'react';
-import { createRun } from '@/lib/api';
-import { useV3ProjectStore } from '../stores/useV3ProjectStore';
-import { useV3Ui } from '../stores/useV3Ui';
-import { trackV3, V3_EVENTS } from '../lib/events';
-import {
-  PROVIDER_DISPLAY,
-  RUN_MODE_PLAN_REVIEW,
-  RUN_MODE_QUICK,
-} from '../lib/terminology';
+import {useEffect, useState} from 'react';
+import {createRun} from '@/lib/api';
+import {useV3ProjectStore} from '../stores/useV3ProjectStore';
+import {useV3Ui} from '../stores/useV3Ui';
+import {trackV3, V3_EVENTS} from '../lib/events';
+import {PROVIDER_DISPLAY, RUN_MODE_PLAN_REVIEW, RUN_MODE_QUICK} from '../lib/terminology';
 
 /**
  * R-123 — single-textarea composer.
@@ -39,7 +35,7 @@ interface ComposerProps {
   defaultProvider?: string;
 }
 
-export default function Composer({ projectId, isEmpty = false, defaultProvider }: ComposerProps) {
+export default function Composer({projectId, isEmpty = false, defaultProvider}: ComposerProps) {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<'plan' | 'quick'>('plan');
   const [provider, setProvider] = useState(defaultProvider ?? 'ANTHROPIC');
@@ -95,7 +91,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
   })();
 
   const placeholder = isEmpty
-    ? 'What do you want to build? Describe it in plain English — we\'ll ship a draft PR you can merge.'
+    ? "What do you want to build? Describe it in plain English — we'll ship a draft PR you can merge."
     : 'Reply or describe a follow-up change…';
   const heroLabel = isEmpty ? 'What do you want to build?' : '';
 
@@ -177,7 +173,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
         paddingBottom: 12,
         zIndex: 10,
       }}
-      aria-label="New run composer"
+      aria-label='New run composer'
     >
       {heroLabel && (
         <div
@@ -225,7 +221,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
             return (
               <button
                 key={i}
-                type="button"
+                type='button'
                 onClick={() => setText(s)}
                 title={s}
                 style={{
@@ -263,7 +259,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
           onChange={(e) => setText(e.target.value)}
           placeholder={placeholder}
           rows={isEmpty ? 4 : 2}
-          aria-label="What do you want to build"
+          aria-label='What do you want to build'
           style={{
             width: '100%',
             background: 'transparent',
@@ -296,9 +292,9 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
             borderTop: '1px solid var(--v3-border)',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <div style={{display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}>
             <button
-              type="button"
+              type='button'
               onClick={() => setMode((m) => (m === 'plan' ? 'quick' : 'plan'))}
               title={
                 mode === 'plan'
@@ -311,7 +307,8 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
                 fontWeight: 600,
                 background: mode === 'quick' ? 'rgba(245,158,11,0.16)' : 'var(--v3-bg)',
                 color: mode === 'quick' ? 'var(--v3-warning)' : 'var(--v3-text-muted)',
-                border: '1px solid ' + (mode === 'quick' ? 'rgba(245,158,11,0.4)' : 'var(--v3-border)'),
+                border:
+                  '1px solid ' + (mode === 'quick' ? 'rgba(245,158,11,0.4)' : 'var(--v3-border)'),
                 borderRadius: 4,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
@@ -320,7 +317,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
               {mode === 'quick' ? RUN_MODE_QUICK : RUN_MODE_PLAN_REVIEW}
             </button>
             <button
-              type="button"
+              type='button'
               onClick={() => setAdvancedOpen((a) => !a)}
               style={{
                 padding: '3px 8px',
@@ -338,7 +335,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
             </button>
           </div>
           <button
-            type="submit"
+            type='submit'
             disabled={!canSubmit}
             style={{
               padding: '6px 16px',
@@ -367,8 +364,8 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
               gap: 10,
             }}
           >
-            <label style={{ display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11 }}>
-              <span style={{ color: 'var(--v3-text-muted)', fontWeight: 500 }}>AI provider</span>
+            <label style={{display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11}}>
+              <span style={{color: 'var(--v3-text-muted)', fontWeight: 500}}>AI provider</span>
               <select
                 value={provider}
                 onChange={(e) => setProvider(e.target.value)}
@@ -404,7 +401,7 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
 
       {error && (
         <div
-          role="alert"
+          role='alert'
           style={{
             marginTop: 8,
             padding: '6px 10px',
@@ -435,10 +432,10 @@ export default function Composer({ projectId, isEmpty = false, defaultProvider }
           ].map((sample) => (
             <button
               key={sample}
-              type="button"
+              type='button'
               onClick={() => {
                 setText(sample);
-                trackV3(V3_EVENTS.COMPOSER_SAMPLE_CHIP_CLICKED, { sample });
+                trackV3(V3_EVENTS.COMPOSER_SAMPLE_CHIP_CLICKED, {sample});
               }}
               style={{
                 padding: '10px 12px',

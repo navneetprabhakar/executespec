@@ -21,7 +21,9 @@ public record TaskSummary(
     Instant completedAt,
     /** Human-readable reason why this task is PARTIAL / BLOCKED / FAILED. */
     String failureReason,
-    /** The objective/description from the planner's TaskDefinition. Shown in the UI when expanded. */
+    /**
+     * The objective/description from the planner's TaskDefinition. Shown in the UI when expanded.
+     */
     String objective,
     /** The worker's summary of what was implemented. */
     String completionNotes,
@@ -30,5 +32,4 @@ public record TaskSummary(
     /** 1-based index within parent's subtask list (null for top-level tasks). */
     Integer subtaskIndex,
     /** Total number of subtasks in the parent (null for top-level tasks). */
-    Integer subtaskTotal
-) {}
+    Integer subtaskTotal) {}

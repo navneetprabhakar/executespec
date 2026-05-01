@@ -1,8 +1,10 @@
 package com.navneet.executespec.v2.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.stereotype.Component;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * V2 completeTask tool. The structured signal that a task is finished.
@@ -22,42 +24,42 @@ import org.springframework.stereotype.Component;
 @Slf4j
 public class CompleteTaskTool implements Tool {
 
-    public static final String NAME = "completeTask";
+  public static final String NAME = "completeTask";
 
-    @Override
-    public String name() {
-        return NAME;
-    }
+  @Override
+  public String name() {
+    return NAME;
+  }
 
-    @Override
-    public String description() {
-        return "Signals that the task is complete. Call this when you have finished all required "
-                + "work (files written, edits applied, smoke test passed). Provide a brief summary "
-                + "of what you did. After this is called, the agent loop terminates — do not call "
-                + "any further tools.";
-    }
+  @Override
+  public String description() {
+    return "Signals that the task is complete. Call this when you have finished all required "
+        + "work (files written, edits applied, smoke test passed). Provide a brief summary "
+        + "of what you did. After this is called, the agent loop terminates — do not call "
+        + "any further tools.";
+  }
 
-    @Override
-    public String inputSchema() {
-        return """
-                {
-                  "type": "object",
-                  "properties": {
-                    "summary": {
-                      "type": "string",
-                      "description": "Brief description of what was accomplished"
-                    }
-                  },
-                  "required": ["summary"],
-                  "additionalProperties": false
-                }
-                """;
-    }
+  @Override
+  public String inputSchema() {
+    return """
+           {
+             "type": "object",
+             "properties": {
+               "summary": {
+                 "type": "string",
+                 "description": "Brief description of what was accomplished"
+               }
+             },
+             "required": ["summary"],
+             "additionalProperties": false
+           }
+           """;
+  }
 
-    @Override
-    public ToolResult execute(JsonNode args, ExecutionContext ctx) {
-        String summary = args.path("summary").asText("(no summary)");
-        log.info("CompleteTaskTool called (run={} task={}): {}", ctx.runId(), ctx.taskId(), summary);
-        return ToolResult.ok("task marked complete: " + summary);
-    }
+  @Override
+  public ToolResult execute(JsonNode args, ExecutionContext ctx) {
+    String summary = args.path("summary").asText("(no summary)");
+    log.info("CompleteTaskTool called (run={} task={}): {}", ctx.runId(), ctx.taskId(), summary);
+    return ToolResult.ok("task marked complete: " + summary);
+  }
 }

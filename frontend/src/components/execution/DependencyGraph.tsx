@@ -1,4 +1,4 @@
-import type { SolutionSpec, DependencyEdge } from '@/types/execution';
+import type {SolutionSpec, DependencyEdge} from '@/types/execution';
 
 interface Props {
   solutions: SolutionSpec[];
@@ -7,7 +7,7 @@ interface Props {
 
 /** Layered text-first DAG. Groups solutions into topological layers and prints
  *  them column-by-column. Cheap, clear, no chart library. */
-export default function DependencyGraph({ solutions, edges }: Props) {
+export default function DependencyGraph({solutions, edges}: Props) {
   if (solutions.length === 0) return null;
   const deps = new Map<number, Set<number>>();
   solutions.forEach((s) => deps.set(s.sequenceNumber, new Set()));
@@ -17,7 +17,8 @@ export default function DependencyGraph({ solutions, edges }: Props) {
   const layers: SolutionSpec[][] = [];
   while (placed.size < solutions.length) {
     const layer = solutions.filter(
-      (s) => !placed.has(s.sequenceNumber) &&
+      (s) =>
+        !placed.has(s.sequenceNumber) &&
         Array.from(deps.get(s.sequenceNumber) ?? []).every((d) => placed.has(d)),
     );
     if (layer.length === 0) break; // cycle — bail out defensively
@@ -26,18 +27,20 @@ export default function DependencyGraph({ solutions, edges }: Props) {
   }
 
   return (
-    <div className="flex gap-2 overflow-x-auto pb-2">
+    <div className='flex gap-2 overflow-x-auto pb-2'>
       {layers.map((layer, li) => (
-        <div key={li} className="flex flex-col gap-1.5 min-w-[160px]">
-          <div className="text-[11px] uppercase tracking-wide text-muted">Layer {li + 1}</div>
+        <div key={li} className='flex flex-col gap-1.5 min-w-[160px]'>
+          <div className='text-[11px] uppercase tracking-wide text-muted'>Layer {li + 1}</div>
           {layer.map((s) => (
             <div
               key={s.sequenceNumber}
-              className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-xs"
+              className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-2 py-1 text-xs'
             >
-              <div className="font-mono text-[11px] text-muted">S{s.sequenceNumber} · {s.complexity}</div>
-              <div className="truncate">{s.title}</div>
-              {s.repoName && <div className="text-[11px] text-muted truncate">{s.repoName}</div>}
+              <div className='font-mono text-[11px] text-muted'>
+                S{s.sequenceNumber} · {s.complexity}
+              </div>
+              <div className='truncate'>{s.title}</div>
+              {s.repoName && <div className='text-[11px] text-muted truncate'>{s.repoName}</div>}
             </div>
           ))}
         </div>

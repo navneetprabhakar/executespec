@@ -1,6 +1,6 @@
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
-import { useEffect, useState } from 'react';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {Link, useNavigate, useSearchParams} from 'react-router-dom';
+import {useEffect, useState} from 'react';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /** Keys used to bridge ?ref / ?anon URL params across the OAuth round-trip
  *  (the OAuth provider strips our query, so we stash → restore via
@@ -64,10 +64,9 @@ export default function V3Auth() {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch(
-          `/api/v3/referrals/lookup?token=${encodeURIComponent(token)}`,
-          { credentials: 'omit' },
-        );
+        const res = await fetch(`/api/v3/referrals/lookup?token=${encodeURIComponent(token)}`, {
+          credentials: 'omit',
+        });
         if (!res.ok) return;
         const data = (await res.json()) as ReferralLookup;
         if (!cancelled) setReferral(data);
@@ -87,8 +86,7 @@ export default function V3Auth() {
     void claimAndForward(navigate);
   }, [isAuthed, navigate]);
 
-  const stashedSpec =
-    typeof window !== 'undefined' ? sessionStorage.getItem('v3-anon-spec') : null;
+  const stashedSpec = typeof window !== 'undefined' ? sessionStorage.getItem('v3-anon-spec') : null;
 
   // Referral context drives the heading + body copy. Three states:
   //   1. Valid token + named inviter → "Welcome — Priya invited you."
@@ -165,7 +163,7 @@ export default function V3Auth() {
               fontWeight: 500,
             }}
           >
-            <span style={{ fontSize: 14 }}>🎁</span>
+            <span style={{fontSize: 14}}>🎁</span>
             <span>
               {referral.valid && referral.inviterFirstName
                 ? `${referral.inviterFirstName} invited you to ExecuteSpec`
@@ -197,25 +195,37 @@ export default function V3Auth() {
         </p>
 
         {/* OAuth — reuses existing v2 routes */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
+        <div style={{display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16}}>
           <a
-            href="/api/auth/oauth2/authorize?provider=github&returnTo=/claim"
+            href='/api/auth/oauth2/authorize?provider=github&returnTo=/claim'
             style={oauthButtonStyle('#24292e')}
           >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-              <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.81.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38C13.71 14.53 16 11.54 16 8c0-4.42-3.58-8-8-8z" />
+            <svg width='14' height='14' viewBox='0 0 16 16' fill='currentColor' aria-hidden='true'>
+              <path d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38v-1.34c-2.22.48-2.69-1.07-2.69-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.81.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38C13.71 14.53 16 11.54 16 8c0-4.42-3.58-8-8-8z' />
             </svg>
             Continue with GitHub
           </a>
           <a
-            href="/api/auth/oauth2/authorize?provider=google&returnTo=/claim"
+            href='/api/auth/oauth2/authorize?provider=google&returnTo=/claim'
             style={oauthButtonStyle('#fff', '#1a1a1a')}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-              <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-              <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.99.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-              <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-              <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+            <svg width='14' height='14' viewBox='0 0 24 24' aria-hidden='true'>
+              <path
+                fill='#4285F4'
+                d='M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z'
+              />
+              <path
+                fill='#34A853'
+                d='M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.99.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z'
+              />
+              <path
+                fill='#FBBC05'
+                d='M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z'
+              />
+              <path
+                fill='#EA4335'
+                d='M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z'
+              />
             </svg>
             Continue with Google
           </a>
@@ -232,34 +242,37 @@ export default function V3Auth() {
             fontSize: 10.5,
           }}
         >
-          <div style={{ flex: 1, height: 1, background: 'var(--v3-border)' }} />
+          <div style={{flex: 1, height: 1, background: 'var(--v3-border)'}} />
           <span>or email + password</span>
-          <div style={{ flex: 1, height: 1, background: 'var(--v3-border)' }} />
+          <div style={{flex: 1, height: 1, background: 'var(--v3-border)'}} />
         </div>
 
         {/* Email + password (re-uses v2 login) */}
-        <form onSubmit={onPasswordSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <form
+          onSubmit={onPasswordSubmit}
+          style={{display: 'flex', flexDirection: 'column', gap: 8}}
+        >
           <input
-            type="email"
-            autoComplete="email"
+            type='email'
+            autoComplete='email'
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="you@example.com"
+            placeholder='you@example.com'
             disabled={submitting}
             style={inputStyle}
           />
-          <div style={{ position: 'relative' }}>
+          <div style={{position: 'relative'}}>
             <input
               type={showPassword ? 'text' : 'password'}
-              autoComplete="current-password"
+              autoComplete='current-password'
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="Password"
+              placeholder='Password'
               disabled={submitting}
-              style={{ ...inputStyle, paddingRight: 56 }}
+              style={{...inputStyle, paddingRight: 56}}
             />
             <button
-              type="button"
+              type='button'
               onClick={() => setShowPassword((s) => !s)}
               style={{
                 position: 'absolute',
@@ -278,7 +291,7 @@ export default function V3Auth() {
             </button>
           </div>
           <button
-            type="submit"
+            type='submit'
             disabled={!email.trim() || !password || submitting}
             style={{
               padding: '8px 14px',
@@ -294,8 +307,7 @@ export default function V3Auth() {
                   : 'var(--v3-text-on-brand)',
               border: 'none',
               borderRadius: 6,
-              cursor:
-                !email.trim() || !password || submitting ? 'not-allowed' : 'pointer',
+              cursor: !email.trim() || !password || submitting ? 'not-allowed' : 'pointer',
               fontFamily: 'inherit',
             }}
           >
@@ -303,7 +315,7 @@ export default function V3Auth() {
           </button>
           {error && (
             <div
-              role="alert"
+              role='alert'
               style={{
                 padding: '6px 10px',
                 background: 'rgba(239,68,68,0.12)',
@@ -327,13 +339,13 @@ export default function V3Auth() {
           }}
         >
           New here?{' '}
-          <Link to="/register" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+          <Link to='/register' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
             Sign up free
           </Link>{' '}
           · or{' '}
           <Link
-            to="/forgot-password"
-            style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}
+            to='/forgot-password'
+            style={{color: 'var(--v3-text-subtle)', textDecoration: 'none'}}
           >
             forgot password
           </Link>
@@ -377,8 +389,8 @@ async function claimAndForward(navigate: (to: string) => void) {
       await fetch('/api/v3/auth/claim-anonymous-session', {
         method: 'POST',
         credentials: 'include',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionToken: anonToken }),
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({sessionToken: anonToken}),
       });
     } catch {
       // Swallow — the redirect must not be blocked by a flaky call.

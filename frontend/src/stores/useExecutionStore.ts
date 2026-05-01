@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { executionApi } from '@/lib/execution-api';
+import {create} from 'zustand';
+import {executionApi} from '@/lib/execution-api';
 import type {
   ExecutionRunDto,
   RepoAnalysisStatus,
@@ -21,7 +21,7 @@ interface ExecutionState {
    *  has been triggered. {@link compensationDoneSummary} is set when the
    *  EXEC_COMPENSATION_DONE event arrives. */
   compensations: CompensationStep[];
-  compensationDoneSummary: { total: number; completed: number; failed: number } | null;
+  compensationDoneSummary: {total: number; completed: number; failed: number} | null;
 
   createExecution: (projectId: string, req: CreateExecutionRequest) => Promise<string>;
   fetchExecution: (id: string) => Promise<void>;
@@ -35,17 +35,21 @@ interface ExecutionState {
 
   updateStatus: (status: string) => void;
   updateSolutionStatus: (solutionId: string, status: string) => void;
-  updateAnalysisProgress: (repoId: string, field: 'codemapStatus' | 'archDocStatus', status: string) => void;
+  updateAnalysisProgress: (
+    repoId: string,
+    field: 'codemapStatus' | 'archDocStatus',
+    status: string,
+  ) => void;
   appendSolutionLog: (solutionId: string, line: string) => void;
 
   setExpandedSolution: (id: string | null) => void;
   toggleLogs: () => void;
-  seedAnalysisProgress: (repos: { repoId: string; repoName: string }[]) => void;
+  seedAnalysisProgress: (repos: {repoId: string; repoName: string}[]) => void;
   reset: () => void;
 
   /** v2.5.2 (Phase 2.3) — append/update a compensation step from SSE. */
   applyCompensationUpdate: (step: CompensationStep) => void;
-  setCompensationDone: (summary: { total: number; completed: number; failed: number }) => void;
+  setCompensationDone: (summary: {total: number; completed: number; failed: number}) => void;
   clearCompensations: () => void;
 }
 
@@ -69,13 +73,13 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   compensationDoneSummary: null,
 
   createExecution: async (projectId, reqBody) => {
-    set({ loading: true, error: null });
+    set({loading: true, error: null});
     try {
       const run = await executionApi.create(projectId, reqBody);
-      set({ executionRun: run, loading: false });
+      set({executionRun: run, loading: false});
       return run.id;
     } catch (e: any) {
-      set({ error: e?.message ?? 'Failed to create execution', loading: false });
+      set({error: e?.message ?? 'Failed to create execution', loading: false});
       throw e;
     }
   },
@@ -83,9 +87,9 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   fetchExecution: async (id) => {
     try {
       const run = await executionApi.get(id);
-      set({ executionRun: run });
+      set({executionRun: run});
     } catch (e: any) {
-      set({ error: e?.message ?? 'Failed to load execution' });
+      set({error: e?.message ?? 'Failed to load execution'});
     }
   },
 
@@ -93,7 +97,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     await executionApi.triggerAnalysis(id);
   },
   approveArch: async (id, annotations) => {
-    await executionApi.approveArch(id, { approved: true, annotations });
+    await executionApi.approveArch(id, {approved: true, annotations});
     await get().fetchExecution(id);
   },
   generatePlan: async (id) => {
@@ -103,7 +107,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     await executionApi.approvePlan(id);
   },
   decide: async (id, solutionId, action) => {
-    await executionApi.decide(id, solutionId, { action });
+    await executionApi.decide(id, solutionId, {action});
     await get().fetchExecution(id);
   },
   signalManualReady: async (id, solutionId) => {
@@ -116,35 +120,37 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   updateStatus: (status) => {
     const run = get().executionRun;
-    if (run) set({ executionRun: { ...run, status: status as any } });
+    if (run) set({executionRun: {...run, status: status as any}});
   },
   updateSolutionStatus: (solutionId, status) => {
     const run = get().executionRun;
     if (!run) return;
     const solutions = run.solutions.map((s) =>
-      s.id === solutionId ? { ...s, status: status as any } : s,
+      s.id === solutionId ? {...s, status: status as any} : s,
     );
-    set({ executionRun: { ...run, solutions } });
+    set({executionRun: {...run, solutions}});
   },
   updateAnalysisProgress: (repoId, field, status) => {
     const progress = [...get().analysisProgress];
     const idx = progress.findIndex((p) => p.repoId === repoId);
-    if (idx >= 0) progress[idx] = { ...progress[idx], [field]: status as any };
-    set({ analysisProgress: progress });
+    if (idx >= 0) progress[idx] = {...progress[idx], [field]: status as any};
+    set({analysisProgress: progress});
   },
   appendSolutionLog: (solutionId, line) => {
-    const logs = { ...get().solutionLogs };
+    const logs = {...get().solutionLogs};
     logs[solutionId] = [...(logs[solutionId] ?? []), line];
-    set({ solutionLogs: logs });
+    set({solutionLogs: logs});
   },
 
-  setExpandedSolution: (id) => set({ expandedSolutionId: id }),
-  toggleLogs: () => set({ showLogs: !get().showLogs }),
+  setExpandedSolution: (id) => set({expandedSolutionId: id}),
+  toggleLogs: () => set({showLogs: !get().showLogs}),
   seedAnalysisProgress: (repos) =>
     set({
       analysisProgress: repos.map((r) => ({
-        repoId: r.repoId, repoName: r.repoName,
-        codemapStatus: 'PENDING', archDocStatus: 'PENDING',
+        repoId: r.repoId,
+        repoName: r.repoName,
+        codemapStatus: 'PENDING',
+        archDocStatus: 'PENDING',
       })),
     }),
   reset: () =>
@@ -163,11 +169,12 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   applyCompensationUpdate: (step) => {
     const cur = get().compensations;
     // Match by (type, repo, prNumber) — same step transitions through statuses.
-    const idx = cur.findIndex((s) =>
-      s.type === step.type && s.repo === step.repo && s.prNumber === step.prNumber);
+    const idx = cur.findIndex(
+      (s) => s.type === step.type && s.repo === step.repo && s.prNumber === step.prNumber,
+    );
     const next = idx === -1 ? [...cur, step] : cur.map((s, i) => (i === idx ? step : s));
-    set({ compensations: next });
+    set({compensations: next});
   },
-  setCompensationDone: (summary) => set({ compensationDoneSummary: summary }),
-  clearCompensations: () => set({ compensations: [], compensationDoneSummary: null }),
+  setCompensationDone: (summary) => set({compensationDoneSummary: summary}),
+  clearCompensations: () => set({compensations: [], compensationDoneSummary: null}),
 }));

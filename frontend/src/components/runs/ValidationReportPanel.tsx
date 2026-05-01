@@ -1,16 +1,33 @@
-import { useState, useEffect } from 'react';
-import { ChevronDown, ChevronRight, Share2, Check, Shield, AlertTriangle, FileCode2, Download, RefreshCw } from 'lucide-react';
-import { getValidationReport, shareValidationReport, downloadValidationReportPdf, retryValidationReport, type ValidationReportData, type ReportIssue } from '@/lib/api';
-import { MarkdownContent } from '@/components/shared/MarkdownContent';
+import {useState, useEffect} from 'react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Share2,
+  Check,
+  Shield,
+  AlertTriangle,
+  FileCode2,
+  Download,
+  RefreshCw,
+} from 'lucide-react';
+import {
+  getValidationReport,
+  shareValidationReport,
+  downloadValidationReportPdf,
+  retryValidationReport,
+  type ValidationReportData,
+  type ReportIssue,
+} from '@/lib/api';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import ScoreCard from './ScoreCard';
 import ScoreRing from './ScoreRing';
 import SignalBreakdown from './SignalBreakdown';
 import VerdictPill from './VerdictPill';
 import RunStamp from '@/components/project/RunStamp';
-import { Glossary } from '@/components/shared/Glossary';
-import { useUiStore } from '@/stores/useUiStore';
-import { useSseStore } from '@/stores/useSseStore';
-import { cn } from '@/lib/utils';
+import {Glossary} from '@/components/shared/Glossary';
+import {useUiStore} from '@/stores/useUiStore';
+import {useSseStore} from '@/stores/useSseStore';
+import {cn} from '@/lib/utils';
 
 interface ValidationReportPanelProps {
   runId: string;
@@ -38,7 +55,7 @@ interface ValidationReportPanelProps {
  * (waiting/amber); lint is purely advisory (muted). Matches StatusBadge
  * colour semantics so Validation reads like every other status surface.
  */
-const SEVERITY_CONFIG: Record<string, { cls: string; label: string; iconCls: string }> = {
+const SEVERITY_CONFIG: Record<string, {cls: string; label: string; iconCls: string}> = {
   WOULD_BREAK_BUILD: {
     cls: 'bg-status-error/10 text-status-error border-status-error/30',
     iconCls: 'text-status-error',
@@ -61,11 +78,27 @@ const SEVERITY_CONFIG: Record<string, { cls: string; label: string; iconCls: str
   },
 };
 
-const RESULT_CONFIG: Record<string, { cls: string; label: string; shieldCls: string }> = {
-  PASSED:            { cls: 'bg-status-success/10 text-status-success border-status-success/30', shieldCls: 'text-status-success', label: 'Passed' },
-  PASSED_WITH_FIXES: { cls: 'bg-status-success/10 text-status-success border-status-success/30', shieldCls: 'text-status-success', label: 'Passed with fixes' },
-  NEEDS_ATTENTION:   { cls: 'bg-status-waiting/10 text-status-waiting border-status-waiting/30', shieldCls: 'text-status-waiting', label: 'Needs attention' },
-  FAILED:            { cls: 'bg-status-error/10 text-status-error border-status-error/30',       shieldCls: 'text-status-error',   label: 'Has issues' },
+const RESULT_CONFIG: Record<string, {cls: string; label: string; shieldCls: string}> = {
+  PASSED: {
+    cls: 'bg-status-success/10 text-status-success border-status-success/30',
+    shieldCls: 'text-status-success',
+    label: 'Passed',
+  },
+  PASSED_WITH_FIXES: {
+    cls: 'bg-status-success/10 text-status-success border-status-success/30',
+    shieldCls: 'text-status-success',
+    label: 'Passed with fixes',
+  },
+  NEEDS_ATTENTION: {
+    cls: 'bg-status-waiting/10 text-status-waiting border-status-waiting/30',
+    shieldCls: 'text-status-waiting',
+    label: 'Needs attention',
+  },
+  FAILED: {
+    cls: 'bg-status-error/10 text-status-error border-status-error/30',
+    shieldCls: 'text-status-error',
+    label: 'Has issues',
+  },
 };
 
 /**
@@ -75,14 +108,16 @@ const RESULT_CONFIG: Record<string, { cls: string; label: string; shieldCls: str
  * a PARTIAL.
  */
 const STATUS_REASON_COPY: Record<string, string> = {
-  CLEAN_COMPLETION:                 'Clean completion — every check passed.',
-  CLEAN_WITH_INTERMEDIATE_WARNINGS: 'Clean result. An intermediate step warned but the final state is clean.',
-  FINAL_BUILD_FAILED:               'The final build did not pass. Code may not run without changes.',
-  REVIEWER_UNRESOLVED:              'The reviewer flagged issues that were not fully resolved.',
-  REVIEWER_FAILED:                  'The reviewer agent errored out. Run status derived from the final build.',
-  REVIEWER_INTERRUPTED_CODE_PRESERVED: 'All tasks finished, but the reviewer pass was interrupted by a server restart. Code and workspace are intact — click Regenerate to re-run the reviewer + scoring.',
-  ALL_TASKS_FAILED:                 'No worker task completed successfully.',
-  LEGACY_UNKNOWN:                   'Pre-v2.5.10 run — detailed signals are unavailable.',
+  CLEAN_COMPLETION: 'Clean completion — every check passed.',
+  CLEAN_WITH_INTERMEDIATE_WARNINGS:
+    'Clean result. An intermediate step warned but the final state is clean.',
+  FINAL_BUILD_FAILED: 'The final build did not pass. Code may not run without changes.',
+  REVIEWER_UNRESOLVED: 'The reviewer flagged issues that were not fully resolved.',
+  REVIEWER_FAILED: 'The reviewer agent errored out. Run status derived from the final build.',
+  REVIEWER_INTERRUPTED_CODE_PRESERVED:
+    'All tasks finished, but the reviewer pass was interrupted by a server restart. Code and workspace are intact — click Regenerate to re-run the reviewer + scoring.',
+  ALL_TASKS_FAILED: 'No worker task completed successfully.',
+  LEGACY_UNKNOWN: 'Pre-v2.5.10 run — detailed signals are unavailable.',
 };
 
 function statusReasonCopy(raw?: string | null): string | null {
@@ -106,21 +141,30 @@ function prettyCheckName(raw: string): string {
   return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
-export default function ValidationReportPanel({ runId, status, statusReason, stampMeta }: ValidationReportPanelProps) {
+export default function ValidationReportPanel({
+  runId,
+  status,
+  statusReason,
+  stampMeta,
+}: ValidationReportPanelProps) {
   const [report, setReport] = useState<ValidationReportData | null>(null);
   const [expanded, setExpanded] = useState(false);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [retrying, setRetrying] = useState(false);
-  const addToast = useUiStore(s => s.addToast);
+  const addToast = useUiStore((s) => s.addToast);
 
-  const reportReady = useSseStore((s) => s.entries).some(e => e.type === 'VALIDATION_REPORT_READY');
+  const reportReady = useSseStore((s) => s.entries).some(
+    (e) => e.type === 'VALIDATION_REPORT_READY',
+  );
   useEffect(() => {
     if (!FETCH_STATUSES.has(status)) return;
     // Fetch immediately if run is terminal (navigated to after stream closed),
     // or when the live VALIDATION_REPORT_READY event arrives during the session.
-    getValidationReport(runId).then(r => { if (r) setReport(r); });
+    getValidationReport(runId).then((r) => {
+      if (r) setReport(r);
+    });
   }, [runId, status, reportReady]);
 
   // Regenerate the validation report. Backend runs async (202) — poll a few
@@ -129,19 +173,19 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
     setRetrying(true);
     try {
       await retryValidationReport(runId);
-      addToast({ type: 'info', message: 'Regenerating validation report…' });
+      addToast({type: 'info', message: 'Regenerating validation report…'});
       // Poll for up to 30s (six 5-s ticks). First successful non-null result wins.
       for (let i = 0; i < 6; i++) {
         await new Promise((r) => setTimeout(r, 5000));
         const fresh = await getValidationReport(runId);
         if (fresh) {
           setReport(fresh);
-          addToast({ type: 'success', message: 'Validation report ready' });
+          addToast({type: 'success', message: 'Validation report ready'});
           break;
         }
       }
     } catch (e: any) {
-      addToast({ type: 'error', message: e.message || 'Retry failed' });
+      addToast({type: 'error', message: e.message || 'Retry failed'});
     } finally {
       setRetrying(false);
     }
@@ -153,19 +197,20 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
   if (!report) {
     if (!FETCH_STATUSES.has(status)) return null;
     return (
-      <div className="mx-4 mb-3 rounded-sm border border-status-waiting/30 bg-status-waiting/10 px-4 py-3 flex items-center gap-3">
-        <AlertTriangle className="h-4 w-4 text-status-waiting flex-shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="text-xs font-medium text-primary">Validation report not generated</div>
-          <div className="text-[11px] text-muted mt-0.5">
-            The background report generator crashed or hasn't finished. Click Retry to regenerate from persisted task state.
+      <div className='mx-4 mb-3 rounded-sm border border-status-waiting/30 bg-status-waiting/10 px-4 py-3 flex items-center gap-3'>
+        <AlertTriangle className='h-4 w-4 text-status-waiting flex-shrink-0' />
+        <div className='flex-1 min-w-0'>
+          <div className='text-xs font-medium text-primary'>Validation report not generated</div>
+          <div className='text-[11px] text-muted mt-0.5'>
+            The background report generator crashed or hasn't finished. Click Retry to regenerate
+            from persisted task state.
           </div>
         </div>
         <button
-          type="button"
+          type='button'
           onClick={handleRetry}
           disabled={retrying}
-          className="flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-sm border border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20 disabled:opacity-60 disabled:cursor-not-allowed"
+          className='flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1 rounded-sm border border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20 disabled:opacity-60 disabled:cursor-not-allowed'
         >
           <RefreshCw className={cn('h-3 w-3', retrying && 'animate-spin')} />
           {retrying ? 'Retrying…' : 'Retry'}
@@ -178,18 +223,24 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
 
   // v2.5.10 — verifiedScore (deterministic build+tests+verdict) is primary.
   // accuracyScore (LLM self-estimate) demoted to secondary "Est." chip.
-  const primaryScore = typeof report.verifiedScore === 'number'
+  const primaryScore =
+    typeof report.verifiedScore === 'number'
       ? report.verifiedScore
-      : (typeof report.accuracyScore === 'number' ? report.accuracyScore : null);
+      : typeof report.accuracyScore === 'number'
+        ? report.accuracyScore
+        : null;
   const primaryLabel = typeof report.verifiedScore === 'number' ? 'Verified' : 'Accuracy';
   const accuracyScore = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
   const grade = report.accuracyGrade || null;
 
-  const primaryScoreCls = primaryScore == null
-    ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
-    : primaryScore >= 90 ? 'text-status-success border-status-success/30 bg-status-success/10'
-    : primaryScore >= 75 ? 'text-status-waiting border-status-waiting/30 bg-status-waiting/10'
-    : 'text-status-error border-status-error/30 bg-status-error/10';
+  const primaryScoreCls =
+    primaryScore == null
+      ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
+      : primaryScore >= 90
+        ? 'text-status-success border-status-success/30 bg-status-success/10'
+        : primaryScore >= 75
+          ? 'text-status-waiting border-status-waiting/30 bg-status-waiting/10'
+          : 'text-status-error border-status-error/30 bg-status-error/10';
 
   const summaryParts: string[] = [];
   summaryParts.push(`${report.filesGenerated} file${report.filesGenerated !== 1 ? 's' : ''}`);
@@ -218,10 +269,10 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
       const result = await shareValidationReport(runId);
       await navigator.clipboard.writeText(window.location.origin + result.shareUrl);
       setCopied(true);
-      addToast({ type: 'success', message: 'Report link copied to clipboard' });
+      addToast({type: 'success', message: 'Report link copied to clipboard'});
       setTimeout(() => setCopied(false), 2000);
     } catch (e: any) {
-      addToast({ type: 'error', message: e.message || 'Failed to share report' });
+      addToast({type: 'error', message: e.message || 'Failed to share report'});
     } finally {
       setSharing(false);
     }
@@ -231,35 +282,38 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
     setDownloading(true);
     try {
       await downloadValidationReportPdf(runId);
-      addToast({ type: 'success', message: 'PDF downloaded' });
+      addToast({type: 'success', message: 'PDF downloaded'});
     } catch (e: any) {
-      addToast({ type: 'error', message: e.message || 'Failed to download PDF' });
+      addToast({type: 'error', message: e.message || 'Failed to download PDF'});
     } finally {
       setDownloading(false);
     }
   };
 
   return (
-    <div className="mx-4 mb-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
+    <div className='mx-4 mb-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden'>
       {/* ── Header: icon + title + primary score + result chip ─────────── */}
       <div
-        role="button"
+        role='button'
         tabIndex={0}
         onClick={() => setExpanded(!expanded)}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded); }}
-        className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--gray-200)] transition-colors cursor-pointer"
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') setExpanded(!expanded);
+        }}
+        className='w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-[var(--gray-200)] transition-colors cursor-pointer'
       >
-        {expanded
-          ? <ChevronDown className="h-4 w-4 text-secondary flex-shrink-0" />
-          : <ChevronRight className="h-4 w-4 text-secondary flex-shrink-0" />
-        }
+        {expanded ? (
+          <ChevronDown className='h-4 w-4 text-secondary flex-shrink-0' />
+        ) : (
+          <ChevronRight className='h-4 w-4 text-secondary flex-shrink-0' />
+        )}
         <Shield className={cn('h-3.5 w-3.5 flex-shrink-0', resultCfg.shieldCls)} />
-        <span className="text-xs font-medium text-primary">Validation Report</span>
+        <span className='text-xs font-medium text-primary'>Validation Report</span>
         {/* Plan 1 (this-week #3): verdict leads, numeric score is secondary
             disclosure. The {resultCfg.label} chip kept for back-compat
             (CLEAN/FIXED/UNRESOLVED palette is familiar) but visually demoted. */}
         <VerdictPill
-          size="lg"
+          size='lg'
           finalBuildPassed={report.finalBuildPassed}
           testsPassed={report.testsPassed}
           testsTotal={report.testsTotal}
@@ -267,34 +321,45 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
           verifiedScore={report.verifiedScore}
           statusReason={statusReason}
         />
-        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-sm border font-medium opacity-70', resultCfg.cls)}>
+        <span
+          className={cn(
+            'text-[10px] px-1.5 py-0.5 rounded-sm border font-medium opacity-70',
+            resultCfg.cls,
+          )}
+        >
           {resultCfg.label}
         </span>
         {primaryScore != null && (
           <span
-            className={cn('text-[10px] font-mono px-1.5 py-0.5 rounded-sm border tabular-nums opacity-70', primaryScoreCls)}
-            title={primaryLabel === 'Verified'
-              ? 'Deterministic score: build + tests + reviewer verdict (v2.5.10)'
-              : 'LLM-estimated spec coverage (legacy pre-V106)'}
+            className={cn(
+              'text-[10px] font-mono px-1.5 py-0.5 rounded-sm border tabular-nums opacity-70',
+              primaryScoreCls,
+            )}
+            title={
+              primaryLabel === 'Verified'
+                ? 'Deterministic score: build + tests + reviewer verdict (v2.5.10)'
+                : 'LLM-estimated spec coverage (legacy pre-V106)'
+            }
           >
-            <span className="opacity-70 mr-0.5">{primaryLabel === 'Verified' ? 'Ver' : 'Acc'}</span>
-            {primaryScore}<span className="opacity-60">/100</span>
+            <span className='opacity-70 mr-0.5'>{primaryLabel === 'Verified' ? 'Ver' : 'Acc'}</span>
+            {primaryScore}
+            <span className='opacity-60'>/100</span>
           </span>
         )}
         {report.generatedAfterImprovements && (
-          <span className="text-[10px] px-1.5 py-0.5 rounded-sm border bg-accent-blue/10 text-accent-blue border-accent-blue/30">
+          <span className='text-[10px] px-1.5 py-0.5 rounded-sm border bg-accent-blue/10 text-accent-blue border-accent-blue/30'>
             Re-validated
           </span>
         )}
-        <span className="text-xs text-muted ml-1 truncate hidden md:inline">
+        <span className='text-xs text-muted ml-1 truncate hidden md:inline'>
           {summaryParts.join(' · ')}
         </span>
-        <div className="ml-auto flex items-center gap-2" onClick={e => e.stopPropagation()}>
+        <div className='ml-auto flex items-center gap-2' onClick={(e) => e.stopPropagation()}>
           <button
             onClick={handleRetry}
             disabled={retrying}
-            title="Regenerate the validation report from persisted run state. Useful after scoring fixes land."
-            className="flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)] disabled:opacity-60 disabled:cursor-not-allowed"
+            title='Regenerate the validation report from persisted run state. Useful after scoring fixes land.'
+            className='flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)] disabled:opacity-60 disabled:cursor-not-allowed'
           >
             <RefreshCw className={cn('h-3 w-3', retrying && 'animate-spin')} />
             {retrying ? '...' : 'Regenerate'}
@@ -302,17 +367,17 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
           <button
             onClick={handleDownloadPdf}
             disabled={downloading}
-            className="flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)]"
+            className='flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)]'
           >
-            <Download className="h-3 w-3" />
+            <Download className='h-3 w-3' />
             {downloading ? '...' : 'PDF'}
           </button>
           <button
             onClick={handleShare}
             disabled={sharing}
-            className="flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)]"
+            className='flex items-center gap-1 text-[11px] text-secondary hover:text-primary transition-colors px-1.5 py-0.5 rounded-sm border border-[var(--border-default)] hover:border-[var(--border-hover)]'
           >
-            {copied ? <Check className="h-3 w-3" /> : <Share2 className="h-3 w-3" />}
+            {copied ? <Check className='h-3 w-3' /> : <Share2 className='h-3 w-3' />}
             {copied ? 'Copied' : 'Share'}
           </button>
         </div>
@@ -320,15 +385,13 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
 
       {/* ── Narrative line for status_reason — v2.5.10 honest-PARTIAL copy ── */}
       {reasonCopy && (
-        <div className="px-4 pb-2 -mt-1">
-          <p className="text-xs text-secondary leading-relaxed">
-            {reasonCopy}
-          </p>
+        <div className='px-4 pb-2 -mt-1'>
+          <p className='text-xs text-secondary leading-relaxed'>{reasonCopy}</p>
         </div>
       )}
 
       {/* ── Signal breakdown chip: always visible ─────────────────────── */}
-      <div className="px-4 pb-2 -mt-1">
+      <div className='px-4 pb-2 -mt-1'>
         <SignalBreakdown
           finalBuildPassed={report.finalBuildPassed}
           testsPassed={report.testsPassed}
@@ -341,70 +404,94 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
 
       {/* ── Expanded content ──────────────────────────────────────────── */}
       {expanded && (
-        <div className="border-t border-[var(--border-default)] max-h-[680px] overflow-y-auto bg-[var(--gray-100)]">
-          <div className="px-4 py-4 space-y-4 text-xs leading-relaxed">
-
+        <div className='border-t border-[var(--border-default)] max-h-[680px] overflow-y-auto bg-[var(--gray-100)]'>
+          <div className='px-4 py-4 space-y-4 text-xs leading-relaxed'>
             {/* Hero: ring + signal tiles in a 2-column layout matching the
                 executespec.ai tour panel. Ring appears only when we have a
                 verified score — LLM-only scoring keeps the legacy chip view. */}
             {primaryScore != null && (
-              <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5 pb-3 border-b border-[var(--border-default)]">
+              <div className='flex flex-col sm:flex-row items-start sm:items-center gap-5 pb-3 border-b border-[var(--border-default)]'>
                 <ScoreRing
                   score={primaryScore}
                   label={primaryLabel === 'Verified' ? 'verified / 100' : 'accuracy / 100'}
                   size={132}
                 />
-                <div className="grid grid-cols-2 gap-2 flex-1 w-full">
+                <div className='grid grid-cols-2 gap-2 flex-1 w-full'>
                   {report.finalBuildPassed != null && (
-                    <div className={cn(
-                      'rounded-sm border px-3 py-2',
-                      report.finalBuildPassed
-                        ? 'border-status-success/30 bg-status-success/10'
-                        : 'border-status-error/30 bg-status-error/10'
-                    )}>
-                      <div className={cn('text-[10px] uppercase tracking-wide font-mono', report.finalBuildPassed ? 'text-status-success' : 'text-status-error')}>Build</div>
-                      <div className="text-sm font-medium mt-0.5 text-primary">{report.finalBuildPassed ? 'Passed' : 'Failed'}</div>
+                    <div
+                      className={cn(
+                        'rounded-sm border px-3 py-2',
+                        report.finalBuildPassed
+                          ? 'border-status-success/30 bg-status-success/10'
+                          : 'border-status-error/30 bg-status-error/10',
+                      )}
+                    >
+                      <div
+                        className={cn(
+                          'text-[10px] uppercase tracking-wide font-mono',
+                          report.finalBuildPassed ? 'text-status-success' : 'text-status-error',
+                        )}
+                      >
+                        Build
+                      </div>
+                      <div className='text-sm font-medium mt-0.5 text-primary'>
+                        {report.finalBuildPassed ? 'Passed' : 'Failed'}
+                      </div>
                     </div>
                   )}
                   {report.testsTotal != null && (
-                    <div className={cn(
-                      'rounded-sm border px-3 py-2',
-                      report.testsTotal === 0
-                        ? 'border-[var(--border-default)] bg-[var(--gray-200)]'
-                        : (report.testsPassed ?? 0) === report.testsTotal
-                          ? 'border-status-success/30 bg-status-success/10'
-                          : (report.testsPassed ?? 0) >= report.testsTotal * 0.8
-                            ? 'border-status-waiting/30 bg-status-waiting/10'
-                            : 'border-status-error/30 bg-status-error/10'
-                    )}>
-                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">Tests</div>
-                      <div className="text-sm font-medium mt-0.5 text-primary tabular-nums">
-                        {report.testsTotal === 0 ? 'Not run' : `${report.testsPassed ?? 0} / ${report.testsTotal}`}
+                    <div
+                      className={cn(
+                        'rounded-sm border px-3 py-2',
+                        report.testsTotal === 0
+                          ? 'border-[var(--border-default)] bg-[var(--gray-200)]'
+                          : (report.testsPassed ?? 0) === report.testsTotal
+                            ? 'border-status-success/30 bg-status-success/10'
+                            : (report.testsPassed ?? 0) >= report.testsTotal * 0.8
+                              ? 'border-status-waiting/30 bg-status-waiting/10'
+                              : 'border-status-error/30 bg-status-error/10',
+                      )}
+                    >
+                      <div className='text-[10px] uppercase tracking-wide font-mono text-muted'>
+                        Tests
+                      </div>
+                      <div className='text-sm font-medium mt-0.5 text-primary tabular-nums'>
+                        {report.testsTotal === 0
+                          ? 'Not run'
+                          : `${report.testsPassed ?? 0} / ${report.testsTotal}`}
                       </div>
                     </div>
                   )}
                   {report.reviewerVerdict && (
-                    <div className={cn(
-                      'rounded-sm border px-3 py-2',
-                      report.reviewerVerdict === 'CLEAN' || report.reviewerVerdict === 'FIXED_ISSUES'
-                        ? 'border-status-success/30 bg-status-success/10'
-                        : report.reviewerVerdict === 'UNRESOLVED_ISSUES'
-                          ? 'border-status-waiting/30 bg-status-waiting/10'
-                          : 'border-status-error/30 bg-status-error/10'
-                    )}>
+                    <div
+                      className={cn(
+                        'rounded-sm border px-3 py-2',
+                        report.reviewerVerdict === 'CLEAN' ||
+                          report.reviewerVerdict === 'FIXED_ISSUES'
+                          ? 'border-status-success/30 bg-status-success/10'
+                          : report.reviewerVerdict === 'UNRESOLVED_ISSUES'
+                            ? 'border-status-waiting/30 bg-status-waiting/10'
+                            : 'border-status-error/30 bg-status-error/10',
+                      )}
+                    >
                       {/* M-006 (Wave 1) — Glossary on "Reviewer" → wiring-pass tooltip. */}
-                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">
-                        <Glossary term="wiring pass">Reviewer</Glossary>
+                      <div className='text-[10px] uppercase tracking-wide font-mono text-muted'>
+                        <Glossary term='wiring pass'>Reviewer</Glossary>
                       </div>
-                      <div className="text-sm font-medium mt-0.5 text-primary">{report.reviewerVerdict.replace(/_/g, ' ')}</div>
+                      <div className='text-sm font-medium mt-0.5 text-primary'>
+                        {report.reviewerVerdict.replace(/_/g, ' ')}
+                      </div>
                     </div>
                   )}
                   {accuracyScore != null && primaryLabel === 'Verified' && (
-                    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2">
-                      <div className="text-[10px] uppercase tracking-wide font-mono text-muted">LLM estimate</div>
-                      <div className="text-sm font-medium mt-0.5 text-secondary tabular-nums">
-                        {accuracyScore}<span className="text-[10px] text-muted ml-0.5">/100</span>
-                        {grade && <span className="ml-1.5 text-[11px] text-muted">· {grade}</span>}
+                    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2'>
+                      <div className='text-[10px] uppercase tracking-wide font-mono text-muted'>
+                        LLM estimate
+                      </div>
+                      <div className='text-sm font-medium mt-0.5 text-secondary tabular-nums'>
+                        {accuracyScore}
+                        <span className='text-[10px] text-muted ml-0.5'>/100</span>
+                        {grade && <span className='ml-1.5 text-[11px] text-muted'>· {grade}</span>}
                       </div>
                     </div>
                   )}
@@ -416,29 +503,65 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
                 Hero tiles above already cover build/tests/reviewer, so this is
                 purely for severity-bucketed issue counts. */}
             {report.issuesCaught > 0 && (
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <div className='grid grid-cols-2 md:grid-cols-4 gap-2'>
                 {report.buildBreakers > 0 && (
-                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_BREAK_BUILD.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Build breakers</div>
-                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.buildBreakers}</div>
+                  <div
+                    className={cn(
+                      'rounded-sm border px-3 py-2',
+                      SEVERITY_CONFIG.WOULD_BREAK_BUILD.cls,
+                    )}
+                  >
+                    <div className='text-[10px] uppercase tracking-wide font-mono opacity-70'>
+                      Build breakers
+                    </div>
+                    <div className='text-sm font-medium mt-0.5 tabular-nums'>
+                      {report.buildBreakers}
+                    </div>
                   </div>
                 )}
                 {report.productionBugs > 0 && (
-                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_CAUSE_BUG.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Bug risks</div>
-                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.productionBugs}</div>
+                  <div
+                    className={cn(
+                      'rounded-sm border px-3 py-2',
+                      SEVERITY_CONFIG.WOULD_CAUSE_BUG.cls,
+                    )}
+                  >
+                    <div className='text-[10px] uppercase tracking-wide font-mono opacity-70'>
+                      Bug risks
+                    </div>
+                    <div className='text-sm font-medium mt-0.5 tabular-nums'>
+                      {report.productionBugs}
+                    </div>
                   </div>
                 )}
                 {report.reviewFailures > 0 && (
-                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_FAIL_REVIEW.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Review issues</div>
-                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.reviewFailures}</div>
+                  <div
+                    className={cn(
+                      'rounded-sm border px-3 py-2',
+                      SEVERITY_CONFIG.WOULD_FAIL_REVIEW.cls,
+                    )}
+                  >
+                    <div className='text-[10px] uppercase tracking-wide font-mono opacity-70'>
+                      Review issues
+                    </div>
+                    <div className='text-sm font-medium mt-0.5 tabular-nums'>
+                      {report.reviewFailures}
+                    </div>
                   </div>
                 )}
                 {report.lintFailures > 0 && (
-                  <div className={cn('rounded-sm border px-3 py-2', SEVERITY_CONFIG.WOULD_FAIL_LINT.cls)}>
-                    <div className="text-[10px] uppercase tracking-wide font-mono opacity-70">Lint</div>
-                    <div className="text-sm font-medium mt-0.5 tabular-nums">{report.lintFailures}</div>
+                  <div
+                    className={cn(
+                      'rounded-sm border px-3 py-2',
+                      SEVERITY_CONFIG.WOULD_FAIL_LINT.cls,
+                    )}
+                  >
+                    <div className='text-[10px] uppercase tracking-wide font-mono opacity-70'>
+                      Lint
+                    </div>
+                    <div className='text-sm font-medium mt-0.5 tabular-nums'>
+                      {report.lintFailures}
+                    </div>
                   </div>
                 )}
               </div>
@@ -448,35 +571,46 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
             <ScoreCard report={report} />
 
             {/* Reviewer markdown narrative */}
-            {report.reportMarkdown && (
-              <MarkdownContent content={report.reportMarkdown} />
-            )}
+            {report.reportMarkdown && <MarkdownContent content={report.reportMarkdown} />}
 
             {/* All individual issues */}
             {report.issues && report.issues.length > 0 && (
-              <div className="space-y-1.5 pt-2 border-t border-[var(--border-default)]">
-                <h4 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary">
+              <div className='space-y-1.5 pt-2 border-t border-[var(--border-default)]'>
+                <h4 className='text-[10px] font-mono font-medium uppercase tracking-wider text-secondary'>
                   All issues ({report.issues.length})
                 </h4>
-                <div className="space-y-1">
+                <div className='space-y-1'>
                   {report.issues.map((issue: ReportIssue, i: number) => {
-                    const cfg = SEVERITY_CONFIG[issue.severity] ?? SEVERITY_CONFIG.WOULD_FAIL_REVIEW;
+                    const cfg =
+                      SEVERITY_CONFIG[issue.severity] ?? SEVERITY_CONFIG.WOULD_FAIL_REVIEW;
                     return (
-                      <div key={i} className="flex items-start gap-2 text-xs rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] px-2.5 py-1.5">
-                        <AlertTriangle className={cn('h-3 w-3 mt-0.5 flex-shrink-0', cfg.iconCls)} />
-                        <div className="min-w-0 flex-1 leading-snug">
-                          <span className="text-primary">{issue.description}</span>
+                      <div
+                        key={i}
+                        className='flex items-start gap-2 text-xs rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] px-2.5 py-1.5'
+                      >
+                        <AlertTriangle
+                          className={cn('h-3 w-3 mt-0.5 flex-shrink-0', cfg.iconCls)}
+                        />
+                        <div className='min-w-0 flex-1 leading-snug'>
+                          <span className='text-primary'>{issue.description}</span>
                           {issue.filePath && (
-                            <span className="flex items-center gap-1 mt-0.5 text-muted font-mono text-[10px]">
-                              <FileCode2 className="h-2.5 w-2.5" />
+                            <span className='flex items-center gap-1 mt-0.5 text-muted font-mono text-[10px]'>
+                              <FileCode2 className='h-2.5 w-2.5' />
                               {issue.filePath}
                             </span>
                           )}
                           {issue.fix && (
-                            <span className="block mt-0.5 text-status-success/80">Fix: {issue.fix}</span>
+                            <span className='block mt-0.5 text-status-success/80'>
+                              Fix: {issue.fix}
+                            </span>
                           )}
                         </div>
-                        <span className={cn('text-[10px] px-1.5 py-0.5 rounded-sm border whitespace-nowrap flex-shrink-0', cfg.cls)}>
+                        <span
+                          className={cn(
+                            'text-[10px] px-1.5 py-0.5 rounded-sm border whitespace-nowrap flex-shrink-0',
+                            cfg.cls,
+                          )}
+                        >
                           {cfg.label}
                         </span>
                       </div>
@@ -488,14 +622,17 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
 
             {/* Checks passed */}
             {report.checksPassed.length > 0 && (
-              <div className="pt-2 border-t border-[var(--border-default)]">
-                <h4 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary mb-1.5">
+              <div className='pt-2 border-t border-[var(--border-default)]'>
+                <h4 className='text-[10px] font-mono font-medium uppercase tracking-wider text-secondary mb-1.5'>
                   Checks passed ({report.checksPassed.length})
                 </h4>
-                <div className="flex flex-wrap gap-x-3 gap-y-1">
-                  {report.checksPassed.map(check => (
-                    <span key={check} className="flex items-center gap-1 text-[11px] text-status-success/80">
-                      <Check className="h-3 w-3" />
+                <div className='flex flex-wrap gap-x-3 gap-y-1'>
+                  {report.checksPassed.map((check) => (
+                    <span
+                      key={check}
+                      className='flex items-center gap-1 text-[11px] text-status-success/80'
+                    >
+                      <Check className='h-3 w-3' />
                       {prettyCheckName(check)}
                     </span>
                   ))}
@@ -508,15 +645,16 @@ export default function ValidationReportPanel({ runId, status, statusReason, sta
                 a free distribution loop. Only render when we have stamp meta
                 AND the run is in a terminal state worth bragging about. */}
             {(status === 'COMPLETE' || status === 'PARTIAL') && stampMeta && (
-              <div className="pt-2 border-t border-[var(--border-default)]">
-                <h4 className="text-[10px] font-mono font-medium uppercase tracking-wider text-secondary mb-1.5">
+              <div className='pt-2 border-t border-[var(--border-default)]'>
+                <h4 className='text-[10px] font-mono font-medium uppercase tracking-wider text-secondary mb-1.5'>
                   Share this run
                 </h4>
                 <RunStamp
                   runId={runId}
                   durationMs={
                     stampMeta.runStartedAt && stampMeta.runCompletedAt
-                      ? new Date(stampMeta.runCompletedAt).getTime() - new Date(stampMeta.runStartedAt).getTime()
+                      ? new Date(stampMeta.runCompletedAt).getTime() -
+                        new Date(stampMeta.runStartedAt).getTime()
                       : null
                   }
                   verifiedScore={report.verifiedScore ?? report.accuracyScore ?? null}

@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { authMe, type AuthUser } from '@/lib/api';
+import {useEffect, useState} from 'react';
+import {Link} from 'react-router-dom';
+import {authMe, type AuthUser} from '@/lib/api';
 import Pill from '../components/Pill';
 
 /**
@@ -139,18 +139,18 @@ export default function V3Integrations() {
   }, {});
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32}}>
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
+        <h1 style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>
           Integrations
         </h1>
-        <p style={{ fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0' }}>
+        <p style={{fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0'}}>
           External tools that can trigger runs, post results, or extend ExecuteSpec.
         </p>
       </div>
 
       {loading && (
-        <div className="v3-placeholder">
+        <div className='v3-placeholder'>
           <p>Loading…</p>
         </div>
       )}
@@ -193,7 +193,7 @@ export default function V3Integrations() {
         }}
       >
         Setting up SSO instead?{' '}
-        <Link to="/team" style={{ color: 'var(--v3-brand)' }}>
+        <Link to='/team' style={{color: 'var(--v3-brand)'}}>
           Open Team
         </Link>
         .
@@ -207,16 +207,14 @@ function resolveState(c: IntegrationCard, u: AuthUser | null): IntegrationState 
   return c.isConnected(u) ? 'connected' : 'available';
 }
 
-function Card({ card, state }: { card: IntegrationCard; state: IntegrationState }) {
-  const tone =
-    state === 'connected' ? 'ok' : state === 'soon' ? 'neutral' : 'info';
+function Card({card, state}: {card: IntegrationCard; state: IntegrationState}) {
+  const tone = state === 'connected' ? 'ok' : state === 'soon' ? 'neutral' : 'info';
   const stateLabel =
     state === 'connected' ? 'Connected' : state === 'soon' ? 'Coming soon' : 'Connect →';
-  const href =
-    state === 'connected' ? card.manageHref : state === 'soon' ? null : card.connectHref;
+  const href = state === 'connected' ? card.manageHref : state === 'soon' ? null : card.connectHref;
 
   const Wrapper: React.ElementType = href ? 'a' : 'div';
-  const wrapperProps = href ? { href } : {};
+  const wrapperProps = href ? {href} : {};
 
   return (
     <Wrapper
@@ -226,9 +224,7 @@ function Card({ card, state }: { card: IntegrationCard; state: IntegrationState 
         padding: 14,
         background: 'var(--v3-surface)',
         border:
-          state === 'connected'
-            ? '1px solid rgba(16,185,129,0.36)'
-            : '1px solid var(--v3-border)',
+          state === 'connected' ? '1px solid rgba(16,185,129,0.36)' : '1px solid var(--v3-border)',
         borderRadius: 8,
         textDecoration: 'none',
         color: 'inherit',
@@ -245,12 +241,10 @@ function Card({ card, state }: { card: IntegrationCard; state: IntegrationState 
           marginBottom: 6,
         }}
       >
-        <h3
-          style={{ margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--v3-text)' }}
-        >
+        <h3 style={{margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--v3-text)'}}>
           {card.name}
         </h3>
-        <Pill tone={tone} size="sm">
+        <Pill tone={tone} size='sm'>
           {state === 'connected' ? '✓ Connected' : state === 'soon' ? 'Soon' : 'Available'}
         </Pill>
       </div>
@@ -265,7 +259,7 @@ function Card({ card, state }: { card: IntegrationCard; state: IntegrationState 
       >
         {card.oneLiner}
       </p>
-      <div style={{ fontSize: 11, color: 'var(--v3-brand)' }}>{stateLabel}</div>
+      <div style={{fontSize: 11, color: 'var(--v3-brand)'}}>{stateLabel}</div>
     </Wrapper>
   );
 }

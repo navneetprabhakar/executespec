@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import {useEffect, useState} from 'react';
+import {Link, useNavigate, useParams} from 'react-router-dom';
 import {
   getMigrationDetail,
   migrationApply,
@@ -9,7 +9,7 @@ import {
   type MigrationDryRunResult,
   type MigrationSlot,
 } from '@/lib/api';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useAuthStore} from '@/stores/useAuthStore';
 import ProjectRepoPicker from '../components/ProjectRepoPicker';
 
 /**
@@ -35,7 +35,7 @@ import ProjectRepoPicker from '../components/ProjectRepoPicker';
  * CTA instead of the apply form.
  */
 export default function V3MigrationDetail() {
-  const { slug } = useParams<{ slug: string }>();
+  const {slug} = useParams<{slug: string}>();
   const navigate = useNavigate();
   // R-341 — caller's tier drives the cost-section UX (cap-input vs
   // info-only chip).
@@ -99,7 +99,7 @@ export default function V3MigrationDetail() {
     setDryRunBusy(true);
     setDryRunError(null);
     try {
-      const r = await migrationDryRun(slug, { projectId, repoIds });
+      const r = await migrationDryRun(slug, {projectId, repoIds});
       setDryRunResult(r);
     } catch (e) {
       setDryRunError((e as Error)?.message ?? 'Dry-run failed');
@@ -132,25 +132,27 @@ export default function V3MigrationDetail() {
 
   if (loading) {
     return (
-      <div style={{ padding: 32, textAlign: 'center', color: 'var(--v3-text-subtle)' }}>
+      <div style={{padding: 32, textAlign: 'center', color: 'var(--v3-text-subtle)'}}>
         Loading recipe…
       </div>
     );
   }
   if (error || !detail) {
     return (
-      <div style={{ padding: 16 }}>
-        <div style={{
-          padding: 12,
-          background: 'rgba(239,68,68,0.12)',
-          border: '1px solid rgba(239,68,68,0.36)',
-          color: '#FCA5A5',
-          borderRadius: 6,
-          fontSize: 13,
-        }}>
+      <div style={{padding: 16}}>
+        <div
+          style={{
+            padding: 12,
+            background: 'rgba(239,68,68,0.12)',
+            border: '1px solid rgba(239,68,68,0.36)',
+            color: '#FCA5A5',
+            borderRadius: 6,
+            fontSize: 13,
+          }}
+        >
           {error ?? 'Recipe not found.'}
-          <div style={{ marginTop: 8 }}>
-            <Link to="/migrations" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
+          <div style={{marginTop: 8}}>
+            <Link to='/migrations' style={{color: 'var(--v3-brand)', fontSize: 12}}>
               ← back to migrations
             </Link>
           </div>
@@ -162,18 +164,22 @@ export default function V3MigrationDetail() {
   const r = detail.recipe;
 
   return (
-    <div style={{ padding: 16, paddingBottom: 48, display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div
+      style={{padding: 16, paddingBottom: 48, display: 'flex', flexDirection: 'column', gap: 20}}
+    >
       {/* Breadcrumb */}
-      <div style={{ fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-        <Link to="/migrations" style={{ color: 'var(--v3-text-subtle)' }}>migrations</Link>
+      <div style={{fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+        <Link to='/migrations' style={{color: 'var(--v3-text-subtle)'}}>
+          migrations
+        </Link>
         {' / '}
-        <span style={{ color: 'var(--v3-text)' }}>{r.slug}</span>
+        <span style={{color: 'var(--v3-text)'}}>{r.slug}</span>
       </div>
 
       {/* Hero */}
       <div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700, color: 'var(--v3-text)', margin: 0 }}>
+        <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
+          <h1 style={{fontSize: 22, fontWeight: 700, color: 'var(--v3-text)', margin: 0}}>
             {r.name}
           </h1>
           {detail.locked && (
@@ -181,48 +187,55 @@ export default function V3MigrationDetail() {
           )}
         </div>
         {r.tagline && (
-          <p style={{ fontSize: 13, color: 'var(--v3-text-subtle)', margin: 0 }}>{r.tagline}</p>
+          <p style={{fontSize: 13, color: 'var(--v3-text-subtle)', margin: 0}}>{r.tagline}</p>
         )}
       </div>
 
       {/* Description */}
       {r.description && (
-        <div style={{
-          fontSize: 13,
-          color: 'var(--v3-text)',
-          lineHeight: 1.6,
-          whiteSpace: 'pre-wrap',
-          padding: 12,
-          background: 'var(--v3-surface)',
-          border: '1px solid var(--v3-border)',
-          borderRadius: 6,
-        }}>
+        <div
+          style={{
+            fontSize: 13,
+            color: 'var(--v3-text)',
+            lineHeight: 1.6,
+            whiteSpace: 'pre-wrap',
+            padding: 12,
+            background: 'var(--v3-surface)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+          }}
+        >
           {r.description}
         </div>
       )}
 
       {/* Locked path — show upgrade CTA + skip the apply form */}
       {detail.locked && (
-        <div style={{
-          padding: 16,
-          background: 'rgba(245,158,11,0.12)',
-          border: '1px solid rgba(245,158,11,0.4)',
-          borderRadius: 6,
-        }}>
-          <div style={{ fontSize: 14, fontWeight: 600, color: '#FBBF24', marginBottom: 6 }}>
+        <div
+          style={{
+            padding: 16,
+            background: 'rgba(245,158,11,0.12)',
+            border: '1px solid rgba(245,158,11,0.4)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{fontSize: 14, fontWeight: 600, color: '#FBBF24', marginBottom: 6}}>
             This recipe requires the {detail.unlockTier} tier.
           </div>
-          <Link to="/pricing" style={{
-            display: 'inline-block',
-            marginTop: 6,
-            padding: '6px 12px',
-            background: 'var(--v3-brand)',
-            color: 'var(--v3-text-on-brand)',
-            borderRadius: 4,
-            textDecoration: 'none',
-            fontSize: 12,
-            fontWeight: 600,
-          }}>
+          <Link
+            to='/pricing'
+            style={{
+              display: 'inline-block',
+              marginTop: 6,
+              padding: '6px 12px',
+              background: 'var(--v3-brand)',
+              color: 'var(--v3-text-on-brand)',
+              borderRadius: 4,
+              textDecoration: 'none',
+              fontSize: 12,
+              fontWeight: 600,
+            }}
+          >
             See pricing →
           </Link>
         </div>
@@ -232,7 +245,7 @@ export default function V3MigrationDetail() {
       {!detail.locked && (
         <>
           {/* Project + repos — R-335 dropdown picker */}
-          <FormSection title="1. Where will this migration run?">
+          <FormSection title='1. Where will this migration run?'>
             <ProjectRepoPicker
               projectId={projectId}
               repoIds={repoIds}
@@ -245,11 +258,11 @@ export default function V3MigrationDetail() {
               }}
               onRepoIdsChange={setRepoIds}
             />
-            <FormField label="Branch (optional)" hint="Override the default branch for this run.">
+            <FormField label='Branch (optional)' hint='Override the default branch for this run.'>
               <input
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
-                placeholder="feature/migrate-to-fastify"
+                placeholder='feature/migrate-to-fastify'
                 style={inputStyle}
               />
             </FormField>
@@ -257,27 +270,27 @@ export default function V3MigrationDetail() {
 
           {/* Slots */}
           {detail.slots.length > 0 && (
-            <FormSection title="2. Recipe parameters">
+            <FormSection title='2. Recipe parameters'>
               {detail.slots.map((s) => (
                 <SlotInput
                   key={s.name}
                   slot={s}
                   value={slotValues[s.name] ?? ''}
-                  onChange={(v) => setSlotValues({ ...slotValues, [s.name]: v })}
+                  onChange={(v) => setSlotValues({...slotValues, [s.name]: v})}
                 />
               ))}
             </FormSection>
           )}
 
           {/* Phase 1 — compute plan */}
-          <FormSection title="3. Plan (Phase 1)">
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-              See what'll happen across your repos before you commit.  No LLM calls in Phase 1 —
-              cost estimates come from historical data; sample diff comes from cache (when present).
+          <FormSection title='3. Plan (Phase 1)'>
+            <p style={{margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+              See what'll happen across your repos before you commit. No LLM calls in Phase 1 — cost
+              estimates come from historical data; sample diff comes from cache (when present).
             </p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
               <button
-                type="button"
+                type='button'
                 onClick={onComputePlan}
                 disabled={dryRunBusy}
                 style={primaryButton(dryRunBusy)}
@@ -285,21 +298,19 @@ export default function V3MigrationDetail() {
                 {dryRunBusy ? 'Computing…' : 'Compute plan'}
               </button>
             </div>
-            {dryRunError && (
-              <div style={errorBoxStyle}>{dryRunError}</div>
-            )}
+            {dryRunError && <div style={errorBoxStyle}>{dryRunError}</div>}
             {dryRunResult && <DryRunSummary result={dryRunResult} showCostCap={showCostCap} />}
           </FormSection>
 
           {/* Phase 2 — apply */}
-          <FormSection title="4. Apply (Phase 2)">
-            <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)' }}>
-              Submits this migration as an ExecutionRun.  Same recipe runs in parallel across every
+          <FormSection title='4. Apply (Phase 2)'>
+            <p style={{margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+              Submits this migration as an ExecutionRun. Same recipe runs in parallel across every
               applicable repo; you get one PR per repo when each is done.
             </p>
-            <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+            <div style={{display: 'flex', gap: 8, marginTop: 8}}>
               <button
-                type="button"
+                type='button'
                 onClick={onApply}
                 disabled={applyBusy || !dryRunResult}
                 style={primaryButton(applyBusy || !dryRunResult)}
@@ -308,9 +319,7 @@ export default function V3MigrationDetail() {
                 {applyBusy ? 'Applying…' : 'Apply migration'}
               </button>
             </div>
-            {applyError && (
-              <div style={errorBoxStyle}>{applyError}</div>
-            )}
+            {applyError && <div style={errorBoxStyle}>{applyError}</div>}
           </FormSection>
         </>
       )}
@@ -318,34 +327,50 @@ export default function V3MigrationDetail() {
   );
 }
 
-function FormSection({ title, children }: { title: string; children: React.ReactNode }) {
+function FormSection({title, children}: {title: string; children: React.ReactNode}) {
   return (
-    <div style={{
-      padding: 14,
-      border: '1px solid var(--v3-border)',
-      borderRadius: 6,
-      background: 'var(--v3-surface)',
-      display: 'flex',
-      flexDirection: 'column',
-      gap: 10,
-    }}>
-      <h3 style={{ fontSize: 13, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
-        {title}
-      </h3>
+    <div
+      style={{
+        padding: 14,
+        border: '1px solid var(--v3-border)',
+        borderRadius: 6,
+        background: 'var(--v3-surface)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
+      <h3 style={{fontSize: 13, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>{title}</h3>
       {children}
     </div>
   );
 }
 
-function FormField({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
+function FormField({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--v3-text-subtle)', textTransform: 'uppercase', letterSpacing: 0.4 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 4}}>
+      <label
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--v3-text-subtle)',
+          textTransform: 'uppercase',
+          letterSpacing: 0.4,
+        }}
+      >
         {label}
       </label>
       {children}
       {hint && (
-        <span style={{ fontSize: 10.5, color: 'var(--v3-text-subtle)', lineHeight: 1.4 }}>
+        <span style={{fontSize: 10.5, color: 'var(--v3-text-subtle)', lineHeight: 1.4}}>
           {hint}
         </span>
       )}
@@ -353,7 +378,11 @@ function FormField({ label, hint, children }: { label: string; hint?: string; ch
   );
 }
 
-function SlotInput({ slot, value, onChange }: {
+function SlotInput({
+  slot,
+  value,
+  onChange,
+}: {
   slot: MigrationSlot;
   value: string;
   onChange: (v: string) => void;
@@ -370,9 +399,11 @@ function SlotInput({ slot, value, onChange }: {
     return (
       <FormField label={label} hint={slot.description ?? undefined}>
         <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-          {!slot.required && <option value="">(none)</option>}
+          {!slot.required && <option value=''>(none)</option>}
           {options.map((o) => (
-            <option key={o} value={o}>{o}</option>
+            <option key={o} value={o}>
+              {o}
+            </option>
           ))}
         </select>
       </FormField>
@@ -382,9 +413,9 @@ function SlotInput({ slot, value, onChange }: {
     return (
       <FormField label={label} hint={slot.description ?? undefined}>
         <select value={value} onChange={(e) => onChange(e.target.value)} style={inputStyle}>
-          <option value="">(unset)</option>
-          <option value="true">true</option>
-          <option value="false">false</option>
+          <option value=''>(unset)</option>
+          <option value='true'>true</option>
+          <option value='false'>false</option>
         </select>
       </FormField>
     );
@@ -393,7 +424,7 @@ function SlotInput({ slot, value, onChange }: {
   return (
     <FormField label={label} hint={slot.description ?? undefined}>
       <input
-        type={isPassword ? 'password' : (slot.type === 'NUMBER' ? 'number' : 'text')}
+        type={isPassword ? 'password' : slot.type === 'NUMBER' ? 'number' : 'text'}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={slot.defaultValue ?? ''}
@@ -403,13 +434,21 @@ function SlotInput({ slot, value, onChange }: {
   );
 }
 
-function DryRunSummary({ result, showCostCap }: { result: MigrationDryRunResult; showCostCap: boolean }) {
-  const totalCost = result.estCostLowTotal && result.estCostHighTotal
-    ? `≈ ${parseFloat(result.estCostLowTotal).toFixed(0)}–${parseFloat(result.estCostHighTotal).toFixed(0)} credits total`
-    : null;
-  const totalFiles = result.estFilesLowTotal != null && result.estFilesHighTotal != null
-    ? `${result.estFilesLowTotal}–${result.estFilesHighTotal} files total`
-    : null;
+function DryRunSummary({
+  result,
+  showCostCap,
+}: {
+  result: MigrationDryRunResult;
+  showCostCap: boolean;
+}) {
+  const totalCost =
+    result.estCostLowTotal && result.estCostHighTotal
+      ? `≈ ${parseFloat(result.estCostLowTotal).toFixed(0)}–${parseFloat(result.estCostHighTotal).toFixed(0)} credits total`
+      : null;
+  const totalFiles =
+    result.estFilesLowTotal != null && result.estFilesHighTotal != null
+      ? `${result.estFilesLowTotal}–${result.estFilesHighTotal} files total`
+      : null;
 
   // R-343 (P1 from UX persona review) — Riley wants a one-line
   // applicability rollup: "3 of 4 applicable · 1 stack mismatch".
@@ -417,125 +456,147 @@ function DryRunSummary({ result, showCostCap }: { result: MigrationDryRunResult;
   const total = result.perRepo.length;
   const applicable = result.perRepo.filter((r) => r.status === 'APPLICABLE').length;
   const blocked = total - applicable;
-  const blockedReasons = blocked > 0
-    ? Array.from(new Set(result.perRepo
-        .filter((r) => r.status !== 'APPLICABLE')
-        .map((r) => r.status))).join(', ').toLowerCase().replace(/_/g, ' ')
-    : null;
+  const blockedReasons =
+    blocked > 0
+      ? Array.from(
+          new Set(result.perRepo.filter((r) => r.status !== 'APPLICABLE').map((r) => r.status)),
+        )
+          .join(', ')
+          .toLowerCase()
+          .replace(/_/g, ' ')
+      : null;
 
   return (
-    <div style={{
-      marginTop: 8,
-      padding: 12,
-      background: 'var(--v3-surface-elevated)',
-      border: '1px solid var(--v3-border)',
-      borderRadius: 6,
-    }}>
-      <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--v3-text)', marginBottom: 8 }}>
+    <div
+      style={{
+        marginTop: 8,
+        padding: 12,
+        background: 'var(--v3-surface-elevated)',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 6,
+      }}
+    >
+      <div style={{fontSize: 12, fontWeight: 600, color: 'var(--v3-text)', marginBottom: 8}}>
         Plan summary
       </div>
       {/* R-343 — applicability rollup line.  Renders only when total > 0. */}
       {total > 0 && (
-        <div style={{
-          marginBottom: 10,
-          padding: '6px 10px',
-          background: blocked === 0 ? 'rgba(74,222,128,0.08)' : 'rgba(251,191,36,0.10)',
-          border: `1px solid ${blocked === 0 ? 'rgba(74,222,128,0.30)' : 'rgba(251,191,36,0.35)'}`,
-          borderRadius: 4,
-          fontSize: 12,
-          color: 'var(--v3-text)',
-          lineHeight: 1.5,
-        }}>
-          <strong style={{ color: blocked === 0 ? '#4ADE80' : '#FBBF24' }}>
+        <div
+          style={{
+            marginBottom: 10,
+            padding: '6px 10px',
+            background: blocked === 0 ? 'rgba(74,222,128,0.08)' : 'rgba(251,191,36,0.10)',
+            border: `1px solid ${blocked === 0 ? 'rgba(74,222,128,0.30)' : 'rgba(251,191,36,0.35)'}`,
+            borderRadius: 4,
+            fontSize: 12,
+            color: 'var(--v3-text)',
+            lineHeight: 1.5,
+          }}
+        >
+          <strong style={{color: blocked === 0 ? '#4ADE80' : '#FBBF24'}}>
             {applicable} of {total}
           </strong>{' '}
           {applicable === 1 ? 'repo is' : 'repos are'} applicable
           {blocked > 0 && (
             <>
               {' · '}
-              <span style={{ color: '#FBBF24' }}>
+              <span style={{color: '#FBBF24'}}>
                 {blocked} blocked{blockedReasons ? ` (${blockedReasons})` : ''}
               </span>
             </>
           )}
           {blocked === 0 && total > 1 && (
-            <span style={{ color: 'var(--v3-text-subtle)' }}> · ready to fan out</span>
+            <span style={{color: 'var(--v3-text-subtle)'}}> · ready to fan out</span>
           )}
         </div>
       )}
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+      <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10}}>
         {totalCost && <span style={chipStyle}>{totalCost}</span>}
         {totalFiles && <span style={chipStyle}>{totalFiles}</span>}
         <span style={chipStyle}>{result.perRepo.length} repo(s) selected</span>
       </div>
       {/* R-341 — tier-stratified cost framing. */}
-      <div style={{
-        marginBottom: 10,
-        padding: '6px 10px',
-        background: showCostCap ? 'rgba(91,141,239,0.10)' : 'rgba(122,209,200,0.10)',
-        border: `1px solid ${showCostCap ? 'rgba(91,141,239,0.35)' : 'rgba(122,209,200,0.35)'}`,
-        borderRadius: 4,
-        fontSize: 11.5,
-        color: 'var(--v3-text)',
-        lineHeight: 1.5,
-      }}>
+      <div
+        style={{
+          marginBottom: 10,
+          padding: '6px 10px',
+          background: showCostCap ? 'rgba(91,141,239,0.10)' : 'rgba(122,209,200,0.10)',
+          border: `1px solid ${showCostCap ? 'rgba(91,141,239,0.35)' : 'rgba(122,209,200,0.35)'}`,
+          borderRadius: 4,
+          fontSize: 11.5,
+          color: 'var(--v3-text)',
+          lineHeight: 1.5,
+        }}
+      >
         {showCostCap
-          ? '💳 Will use platform credits — capped at your tier\'s per-run budget. Upgrade or add a BYOK key on Settings to remove the cap.'
+          ? "💳 Will use platform credits — capped at your tier's per-run budget. Upgrade or add a BYOK key on Settings to remove the cap."
           : '🔑 Will use your own LLM provider keys (BYOK) — billed direct by the provider, no platform-side cap.'}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
         {result.perRepo.map((row) => (
           <RepoApplicabilityRow key={row.repoId} row={row} />
         ))}
       </div>
       {result.sampleDiff && (
-        <details style={{ marginTop: 10 }}>
-          <summary style={{ cursor: 'pointer', fontSize: 12, color: 'var(--v3-text-subtle)' }}>
+        <details style={{marginTop: 10}}>
+          <summary style={{cursor: 'pointer', fontSize: 12, color: 'var(--v3-text-subtle)'}}>
             Sample diff (representative file)
           </summary>
-          <pre style={{
-            marginTop: 8,
-            padding: 10,
-            background: 'var(--v3-bg)',
-            border: '1px solid var(--v3-border)',
-            borderRadius: 4,
-            fontSize: 11,
-            color: 'var(--v3-text)',
-            overflow: 'auto',
-            maxHeight: 320,
-          }}>{result.sampleDiff}</pre>
+          <pre
+            style={{
+              marginTop: 8,
+              padding: 10,
+              background: 'var(--v3-bg)',
+              border: '1px solid var(--v3-border)',
+              borderRadius: 4,
+              fontSize: 11,
+              color: 'var(--v3-text)',
+              overflow: 'auto',
+              maxHeight: 320,
+            }}
+          >
+            {result.sampleDiff}
+          </pre>
         </details>
       )}
     </div>
   );
 }
 
-function RepoApplicabilityRow({ row }: { row: import('@/lib/api').MigrationDryRunRepoApplicability }) {
+function RepoApplicabilityRow({row}: {row: import('@/lib/api').MigrationDryRunRepoApplicability}) {
   const statusColor = row.status === 'APPLICABLE' ? '#4ADE80' : '#FBBF24';
   return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 10,
-      padding: '6px 8px',
-      background: 'var(--v3-bg)',
-      border: '1px solid var(--v3-border)',
-      borderRadius: 4,
-      fontSize: 12,
-    }}>
-      <span style={{ color: statusColor, fontWeight: 600, minWidth: 110, fontSize: 11 }}>
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 10,
+        padding: '6px 8px',
+        background: 'var(--v3-bg)',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 4,
+        fontSize: 12,
+      }}
+    >
+      <span style={{color: statusColor, fontWeight: 600, minWidth: 110, fontSize: 11}}>
         {row.status}
       </span>
-      <span style={{ color: 'var(--v3-text)', fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', flex: 1 }}>
+      <span
+        style={{
+          color: 'var(--v3-text)',
+          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          flex: 1,
+        }}
+      >
         {row.fullName ?? row.repoId.slice(0, 8)}
       </span>
       {row.estFilesHigh != null && (
-        <span style={chipStyle}>{row.estFilesLow}–{row.estFilesHigh} files</span>
+        <span style={chipStyle}>
+          {row.estFilesLow}–{row.estFilesHigh} files
+        </span>
       )}
       {row.reason && row.status !== 'APPLICABLE' && (
-        <span style={{ color: 'var(--v3-text-subtle)', fontSize: 10.5 }}>
-          {row.reason}
-        </span>
+        <span style={{color: 'var(--v3-text-subtle)', fontSize: 10.5}}>{row.reason}</span>
       )}
     </div>
   );

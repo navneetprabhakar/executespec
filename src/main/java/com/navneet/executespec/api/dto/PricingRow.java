@@ -8,5 +8,4 @@ public record PricingRow(
     double inputCostPer1m,
     double outputCostPer1m,
     String notes,
-    Instant updatedAt
-) {}
+    Instant updatedAt) {}

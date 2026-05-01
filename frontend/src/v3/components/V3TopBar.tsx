@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
-import { Link, NavLink } from 'react-router-dom';
-import { Menu, X } from 'lucide-react';
+import {useEffect, useState} from 'react';
+import {Link, NavLink} from 'react-router-dom';
+import {Menu, X} from 'lucide-react';
 import AvatarMenu from './AvatarMenu';
 import ProjectSwitcher from './ProjectSwitcher';
-import { UsageBadge } from '@/components/billing/UsageBadge';
+import {UsageBadge} from '@/components/billing/UsageBadge';
 
 /**
  * R-101 — top-bar shell.
@@ -35,7 +35,7 @@ import { UsageBadge } from '@/components/billing/UsageBadge';
  * no Tailwind class additions, no v3.css edits. Same UX-preservation
  * contract as v2.6.4.
  */
-const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
+const navLinkStyle = ({isActive}: {isActive: boolean}): React.CSSProperties => ({
   display: 'inline-flex',
   alignItems: 'center',
   padding: '4px 10px',
@@ -48,7 +48,7 @@ const navLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties 
   border: `1px solid ${isActive ? 'var(--v3-border)' : 'transparent'}`,
 });
 
-const drawerLinkStyle = ({ isActive }: { isActive: boolean }): React.CSSProperties => ({
+const drawerLinkStyle = ({isActive}: {isActive: boolean}): React.CSSProperties => ({
   display: 'block',
   padding: '12px 16px',
   fontSize: 16,
@@ -66,8 +66,10 @@ export default function V3TopBar() {
   // [M-01/02/03] track viewport width to pick desktop-inline vs
   // mobile-hamburger layout. ResizeObserver isn't necessary at this
   // resolution; matchMedia + change listener is plenty.
-  const [isMobile, setIsMobile] = useState<boolean>(() =>
-    typeof window !== 'undefined' && window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`).matches
+  const [isMobile, setIsMobile] = useState<boolean>(
+    () =>
+      typeof window !== 'undefined' &&
+      window.matchMedia(`(max-width: ${MOBILE_BREAKPOINT_PX}px)`).matches,
   );
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -96,14 +98,16 @@ export default function V3TopBar() {
     if (drawerOpen) {
       const prev = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
-      return () => { document.body.style.overflow = prev; };
+      return () => {
+        document.body.style.overflow = prev;
+      };
     }
   }, [drawerOpen]);
 
   return (
-    <header className="v3-topbar" role="banner">
-      <Link to="/home" className="v3-topbar__brand" aria-label="ExecuteSpec home">
-        <span className="v3-topbar__brand-mark" aria-hidden="true">
+    <header className='v3-topbar' role='banner'>
+      <Link to='/home' className='v3-topbar__brand' aria-label='ExecuteSpec home'>
+        <span className='v3-topbar__brand-mark' aria-hidden='true'>
           ES
         </span>
         ExecuteSpec
@@ -111,15 +115,15 @@ export default function V3TopBar() {
 
       {/* Desktop: inline center nav. Hidden on mobile. */}
       {!isMobile && (
-        <div className="v3-topbar__center" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div className='v3-topbar__center' style={{display: 'flex', alignItems: 'center', gap: 8}}>
           <ProjectSwitcher />
-          <NavLink to="/runs" style={navLinkStyle} title="All runs across projects">
+          <NavLink to='/runs' style={navLinkStyle} title='All runs across projects'>
             Runs
           </NavLink>
-          <NavLink to="/library" style={navLinkStyle} title="Readymade Solutions library">
+          <NavLink to='/library' style={navLinkStyle} title='Readymade Solutions library'>
             Library
           </NavLink>
-          <NavLink to="/migrations" style={navLinkStyle} title="Migration recipes">
+          <NavLink to='/migrations' style={navLinkStyle} title='Migration recipes'>
             Migrations
           </NavLink>
         </div>
@@ -128,23 +132,26 @@ export default function V3TopBar() {
       {/* Mobile: only ProjectSwitcher stays inline (it's the most
           frequently-used center surface). Other links go to drawer. */}
       {isMobile && (
-        <div className="v3-topbar__center" style={{ display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0 }}>
+        <div
+          className='v3-topbar__center'
+          style={{display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0}}
+        >
           <ProjectSwitcher />
         </div>
       )}
 
-      <div className="v3-topbar__right" style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+      <div className='v3-topbar__right' style={{display: 'flex', alignItems: 'center', gap: 12}}>
         {/* [IA-Q4] quota chip — visible on both desktop and mobile.
             UsageBadge self-hides for TEAM/ENTERPRISE/SUPER_ADMIN. */}
         <UsageBadge />
         {!isMobile && <AvatarMenu />}
         {isMobile && (
           <button
-            type="button"
+            type='button'
             onClick={() => setDrawerOpen(true)}
-            aria-label="Open navigation menu"
+            aria-label='Open navigation menu'
             aria-expanded={drawerOpen}
-            aria-controls="v3-mobile-nav-drawer"
+            aria-controls='v3-mobile-nav-drawer'
             style={{
               minWidth: 44,
               minHeight: 44,
@@ -158,7 +165,7 @@ export default function V3TopBar() {
               cursor: 'pointer',
             }}
           >
-            <Menu size={20} aria-hidden="true" />
+            <Menu size={20} aria-hidden='true' />
           </button>
         )}
       </div>
@@ -175,12 +182,12 @@ export default function V3TopBar() {
               background: 'rgba(0,0,0,0.5)',
               zIndex: 50,
             }}
-            aria-hidden="true"
+            aria-hidden='true'
           />
           {/* Drawer panel */}
           <nav
-            id="v3-mobile-nav-drawer"
-            aria-label="Main navigation"
+            id='v3-mobile-nav-drawer'
+            aria-label='Main navigation'
             style={{
               position: 'fixed',
               top: 0,
@@ -197,11 +204,11 @@ export default function V3TopBar() {
               overflowY: 'auto',
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+            <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 8}}>
               <button
-                type="button"
+                type='button'
                 onClick={() => setDrawerOpen(false)}
-                aria-label="Close navigation menu"
+                aria-label='Close navigation menu'
                 style={{
                   minWidth: 44,
                   minHeight: 44,
@@ -215,19 +222,21 @@ export default function V3TopBar() {
                   cursor: 'pointer',
                 }}
               >
-                <X size={20} aria-hidden="true" />
+                <X size={20} aria-hidden='true' />
               </button>
             </div>
-            <NavLink to="/runs" style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
+            <NavLink to='/runs' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
               Runs
             </NavLink>
-            <NavLink to="/library" style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
+            <NavLink to='/library' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
               Library
             </NavLink>
-            <NavLink to="/migrations" style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
+            <NavLink to='/migrations' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
               Migrations
             </NavLink>
-            <div style={{ marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--v3-border)' }}>
+            <div
+              style={{marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--v3-border)'}}
+            >
               <AvatarMenu />
             </div>
           </nav>

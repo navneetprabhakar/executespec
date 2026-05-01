@@ -1,6 +1,6 @@
-import { Navigate, useLocation } from 'react-router-dom';
-import type { ReactNode } from 'react';
-import { isV3OptedIn, v3Destination } from '../lib/optIn';
+import {Navigate, useLocation} from 'react-router-dom';
+import type {ReactNode} from 'react';
+import {isV3OptedIn, v3Destination} from '../lib/optIn';
 
 /**
  * R-180 — wraps any v2 route's element. When the user has flipped
@@ -14,7 +14,7 @@ import { isV3OptedIn, v3Destination } from '../lib/optIn';
  * redirect. If no v3 destination is mapped for the current path,
  * the v2 element renders unchanged (safe-by-default).
  */
-export default function V2OptInGate({ children }: { children: ReactNode }) {
+export default function V2OptInGate({children}: {children: ReactNode}) {
   const location = useLocation();
   if (!isV3OptedIn()) return <>{children}</>;
   const dest = v3Destination(location.pathname);

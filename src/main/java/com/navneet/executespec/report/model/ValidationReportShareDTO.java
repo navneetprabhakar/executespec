@@ -1,9 +1,9 @@
 package com.navneet.executespec.report.model;
 
-import com.navneet.executespec.report.entity.PipelineResult;
-
 import java.time.Instant;
 import java.util.List;
+
+import com.navneet.executespec.report.entity.PipelineResult;
 
 public record ValidationReportShareDTO(
     int filesGenerated,
@@ -12,5 +12,4 @@ public record ValidationReportShareDTO(
     List<ReportIssueDTO> issues,
     List<String> checksPassed,
     String reportMarkdown,
-    Instant createdAt
-) {}
+    Instant createdAt) {}
