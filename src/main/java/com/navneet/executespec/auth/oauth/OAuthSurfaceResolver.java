@@ -1,6 +1,7 @@
 package com.navneet.executespec.auth.oauth;
 
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpSession;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -72,7 +73,16 @@ public class OAuthSurfaceResolver {
      * in the HTTP session for {@link #resolveReturnUrl} to read after the
      * OAuth bounce returns.
      *
-     * @return the captured surface, or {@code executespec} as a default
+     * <p>Only stashes when a positive match is found (explicit {@code surface}
+     * query param OR Origin/Referer matches a configured surface origin). On
+     * no-match — e.g. local-dev frontend on {@code http://localhost:5173} that
+     * doesn't match either configured surface origin — returns {@code null}
+     * and clears any stale stash so the post-OAuth handler falls back to
+     * {@code dashboardUrl}. This is what keeps Google login on localhost from
+     * landing on production {@code build.executespec.ai}.
+     *
+     * @return the captured surface, or {@code null} when neither the
+     *         {@code surface} param nor Origin/Referer identify a known surface
      */
     public String captureFromRequest(HttpServletRequest request) {
         String surfaceParam = request.getParameter("surface");
@@ -90,8 +100,9 @@ public class OAuthSurfaceResolver {
                 }
             }
         }
-        request.getSession().setAttribute(SESSION_ATTR, SURFACE_EXECUTESPEC);
-        return SURFACE_EXECUTESPEC;
+        HttpSession existing = request.getSession(false);
+        if (existing != null) existing.removeAttribute(SESSION_ATTR);
+        return null;
     }
 
     /**
