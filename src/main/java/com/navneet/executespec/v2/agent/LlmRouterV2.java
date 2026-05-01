@@ -1,5 +1,7 @@
 package com.navneet.executespec.v2.agent;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.v2.cost.V2RunCostTracker;
@@ -9,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.ai.anthropic.api.AnthropicCacheOptions;
 import org.springframework.ai.anthropic.api.AnthropicCacheStrategy;
 import org.springframework.ai.chat.messages.MessageType;
@@ -19,6 +22,10 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
@@ -44,10 +51,19 @@ import java.util.concurrent.ConcurrentHashMap;
  *       working in Phase 0.</li>
  * </ul>
  *
- * <p><b>Deferred to Phase 2.x / Phase 9</b>: multi-provider failover,
- * {@code ProviderHealthTracker} circuit breaker, per-run API-key resolution, tier-based
- * model resolution. These are production-canary concerns; the Phase 2 baseline proves
- * routing correctness end-to-end first.
+ * <p><b>Per-run API-key resolution (V165+):</b> the router resolves
+ * customer-configured BYOK keys via {@link V2RunKeyContextStore} keyed by
+ * {@code request.context().runId()} and threads them into provider-side
+ * dispatch. When no customer key is present the call falls through to the
+ * platform default (HYBRID semantics). For Anthropic the per-key model
+ * cache ({@link #anthropicByKey}) wraps Spring AI's singleton bean — keyed
+ * by SHA-256(apiKey), Caffeine LRU 128 × 1h TTL — so customer prompt-caching
+ * stays on the customer's API account. OpenAI + Gemini wrappers already
+ * accept a per-request key, so the router just threads it through.
+ *
+ * <p>Multi-provider failover, {@code ProviderHealthTracker} circuit breaker,
+ * tier-based model resolution remain deferred to a later phase — V2's
+ * direct-dispatch model handles that via per-call status metrics today.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so
  * the WorkerAgentV2 loop (Phase 3) keeps control of dispatch — needed for context
@@ -65,6 +81,21 @@ public class LlmRouterV2 {
     private final V2Metrics metrics;
     private final V2RunCostTracker costTracker;
     private final SseBroadcaster broadcaster;
+    private final V2RunKeyContextStore keyContextStore;
+
+    /**
+     * Per-customer-key Anthropic model cache. Spring AI's
+     * {@link AnthropicChatModel} is a singleton with the API key bound at
+     * bean construction, so per-call key override requires a fresh model
+     * (cheap HTTP-client + serializer registration ~50ms first time, ~0ms
+     * cache-hit). Keyed by SHA-256(apiKey) so the plaintext key never lives
+     * in the cache key. 128 entries × 1h TTL covers any realistic mix of
+     * concurrent BYOK customers; eviction returns to bean-construction.
+     */
+    private final Cache<String, AnthropicChatModel> anthropicByKey = Caffeine.newBuilder()
+            .maximumSize(128)
+            .expireAfterAccess(Duration.ofHours(1))
+            .build();
 
     // Auto-configured Spring AI bean for Anthropic (the one provider whose native
     // tool calling works correctly on Spring AI 1.1.4). OpenAI and Gemini both have
@@ -84,14 +115,31 @@ public class LlmRouterV2 {
         List<ToolCallback> tools = (request.toolsOverride() != null)
                 ? request.toolsOverride()
                 : toolRegistry.bind(request.context());
+
+        // Per-run BYOK lookup — null when the run hasn't pre-resolved keys
+        // (test harnesses, smoke endpoints) or when the customer has no
+        // configured keys. Either case falls through to platform defaults
+        // for HYBRID semantics; OWN_KEYS hard-fail mode is enforced by
+        // ApiKeyResolver.validateKeyAvailability at submit time.
+        V2RunKeyContext keys = keyContextStore.get(request.context().runId());
+        String resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
+        V2RunKeyContext.Source source = (keys == null)
+                ? V2RunKeyContext.Source.PLATFORM
+                : keys.sourceFor(request.provider());
+        // No-key fallback is reflected as PLATFORM source for the metric,
+        // even when the run has BYOK configured for *another* provider.
+        if (resolvedKey == null) source = V2RunKeyContext.Source.PLATFORM;
+
         long start = System.currentTimeMillis();
-        log.info("LlmRouterV2 -> {} {} (tools={}, messages={})",
-                request.provider(), request.model(), tools.size(), request.messages().size());
+        log.info("LlmRouterV2 -> {} {} keySource={} (tools={}, messages={})",
+                request.provider(), request.model(), source,
+                tools.size(), request.messages().size());
         try {
-            ChatResponse resp = dispatch(request, tools);
+            ChatResponse resp = dispatch(request, tools, resolvedKey);
             long elapsed = System.currentTimeMillis() - start;
             metrics.recordLlmLatency(request.provider(), request.model(), "ok",
                     java.time.Duration.ofMillis(elapsed));
+            metrics.recordKeySource(request.provider(), source.name());
             String runId = request.context().runId();
             String taskId = request.context().taskId();
             costTracker.record(runId, taskId, request.provider(), request.model(), resp);
@@ -105,24 +153,31 @@ public class LlmRouterV2 {
             long elapsed = System.currentTimeMillis() - start;
             metrics.recordLlmLatency(request.provider(), request.model(), "failed",
                     java.time.Duration.ofMillis(elapsed));
+            metrics.recordKeySource(request.provider(), source.name());
             log.warn("LlmRouterV2 <- {} {} FAILED in {}ms: {}",
                     request.provider(), request.model(), elapsed, e.getMessage());
             throw e;
         }
     }
 
-    private ChatResponse dispatch(LlmRequestV2 request, List<ToolCallback> tools) {
+    private ChatResponse dispatch(LlmRequestV2 request, List<ToolCallback> tools, String apiKey) {
         return switch (request.provider().toLowerCase(Locale.ROOT)) {
-            case "anthropic" -> callAnthropic(request, tools);
-            case "openai" -> callOpenAi(request, tools);
-            case "gemini" -> callGemini(request, tools);
+            case "anthropic" -> callAnthropic(request, tools, apiKey);
+            case "openai"    -> callOpenAi(request, tools, apiKey);
+            case "gemini"    -> callGemini(request, tools, apiKey);
             default -> throw new IllegalArgumentException(
                     "Unknown provider: " + request.provider() + " (expected anthropic|openai|gemini)");
         };
     }
 
-    private ChatResponse callAnthropic(LlmRequestV2 r, List<ToolCallback> tools) {
-        if (anthropicModel == null) throw new IllegalStateException("Anthropic model not configured");
+    private ChatResponse callAnthropic(LlmRequestV2 r, List<ToolCallback> tools, String apiKey) {
+        // Pick the per-customer-key model when BYOK is in play; fall back to
+        // the platform singleton otherwise. The cache lookup is keyed by
+        // SHA-256(apiKey) so the plaintext never sits in the cache key.
+        AnthropicChatModel model = (apiKey != null && !apiKey.isBlank())
+                ? perKeyAnthropicModel(apiKey)
+                : anthropicModel;
+        if (model == null) throw new IllegalStateException("Anthropic model not configured");
         // Prompt caching — must-have for cost control on multi-iteration tasks.
         // Strategy CONVERSATION_HISTORY caches the system prompt, tool definitions,
         // and messages up through the last-but-one in the history. Each subsequent
@@ -134,6 +189,9 @@ public class LlmRouterV2 {
         // actually attaches cache_control blocks to SYSTEM + TOOL + long USER/ASSISTANT
         // messages instead of silently skipping them. Verify activation via
         // cacheWrite / cacheRead values > 0 on the V2RunCostTracker log lines.
+        // Per-key models get their own per-key prompt cache on Anthropic's
+        // side (cache scope = API account), which is the correct isolation
+        // for BYOK — Customer A's cached prompts never leak to Customer B.
         AnthropicCacheOptions cache = AnthropicCacheOptions.builder()
                 .strategy(AnthropicCacheStrategy.CONVERSATION_HISTORY)
                 .contentLengthFunction(s -> s == null ? 0 : s.length() / 4)  // ~chars→tokens
@@ -151,7 +209,7 @@ public class LlmRouterV2 {
         if (!dropTemperature) b.temperature(r.temperature());
         if (r.maxTokens() != null) b.maxTokens(r.maxTokens());
         try {
-            return anthropicModel.call(new Prompt(r.messages(), b.build()));
+            return model.call(new Prompt(r.messages(), b.build()));
         } catch (RuntimeException ex) {
             if (!isTemperatureDeprecatedError(ex)) throw ex;
             ANTHROPIC_DEPRECATED_TEMP_MODELS.add(r.model());
@@ -163,7 +221,40 @@ public class LlmRouterV2 {
                     .cacheOptions(cache)
                     .internalToolExecutionEnabled(false);
             if (r.maxTokens() != null) retry.maxTokens(r.maxTokens());
-            return anthropicModel.call(new Prompt(r.messages(), retry.build()));
+            return model.call(new Prompt(r.messages(), retry.build()));
+        }
+    }
+
+    /**
+     * Per-customer-key Anthropic model — built once per unique key and
+     * cached. Key cache key is SHA-256(apiKey) so the plaintext never
+     * appears as a cache key. Caffeine handles eviction (128 × 1h TTL).
+     */
+    private AnthropicChatModel perKeyAnthropicModel(String apiKey) {
+        String hash = sha256Hex(apiKey);
+        return anthropicByKey.get(hash, h -> {
+            AnthropicApi api = AnthropicApi.builder().apiKey(apiKey).build();
+            return AnthropicChatModel.builder()
+                    .anthropicApi(api)
+                    .defaultOptions(AnthropicChatOptions.builder()
+                            .temperature(0.0)
+                            .build())
+                    .build();
+        });
+    }
+
+    private static String sha256Hex(String input) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(input.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(hash.length * 2);
+            for (byte b : hash) hex.append(String.format("%02x", b));
+            return hex.toString();
+        } catch (NoSuchAlgorithmException e) {
+            // SHA-256 is JDK-mandatory; this branch is unreachable. If it
+            // ever fires, fail loud rather than silently using a weaker hash
+            // that could collide and leak keys across customers.
+            throw new IllegalStateException("SHA-256 unavailable — refusing to fall back", e);
         }
     }
 
@@ -179,7 +270,7 @@ public class LlmRouterV2 {
         return false;
     }
 
-    private ChatResponse callGemini(LlmRequestV2 r, List<ToolCallback> tools) {
+    private ChatResponse callGemini(LlmRequestV2 r, List<ToolCallback> tools, String apiKey) {
         // Routes through GeminiNativeToolClient — direct REST POST, bypasses Spring AI
         // 1.1.4's broken multi-turn response parsing (Optional.get() on empty Optional
         // inside GoogleGenAiChatModel.responseCandidateToGeneration).
@@ -196,10 +287,11 @@ public class LlmRouterV2 {
                 .temperature(r.temperature())
                 .maxOutputTokens(r.maxTokens())
                 .forceToolCall(forceToolCall)
+                .apiKey(apiKey)
                 .build());
     }
 
-    private ChatResponse callOpenAi(LlmRequestV2 r, List<ToolCallback> tools) {
+    private ChatResponse callOpenAi(LlmRequestV2 r, List<ToolCallback> tools, String apiKey) {
         // Phase 3: pass the full Spring AI message list — wrapper serializes
         // SystemMessage / UserMessage / AssistantMessage(+toolCalls) / ToolResponseMessage
         // to OpenAI's chat-completions wire format, supporting multi-turn agent loops.
@@ -209,6 +301,7 @@ public class LlmRouterV2 {
                 .tools(tools)
                 .temperature(r.temperature())
                 .maxCompletionTokens(r.maxTokens())
+                .apiKey(apiKey)
                 .build());
     }
 }
