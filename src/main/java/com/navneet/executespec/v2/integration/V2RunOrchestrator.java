@@ -155,6 +155,10 @@ public class V2RunOrchestrator {
     /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
     private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
+    /** V165 BYOK fix — resolves customer-configured keys at run-start;
+     *  LlmRouterV2 reads back per dispatch. */
+    private final com.navneet.executespec.v2.agent.V2RunKeyContextStore keyContextStore;
+
     /**
      * R-162 — referral hook. Wired here so that when a referee's first
      * run reaches a successful terminal status, the inviting Free user
@@ -401,6 +405,31 @@ public class V2RunOrchestrator {
         Path workspace = null;
         String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
         try {
+            // V165 BYOK fix — resolve the run owner's configured keys ONCE
+            // at run-start and stash them in V2RunKeyContextStore. LlmRouterV2
+            // reads back per-dispatch via request.context().runId() and
+            // threads the right provider key into the wire call. Without
+            // this, every dispatched LLM call silently used the platform
+            // default key — see audit-output/BYOK_DEEPDIVE.md for the
+            // full chain-of-evidence.
+            try {
+                PipelineRun pre = runRepo.findById(runId).orElse(null);
+                if (pre != null && pre.getCreatedByUserId() != null) {
+                    com.navneet.executespec.v2.agent.V2RunKeyContext kctx =
+                            keyContextStore.resolveAndPut(runId, pre.getCreatedByUserId());
+                    String label = kctx.dominantSource().name();
+                    if (!label.equals(pre.getKeySource())) {
+                        pre.setKeySource(label);
+                        runRepo.save(pre);
+                    }
+                    log.info("V2 run={} keys resolved (source={})", runId, label);
+                }
+            } catch (Exception keyEx) {
+                // Non-fatal — falls through to platform key dispatch.
+                log.warn("V2 run={} BYOK resolution failed; using platform keys: {}",
+                        runId, keyEx.getMessage());
+            }
+
             // Use V1's workspace convention: <agent.workspace>/<runId>/
             // V1's WorkspaceFileService (Code tab, download ZIP) resolves paths via the
             // same formula, so files written here are visible through the existing UI
@@ -838,6 +867,11 @@ public class V2RunOrchestrator {
             terminate(runId, "FAILED", "unexpected: " + shortMsg(unexpected), startedAt);
         } finally {
             perky.stop(runId);
+            // V165 BYOK fix — drop the cached key context. Caffeine's TTL
+            // would clean up eventually, but explicit eviction keeps memory
+            // usage tight on long-lived JVMs and prevents a stale entry
+            // from outlasting a re-submission of the same runId.
+            try { keyContextStore.evict(runId); } catch (Exception ignore) { /* best-effort */ }
             // Workspace retained for code-view / download endpoints (Phase 11.C).
             if (workspace != null) {
                 log.info("V2RunOrchestrator run={} workspace at {}", runId, workspace);

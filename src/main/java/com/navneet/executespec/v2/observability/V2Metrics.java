@@ -141,6 +141,21 @@ public class V2Metrics {
                 .record(elapsed);
     }
 
+    /**
+     * V165 BYOK fix — counts every dispatched LLM call by which side
+     * provided the API key (USER / ORG / PLATFORM). Dashboards filter by
+     * tier to spot regressions: e.g. a TEAM/ENT row showing PLATFORM
+     * counts is the gap that the audit deep-dive identified. Source
+     * label comes from {@link com.navneet.executespec.v2.agent.V2RunKeyContext.Source}.
+     */
+    public void recordKeySource(String provider, String source) {
+        Counter.builder(NS + "llm.key_source")
+                .tags(Tags.of(
+                        Tag.of("provider", nonNull(provider)),
+                        Tag.of("source", nonNull(source))))
+                .register(registry).increment();
+    }
+
     // ─── reviewer ───────────────────────────────────────────────────────────
 
     public void recordReviewerVerdict(String verdict) {
