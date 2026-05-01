@@ -273,24 +273,35 @@ public class TierPermissionService {
         boolean isTeamOrEnterprise = "TEAM".equals(tier) || "ENTERPRISE".equals(tier);
         boolean isFree = "FREE".equals(tier);
 
+        // R8 (2026-05-01 follow-up Task 9 + R8) — solo TEAM/ENT users
+        // (which is everyone in a personal org per V162) were getting
+        // canViewAudit / canManageIntegrations / canInviteMembers /
+        // canViewOrgMembers all hardcoded false here, even though they
+        // pay for an Enterprise plan. The procurement-evaluator persona
+        // explicitly asked for audit-log + member-management surfaces.
+        // Grant them when tier ≥ TEAM since the user is by definition
+        // the admin of their own personal org. FREE/PRO stay locked
+        // (FREE has no billing; PRO is single-developer grandfathered).
+        boolean canManageOrgAsTeamOrEnt = isTeamOrEnterprise;
+
         return new TierPermissions(
                 isTeamOrEnterprise, // canManageAiKeys — TEAM/ENTERPRISE can configure BYOK
-                false, // canViewPricing — admin-only; consistent with admin-page gating
-                false, // canManageIntegrations
+                canManageOrgAsTeamOrEnt, // [R8] canViewPricing — TEAM/ENT need to see plans they're paying for
+                canManageOrgAsTeamOrEnt, // [R8] canManageIntegrations — connect GitHub App, Slack, etc.
                 true,  // canViewMetrics — unlocked for all tiers
                 isTeamOrEnterprise, // [F-03] canViewCostBreakdown — TEAM/ENT solo can see their own cost breakdown (was: false hardcoded)
                 true,  // canViewTokenUsage — unlocked for all tiers
                 true,  // canUseChat — unlocked for all tiers
-                false, // canCreateOrg
-                false, // canInviteMembers
-                false, // canViewOrgMembers
-                false, // canViewAudit
+                false, // canCreateOrg — secondary-org creation reserved for SUPER_ADMIN
+                canManageOrgAsTeamOrEnt, // [R8] canInviteMembers — TEAM/ENT need to grow their team
+                canManageOrgAsTeamOrEnt, // [R8] canViewOrgMembers — TEAM/ENT need to see who's on their plan
+                canManageOrgAsTeamOrEnt, // [R8] canViewAudit — Enterprise-grade audit-log access; procurement requires it
                 true,  // canViewLiveLog — unlocked for all tiers
                 true,  // canViewInvoices (own invoices)
-                false, // canViewAccounting
-                false, // canManageCreditNotes
-                false, // canExportGstr
-                false, // canManageSellerConfig
+                false, // canViewAccounting (finance + super admin)
+                false, // canManageCreditNotes (finance + super admin)
+                false, // canExportGstr (finance + super admin)
+                false, // canManageSellerConfig (super admin only)
                 !isFree, // [F-18] canManageBillingProfile — paid tiers only; FREE has no billing context (was: true hardcoded for everyone)
                 limit, used, -1, 0, maxApply, maxPreviews,
                 resolveCanDeploy(tier),    // [F-03] from tier_config (was: true hardcoded)
