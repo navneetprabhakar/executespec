@@ -7,6 +7,7 @@ import * as api from '@/lib/api';
 import { useUiStore } from '@/stores/useUiStore';
 import AdminInviteModal from './AdminInviteModal';
 import GrantRunsModal from './GrantRunsModal';
+import TypedConfirmModal from '@/components/shared/TypedConfirmModal';
 
 type Tab = 'users' | 'orgs' | 'tiers' | 'escalations' | 'packages' | 'reports' | 'audit' | 'webhooks';
 
@@ -33,6 +34,9 @@ function AdminPageInner() {
   const { addToast } = useUiStore();
   // M-010 — halt-all-runs busy + last-result state for the emergency button.
   const [haltBusy, setHaltBusy] = useState(false);
+  // Task 10 (2026-05-01 fix list) — typed-confirmation modal for the
+  // halt-all action. Open via the button; resets on close.
+  const [haltModalOpen, setHaltModalOpen] = useState(false);
 
   // M-042 — audit-chain verifier state for the SUPER_ADMIN button.
   const [verifyBusy, setVerifyBusy] = useState(false);
@@ -59,13 +63,11 @@ function AdminPageInner() {
     }
   };
 
-  const handleHaltAll = async () => {
-    const reason = window.prompt(
-      'Halt every non-terminal run on the platform?\n\nProvide a short reason (logged on each run + audit feed). Leave blank to use the per-run default.'
-    );
-    // null == user cancelled the prompt; '' == user clicked OK with no text
-    if (reason === null) return;
-    if (!confirm('This will CANCEL every active run. Continue?')) return;
+  // Task 10 (2026-05-01 fix list) — replaced the native `prompt()` +
+  // `confirm()` chain with a typed-confirmation modal. Native prompts
+  // are easy to misclick (single-button OK on macOS), don't enforce a
+  // typed keyword, and look unprofessional in a SUPER_ADMIN console.
+  const handleHaltAll = async (reason?: string) => {
     setHaltBusy(true);
     try {
       const result = await api.haltAllActiveRuns(reason || undefined);
@@ -73,6 +75,7 @@ function AdminPageInner() {
         type: 'success',
         message: `${result.haltedCount} active run${result.haltedCount === 1 ? '' : 's'} cancelled.`,
       });
+      setHaltModalOpen(false);
     } catch (e: any) {
       addToast({ type: 'error', message: e?.message ?? 'Halt-all failed' });
     } finally {
@@ -147,10 +150,16 @@ function AdminPageInner() {
 
   useEffect(() => { loadUsers(); loadOrgs(); loadTierConfigs(); loadEscalations(); loadPackages(); }, []);
 
-  // Build tier label map from DB config, with fallback
+  // Build tier label map from DB config, with fallback. Task 27
+  // (2026-05-01 fix list) — append "(grandfathered)" to PRO so admins
+  // editing tier values know it's no longer a sellable tier (V165
+  // moved PRO to lifecycle_state=HIDDEN). Selection still works
+  // exactly the same — we don't disable existing PRO assignments.
   const tierLabel = (tier: string) => {
     const fromDb = tierConfigs.find((tc) => tc.tier === tier);
-    return fromDb?.displayName ?? TIER_LABEL_FALLBACK[tier] ?? tier;
+    const base = fromDb?.displayName ?? TIER_LABEL_FALLBACK[tier] ?? tier;
+    if (tier === 'PRO') return `${base} (grandfathered)`;
+    return base;
   };
 
   // ── User actions ──────────────────────────────────────────────────────────
@@ -346,9 +355,11 @@ function AdminPageInner() {
           </button>
           {/* M-010 (Wave 2) — emergency halt-all-runs control. Visible from
               every tab so an oncall SUPER_ADMIN can stop the platform
-              cold during an incident. */}
+              cold during an incident. Task 10 (2026-05-01 fix list)
+              gated this behind a typed-confirmation modal so the button
+              can't be triggered with a single misclick. */}
           <button
-            onClick={handleHaltAll}
+            onClick={() => setHaltModalOpen(true)}
             disabled={haltBusy}
             className="flex items-center gap-1.5 px-3 py-1.5 text-xs text-status-error hover:text-status-error bg-status-error/10 hover:bg-status-error/20 rounded-md border border-status-error/30 transition-colors disabled:opacity-50"
             title="Cancel every non-terminal run on the platform"
@@ -358,6 +369,25 @@ function AdminPageInner() {
           </button>
         </div>
       </div>
+
+      <TypedConfirmModal
+        open={haltModalOpen}
+        title="Halt all running operations?"
+        description={
+          <span>
+            This will cancel every active run across all orgs. Users will see
+            their runs end immediately. The action cannot be undone, and
+            credits already charged for those runs are not auto-refunded.
+          </span>
+        }
+        confirmKeyword="HALT"
+        reasonLabel="Reason"
+        reasonRequired={false}
+        submitLabel="Halt all runs"
+        busy={haltBusy}
+        onCancel={() => setHaltModalOpen(false)}
+        onConfirm={(reason) => handleHaltAll(reason)}
+      />
 
       {/* Tabs */}
       <div className="flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto">
