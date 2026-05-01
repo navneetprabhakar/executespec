@@ -292,8 +292,14 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                 {msgCount}/{MAX_MESSAGES}
               </span>
             )}
-            <button onClick={onClose} className="p-2 -m-1 text-muted hover:text-secondary">
-              <X className="h-4 w-4" />
+            <button
+              onClick={onClose}
+              type="button"
+              aria-label="Close"
+              title="Close"
+              className="p-2 -m-1 text-muted hover:text-secondary"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
             </button>
           </div>
         </div>

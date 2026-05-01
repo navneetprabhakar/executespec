@@ -23,8 +23,14 @@ public class ModelController {
 
     private final ModelMatrixProperties matrixProps;
 
+    // Task 15 (2026-05-01 fix list): post-V120 the canonical provider key
+    // is "gemini" (was "google" pre-migration); the label map lacked the
+    // new key so the New Run modal rendered "gemini" lowercase next to
+    // "Anthropic" / "OpenAI". Both keys are mapped to "Gemini" until the
+    // legacy "google" alias is fully retired.
     private static final Map<String, String> PROVIDER_LABELS = Map.of(
         "anthropic", "Anthropic",
+        "gemini", "Gemini",
         "google", "Gemini",
         "openai", "OpenAI"
     );

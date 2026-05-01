@@ -1,8 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Navigate } from 'react-router-dom';
 import { AlertTriangle, Layers } from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
-import { useAuthStore, selectIsSuperAdmin } from '@/stores/useAuthStore';
+import RoleGuard from '@/components/auth/RoleGuard';
 import {
   fetchTiersLifecycle, updateTierLifecycle,
   type TierLifecycleDto, type LifecycleState,
@@ -14,9 +13,23 @@ import {
  * Implements the 3-state state machine (LISTED / HIDDEN / SUNSETTING) with
  * an MRR-aware confirmation modal for SUNSETTING transitions. Full design
  * at docs/plans/tier-lifecycle-plan.md.
+ *
+ * Task 21 (2026-05-01 fix list) — wrapped with RoleGuard so the page
+ * doesn't bounce to "/" (and thence to the home-redirect's first-project
+ * dispatch) before the auth store hydrates. The previous gate
+ * (`if (!isSuperAdmin) return <Navigate to="/" replace />`) fired on the
+ * very first render when `user` was still null, treating "loading" as
+ * "denied" and breaking direct deep-links to /admin/tiers.
  */
 export default function TierLifecyclePage() {
-  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
+  return (
+    <RoleGuard requireSuperAdmin featureName="Tier lifecycle">
+      <TierLifecyclePageInner />
+    </RoleGuard>
+  );
+}
+
+function TierLifecyclePageInner() {
   const [tiers, setTiers] = useState<TierLifecycleDto[]>([]);
   const [loading, setLoading] = useState(true);
   const [reload, setReload] = useState(0);
@@ -41,8 +54,6 @@ export default function TierLifecyclePage() {
   }, []);
 
   useEffect(() => { fetchData(); }, [fetchData, reload]);
-
-  if (!isSuperAdmin) return <Navigate to="/" replace />;
 
   const openTransition = (tier: TierLifecycleDto, target: LifecycleState) => {
     setModalTier(tier);

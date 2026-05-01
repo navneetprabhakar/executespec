@@ -244,7 +244,41 @@ function SolutionCard({ item }: { item: ReadymadeListItem }) {
   );
 }
 
+/** Task 16 (2026-05-01 fix list) — naive Title-Case rendered slugs as
+ *  "People And Money" / "Smart And Reach" / "Ui And Growth" / "Data
+ *  And Infra" which read computer-generated. Use an explicit label
+ *  map for known macro-groups + categories so chips match what a
+ *  human would write (proper "&", "UI", etc). Falls back to the old
+ *  Title-Case for any unmapped key so newly-added categories don't
+ *  silently disappear behind an empty label. */
+const HUMAN_LABELS: Record<string, string> = {
+  // Macro groups
+  'people-and-money': 'People & Money',
+  'smart-and-reach': 'Marketing & Reach',
+  'ui-and-growth': 'UI & Growth',
+  'data-and-infra': 'Data & Infrastructure',
+  // Common categories whose slug-cased rendering reads awkward
+  'sign-in-and-users': 'Sign-in & Users',
+  'add-ai': 'Add AI',
+  'ship-and-monitor': 'Ship & Monitor',
+  'build-the-ui': 'Build the UI',
+  'take-payments': 'Take Payments',
+  'grow-the-user-base': 'Grow the User Base',
+  'send-messages': 'Send Messages',
+  'track-usage': 'Track Usage',
+  'store-data': 'Store Data',
+  'work-with-apis': 'Work with APIs',
+  'talk-to-users': 'Talk to Users',
+  'booking-and-scheduling': 'Booking & Scheduling',
+  'go-mobile': 'Go Mobile',
+  'stay-compliant': 'Stay Compliant',
+  'location-and-maps': 'Location & Maps',
+};
+
 function humanize(key: string): string {
+  if (!key) return '';
+  const mapped = HUMAN_LABELS[key.toLowerCase()];
+  if (mapped) return mapped;
   return key.replace(/[-_]/g, ' ').replace(/\b\w/g, (m) => m.toUpperCase());
 }
 
