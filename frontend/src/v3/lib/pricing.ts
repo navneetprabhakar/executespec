@@ -42,10 +42,15 @@ export const PRICING_CARDS: PricingCard[] = [
     priceInr: 0,
     priceUnit: '',
     badge: null,
-    subhead: '5 lifetime runs · invite friends for +5 each',
+    // Task 8 (2026-05-01 fix list) — V145 raised FREE from 5 lifetime
+    // runs to 10/month. The pricing card has to agree with the canonical
+    // tier_config.monthly_run_limit so the four FREE-user surfaces (top-bar,
+    // billing hero, sidebar, pricing card) all read "10". The referral
+    // line is intentionally omitted until product confirms whether the
+    // +5/friend mechanic still ships under the monthly model.
+    subhead: '10 runs / month · no credit card',
     bullets: [
-      '5 lifetime runs',
-      '+5 per friend (cap 25)',
+      '10 runs / month',
       '1 project · 1 repo',
       'All providers available',
       'Anonymous trial — no signup',
@@ -60,13 +65,14 @@ export const PRICING_CARDS: PricingCard[] = [
     priceUnit: '/ month',
     // [F-28] (audit Sprint 1 PR-4, 2026-04-30) — PRO is HIDDEN per
     // `tier_config.PRO.lifecycle_state = 'HIDDEN'` (v2.6.1 Wave 1).
-    // New buyers should choose TEAM or MAX (latter is power-individual
-    // BYOK at $29). PRO continues to bill for grandfathered subscribers
-    // only — the card stays visible so existing users recognise their
-    // plan, but the badge + subhead now name the grandfathered status
-    // explicitly instead of selling PRO as "Most popular".
+    // New buyers should choose TEAM. PRO continues to bill for grandfathered
+    // subscribers only — the card stays visible so existing users recognise
+    // their plan, but the badge + subhead now name the grandfathered
+    // status explicitly instead of selling PRO as "Most popular".
+    // Task 7 (2026-05-01 fix list): MAX was retired in V165 — the
+    // public-facing copy must not name a tier we no longer sell.
     badge: 'Grandfathered',
-    subhead: 'Existing subscribers only — new buyers, choose TEAM or MAX',
+    subhead: 'Existing subscribers only — new buyers, choose Team',
     // [S-03] (coverage Sprint 3 follow-up to F-28, 2026-04-30) — bullet
     // list reconciled with V145 cap. Pre-V145 PRO copy claimed
     // "Unlimited runs / month"; V145 capped PRO at 20 credits/month
