@@ -11,6 +11,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -22,10 +23,18 @@ import java.util.Optional;
  * tier + plan + caps + period usage into one read so v3 surfaces all
  * consult the same answer.
  *
- * Tier resolution order:
- *   1. The user's org tier (when orgId is set) — orgs always win.
- *   2. The user's personal tier (FREE for solo users).
- *   3. FREE as a safe fallback.
+ * Tier resolution: pick the higher rank between the user's org tier
+ * (when orgId is set) and the user's personal tier — whichever
+ * grants more capability wins. The audit on 2026-05-01 (F-14)
+ * surfaced the previous "orgs always win" rule producing FREE for
+ * paid users whose backing org row still said FREE: operator-
+ * promoted accounts, expired-but-not-demoted subscriptions, and
+ * test fixtures whose `app_user.tier` was bumped without a
+ * matching `org.tier` move all rendered as FREE on /billing while
+ * the legacy `/api/auth/me` correctly reported the paid tier.
+ * Picking the higher rank closes that class of bug at the
+ * resolver instead of patching every consumer with
+ * `canonicalTier(meTier, ent.tierKey)`.
  *
  * Limits / caps:
  *   - Read from tier_config row by tier key. Falls back to {-1, -1, ...}
@@ -49,6 +58,18 @@ public class EntitlementResolver {
      *  threshold lives on the frontend at
      *  {@code frontend/src/v3/lib/tierDisplay.ts MAX_DISPLAYABLE_BALANCE}. */
     static final int MAX_DISPLAYABLE_BALANCE = 1_000_000;
+
+    /** Capability rank for the higher-of-(org,user) pick in {@link #resolveTier}.
+     *  MAX is treated as TEAM-equivalent because it normalises to TEAM at the
+     *  v3 surface (V141). Unknown tiers map to 0 so a typo can never
+     *  out-rank a real tier. */
+    private static final Map<String, Integer> TIER_RANK = Map.of(
+            "FREE", 0,
+            "PRO", 1,
+            "TEAM", 2,
+            "MAX", 2,
+            "ENTERPRISE", 3
+    );
 
     private final AppUserRepository userRepo;
     private final OrgRepository orgRepo;
@@ -113,15 +134,20 @@ public class EntitlementResolver {
         );
     }
 
-    /** Tier key with org-wins semantics. */
+    /** Tier key — picks the higher rank between user.tier and org.tier.
+     *  See class doc for the rationale. */
     String resolveTier(AppUser user) {
+        String userTier = normalize(user.getTier() != null ? user.getTier() : "FREE");
+        String orgTier = userTier;
         if (user.getOrgId() != null) {
             Optional<Org> org = orgRepo.findById(user.getOrgId());
             if (org.isPresent() && org.get().getTier() != null) {
-                return normalize(org.get().getTier());
+                orgTier = normalize(org.get().getTier());
             }
         }
-        return normalize(user.getTier() != null ? user.getTier() : "FREE");
+        int orgRank = TIER_RANK.getOrDefault(orgTier, 0);
+        int userRank = TIER_RANK.getOrDefault(userTier, 0);
+        return orgRank >= userRank ? orgTier : userTier;
     }
 
     static String normalize(String tier) {

@@ -28,8 +28,17 @@ export default {
         // --status-success #10B981). Aliased to the same token now so the
         // two palettes can't diverge again. See docs/design/ui-tokens.md.
         accent: {
+          // F-16 (round-3 audit): `accent.blue` continues to alias the brand
+          // SURFACE token (--accent-blue, #3B6FCC) — every existing
+          // `bg-accent-blue` button keeps white-on-blue contrast at 4.85.
+          // Body-text-on-dark consumers should switch to `accent.blue-text`
+          // (#7AA5F5 on dark, #2563EB on light) which lands AA-body on
+          // either surface. New code: prefer `text-accent-blue-text` for
+          // links + inline brand-coloured text, keep `bg-accent-blue` for
+          // primary button surfaces.
           blue: 'var(--accent-blue)',
           'blue-hover': 'var(--accent-blue-hover)',
+          'blue-text': 'var(--accent-blue-text)',
           red: 'var(--status-error)',
           amber: 'var(--status-waiting)',
           green: 'var(--status-success)',

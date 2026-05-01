@@ -145,11 +145,17 @@ function TierLifecyclePageInner() {
                     </td>
                     <td className="py-2 px-2 text-right font-mono">{t.activeSubscribers}</td>
                     <td className="py-2 px-2 text-right font-mono">${mrr}</td>
+                    {/* F-20 (round-3 audit) — show date only by default,
+                        reason moved to hover. The previous inline-truncated
+                        reason ("TEAM tier reinstated (V144) — pro...")
+                        leaked migration-version churn into screenshots
+                        whenever a screen-cap of this admin view escaped
+                        SUPER_ADMIN scope. The full reason stays accessible
+                        via tooltip for operators who actually need it. */}
                     <td className="py-2 px-2 text-[11px] text-muted">
-                      {changedAt}
-                      {t.reason && (
-                        <span className="block truncate max-w-[180px]" title={t.reason}>{t.reason}</span>
-                      )}
+                      <span title={t.reason || undefined} className={t.reason ? 'border-b border-dashed border-[var(--border-default)] cursor-help' : ''}>
+                        {changedAt}
+                      </span>
                     </td>
                     <td className="py-2 px-2 text-right space-x-1">
                       {t.state !== 'LISTED' && (
