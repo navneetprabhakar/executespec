@@ -74,10 +74,20 @@ export default function PlansPage() {
     // Phase 1.1 #9: PRO is hidden from new buyers (lifecycle filter at backend).
     // M-009 (Wave 1) — when ?legacy=1 arrives from /legacy/billing, show PRO
     // inline so grandfathered subscribers can manage their existing plan.
-    const tierOrder = legacyView ? ['PRO', 'TEAM', 'MAX'] : ['TEAM', 'MAX'];
+    // V165 — MAX dropped from the ladder; TEAM is the headline paid plan.
+    const tierOrder = legacyView ? ['PRO', 'TEAM'] : ['TEAM'];
+    // For TEAM, prefer the BYOK plan when both managed + BYOK exist (V165
+    // promoted BYOK to canonical pricing at $39/seat; managed $49 plans
+    // remain in the DB for billing-history continuity but are inactive).
     return tierOrder
       .filter(t => byTier[t])
-      .map(t => byTier[t][showInr ? 'INR' : 'USD'])
+      .map(t => {
+        const variants = byTier[t];
+        const currency = showInr ? 'INR' : 'USD';
+        // For TEAM, the active plan after V165 is the BYOK one; only one row per
+        // currency in active=TRUE. listPlans() already filters inactive plans.
+        return variants[currency];
+      })
       .filter(Boolean);
   })();
 

@@ -5,7 +5,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Unit tests for the V143 + V144 tier → product_surface mapping.
+ * Unit tests for the V143 (+ V165 MAX-drop) tier → product_surface mapping.
  *
  * Pins the decision matrix so a tier-rename or surface-rename has to
  * either (a) update this test or (b) explicitly justify the policy
@@ -14,12 +14,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 class TierProductSurfaceMapperTest {
 
     @Test
-    void freeProAndMaxDefaultToVibeSurface() {
+    void freeAndProDefaultToVibeSurface() {
         assertThat(TierProductSurfaceMapper.defaultSurfaceFor("FREE"))
             .isEqualTo(TierProductSurfaceMapper.SURFACE_VIBE);
         assertThat(TierProductSurfaceMapper.defaultSurfaceFor("PRO"))
-            .isEqualTo(TierProductSurfaceMapper.SURFACE_VIBE);
-        assertThat(TierProductSurfaceMapper.defaultSurfaceFor("MAX"))
             .isEqualTo(TierProductSurfaceMapper.SURFACE_VIBE);
     }
 
@@ -50,6 +48,15 @@ class TierProductSurfaceMapperTest {
     }
 
     @Test
+    void droppedMaxTierFallsBackToDefault() {
+        // V165 — MAX was deprecated and dropped from the mapping. Stale
+        // references (e.g. unmigrated session caches, telemetry replays)
+        // fall through to the default surface rather than throwing.
+        assertThat(TierProductSurfaceMapper.defaultSurfaceFor("MAX"))
+            .isEqualTo(TierProductSurfaceMapper.DEFAULT_SURFACE);
+    }
+
+    @Test
     void teamCanAccessBothSurfaces() {
         assertThat(TierProductSurfaceMapper.tierCanAccessSurface("TEAM", "vibe")).isTrue();
         assertThat(TierProductSurfaceMapper.tierCanAccessSurface("TEAM", "executespec")).isTrue();
@@ -62,17 +69,24 @@ class TierProductSurfaceMapperTest {
     }
 
     @Test
-    void freeProAndMaxCannotAccessBuildSurface() {
+    void freeAndProCannotAccessBuildSurface() {
         assertThat(TierProductSurfaceMapper.tierCanAccessSurface("FREE", "executespec")).isFalse();
         assertThat(TierProductSurfaceMapper.tierCanAccessSurface("PRO", "executespec")).isFalse();
-        assertThat(TierProductSurfaceMapper.tierCanAccessSurface("MAX", "executespec")).isFalse();
     }
 
     @Test
-    void freeProAndMaxCanAccessVibeSurface() {
+    void freeAndProCanAccessVibeSurface() {
         assertThat(TierProductSurfaceMapper.tierCanAccessSurface("FREE", "vibe")).isTrue();
         assertThat(TierProductSurfaceMapper.tierCanAccessSurface("PRO", "vibe")).isTrue();
-        assertThat(TierProductSurfaceMapper.tierCanAccessSurface("MAX", "vibe")).isTrue();
+    }
+
+    @Test
+    void droppedMaxTierDeniesEverySurface() {
+        // V165 — MAX is no longer in ALLOWED_SURFACES_FOR_TIER, so the
+        // safe-default-deny path applies. Any caller still passing "MAX"
+        // gets a clean false instead of crashing on a missing-key NPE.
+        assertThat(TierProductSurfaceMapper.tierCanAccessSurface("MAX", "vibe")).isFalse();
+        assertThat(TierProductSurfaceMapper.tierCanAccessSurface("MAX", "executespec")).isFalse();
     }
 
     @Test
