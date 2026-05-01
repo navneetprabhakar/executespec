@@ -1,8 +1,8 @@
-import { WebTracerProvider, BatchSpanProcessor } from '@opentelemetry/sdk-trace-web';
-import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-http';
-import { ZoneContextManager } from '@opentelemetry/context-zone';
-import { Resource } from '@opentelemetry/resources';
-import { ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION } from '@opentelemetry/semantic-conventions';
+import {WebTracerProvider, BatchSpanProcessor} from '@opentelemetry/sdk-trace-web';
+import {OTLPTraceExporter} from '@opentelemetry/exporter-trace-otlp-http';
+import {ZoneContextManager} from '@opentelemetry/context-zone';
+import {Resource} from '@opentelemetry/resources';
+import {ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION} from '@opentelemetry/semantic-conventions';
 
 /**
  * Initialize OpenTelemetry browser telemetry.
@@ -42,4 +42,3 @@ export function initTelemetry() {
 
   console.debug('[OTel] Browser telemetry initialized');
 }
-

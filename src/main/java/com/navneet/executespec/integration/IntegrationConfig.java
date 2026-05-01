@@ -1,5 +1,8 @@
 package com.navneet.executespec.integration;
 
+import java.time.Duration;
+import java.util.concurrent.ThreadPoolExecutor;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.integration.bitbucket.BitbucketAdapter;
 import com.navneet.executespec.integration.bitbucket.BitbucketClient;
@@ -16,6 +19,7 @@ import com.navneet.executespec.integration.slack.SlackMessageBuilder;
 import com.navneet.executespec.integration.slack.SlackOAuthService;
 import com.navneet.executespec.integration.slack.model.OrgSlackIntegrationRepository;
 import com.navneet.executespec.integration.slack.model.ProjectSlackChannelRepository;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -26,127 +30,133 @@ import org.springframework.core.task.TaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestTemplate;
 
-import java.time.Duration;
-import java.util.concurrent.ThreadPoolExecutor;
-
 @Configuration
 @EnableConfigurationProperties(IntegrationProperties.class)
 public class IntegrationConfig {
 
-    @Bean
-    public RestTemplate integrationRestTemplate(RestTemplateBuilder builder) {
-        return builder
-                .setConnectTimeout(Duration.ofSeconds(10))
-                .setReadTimeout(Duration.ofSeconds(30))
-                .build();
-    }
+  @Bean
+  public RestTemplate integrationRestTemplate(RestTemplateBuilder builder) {
+    return builder
+        .setConnectTimeout(Duration.ofSeconds(10))
+        .setReadTimeout(Duration.ofSeconds(30))
+        .build();
+  }
 
-    // ── Jira ──────────────────────────────────────────────────────────────────
+  // ── Jira ──────────────────────────────────────────────────────────────────
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.jira.enabled")
-    public JiraClient jiraClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
-        return new JiraClient(integrationRestTemplate, props.getJira());
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.jira.enabled")
+  public JiraClient jiraClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
+    return new JiraClient(integrationRestTemplate, props.getJira());
+  }
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.jira.enabled")
-    public JiraAdapter jiraAdapter(JiraClient jiraClient, IntegrationProperties props, ObjectMapper mapper) {
-        return new JiraAdapter(jiraClient, props.getJira(), mapper);
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.jira.enabled")
+  public JiraAdapter jiraAdapter(
+      JiraClient jiraClient, IntegrationProperties props, ObjectMapper mapper) {
+    return new JiraAdapter(jiraClient, props.getJira(), mapper);
+  }
 
-    // ── Confluence ────────────────────────────────────────────────────────────
+  // ── Confluence ────────────────────────────────────────────────────────────
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.confluence.enabled")
-    public ConfluenceClient confluenceClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
-        return new ConfluenceClient(integrationRestTemplate, props.getConfluence());
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.confluence.enabled")
+  public ConfluenceClient confluenceClient(
+      RestTemplate integrationRestTemplate, IntegrationProperties props) {
+    return new ConfluenceClient(integrationRestTemplate, props.getConfluence());
+  }
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.confluence.enabled")
-    public ConfluenceAdapter confluenceAdapter(ConfluenceClient confluenceClient, IntegrationProperties props, ObjectMapper mapper) {
-        return new ConfluenceAdapter(confluenceClient, props.getConfluence(), mapper);
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.confluence.enabled")
+  public ConfluenceAdapter confluenceAdapter(
+      ConfluenceClient confluenceClient, IntegrationProperties props, ObjectMapper mapper) {
+    return new ConfluenceAdapter(confluenceClient, props.getConfluence(), mapper);
+  }
 
-    // ── ServiceNow ────────────────────────────────────────────────────────────
+  // ── ServiceNow ────────────────────────────────────────────────────────────
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.servicenow.enabled")
-    public ServiceNowClient serviceNowClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
-        return new ServiceNowClient(integrationRestTemplate, props.getServicenow());
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.servicenow.enabled")
+  public ServiceNowClient serviceNowClient(
+      RestTemplate integrationRestTemplate, IntegrationProperties props) {
+    return new ServiceNowClient(integrationRestTemplate, props.getServicenow());
+  }
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.servicenow.enabled")
-    public ServiceNowAdapter serviceNowAdapter(ServiceNowClient serviceNowClient, IntegrationProperties props, ObjectMapper mapper) {
-        return new ServiceNowAdapter(serviceNowClient, props.getServicenow(), mapper);
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.servicenow.enabled")
+  public ServiceNowAdapter serviceNowAdapter(
+      ServiceNowClient serviceNowClient, IntegrationProperties props, ObjectMapper mapper) {
+    return new ServiceNowAdapter(serviceNowClient, props.getServicenow(), mapper);
+  }
 
-    // ── PagerDuty ─────────────────────────────────────────────────────────────
+  // ── PagerDuty ─────────────────────────────────────────────────────────────
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.pagerduty.enabled")
-    public PagerDutyClient pagerDutyClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
-        return new PagerDutyClient(integrationRestTemplate, props.getPagerduty());
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.pagerduty.enabled")
+  public PagerDutyClient pagerDutyClient(
+      RestTemplate integrationRestTemplate, IntegrationProperties props) {
+    return new PagerDutyClient(integrationRestTemplate, props.getPagerduty());
+  }
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.pagerduty.enabled")
-    public PagerDutyAdapter pagerDutyAdapter(PagerDutyClient pagerDutyClient, IntegrationProperties props, ObjectMapper mapper) {
-        return new PagerDutyAdapter(pagerDutyClient, props.getPagerduty(), mapper);
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.pagerduty.enabled")
+  public PagerDutyAdapter pagerDutyAdapter(
+      PagerDutyClient pagerDutyClient, IntegrationProperties props, ObjectMapper mapper) {
+    return new PagerDutyAdapter(pagerDutyClient, props.getPagerduty(), mapper);
+  }
 
-    // ── Bitbucket ──────────────────────────────────────────────────────────────
+  // ── Bitbucket ──────────────────────────────────────────────────────────────
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.bitbucket.enabled")
-    public BitbucketClient bitbucketClient(RestTemplate integrationRestTemplate, IntegrationProperties props) {
-        return new BitbucketClient(integrationRestTemplate, props.getBitbucket());
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.bitbucket.enabled")
+  public BitbucketClient bitbucketClient(
+      RestTemplate integrationRestTemplate, IntegrationProperties props) {
+    return new BitbucketClient(integrationRestTemplate, props.getBitbucket());
+  }
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.bitbucket.enabled")
-    public BitbucketAdapter bitbucketAdapter(BitbucketClient bitbucketClient, IntegrationProperties props, ObjectMapper mapper) {
-        return new BitbucketAdapter(bitbucketClient, props.getBitbucket(), mapper);
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.bitbucket.enabled")
+  public BitbucketAdapter bitbucketAdapter(
+      BitbucketClient bitbucketClient, IntegrationProperties props, ObjectMapper mapper) {
+    return new BitbucketAdapter(bitbucketClient, props.getBitbucket(), mapper);
+  }
 
-    // ── Slack ──────────────────────────────────────────────────────────────────
+  // ── Slack ──────────────────────────────────────────────────────────────────
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.slack.enabled")
-    public SlackClient slackClient(RestTemplate integrationRestTemplate) {
-        return new SlackClient(integrationRestTemplate);
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.slack.enabled")
+  public SlackClient slackClient(RestTemplate integrationRestTemplate) {
+    return new SlackClient(integrationRestTemplate);
+  }
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.slack.enabled")
-    public SlackMessageBuilder slackMessageBuilder(IntegrationProperties props) {
-        return new SlackMessageBuilder(props.getSlack().getDashboardUrl());
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.slack.enabled")
+  public SlackMessageBuilder slackMessageBuilder(IntegrationProperties props) {
+    return new SlackMessageBuilder(props.getSlack().getDashboardUrl());
+  }
 
-    @Bean
-    @ConditionalOnProperty("agent.integrations.slack.enabled")
-    public SlackOAuthService slackOAuthService(
-            SlackClient slackClient,
-            OrgSlackIntegrationRepository integrationRepo,
-            ProjectSlackChannelRepository channelRepo,
-            IntegrationProperties props,
-            @Value("${app.jwt.secret:executespec-default-secret}") String jwtSecret) {
-        return new SlackOAuthService(slackClient, integrationRepo, channelRepo,
-                props.getSlack(), jwtSecret);
-    }
+  @Bean
+  @ConditionalOnProperty("agent.integrations.slack.enabled")
+  public SlackOAuthService slackOAuthService(
+      SlackClient slackClient,
+      OrgSlackIntegrationRepository integrationRepo,
+      ProjectSlackChannelRepository channelRepo,
+      IntegrationProperties props,
+      @Value("${app.jwt.secret:executespec-default-secret}") String jwtSecret) {
+    return new SlackOAuthService(
+        slackClient, integrationRepo, channelRepo, props.getSlack(), jwtSecret);
+  }
 
-    @Bean(name = "slackNotificationExecutor")
-    @ConditionalOnProperty("agent.integrations.slack.enabled")
-    public TaskExecutor slackNotificationExecutor() {
-        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
-        executor.setCorePoolSize(2);
-        executor.setMaxPoolSize(4);
-        executor.setQueueCapacity(200);
-        executor.setThreadNamePrefix("slack-notif-");
-        executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
-        executor.initialize();
-        return executor;
-    }
+  @Bean(name = "slackNotificationExecutor")
+  @ConditionalOnProperty("agent.integrations.slack.enabled")
+  public TaskExecutor slackNotificationExecutor() {
+    ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+    executor.setCorePoolSize(2);
+    executor.setMaxPoolSize(4);
+    executor.setQueueCapacity(200);
+    executor.setThreadNamePrefix("slack-notif-");
+    executor.setRejectedExecutionHandler(new ThreadPoolExecutor.CallerRunsPolicy());
+    executor.initialize();
+    return executor;
+  }
 }

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type {ReactNode} from 'react';
 
 /**
  * R-106 — single status primitive.
@@ -24,13 +24,17 @@ interface PillProps {
   className?: string;
 }
 
-const toneToVar: Record<PillTone, { bg: string; fg: string; border: string }> = {
-  ok:      { bg: 'rgba(16,185,129,0.12)',  fg: 'var(--v3-success)', border: 'rgba(16,185,129,0.32)'  },
-  warn:    { bg: 'rgba(245,158,11,0.12)',  fg: 'var(--v3-warning)', border: 'rgba(245,158,11,0.32)'  },
-  err:     { bg: 'rgba(239,68,68,0.12)',   fg: 'var(--v3-error)', border: 'rgba(239,68,68,0.36)'   },
-  neutral: { bg: 'rgba(148,163,184,0.10)', fg: 'var(--v3-text-muted)', border: 'rgba(148,163,184,0.26)' },
-  info:    { bg: 'rgba(91,141,239,0.14)',  fg: 'var(--v3-brand)', border: 'rgba(91,141,239,0.32)'  },
-  brand:   { bg: 'rgba(91,141,239,0.16)',  fg: 'var(--v3-brand-2)', border: 'rgba(91,141,239,0.36)'  },
+const toneToVar: Record<PillTone, {bg: string; fg: string; border: string}> = {
+  ok: {bg: 'rgba(16,185,129,0.12)', fg: 'var(--v3-success)', border: 'rgba(16,185,129,0.32)'},
+  warn: {bg: 'rgba(245,158,11,0.12)', fg: 'var(--v3-warning)', border: 'rgba(245,158,11,0.32)'},
+  err: {bg: 'rgba(239,68,68,0.12)', fg: 'var(--v3-error)', border: 'rgba(239,68,68,0.36)'},
+  neutral: {
+    bg: 'rgba(148,163,184,0.10)',
+    fg: 'var(--v3-text-muted)',
+    border: 'rgba(148,163,184,0.26)',
+  },
+  info: {bg: 'rgba(91,141,239,0.14)', fg: 'var(--v3-brand)', border: 'rgba(91,141,239,0.32)'},
+  brand: {bg: 'rgba(91,141,239,0.16)', fg: 'var(--v3-brand-2)', border: 'rgba(91,141,239,0.36)'},
 };
 
 export default function Pill({
@@ -66,7 +70,7 @@ export default function Pill({
     >
       {dot && (
         <span
-          aria-hidden="true"
+          aria-hidden='true'
           style={{
             display: 'inline-block',
             width: isSmall ? 5 : 6,
@@ -77,7 +81,7 @@ export default function Pill({
         />
       )}
       {icon && (
-        <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center' }}>
+        <span aria-hidden='true' style={{display: 'inline-flex', alignItems: 'center'}}>
           {icon}
         </span>
       )}

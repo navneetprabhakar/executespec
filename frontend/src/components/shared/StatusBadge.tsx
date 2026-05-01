@@ -1,5 +1,5 @@
-import { cn } from '@/lib/utils';
-import { STATUS_COLORS } from '@/lib/constants';
+import {cn} from '@/lib/utils';
+import {STATUS_COLORS} from '@/lib/constants';
 import GlowDot from './GlowDot';
 
 interface StatusBadgeProps {
@@ -71,7 +71,7 @@ function explainReason(reason: string | null | undefined): string | null {
   }
 }
 
-export default function StatusBadge({ status, className, statusReason }: StatusBadgeProps) {
+export default function StatusBadge({status, className, statusReason}: StatusBadgeProps) {
   const colors = STATUS_COLORS[status] ?? STATUS_COLORS['QUEUED'];
   const tooltip = explainReason(statusReason);
   return (
@@ -80,11 +80,11 @@ export default function StatusBadge({ status, className, statusReason }: StatusB
         'inline-flex items-center gap-1.5 text-xs font-medium tracking-wide uppercase',
         colors.text,
         tooltip && 'cursor-help',
-        className
+        className,
       )}
       title={tooltip ?? undefined}
     >
-      <GlowDot status={status} size="sm" />
+      <GlowDot status={status} size='sm' />
       {DISPLAY_NAMES[status] ?? status.replace(/_/g, ' ')}
     </span>
   );

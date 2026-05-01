@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 import * as api from '@/lib/api';
 
 interface MetricsStore {
@@ -23,18 +23,18 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
   days: 30,
 
   setDays: (days) => {
-    set({ days });
+    set({days});
     get().fetchAll();
   },
 
   fetchMetrics: async (days?) => {
     const d = days ?? get().days;
-    set({ loading: true });
+    set({loading: true});
     try {
       const metrics = await api.getMetrics(d);
-      set({ metrics, loading: false });
+      set({metrics, loading: false});
     } catch {
-      set({ loading: false });
+      set({loading: false});
     }
   },
 
@@ -42,7 +42,7 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
     const d = days ?? get().days;
     try {
       const modelComparison = await api.getModelComparison(d);
-      set({ modelComparison });
+      set({modelComparison});
     } catch {}
   },
 
@@ -50,7 +50,7 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
     const d = days ?? get().days;
     try {
       const userRunsSummary = await api.getUserRunsSummary(d);
-      set({ userRunsSummary });
+      set({userRunsSummary});
     } catch {}
   },
 

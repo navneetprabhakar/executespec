@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus } from 'lucide-react';
-import { useProjectStore } from '@/stores/useProjectStore';
+import {useEffect, useMemo, useState} from 'react';
+import {Link, useNavigate, useParams} from 'react-router-dom';
+import {ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus} from 'lucide-react';
+import {useProjectStore} from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
 import ProjectChatPanel from '@/components/project/ProjectChatPanel';
@@ -10,13 +10,13 @@ import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import StatusBadge from '@/components/shared/StatusBadge';
 import PulseTab from '@/components/project/PulseTab';
-import CodeTab, { type CodeSubTab } from '@/components/project/CodeTab';
+import CodeTab, {type CodeSubTab} from '@/components/project/CodeTab';
 import EmptyProjectLanding from '@/components/project/EmptyProjectLanding';
 import ProjectRepoManager from '@/components/project/ProjectRepoManager';
-import MoreDrawer, { useDrawerState, type DrawerPanel } from '@/components/project/MoreDrawer';
-import { cn } from '@/lib/utils';
-import type { TaskSummary } from '@/types/project';
-import type { RunDetail } from '@/lib/api';
+import MoreDrawer, {useDrawerState, type DrawerPanel} from '@/components/project/MoreDrawer';
+import {cn} from '@/lib/utils';
+import type {TaskSummary} from '@/types/project';
+import type {RunDetail} from '@/lib/api';
 
 /**
  * v2.6.4 — IA cleanup per UX & Wireframe Report (2026-04-26 §5.3).
@@ -53,46 +53,51 @@ import type { RunDetail } from '@/lib/api';
 type TabKey = 'pulse' | 'repos' | 'runs' | 'code' | 'chat';
 type RunsSubTab = 'launches' | 'prs' | 'detail';
 
-function legacyTabToNew(legacy: string | null): { tab: TabKey; sub?: RunsSubTab; codeSub?: CodeSubTab; drawer?: DrawerPanel } {
+function legacyTabToNew(legacy: string | null): {
+  tab: TabKey;
+  sub?: RunsSubTab;
+  codeSub?: CodeSubTab;
+  drawer?: DrawerPanel;
+} {
   switch (legacy) {
     case 'overview':
-      return { tab: 'pulse' };
+      return {tab: 'pulse'};
     case 'launches':
-      return { tab: 'runs', sub: 'launches' };
+      return {tab: 'runs', sub: 'launches'};
     case 'prs':
-      return { tab: 'runs', sub: 'prs' };
+      return {tab: 'runs', sub: 'prs'};
     case 'tasks':
-      return { tab: 'runs', sub: 'detail' };
+      return {tab: 'runs', sub: 'detail'};
     case 'architecture':
-      return { tab: 'code', codeSub: 'architecture' };
+      return {tab: 'code', codeSub: 'architecture'};
     case 'repos':
       // v2.7.2: Repos is now top-level, no codeSub needed.
-      return { tab: 'repos' };
+      return {tab: 'repos'};
     case 'chat':
-      return { tab: 'chat' };
+      return {tab: 'chat'};
     case 'docs':
-      return { tab: 'pulse', drawer: 'docs' };
+      return {tab: 'pulse', drawer: 'docs'};
     case 'memory':
-      return { tab: 'pulse', drawer: 'memory' };
+      return {tab: 'pulse', drawer: 'memory'};
     case 'activity':
-      return { tab: 'pulse', drawer: 'activity' };
+      return {tab: 'pulse', drawer: 'activity'};
     case 'team':
-      return { tab: 'pulse', drawer: 'team' };
+      return {tab: 'pulse', drawer: 'team'};
     default:
-      return { tab: 'pulse' };
+      return {tab: 'pulse'};
   }
 }
 
-const TAB_LABELS: { key: TabKey; label: string }[] = [
-  { key: 'pulse', label: 'Pulse' },
-  { key: 'repos', label: 'Repos' },
-  { key: 'runs',  label: 'Runs' },
-  { key: 'code',  label: 'Code' },
-  { key: 'chat',  label: 'Chat' },
+const TAB_LABELS: {key: TabKey; label: string}[] = [
+  {key: 'pulse', label: 'Pulse'},
+  {key: 'repos', label: 'Repos'},
+  {key: 'runs', label: 'Runs'},
+  {key: 'code', label: 'Code'},
+  {key: 'chat', label: 'Chat'},
 ];
 
 export default function ProjectDashboardPage() {
-  const { projectId } = useParams<{ projectId: string }>();
+  const {projectId} = useParams<{projectId: string}>();
   const navigate = useNavigate();
   const drawer = useDrawerState();
 
@@ -113,17 +118,22 @@ export default function ProjectDashboardPage() {
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
   const [runCache, setRunCache] = useState<Record<string, RunDetail | 'loading' | 'error'>>({});
 
-  const {
-    dashboard, repos, loading, error,
-    fetchDashboard, fetchScoreTrend, fetchRepos, reset,
-  } = useProjectStore();
+  const {dashboard, repos, loading, error, fetchDashboard, fetchScoreTrend, fetchRepos, reset} =
+    useProjectStore();
 
   useEffect(() => {
     if (!projectId) return;
     setProjectLookup('pending');
-    api.getProject(projectId)
-      .then((p) => { setProject(p); setProjectLookup('found'); })
-      .catch(() => { setProject(null); setProjectLookup('missing'); });
+    api
+      .getProject(projectId)
+      .then((p) => {
+        setProject(p);
+        setProjectLookup('found');
+      })
+      .catch(() => {
+        setProject(null);
+        setProjectLookup('missing');
+      });
     fetchDashboard(projectId);
     fetchScoreTrend(projectId);
     fetchRepos(projectId);
@@ -159,12 +169,12 @@ export default function ProjectDashboardPage() {
   }, [tasks, selectedRunId]);
 
   const loadRun = async (runId: string) => {
-    setRunCache((c) => ({ ...c, [runId]: 'loading' }));
+    setRunCache((c) => ({...c, [runId]: 'loading'}));
     try {
       const run = await api.getRun(runId);
-      setRunCache((c) => ({ ...c, [runId]: run }));
+      setRunCache((c) => ({...c, [runId]: run}));
     } catch {
-      setRunCache((c) => ({ ...c, [runId]: 'error' }));
+      setRunCache((c) => ({...c, [runId]: 'error'}));
     }
   };
 
@@ -220,20 +230,20 @@ export default function ProjectDashboardPage() {
 
   if (!projectId) {
     return (
-      <div className="h-full overflow-y-auto">
-        <div className="mx-auto max-w-5xl p-4 text-sm text-muted">No project selected.</div>
+      <div className='h-full overflow-y-auto'>
+        <div className='mx-auto max-w-5xl p-4 text-sm text-muted'>No project selected.</div>
       </div>
     );
   }
   if (projectLookup === 'missing') {
     return (
-      <div className="h-full overflow-y-auto">
-        <div className="mx-auto max-w-5xl p-4 space-y-3">
-          <h1 className="text-[14px] font-medium text-primary">Project not found</h1>
-          <p className="text-xs text-muted">
-            <span className="font-mono">{projectId}</span> is not a valid project.
+      <div className='h-full overflow-y-auto'>
+        <div className='mx-auto max-w-5xl p-4 space-y-3'>
+          <h1 className='text-[14px] font-medium text-primary'>Project not found</h1>
+          <p className='text-xs text-muted'>
+            <span className='font-mono'>{projectId}</span> is not a valid project.
           </p>
-          <Link to="/projects" className="text-xs text-accent-blue hover:underline">
+          <Link to='/projects' className='text-xs text-accent-blue hover:underline'>
             ← Back to projects
           </Link>
         </div>
@@ -246,37 +256,50 @@ export default function ProjectDashboardPage() {
   const repoCount = repos?.length ?? 0;
 
   return (
-    <div className="h-full flex flex-col">
+    <div className='h-full flex flex-col'>
       {/* Top chrome: back link + header + compact summary bar + tab strip */}
-      <div className="border-b border-[var(--border-default)] px-4 pt-3 pb-2 space-y-2 flex-shrink-0">
-        <Link to="/projects" className="inline-flex items-center gap-1 text-xs text-muted hover:text-accent-blue transition-colors">
-          <ArrowLeft className="h-3 w-3" />
+      <div className='border-b border-[var(--border-default)] px-4 pt-3 pb-2 space-y-2 flex-shrink-0'>
+        <Link
+          to='/projects'
+          className='inline-flex items-center gap-1 text-xs text-muted hover:text-accent-blue transition-colors'
+        >
+          <ArrowLeft className='h-3 w-3' />
           Projects
         </Link>
 
         {projectId && <PostMergeBar projectId={projectId} />}
 
-        <header className="flex items-start justify-between gap-3">
-          <div className="min-w-0 flex items-start gap-3">
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0">
-              <FolderGit2 className="h-5 w-5" />
+        <header className='flex items-start justify-between gap-3'>
+          <div className='min-w-0 flex items-start gap-3'>
+            <span className='inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0'>
+              <FolderGit2 className='h-5 w-5' />
             </span>
-            <div className="min-w-0">
-              <div className="font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5">Project</div>
-              <h1 className="text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate">
+            <div className='min-w-0'>
+              <div className='font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5'>
+                Project
+              </div>
+              <h1 className='text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate'>
                 {project?.name ?? 'Project'}
               </h1>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className='flex items-center gap-2'>
             {/* v2.7.2 — first-class Repos chip. Always visible; amber-tinted
                 when zero repos so users see the linkage gap before they
                 discover it via a failed Launch. Click opens AddRepoModal
                 directly via the shared openAddRepoFlow. */}
             <button
               onClick={openAddRepoFlow}
-              aria-label={repoCount === 0 ? 'Link your first repository' : `Manage ${repoCount} linked repository${repoCount === 1 ? '' : 'ies'}`}
-              title={repoCount === 0 ? 'No repos linked — click to add one' : `${repoCount} linked. Click to add another.`}
+              aria-label={
+                repoCount === 0
+                  ? 'Link your first repository'
+                  : `Manage ${repoCount} linked repository${repoCount === 1 ? '' : 'ies'}`
+              }
+              title={
+                repoCount === 0
+                  ? 'No repos linked — click to add one'
+                  : `${repoCount} linked. Click to add another.`
+              }
               className={cn(
                 'inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border transition-colors',
                 repoCount === 0
@@ -284,17 +307,21 @@ export default function ProjectDashboardPage() {
                   : 'border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40',
               )}
             >
-              {repoCount === 0 ? <Plus className="h-3.5 w-3.5" /> : <FolderGit2 className="h-3.5 w-3.5" />}
+              {repoCount === 0 ? (
+                <Plus className='h-3.5 w-3.5' />
+              ) : (
+                <FolderGit2 className='h-3.5 w-3.5' />
+              )}
               <span>Repos · {repoCount}</span>
             </button>
             <NewExecutionButton projectId={projectId} repoCount={repoCount} />
             <button
               onClick={() => openDrawer('settings')}
-              aria-label="Open more"
-              title="Settings, docs, memory, activity, team"
-              className="inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors"
+              aria-label='Open more'
+              title='Settings, docs, memory, activity, team'
+              className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
             >
-              <MoreHorizontal className="h-3.5 w-3.5" />
+              <MoreHorizontal className='h-3.5 w-3.5' />
               More
             </button>
           </div>
@@ -314,15 +341,19 @@ export default function ProjectDashboardPage() {
           avgScore={dashboard?.avgScore}
         />
 
-        {loading && <div className="text-xs text-muted">Loading…</div>}
-        {error && <div className="text-xs text-accent-red">{error}</div>}
+        {loading && <div className='text-xs text-muted'>Loading…</div>}
+        {error && <div className='text-xs text-accent-red'>{error}</div>}
 
         {/* Top-level 4-tab strip */}
-        <nav className="flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto -mx-4 px-4" role="tablist" aria-label="Project sections">
+        <nav
+          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto -mx-4 px-4'
+          role='tablist'
+          aria-label='Project sections'
+        >
           {TAB_LABELS.map((t) => (
             <button
               key={t.key}
-              role="tab"
+              role='tab'
               aria-selected={tab === t.key}
               onClick={() => setTab(t.key)}
               className={cn(
@@ -339,11 +370,15 @@ export default function ProjectDashboardPage() {
 
         {/* Runs sub-tab strip — only shown when in Runs tab */}
         {tab === 'runs' && (
-          <nav className="flex gap-0.5 overflow-x-auto -mx-4 px-4 pt-1" role="tablist" aria-label="Runs sections">
+          <nav
+            className='flex gap-0.5 overflow-x-auto -mx-4 px-4 pt-1'
+            role='tablist'
+            aria-label='Runs sections'
+          >
             {(['launches', 'prs', 'detail'] as RunsSubTab[]).map((s) => (
               <button
                 key={s}
-                role="tab"
+                role='tab'
                 aria-selected={runsSub === s}
                 onClick={() => setRunsSub(s)}
                 className={cn(
@@ -361,9 +396,9 @@ export default function ProjectDashboardPage() {
       </div>
 
       {/* Body */}
-      <div className="flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden">
+      <div className='flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden'>
         {showLeftRunsList && (
-          <aside className="w-full lg:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] overflow-y-auto max-h-40 lg:max-h-none">
+          <aside className='w-full lg:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] overflow-y-auto max-h-40 lg:max-h-none'>
             <RunsSidebar
               tasks={tasks}
               selectedRunId={selectedRunId}
@@ -380,8 +415,8 @@ export default function ProjectDashboardPage() {
             tab === 'chat' ? 'flex flex-col' : 'overflow-y-auto p-3 sm:p-4',
           )}
         >
-          {tab === 'pulse' && (
-            noRuns && repoCount === 0 ? (
+          {tab === 'pulse' &&
+            (noRuns && repoCount === 0 ? (
               <EmptyProjectLanding
                 projectId={projectId}
                 repoCount={repoCount}
@@ -396,8 +431,7 @@ export default function ProjectDashboardPage() {
                 onSwitchTab={onSwitchTab}
                 onLinkRepo={repoCount === 0 ? openAddRepoFlow : undefined}
               />
-            )
-          )}
+            ))}
           {tab === 'repos' && <ProjectRepoManager projectId={projectId} />}
           {tab === 'runs' && runsSub === 'launches' && (
             <ProjectLaunchesList projectId={projectId} />
@@ -406,26 +440,26 @@ export default function ProjectDashboardPage() {
             <ProjectPrRollup
               projectId={projectId}
               onAddressReview={(config) => {
-                navigate(`/projects/${projectId}/executions/new`, { state: { continueOnPr: config } });
+                navigate(`/projects/${projectId}/executions/new`, {state: {continueOnPr: config}});
               }}
             />
           )}
-          {tab === 'runs' && runsSub === 'detail' && (
-            selectedDetail === 'loading' ? (
-              <div className="text-xs text-muted p-3">Loading run…</div>
+          {tab === 'runs' &&
+            runsSub === 'detail' &&
+            (selectedDetail === 'loading' ? (
+              <div className='text-xs text-muted p-3'>Loading run…</div>
             ) : selectedDetail === 'error' ? (
-              <div className="text-xs text-accent-red p-3">Failed to load run.</div>
+              <div className='text-xs text-accent-red p-3'>Failed to load run.</div>
             ) : selectedDetail ? (
               <InlineRunDetail
                 run={selectedDetail}
-                onRefresh={() => selectedRunId ? loadRun(selectedRunId) : Promise.resolve()}
+                onRefresh={() => (selectedRunId ? loadRun(selectedRunId) : Promise.resolve())}
               />
             ) : (
               /* R-191 (post-cutover) — Mission rename reverted; v3 vocabulary
                  is "run" everywhere. */
-              <div className="text-xs text-muted p-3">Select a run on the left.</div>
-            )
-          )}
+              <div className='text-xs text-muted p-3'>Select a run on the left.</div>
+            ))}
           {tab === 'code' && (
             <CodeTab
               projectId={projectId}
@@ -475,32 +509,38 @@ function SummaryBar({
 }) {
   // Render a single scrollable row of facts. Only show segments that
   // actually have data so empty projects don't have 8 "—" placeholders.
-  const segments: { label: string; value: string; muted?: boolean }[] = [];
-  if (status) segments.push({ label: '', value: status, muted: true });
-  if (provider) segments.push({ label: '', value: provider });
-  if (githubOwner) segments.push({ label: 'owner', value: githubOwner });
-  segments.push({ label: 'repos', value: String(repoCount) });
-  if (completedRuns != null) segments.push({ label: 'done', value: String(completedRuns) });
-  if (activeRuns != null && activeRuns > 0) segments.push({ label: 'active', value: String(activeRuns) });
-  if (failedRuns != null && failedRuns > 0) segments.push({ label: 'failed', value: String(failedRuns) });
+  const segments: {label: string; value: string; muted?: boolean}[] = [];
+  if (status) segments.push({label: '', value: status, muted: true});
+  if (provider) segments.push({label: '', value: provider});
+  if (githubOwner) segments.push({label: 'owner', value: githubOwner});
+  segments.push({label: 'repos', value: String(repoCount)});
+  if (completedRuns != null) segments.push({label: 'done', value: String(completedRuns)});
+  if (activeRuns != null && activeRuns > 0)
+    segments.push({label: 'active', value: String(activeRuns)});
+  if (failedRuns != null && failedRuns > 0)
+    segments.push({label: 'failed', value: String(failedRuns)});
   if (avgScore != null && avgScore > 0) {
-    segments.push({ label: 'score', value: `${Math.round(avgScore)}` });
+    segments.push({label: 'score', value: `${Math.round(avgScore)}`});
   }
   if (totalCostUsd != null && totalCostUsd > 0) {
-    segments.push({ label: 'spend', value: `$${totalCostUsd.toFixed(2)}` });
+    segments.push({label: 'spend', value: `$${totalCostUsd.toFixed(2)}`});
   }
 
   if (segments.length === 0) {
-    return <div className="text-[11px] text-muted">No project metadata yet.</div>;
+    return <div className='text-[11px] text-muted'>No project metadata yet.</div>;
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]">
+    <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
       {segments.map((s, i) => (
-        <span key={i} className="inline-flex items-center gap-1">
-          {s.label && <span className="text-muted font-mono uppercase tracking-wider">{s.label}</span>}
-          <span className={cn('font-mono', s.muted ? 'text-muted' : 'text-secondary')}>{s.value}</span>
-          {i < segments.length - 1 && <span className="text-muted">·</span>}
+        <span key={i} className='inline-flex items-center gap-1'>
+          {s.label && (
+            <span className='text-muted font-mono uppercase tracking-wider'>{s.label}</span>
+          )}
+          <span className={cn('font-mono', s.muted ? 'text-muted' : 'text-secondary')}>
+            {s.value}
+          </span>
+          {i < segments.length - 1 && <span className='text-muted'>·</span>}
         </span>
       ))}
     </div>
@@ -508,18 +548,20 @@ function SummaryBar({
 }
 
 function RunsSidebar({
-  tasks, selectedRunId, onSelect,
+  tasks,
+  selectedRunId,
+  onSelect,
 }: {
   tasks: TaskSummary[];
   selectedRunId: string | null;
   onSelect: (runId: string) => void;
 }) {
   if (tasks.length === 0) {
-    return <div className="text-xs text-muted p-3">No runs yet.</div>;
+    return <div className='text-xs text-muted p-3'>No runs yet.</div>;
   }
   return (
     <div>
-      <div className="px-3 py-2 text-[11px] uppercase tracking-wide text-muted border-b border-[var(--border-default)]">
+      <div className='px-3 py-2 text-[11px] uppercase tracking-wide text-muted border-b border-[var(--border-default)]'>
         Runs ({tasks.length})
       </div>
       <ul>
@@ -534,19 +576,21 @@ function RunsSidebar({
                 selected ? 'bg-accent-blue/10' : 'hover:bg-[var(--gray-200)]',
               )}
             >
-              <div className="flex items-center justify-between gap-2">
+              <div className='flex items-center justify-between gap-2'>
                 <StatusBadge status={t.status} />
                 <span className={cn('text-[11px] font-mono tabular-nums', scoreColor(t.score))}>
                   {t.score != null ? t.score : '—'}
                 </span>
               </div>
-              <div className={cn(
-                'text-sm truncate mt-0.5',
-                selected ? 'text-primary' : 'text-secondary',
-              )}>
+              <div
+                className={cn(
+                  'text-sm truncate mt-0.5',
+                  selected ? 'text-primary' : 'text-secondary',
+                )}
+              >
                 {t.name || t.runId.slice(0, 8)}
               </div>
-              <div className="text-[11px] text-muted font-mono mt-0.5">
+              <div className='text-[11px] text-muted font-mono mt-0.5'>
                 {t.createdAt ? new Date(t.createdAt).toLocaleString() : '—'}
               </div>
             </li>
@@ -564,14 +608,12 @@ function scoreColor(score: number | null | undefined): string {
   return 'text-status-error';
 }
 
-function NewExecutionButton({ projectId, repoCount }: { projectId: string; repoCount: number }) {
+function NewExecutionButton({projectId, repoCount}: {projectId: string; repoCount: number}) {
   const navigate = useNavigate();
   const disabled = repoCount === 0;
-  const title = disabled
-    ? 'Link at least one repository to launch.'
-    : 'Start a cross-repo Launch';
+  const title = disabled ? 'Link at least one repository to launch.' : 'Start a cross-repo Launch';
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className='flex flex-col items-end gap-1'>
       <button
         onClick={() => !disabled && navigate(`/projects/${projectId}/executions/new`)}
         disabled={disabled}
@@ -584,11 +626,11 @@ function NewExecutionButton({ projectId, repoCount }: { projectId: string; repoC
         )}
         title={title}
       >
-        <Rocket className="h-3 w-3" />
+        <Rocket className='h-3 w-3' />
         Launch
       </button>
       {disabled && (
-        <span className="text-[10px] text-muted italic whitespace-nowrap">
+        <span className='text-[10px] text-muted italic whitespace-nowrap'>
           Link a repo to enable
         </span>
       )}

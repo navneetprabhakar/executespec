@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom';
-import { ShieldAlert, ArrowLeft } from 'lucide-react';
+import {Link} from 'react-router-dom';
+import {ShieldAlert, ArrowLeft} from 'lucide-react';
 
 /**
  * R-311 (Wave 7) — explicit access-denied frame.
@@ -52,7 +52,8 @@ export default function AccessDenied({
 }: AccessDeniedProps) {
   const friendlyRole = ROLE_LABELS[requiredRole] ?? requiredRole.toLowerCase().replace(/_/g, ' ');
   const contactLine =
-    contactHint ?? `Ask your org ${friendlyRole === 'super admin' ? 'owner' : friendlyRole} to grant you access, or switch to an account that has it.`;
+    contactHint ??
+    `Ask your org ${friendlyRole === 'super admin' ? 'owner' : friendlyRole} to grant you access, or switch to an account that has it.`;
 
   return (
     <div
@@ -65,8 +66,8 @@ export default function AccessDenied({
         padding: '48px 24px',
         textAlign: 'center',
       }}
-      role="region"
-      aria-label="Access denied"
+      role='region'
+      aria-label='Access denied'
     >
       <div
         style={{
@@ -81,9 +82,9 @@ export default function AccessDenied({
         }}
       >
         <ShieldAlert
-          className="h-7 w-7"
-          style={{ color: 'var(--status-warning, #F59E0B)' }}
-          aria-hidden="true"
+          className='h-7 w-7'
+          style={{color: 'var(--status-warning, #F59E0B)'}}
+          aria-hidden='true'
         />
       </div>
       <h1
@@ -95,7 +96,8 @@ export default function AccessDenied({
           lineHeight: 1.25,
         }}
       >
-        {feature} requires {friendlyRole === 'super admin' ? '' : 'an '}{friendlyRole} access
+        {feature} requires {friendlyRole === 'super admin' ? '' : 'an '}
+        {friendlyRole} access
       </h1>
       <p
         style={{
@@ -124,7 +126,7 @@ export default function AccessDenied({
           textDecoration: 'none',
         }}
       >
-        <ArrowLeft className="h-4 w-4" aria-hidden="true" />
+        <ArrowLeft className='h-4 w-4' aria-hidden='true' />
         {backLabel}
       </Link>
     </div>

@@ -1,7 +1,7 @@
-import { useNavigate } from 'react-router-dom';
-import type { RunDetail, ValidationReportData } from '@/lib/api';
+import {useNavigate} from 'react-router-dom';
+import type {RunDetail, ValidationReportData} from '@/lib/api';
 import Pill from './Pill';
-import { useV3ProjectStore } from '../stores/useV3ProjectStore';
+import {useV3ProjectStore} from '../stores/useV3ProjectStore';
 
 /**
  * R-131 — failure-state summary block on the run detail.
@@ -24,7 +24,7 @@ interface RunFailureSummaryProps {
   report: ValidationReportData | null;
 }
 
-export default function RunFailureSummary({ detail, report }: RunFailureSummaryProps) {
+export default function RunFailureSummary({detail, report}: RunFailureSummaryProps) {
   const navigate = useNavigate();
   const pushBubble = useV3ProjectStore((s) => s.pushBubble);
 
@@ -78,33 +78,39 @@ export default function RunFailureSummary({ detail, report }: RunFailureSummaryP
           marginBottom: 10,
         }}
       >
-        <Pill tone="warn">What went wrong</Pill>
+        <Pill tone='warn'>What went wrong</Pill>
       </div>
 
-      <ul style={{ margin: 0, padding: '0 0 8px 18px', fontSize: 12.5, color: 'var(--v3-text)' }}>
+      <ul style={{margin: 0, padding: '0 0 8px 18px', fontSize: 12.5, color: 'var(--v3-text)'}}>
         {buildFailed && (
-          <li style={{ marginBottom: 4 }}>
-            The final build did not pass. Open the Logs tab for the last few
-            stderr lines.
+          <li style={{marginBottom: 4}}>
+            The final build did not pass. Open the Logs tab for the last few stderr lines.
           </li>
         )}
         {testsFailed && (
-          <li style={{ marginBottom: 4 }}>
-            Tests: <strong>{report?.testsPassed}/{report?.testsTotal}</strong> passed —{' '}
-            {(report?.testsTotal ?? 0) - (report?.testsPassed ?? 0)} failing.
+          <li style={{marginBottom: 4}}>
+            Tests:{' '}
+            <strong>
+              {report?.testsPassed}/{report?.testsTotal}
+            </strong>{' '}
+            passed — {(report?.testsTotal ?? 0) - (report?.testsPassed ?? 0)} failing.
           </li>
         )}
         {reviewerUnresolved && (
-          <li style={{ marginBottom: 4 }}>
+          <li style={{marginBottom: 4}}>
             Reviewer flagged <strong>{issues.length}</strong> issue
-            {issues.length === 1 ? '' : 's'} that the auto-fix pass couldn't
-            resolve.
+            {issues.length === 1 ? '' : 's'} that the auto-fix pass couldn't resolve.
           </li>
         )}
         {!buildFailed && !testsFailed && !reviewerUnresolved && (
           <li>
             The run terminated with status {detail.status}.
-            {detail.statusReason && <> Reason: <code>{detail.statusReason}</code>.</>}
+            {detail.statusReason && (
+              <>
+                {' '}
+                Reason: <code>{detail.statusReason}</code>.
+              </>
+            )}
           </li>
         )}
       </ul>
@@ -121,12 +127,10 @@ export default function RunFailureSummary({ detail, report }: RunFailureSummaryP
             color: 'var(--v3-text-muted)',
           }}
         >
-          <div style={{ fontWeight: 600, color: 'var(--v3-text)', marginBottom: 6 }}>
-            Top issues
-          </div>
-          <ul style={{ margin: 0, padding: '0 0 0 16px' }}>
+          <div style={{fontWeight: 600, color: 'var(--v3-text)', marginBottom: 6}}>Top issues</div>
+          <ul style={{margin: 0, padding: '0 0 0 16px'}}>
             {topIssues.map((iss, i) => (
-              <li key={i} style={{ marginBottom: 4 }}>
+              <li key={i} style={{marginBottom: 4}}>
                 <span
                   style={{
                     fontWeight: 600,
@@ -136,10 +140,15 @@ export default function RunFailureSummary({ detail, report }: RunFailureSummaryP
                         : 'var(--v3-warning)',
                   }}
                 >
-                  {iss.severity.replace(/^WOULD_/, '').toLowerCase().replace(/_/g, ' ')}
+                  {iss.severity
+                    .replace(/^WOULD_/, '')
+                    .toLowerCase()
+                    .replace(/_/g, ' ')}
                 </span>{' '}
                 {iss.filePath && (
-                  <>· <code>{iss.filePath}</code> </>
+                  <>
+                    · <code>{iss.filePath}</code>{' '}
+                  </>
                 )}
                 {iss.description}
               </li>
@@ -148,9 +157,9 @@ export default function RunFailureSummary({ detail, report }: RunFailureSummaryP
         </div>
       )}
 
-      <div style={{ marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{marginTop: 12, display: 'flex', gap: 6, flexWrap: 'wrap'}}>
         <button
-          type="button"
+          type='button'
           onClick={rePromptInComposer}
           style={{
             padding: '5px 12px',
@@ -168,7 +177,7 @@ export default function RunFailureSummary({ detail, report }: RunFailureSummaryP
         </button>
         {detail.projectId && (
           <button
-            type="button"
+            type='button'
             onClick={() => navigate(`/projects/${detail.projectId}`)}
             style={{
               padding: '5px 12px',

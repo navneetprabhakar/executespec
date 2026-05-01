@@ -1,6 +1,6 @@
-import { forwardRef, type ButtonHTMLAttributes } from 'react';
-import { cva, type VariantProps } from 'class-variance-authority';
-import { cn } from '@/lib/utils';
+import {forwardRef, type ButtonHTMLAttributes} from 'react';
+import {cva, type VariantProps} from 'class-variance-authority';
+import {cn} from '@/lib/utils';
 
 const buttonVariants = cva(
   'inline-flex items-center justify-center gap-1.5 font-medium rounded-md transition-colors select-none disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--geist-bg)]',
@@ -38,24 +38,23 @@ const buttonVariants = cva(
 );
 
 export interface ButtonProps
-  extends ButtonHTMLAttributes<HTMLButtonElement>,
-    VariantProps<typeof buttonVariants> {
+  extends ButtonHTMLAttributes<HTMLButtonElement>, VariantProps<typeof buttonVariants> {
   loading?: boolean;
 }
 
 const Button = forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, fullWidth, loading, disabled, children, ...props }, ref) => {
+  ({className, variant, size, fullWidth, loading, disabled, children, ...props}, ref) => {
     return (
       <button
         ref={ref}
-        className={cn(buttonVariants({ variant, size, fullWidth }), className)}
+        className={cn(buttonVariants({variant, size, fullWidth}), className)}
         disabled={disabled || loading}
         {...props}
       >
         {loading ? (
           <>
-            <span className="inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin" />
-            <span className="opacity-70">{children}</span>
+            <span className='inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin' />
+            <span className='opacity-70'>{children}</span>
           </>
         ) : (
           children
@@ -68,4 +67,4 @@ const Button = forwardRef<HTMLButtonElement, ButtonProps>(
 Button.displayName = 'Button';
 
 export default Button;
-export { Button, buttonVariants };
+export {Button, buttonVariants};

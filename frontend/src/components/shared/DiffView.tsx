@@ -1,5 +1,5 @@
-import { useMemo } from 'react';
-import { cn } from '@/lib/utils';
+import {useMemo} from 'react';
+import {cn} from '@/lib/utils';
 
 /**
  * Renders a unified-diff string (from `git diff` / GitHub's patch API) with
@@ -20,14 +20,16 @@ export default function DiffView({
   const blocks = useMemo(() => parseDiff(diff), [diff]);
 
   if (blocks.length === 0) {
-    return <div className="text-[11px] text-muted">No diff content.</div>;
+    return <div className='text-[11px] text-muted'>No diff content.</div>;
   }
 
   return (
-    <div className={cn(
-      'rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] overflow-auto font-mono text-[11px] leading-snug',
-      maxHeightClass,
-    )}>
+    <div
+      className={cn(
+        'rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] overflow-auto font-mono text-[11px] leading-snug',
+        maxHeightClass,
+      )}
+    >
       {blocks.map((b, i) => (
         <FileBlock key={i} block={b} />
       ))}
@@ -35,27 +37,29 @@ export default function DiffView({
   );
 }
 
-function FileBlock({ block }: { block: FileBlockT }) {
+function FileBlock({block}: {block: FileBlockT}) {
   return (
-    <div className="border-b border-[var(--border-default)] last:border-b-0">
-      <div className="sticky top-0 z-[1] flex items-center gap-2 bg-[var(--gray-300)] px-2 py-1 text-[10px] border-b border-[var(--border-default)]">
-        <span className="text-muted uppercase tracking-wide">{block.fileStatus}</span>
-        <span className="text-secondary truncate">{block.filePath}</span>
+    <div className='border-b border-[var(--border-default)] last:border-b-0'>
+      <div className='sticky top-0 z-[1] flex items-center gap-2 bg-[var(--gray-300)] px-2 py-1 text-[10px] border-b border-[var(--border-default)]'>
+        <span className='text-muted uppercase tracking-wide'>{block.fileStatus}</span>
+        <span className='text-secondary truncate'>{block.filePath}</span>
         {(block.additions > 0 || block.deletions > 0) && (
-          <span className="ml-auto text-[10px] font-mono flex items-center gap-2">
-            {block.additions > 0 && <span className="text-status-success">+{block.additions}</span>}
-            {block.deletions > 0 && <span className="text-accent-red">−{block.deletions}</span>}
+          <span className='ml-auto text-[10px] font-mono flex items-center gap-2'>
+            {block.additions > 0 && <span className='text-status-success'>+{block.additions}</span>}
+            {block.deletions > 0 && <span className='text-accent-red'>−{block.deletions}</span>}
           </span>
         )}
       </div>
       {block.hunks.map((h, hi) => (
         <div key={hi}>
-          <div className="bg-[var(--gray-100)] px-2 py-0.5 text-[10px] text-muted select-none">
+          <div className='bg-[var(--gray-100)] px-2 py-0.5 text-[10px] text-muted select-none'>
             {h.header}
           </div>
-          <table className="w-full border-collapse">
+          <table className='w-full border-collapse'>
             <tbody>
-              {h.lines.map((line, li) => <DiffLine key={li} line={line} />)}
+              {h.lines.map((line, li) => (
+                <DiffLine key={li} line={line} />
+              ))}
             </tbody>
           </table>
         </div>
@@ -64,29 +68,28 @@ function FileBlock({ block }: { block: FileBlockT }) {
   );
 }
 
-function DiffLine({ line }: { line: Line }) {
-  const { kind, oldNo, newNo, content } = line;
-  const rowBg =
-    kind === 'add' ? 'bg-status-success/10'
-    : kind === 'del' ? 'bg-accent-red/10'
-    : '';
+function DiffLine({line}: {line: Line}) {
+  const {kind, oldNo, newNo, content} = line;
+  const rowBg = kind === 'add' ? 'bg-status-success/10' : kind === 'del' ? 'bg-accent-red/10' : '';
   const marker =
-    kind === 'add' ? <span className="text-status-success">+</span>
-    : kind === 'del' ? <span className="text-accent-red">−</span>
-    : <span className="text-muted"> </span>;
+    kind === 'add' ? (
+      <span className='text-status-success'>+</span>
+    ) : kind === 'del' ? (
+      <span className='text-accent-red'>−</span>
+    ) : (
+      <span className='text-muted'> </span>
+    );
   const textColor =
-    kind === 'add' ? 'text-primary'
-    : kind === 'del' ? 'text-primary'
-    : 'text-secondary';
+    kind === 'add' ? 'text-primary' : kind === 'del' ? 'text-primary' : 'text-secondary';
   return (
     <tr className={rowBg}>
-      <td className="w-9 px-1.5 text-right text-[10px] text-muted tabular-nums select-none border-r border-[var(--border-default)]/50">
+      <td className='w-9 px-1.5 text-right text-[10px] text-muted tabular-nums select-none border-r border-[var(--border-default)]/50'>
         {oldNo ?? ''}
       </td>
-      <td className="w-9 px-1.5 text-right text-[10px] text-muted tabular-nums select-none border-r border-[var(--border-default)]/50">
+      <td className='w-9 px-1.5 text-right text-[10px] text-muted tabular-nums select-none border-r border-[var(--border-default)]/50'>
         {newNo ?? ''}
       </td>
-      <td className="w-4 text-center select-none">{marker}</td>
+      <td className='w-4 text-center select-none'>{marker}</td>
       <td className={cn('pr-2 whitespace-pre', textColor)}>{content}</td>
     </tr>
   );
@@ -101,7 +104,7 @@ type Line = {
   newNo: number | null;
   content: string;
 };
-type Hunk = { header: string; lines: Line[] };
+type Hunk = {header: string; lines: Line[]};
 type FileBlockT = {
   filePath: string;
   fileStatus: string; // ADDED | DELETED | MODIFIED | RENAMED
@@ -139,33 +142,63 @@ function parseDiff(raw: string): FileBlockT[] {
       continue;
     }
 
-    if (!current) { i++; continue; }
+    if (!current) {
+      i++;
+      continue;
+    }
 
-    if (line.startsWith('new file mode')) { current.fileStatus = 'ADDED'; i++; continue; }
-    if (line.startsWith('deleted file mode')) { current.fileStatus = 'DELETED'; i++; continue; }
-    if (line.startsWith('rename from') || line.startsWith('rename to')) { current.fileStatus = 'RENAMED'; i++; continue; }
-    if (line.startsWith('index ') || line.startsWith('--- ') || line.startsWith('+++ ') || line.startsWith('Binary files')) { i++; continue; }
+    if (line.startsWith('new file mode')) {
+      current.fileStatus = 'ADDED';
+      i++;
+      continue;
+    }
+    if (line.startsWith('deleted file mode')) {
+      current.fileStatus = 'DELETED';
+      i++;
+      continue;
+    }
+    if (line.startsWith('rename from') || line.startsWith('rename to')) {
+      current.fileStatus = 'RENAMED';
+      i++;
+      continue;
+    }
+    if (
+      line.startsWith('index ') ||
+      line.startsWith('--- ') ||
+      line.startsWith('+++ ') ||
+      line.startsWith('Binary files')
+    ) {
+      i++;
+      continue;
+    }
 
     if (line.startsWith('@@')) {
-      const hunk: Hunk = { header: line, lines: [] };
+      const hunk: Hunk = {header: line, lines: []};
       const m = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
       oldNo = m ? parseInt(m[1], 10) : 0;
       newNo = m ? parseInt(m[2], 10) : 0;
       i++;
-      while (i < lines.length && !lines[i].startsWith('diff --git ') && !lines[i].startsWith('@@')) {
+      while (
+        i < lines.length &&
+        !lines[i].startsWith('diff --git ') &&
+        !lines[i].startsWith('@@')
+      ) {
         const l = lines[i];
-        if (l.startsWith('\\ No newline at end of file')) { i++; continue; }
+        if (l.startsWith('\\ No newline at end of file')) {
+          i++;
+          continue;
+        }
         if (l.startsWith('+')) {
-          hunk.lines.push({ kind: 'add', oldNo: null, newNo, content: l.slice(1) });
+          hunk.lines.push({kind: 'add', oldNo: null, newNo, content: l.slice(1)});
           newNo++;
           current.additions++;
         } else if (l.startsWith('-')) {
-          hunk.lines.push({ kind: 'del', oldNo, newNo: null, content: l.slice(1) });
+          hunk.lines.push({kind: 'del', oldNo, newNo: null, content: l.slice(1)});
           oldNo++;
           current.deletions++;
         } else {
           const stripped = l.startsWith(' ') ? l.slice(1) : l;
-          hunk.lines.push({ kind: 'ctx', oldNo, newNo, content: stripped });
+          hunk.lines.push({kind: 'ctx', oldNo, newNo, content: stripped});
           oldNo++;
           newNo++;
         }

@@ -1,7 +1,7 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 import * as api from '@/lib/api';
-import { useUiStore } from '@/stores/useUiStore';
-import { refreshUsageBadge } from '@/components/billing/UsageBadge';
+import {useUiStore} from '@/stores/useUiStore';
+import {refreshUsageBadge} from '@/components/billing/UsageBadge';
 
 interface RunStore {
   runs: api.RunSummary[];
@@ -30,10 +30,28 @@ interface RunStore {
   setActiveRunId: (id: string | null) => void;
   fetchRuns: () => Promise<void>;
   fetchRun: (id: string) => Promise<void>;
-  createRun: (req: { userRequest: string; executionMode?: 'PROTOTYPE' | 'PRODUCTION'; skipApproval?: boolean; autoMerge?: boolean; modelName?: string; aiProvider?: string; projectId?: string; repoMode?: string | null; repoUrl?: string | null; selectedRepoIds?: string[]; figmaUrl?: string; tddMode?: boolean }) => Promise<string>;
+  createRun: (req: {
+    userRequest: string;
+    executionMode?: 'PROTOTYPE' | 'PRODUCTION';
+    skipApproval?: boolean;
+    autoMerge?: boolean;
+    modelName?: string;
+    aiProvider?: string;
+    projectId?: string;
+    repoMode?: string | null;
+    repoUrl?: string | null;
+    selectedRepoIds?: string[];
+    figmaUrl?: string;
+    tddMode?: boolean;
+  }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   archiveRun: (id: string) => Promise<void>;
-  approveRun: (id: string, approved: boolean, creditsConfirmed?: number, executionMode?: string) => Promise<void>;
+  approveRun: (
+    id: string,
+    approved: boolean,
+    creditsConfirmed?: number,
+    executionMode?: string,
+  ) => Promise<void>;
   retryTask: (runId: string, taskId: string) => Promise<void>;
   // v2.5.12 — V1-only actions removed (clarify, merge, retry, reopenMergeGate,
   // implementSuggestions, rework, editAndRestart). Backend returns 410 Gone.
@@ -63,32 +81,32 @@ export const useRunStore = create<RunStore>((set, get) => ({
   hasPrevious: false,
 
   setStatusFilter: (s) => {
-    set({ statusFilter: s, page: 0 }); // Reset to first page on filter change
+    set({statusFilter: s, page: 0}); // Reset to first page on filter change
   },
   setProjectFilter: (projectId) => {
-    set({ projectFilter: projectId, page: 0 });
+    set({projectFilter: projectId, page: 0});
   },
   setScopeFilter: (scope) => {
-    set({ scopeFilter: scope, page: 0 });
+    set({scopeFilter: scope, page: 0});
   },
   setArchivedFilter: (archived) => {
-    set({ archivedFilter: archived, statusFilter: 'ALL', page: 0 });
+    set({archivedFilter: archived, statusFilter: 'ALL', page: 0});
   },
   setPage: (page) => {
-    set({ page });
+    set({page});
     get().fetchRuns();
   },
 
   setActiveRunId: (id) => {
-    set({ activeRunId: id, activeRun: null });
+    set({activeRunId: id, activeRun: null});
     useUiStore.getState().setActiveTab('overview');
     if (id) get().fetchRun(id);
   },
 
   fetchRuns: async () => {
-    set({ loading: true, error: null });
+    set({loading: true, error: null});
     try {
-      const { statusFilter, projectFilter, scopeFilter, archivedFilter, page, pageSize } = get();
+      const {statusFilter, projectFilter, scopeFilter, archivedFilter, page, pageSize} = get();
       const result = await api.getRuns({
         status: statusFilter === 'ALL' ? undefined : statusFilter,
         projectId: projectFilter ?? undefined,
@@ -107,22 +125,22 @@ export const useRunStore = create<RunStore>((set, get) => ({
         loading: false,
       });
     } catch (e: any) {
-      set({ loading: false, error: e.message });
+      set({loading: false, error: e.message});
     }
   },
 
   fetchRun: async (id) => {
     try {
       const activeRun = await api.getRun(id);
-      set({ activeRun });
+      set({activeRun});
     } catch (e: any) {
-      set({ error: e.message });
+      set({error: e.message});
     }
   },
 
   createRun: async (req) => {
-    const { runId } = await api.createRun(req);
-    set({ page: 0 }); // Go to first page to see the new run
+    const {runId} = await api.createRun(req);
+    set({page: 0}); // Go to first page to see the new run
     await get().fetchRuns();
     return runId;
   },
@@ -130,13 +148,13 @@ export const useRunStore = create<RunStore>((set, get) => ({
   cancelRun: async (id) => {
     await api.cancelRun(id);
     await get().fetchRuns();
-    if (get().activeRunId === id) set({ activeRun: null, activeRunId: null });
+    if (get().activeRunId === id) set({activeRun: null, activeRunId: null});
   },
 
   archiveRun: async (id) => {
     await api.archiveRun(id);
     await get().fetchRuns();
-    if (get().activeRunId === id) set({ activeRun: null, activeRunId: null });
+    if (get().activeRunId === id) set({activeRun: null, activeRunId: null});
   },
 
   approveRun: async (id, approved, creditsConfirmed?, executionMode?) => {
@@ -148,11 +166,14 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   retryTask: async (runId, taskId) => {
     set((s) => ({
-      activeRun: s.activeRun ? {
-        ...s.activeRun,
-        tasks: s.activeRun.tasks?.map((t: any) =>
-          t.taskId === taskId ? { ...t, status: 'PENDING' } : t),
-      } : null,
+      activeRun: s.activeRun
+        ? {
+            ...s.activeRun,
+            tasks: s.activeRun.tasks?.map((t: any) =>
+              t.taskId === taskId ? {...t, status: 'PENDING'} : t,
+            ),
+          }
+        : null,
     }));
     await api.retryTask(runId, taskId);
     await get().fetchRun(runId);
@@ -172,10 +193,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
 
   patchRunStatus: (runId, status) => {
     set((state) => ({
-      runs: state.runs.map((r) => r.runId === runId ? { ...r, status } : r),
-      activeRun: state.activeRun?.runId === runId
-        ? { ...state.activeRun, status }
-        : state.activeRun,
+      runs: state.runs.map((r) => (r.runId === runId ? {...r, status} : r)),
+      activeRun: state.activeRun?.runId === runId ? {...state.activeRun, status} : state.activeRun,
     }));
   },
 }));

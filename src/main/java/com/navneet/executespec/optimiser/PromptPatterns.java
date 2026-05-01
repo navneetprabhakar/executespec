@@ -15,5 +15,4 @@ public record PromptPatterns(
     boolean hasPatterns,
 
     /** Human-readable summary for audit log */
-    String summary
-) {}
+    String summary) {}

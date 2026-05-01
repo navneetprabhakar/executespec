@@ -1,79 +1,77 @@
 package com.navneet.executespec.api.dto;
 
-import com.fasterxml.jackson.annotation.JsonAlias;
+import java.util.List;
+import java.util.UUID;
+
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-import java.util.List;
-import java.util.UUID;
+import com.fasterxml.jackson.annotation.JsonAlias;
 
 /**
  * POST /api/runs request body.
  *
- * <p>Every run executes inside its own isolated workspace directory
- * ({@code workspace/<runId>/}), so there is no need for a "fresh workspace" flag —
- * isolation is built-in.
+ * <p>Every run executes inside its own isolated workspace directory ({@code workspace/<runId>/}),
+ * so there is no need for a "fresh workspace" flag — isolation is built-in.
  */
 public record RunRequest(
     /**
-     * The spec the user wants executed. Accepts the legacy field name
-     * {@code "requirement"} too — docs and several external scripts historically
-     * used that name (adversarial-test-report Finding 17).
+     * The spec the user wants executed. Accepts the legacy field name {@code "requirement"} too —
+     * docs and several external scripts historically used that name (adversarial-test-report
+     * Finding 17).
      */
     @NotBlank(message = "User request must not be blank")
-    @Size(max = 50_000, message = "User request must not exceed 50,000 characters")
-    @JsonAlias({"requirement", "spec"})
-    String userRequest,
+        @Size(max = 50_000, message = "User request must not exceed 50,000 characters")
+        @JsonAlias({"requirement", "spec"})
+        String userRequest,
     /** "MANUAL" | "GITHUB_NEW" | "GITHUB_EXISTING" */
     @Pattern(regexp = "MANUAL|GITHUB_NEW|GITHUB_EXISTING|REST", message = "Invalid source")
-    String source,
+        String source,
     /**
-     * HTTPS URL of an existing repo (optional). Restricted to HTTPS against the
-     * major SCM hosts so the harness can't be tricked into fetching from the
-     * cloud-metadata endpoint, localhost, or a {@code file://} URI. Closes
-     * adversarial-test-report Finding 7.
+     * HTTPS URL of an existing repo (optional). Restricted to HTTPS against the major SCM hosts so
+     * the harness can't be tricked into fetching from the cloud-metadata endpoint, localhost, or a
+     * {@code file://} URI. Closes adversarial-test-report Finding 7.
      */
     @Size(max = 500, message = "Repo URL must not exceed 500 characters")
-    @Pattern(
-        regexp = "^$|^https://(github\\.com|gitlab\\.com|bitbucket\\.org|[a-zA-Z0-9.-]+\\.githubusercontent\\.com)/.+$",
-        message = "repoUrl must be an HTTPS URL against github.com, gitlab.com, or bitbucket.org")
-    String repoUrl,
+        @Pattern(
+            regexp =
+                "^$|^https://(github\\.com|gitlab\\.com|bitbucket\\.org|[a-zA-Z0-9.-]+\\.githubusercontent\\.com)/.+$",
+            message =
+                "repoUrl must be an HTTPS URL against github.com, gitlab.com, or bitbucket.org")
+        String repoUrl,
     /** "NEW" | "EXISTING" (optional). */
-    @Pattern(regexp = "NEW|EXISTING", message = "Invalid repoMode")
-    String repoMode,
+    @Pattern(regexp = "NEW|EXISTING", message = "Invalid repoMode") String repoMode,
     /** When true, automatically approve the plan gate without human review. */
     Boolean skipApproval,
     /** When true, automatically approve the merge gate without human review. */
     Boolean autoMerge,
     /** "PROTOTYPE" | "PRODUCTION" (default). Controls speed-vs-quality tradeoffs. */
     @Pattern(regexp = "PROTOTYPE|PRODUCTION", message = "Invalid executionMode")
-    String executionMode,
+        String executionMode,
     /** Optional model override applied to all agents (e.g. "claude-sonnet-4-5"). */
-    @Size(max = 100, message = "Model name must not exceed 100 characters")
-    String modelName,
-    /** Optional AI provider override for this run. v2.5.13 — enum renamed GOOGLE → GEMINI; legacy GOOGLE still accepted. */
-    @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI", message = "Invalid AI provider")
-    String aiProvider,
-    /** Optional project ID to associate this run with (org members only). */
-    @Size(max = 36, message = "Project ID must not exceed 36 characters")
-    String projectId,
+    @Size(max = 100, message = "Model name must not exceed 100 characters") String modelName,
     /**
-     * Pilot v3.0 — repos selected from the project's linked catalogue. When
-     * present, the harness clones each repo into
-     * {@code workspace/<runId>/repos/<name>/}. When null or empty, falls back
-     * to the single-repo {@link #repoUrl} path. IDs must reference repos
-     * already linked to {@link #projectId}.
+     * Optional AI provider override for this run. v2.5.13 — enum renamed GOOGLE → GEMINI; legacy
+     * GOOGLE still accepted.
+     */
+    @Pattern(regexp = "ANTHROPIC|GEMINI|GOOGLE|OPENAI", message = "Invalid AI provider")
+        String aiProvider,
+    /** Optional project ID to associate this run with (org members only). */
+    @Size(max = 36, message = "Project ID must not exceed 36 characters") String projectId,
+    /**
+     * Pilot v3.0 — repos selected from the project's linked catalogue. When present, the harness
+     * clones each repo into {@code workspace/<runId>/repos/<name>/}. When null or empty, falls back
+     * to the single-repo {@link #repoUrl} path. IDs must reference repos already linked to {@link
+     * #projectId}.
      */
     List<UUID> selectedRepoIds,
     /** Pilot R7 — optional Figma URL, drives design-compliance scoring. */
-    @Size(max = 500, message = "Figma URL must not exceed 500 characters")
-    String figmaUrl,
+    @Size(max = 500, message = "Figma URL must not exceed 500 characters") String figmaUrl,
     /**
-     * v2.5.2 (Phase 4.3) — when true, the planner is instructed to declare
-     * test-writing tasks as a leading group with implementation tasks declaring
-     * dependsOn the test tasks. Same plan structure, just different ordering.
-     * Higher accuracy on logic-heavy specs at the cost of more tokens.
+     * v2.5.2 (Phase 4.3) — when true, the planner is instructed to declare test-writing tasks as a
+     * leading group with implementation tasks declaring dependsOn the test tasks. Same plan
+     * structure, just different ordering. Higher accuracy on logic-heavy specs at the cost of more
+     * tokens.
      */
-    Boolean tddMode
-) {}
+    Boolean tddMode) {}

@@ -13,5 +13,4 @@ public record AuditLogEntry(
     String oldValue,
     String newValue,
     String metadata,
-    Instant createdAt
-) {}
+    Instant createdAt) {}

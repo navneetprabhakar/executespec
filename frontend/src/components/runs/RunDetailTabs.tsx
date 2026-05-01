@@ -1,59 +1,87 @@
-import { useCallback, useEffect, useRef, useState, useReducer } from 'react';
+import {useCallback, useEffect, useRef, useState, useReducer} from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
-import { useUiStore } from '@/stores/useUiStore';
-import { Glossary } from '@/components/shared/Glossary';
-import { useRunStore } from '@/stores/useRunStore';
-import { useAuthStore, selectIsSuperAdmin, selectIsOrgAdmin, selectIsOrgMember } from '@/stores/useAuthStore';
-import { useTierPermissions } from '@/hooks/useTierPermissions';
-import { useIsMobile } from '@/hooks/useIsMobile';
+import {useUiStore} from '@/stores/useUiStore';
+import {Glossary} from '@/components/shared/Glossary';
+import {useRunStore} from '@/stores/useRunStore';
 import {
-  getFiles, getFile,
+  useAuthStore,
+  selectIsSuperAdmin,
+  selectIsOrgAdmin,
+  selectIsOrgMember,
+} from '@/stores/useAuthStore';
+import {useTierPermissions} from '@/hooks/useTierPermissions';
+import {useIsMobile} from '@/hooks/useIsMobile';
+import {
+  getFiles,
+  getFile,
   getOpenApiSpec,
-  getProjects, createProject, updateRunProject,
-  applyToRun, editRunPlan,
+  getProjects,
+  createProject,
+  updateRunProject,
+  applyToRun,
+  editRunPlan,
   getTestPlan,
   getLiveCost,
   getRunPrs,
 } from '@/lib/api';
-import type { PrSummary } from '@/types/project';
-import type { RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto } from '@/lib/api';
+import type {PrSummary} from '@/types/project';
+import type {RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto} from '@/lib/api';
 import GlowDot from '@/components/shared/GlowDot';
-import { MarkdownContent } from '@/components/shared/MarkdownContent';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
 import RunConversation from './RunConversation';
 import TaskTimeline from './TaskTimeline';
 import PreviewTab from './PreviewTab';
-import { PIPELINE_STEPS, V2_LEGACY_UI } from '@/lib/constants';
-import { useSseStore } from '@/stores/useSseStore';
-import { fmtTokens, relativeTime, cn } from '@/lib/utils';
+import {PIPELINE_STEPS, V2_LEGACY_UI} from '@/lib/constants';
+import {useSseStore} from '@/stores/useSseStore';
+import {fmtTokens, relativeTime, cn} from '@/lib/utils';
 import {
-  ChevronDown, ChevronRight,
-  Folder, FolderOpen,
-  FileCode2, FileText, File,
+  ChevronDown,
+  ChevronRight,
+  Folder,
+  FolderOpen,
+  FileCode2,
+  FileText,
+  File,
   MessageSquare,
-  ChevronsDownUp, ChevronsUpDown, Copy, Check,
-  Clock, Coins, Cpu, RefreshCw, FolderKanban, X, Plus, User, Wrench, Loader2,
+  ChevronsDownUp,
+  ChevronsUpDown,
+  Copy,
+  Check,
+  Clock,
+  Coins,
+  Cpu,
+  RefreshCw,
+  FolderKanban,
+  X,
+  Plus,
+  User,
+  Wrench,
+  Loader2,
   TestTube2,
-  Maximize2, Minimize2, PanelLeftClose, PanelLeftOpen,
+  Maximize2,
+  Minimize2,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
 import Editor from '@monaco-editor/react';
-import type { editor as monacoEditor } from 'monaco-editor';
-import { GEIST_THEME_NAME } from '@/lib/monacoGeistTheme';
+import type {editor as monacoEditor} from 'monaco-editor';
+import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
 
 const BASE_TABS = [
-  { value: 'overview',  label: 'Overview' },
-  { value: 'plan',      label: 'Plan' },
-  { value: 'tasks',     label: 'Tasks' },
-  { value: 'timeline',  label: 'Timeline' },
-  { value: 'log',       label: 'Live Log' },
-  { value: 'code',      label: 'Code' },
+  {value: 'overview', label: 'Overview'},
+  {value: 'plan', label: 'Plan'},
+  {value: 'tasks', label: 'Tasks'},
+  {value: 'timeline', label: 'Timeline'},
+  {value: 'log', label: 'Live Log'},
+  {value: 'code', label: 'Code'},
 ];
 
 export default function RunDetailTabs() {
-  const { activeTab, setActiveTab } = useUiStore();
+  const {activeTab, setActiveTab} = useUiStore();
   const activeRun = useRunStore((s) => s.activeRun);
   const fetchRun = useRunStore((s) => s.fetchRun);
   const fetchRuns = useRunStore((s) => s.fetchRuns);
@@ -81,13 +109,17 @@ export default function RunDetailTabs() {
   // Test generation tasks — only fetch after test gen has started (avoids 404 noise)
   const [testTasks, setTestTasks] = useState<TestTaskDto[]>([]);
   const sseEntries = useSseStore((s) => s.entries);
-  const testGenStarted = sseEntries.some(e => e.type === 'TEST_GEN_STARTED' || e.type === 'TEST_REPORT_READY');
+  const testGenStarted = sseEntries.some(
+    (e) => e.type === 'TEST_GEN_STARTED' || e.type === 'TEST_REPORT_READY',
+  );
 
   useEffect(() => {
     if (!activeRun || !testGenStarted) return;
-    getTestPlan(activeRun.runId).then((plan) => {
-      if (plan) setTestTasks(plan.tasks);
-    }).catch(() => {});
+    getTestPlan(activeRun.runId)
+      .then((plan) => {
+        if (plan) setTestTasks(plan.tasks);
+      })
+      .catch(() => {});
   }, [activeRun?.runId, filesTick, testGenStarted]);
 
   // Note: live task updates are driven entirely by SSE (taskStatus events → fetchRun).
@@ -113,9 +145,16 @@ export default function RunDetailTabs() {
 
   if (!activeRun) return null;
 
-  const isTerminal = activeRun.status === 'COMPLETE' || activeRun.status === 'PARTIAL' || activeRun.status === 'FAILED';
-  const isActive = activeRun.status === 'WORKING' || activeRun.status === 'COMPILING'
-    || activeRun.status === 'REVIEWING' || activeRun.status === 'MERGING' || activeRun.status === 'AWAITING_MERGE';
+  const isTerminal =
+    activeRun.status === 'COMPLETE' ||
+    activeRun.status === 'PARTIAL' ||
+    activeRun.status === 'FAILED';
+  const isActive =
+    activeRun.status === 'WORKING' ||
+    activeRun.status === 'COMPILING' ||
+    activeRun.status === 'REVIEWING' ||
+    activeRun.status === 'MERGING' ||
+    activeRun.status === 'AWAITING_MERGE';
   /** Preview content is ready when the pipeline is active or finished. */
   const previewReady = isTerminal || isActive;
   /** Chat is only functional after the run finishes (success or failed). */
@@ -125,19 +164,19 @@ export default function RunDetailTabs() {
   // harness-v2-remaining-work Gap 3: Chat tab is hidden while the V2 chat/apply
   // endpoints return 410 Gone. Re-enable via V2_LEGACY_UI.runConversation once
   // the V2 ConversationAgent is wired.
-  const chatTab = V2_LEGACY_UI.runConversation ? [{ value: 'chat', label: 'Chat' }] : [];
+  const chatTab = V2_LEGACY_UI.runConversation ? [{value: 'chat', label: 'Chat'}] : [];
 
   // R-190 (post-cutover) — VIBE_TABS (Code + Preview only) deleted with
   // the Vibe surface. TABS is now always the full Pro set.
   const TABS = [
-    ...BASE_TABS.filter(t => t.value !== 'log' || topLevelPermissions?.canViewLiveLog !== false),
-    { value: 'preview', label: 'Preview' },
+    ...BASE_TABS.filter((t) => t.value !== 'log' || topLevelPermissions?.canViewLiveLog !== false),
+    {value: 'preview', label: 'Preview'},
     ...chatTab,
   ];
 
   return (
-    <Tabs.Root value={activeTab} onValueChange={setActiveTab} className="flex flex-col">
-      <Tabs.List className="flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 sm:px-3 lg:px-4 overflow-x-auto scrollbar-hide sticky top-0 z-10 bg-[var(--gray-100)]">
+    <Tabs.Root value={activeTab} onValueChange={setActiveTab} className='flex flex-col'>
+      <Tabs.List className='flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 sm:px-3 lg:px-4 overflow-x-auto scrollbar-hide sticky top-0 z-10 bg-[var(--gray-100)]'>
         {TABS.map((tab) => (
           <Tabs.Trigger
             key={tab.value}
@@ -146,139 +185,167 @@ export default function RunDetailTabs() {
               'px-2.5 lg:px-4 py-2 lg:py-2.5 text-[10px] sm:text-[11px] lg:text-xs font-mono font-medium uppercase tracking-wider border-b-2 -mb-px transition-colors whitespace-nowrap',
               'data-[state=active]:border-[var(--text-primary)] data-[state=active]:text-primary',
               'data-[state=inactive]:border-transparent data-[state=inactive]:text-muted',
-              'hover:text-secondary'
+              'hover:text-secondary',
             )}
           >
             {tab.value === 'chat' ? (
-              <span className="flex items-center gap-1.5">
-                <MessageSquare className="h-3 w-3" />
+              <span className='flex items-center gap-1.5'>
+                <MessageSquare className='h-3 w-3' />
                 {tab.label}
               </span>
-            ) : tab.label}
+            ) : (
+              tab.label
+            )}
           </Tabs.Trigger>
         ))}
         <button
           onClick={handleRefresh}
           disabled={refreshing}
-          className="ml-auto flex-shrink-0 p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-muted hover:text-secondary transition-colors disabled:opacity-50"
-          title="Refresh run data"
+          className='ml-auto flex-shrink-0 p-2 min-h-[36px] min-w-[36px] flex items-center justify-center text-muted hover:text-secondary transition-colors disabled:opacity-50'
+          title='Refresh run data'
         >
           <RefreshCw className={cn('h-3.5 w-3.5', refreshing && 'animate-spin')} />
         </button>
       </Tabs.List>
 
       <div>
-        <Tabs.Content value="overview" className="p-4">
+        <Tabs.Content value='overview' className='p-4'>
           <OverviewTab run={activeRun} fetchRun={fetchRun} fetchRuns={fetchRuns} />
         </Tabs.Content>
 
-        <Tabs.Content value="tasks" className="p-4 space-y-2">
-          {activeRun.tasks.length === 0 && testTasks.length === 0
-            ? <p className="text-sm text-muted">No tasks yet.</p>
-            : (
-              <>
-                {(() => {
-                  // Group: show parent tasks, nest subtasks underneath.
-                  // Exclude gap-closing tasks (taskId contains _gap_) — they're background best-effort
-                  // and shown separately below; including them inflates the count and alarms users.
-                  const parentTasks = activeRun.tasks.filter(t => !t.parentTaskId && !t.taskId?.includes('_gap_'));
-                  const subtaskMap = new Map<string, typeof activeRun.tasks>();
-                  activeRun.tasks.filter(t => t.parentTaskId).forEach(t => {
+        <Tabs.Content value='tasks' className='p-4 space-y-2'>
+          {activeRun.tasks.length === 0 && testTasks.length === 0 ? (
+            <p className='text-sm text-muted'>No tasks yet.</p>
+          ) : (
+            <>
+              {(() => {
+                // Group: show parent tasks, nest subtasks underneath.
+                // Exclude gap-closing tasks (taskId contains _gap_) — they're background best-effort
+                // and shown separately below; including them inflates the count and alarms users.
+                const parentTasks = activeRun.tasks.filter(
+                  (t) => !t.parentTaskId && !t.taskId?.includes('_gap_'),
+                );
+                const subtaskMap = new Map<string, typeof activeRun.tasks>();
+                activeRun.tasks
+                  .filter((t) => t.parentTaskId)
+                  .forEach((t) => {
                     const list = subtaskMap.get(t.parentTaskId!) || [];
                     list.push(t);
                     subtaskMap.set(t.parentTaskId!, list);
                   });
-                  return parentTasks.map((t) => (
-                    <div key={t.taskId}>
+                return parentTasks.map((t) => (
+                  <div key={t.taskId}>
+                    <TaskCard
+                      task={t}
+                      runId={activeRun.runId}
+                      runStatus={activeRun.status}
+                      subtasks={subtaskMap.get(t.taskId)}
+                    />
+                    {subtaskMap.get(t.taskId)?.map((st) => (
                       <TaskCard
-                        task={t}
+                        key={st.taskId}
+                        task={st}
                         runId={activeRun.runId}
                         runStatus={activeRun.status}
-                        subtasks={subtaskMap.get(t.taskId)}
                       />
-                      {subtaskMap.get(t.taskId)?.map((st) => (
-                        <TaskCard key={st.taskId} task={st} runId={activeRun.runId} runStatus={activeRun.status} />
+                    ))}
+                  </div>
+                ));
+              })()}
+
+              {/* Gap-closing tasks — background best-effort, shown collapsed */}
+              {(() => {
+                const gapTasks = activeRun.tasks.filter((t) => t.taskId?.includes('_gap_'));
+                // Deduplicate by title — keep most recent (last in array)
+                const seen = new Map<string, (typeof gapTasks)[0]>();
+                gapTasks.forEach((t) => seen.set(t.title, t));
+                const uniqueGapTasks = Array.from(seen.values());
+                if (uniqueGapTasks.length === 0) return null;
+                const doneCount = uniqueGapTasks.filter((t) => t.status === 'COMPLETE').length;
+                return (
+                  <details className='mt-2 border-t border-[var(--border-default)]'>
+                    <summary className='flex items-center gap-2 pt-3 pb-1 cursor-pointer select-none text-muted hover:text-secondary'>
+                      <Wrench className='h-3.5 w-3.5' />
+                      <span className='text-xs font-medium'>Gap fixes (background)</span>
+                      <span className='text-xs opacity-60'>
+                        {doneCount}/{uniqueGapTasks.length} completed
+                      </span>
+                    </summary>
+                    <div className='mt-1 space-y-1'>
+                      {uniqueGapTasks.map((t) => (
+                        <TaskCard
+                          key={t.taskId}
+                          task={t}
+                          runId={activeRun.runId}
+                          runStatus={activeRun.status}
+                        />
                       ))}
                     </div>
-                  ));
-                })()}
+                  </details>
+                );
+              })()}
 
-                {/* Gap-closing tasks — background best-effort, shown collapsed */}
-                {(() => {
-                  const gapTasks = activeRun.tasks.filter(t => t.taskId?.includes('_gap_'));
-                  // Deduplicate by title — keep most recent (last in array)
-                  const seen = new Map<string, typeof gapTasks[0]>();
-                  gapTasks.forEach(t => seen.set(t.title, t));
-                  const uniqueGapTasks = Array.from(seen.values());
-                  if (uniqueGapTasks.length === 0) return null;
-                  const doneCount = uniqueGapTasks.filter(t => t.status === 'COMPLETE').length;
-                  return (
-                    <details className="mt-2 border-t border-[var(--border-default)]">
-                      <summary className="flex items-center gap-2 pt-3 pb-1 cursor-pointer select-none text-muted hover:text-secondary">
-                        <Wrench className="h-3.5 w-3.5" />
-                        <span className="text-xs font-medium">Gap fixes (background)</span>
-                        <span className="text-xs opacity-60">{doneCount}/{uniqueGapTasks.length} completed</span>
-                      </summary>
-                      <div className="mt-1 space-y-1">
-                        {uniqueGapTasks.map((t) => (
-                          <TaskCard key={t.taskId} task={t} runId={activeRun.runId} runStatus={activeRun.status} />
-                        ))}
-                      </div>
-                    </details>
-                  );
-                })()}
-
-                {testTasks.length > 0 && (
-                  <>
-                    <div className="flex items-center gap-2 pt-4 pb-1 border-t border-[var(--border-default)]">
-                      <TestTube2 className="h-4 w-4 text-accent-blue" />
-                      <span className="text-sm font-medium text-secondary">Test Generation Tasks</span>
-                      <span className="text-xs text-muted">({testTasks.length})</span>
-                    </div>
-                    {testTasks.map((tt) => (
-                      <TestTaskCard key={tt.id} task={tt} />
-                    ))}
-                  </>
-                )}
-              </>
-            )
-          }
+              {testTasks.length > 0 && (
+                <>
+                  <div className='flex items-center gap-2 pt-4 pb-1 border-t border-[var(--border-default)]'>
+                    <TestTube2 className='h-4 w-4 text-accent-blue' />
+                    <span className='text-sm font-medium text-secondary'>
+                      Test Generation Tasks
+                    </span>
+                    <span className='text-xs text-muted'>({testTasks.length})</span>
+                  </div>
+                  {testTasks.map((tt) => (
+                    <TestTaskCard key={tt.id} task={tt} />
+                  ))}
+                </>
+              )}
+            </>
+          )}
         </Tabs.Content>
 
-        <Tabs.Content value="log" className="h-[calc(100vh-180px)]">
+        <Tabs.Content value='log' className='h-[calc(100vh-180px)]'>
           <LiveLog />
         </Tabs.Content>
 
-        <Tabs.Content value="plan" className="p-4">
+        <Tabs.Content value='plan' className='p-4'>
           <PlanTab run={activeRun} />
         </Tabs.Content>
 
-        <Tabs.Content value="code" className="h-[calc(100vh-180px)] overflow-hidden">
-          <CodeTab runId={activeRun.runId} files={files} filesLoading={filesLoading} repoUrl={activeRun.repoUrl} status={activeRun.status} scmProvider={activeRun.scmProvider} />
+        <Tabs.Content value='code' className='h-[calc(100vh-180px)] overflow-hidden'>
+          <CodeTab
+            runId={activeRun.runId}
+            files={files}
+            filesLoading={filesLoading}
+            repoUrl={activeRun.repoUrl}
+            status={activeRun.status}
+            scmProvider={activeRun.scmProvider}
+          />
         </Tabs.Content>
 
-        <Tabs.Content value="timeline" className="p-4 overflow-auto">
+        <Tabs.Content value='timeline' className='p-4 overflow-auto'>
           <TaskTimeline tasks={activeRun.tasks} runStartedAt={activeRun.startedAt} />
         </Tabs.Content>
 
-        <Tabs.Content value="preview" className="h-[calc(100vh-180px)] overflow-hidden">
+        <Tabs.Content value='preview' className='h-[calc(100vh-180px)] overflow-hidden'>
           {previewReady ? (
             <PreviewTab runId={activeRun.runId} />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted gap-2">
-              <Loader2 className="h-5 w-5 animate-spin text-muted" />
-              <p className="text-sm">Preview will be available once the run starts generating code.</p>
+            <div className='flex flex-col items-center justify-center h-full text-muted gap-2'>
+              <Loader2 className='h-5 w-5 animate-spin text-muted' />
+              <p className='text-sm'>
+                Preview will be available once the run starts generating code.
+              </p>
             </div>
           )}
         </Tabs.Content>
 
-        <Tabs.Content value="chat" className="h-[calc(100vh-180px)] overflow-hidden">
+        <Tabs.Content value='chat' className='h-[calc(100vh-180px)] overflow-hidden'>
           {chatReady ? (
             <RunConversation runId={activeRun.runId} />
           ) : (
-            <div className="flex flex-col items-center justify-center h-full text-muted gap-2">
-              <MessageSquare className="h-5 w-5 text-muted" />
-              <p className="text-sm">Chat will be available once the run finishes.</p>
+            <div className='flex flex-col items-center justify-center h-full text-muted gap-2'>
+              <MessageSquare className='h-5 w-5 text-muted' />
+              <p className='text-sm'>Chat will be available once the run finishes.</p>
             </div>
           )}
         </Tabs.Content>
@@ -290,19 +357,17 @@ export default function RunDetailTabs() {
 /** Shows a subtle indicator while review & tests run in the background. */
 function BackgroundValidationIndicator() {
   const entries = useSseStore((s) => s.entries);
-  const hasValidationStarted = entries.some(e =>
-    e.type === 'REVIEW_STARTED' || e.type === 'TEST_GEN_STARTED'
+  const hasValidationStarted = entries.some(
+    (e) => e.type === 'REVIEW_STARTED' || e.type === 'TEST_GEN_STARTED',
   );
-  const hasValidationFinished = entries.some(e =>
-    e.type === 'VALIDATION_REPORT_READY'
-  );
+  const hasValidationFinished = entries.some((e) => e.type === 'VALIDATION_REPORT_READY');
 
   if (!hasValidationStarted || hasValidationFinished) return null;
 
   return (
-    <div className="flex items-center gap-2 px-1 py-1.5">
-      <span className="h-1.5 w-1.5 rounded-full bg-accent-blue/60 animate-pulse" />
-      <span className="text-[11px] text-muted">Review & tests running in background...</span>
+    <div className='flex items-center gap-2 px-1 py-1.5'>
+      <span className='h-1.5 w-1.5 rounded-full bg-accent-blue/60 animate-pulse' />
+      <span className='text-[11px] text-muted'>Review & tests running in background...</span>
     </div>
   );
 }
@@ -323,8 +388,13 @@ function fmtDuration(ms: number): string {
 }
 
 /** Group tasks by copilot/review source prefix. Returns only cop/rev groups (excludes original tasks). */
-function groupTasksBySource(tasks: RunDetail['tasks']): { label: string; taskCount: number; inputTokens: number; outputTokens: number; order: number }[] {
-  const groups = new Map<string, { label: string; taskCount: number; inputTokens: number; outputTokens: number; order: number }>();
+function groupTasksBySource(
+  tasks: RunDetail['tasks'],
+): {label: string; taskCount: number; inputTokens: number; outputTokens: number; order: number}[] {
+  const groups = new Map<
+    string,
+    {label: string; taskCount: number; inputTokens: number; outputTokens: number; order: number}
+  >();
   for (const t of tasks) {
     const copMatch = t.taskId.match(/_cop(\d+)_/);
     const revMatch = t.taskId.match(/_rev(\d+)_/);
@@ -343,7 +413,7 @@ function groupTasksBySource(tasks: RunDetail['tasks']): { label: string; taskCou
       order = 200 + idx;
     }
     if (!key) continue;
-    const entry = groups.get(key) || { label, taskCount: 0, inputTokens: 0, outputTokens: 0, order };
+    const entry = groups.get(key) || {label, taskCount: 0, inputTokens: 0, outputTokens: 0, order};
     entry.taskCount++;
     entry.inputTokens += t.inputTokens || 0;
     entry.outputTokens += t.outputTokens || 0;
@@ -357,10 +427,14 @@ function displayProvider(provider: string | null | undefined): string {
   if (!provider) return '—';
   switch (provider.toUpperCase()) {
     case 'GEMINI':
-    case 'GOOGLE': return 'Gemini'; // GOOGLE retained for pre-V119 historical runs
-    case 'ANTHROPIC': return 'Anthropic';
-    case 'OPENAI': return 'OpenAI';
-    default: return provider;
+    case 'GOOGLE':
+      return 'Gemini'; // GOOGLE retained for pre-V119 historical runs
+    case 'ANTHROPIC':
+      return 'Anthropic';
+    case 'OPENAI':
+      return 'OpenAI';
+    default:
+      return provider;
   }
 }
 
@@ -368,12 +442,15 @@ function displayProvider(provider: string | null | undefined): string {
 function tokensByModel(
   tasks: RunDetail['tasks'],
   agentTokens?: AgentTokenEntry[],
-): { model: string; provider: string | null; input: number; output: number; role?: string }[] {
-  const map = new Map<string, { provider: string | null; input: number; output: number; role?: string }>();
+): {model: string; provider: string | null; input: number; output: number; role?: string}[] {
+  const map = new Map<
+    string,
+    {provider: string | null; input: number; output: number; role?: string}
+  >();
   // Worker task tokens
   for (const t of tasks) {
     const model = t.model || t.assignedModel || 'unknown';
-    const entry = map.get(model) || { provider: null, input: 0, output: 0 };
+    const entry = map.get(model) || {provider: null, input: 0, output: 0};
     entry.input += t.inputTokens || 0;
     entry.output += t.outputTokens || 0;
     if (t.provider) entry.provider = t.provider;
@@ -385,7 +462,7 @@ function tokensByModel(
     for (const a of agentTokens) {
       const model = a.model || 'unknown';
       const key = `${a.role}:${model}`;
-      const entry = map.get(key) || { provider: null, input: 0, output: 0, role: a.role };
+      const entry = map.get(key) || {provider: null, input: 0, output: 0, role: a.role};
       entry.input += a.inputTokens || 0;
       entry.output += a.outputTokens || 0;
       if (a.provider) entry.provider = a.provider;
@@ -394,15 +471,22 @@ function tokensByModel(
     }
   }
   return Array.from(map.entries())
-    .map(([key, { provider, input, output, role }]) => ({
+    .map(([key, {provider, input, output, role}]) => ({
       // Strip the "role:" prefix for agent entries to show the real model name
       model: key.includes(':') ? key.split(':').slice(1).join(':') : key,
-      provider, input, output, role,
+      provider,
+      input,
+      output,
+      role,
     }))
-    .sort((a, b) => (b.input + b.output) - (a.input + a.output));
+    .sort((a, b) => b.input + b.output - (a.input + a.output));
 }
 
-function OverviewTab({ run, fetchRun, fetchRuns }: {
+function OverviewTab({
+  run,
+  fetchRun,
+  fetchRuns,
+}: {
   run: RunDetail;
   fetchRun: (id: string) => Promise<void>;
   fetchRuns: () => Promise<void>;
@@ -419,7 +503,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
   // shows an internally-consistent pair (tokens and cost in lockstep)
   // instead of "Total 3.4K / Live $3.31".
   const [liveCost, setLiveCost] = useState<number | null>(null);
-  const [liveTokens, setLiveTokens] = useState<{ input: number; output: number } | null>(null);
+  const [liveTokens, setLiveTokens] = useState<{input: number; output: number} | null>(null);
   useEffect(() => {
     let cancelled = false;
     const fetchCost = () => {
@@ -428,7 +512,7 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
           if (cancelled) return;
           setLiveCost(res.costUsd);
           if (typeof res.inputTokens === 'number' && typeof res.outputTokens === 'number') {
-            setLiveTokens({ input: res.inputTokens, output: res.outputTokens });
+            setLiveTokens({input: res.inputTokens, output: res.outputTokens});
           }
         })
         .catch(() => {});
@@ -438,10 +522,15 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
     // mount-time snapshot for the entire worker phase (status doesn't flip
     // between PLANNING → WORKING → REVIEWING for cost accumulation, but the
     // accumulator updates on every LLM call).
-    const isTerminal = run.status === 'COMPLETE' || run.status === 'FAILED'
-      || run.status === 'CANCELLED' || run.status === 'PARTIAL';
+    const isTerminal =
+      run.status === 'COMPLETE' ||
+      run.status === 'FAILED' ||
+      run.status === 'CANCELLED' ||
+      run.status === 'PARTIAL';
     if (isTerminal) {
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
     const interval = setInterval(fetchCost, 5000);
     return () => {
@@ -466,7 +555,9 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
       .catch(() => setProjects([]));
   }, [isOrgMember]);
 
-  useEffect(() => { refreshProjects(); }, [refreshProjects]);
+  useEffect(() => {
+    refreshProjects();
+  }, [refreshProjects]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -480,27 +571,30 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
     return () => document.removeEventListener('mousedown', handler);
   }, [projectDropdownOpen]);
 
-  const handleProjectChange = useCallback(async (projectId: string | null) => {
-    setProjectSaving(true);
-    setProjectDropdownOpen(false);
-    setCreatingProject(false);
-    try {
-      await updateRunProject(run.runId, projectId);
-      await fetchRun(run.runId);
-      await fetchRuns();
-    } catch {
-      // silent
-    } finally {
-      setProjectSaving(false);
-    }
-  }, [run.runId, fetchRun, fetchRuns]);
+  const handleProjectChange = useCallback(
+    async (projectId: string | null) => {
+      setProjectSaving(true);
+      setProjectDropdownOpen(false);
+      setCreatingProject(false);
+      try {
+        await updateRunProject(run.runId, projectId);
+        await fetchRun(run.runId);
+        await fetchRuns();
+      } catch {
+        // silent
+      } finally {
+        setProjectSaving(false);
+      }
+    },
+    [run.runId, fetchRun, fetchRuns],
+  );
 
   const handleCreateProject = useCallback(async () => {
     const name = newProjectName.trim();
     if (!name) return;
     setProjectSaving(true);
     try {
-      const created = await createProject({ name });
+      const created = await createProject({name});
       refreshProjects();
       // Immediately assign the run to the new project
       await updateRunProject(run.runId, created.id);
@@ -535,9 +629,10 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
     ? ['QUEUED', 'PLANNING', 'WORKING', 'REVIEWING', 'COMPLETE']
     : PIPELINE_STEPS;
   // V2 terminal statuses map onto the last step for display purposes.
-  const v2DisplayStatus = isV2 && ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(displayStatus)
-    ? 'COMPLETE'
-    : displayStatus;
+  const v2DisplayStatus =
+    isV2 && ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(displayStatus)
+      ? 'COMPLETE'
+      : displayStatus;
   const stepIndex = effectiveSteps.indexOf(isV2 ? v2DisplayStatus : displayStatus);
 
   // Compute run duration
@@ -547,14 +642,14 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
   const isTerminal = ['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(run.status);
 
   return (
-    <div className="space-y-6">
+    <div className='space-y-6'>
       {/* Stuck warning banner */}
       {run.status === 'STUCK' && (
-        <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-red/10 border border-accent-red/20">
-          <span className="text-accent-red text-sm flex-shrink-0">⚠</span>
+        <div className='flex items-start gap-2 p-3 rounded-sm bg-accent-red/10 border border-accent-red/20'>
+          <span className='text-accent-red text-sm flex-shrink-0'>⚠</span>
           <div>
-            <p className="text-sm font-medium text-accent-red">Run is stuck</p>
-            <p className="text-xs text-accent-red/70 mt-0.5">
+            <p className='text-sm font-medium text-accent-red'>Run is stuck</p>
+            <p className='text-xs text-accent-red/70 mt-0.5'>
               No activity detected for 30+ minutes. Recovery has been triggered automatically.
             </p>
           </div>
@@ -562,39 +657,46 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
       )}
 
       {/* Pipeline timeline — V1 and V2 have different phase sequences */}
-      <div className="space-y-0">
+      <div className='space-y-0'>
         {effectiveSteps.map((step, i) => {
           const isDone = i < stepIndex;
           const isActive = step === (isV2 ? v2DisplayStatus : displayStatus);
           return (
-            <div key={step} className="flex items-start gap-3 relative">
+            <div key={step} className='flex items-start gap-3 relative'>
               {/* Connector line */}
               {i < effectiveSteps.length - 1 && (
-                <div className={cn(
-                  'absolute left-[11px] top-6 w-0.5 h-5 -bottom-1',
-                  isDone ? 'bg-accent-green/40' : 'bg-[var(--gray-200)]'
-                )} />
+                <div
+                  className={cn(
+                    'absolute left-[11px] top-6 w-0.5 h-5 -bottom-1',
+                    isDone ? 'bg-accent-green/40' : 'bg-[var(--gray-200)]',
+                  )}
+                />
               )}
-              <div className={cn(
-                'relative z-10 h-6 w-6 rounded-full border flex items-center justify-center flex-shrink-0 mt-0.5',
-                isDone ? 'border-accent-green bg-accent-green/20' :
-                isActive ? 'border-accent-blue bg-accent-blue/20' :
-                'border-[var(--border-hover)] bg-transparent'
-              )}>
+              <div
+                className={cn(
+                  'relative z-10 h-6 w-6 rounded-full border flex items-center justify-center flex-shrink-0 mt-0.5',
+                  isDone
+                    ? 'border-accent-green bg-accent-green/20'
+                    : isActive
+                      ? 'border-accent-blue bg-accent-blue/20'
+                      : 'border-[var(--border-hover)] bg-transparent',
+                )}
+              >
                 {isDone ? (
-                  <span className="text-accent-green text-xs">✓</span>
+                  <span className='text-accent-green text-xs'>✓</span>
                 ) : isActive ? (
-                  <span className="h-2 w-2 rounded-full bg-accent-blue animate-pulse" />
+                  <span className='h-2 w-2 rounded-full bg-accent-blue animate-pulse' />
                 ) : (
-                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--border-default)]" />
+                  <span className='h-1.5 w-1.5 rounded-full bg-[var(--border-default)]' />
                 )}
               </div>
-              <div className="pb-5">
-                <p className={cn(
-                  'text-sm font-medium',
-                  isDone ? 'text-accent-green' :
-                  isActive ? 'text-primary' : 'text-muted'
-                )}>
+              <div className='pb-5'>
+                <p
+                  className={cn(
+                    'text-sm font-medium',
+                    isDone ? 'text-accent-green' : isActive ? 'text-primary' : 'text-muted',
+                  )}
+                >
                   {step === 'COMPLETE' ? 'CODE GENERATED' : step.replace(/_/g, ' ')}
                 </p>
               </div>
@@ -607,49 +709,54 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
       {run.status === 'COMPLETE' && <BackgroundValidationIndicator />}
 
       {/* Run stats: time taken */}
-      <div className="pt-2 border-t border-[var(--border-default)]">
-        <div className="flex items-center gap-2 mb-3">
-          <Clock className="h-3.5 w-3.5 text-muted" />
-          <span className="text-xs font-medium text-secondary uppercase tracking-wider">Run Stats</span>
+      <div className='pt-2 border-t border-[var(--border-default)]'>
+        <div className='flex items-center gap-2 mb-3'>
+          <Clock className='h-3.5 w-3.5 text-muted' />
+          <span className='text-xs font-medium text-secondary uppercase tracking-wider'>
+            Run Stats
+          </span>
         </div>
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+        <div className='grid grid-cols-1 lg:grid-cols-2 gap-3'>
           <div>
-            <p className="text-xs text-muted">Time taken</p>
-            <p className="text-sm text-primary mt-0.5 font-mono">
+            <p className='text-xs text-muted'>Time taken</p>
+            <p className='text-sm text-primary mt-0.5 font-mono'>
               {durationMs > 0
                 ? `${fmtDuration(durationMs)}${!isTerminal ? ' (running)' : ''}`
                 : '—'}
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted">Started</p>
-            <p className="text-sm text-primary mt-0.5 font-mono">{relativeTime(run.startedAt)}</p>
+            <p className='text-xs text-muted'>Started</p>
+            <p className='text-sm text-primary mt-0.5 font-mono'>{relativeTime(run.startedAt)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted">Tasks</p>
-            <p className="text-sm text-primary mt-0.5 font-mono">{String(run.tasks.length)}</p>
+            <p className='text-xs text-muted'>Tasks</p>
+            <p className='text-sm text-primary mt-0.5 font-mono'>{String(run.tasks.length)}</p>
           </div>
           <div>
-            <p className="text-xs text-muted">Total tokens</p>
-            <p className="text-sm text-primary mt-0.5 font-mono">
+            <p className='text-xs text-muted'>Total tokens</p>
+            <p className='text-sm text-primary mt-0.5 font-mono'>
               {totalTokens > 0 ? fmtTokens(totalTokens) : '—'}
             </p>
           </div>
           {run.createdByName && (
             <div>
-              <p className="text-xs text-muted">Created by</p>
-              <p className="text-sm text-primary mt-0.5 flex items-center gap-1.5">
-                <User className="h-3 w-3 text-accent-blue" />
+              <p className='text-xs text-muted'>Created by</p>
+              <p className='text-sm text-primary mt-0.5 flex items-center gap-1.5'>
+                <User className='h-3 w-3 text-accent-blue' />
                 {run.createdByName}
               </p>
             </div>
           )}
           {/* Project selector — org members can assign/change/remove/create project */}
           {isOrgMember ? (
-            <div className="relative" ref={projectDropdownRef}>
-              <p className="text-xs text-muted">Project</p>
+            <div className='relative' ref={projectDropdownRef}>
+              <p className='text-xs text-muted'>Project</p>
               <button
-                onClick={() => { setProjectDropdownOpen((v) => !v); setCreatingProject(false); }}
+                onClick={() => {
+                  setProjectDropdownOpen((v) => !v);
+                  setCreatingProject(false);
+                }}
                 disabled={projectSaving}
                 className={cn(
                   'mt-0.5 flex items-center gap-1.5 text-sm rounded px-1.5 py-0.5 -mx-1.5 transition-colors',
@@ -657,22 +764,22 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                   projectSaving && 'opacity-50 pointer-events-none',
                 )}
               >
-                <FolderKanban className="h-3 w-3 text-cyan-400 flex-shrink-0" />
+                <FolderKanban className='h-3 w-3 text-cyan-400 flex-shrink-0' />
                 <span className={run.projectName ? 'text-primary' : 'text-muted italic'}>
                   {run.projectName ?? 'Assign project…'}
                 </span>
-                <ChevronDown className="h-3 w-3 text-muted" />
+                <ChevronDown className='h-3 w-3 text-muted' />
               </button>
 
               {projectDropdownOpen && (
-                <div className="absolute left-0 top-full mt-1 z-50 min-w-[200px] rounded-md border border-[var(--border-default)] bg-[var(--gray-200)]  py-1">
+                <div className='absolute left-0 top-full mt-1 z-50 min-w-[200px] rounded-md border border-[var(--border-default)] bg-[var(--gray-200)]  py-1'>
                   {/* Un-assign option — only if currently assigned */}
                   {run.projectId && (
                     <button
                       onClick={() => handleProjectChange(null)}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-secondary hover:bg-[var(--gray-200)] hover:text-primary transition-colors"
+                      className='flex items-center gap-2 w-full px-3 py-1.5 text-sm text-secondary hover:bg-[var(--gray-200)] hover:text-primary transition-colors'
                     >
-                      <X className="h-3 w-3" />
+                      <X className='h-3 w-3' />
                       Remove from project
                     </button>
                   )}
@@ -687,44 +794,55 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                           : 'text-secondary hover:bg-[var(--gray-200)]',
                       )}
                     >
-                      <FolderKanban className="h-3 w-3 flex-shrink-0" />
+                      <FolderKanban className='h-3 w-3 flex-shrink-0' />
                       {proj.name}
                     </button>
                   ))}
 
                   {/* Divider */}
                   {(projects.length > 0 || run.projectId) && (
-                    <div className="border-t border-[var(--border-default)] my-1" />
+                    <div className='border-t border-[var(--border-default)] my-1' />
                   )}
 
                   {/* Create new project */}
                   {creatingProject ? (
                     <form
-                      onSubmit={(e) => { e.preventDefault(); handleCreateProject(); }}
-                      className="px-2 py-1.5"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        handleCreateProject();
+                      }}
+                      className='px-2 py-1.5'
                     >
                       <input
                         ref={newProjectInputRef}
-                        type="text"
+                        type='text'
                         value={newProjectName}
                         onChange={(e) => setNewProjectName(e.target.value)}
-                        placeholder="Project name…"
+                        placeholder='Project name…'
                         autoFocus
-                        className="w-full bg-[var(--gray-200)] border border-[var(--border-hover)] rounded px-2 py-1 text-sm text-primary placeholder-[var(--text-muted)] outline-none focus:border-accent-blue/50"
-                        onKeyDown={(e) => { if (e.key === 'Escape') { setCreatingProject(false); setNewProjectName(''); } }}
+                        className='w-full bg-[var(--gray-200)] border border-[var(--border-hover)] rounded px-2 py-1 text-sm text-primary placeholder-[var(--text-muted)] outline-none focus:border-accent-blue/50'
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') {
+                            setCreatingProject(false);
+                            setNewProjectName('');
+                          }
+                        }}
                       />
-                      <div className="flex items-center gap-1.5 mt-1.5">
+                      <div className='flex items-center gap-1.5 mt-1.5'>
                         <button
-                          type="submit"
+                          type='submit'
                           disabled={!newProjectName.trim() || projectSaving}
-                          className="flex-1 text-xs text-center py-1 rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors disabled:opacity-40"
+                          className='flex-1 text-xs text-center py-1 rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 transition-colors disabled:opacity-40'
                         >
                           Create & assign
                         </button>
                         <button
-                          type="button"
-                          onClick={() => { setCreatingProject(false); setNewProjectName(''); }}
-                          className="text-xs text-muted hover:text-secondary px-2 py-1 transition-colors"
+                          type='button'
+                          onClick={() => {
+                            setCreatingProject(false);
+                            setNewProjectName('');
+                          }}
+                          className='text-xs text-muted hover:text-secondary px-2 py-1 transition-colors'
                         >
                           Cancel
                         </button>
@@ -732,10 +850,13 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
                     </form>
                   ) : (
                     <button
-                      onClick={() => { setCreatingProject(true); setTimeout(() => newProjectInputRef.current?.focus(), 0); }}
-                      className="flex items-center gap-2 w-full px-3 py-1.5 text-sm text-accent-blue hover:bg-[var(--gray-200)] transition-colors"
+                      onClick={() => {
+                        setCreatingProject(true);
+                        setTimeout(() => newProjectInputRef.current?.focus(), 0);
+                      }}
+                      className='flex items-center gap-2 w-full px-3 py-1.5 text-sm text-accent-blue hover:bg-[var(--gray-200)] transition-colors'
                     >
-                      <Plus className="h-3 w-3" />
+                      <Plus className='h-3 w-3' />
                       New project…
                     </button>
                   )}
@@ -744,9 +865,9 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
             </div>
           ) : run.projectName ? (
             <div>
-              <p className="text-xs text-muted">Project</p>
-              <p className="text-sm text-primary mt-0.5 flex items-center gap-1.5">
-                <FolderOpen className="h-3 w-3 text-cyan-400" />
+              <p className='text-xs text-muted'>Project</p>
+              <p className='text-sm text-primary mt-0.5 flex items-center gap-1.5'>
+                <FolderOpen className='h-3 w-3 text-cyan-400' />
                 {run.projectName}
               </p>
             </div>
@@ -756,18 +877,24 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
       {/* Credits charged — visible to all users */}
       {run.creditsCharged != null && (
-        <div className="pt-3 border-t border-[var(--border-default)]">
-          <div className="flex items-center gap-2 mb-2">
-            <Coins className="h-3.5 w-3.5 text-accent-amber/70" />
-            <span className="text-xs font-medium text-secondary uppercase tracking-wider">Credits</span>
+        <div className='pt-3 border-t border-[var(--border-default)]'>
+          <div className='flex items-center gap-2 mb-2'>
+            <Coins className='h-3.5 w-3.5 text-accent-amber/70' />
+            <span className='text-xs font-medium text-secondary uppercase tracking-wider'>
+              Credits
+            </span>
           </div>
-          <div className="flex items-baseline gap-2">
-            <span className="text-sm text-primary font-mono font-medium">{run.creditsCharged} credit{run.creditsCharged > 1 ? 's' : ''}</span>
+          <div className='flex items-baseline gap-2'>
+            <span className='text-sm text-primary font-mono font-medium'>
+              {run.creditsCharged} credit{run.creditsCharged > 1 ? 's' : ''}
+            </span>
             {run.approvedExecutionMode === 'BATCH' && (
-              <span className="text-[10px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full">Batch</span>
+              <span className='text-[10px] font-medium text-accent-emerald bg-accent-emerald/10 px-1.5 py-0.5 rounded-full'>
+                Batch
+              </span>
             )}
             {run.approvedExecutionMode === 'REALTIME' && (
-              <span className="text-[10px] text-muted">Real-time</span>
+              <span className='text-[10px] text-muted'>Real-time</span>
             )}
           </div>
         </div>
@@ -775,30 +902,36 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
       {/* Super admin: cost breakdown */}
       {isSuperAdmin && (
-        <div className="pt-3 border-t border-[var(--border-default)]">
-          <div className="flex items-center gap-2 mb-3">
-            <Coins className="h-3.5 w-3.5 text-accent-amber/70" />
-            <span className="text-xs font-medium text-secondary uppercase tracking-wider">Cost Breakdown</span>
-            <span className="text-[9px] text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded-full">Admin</span>
+        <div className='pt-3 border-t border-[var(--border-default)]'>
+          <div className='flex items-center gap-2 mb-3'>
+            <Coins className='h-3.5 w-3.5 text-accent-amber/70' />
+            <span className='text-xs font-medium text-secondary uppercase tracking-wider'>
+              Cost Breakdown
+            </span>
+            <span className='text-[9px] text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded-full'>
+              Admin
+            </span>
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
+          <div className='grid grid-cols-2 gap-3'>
             <div>
-              <p className="text-xs text-muted">Live cost</p>
-              <p className="text-sm text-accent-green mt-0.5 font-mono font-medium">
-                {liveCost != null ? `$${liveCost.toFixed(4)}` : run.actualCostUsd != null ? `$${run.actualCostUsd.toFixed(4)}` : '—'}
+              <p className='text-xs text-muted'>Live cost</p>
+              <p className='text-sm text-accent-green mt-0.5 font-mono font-medium'>
+                {liveCost != null
+                  ? `$${liveCost.toFixed(4)}`
+                  : run.actualCostUsd != null
+                    ? `$${run.actualCostUsd.toFixed(4)}`
+                    : '—'}
               </p>
               {run.costEstimateLow != null && run.costEstimateHigh != null && (
-                <p className="text-[10px] text-muted mt-0.5 font-mono">
+                <p className='text-[10px] text-muted mt-0.5 font-mono'>
                   est. ${run.costEstimateLow.toFixed(2)} – ${run.costEstimateHigh.toFixed(2)}
                 </p>
               )}
             </div>
             <div>
-              <p className="text-xs text-muted">Key source</p>
-              <p className="text-sm text-primary mt-0.5 font-mono">
-                {run.keySource ?? '—'}
-              </p>
+              <p className='text-xs text-muted'>Key source</p>
+              <p className='text-sm text-primary mt-0.5 font-mono'>{run.keySource ?? '—'}</p>
             </div>
           </div>
 
@@ -815,21 +948,24 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
         const copilotGroups = groupTasksBySource(run.tasks);
         if (copilotGroups.length === 0) return null;
         return (
-          <div className="pt-3 border-t border-[var(--border-default)]">
-            <div className="flex items-center gap-2 mb-3">
-              <RefreshCw className="h-3.5 w-3.5 text-accent-blue/70" />
-              <span className="text-xs font-medium text-secondary uppercase tracking-wider">
+          <div className='pt-3 border-t border-[var(--border-default)]'>
+            <div className='flex items-center gap-2 mb-3'>
+              <RefreshCw className='h-3.5 w-3.5 text-accent-blue/70' />
+              <span className='text-xs font-medium text-secondary uppercase tracking-wider'>
                 Copilot Runs ({copilotGroups.length})
               </span>
             </div>
-            <div className="space-y-1.5">
+            <div className='space-y-1.5'>
               {copilotGroups.map((g) => (
-                <div key={g.label} className="flex items-center justify-between p-2 rounded bg-[var(--gray-100)] border border-[var(--border-default)]">
-                  <span className="text-xs font-medium text-secondary">{g.label}</span>
-                  <div className="flex items-center gap-3 text-[11px] font-mono">
-                    <span className="text-muted">{g.taskCount} tasks</span>
-                    <span className="text-secondary/70">{fmtTokens(g.inputTokens)} in</span>
-                    <span className="text-accent-blue/70">{fmtTokens(g.outputTokens)} out</span>
+                <div
+                  key={g.label}
+                  className='flex items-center justify-between p-2 rounded bg-[var(--gray-100)] border border-[var(--border-default)]'
+                >
+                  <span className='text-xs font-medium text-secondary'>{g.label}</span>
+                  <div className='flex items-center gap-3 text-[11px] font-mono'>
+                    <span className='text-muted'>{g.taskCount} tasks</span>
+                    <span className='text-secondary/70'>{fmtTokens(g.inputTokens)} in</span>
+                    <span className='text-accent-blue/70'>{fmtTokens(g.outputTokens)} out</span>
                   </div>
                 </div>
               ))}
@@ -840,52 +976,58 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
 
       {/* Token usage by model — visible to Org Admins and Super Admins */}
       {isOrgAdmin && tokensByModel(run.tasks, run.agentTokens).length > 0 && (
-        <div className="pt-3 border-t border-[var(--border-default)]">
-          <div className="flex items-center gap-2 mb-3">
-            <Cpu className="h-3.5 w-3.5 text-muted" />
-            <span className="text-xs font-medium text-secondary uppercase tracking-wider">Token Usage by Model</span>
+        <div className='pt-3 border-t border-[var(--border-default)]'>
+          <div className='flex items-center gap-2 mb-3'>
+            <Cpu className='h-3.5 w-3.5 text-muted' />
+            <span className='text-xs font-medium text-secondary uppercase tracking-wider'>
+              Token Usage by Model
+            </span>
           </div>
-          <div className="space-y-1.5">
-            {tokensByModel(run.tasks, run.agentTokens).map(({ model, provider, input, output, role }) => (
-              <div key={role ? `${role}:${model}` : model} className="flex items-center gap-3 p-2 rounded bg-[var(--gray-100)] border border-[var(--border-default)]">
-                <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                  {role && (
-                    <span className="text-[10px] font-medium text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded flex-shrink-0 capitalize">
-                      {role}
-                    </span>
-                  )}
-                  {provider && (
-                    <span className="text-[10px] font-mono text-muted bg-[var(--gray-200)] px-1 py-0.5 rounded flex-shrink-0">
-                      {displayProvider(provider)}
-                    </span>
-                  )}
-                  <span className="text-xs font-mono text-secondary truncate">{model}</span>
+          <div className='space-y-1.5'>
+            {tokensByModel(run.tasks, run.agentTokens).map(
+              ({model, provider, input, output, role}) => (
+                <div
+                  key={role ? `${role}:${model}` : model}
+                  className='flex items-center gap-3 p-2 rounded bg-[var(--gray-100)] border border-[var(--border-default)]'
+                >
+                  <div className='flex items-center gap-1.5 flex-1 min-w-0'>
+                    {role && (
+                      <span className='text-[10px] font-medium text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded flex-shrink-0 capitalize'>
+                        {role}
+                      </span>
+                    )}
+                    {provider && (
+                      <span className='text-[10px] font-mono text-muted bg-[var(--gray-200)] px-1 py-0.5 rounded flex-shrink-0'>
+                        {displayProvider(provider)}
+                      </span>
+                    )}
+                    <span className='text-xs font-mono text-secondary truncate'>{model}</span>
+                  </div>
+                  <div className='flex items-center gap-3 flex-shrink-0 text-[11px] font-mono'>
+                    <span className='text-secondary/70'>{fmtTokens(input)} in</span>
+                    <span className='text-accent-blue/70'>{fmtTokens(output)} out</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-3 flex-shrink-0 text-[11px] font-mono">
-                  <span className="text-secondary/70">
-                    {fmtTokens(input)} in
-                  </span>
-                  <span className="text-accent-blue/70">
-                    {fmtTokens(output)} out
-                  </span>
-                </div>
-              </div>
-            ))}
+              ),
+            )}
           </div>
         </div>
       )}
 
       {/* AI Provider */}
-      <div className="pt-2 border-t border-[var(--border-default)]">
-        <p className="text-xs text-muted">Provider</p>
-        <p className="text-sm text-primary mt-0.5 font-mono">
+      <div className='pt-2 border-t border-[var(--border-default)]'>
+        <p className='text-xs text-muted'>Provider</p>
+        <p className='text-sm text-primary mt-0.5 font-mono'>
           {displayProvider(
-            run.aiProvider
-            ?? run.tasks?.[0]?.provider
-            ?? (run.plannerModel?.startsWith('claude') ? 'ANTHROPIC'
-              : run.plannerModel?.startsWith('gpt') ? 'OPENAI'
-              : run.plannerModel?.startsWith('gemini') ? 'GEMINI'
-              : null)
+            run.aiProvider ??
+              run.tasks?.[0]?.provider ??
+              (run.plannerModel?.startsWith('claude')
+                ? 'ANTHROPIC'
+                : run.plannerModel?.startsWith('gpt')
+                  ? 'OPENAI'
+                  : run.plannerModel?.startsWith('gemini')
+                    ? 'GEMINI'
+                    : null),
           )}
         </p>
       </div>
@@ -894,16 +1036,14 @@ function OverviewTab({ run, fetchRun, fetchRuns }: {
       <RunPrList run={run} />
 
       {/* Goal — the user's original request (markdown rendered) */}
-      {run.userRequest && (
-        <GoalSection content={run.userRequest} />
-      )}
+      {run.userRequest && <GoalSection content={run.userRequest} />}
     </div>
   );
 }
 
 // ── Goal section with copy button ─────────────────────────────────────────────
 
-function GoalSection({ content }: { content: string }) {
+function GoalSection({content}: {content: string}) {
   const [copied, setCopied] = useState(false);
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -912,19 +1052,19 @@ function GoalSection({ content }: { content: string }) {
     });
   };
   return (
-    <div className="pt-3 border-t border-[var(--border-default)]">
-      <div className="flex items-center justify-between mb-1.5">
-        <p className="text-xs text-muted">Goal</p>
+    <div className='pt-3 border-t border-[var(--border-default)]'>
+      <div className='flex items-center justify-between mb-1.5'>
+        <p className='text-xs text-muted'>Goal</p>
         <button
           onClick={handleCopy}
-          className="flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted hover:text-secondary transition-colors rounded hover:bg-[var(--gray-200)]"
-          title="Copy goal to clipboard"
+          className='flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted hover:text-secondary transition-colors rounded hover:bg-[var(--gray-200)]'
+          title='Copy goal to clipboard'
         >
-          {copied ? <Check className="h-3 w-3 text-accent-green" /> : <Copy className="h-3 w-3" />}
+          {copied ? <Check className='h-3 w-3 text-accent-green' /> : <Copy className='h-3 w-3' />}
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <div className="line-clamp-8">
+      <div className='line-clamp-8'>
         <MarkdownContent content={content} />
       </div>
     </div>
@@ -933,9 +1073,9 @@ function GoalSection({ content }: { content: string }) {
 
 // ── Plan tab ──────────────────────────────────────────────────────────────────
 
-function PlanTab({ run }: { run: RunDetail }) {
+function PlanTab({run}: {run: RunDetail}) {
   if (!run.planJson) {
-    return <p className="text-sm text-muted">Plan not available yet.</p>;
+    return <p className='text-sm text-muted'>Plan not available yet.</p>;
   }
 
   let plan: any = null;
@@ -943,7 +1083,7 @@ function PlanTab({ run }: { run: RunDetail }) {
     plan = JSON.parse(run.planJson);
   } catch {
     return (
-      <pre className="text-xs font-mono text-secondary whitespace-pre-wrap break-all">
+      <pre className='text-xs font-mono text-secondary whitespace-pre-wrap break-all'>
         {run.planJson}
       </pre>
     );
@@ -952,21 +1092,27 @@ function PlanTab({ run }: { run: RunDetail }) {
   const canEdit = run.status === 'AWAITING_APPROVAL';
 
   return (
-    <div className="space-y-4">
+    <div className='space-y-4'>
       {plan.plan_summary && (
-        <div className="p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
-          <p className="text-[10px] uppercase tracking-wider text-muted mb-1">Plan Summary</p>
-          <p className="text-sm text-primary leading-relaxed">{plan.plan_summary}</p>
+        <div className='p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]'>
+          <p className='text-[10px] uppercase tracking-wider text-muted mb-1'>Plan Summary</p>
+          <p className='text-sm text-primary leading-relaxed'>{plan.plan_summary}</p>
         </div>
       )}
 
       {Array.isArray(plan.tasks) && plan.tasks.length > 0 && (
-        <div className="space-y-3">
-          <h4 className="text-xs font-medium text-muted uppercase tracking-wider">
+        <div className='space-y-3'>
+          <h4 className='text-xs font-medium text-muted uppercase tracking-wider'>
             Tasks ({plan.tasks.length})
           </h4>
           {plan.tasks.map((t: any, i: number) => (
-            <PlanTaskCard key={t.task_id ?? i} task={t} index={i} runId={run.runId} canEdit={canEdit} />
+            <PlanTaskCard
+              key={t.task_id ?? i}
+              task={t}
+              index={i}
+              runId={run.runId}
+              canEdit={canEdit}
+            />
           ))}
         </div>
       )}
@@ -976,65 +1122,80 @@ function PlanTab({ run }: { run: RunDetail }) {
 
 // ── Plan task card (expandable) ───────────────────────────────────────────────
 
-function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index: number; runId: string; canEdit: boolean }) {
+function PlanTaskCard({
+  task: t,
+  index: i,
+  runId,
+  canEdit,
+}: {
+  task: any;
+  index: number;
+  runId: string;
+  canEdit: boolean;
+}) {
   const [objExpanded, setObjExpanded] = useState(false);
   const [critExpanded, setCritExpanded] = useState(false);
   const [editing, setEditing] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [submitting, setSubmitting] = useState(false);
-  const { addToast } = useUiStore();
+  const {addToast} = useUiStore();
   const TRUNCATE = 220;
 
-  const objective  = t.objective ?? '';
-  const criteria   = t.acceptance_criteria ?? '';
-  const objLong    = objective.length > TRUNCATE;
-  const critLong   = criteria.length > TRUNCATE;
+  const objective = t.objective ?? '';
+  const criteria = t.acceptance_criteria ?? '';
+  const objLong = objective.length > TRUNCATE;
+  const critLong = criteria.length > TRUNCATE;
 
-  const displayObj  = objExpanded  || !objLong  ? objective  : objective.slice(0, TRUNCATE) + '…';
-  const displayCrit = critExpanded || !critLong ? criteria  : criteria.slice(0, TRUNCATE) + '…';
+  const displayObj = objExpanded || !objLong ? objective : objective.slice(0, TRUNCATE) + '…';
+  const displayCrit = critExpanded || !critLong ? criteria : criteria.slice(0, TRUNCATE) + '…';
 
   return (
-    <div className="rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden">
+    <div className='rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden'>
       {/* ── Header: index · title · complexity badge ── */}
-      <div className="flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[var(--border-default)]">
-        <div className="flex items-center gap-2 min-w-0">
-          <span className="text-[10px] text-muted flex-shrink-0 font-mono tabular-nums">
+      <div className='flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[var(--border-default)]'>
+        <div className='flex items-center gap-2 min-w-0'>
+          <span className='text-[10px] text-muted flex-shrink-0 font-mono tabular-nums'>
             #{String(i + 1).padStart(2, '0')}
           </span>
-          <p className="text-sm font-medium text-primary leading-snug">{t.title}</p>
+          <p className='text-sm font-medium text-primary leading-snug'>{t.title}</p>
         </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className='flex items-center gap-2 flex-shrink-0'>
           {V2_LEGACY_UI.editRunPlan && canEdit && !editing && (
             <button
               onClick={() => setEditing(true)}
-              className="text-[10px] text-muted hover:text-accent-blue transition-colors"
+              className='text-[10px] text-muted hover:text-accent-blue transition-colors'
             >
               Edit
             </button>
           )}
-          <span className={cn(
-            'text-[10px] font-medium px-1.5 py-0.5 rounded',
-            t.complexity === 'HIGH'   ? 'text-accent-red bg-accent-red/10' :
-            t.complexity === 'MEDIUM' ? 'text-accent-amber bg-accent-amber/10' :
-                                        'text-accent-green bg-accent-green/10'
-          )}>
+          <span
+            className={cn(
+              'text-[10px] font-medium px-1.5 py-0.5 rounded',
+              t.complexity === 'HIGH'
+                ? 'text-accent-red bg-accent-red/10'
+                : t.complexity === 'MEDIUM'
+                  ? 'text-accent-amber bg-accent-amber/10'
+                  : 'text-accent-green bg-accent-green/10',
+            )}
+          >
             {t.complexity ?? 'MEDIUM'}
           </span>
         </div>
       </div>
 
       {/* ── Body ── */}
-      <div className="px-3 py-2.5 space-y-3">
-
+      <div className='px-3 py-2.5 space-y-3'>
         {/* Objective */}
         {objective && (
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted mb-1">Objective</p>
-            <p className="text-xs text-secondary leading-relaxed whitespace-pre-wrap">{displayObj}</p>
+            <p className='text-[10px] uppercase tracking-wider text-muted mb-1'>Objective</p>
+            <p className='text-xs text-secondary leading-relaxed whitespace-pre-wrap'>
+              {displayObj}
+            </p>
             {objLong && (
               <button
                 onClick={() => setObjExpanded(!objExpanded)}
-                className="text-[10px] text-accent-blue hover:text-accent-blue/70 mt-1 transition-colors"
+                className='text-[10px] text-accent-blue hover:text-accent-blue/70 mt-1 transition-colors'
               >
                 {objExpanded ? '▲ Show less' : '▼ Show more'}
               </button>
@@ -1045,14 +1206,18 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
         {/* Acceptance criteria */}
         {criteria && (
           <div>
-            <p className="text-[10px] uppercase tracking-wider text-muted mb-1">Acceptance Criteria</p>
-            <div className="bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1.5">
-              <p className="text-xs font-mono text-muted leading-relaxed whitespace-pre-wrap">{displayCrit}</p>
+            <p className='text-[10px] uppercase tracking-wider text-muted mb-1'>
+              Acceptance Criteria
+            </p>
+            <div className='bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1.5'>
+              <p className='text-xs font-mono text-muted leading-relaxed whitespace-pre-wrap'>
+                {displayCrit}
+              </p>
             </div>
             {critLong && (
               <button
                 onClick={() => setCritExpanded(!critExpanded)}
-                className="text-[10px] text-accent-blue hover:text-accent-blue/70 mt-1 transition-colors"
+                className='text-[10px] text-accent-blue hover:text-accent-blue/70 mt-1 transition-colors'
               >
                 {critExpanded ? '▲ Show less' : '▼ Show more'}
               </button>
@@ -1061,19 +1226,19 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
         )}
 
         {/* Footer: model chip + depends_on chips */}
-        <div className="flex items-center flex-wrap gap-2 pt-0.5">
+        <div className='flex items-center flex-wrap gap-2 pt-0.5'>
           {t.assigned_model && (
-            <span className="text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]">
+            <span className='text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]'>
               {t.assigned_model}
             </span>
           )}
           {Array.isArray(t.depends_on) && t.depends_on.length > 0 && (
-            <div className="flex items-center gap-1 flex-wrap">
-              <span className="text-[10px] text-muted">needs:</span>
+            <div className='flex items-center gap-1 flex-wrap'>
+              <span className='text-[10px] text-muted'>needs:</span>
               {t.depends_on.map((dep: string) => (
                 <span
                   key={dep}
-                  className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue/70 border border-accent-blue/10"
+                  className='text-[10px] font-mono px-1.5 py-0.5 rounded bg-accent-blue/10 text-accent-blue/70 border border-accent-blue/10'
                 >
                   {dep}
                 </span>
@@ -1084,16 +1249,16 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
 
         {/* Inline task edit */}
         {editing && (
-          <div className="px-3 py-2.5 border-t border-[var(--border-default)] space-y-2">
+          <div className='px-3 py-2.5 border-t border-[var(--border-default)] space-y-2'>
             <textarea
               value={feedback}
               onChange={(e) => setFeedback(e.target.value)}
               placeholder={`How should "${t.title}" be changed?`}
               rows={2}
-              className="w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2 text-xs text-primary placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none"
+              className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2 text-xs text-primary placeholder-[var(--text-muted)] focus:outline-none focus:ring-1 focus:ring-accent-blue/50 resize-none'
               autoFocus
             />
-            <div className="flex gap-2">
+            <div className='flex gap-2'>
               <button
                 disabled={submitting || !feedback.trim()}
                 onClick={async () => {
@@ -1103,21 +1268,24 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
                     await editRunPlan(runId, taskFeedback);
                     setFeedback('');
                     setEditing(false);
-                    addToast({ type: 'success', message: 'Plan updated with task feedback' });
+                    addToast({type: 'success', message: 'Plan updated with task feedback'});
                     await useRunStore.getState().fetchRun(runId);
                   } catch (e: any) {
-                    addToast({ type: 'error', message: e.message });
+                    addToast({type: 'error', message: e.message});
                   } finally {
                     setSubmitting(false);
                   }
                 }}
-                className="px-2.5 py-1 text-[10px] font-medium rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 disabled:opacity-50"
+                className='px-2.5 py-1 text-[10px] font-medium rounded bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 disabled:opacity-50'
               >
                 {submitting ? 'Updating…' : 'Update Task'}
               </button>
               <button
-                onClick={() => { setEditing(false); setFeedback(''); }}
-                className="px-2.5 py-1 text-[10px] font-medium rounded text-secondary hover:text-primary"
+                onClick={() => {
+                  setEditing(false);
+                  setFeedback('');
+                }}
+                className='px-2.5 py-1 text-[10px] font-medium rounded text-secondary hover:text-primary'
               >
                 Cancel
               </button>
@@ -1132,31 +1300,31 @@ function PlanTaskCard({ task: t, index: i, runId, canEdit }: { task: any; index:
 // ── Review tab ────────────────────────────────────────────────────────────────
 
 const VERDICT_COLORS: Record<string, string> = {
-  APPROVE:  'text-accent-green',
-  REJECT:   'text-accent-red',
-  PARTIAL:  'text-accent-amber',
+  APPROVE: 'text-accent-green',
+  REJECT: 'text-accent-red',
+  PARTIAL: 'text-accent-amber',
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
-  'SPEC_MISMATCH': 'Spec Mismatch',
-  'MISSING_ENDPOINT': 'Missing Endpoint',
-  'LOGIC_ERROR': 'Logic Error',
-  'SECURITY': 'Security',
-  'ERROR_HANDLING': 'Error Handling',
-  'CROSS_TASK_MISMATCH': 'Cross-Task Mismatch',
-  'README_INCOMPLETE': 'README Incomplete',
-  'CODE_QUALITY': 'Code Quality',
-  'COMPLETENESS': 'Completeness',
+  SPEC_MISMATCH: 'Spec Mismatch',
+  MISSING_ENDPOINT: 'Missing Endpoint',
+  LOGIC_ERROR: 'Logic Error',
+  SECURITY: 'Security',
+  ERROR_HANDLING: 'Error Handling',
+  CROSS_TASK_MISMATCH: 'Cross-Task Mismatch',
+  README_INCOMPLETE: 'README Incomplete',
+  CODE_QUALITY: 'Code Quality',
+  COMPLETENESS: 'Completeness',
 };
 
-function ReviewTab({ run }: { run: RunDetail }) {
+function ReviewTab({run}: {run: RunDetail}) {
   const permissions = useTierPermissions();
-  const { addToast } = useUiStore();
+  const {addToast} = useUiStore();
   const [applyingReview, setApplyingReview] = useState(false);
   const [applyError, setApplyError] = useState<string | null>(null);
 
   if (!run.reviewJson) {
-    return <p className="text-sm text-muted">Review not available yet.</p>;
+    return <p className='text-sm text-muted'>Review not available yet.</p>;
   }
 
   let review: any = null;
@@ -1164,7 +1332,7 @@ function ReviewTab({ run }: { run: RunDetail }) {
     review = JSON.parse(run.reviewJson);
   } catch {
     return (
-      <pre className="text-xs font-mono text-secondary whitespace-pre-wrap break-all">
+      <pre className='text-xs font-mono text-secondary whitespace-pre-wrap break-all'>
         {run.reviewJson}
       </pre>
     );
@@ -1180,7 +1348,10 @@ function ReviewTab({ run }: { run: RunDetail }) {
     setApplyError(null);
     try {
       const result = await applyToRun(run.runId, '', 'REVIEW');
-      addToast({ type: 'success', message: `Applied ${result.taskCount} review fix task${result.taskCount !== 1 ? 's' : ''}` });
+      addToast({
+        type: 'success',
+        message: `Applied ${result.taskCount} review fix task${result.taskCount !== 1 ? 's' : ''}`,
+      });
       // Refresh the run to show new tasks
       useRunStore.getState().fetchRun(run.runId);
     } catch (e: any) {
@@ -1198,19 +1369,19 @@ function ReviewTab({ run }: { run: RunDetail }) {
   };
 
   return (
-    <div className="space-y-4">
+    <div className='space-y-4'>
       {/* Verdict + confidence */}
-      <div className="flex items-center justify-between p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
+      <div className='flex items-center justify-between p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]'>
         <div>
-          <p className="text-xs text-muted mb-1">Verdict</p>
+          <p className='text-xs text-muted mb-1'>Verdict</p>
           <p className={cn('text-sm font-semibold', VERDICT_COLORS[verdict] ?? 'text-secondary')}>
             {verdict ?? '—'}
           </p>
         </div>
         {review.overall_confidence != null && (
-          <div className="text-right">
-            <p className="text-xs text-muted mb-1">Confidence</p>
-            <p className="text-sm text-secondary">
+          <div className='text-right'>
+            <p className='text-xs text-muted mb-1'>Confidence</p>
+            <p className='text-sm text-secondary'>
               {typeof review.overall_confidence === 'number'
                 ? `${Math.round(review.overall_confidence * 100)}%`
                 : review.overall_confidence}
@@ -1221,41 +1392,52 @@ function ReviewTab({ run }: { run: RunDetail }) {
 
       {/* Summary */}
       {review.summary && (
-        <div className="p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
-          <p className="text-xs text-muted mb-1">Summary</p>
-          <p className="text-sm text-secondary">{review.summary}</p>
+        <div className='p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]'>
+          <p className='text-xs text-muted mb-1'>Summary</p>
+          <p className='text-sm text-secondary'>{review.summary}</p>
         </div>
       )}
 
       {/* Issues */}
       {hasIssues && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-medium text-muted uppercase tracking-wider">Issues ({review.issues.length})</h4>
+        <div className='space-y-2'>
+          <h4 className='text-xs font-medium text-muted uppercase tracking-wider'>
+            Issues ({review.issues.length})
+          </h4>
           {review.issues.map((issue: any, i: number) => (
-            <div key={i} className="p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]">
-              <div className="flex items-center gap-2 mb-1">
-                <span className={cn(
-                  'text-xs px-1.5 py-0.5 rounded',
-                  issue.severity === 'CRITICAL' ? 'text-accent-red bg-accent-red/10' :
-                  issue.severity === 'MINOR'    ? 'text-accent-amber bg-accent-amber/10' :
-                  'text-secondary bg-[var(--gray-200)]'
-                )}>
+            <div
+              key={i}
+              className='p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)]'
+            >
+              <div className='flex items-center gap-2 mb-1'>
+                <span
+                  className={cn(
+                    'text-xs px-1.5 py-0.5 rounded',
+                    issue.severity === 'CRITICAL'
+                      ? 'text-accent-red bg-accent-red/10'
+                      : issue.severity === 'MINOR'
+                        ? 'text-accent-amber bg-accent-amber/10'
+                        : 'text-secondary bg-[var(--gray-200)]',
+                  )}
+                >
                   {issue.severity ?? 'MINOR'}
                 </span>
-                <span className="text-xs text-muted">{CATEGORY_LABELS[issue.category] ?? issue.category}</span>
+                <span className='text-xs text-muted'>
+                  {CATEGORY_LABELS[issue.category] ?? issue.category}
+                </span>
               </div>
-              {issue.file && (
-                <p className="text-xs text-muted font-mono mt-0.5">{issue.file}</p>
-              )}
-              <p className="text-sm text-secondary">{issue.description}</p>
+              {issue.file && <p className='text-xs text-muted font-mono mt-0.5'>{issue.file}</p>}
+              <p className='text-sm text-secondary'>{issue.description}</p>
               {issue.fixInstruction && (
-                <p className="text-xs text-muted mt-1 italic">{issue.fixInstruction}</p>
+                <p className='text-xs text-muted mt-1 italic'>{issue.fixInstruction}</p>
               )}
               {issue.autoFixed && (
-                <span className={cn(
-                  'inline-block text-xs mt-1',
-                  issue.fixSucceeded ? 'text-status-success' : 'text-accent-red'
-                )}>
+                <span
+                  className={cn(
+                    'inline-block text-xs mt-1',
+                    issue.fixSucceeded ? 'text-status-success' : 'text-accent-red',
+                  )}
+                >
                   {issue.fixSucceeded ? 'Auto-fixed \u2713' : 'Auto-fix failed'}
                 </span>
               )}
@@ -1268,12 +1450,12 @@ function ReviewTab({ run }: { run: RunDetail }) {
 
       {/* Apply Review button */}
       {isApplyable && permissions?.canUseChat && (
-        <div className="pt-3 border-t border-[var(--border-default)]">
-          <div className="flex items-center justify-between">
+        <div className='pt-3 border-t border-[var(--border-default)]'>
+          <div className='flex items-center justify-between'>
             <div>
-              <p className="text-xs text-muted">Apply review fixes to this run</p>
+              <p className='text-xs text-muted'>Apply review fixes to this run</p>
               {permissions.maxApplySuggestions > 0 && (
-                <p className="text-[10px] text-muted font-mono mt-0.5">
+                <p className='text-[10px] text-muted font-mono mt-0.5'>
                   {run.applySuggestionCount ?? 0}/{permissions.maxApplySuggestions} applied
                 </p>
               )}
@@ -1284,18 +1466,21 @@ function ReviewTab({ run }: { run: RunDetail }) {
               className={cn(
                 'flex items-center gap-1.5 px-3 py-2 rounded-sm text-xs font-medium transition-all',
                 'bg-status-waiting/15 text-accent-amber hover:bg-status-waiting/25 border border-status-waiting/20',
-                'disabled:opacity-40 disabled:cursor-not-allowed'
+                'disabled:opacity-40 disabled:cursor-not-allowed',
               )}
             >
-              {applyingReview
-                ? <><Loader2 className="h-3.5 w-3.5 animate-spin" /> Applying&hellip;</>
-                : <><Wrench className="h-3.5 w-3.5" /> Apply Review</>
-              }
+              {applyingReview ? (
+                <>
+                  <Loader2 className='h-3.5 w-3.5 animate-spin' /> Applying&hellip;
+                </>
+              ) : (
+                <>
+                  <Wrench className='h-3.5 w-3.5' /> Apply Review
+                </>
+              )}
             </button>
           </div>
-          {applyError && (
-            <p className="text-xs text-accent-red mt-2">{applyError}</p>
-          )}
+          {applyError && <p className='text-xs text-accent-red mt-2'>{applyError}</p>}
         </div>
       )}
     </div>
@@ -1321,7 +1506,7 @@ function buildFileTree(files: string[]): FileTreeNode[] {
       const part = parts[i];
       const isLast = i === parts.length - 1;
       if (!current[part]) {
-        current[part] = { _isFile: false, _path: '', _children: {} };
+        current[part] = {_isFile: false, _path: '', _children: {}};
       }
       if (isLast) {
         current[part]._isFile = true;
@@ -1353,31 +1538,77 @@ function buildFileTree(files: string[]): FileTreeNode[] {
   return mapToNodes(root);
 }
 
-function FileTypeIcon({ name }: { name: string }) {
+function FileTypeIcon({name}: {name: string}) {
   const lower = name.toLowerCase();
   const ext = lower.includes('.') ? lower.split('.').pop()! : '';
 
-  const codeExts = new Set(['java', 'kt', 'ts', 'tsx', 'js', 'jsx', 'py', 'go', 'rs', 'cpp', 'c', 'cs', 'swift', 'scala']);
-  const textExts = new Set(['md', 'txt', 'yaml', 'yml', 'json', 'xml', 'html', 'css', 'scss', 'sql', 'sh', 'bash', 'properties', 'env', 'conf', 'toml', 'gradle', 'gitignore', 'dockerignore']);
+  const codeExts = new Set([
+    'java',
+    'kt',
+    'ts',
+    'tsx',
+    'js',
+    'jsx',
+    'py',
+    'go',
+    'rs',
+    'cpp',
+    'c',
+    'cs',
+    'swift',
+    'scala',
+  ]);
+  const textExts = new Set([
+    'md',
+    'txt',
+    'yaml',
+    'yml',
+    'json',
+    'xml',
+    'html',
+    'css',
+    'scss',
+    'sql',
+    'sh',
+    'bash',
+    'properties',
+    'env',
+    'conf',
+    'toml',
+    'gradle',
+    'gitignore',
+    'dockerignore',
+  ]);
 
   const colorMap: Record<string, string> = {
-    java: 'text-accent-amber', kt: 'text-[var(--text-secondary)]',
-    ts: 'text-accent-blue', tsx: 'text-accent-blue',
-    js: 'text-status-waiting', jsx: 'text-status-waiting',
-    py: 'text-[var(--status-success)]', go: 'text-sky-400',
-    rs: 'text-status-partial', sql: 'text-accent-blue',
-    json: 'text-status-waiting', xml: 'text-accent-red',
-    yml: 'text-[var(--text-secondary)]', yaml: 'text-[var(--text-secondary)]',
-    html: 'text-accent-amber', css: 'text-accent-blue',
-    scss: 'text-accent-red', md: 'text-secondary',
-    sh: 'text-[var(--status-success)]', bash: 'text-[var(--status-success)]',
-    gradle: 'text-accent-green', properties: 'text-secondary',
+    java: 'text-accent-amber',
+    kt: 'text-[var(--text-secondary)]',
+    ts: 'text-accent-blue',
+    tsx: 'text-accent-blue',
+    js: 'text-status-waiting',
+    jsx: 'text-status-waiting',
+    py: 'text-[var(--status-success)]',
+    go: 'text-sky-400',
+    rs: 'text-status-partial',
+    sql: 'text-accent-blue',
+    json: 'text-status-waiting',
+    xml: 'text-accent-red',
+    yml: 'text-[var(--text-secondary)]',
+    yaml: 'text-[var(--text-secondary)]',
+    html: 'text-accent-amber',
+    css: 'text-accent-blue',
+    scss: 'text-accent-red',
+    md: 'text-secondary',
+    sh: 'text-[var(--status-success)]',
+    bash: 'text-[var(--status-success)]',
+    gradle: 'text-accent-green',
+    properties: 'text-secondary',
   };
 
   const color = colorMap[ext] ?? 'text-muted';
 
   if (lower === 'dockerfile' || lower === '.dockerfile') {
-    return <span className="text-sky-400 font-mono text-[9px] font-bold leading-none">🐳</span>;
+    return <span className='text-sky-400 font-mono text-[9px] font-bold leading-none'>🐳</span>;
   }
   if (codeExts.has(ext)) {
     return <FileCode2 className={cn('h-3 w-3 flex-shrink-0', color)} />;
@@ -1385,7 +1616,7 @@ function FileTypeIcon({ name }: { name: string }) {
   if (textExts.has(ext)) {
     return <FileText className={cn('h-3 w-3 flex-shrink-0', color)} />;
   }
-  return <File className="h-3 w-3 flex-shrink-0 text-muted" />;
+  return <File className='h-3 w-3 flex-shrink-0 text-muted' />;
 }
 
 interface TreeNodeViewProps {
@@ -1400,14 +1631,22 @@ interface TreeNodeViewProps {
 }
 
 function TreeNodeView({
-  node, selected, onSelect,
-  depth = 0, expandSignal = 0, collapseSignal = 0,
+  node,
+  selected,
+  onSelect,
+  depth = 0,
+  expandSignal = 0,
+  collapseSignal = 0,
 }: TreeNodeViewProps) {
   const [open, setOpen] = useState(depth < 2);
 
   // React to expand / collapse all signals
-  useEffect(() => { if (expandSignal > 0) setOpen(true); }, [expandSignal]);
-  useEffect(() => { if (collapseSignal > 0) setOpen(false); }, [collapseSignal]);
+  useEffect(() => {
+    if (expandSignal > 0) setOpen(true);
+  }, [expandSignal]);
+  useEffect(() => {
+    if (collapseSignal > 0) setOpen(false);
+  }, [collapseSignal]);
 
   const indent = depth * 12 + 8;
 
@@ -1419,13 +1658,13 @@ function TreeNodeView({
           'w-full text-left flex items-center gap-1.5 py-[3px] pr-2 rounded text-xs font-mono truncate transition-colors',
           selected === node.path
             ? 'bg-accent-blue/15 text-accent-blue'
-            : 'text-secondary hover:text-primary hover:bg-[var(--gray-200)]'
+            : 'text-secondary hover:text-primary hover:bg-[var(--gray-200)]',
         )}
-        style={{ paddingLeft: `${indent}px` }}
+        style={{paddingLeft: `${indent}px`}}
         title={node.path}
       >
         <FileTypeIcon name={node.name} />
-        <span className="truncate">{node.name}</span>
+        <span className='truncate'>{node.name}</span>
       </button>
     );
   }
@@ -1434,14 +1673,17 @@ function TreeNodeView({
     <div>
       <button
         onClick={() => setOpen(!open)}
-        className="w-full text-left flex items-center gap-1.5 py-[3px] pr-2 rounded text-xs text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
-        style={{ paddingLeft: `${indent}px` }}
+        className='w-full text-left flex items-center gap-1.5 py-[3px] pr-2 rounded text-xs text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
+        style={{paddingLeft: `${indent}px`}}
       >
-        <ChevronRight className={cn('h-3 w-3 flex-shrink-0 transition-transform', open && 'rotate-90')} />
-        {open
-          ? <FolderOpen className="h-3 w-3 flex-shrink-0 text-accent-amber/60" />
-          : <Folder className="h-3 w-3 flex-shrink-0 text-accent-amber/60" />
-        }
+        <ChevronRight
+          className={cn('h-3 w-3 flex-shrink-0 transition-transform', open && 'rotate-90')}
+        />
+        {open ? (
+          <FolderOpen className='h-3 w-3 flex-shrink-0 text-accent-amber/60' />
+        ) : (
+          <Folder className='h-3 w-3 flex-shrink-0 text-accent-amber/60' />
+        )}
         <span>{node.name}</span>
       </button>
       {open && (
@@ -1465,19 +1707,34 @@ function TreeNodeView({
 
 // ── highlight.js language map ─────────────────────────────────────────────────
 const EXT_TO_LANG: Record<string, string> = {
-  ts: 'typescript', tsx: 'typescript',
-  js: 'javascript', jsx: 'javascript',
-  java: 'java', kt: 'kotlin',
-  py: 'python', go: 'go', rs: 'rust',
+  ts: 'typescript',
+  tsx: 'typescript',
+  js: 'javascript',
+  jsx: 'javascript',
+  java: 'java',
+  kt: 'kotlin',
+  py: 'python',
+  go: 'go',
+  rs: 'rust',
   swift: 'swift',
-  cs: 'csharp', cpp: 'cpp', c: 'c', scala: 'scala',
-  css: 'css', scss: 'scss',
-  html: 'xml', xml: 'xml',
-  json: 'json', yaml: 'yaml', yml: 'yaml',
-  md: 'markdown', sql: 'sql',
-  sh: 'bash', bash: 'bash',
+  cs: 'csharp',
+  cpp: 'cpp',
+  c: 'c',
+  scala: 'scala',
+  css: 'css',
+  scss: 'scss',
+  html: 'xml',
+  xml: 'xml',
+  json: 'json',
+  yaml: 'yaml',
+  yml: 'yaml',
+  md: 'markdown',
+  sql: 'sql',
+  sh: 'bash',
+  bash: 'bash',
   dockerfile: 'dockerfile',
-  gradle: 'gradle', toml: 'ini',
+  gradle: 'gradle',
+  toml: 'ini',
   properties: 'properties',
 };
 
@@ -1491,7 +1748,7 @@ function getLanguage(filePath: string): string {
 function highlightCode(code: string, language: string): string {
   try {
     if (language === 'plaintext') return escapeHtml(code);
-    const result = hljs.highlight(code, { language, ignoreIllegals: true });
+    const result = hljs.highlight(code, {language, ignoreIllegals: true});
     return result.value;
   } catch {
     return escapeHtml(code);
@@ -1499,20 +1756,39 @@ function highlightCode(code: string, language: string): string {
 }
 
 function escapeHtml(str: string): string {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 // ── Monaco language map (superset of hljs map) ───────────────────────────────
 const MONACO_LANG_MAP: Record<string, string> = {
-  java: 'java', kt: 'kotlin', py: 'python', js: 'javascript', jsx: 'javascript',
-  ts: 'typescript', tsx: 'typescript', html: 'html', css: 'css', scss: 'scss',
-  json: 'json', yml: 'yaml', yaml: 'yaml', xml: 'xml', md: 'markdown',
-  sql: 'sql', sh: 'shell', bash: 'shell', dockerfile: 'dockerfile', toml: 'ini',
-  rs: 'rust', go: 'go', gradle: 'groovy', tf: 'hcl',
-  properties: 'ini', txt: 'plaintext', cfg: 'ini', env: 'ini',
+  java: 'java',
+  kt: 'kotlin',
+  py: 'python',
+  js: 'javascript',
+  jsx: 'javascript',
+  ts: 'typescript',
+  tsx: 'typescript',
+  html: 'html',
+  css: 'css',
+  scss: 'scss',
+  json: 'json',
+  yml: 'yaml',
+  yaml: 'yaml',
+  xml: 'xml',
+  md: 'markdown',
+  sql: 'sql',
+  sh: 'shell',
+  bash: 'shell',
+  dockerfile: 'dockerfile',
+  toml: 'ini',
+  rs: 'rust',
+  go: 'go',
+  gradle: 'groovy',
+  tf: 'hcl',
+  properties: 'ini',
+  txt: 'plaintext',
+  cfg: 'ini',
+  env: 'ini',
 };
 
 function getMonacoLanguage(filePath: string): string {
@@ -1524,8 +1800,14 @@ function getMonacoLanguage(filePath: string): string {
 
 // ── IDE file viewer (Monaco-based with native folding) ────────────────────────
 function IDEFileViewer({
-  filePath, content, loading,
-}: { filePath: string | null; content: string; loading: boolean }) {
+  filePath,
+  content,
+  loading,
+}: {
+  filePath: string | null;
+  content: string;
+  loading: boolean;
+}) {
   const [copied, setCopied] = useState(false);
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
 
@@ -1537,59 +1819,63 @@ function IDEFileViewer({
   };
 
   // Auto-collapse imports and collapse methods when file has >5 methods
-  const handleEditorMount = useCallback((editor: monacoEditor.IStandaloneCodeEditor) => {
-    editorRef.current = editor;
+  const handleEditorMount = useCallback(
+    (editor: monacoEditor.IStandaloneCodeEditor) => {
+      editorRef.current = editor;
 
-    // Wait for folding ranges to be computed by Monaco's built-in provider
-    setTimeout(() => {
-      try {
-        const model = editor.getModel();
-        if (!model) return;
+      // Wait for folding ranges to be computed by Monaco's built-in provider
+      setTimeout(() => {
+        try {
+          const model = editor.getModel();
+          if (!model) return;
 
-        const lineCount = model.getLineCount();
-        // Don't fold small files (< 10 lines)
-        if (lineCount < 10) return;
+          const lineCount = model.getLineCount();
+          // Don't fold small files (< 10 lines)
+          if (lineCount < 10) return;
 
-        // Detect import block: consecutive lines starting with 'import' at the top
-        let importEnd = 0;
-        for (let i = 1; i <= Math.min(lineCount, 60); i++) {
-          const line = model.getLineContent(i).trim();
-          if (line.startsWith('import ') || line.startsWith('from ') || line === '') {
-            if (line.startsWith('import ') || line.startsWith('from ')) importEnd = i;
-          } else if (importEnd > 0) {
-            break;
+          // Detect import block: consecutive lines starting with 'import' at the top
+          let importEnd = 0;
+          for (let i = 1; i <= Math.min(lineCount, 60); i++) {
+            const line = model.getLineContent(i).trim();
+            if (line.startsWith('import ') || line.startsWith('from ') || line === '') {
+              if (line.startsWith('import ') || line.startsWith('from ')) importEnd = i;
+            } else if (importEnd > 0) {
+              break;
+            }
           }
-        }
 
-        // Collapse import block if it's 3+ lines
-        if (importEnd >= 3) {
-          editor.trigger('fold', 'editor.fold', { selectionLines: [1] });
-        }
+          // Collapse import block if it's 3+ lines
+          if (importEnd >= 3) {
+            editor.trigger('fold', 'editor.fold', {selectionLines: [1]});
+          }
 
-        // Count methods to decide on auto-collapse
-        const text = model.getValue();
-        // Rough method count: lines matching common method/function signatures
-        const methodPatterns = /^\s*(public|private|protected|static|async|export)?\s*(function|def |class |void |[A-Z]\w+\s+\w+\s*\()/gm;
-        const methodCount = (text.match(methodPatterns) || []).length;
+          // Count methods to decide on auto-collapse
+          const text = model.getValue();
+          // Rough method count: lines matching common method/function signatures
+          const methodPatterns =
+            /^\s*(public|private|protected|static|async|export)?\s*(function|def |class |void |[A-Z]\w+\s+\w+\s*\()/gm;
+          const methodCount = (text.match(methodPatterns) || []).length;
 
-        // If >5 methods, fold all then unfold the top level (class)
-        if (methodCount > 5) {
-          editor.trigger('fold', 'editor.foldAll', {});
-          // Unfold top-level (line 1) so class/module is visible
-          editor.trigger('fold', 'editor.unfold', { selectionLines: [1] });
-          // Also unfold imports line to keep them visible (they'll be separately folded)
+          // If >5 methods, fold all then unfold the top level (class)
+          if (methodCount > 5) {
+            editor.trigger('fold', 'editor.foldAll', {});
+            // Unfold top-level (line 1) so class/module is visible
+            editor.trigger('fold', 'editor.unfold', {selectionLines: [1]});
+            // Also unfold imports line to keep them visible (they'll be separately folded)
+          }
+        } catch {
+          // Folding is best-effort — don't break the viewer
         }
-      } catch {
-        // Folding is best-effort — don't break the viewer
-      }
-    }, 300);
-  }, [content]);
+      }, 300);
+    },
+    [content],
+  );
 
   if (!filePath) {
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 text-muted">
-        <FileCode2 className="h-10 w-10 opacity-30" />
-        <span className="text-sm">Select a file to view its contents</span>
+      <div className='flex flex-col items-center justify-center h-full gap-3 text-muted'>
+        <FileCode2 className='h-10 w-10 opacity-30' />
+        <span className='text-sm'>Select a file to view its contents</span>
       </div>
     );
   }
@@ -1599,52 +1885,58 @@ function IDEFileViewer({
   const hljsLang = getLanguage(filePath);
 
   return (
-    <div className="flex flex-col h-full overflow-hidden">
+    <div className='flex flex-col h-full overflow-hidden'>
       {/* ── Tab bar (VS Code style) ── */}
-      <div className="flex items-center border-b border-[var(--border-default)] bg-[var(--geist-bg)] flex-shrink-0 overflow-x-auto">
-        <div className="flex items-center gap-1.5 px-3 py-2 bg-[var(--gray-100)] border-r border-[var(--border-default)] border-t border-t-[var(--text-primary)] min-w-0">
+      <div className='flex items-center border-b border-[var(--border-default)] bg-[var(--geist-bg)] flex-shrink-0 overflow-x-auto'>
+        <div className='flex items-center gap-1.5 px-3 py-2 bg-[var(--gray-100)] border-r border-[var(--border-default)] border-t border-t-[var(--text-primary)] min-w-0'>
           <FileTypeIcon name={fileName} />
-          <span className="text-xs font-mono text-secondary whitespace-nowrap">{fileName}</span>
+          <span className='text-xs font-mono text-secondary whitespace-nowrap'>{fileName}</span>
         </div>
         {/* breadcrumb path */}
-        <span className="text-[10px] font-mono text-muted px-3 truncate flex-1">
+        <span className='text-[10px] font-mono text-muted px-3 truncate flex-1'>
           {filePath.split('/').slice(0, -1).join(' / ')}
         </span>
         {/* copy button */}
         <button
           onClick={handleCopy}
-          title="Copy file contents"
-          className="flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0"
+          title='Copy file contents'
+          className='flex items-center gap-1 px-3 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0'
         >
-          {copied
-            ? <><Check className="h-3 w-3 text-[var(--status-success)]" /><span className="text-[var(--status-success)]">Copied</span></>
-            : <><Copy className="h-3 w-3" /><span>Copy</span></>}
+          {copied ? (
+            <>
+              <Check className='h-3 w-3 text-[var(--status-success)]' />
+              <span className='text-[var(--status-success)]'>Copied</span>
+            </>
+          ) : (
+            <>
+              <Copy className='h-3 w-3' />
+              <span>Copy</span>
+            </>
+          )}
         </button>
         {/* Fold controls */}
         <button
           onClick={() => editorRef.current?.trigger('fold', 'editor.foldAll', {})}
-          title="Collapse All"
-          className="flex items-center gap-1 px-2 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0"
+          title='Collapse All'
+          className='flex items-center gap-1 px-2 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0'
         >
-          <ChevronsDownUp className="h-3 w-3" />
+          <ChevronsDownUp className='h-3 w-3' />
         </button>
         <button
           onClick={() => editorRef.current?.trigger('fold', 'editor.unfoldAll', {})}
-          title="Expand All"
-          className="flex items-center gap-1 px-2 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0"
+          title='Expand All'
+          className='flex items-center gap-1 px-2 py-2 text-xs text-muted hover:text-secondary transition-colors flex-shrink-0'
         >
-          <ChevronsUpDown className="h-3 w-3" />
+          <ChevronsUpDown className='h-3 w-3' />
         </button>
         {/* language badge */}
-        <span className="px-3 py-2 text-[10px] font-mono text-muted flex-shrink-0">
-          {hljsLang}
-        </span>
+        <span className='px-3 py-2 text-[10px] font-mono text-muted flex-shrink-0'>{hljsLang}</span>
       </div>
 
       {/* ── Code area (Monaco editor — read-only with native folding) ── */}
-      <div className="flex-1 overflow-hidden bg-[var(--geist-bg)]">
+      <div className='flex-1 overflow-hidden bg-[var(--geist-bg)]'>
         {loading ? (
-          <div className="p-4 text-sm text-muted animate-pulse">Loading…</div>
+          <div className='p-4 text-sm text-muted animate-pulse'>Loading…</div>
         ) : (
           <Editor
             key={filePath}
@@ -1654,7 +1946,7 @@ function IDEFileViewer({
             onMount={handleEditorMount}
             options={{
               readOnly: true,
-              minimap: { enabled: false },
+              minimap: {enabled: false},
               scrollBeyondLastLine: false,
               fontSize: 12,
               lineNumbers: 'on',
@@ -1677,7 +1969,7 @@ function IDEFileViewer({
                 indentation: true,
                 bracketPairs: true,
               },
-              padding: { top: 8 },
+              padding: {top: 8},
             }}
           />
         )}
@@ -1729,26 +2021,26 @@ export function CodeTab({
   };
 
   // Convert clone URL to web URL for "View on SCM" link
-  const scmWebUrl = repoUrl
-    ? repoUrl.replace(/\.git$/, '')
-    : null;
+  const scmWebUrl = repoUrl ? repoUrl.replace(/\.git$/, '') : null;
   const scmLinkLabel = scmProvider === 'BITBUCKET' ? 'View on Bitbucket' : 'View on GitHub';
 
   // Hooks must be called before any early returns (React rules of hooks)
   const isMobile = useIsMobile();
   const [maximized, setMaximized] = useState(false);
   const [showTree, setShowTree] = useState(!isMobile);
-  useEffect(() => { setShowTree(!isMobile); }, [isMobile]);
+  useEffect(() => {
+    setShowTree(!isMobile);
+  }, [isMobile]);
 
   if (filesLoading) {
-    return <div className="p-4 text-sm text-muted">Loading files…</div>;
+    return <div className='p-4 text-sm text-muted'>Loading files…</div>;
   }
 
   if (files.length === 0) {
     const isTerminal = ['COMPLETE', 'PARTIAL', 'FAILED'].includes(status || '');
     return (
-      <div className="p-4 space-y-3">
-        <p className="text-sm text-muted">
+      <div className='p-4 space-y-3'>
+        <p className='text-sm text-muted'>
           {isTerminal
             ? 'Local workspace has been cleaned up.'
             : 'No files generated yet. Files appear after the run completes.'}
@@ -1756,16 +2048,21 @@ export function CodeTab({
         {isTerminal && scmWebUrl && (
           <a
             href={scmWebUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex items-center gap-1.5 text-sm text-accent-blue hover:text-accent-blue/80 transition-colors"
+            target='_blank'
+            rel='noopener noreferrer'
+            className='inline-flex items-center gap-1.5 text-sm text-accent-blue hover:text-accent-blue/80 transition-colors'
           >
-            <svg className="h-4 w-4" viewBox="0 0 16 16" fill="currentColor"><path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+            <svg className='h-4 w-4' viewBox='0 0 16 16' fill='currentColor'>
+              <path
+                fillRule='evenodd'
+                d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z'
+              />
+            </svg>
             {scmLinkLabel}
           </a>
         )}
         {isTerminal && !scmWebUrl && (
-          <p className="text-xs text-muted">
+          <p className='text-xs text-muted'>
             Tip: Push to GitHub or Bitbucket to preserve code access after workspace cleanup.
           </p>
         )}
@@ -1776,57 +2073,68 @@ export function CodeTab({
   const tree = buildFileTree(files);
 
   const codeContent = (
-    <div className={cn(
-      'flex h-full overflow-hidden',
-      maximized && 'fixed inset-0 z-50 bg-[var(--gray-100)]'
-    )}>
+    <div
+      className={cn(
+        'flex h-full overflow-hidden',
+        maximized && 'fixed inset-0 z-50 bg-[var(--gray-100)]',
+      )}
+    >
       {/* ── File tree sidebar ── */}
       {showTree && (
-        <div className={cn(
-          'flex-shrink-0 border-r border-[var(--border-default)] flex flex-col overflow-hidden',
-          isMobile ? 'w-full absolute inset-0 z-10 bg-[var(--gray-100)]' : 'w-56'
-        )}>
+        <div
+          className={cn(
+            'flex-shrink-0 border-r border-[var(--border-default)] flex flex-col overflow-hidden',
+            isMobile ? 'w-full absolute inset-0 z-10 bg-[var(--gray-100)]' : 'w-56',
+          )}
+        >
           {/* Toolbar: Expand All / Collapse All / GitHub link */}
-          <div className="flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-default)] flex-shrink-0">
-            <span className="text-[10px] text-muted uppercase tracking-widest flex-1 pl-1">Explorer</span>
+          <div className='flex items-center gap-1 px-2 py-1.5 border-b border-[var(--border-default)] flex-shrink-0'>
+            <span className='text-[10px] text-muted uppercase tracking-widest flex-1 pl-1'>
+              Explorer
+            </span>
             {scmWebUrl && (
               <a
                 href={scmWebUrl}
-                target="_blank"
-                rel="noopener noreferrer"
+                target='_blank'
+                rel='noopener noreferrer'
                 title={scmLinkLabel}
-                className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
+                className='p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
               >
-                <svg className="h-3 w-3" viewBox="0 0 16 16" fill="currentColor"><path fillRule="evenodd" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                <svg className='h-3 w-3' viewBox='0 0 16 16' fill='currentColor'>
+                  <path
+                    fillRule='evenodd'
+                    d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z'
+                  />
+                </svg>
               </a>
             )}
             <button
-              title="Expand all folders"
-              onClick={() => setExpandSignal(s => s + 1)}
-              className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
+              title='Expand all folders'
+              onClick={() => setExpandSignal((s) => s + 1)}
+              className='p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
             >
-              <ChevronsUpDown className="h-3 w-3" />
+              <ChevronsUpDown className='h-3 w-3' />
             </button>
             <button
-              title="Collapse all folders"
-              onClick={() => setCollapseSignal(s => s + 1)}
-              className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
+              title='Collapse all folders'
+              onClick={() => setCollapseSignal((s) => s + 1)}
+              className='p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
             >
-              <ChevronsDownUp className="h-3 w-3" />
+              <ChevronsDownUp className='h-3 w-3' />
             </button>
             {isMobile && (
               <button
-                title="Close file tree"
+                title='Close file tree'
                 onClick={() => setShowTree(false)}
-                className="p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors"
+                className='p-1 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
               >
-                <X className="h-3 w-3" />
+                <X className='h-3 w-3' />
               </button>
             )}
           </div>
 
           {/* Tree nodes */}
-          <div className="overflow-y-auto flex-1 py-1">
+          <div className='overflow-y-auto flex-1 py-1'>
             {tree.map((node) => (
               <TreeNodeView
                 key={node.name}
@@ -1845,38 +2153,42 @@ export function CodeTab({
       )}
 
       {/* ── IDE viewer pane ── */}
-      <div className="flex-1 overflow-hidden flex flex-col">
+      <div className='flex-1 overflow-hidden flex flex-col'>
         {/* Mobile/maximize toolbar */}
         {(isMobile || maximized) && (
-          <div className="flex items-center gap-1 px-2 py-1 border-b border-[var(--border-default)] flex-shrink-0 bg-[var(--geist-bg)]">
+          <div className='flex items-center gap-1 px-2 py-1 border-b border-[var(--border-default)] flex-shrink-0 bg-[var(--geist-bg)]'>
             {isMobile && !showTree && (
               <button
                 onClick={() => setShowTree(true)}
-                className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted hover:text-secondary transition-colors"
-                title="Show file tree"
+                className='flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted hover:text-secondary transition-colors'
+                title='Show file tree'
               >
-                <PanelLeftOpen className="h-3.5 w-3.5" />
+                <PanelLeftOpen className='h-3.5 w-3.5' />
                 <span>Files</span>
               </button>
             )}
-            <div className="flex-1" />
+            <div className='flex-1' />
             <button
               onClick={() => setMaximized(!maximized)}
-              className="flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted hover:text-secondary transition-colors"
+              className='flex items-center gap-1.5 px-2 py-1.5 text-xs text-muted hover:text-secondary transition-colors'
               title={maximized ? 'Exit fullscreen' : 'Fullscreen'}
             >
-              {maximized
-                ? <><Minimize2 className="h-3.5 w-3.5" /><span>Exit</span></>
-                : <><Maximize2 className="h-3.5 w-3.5" /><span>Fullscreen</span></>}
+              {maximized ? (
+                <>
+                  <Minimize2 className='h-3.5 w-3.5' />
+                  <span>Exit</span>
+                </>
+              ) : (
+                <>
+                  <Maximize2 className='h-3.5 w-3.5' />
+                  <span>Fullscreen</span>
+                </>
+              )}
             </button>
           </div>
         )}
-        <div className="flex-1 overflow-hidden">
-          <IDEFileViewer
-            filePath={selected}
-            content={content}
-            loading={loadingContent}
-          />
+        <div className='flex-1 overflow-hidden'>
+          <IDEFileViewer filePath={selected} content={content} loading={loadingContent} />
         </div>
       </div>
     </div>
@@ -1894,34 +2206,43 @@ const TEST_STATUS_COLORS: Record<string, string> = {
   FAILED: 'bg-status-error/20 text-accent-red',
 };
 
-function TestTaskCard({ task }: { task: TestTaskDto }) {
+function TestTaskCard({task}: {task: TestTaskDto}) {
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
-      <div className="flex items-center gap-2">
-        <TestTube2 className="h-3.5 w-3.5 text-accent-blue flex-shrink-0" />
-        <span className="text-sm text-primary font-medium truncate">{task.taskName}</span>
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3'>
+      <div className='flex items-center gap-2'>
+        <TestTube2 className='h-3.5 w-3.5 text-accent-blue flex-shrink-0' />
+        <span className='text-sm text-primary font-medium truncate'>{task.taskName}</span>
         {task.testCategory && (
-          <span className="text-xs text-muted bg-[var(--gray-200)] rounded px-1.5 py-0.5">{task.testCategory}</span>
+          <span className='text-xs text-muted bg-[var(--gray-200)] rounded px-1.5 py-0.5'>
+            {task.testCategory}
+          </span>
         )}
-        <span className={cn('ml-auto text-xs rounded-sm px-2 py-0.5', TEST_STATUS_COLORS[task.status] || TEST_STATUS_COLORS.PENDING)}>
+        <span
+          className={cn(
+            'ml-auto text-xs rounded-sm px-2 py-0.5',
+            TEST_STATUS_COLORS[task.status] || TEST_STATUS_COLORS.PENDING,
+          )}
+        >
           {task.status}
         </span>
       </div>
       {task.taskDescription && (
-        <p className="mt-1 ml-5.5 text-xs text-muted line-clamp-2">{task.taskDescription}</p>
+        <p className='mt-1 ml-5.5 text-xs text-muted line-clamp-2'>{task.taskDescription}</p>
       )}
       {task.targetEntity && (
-        <p className="mt-0.5 ml-5.5 text-xs text-muted">Target: {task.targetEntity}</p>
+        <p className='mt-0.5 ml-5.5 text-xs text-muted'>Target: {task.targetEntity}</p>
       )}
       {task.status === 'FAILED' && task.compilationError && (
-        <p className="mt-1 ml-5.5 text-xs text-accent-red/80 font-mono line-clamp-3">{task.compilationError}</p>
+        <p className='mt-1 ml-5.5 text-xs text-accent-red/80 font-mono line-clamp-3'>
+          {task.compilationError}
+        </p>
       )}
     </div>
   );
 }
 
 // ─── Pilot R5: Pull request list ────────────────────────────────────────────
-function RunPrList({ run }: { run: RunDetail }) {
+function RunPrList({run}: {run: RunDetail}) {
   const [prs, setPrs] = useState<PrSummary[]>([]);
   const [loaded, setLoaded] = useState(false);
 
@@ -1948,25 +2269,30 @@ function RunPrList({ run }: { run: RunDetail }) {
   if (prs.length === 0 && !legacyUrl) return null;
 
   return (
-    <div className="pt-2 border-t border-[var(--border-default)]">
-      <p className="text-xs text-muted mb-1">Pull requests</p>
+    <div className='pt-2 border-t border-[var(--border-default)]'>
+      <p className='text-xs text-muted mb-1'>Pull requests</p>
       {prs.length > 0 ? (
-        <ul className="space-y-1">
+        <ul className='space-y-1'>
           {prs.map((pr) => (
-            <li key={`${pr.repoFullName}-${pr.prNumber}`} className="flex items-center gap-2 text-sm">
-              <span className={cn(
-                'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide',
-                pr.status === 'MERGED' && 'bg-purple-500/10 text-purple-500',
-                pr.status === 'OPEN' && 'bg-blue-500/10 text-blue-500',
-                pr.status === 'CLOSED' && 'bg-status-error/10 text-status-error',
-              )}>
+            <li
+              key={`${pr.repoFullName}-${pr.prNumber}`}
+              className='flex items-center gap-2 text-sm'
+            >
+              <span
+                className={cn(
+                  'inline-flex items-center px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide',
+                  pr.status === 'MERGED' && 'bg-purple-500/10 text-purple-500',
+                  pr.status === 'OPEN' && 'bg-blue-500/10 text-blue-500',
+                  pr.status === 'CLOSED' && 'bg-status-error/10 text-status-error',
+                )}
+              >
                 {pr.status}
               </span>
               <a
                 href={pr.prUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-mono text-accent-blue hover:underline break-all"
+                target='_blank'
+                rel='noopener noreferrer'
+                className='font-mono text-accent-blue hover:underline break-all'
               >
                 {pr.repoFullName}#{pr.prNumber}
               </a>
@@ -1976,9 +2302,9 @@ function RunPrList({ run }: { run: RunDetail }) {
       ) : legacyUrl ? (
         <a
           href={legacyUrl}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="text-sm text-accent-blue hover:underline font-mono break-all"
+          target='_blank'
+          rel='noopener noreferrer'
+          className='text-sm text-accent-blue hover:underline font-mono break-all'
         >
           {legacyUrl.replace('https://github.com/', '').replace('https://bitbucket.org/', '')}
         </a>
@@ -1993,47 +2319,82 @@ function RunPrList({ run }: { run: RunDetail }) {
  * hierarchical pipeline (planStrategy null) or when no phase has tokens
  * recorded yet — keeps legacy runs free of empty rows.
  */
-function PlannerPhaseBreakdown({ run }: { run: RunDetail }) {
+function PlannerPhaseBreakdown({run}: {run: RunDetail}) {
   if (!run.planStrategy) return null;
-  type Row = { label: string; cost: number | null | undefined; inTok: number | null | undefined; outTok: number | null | undefined };
+  type Row = {
+    label: string;
+    cost: number | null | undefined;
+    inTok: number | null | undefined;
+    outTok: number | null | undefined;
+  };
   const rows: Row[] = [
-    { label: 'Classifier', cost: run.classifierCostUsd, inTok: run.classifierInputTokens, outTok: run.classifierOutputTokens },
-    { label: 'Outline',    cost: run.outlineCostUsd,    inTok: run.outlineInputTokens,    outTok: run.outlineOutputTokens },
-    { label: 'Expansion',  cost: run.expansionCostUsd,  inTok: run.expansionInputTokens,  outTok: run.expansionOutputTokens },
-    { label: 'Coherence',  cost: run.coherenceCostUsd,  inTok: run.coherenceInputTokens,  outTok: run.coherenceOutputTokens },
+    {
+      label: 'Classifier',
+      cost: run.classifierCostUsd,
+      inTok: run.classifierInputTokens,
+      outTok: run.classifierOutputTokens,
+    },
+    {
+      label: 'Outline',
+      cost: run.outlineCostUsd,
+      inTok: run.outlineInputTokens,
+      outTok: run.outlineOutputTokens,
+    },
+    {
+      label: 'Expansion',
+      cost: run.expansionCostUsd,
+      inTok: run.expansionInputTokens,
+      outTok: run.expansionOutputTokens,
+    },
+    {
+      label: 'Coherence',
+      cost: run.coherenceCostUsd,
+      inTok: run.coherenceInputTokens,
+      outTok: run.coherenceOutputTokens,
+    },
   ];
-  const populated = rows.filter((r) => (r.cost ?? 0) > 0 || (r.inTok ?? 0) > 0 || (r.outTok ?? 0) > 0);
+  const populated = rows.filter(
+    (r) => (r.cost ?? 0) > 0 || (r.inTok ?? 0) > 0 || (r.outTok ?? 0) > 0,
+  );
   if (populated.length === 0) return null;
 
   const totalCost = populated.reduce((acc, r) => acc + (r.cost ?? 0), 0);
-  const fmtCost = (v: number | null | undefined) => (v == null || v === 0 ? '—' : `$${v.toFixed(4)}`);
-  const fmtTok = (v: number | null | undefined) => (v == null || v === 0 ? '—' : v.toLocaleString());
+  const fmtCost = (v: number | null | undefined) =>
+    v == null || v === 0 ? '—' : `$${v.toFixed(4)}`;
+  const fmtTok = (v: number | null | undefined) =>
+    v == null || v === 0 ? '—' : v.toLocaleString();
 
   return (
-    <div className="mt-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[11px] uppercase tracking-wide text-muted">
-          Planner phases <span className="text-secondary normal-case tracking-normal">· {run.planStrategy}</span>
+    <div className='mt-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3'>
+      <div className='flex items-center justify-between mb-2'>
+        <p className='text-[11px] uppercase tracking-wide text-muted'>
+          Planner phases{' '}
+          <span className='text-secondary normal-case tracking-normal'>· {run.planStrategy}</span>
         </p>
-        <p className="text-[11px] font-mono text-secondary">
-          phase total {fmtCost(totalCost)}
-        </p>
+        <p className='text-[11px] font-mono text-secondary'>phase total {fmtCost(totalCost)}</p>
       </div>
       {run.classifierReasoning && (
-        <p className="text-[10.5px] text-muted italic mb-2 leading-snug">
+        <p className='text-[10.5px] text-muted italic mb-2 leading-snug'>
           {run.classifierReasoning}
         </p>
       )}
-      <div className="space-y-1">
+      <div className='space-y-1'>
         {populated.map((r) => (
-          <div key={r.label} className="grid grid-cols-[5.5rem_1fr_1fr_1fr] gap-2 text-[11px] font-mono">
+          <div
+            key={r.label}
+            className='grid grid-cols-[5.5rem_1fr_1fr_1fr] gap-2 text-[11px] font-mono'
+          >
             {/* M-006 (Wave 1) — wrap "Classifier" with Glossary so the tooltip explains the phase. */}
-            <span className="text-secondary">
-              {r.label === 'Classifier' ? <Glossary term="classifier">Classifier</Glossary> : r.label}
+            <span className='text-secondary'>
+              {r.label === 'Classifier' ? (
+                <Glossary term='classifier'>Classifier</Glossary>
+              ) : (
+                r.label
+              )}
             </span>
-            <span className="text-muted">{fmtCost(r.cost)}</span>
-            <span className="text-muted">in {fmtTok(r.inTok)}</span>
-            <span className="text-muted">out {fmtTok(r.outTok)}</span>
+            <span className='text-muted'>{fmtCost(r.cost)}</span>
+            <span className='text-muted'>in {fmtTok(r.inTok)}</span>
+            <span className='text-muted'>out {fmtTok(r.outTok)}</span>
           </div>
         ))}
       </div>

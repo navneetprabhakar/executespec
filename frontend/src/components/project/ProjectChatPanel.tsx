@@ -1,12 +1,25 @@
-import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { MessageSquare, Send, Loader2, Layers, GitBranch, Bug, Rocket, X, RotateCcw, Copy, Check, Archive } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import {useEffect, useRef, useState} from 'react';
+import {motion} from 'framer-motion';
+import {
+  MessageSquare,
+  Send,
+  Loader2,
+  Layers,
+  GitBranch,
+  Bug,
+  Rocket,
+  X,
+  RotateCcw,
+  Copy,
+  Check,
+  Archive,
+} from 'lucide-react';
+import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
-import { req, clearProjectChat, compactProjectChat } from '@/lib/api';
-import type { ProjectRepoLink } from '@/types/project';
-import { MarkdownContent } from '@/components/shared/MarkdownContent';
-import { cn } from '@/lib/utils';
+import {req, clearProjectChat, compactProjectChat} from '@/lib/api';
+import type {ProjectRepoLink} from '@/types/project';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
+import {cn} from '@/lib/utils';
 
 interface ChatMessage {
   id: string;
@@ -21,21 +34,24 @@ const QUICK_ACTIONS = [
   {
     icon: Layers,
     label: 'Project summary',
-    prompt: 'Give me a concise summary of what this project does, its main repos, and the features built so far.',
+    prompt:
+      'Give me a concise summary of what this project does, its main repos, and the features built so far.',
   },
   {
     icon: GitBranch,
     label: 'Architecture',
-    prompt: 'Explain the architecture — how the repos in this project interact, key interfaces, and data flow.',
+    prompt:
+      'Explain the architecture — how the repos in this project interact, key interfaces, and data flow.',
   },
   {
     icon: Bug,
     label: 'Debt + risks',
-    prompt: 'Based on the project memory and recent runs, what technical debt and risks should I know about?',
+    prompt:
+      'Based on the project memory and recent runs, what technical debt and risks should I know about?',
   },
 ];
 
-export default function ProjectChatPanel({ projectId }: { projectId: string }) {
+export default function ProjectChatPanel({projectId}: {projectId: string}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -62,15 +78,18 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
     }
   };
 
-  useEffect(() => () => {
-    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
-  }, []);
+  useEffect(
+    () => () => {
+      if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+    },
+    [],
+  );
 
   const handleResetHistory = async () => {
     if (resetting) return;
     const confirmed = window.confirm(
       'Reset chat history? This deletes every message in this conversation. ' +
-      'Project memory + architecture are kept — only the chat transcript is cleared.',
+        'Project memory + architecture are kept — only the chat transcript is cleared.',
     );
     if (!confirmed) return;
     setResetting(true);
@@ -98,7 +117,9 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
       // Surface a brief confirmation via the existing error slot (it doubles
       // as a status banner for transient flows; the styling is intentionally
       // neutral when the message starts with "Compacted".
-      setError(`Compacted ${result.compactedFrom} earlier message${result.compactedFrom === 1 ? '' : 's'} into a summary · ${result.totalAfter} now in conversation`);
+      setError(
+        `Compacted ${result.compactedFrom} earlier message${result.compactedFrom === 1 ? '' : 's'} into a summary · ${result.totalAfter} now in conversation`,
+      );
       setTimeout(() => {
         setError((curr) => (curr && curr.startsWith('Compacted') ? null : curr));
       }, 4000);
@@ -118,7 +139,7 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
   }, [projectId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    bottomRef.current?.scrollIntoView({behavior: 'smooth'});
   }, [messages, sending]);
 
   const handleSend = async (override?: string) => {
@@ -140,7 +161,7 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
     try {
       const reply = await req<ChatMessage>(`/projects/${projectId}/chat`, {
         method: 'POST',
-        body: JSON.stringify({ message: text }),
+        body: JSON.stringify({message: text}),
       });
       setMessages((m) => [...m, reply]);
     } catch (e) {
@@ -160,23 +181,26 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
   const hasConversation = messages.length > 0;
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-[var(--gray-100)]">
+    <div className='flex flex-col h-full min-h-0 bg-[var(--gray-100)]'>
       {/* Slim header — only when conversation exists, so the empty state stays clean */}
       {hasConversation && (
-        <div className="flex items-center justify-between px-4 py-2 border-b border-[var(--border-default)] flex-shrink-0">
-          <div className="flex items-center gap-1.5 text-[11px] font-medium text-secondary">
-            <MessageSquare className="h-3 w-3 text-accent-blue" />
+        <div className='flex items-center justify-between px-4 py-2 border-b border-[var(--border-default)] flex-shrink-0'>
+          <div className='flex items-center gap-1.5 text-[11px] font-medium text-secondary'>
+            <MessageSquare className='h-3 w-3 text-accent-blue' />
             Project Chat
-            <span className="text-muted">· {messages.length} message{messages.length === 1 ? '' : 's'}</span>
+            <span className='text-muted'>
+              · {messages.length} message{messages.length === 1 ? '' : 's'}
+            </span>
           </div>
-          <div className="flex items-center gap-1.5">
+          <div className='flex items-center gap-1.5'>
             <button
               onClick={handleCompact}
               disabled={compacting || resetting || sending || messages.length < 10}
               className={cn(
                 'inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm transition-colors',
                 'border border-[var(--border-default)] text-muted hover:text-accent-blue hover:border-accent-blue/40',
-                (compacting || resetting || sending || messages.length < 10) && 'opacity-40 cursor-not-allowed',
+                (compacting || resetting || sending || messages.length < 10) &&
+                  'opacity-40 cursor-not-allowed',
               )}
               title={
                 messages.length < 10
@@ -184,9 +208,11 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
                   : 'Summarise earlier messages into one note while keeping the recent tail. Use this when answers start drifting.'
               }
             >
-              {compacting
-                ? <Loader2 className="h-3 w-3 animate-spin" />
-                : <Archive className="h-3 w-3" />}
+              {compacting ? (
+                <Loader2 className='h-3 w-3 animate-spin' />
+              ) : (
+                <Archive className='h-3 w-3' />
+              )}
               Compact
             </button>
             <button
@@ -197,37 +223,39 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
                 'border border-[var(--border-default)] text-muted hover:text-accent-red hover:border-accent-red/40',
                 (resetting || compacting || sending) && 'opacity-40 cursor-not-allowed',
               )}
-              title="Clear chat history (project memory + architecture are preserved)"
+              title='Clear chat history (project memory + architecture are preserved)'
             >
-              {resetting
-                ? <Loader2 className="h-3 w-3 animate-spin" />
-                : <RotateCcw className="h-3 w-3" />}
+              {resetting ? (
+                <Loader2 className='h-3 w-3 animate-spin' />
+              ) : (
+                <RotateCcw className='h-3 w-3' />
+              )}
               Reset
             </button>
           </div>
         </div>
       )}
       {/* Scrollable message list */}
-      <div className="flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3">
+      <div className='flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3'>
         {loading && (
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <Loader2 className="h-3 w-3 animate-spin" />
+          <div className='flex items-center gap-2 text-xs text-muted'>
+            <Loader2 className='h-3 w-3 animate-spin' />
             Loading conversation…
           </div>
         )}
 
         {!loading && !hasConversation && (
-          <div className="flex flex-col items-center justify-center h-full text-center space-y-4 py-8">
-            <MessageSquare className="h-8 w-8 text-[var(--text-muted)]" />
+          <div className='flex flex-col items-center justify-center h-full text-center space-y-4 py-8'>
+            <MessageSquare className='h-8 w-8 text-[var(--text-muted)]' />
             <div>
-              <p className="text-sm font-medium text-secondary">Project Chat</p>
-              <p className="text-xs text-muted mt-1 max-w-sm leading-relaxed">
-                Ask about this project's architecture, past runs, decisions, or debt.
-                The assistant answers from project memory + the architecture doc — no fabrication.
+              <p className='text-sm font-medium text-secondary'>Project Chat</p>
+              <p className='text-xs text-muted mt-1 max-w-sm leading-relaxed'>
+                Ask about this project's architecture, past runs, decisions, or debt. The assistant
+                answers from project memory + the architecture doc — no fabrication.
               </p>
             </div>
-            <div className="flex flex-wrap justify-center gap-2 max-w-md">
-              {QUICK_ACTIONS.map(({ icon: Icon, label, prompt }) => (
+            <div className='flex flex-wrap justify-center gap-2 max-w-md'>
+              {QUICK_ACTIONS.map(({icon: Icon, label, prompt}) => (
                 <button
                   key={label}
                   onClick={() => handleSend(prompt)}
@@ -239,7 +267,7 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
                     sending && 'opacity-50 cursor-not-allowed',
                   )}
                 >
-                  <Icon className="h-3.5 w-3.5" />
+                  <Icon className='h-3.5 w-3.5' />
                   {label}
                 </button>
               ))}
@@ -253,20 +281,20 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
           return (
             <motion.div
               key={messageKey}
-              initial={{ opacity: 0, y: 6 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.2 }}
+              initial={{opacity: 0, y: 6}}
+              animate={{opacity: 1, y: 0}}
+              transition={{duration: 0.2}}
               className={cn(
                 'group flex flex-col gap-1',
                 m.role === 'USER' ? 'items-end' : 'items-start',
               )}
             >
               {m.role === 'USER' ? (
-                <div className="max-w-[85%] rounded-sm rounded-br-sm px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary">
-                  <p className="whitespace-pre-wrap break-words">{m.content}</p>
+                <div className='max-w-[85%] rounded-sm rounded-br-sm px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary'>
+                  <p className='whitespace-pre-wrap break-words'>{m.content}</p>
                 </div>
               ) : (
-                <div className="max-w-[90%] rounded-sm rounded-bl-sm px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary">
+                <div className='max-w-[90%] rounded-sm rounded-bl-sm px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary'>
                   <MarkdownContent content={m.content} compact />
                 </div>
               )}
@@ -281,10 +309,10 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
                     ? 'opacity-100 text-accent-blue'
                     : 'opacity-0 group-hover:opacity-100 focus:opacity-100',
                 )}
-                title="Copy message"
+                title='Copy message'
                 aria-label={isCopied ? 'Copied' : 'Copy message'}
               >
-                {isCopied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                {isCopied ? <Check className='h-3 w-3' /> : <Copy className='h-3 w-3' />}
                 {isCopied ? 'Copied' : 'Copy'}
               </button>
             </motion.div>
@@ -292,22 +320,22 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
         })}
 
         {sending && (
-          <div className="flex justify-start">
-            <div className="bg-[var(--gray-300)] border border-[var(--border-default)] rounded-sm rounded-bl-sm px-4 py-3">
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5">
-                  <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:0ms]" />
-                  <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:150ms]" />
-                  <span className="h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:300ms]" />
+          <div className='flex justify-start'>
+            <div className='bg-[var(--gray-300)] border border-[var(--border-default)] rounded-sm rounded-bl-sm px-4 py-3'>
+              <div className='flex items-center gap-2'>
+                <div className='flex items-center gap-1.5'>
+                  <span className='h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:0ms]' />
+                  <span className='h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:150ms]' />
+                  <span className='h-1.5 w-1.5 bg-accent-blue/60 rounded-full animate-bounce [animation-delay:300ms]' />
                 </div>
-                <span className="text-[11px] text-muted">Thinking…</span>
+                <span className='text-[11px] text-muted'>Thinking…</span>
               </div>
             </div>
           </div>
         )}
 
         {error && (
-          <div className="mx-auto max-w-md p-3 rounded-sm bg-accent-red/10 border border-accent-red/20 text-xs text-accent-red text-center">
+          <div className='mx-auto max-w-md p-3 rounded-sm bg-accent-red/10 border border-accent-red/20 text-xs text-accent-red text-center'>
             {error}
           </div>
         )}
@@ -325,15 +353,15 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
             // context (recent submissions on the Overview tab) instead of
             // bouncing to a standalone /runs/{id} route that doesn't exist
             // in the current router and falls through to the landing page.
-            navigate(`/projects/${projectId}/dashboard`, { state: { launchedRunId: runId } });
+            navigate(`/projects/${projectId}/dashboard`, {state: {launchedRunId: runId}});
           }}
         />
       )}
 
       {/* Input */}
       <div
-        className="px-4 py-3 border-t border-[var(--border-default)] flex-shrink-0"
-        style={{ paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))' }}
+        className='px-4 py-3 border-t border-[var(--border-default)] flex-shrink-0'
+        style={{paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))'}}
       >
         <div
           className={cn(
@@ -343,8 +371,8 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
         >
           <textarea
             ref={inputRef}
-            className="flex-1 bg-transparent text-sm text-primary placeholder-[var(--text-muted)] resize-none focus:outline-none max-h-32 min-h-[24px]"
-            placeholder="Ask about this project…"
+            className='flex-1 bg-transparent text-sm text-primary placeholder-[var(--text-muted)] resize-none focus:outline-none max-h-32 min-h-[24px]'
+            placeholder='Ask about this project…'
             rows={1}
             value={input}
             onChange={(e) => {
@@ -358,10 +386,10 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
           <button
             onClick={() => setLaunchOpen(true)}
             disabled={sending || messages.length === 0}
-            className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
-            title="Distil this chat into an execution and launch it"
+            className='inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0'
+            title='Distil this chat into an execution and launch it'
           >
-            <Rocket className="h-3.5 w-3.5" />
+            <Rocket className='h-3.5 w-3.5' />
             Launch
           </button>
           <button
@@ -373,9 +401,9 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
                 ? 'bg-accent-blue text-primary hover:bg-accent-blue/90'
                 : 'text-muted cursor-not-allowed',
             )}
-            title="Send (Enter)"
+            title='Send (Enter)'
           >
-            {sending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+            {sending ? <Loader2 className='h-4 w-4 animate-spin' /> : <Send className='h-4 w-4' />}
           </button>
         </div>
       </div>
@@ -384,7 +412,9 @@ export default function ProjectChatPanel({ projectId }: { projectId: string }) {
 }
 
 function LaunchFromChatModal({
-  projectId, onClose, onLaunched,
+  projectId,
+  onClose,
+  onLaunched,
 }: {
   projectId: string;
   onClose: () => void;
@@ -400,39 +430,47 @@ function LaunchFromChatModal({
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([
-      api.compileProjectChatToSpec(projectId),
-      api.getProjectRepos(projectId),
-    ])
-      .then(([{ spec }, linkedRepos]) => {
+    Promise.all([api.compileProjectChatToSpec(projectId), api.getProjectRepos(projectId)])
+      .then(([{spec}, linkedRepos]) => {
         if (cancelled) return;
         setSpec(spec);
         setRepos(linkedRepos);
         setSelected(new Set(linkedRepos.map((l) => l.repo.id)));
       })
-      .catch((e: Error) => { if (!cancelled) setErr(e.message); })
-      .finally(() => { if (!cancelled) setCompiling(false); });
-    return () => { cancelled = true; };
+      .catch((e: Error) => {
+        if (!cancelled) setErr(e.message);
+      })
+      .finally(() => {
+        if (!cancelled) setCompiling(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
   const toggleRepo = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id); else next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
 
   const submit = async () => {
-    if (!spec.trim()) { setErr('Spec is empty.'); return; }
-    if (selected.size === 0) { setErr('Pick at least one repo.'); return; }
+    if (!spec.trim()) {
+      setErr('Spec is empty.');
+      return;
+    }
+    if (selected.size === 0) {
+      setErr('Pick at least one repo.');
+      return;
+    }
     setSubmitting(true);
     setErr(null);
     try {
       const ids = Array.from(selected);
-      const repoUrl = repos
-        .find((l) => l.repo.id === ids[0])
-        ?.repo.githubRepoFullName;
+      const repoUrl = repos.find((l) => l.repo.id === ids[0])?.repo.githubRepoFullName;
       const body: Record<string, unknown> = {
         userRequest: spec.trim(),
         source: 'GITHUB_EXISTING',
@@ -445,7 +483,7 @@ function LaunchFromChatModal({
       };
       const trimmedBranch = branch.trim();
       if (trimmedBranch) body.branch = trimmedBranch;
-      const res = await req<{ runId?: string; id?: string }>('/runs', {
+      const res = await req<{runId?: string; id?: string}>('/runs', {
         method: 'POST',
         body: JSON.stringify(body),
       });
@@ -460,24 +498,27 @@ function LaunchFromChatModal({
   };
 
   return (
-    <div className="fixed inset-0 z-40 bg-black/60 flex items-center justify-center" onClick={onClose}>
+    <div
+      className='fixed inset-0 z-40 bg-black/60 flex items-center justify-center'
+      onClick={onClose}
+    >
       <div
-        className="w-full max-w-xl rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] shadow-xl p-4 space-y-3"
+        className='w-full max-w-xl rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] shadow-xl p-4 space-y-3'
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center justify-between">
-          <h2 className="text-[13px] font-medium text-primary flex items-center gap-1.5">
-            <Rocket className="h-3.5 w-3.5 text-accent-blue" />
+        <div className='flex items-center justify-between'>
+          <h2 className='text-[13px] font-medium text-primary flex items-center gap-1.5'>
+            <Rocket className='h-3.5 w-3.5 text-accent-blue' />
             Launch execution from chat
           </h2>
-          <button onClick={onClose} className="text-muted hover:text-primary">
-            <X className="h-3.5 w-3.5" />
+          <button onClick={onClose} className='text-muted hover:text-primary'>
+            <X className='h-3.5 w-3.5' />
           </button>
         </div>
 
         {compiling && (
-          <div className="flex items-center gap-2 text-xs text-muted">
-            <Loader2 className="h-3 w-3 animate-spin" />
+          <div className='flex items-center gap-2 text-xs text-muted'>
+            <Loader2 className='h-3 w-3 animate-spin' />
             Compiling chat into a spec…
           </div>
         )}
@@ -485,78 +526,88 @@ function LaunchFromChatModal({
         {!compiling && (
           <>
             <div>
-              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
+              <label className='block text-[11px] uppercase tracking-wide text-muted mb-1'>
                 Execution spec (editable)
               </label>
               <textarea
                 value={spec}
                 onChange={(e) => setSpec(e.target.value)}
                 rows={7}
-                className="w-full text-sm font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-1.5 focus:outline-none focus:border-accent-blue resize-y"
+                className='w-full text-sm font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-1.5 focus:outline-none focus:border-accent-blue resize-y'
               />
             </div>
 
             <div>
-              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
-                Branch <span className="normal-case tracking-normal text-muted">(optional — leave blank for each repo's default)</span>
+              <label className='block text-[11px] uppercase tracking-wide text-muted mb-1'>
+                Branch{' '}
+                <span className='normal-case tracking-normal text-muted'>
+                  (optional — leave blank for each repo's default)
+                </span>
               </label>
               <input
-                type="text"
+                type='text'
                 value={branch}
                 onChange={(e) => setBranch(e.target.value)}
-                placeholder="main"
+                placeholder='main'
                 title="Re-launch on an existing branch (e.g. the PR branch you want to address review comments on, or a feature branch you're staging changes onto). Applied to every selected repo."
-                className="w-full text-sm font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted px-2 py-1.5 focus:outline-none focus:border-accent-blue"
+                className='w-full text-sm font-mono rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary placeholder:text-muted px-2 py-1.5 focus:outline-none focus:border-accent-blue'
               />
-              <p className="text-[10.5px] text-muted mt-1">
-                Use cases — addressing PR review comments (paste the PR branch), or stacking a staged launch on an in-progress branch.
+              <p className='text-[10.5px] text-muted mt-1'>
+                Use cases — addressing PR review comments (paste the PR branch), or stacking a
+                staged launch on an in-progress branch.
               </p>
             </div>
 
             <div>
-              <label className="block text-[11px] uppercase tracking-wide text-muted mb-1">
+              <label className='block text-[11px] uppercase tracking-wide text-muted mb-1'>
                 Repos ({selected.size} of {repos.length} selected)
               </label>
-              <div className="space-y-1 max-h-40 overflow-y-auto">
+              <div className='space-y-1 max-h-40 overflow-y-auto'>
                 {repos.map((l) => (
                   <label
                     key={l.repo.id}
-                    className="flex items-center gap-2 text-xs font-mono text-secondary px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] cursor-pointer hover:border-accent-blue/40"
+                    className='flex items-center gap-2 text-xs font-mono text-secondary px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] cursor-pointer hover:border-accent-blue/40'
                   >
                     <input
-                      type="checkbox"
+                      type='checkbox'
                       checked={selected.has(l.repo.id)}
                       onChange={() => toggleRepo(l.repo.id)}
-                      className="accent-accent-blue"
+                      className='accent-accent-blue'
                     />
                     {l.repo.githubRepoFullName}
                   </label>
                 ))}
                 {repos.length === 0 && (
-                  <div className="text-xs text-muted">No repos linked to this project.</div>
+                  <div className='text-xs text-muted'>No repos linked to this project.</div>
                 )}
               </div>
             </div>
           </>
         )}
 
-        {err && <div className="text-xs text-accent-red">{err}</div>}
+        {err && <div className='text-xs text-accent-red'>{err}</div>}
 
-        <div className="flex justify-end gap-2 pt-1">
+        <div className='flex justify-end gap-2 pt-1'>
           <button
             onClick={onClose}
-            className="text-xs px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary"
+            className='text-xs px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary'
           >
             Cancel
           </button>
           <button
             onClick={submit}
             disabled={submitting || compiling || !spec.trim() || selected.size === 0}
-            className="inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 disabled:cursor-not-allowed"
+            className='inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 disabled:cursor-not-allowed'
           >
-            {submitting
-              ? <><Loader2 className="h-3 w-3 animate-spin" /> Launching…</>
-              : <><Rocket className="h-3 w-3" /> Launch</>}
+            {submitting ? (
+              <>
+                <Loader2 className='h-3 w-3 animate-spin' /> Launching…
+              </>
+            ) : (
+              <>
+                <Rocket className='h-3 w-3' /> Launch
+              </>
+            )}
           </button>
         </div>
       </div>

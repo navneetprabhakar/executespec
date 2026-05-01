@@ -10,7 +10,7 @@
  * dimension bars, the Show-details panel).
  */
 
-import { CheckCircle2, AlertTriangle, XCircle } from 'lucide-react';
+import {CheckCircle2, AlertTriangle, XCircle} from 'lucide-react';
 
 export type Verdict = 'shippable' | 'needs-review' | 'blocked';
 
@@ -47,31 +47,42 @@ export function deriveVerdict(s: VerdictSignals): VerdictResult | null {
 
   // Hard blocks first.
   if (s.statusReason === 'FINAL_BUILD_FAILED' || s.finalBuildPassed === false) {
-    return { verdict: 'blocked', reason: 'Final build failed — code may not run as written.' };
+    return {verdict: 'blocked', reason: 'Final build failed — code may not run as written.'};
   }
   if (s.statusReason === 'ALL_TASKS_FAILED') {
-    return { verdict: 'blocked', reason: 'Every task failed; nothing was successfully implemented.' };
+    return {verdict: 'blocked', reason: 'Every task failed; nothing was successfully implemented.'};
   }
   if (s.reviewerVerdict === 'REVIEW_FAILED' || s.statusReason === 'REVIEWER_FAILED') {
-    return { verdict: 'blocked', reason: 'Reviewer could not complete its passes; treat the run as unverified.' };
+    return {
+      verdict: 'blocked',
+      reason: 'Reviewer could not complete its passes; treat the run as unverified.',
+    };
   }
   if (s.verifiedScore != null && s.verifiedScore < 50) {
-    return { verdict: 'blocked', reason: `Verified score ${s.verifiedScore}/100 is below the acceptance bar (50).` };
+    return {
+      verdict: 'blocked',
+      reason: `Verified score ${s.verifiedScore}/100 is below the acceptance bar (50).`,
+    };
   }
 
   // Yellow-light: caller should look before merging.
   if (s.reviewerVerdict === 'UNRESOLVED_ISSUES' || s.statusReason === 'REVIEWER_UNRESOLVED') {
-    return { verdict: 'needs-review', reason: 'Reviewer flagged issues it could not auto-fix; inspect the report.' };
+    return {
+      verdict: 'needs-review',
+      reason: 'Reviewer flagged issues it could not auto-fix; inspect the report.',
+    };
+  }
+  if (s.statusReason != null && s.statusReason.startsWith('TESTS_FAILED')) {
+    return {
+      verdict: 'needs-review',
+      reason: 'One or more tests failed; review the test report before shipping.',
+    };
   }
   if (
-    s.statusReason != null &&
-    s.statusReason.startsWith('TESTS_FAILED')
-  ) {
-    return { verdict: 'needs-review', reason: 'One or more tests failed; review the test report before shipping.' };
-  }
-  if (
-    s.testsTotal != null && s.testsTotal > 0 &&
-    s.testsPassed != null && s.testsPassed < s.testsTotal
+    s.testsTotal != null &&
+    s.testsTotal > 0 &&
+    s.testsPassed != null &&
+    s.testsPassed < s.testsTotal
   ) {
     return {
       verdict: 'needs-review',
@@ -79,7 +90,10 @@ export function deriveVerdict(s: VerdictSignals): VerdictResult | null {
     };
   }
   if (s.verifiedScore != null && s.verifiedScore < 85) {
-    return { verdict: 'needs-review', reason: `Verified score ${s.verifiedScore}/100 is below the auto-ship threshold (85).` };
+    return {
+      verdict: 'needs-review',
+      reason: `Verified score ${s.verifiedScore}/100 is below the auto-ship threshold (85).`,
+    };
   }
 
   return {
@@ -91,21 +105,21 @@ export function deriveVerdict(s: VerdictSignals): VerdictResult | null {
   };
 }
 
-const STYLES: Record<Verdict, { wrap: string; label: string; Icon: typeof CheckCircle2 }> = {
+const STYLES: Record<Verdict, {wrap: string; label: string; Icon: typeof CheckCircle2}> = {
   shippable: {
-    wrap:  'border-status-success/30 bg-status-success/10 text-status-success',
+    wrap: 'border-status-success/30 bg-status-success/10 text-status-success',
     label: 'Shippable',
-    Icon:  CheckCircle2,
+    Icon: CheckCircle2,
   },
   'needs-review': {
-    wrap:  'border-status-waiting/30 bg-status-waiting/10 text-status-waiting',
+    wrap: 'border-status-waiting/30 bg-status-waiting/10 text-status-waiting',
     label: 'Needs review',
-    Icon:  AlertTriangle,
+    Icon: AlertTriangle,
   },
   blocked: {
-    wrap:  'border-status-error/30 bg-status-error/10 text-status-error',
+    wrap: 'border-status-error/30 bg-status-error/10 text-status-error',
     label: 'Blocked',
-    Icon:  XCircle,
+    Icon: XCircle,
   },
 };
 
@@ -115,20 +129,18 @@ export interface VerdictPillProps extends VerdictSignals {
   size?: 'sm' | 'lg';
 }
 
-export default function VerdictPill({ className, size = 'sm', ...signals }: VerdictPillProps) {
+export default function VerdictPill({className, size = 'sm', ...signals}: VerdictPillProps) {
   const result = deriveVerdict(signals);
   if (!result) return null;
-  const { wrap, label, Icon } = STYLES[result.verdict];
-  const sizeCls = size === 'lg'
-    ? 'text-xs px-2.5 py-1 gap-1.5'
-    : 'text-[10px] px-1.5 py-0.5 gap-1';
+  const {wrap, label, Icon} = STYLES[result.verdict];
+  const sizeCls = size === 'lg' ? 'text-xs px-2.5 py-1 gap-1.5' : 'text-[10px] px-1.5 py-0.5 gap-1';
   const iconSize = size === 'lg' ? 14 : 11;
   return (
     <span
       className={`inline-flex items-center rounded-md border font-medium tracking-wide ${sizeCls} ${wrap} ${className ?? ''}`}
       title={result.reason}
       aria-label={`${label}: ${result.reason}`}
-      role="status"
+      role='status'
     >
       <Icon size={iconSize} aria-hidden />
       {label}

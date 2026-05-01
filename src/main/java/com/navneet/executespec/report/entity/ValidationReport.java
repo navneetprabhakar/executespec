@@ -1,12 +1,13 @@
 package com.navneet.executespec.report.entity;
 
+import java.time.Instant;
+
 import jakarta.persistence.*;
+
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-
-import java.time.Instant;
 
 @Entity
 @Table(name = "validation_report")
@@ -16,140 +17,156 @@ import java.time.Instant;
 @AllArgsConstructor
 public class ValidationReport {
 
-    @Id
-    private String id;
+  @Id private String id;
 
-    @Column(name = "run_id", nullable = false)
-    private String runId;
+  @Column(name = "run_id", nullable = false)
+  private String runId;
 
-    @Column(name = "files_generated", nullable = false)
-    @Builder.Default
-    private int filesGenerated = 0;
+  @Column(name = "files_generated", nullable = false)
+  @Builder.Default
+  private int filesGenerated = 0;
 
-    @Column(name = "languages", nullable = false)
-    @Builder.Default
-    private String languages = "";
+  @Column(name = "languages", nullable = false)
+  @Builder.Default
+  private String languages = "";
 
-    @Enumerated(EnumType.STRING)
-    @Column(name = "pipeline_result", nullable = false, length = 30)
-    @Builder.Default
-    private PipelineResult pipelineResult = PipelineResult.PASSED;
+  @Enumerated(EnumType.STRING)
+  @Column(name = "pipeline_result", nullable = false, length = 30)
+  @Builder.Default
+  private PipelineResult pipelineResult = PipelineResult.PASSED;
 
-    @Column(name = "issues_json", columnDefinition = "TEXT", nullable = false)
-    @Builder.Default
-    private String issuesJson = "[]";
+  @Column(name = "issues_json", columnDefinition = "TEXT", nullable = false)
+  @Builder.Default
+  private String issuesJson = "[]";
 
-    @Column(name = "checks_passed", nullable = false)
-    @Builder.Default
-    private String checksPassed = "";
+  @Column(name = "checks_passed", nullable = false)
+  @Builder.Default
+  private String checksPassed = "";
 
-    @Column(name = "report_markdown", columnDefinition = "TEXT")
-    private String reportMarkdown;
+  @Column(name = "report_markdown", columnDefinition = "TEXT")
+  private String reportMarkdown;
 
-    @Column(name = "model_used", length = 50)
-    private String modelUsed;
+  @Column(name = "model_used", length = 50)
+  private String modelUsed;
 
-    @Column(name = "input_tokens")
-    private Integer inputTokens;
+  @Column(name = "input_tokens")
+  private Integer inputTokens;
 
-    @Column(name = "output_tokens")
-    private Integer outputTokens;
+  @Column(name = "output_tokens")
+  private Integer outputTokens;
 
-    @Column(name = "generation_time_ms")
-    private Long generationTimeMs;
+  @Column(name = "generation_time_ms")
+  private Long generationTimeMs;
 
-    @Column(name = "generated_after_improvements", nullable = false)
-    @Builder.Default
-    private boolean generatedAfterImprovements = false;
+  @Column(name = "generated_after_improvements", nullable = false)
+  @Builder.Default
+  private boolean generatedAfterImprovements = false;
 
-    /** Lifecycle marker: PENDING while generation is in flight, COMPLETE when
-     *  the report is readable, FAILED if generation errored out. Default
-     *  COMPLETE so backfilled rows (V80 migration) render correctly. */
-    @Column(name = "status", nullable = false, length = 20)
-    @Builder.Default
-    private String status = "COMPLETE";
+  /**
+   * Lifecycle marker: PENDING while generation is in flight, COMPLETE when the report is readable,
+   * FAILED if generation errored out. Default COMPLETE so backfilled rows (V80 migration) render
+   * correctly.
+   */
+  @Column(name = "status", nullable = false, length = 20)
+  @Builder.Default
+  private String status = "COMPLETE";
 
-    // ── Phase 3: Accuracy assessment fields (V74) ──────────────────────────────────────────────
+  // ── Phase 3: Accuracy assessment fields (V74) ──────────────────────────────────────────────
 
-    /** Spec adherence score 0-100 from AccuracyAssessmentService. Null if assessment was skipped. */
-    @Column(name = "accuracy_score")
-    private Integer accuracyScore;
+  /** Spec adherence score 0-100 from AccuracyAssessmentService. Null if assessment was skipped. */
+  @Column(name = "accuracy_score")
+  private Integer accuracyScore;
 
-    /** Letter grade: A/B/C/D/F. Null if assessment was skipped. */
-    @Column(name = "accuracy_grade", length = 2)
-    private String accuracyGrade;
+  /** Letter grade: A/B/C/D/F. Null if assessment was skipped. */
+  @Column(name = "accuracy_grade", length = 2)
+  private String accuracyGrade;
 
-    /**
-     * Full AccuracyReport JSON including implemented/missing requirements, endpoint coverage,
-     * schema accuracy, test coverage level, and grading notes.
-     */
-    @Column(name = "accuracy_json", columnDefinition = "TEXT")
-    private String accuracyJson;
+  /**
+   * Full AccuracyReport JSON including implemented/missing requirements, endpoint coverage, schema
+   * accuracy, test coverage level, and grading notes.
+   */
+  @Column(name = "accuracy_json", columnDefinition = "TEXT")
+  private String accuracyJson;
 
-    // ── Pilot R6: Multi-dimension review scoring (V83) ─────────────────────────────────────────
+  // ── Pilot R6: Multi-dimension review scoring (V83) ─────────────────────────────────────────
 
-    @Column(name = "code_quality_score")      private Integer codeQualityScore;
-    @Column(name = "test_coverage_score")     private Integer testCoverageScore;
-    @Column(name = "architecture_score")      private Integer architectureScore;
-    @Column(name = "security_score")          private Integer securityScore;
-    @Column(name = "performance_score")       private Integer performanceScore;
-    /** Weighted when the run provides a {@code figmaUrl}. Null otherwise. */
-    @Column(name = "design_compliance_score") private Integer designComplianceScore;
+  @Column(name = "code_quality_score")
+  private Integer codeQualityScore;
 
-    // ── v2.5.10 (V106): verified signals for trustworthy scoring ──────────────────────────────
+  @Column(name = "test_coverage_score")
+  private Integer testCoverageScore;
 
-    /** True when ReviewerResult.finalBuildPassed at report time. Null for rows written before V106. */
-    @Column(name = "final_build_passed")
-    private Boolean finalBuildPassed;
+  @Column(name = "architecture_score")
+  private Integer architectureScore;
 
-    /** Count of TestResult rows with status=PASS for this run at report time. */
-    @Column(name = "tests_passed")
-    private Integer testsPassed;
+  @Column(name = "security_score")
+  private Integer securityScore;
 
-    /** Count of all TestResult rows for this run at report time. 0 when test generation never ran. */
-    @Column(name = "tests_total")
-    private Integer testsTotal;
+  @Column(name = "performance_score")
+  private Integer performanceScore;
 
-    /** ReviewerResult.Overall enum name: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. */
-    @Column(name = "reviewer_verdict", length = 32)
-    private String reviewerVerdict;
+  /** Weighted when the run provides a {@code figmaUrl}. Null otherwise. */
+  @Column(name = "design_compliance_score")
+  private Integer designComplianceScore;
 
-    /**
-     * 0-100 deterministic score derived from final_build_passed + tests_passed/tests_total
-     * + reviewer_verdict - unfixed_critical_penalty. Primary display when the
-     * {@code scoring.v2-verified} feature flag is on; accuracy_score remains
-     * available as secondary "estimated requirement coverage".
-     */
-    @Column(name = "verified_score")
-    private Integer verifiedScore;
+  // ── v2.5.10 (V106): verified signals for trustworthy scoring ──────────────────────────────
 
-    // ──────────────────────────────────────────────────────────────────────────────────────────
+  /**
+   * True when ReviewerResult.finalBuildPassed at report time. Null for rows written before V106.
+   */
+  @Column(name = "final_build_passed")
+  private Boolean finalBuildPassed;
 
-    /** Preview URL captured at report generation time. Null if preview expired or was never started. */
-    @Column(name = "preview_url", length = 512)
-    private String previewUrl;
+  /** Count of TestResult rows with status=PASS for this run at report time. */
+  @Column(name = "tests_passed")
+  private Integer testsPassed;
 
-    @Column(name = "share_token", length = 64, unique = true)
-    private String shareToken;
+  /** Count of all TestResult rows for this run at report time. 0 when test generation never ran. */
+  @Column(name = "tests_total")
+  private Integer testsTotal;
 
-    @Column(name = "shared_at")
-    private Instant sharedAt;
+  /** ReviewerResult.Overall enum name: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. */
+  @Column(name = "reviewer_verdict", length = 32)
+  private String reviewerVerdict;
 
-    @Column(name = "created_at", nullable = false, updatable = false)
-    private Instant createdAt;
+  /**
+   * 0-100 deterministic score derived from final_build_passed + tests_passed/tests_total +
+   * reviewer_verdict - unfixed_critical_penalty. Primary display when the {@code
+   * scoring.v2-verified} feature flag is on; accuracy_score remains available as secondary
+   * "estimated requirement coverage".
+   */
+  @Column(name = "verified_score")
+  private Integer verifiedScore;
 
-    @Column(name = "updated_at", nullable = false)
-    private Instant updatedAt;
+  // ──────────────────────────────────────────────────────────────────────────────────────────
 
-    @PrePersist
-    void prePersist() {
-        var now = Instant.now();
-        if (createdAt == null) createdAt = now;
-        if (updatedAt == null) updatedAt = now;
-    }
+  /**
+   * Preview URL captured at report generation time. Null if preview expired or was never started.
+   */
+  @Column(name = "preview_url", length = 512)
+  private String previewUrl;
 
-    @PreUpdate
-    void preUpdate() {
-        updatedAt = Instant.now();
-    }
+  @Column(name = "share_token", length = 64, unique = true)
+  private String shareToken;
+
+  @Column(name = "shared_at")
+  private Instant sharedAt;
+
+  @Column(name = "created_at", nullable = false, updatable = false)
+  private Instant createdAt;
+
+  @Column(name = "updated_at", nullable = false)
+  private Instant updatedAt;
+
+  @PrePersist
+  void prePersist() {
+    var now = Instant.now();
+    if (createdAt == null) createdAt = now;
+    if (updatedAt == null) updatedAt = now;
+  }
+
+  @PreUpdate
+  void preUpdate() {
+    updatedAt = Instant.now();
+  }
 }

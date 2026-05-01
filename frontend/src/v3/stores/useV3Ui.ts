@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 
 /**
  * R-103+ — tiny v3 UI store. Avoids prop-drilling for cross-component
@@ -36,16 +36,16 @@ interface V3UiStore {
 
 export const useV3Ui = create<V3UiStore>((set) => ({
   cmdKOpen: false,
-  openCmdK: () => set({ cmdKOpen: true }),
-  closeCmdK: () => set({ cmdKOpen: false }),
-  toggleCmdK: () => set((s) => ({ cmdKOpen: !s.cmdKOpen })),
+  openCmdK: () => set({cmdKOpen: true}),
+  closeCmdK: () => set({cmdKOpen: false}),
+  toggleCmdK: () => set((s) => ({cmdKOpen: !s.cmdKOpen})),
 
   cap: null,
-  setCap: (c) => set({ cap: c }),
+  setCap: (c) => set({cap: c}),
   capToastDismissed: false,
-  dismissCapToast: () => set({ capToastDismissed: true }),
+  dismissCapToast: () => set({capToastDismissed: true}),
 
   capModalOpen: false,
-  openCapModal: () => set({ capModalOpen: true }),
-  closeCapModal: () => set({ capModalOpen: false }),
+  openCapModal: () => set({capModalOpen: true}),
+  closeCapModal: () => set({capModalOpen: false}),
 }));

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, useRef } from 'react';
+import {useEffect, useCallback, useRef} from 'react';
 
 // Declare Razorpay global type
 declare global {
@@ -32,7 +32,6 @@ export function RazorpayCheckout({
   planName,
   amountPaise,
 }: RazorpayCheckoutProps) {
-
   const openedRef = useRef(false);
 
   // Load Razorpay script dynamically
@@ -61,7 +60,7 @@ export function RazorpayCheckout({
 
       const gstNote = amountPaise
         ? `${planName || 'Subscription'} — ₹${(amountPaise / 100).toLocaleString('en-IN')} + 18% GST`
-        : (planName || 'Subscription');
+        : planName || 'Subscription';
 
       const options = {
         key: razorpayKeyId,
