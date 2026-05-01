@@ -28,9 +28,9 @@
  * `onClose` here. The drawer doesn't manage its own visibility.
  */
 
-import { ReactNode, useEffect, useRef } from 'react';
-import { X } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import {ReactNode, useEffect, useRef} from 'react';
+import {X} from 'lucide-react';
+import {cn} from '@/lib/utils';
 
 interface DrawerProps {
   open: boolean;
@@ -81,10 +81,10 @@ export function Drawer({
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex" role="dialog" aria-modal="true" aria-label={title}>
+    <div className='fixed inset-0 z-50 flex' role='dialog' aria-modal='true' aria-label={title}>
       {/* Backdrop */}
       <div
-        className="flex-1 bg-black/40 transition-opacity"
+        className='flex-1 bg-black/40 transition-opacity'
         onClick={dismissOnBackdrop ? onClose : undefined}
         aria-hidden
       />
@@ -94,27 +94,25 @@ export function Drawer({
           'flex flex-col bg-[var(--bg-primary)] border-l border-[var(--border-default)] shadow-2xl',
           'animate-in slide-in-from-right duration-200',
           widthClass,
-          'max-w-full'
+          'max-w-full',
         )}
       >
-        <div className="flex items-start justify-between gap-3 px-5 py-4 border-b border-[var(--border-default)]">
-          <div className="min-w-0">
-            <h2 className="text-sm font-semibold text-primary truncate">{title}</h2>
-            {description && (
-              <p className="text-xs text-muted mt-1 leading-snug">{description}</p>
-            )}
+        <div className='flex items-start justify-between gap-3 px-5 py-4 border-b border-[var(--border-default)]'>
+          <div className='min-w-0'>
+            <h2 className='text-sm font-semibold text-primary truncate'>{title}</h2>
+            {description && <p className='text-xs text-muted mt-1 leading-snug'>{description}</p>}
           </div>
           <button
             ref={closeBtnRef}
             onClick={onClose}
-            className="rounded-sm p-1 text-muted hover:text-primary hover:bg-[var(--gray-200)] transition-colors flex-shrink-0"
-            aria-label="Close"
-            title="Close (Esc)"
+            className='rounded-sm p-1 text-muted hover:text-primary hover:bg-[var(--gray-200)] transition-colors flex-shrink-0'
+            aria-label='Close'
+            title='Close (Esc)'
           >
-            <X className="h-4 w-4" />
+            <X className='h-4 w-4' />
           </button>
         </div>
-        <div className="flex-1 overflow-y-auto px-5 py-4">{children}</div>
+        <div className='flex-1 overflow-y-auto px-5 py-4'>{children}</div>
       </div>
     </div>
   );

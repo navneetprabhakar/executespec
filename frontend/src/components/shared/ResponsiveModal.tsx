@@ -1,9 +1,9 @@
-import { useEffect, useRef } from 'react';
-import { createPortal } from 'react-dom';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useIsMobile } from '@/hooks/useIsMobile';
+import {useEffect, useRef} from 'react';
+import {createPortal} from 'react-dom';
+import {motion, AnimatePresence} from 'framer-motion';
+import {X} from 'lucide-react';
+import {cn} from '@/lib/utils';
+import {useIsMobile} from '@/hooks/useIsMobile';
 
 interface ResponsiveModalProps {
   open: boolean;
@@ -23,21 +23,21 @@ const FOCUSABLE =
   'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
 
 const desktopVariants = {
-  hidden: { opacity: 0, scale: 0.95 },
-  visible: { opacity: 1, scale: 1 },
-  exit: { opacity: 0, scale: 0.95 },
+  hidden: {opacity: 0, scale: 0.95},
+  visible: {opacity: 1, scale: 1},
+  exit: {opacity: 0, scale: 0.95},
 };
 
 const mobileVariants = {
-  hidden: { y: '100%' },
-  visible: { y: 0 },
-  exit: { y: '100%' },
+  hidden: {y: '100%'},
+  visible: {y: 0},
+  exit: {y: '100%'},
 };
 
 const backdropVariants = {
-  hidden: { opacity: 0 },
-  visible: { opacity: 1 },
-  exit: { opacity: 0 },
+  hidden: {opacity: 0},
+  visible: {opacity: 1},
+  exit: {opacity: 0},
 };
 
 export default function ResponsiveModal({
@@ -112,19 +112,19 @@ export default function ResponsiveModal({
     <AnimatePresence>
       {open && (
         <div
-          role="dialog"
-          aria-modal="true"
+          role='dialog'
+          aria-modal='true'
           aria-label={title}
-          className="fixed inset-0 z-50 flex items-center justify-center"
+          className='fixed inset-0 z-50 flex items-center justify-center'
         >
           {/* Backdrop */}
           <motion.div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+            className='absolute inset-0 bg-black/50 backdrop-blur-sm'
             variants={backdropVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            transition={{ duration: 0.2 }}
+            initial='hidden'
+            animate='visible'
+            exit='exit'
+            transition={{duration: 0.2}}
             onClick={isMobile || disableDismiss ? undefined : onClose}
           />
 
@@ -139,33 +139,33 @@ export default function ResponsiveModal({
               className,
             )}
             variants={isMobile ? mobileVariants : desktopVariants}
-            initial="hidden"
-            animate="visible"
-            exit="exit"
-            transition={{ duration: 0.2, ease: 'easeOut' }}
+            initial='hidden'
+            animate='visible'
+            exit='exit'
+            transition={{duration: 0.2, ease: 'easeOut'}}
           >
             {/* Header */}
             {(title || !hideCloseButton) && (
-              <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--border-default)] shrink-0">
+              <div className='flex items-center justify-between px-4 py-3 border-b border-[var(--border-default)] shrink-0'>
                 {title && (
-                  <h2 className="text-lg font-semibold text-[var(--text-primary)] truncate pr-2">
+                  <h2 className='text-lg font-semibold text-[var(--text-primary)] truncate pr-2'>
                     {title}
                   </h2>
                 )}
                 {!hideCloseButton && (
                   <button
                     onClick={onClose}
-                    className="ml-auto p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--gray-200)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]"
-                    aria-label="Close"
+                    className='ml-auto p-1.5 rounded-md text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-[var(--gray-200)] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent-blue)]'
+                    aria-label='Close'
                   >
-                    <X className="w-5 h-5" />
+                    <X className='w-5 h-5' />
                   </button>
                 )}
               </div>
             )}
 
             {/* Body */}
-            <div className="flex-1 overflow-y-auto p-4">{children}</div>
+            <div className='flex-1 overflow-y-auto p-4'>{children}</div>
           </motion.div>
         </div>
       )}

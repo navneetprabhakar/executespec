@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import {useEffect, useState} from 'react';
+import {Link, useNavigate} from 'react-router-dom';
 // 2026-04-28 — submitAnonymousRun + AnonymousRunResponse type no longer
 // imported here. Submit now redirects straight to /login (with the typed
 // spec stashed in sessionStorage for post-signup composer hydration).
@@ -13,7 +13,7 @@ import {
   type V3SampleRun,
   type V3ExecSnapshot,
 } from '../lib/api';
-import { trackV3, V3_EVENTS } from '../lib/events';
+import {trackV3, V3_EVENTS} from '../lib/events';
 import Pill from '../components/Pill';
 
 /**
@@ -81,15 +81,29 @@ export default function V3Landing() {
   useEffect(() => {
     let cancelled = false;
     getV3LandingStats()
-      .then((s) => { if (!cancelled) setStats(s); })
-      .catch(() => { /* hide block on failure */ });
+      .then((s) => {
+        if (!cancelled) setStats(s);
+      })
+      .catch(() => {
+        /* hide block on failure */
+      });
     getV3SampleRuns()
-      .then((rows) => { if (!cancelled) setSamples(rows); })
-      .catch(() => { /* hide block on failure */ });
+      .then((rows) => {
+        if (!cancelled) setSamples(rows);
+      })
+      .catch(() => {
+        /* hide block on failure */
+      });
     getV3ExecSnapshot()
-      .then((snap) => { if (!cancelled) setSnapshot(snap); })
-      .catch(() => { /* hide block on failure */ });
-    return () => { cancelled = true; };
+      .then((snap) => {
+        if (!cancelled) setSnapshot(snap);
+      })
+      .catch(() => {
+        /* hide block on failure */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function onSubmit(e: React.FormEvent) {
@@ -97,7 +111,7 @@ export default function V3Landing() {
     if (text.trim().length === 0 || submitting) return;
     setSubmitting(true);
     setError(null);
-    trackV3(V3_EVENTS.LANDING_TEXTAREA_SUBMIT, { textLen: text.length });
+    trackV3(V3_EVENTS.LANDING_TEXTAREA_SUBMIT, {textLen: text.length});
     // 2026-04-28 — direct redirect to /login on anon submit. Previously the
     // textarea triggered an anonymous-trial run + showed a "Save this run —
     // sign in" panel; per founder direction we now skip the trial UI and
@@ -108,11 +122,11 @@ export default function V3Landing() {
     } catch {
       /* private mode — best-effort */
     }
-    navigate('/login', { state: { from: '/' } });
+    navigate('/login', {state: {from: '/'}});
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 56px - 48px)' }}>
+    <div style={{display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 56px - 48px)'}}>
       {/* Hero */}
       <section
         style={{
@@ -154,8 +168,8 @@ export default function V3Landing() {
             }}
           >
             merge
-          </span>
-          {' '}— for one repo or for twenty.
+          </span>{' '}
+          — for one repo or for twenty.
         </h1>
         <p
           style={{
@@ -167,9 +181,8 @@ export default function V3Landing() {
             lineHeight: 1.55,
           }}
         >
-          Plan, build, test, review, open a PR. ~80% of real runs land Ready —
-          and you see the verdict (Ready / Needs review / Failed) on every one
-          of yours.
+          Plan, build, test, review, open a PR. ~80% of real runs land Ready — and you see the
+          verdict (Ready / Needs review / Failed) on every one of yours.
         </p>
       </section>
 
@@ -182,7 +195,7 @@ export default function V3Landing() {
           width: '100%',
           padding: '0 16px',
         }}
-        aria-label="Anonymous trial composer"
+        aria-label='Anonymous trial composer'
       >
         <div
           style={{
@@ -197,7 +210,7 @@ export default function V3Landing() {
             onChange={(e) => setText(e.target.value)}
             placeholder='e.g. "Add a forgot-password flow to my Spring Boot app"'
             rows={4}
-            aria-label="What do you want to build"
+            aria-label='What do you want to build'
             disabled={submitting}
             style={{
               width: '100%',
@@ -225,11 +238,11 @@ export default function V3Landing() {
               flexWrap: 'wrap',
             }}
           >
-            <span style={{ fontSize: 11.5, color: 'var(--v3-text-subtle)' }}>
+            <span style={{fontSize: 11.5, color: 'var(--v3-text-subtle)'}}>
               Free preview · no card · ~60s · sign up to ship the code
             </span>
             <button
-              type="submit"
+              type='submit'
               disabled={text.trim().length === 0 || submitting}
               style={{
                 padding: '8px 18px',
@@ -245,8 +258,7 @@ export default function V3Landing() {
                     : 'var(--v3-text-on-brand)',
                 border: 'none',
                 borderRadius: 6,
-                cursor:
-                  text.trim().length === 0 || submitting ? 'not-allowed' : 'pointer',
+                cursor: text.trim().length === 0 || submitting ? 'not-allowed' : 'pointer',
                 fontFamily: 'inherit',
               }}
             >
@@ -267,10 +279,10 @@ export default function V3Landing() {
           {SAMPLE_PROMPTS.map((p) => (
             <button
               key={p}
-              type="button"
+              type='button'
               onClick={() => {
                 setText(p);
-                trackV3(V3_EVENTS.COMPOSER_SAMPLE_CHIP_CLICKED, { sample: p });
+                trackV3(V3_EVENTS.COMPOSER_SAMPLE_CHIP_CLICKED, {sample: p});
               }}
               style={{
                 padding: '10px 12px',
@@ -298,7 +310,7 @@ export default function V3Landing() {
 
         {error && (
           <div
-            role="alert"
+            role='alert'
             style={{
               marginTop: 12,
               padding: '8px 12px',
@@ -334,9 +346,7 @@ export default function V3Landing() {
       <HeroVideoSlot />
 
       {/* Selling-point #7 — sample-run gallery (anonymized recent successful runs) */}
-      {samples && samples.length > 0 && (
-        <SampleRunGallery rows={samples} />
-      )}
+      {samples && samples.length > 0 && <SampleRunGallery rows={samples} />}
 
       {/* R-203 (Wave 4) — competitor positioning table. The narrow line
           ("ships PRs your team will merge") is more believable when paired
@@ -360,19 +370,19 @@ export default function V3Landing() {
         }}
       >
         Already have an account?{' '}
-        <Link to="/login" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+        <Link to='/login' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
           Sign in
         </Link>{' '}
         ·{' '}
-        <Link to="/home" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to='/home' style={{color: 'var(--v3-text-subtle)', textDecoration: 'none'}}>
           v3 home
         </Link>{' '}
         ·{' '}
-        <Link to="/exec-demo" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to='/exec-demo' style={{color: 'var(--v3-text-subtle)', textDecoration: 'none'}}>
           See a team's last 30 days
         </Link>{' '}
         ·{' '}
-        <Link to="/trust" style={{ color: 'var(--v3-text-subtle)', textDecoration: 'none' }}>
+        <Link to='/trust' style={{color: 'var(--v3-text-subtle)', textDecoration: 'none'}}>
           SOC 2 · DPA · DSAR
         </Link>
       </footer>
@@ -382,10 +392,10 @@ export default function V3Landing() {
 
 // ─── Verified-score counter (selling-point #2) ──────────────────────────────
 
-function VerifiedCounter({ stats }: { stats: V3LandingStats }) {
+function VerifiedCounter({stats}: {stats: V3LandingStats}) {
   return (
     <section
-      aria-label="Platform proof"
+      aria-label='Platform proof'
       style={{
         margin: '12px auto 0',
         padding: '14px 18px',
@@ -401,34 +411,30 @@ function VerifiedCounter({ stats }: { stats: V3LandingStats }) {
         width: '100%',
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 110 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--v3-text)' }}>
+      <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 110}}>
+        <span style={{fontSize: 22, fontWeight: 700, color: 'var(--v3-text)'}}>
           {stats.specsThisWeek.toLocaleString()}
         </span>
-        <span style={{ fontSize: 11, color: 'var(--v3-text-muted)' }}>
-          specs shipped this week
-        </span>
+        <span style={{fontSize: 11, color: 'var(--v3-text-muted)'}}>specs shipped this week</span>
       </div>
       {stats.verifiedScorePercent != null && (
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 110 }}>
-          <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--v3-brand)' }}>
+        <div
+          style={{display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 110}}
+        >
+          <span style={{fontSize: 22, fontWeight: 700, color: 'var(--v3-brand)'}}>
             {stats.verifiedScorePercent}%
           </span>
-          <span style={{ fontSize: 11, color: 'var(--v3-text-muted)' }}>
-            verified score ≥ 80
-          </span>
+          <span style={{fontSize: 11, color: 'var(--v3-text-muted)'}}>verified score ≥ 80</span>
         </div>
       )}
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 110 }}>
-        <span style={{ fontSize: 22, fontWeight: 700, color: 'var(--v3-text)' }}>
+      <div style={{display: 'flex', flexDirection: 'column', alignItems: 'center', minWidth: 110}}>
+        <span style={{fontSize: 22, fontWeight: 700, color: 'var(--v3-text)'}}>
           {stats.totalRunsAllTime.toLocaleString()}
         </span>
-        <span style={{ fontSize: 11, color: 'var(--v3-text-muted)' }}>
-          total runs all-time
-        </span>
+        <span style={{fontSize: 11, color: 'var(--v3-text-muted)'}}>total runs all-time</span>
       </div>
       <Link
-        to="/exec-demo"
+        to='/exec-demo'
         style={{
           fontSize: 12,
           color: 'var(--v3-brand)',
@@ -447,11 +453,27 @@ function VerifiedCounter({ stats }: { stats: V3LandingStats }) {
 // ─── Demo animation (selling-point #3 — placeholder for real video) ─────────
 
 const DEMO_FRAMES = [
-  { phase: 'Spec',     line: 'Add a /healthz endpoint to my Spring Boot app',           tone: 'var(--v3-text-muted)' },
-  { phase: 'Plan',     line: 'T1 · Add HealthController · T2 · Wire ManagementMetrics', tone: 'var(--v3-brand)' },
-  { phase: 'Build',    line: 'mvn -q compile · 0 errors · 47 source files · 6.2s',      tone: 'var(--v3-brand)' },
-  { phase: 'Test',     line: '14/14 tests passed · reviewer verdict: CLEAN',            tone: 'var(--v3-brand-2)' },
-  { phase: 'PR opened', line: 'github.com/your-org/svc · #482 · ready for review',      tone: 'var(--v3-brand-2)' },
+  {
+    phase: 'Spec',
+    line: 'Add a /healthz endpoint to my Spring Boot app',
+    tone: 'var(--v3-text-muted)',
+  },
+  {
+    phase: 'Plan',
+    line: 'T1 · Add HealthController · T2 · Wire ManagementMetrics',
+    tone: 'var(--v3-brand)',
+  },
+  {
+    phase: 'Build',
+    line: 'mvn -q compile · 0 errors · 47 source files · 6.2s',
+    tone: 'var(--v3-brand)',
+  },
+  {phase: 'Test', line: '14/14 tests passed · reviewer verdict: CLEAN', tone: 'var(--v3-brand-2)'},
+  {
+    phase: 'PR opened',
+    line: 'github.com/your-org/svc · #482 · ready for review',
+    tone: 'var(--v3-brand-2)',
+  },
 ];
 
 // ─── R-204 (Wave 4) — Hero-video slot ──────────────────────────────────────
@@ -478,7 +500,7 @@ function HeroVideoSlot() {
   if (!USE_REAL_VIDEO) return <DemoAnimation />;
   return (
     <section
-      aria-label="What a run looks like (30s demo)"
+      aria-label='What a run looks like (30s demo)'
       style={{
         margin: '20px auto 0',
         maxWidth: 720,
@@ -486,8 +508,8 @@ function HeroVideoSlot() {
       }}
     >
       <video
-        src="/hero-demo.mp4"
-        poster="/hero-demo-poster.jpg"
+        src='/hero-demo.mp4'
+        poster='/hero-demo-poster.jpg'
         autoPlay
         muted
         loop
@@ -515,7 +537,7 @@ function DemoAnimation() {
   const f = DEMO_FRAMES[frame];
   return (
     <section
-      aria-label="What a run looks like"
+      aria-label='What a run looks like'
       style={{
         margin: '20px auto 0',
         maxWidth: 720,
@@ -528,7 +550,7 @@ function DemoAnimation() {
         fontSize: 12.5,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10 }}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10}}>
         {DEMO_FRAMES.map((d, i) => (
           <span
             key={d.phase}
@@ -545,7 +567,7 @@ function DemoAnimation() {
             {d.phase}
           </span>
         ))}
-        <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--v3-text-subtle)' }}>
+        <span style={{marginLeft: 'auto', fontSize: 10, color: 'var(--v3-text-subtle)'}}>
           live demo · loops every 1.8s
         </span>
       </div>
@@ -566,22 +588,37 @@ function DemoAnimation() {
 
 // ─── Sample-run gallery (selling-point #7) ──────────────────────────────────
 
-function SampleRunGallery({ rows }: { rows: V3SampleRun[] }) {
+function SampleRunGallery({rows}: {rows: V3SampleRun[]}) {
   return (
     <section
-      aria-label="Sample runs"
+      aria-label='Sample runs'
       style={{
         margin: '24px auto 0',
         maxWidth: 960,
         width: '100%',
       }}
     >
-      <h2 style={{ fontSize: 14, fontWeight: 600, color: 'var(--v3-text)', margin: '0 0 10px', textAlign: 'center' }}>
+      <h2
+        style={{
+          fontSize: 14,
+          fontWeight: 600,
+          color: 'var(--v3-text)',
+          margin: '0 0 10px',
+          textAlign: 'center',
+        }}
+      >
         What we shipped recently
       </h2>
-      <p style={{ fontSize: 12, color: 'var(--v3-text-muted)', margin: '0 0 14px', textAlign: 'center' }}>
-        Anonymized — real runs from real users. Verdict + verified score from the
-        same review pipeline yours will go through.
+      <p
+        style={{
+          fontSize: 12,
+          color: 'var(--v3-text-muted)',
+          margin: '0 0 14px',
+          textAlign: 'center',
+        }}
+      >
+        Anonymized — real runs from real users. Verdict + verified score from the same review
+        pipeline yours will go through.
       </p>
       <div
         style={{
@@ -598,13 +635,15 @@ function SampleRunGallery({ rows }: { rows: V3SampleRun[] }) {
   );
 }
 
-function SampleRunCard({ row }: { row: V3SampleRun }) {
-  const verdictTone = row.verdict === 'READY' ? 'var(--v3-brand-2)'
-    : row.verdict === 'NEEDS_REVIEW' ? 'var(--v3-warning)'
-    : '#FCA5A5';
-  const verdictLabel = row.verdict === 'READY' ? 'Ready'
-    : row.verdict === 'NEEDS_REVIEW' ? 'Needs review'
-    : 'Failed';
+function SampleRunCard({row}: {row: V3SampleRun}) {
+  const verdictTone =
+    row.verdict === 'READY'
+      ? 'var(--v3-brand-2)'
+      : row.verdict === 'NEEDS_REVIEW'
+        ? 'var(--v3-warning)'
+        : '#FCA5A5';
+  const verdictLabel =
+    row.verdict === 'READY' ? 'Ready' : row.verdict === 'NEEDS_REVIEW' ? 'Needs review' : 'Failed';
   return (
     <div
       style={{
@@ -617,7 +656,7 @@ function SampleRunCard({ row }: { row: V3SampleRun }) {
         gap: 8,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}>
         <span
           style={{
             fontSize: 10,
@@ -633,18 +672,16 @@ function SampleRunCard({ row }: { row: V3SampleRun }) {
           {verdictLabel}
         </span>
         {row.verifiedScore != null && (
-          <span style={{ fontSize: 11, color: 'var(--v3-text-muted)' }}>
+          <span style={{fontSize: 11, color: 'var(--v3-text-muted)'}}>
             Verified {row.verifiedScore}/100
           </span>
         )}
         {row.prOpened && (
-          <span style={{ fontSize: 10, color: 'var(--v3-text-subtle)' }}>· PR opened</span>
+          <span style={{fontSize: 10, color: 'var(--v3-text-subtle)'}}>· PR opened</span>
         )}
       </div>
-      <p style={{ margin: 0, fontSize: 13, color: 'var(--v3-text)', lineHeight: 1.45 }}>
-        {row.spec}
-      </p>
-      <div style={{ marginTop: 'auto', fontSize: 10.5, color: 'var(--v3-text-subtle)' }}>
+      <p style={{margin: 0, fontSize: 13, color: 'var(--v3-text)', lineHeight: 1.45}}>{row.spec}</p>
+      <div style={{marginTop: 'auto', fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
         {row.filesGenerated != null ? `${row.filesGenerated} files generated` : '—'}
         {row.durationMs != null && ` · ${Math.round(row.durationMs / 1000)}s`}
       </div>
@@ -666,7 +703,7 @@ function SampleRunCard({ row }: { row: V3SampleRun }) {
 // remain placeholders until the founder swaps in real ones via the
 // existing "Add your logo here" mailto path.
 
-function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
+function TrustedByStrip({snapshot}: {snapshot?: V3ExecSnapshot | null}) {
   // Slot count — sized for desktop 5-up, wraps to 3 then 2 on smaller widths.
   const slots = ['Your logo', 'Your logo', 'Your logo', 'Your logo', 'Your logo'];
   // R-313 — show the assertive headline only when we actually have shipping
@@ -675,7 +712,7 @@ function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
   const hasShipVolume = !!snapshot && snapshot.totalRuns > 0;
   return (
     <section
-      aria-label="Trusted by — placeholder"
+      aria-label='Trusted by — placeholder'
       style={{
         margin: '24px auto 0',
         maxWidth: 960,
@@ -703,17 +740,19 @@ function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
               lineHeight: 1.3,
             }}
           >
-            <span style={{
-              backgroundImage: 'var(--v3-pop-grad)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent',
-              WebkitTextFillColor: 'transparent',
-              fontFamily: "'Instrument Serif', Georgia, serif",
-              fontStyle: 'italic',
-              fontWeight: 500,
-              fontSize: 22,
-            }}>
+            <span
+              style={{
+                backgroundImage: 'var(--v3-pop-grad)',
+                backgroundClip: 'text',
+                WebkitBackgroundClip: 'text',
+                color: 'transparent',
+                WebkitTextFillColor: 'transparent',
+                fontFamily: "'Instrument Serif', Georgia, serif",
+                fontStyle: 'italic',
+                fontWeight: 500,
+                fontSize: 22,
+              }}
+            >
               {snapshot!.totalRuns.toLocaleString()}
             </span>{' '}
             PRs shipped in the last {snapshot!.windowDays} days
@@ -727,7 +766,8 @@ function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
                 letterSpacing: 0.2,
               }}
             >
-              across {snapshot!.activeProjects.toLocaleString()} active project{snapshot!.activeProjects === 1 ? '' : 's'}
+              across {snapshot!.activeProjects.toLocaleString()} active project
+              {snapshot!.activeProjects === 1 ? '' : 's'}
               {snapshot!.successRatePercent !== null
                 ? ` · ${Math.round(snapshot!.successRatePercent)}% reviewer-CLEAN rate`
                 : ''}
@@ -769,7 +809,7 @@ function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
           {slots.map((label, i) => (
             <div
               key={i}
-              aria-hidden="true"
+              aria-hidden='true'
               style={{
                 width: 110,
                 height: 26,
@@ -789,7 +829,7 @@ function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
           ))}
         </div>
         <a
-          href="mailto:admin@executespec.ai?subject=Trusted-by%20logo%20—%20%5Borg%20name%5D&body=We%27d%20like%20our%20logo%20on%20your%20landing.%20Org%3A%20%5Bname%5D.%20Logo%20file%3A%20%5Bsvg%2Fpng%20attached%5D.%20Use%20approval%3A%20%5Bcontact%20%2B%20OK%5D."
+          href='mailto:admin@executespec.ai?subject=Trusted-by%20logo%20—%20%5Borg%20name%5D&body=We%27d%20like%20our%20logo%20on%20your%20landing.%20Org%3A%20%5Bname%5D.%20Logo%20file%3A%20%5Bsvg%2Fpng%20attached%5D.%20Use%20approval%3A%20%5Bcontact%20%2B%20OK%5D.'
           style={{
             fontSize: 11,
             color: 'var(--v3-brand)',
@@ -813,7 +853,7 @@ function TrustedByStrip({ snapshot }: { snapshot?: V3ExecSnapshot | null }) {
 // Devin on autonomy mystique. We win on the merge step. The table makes
 // that explicit so visitors can self-select.
 
-const COMPETITOR_ROWS: { name: string; theyWin: string; weAdd: string }[] = [
+const COMPETITOR_ROWS: {name: string; theyWin: string; weAdd: string}[] = [
   {
     name: 'Cursor',
     theyWin: 'Completion latency · IDE-native edits · individual flow',
@@ -839,7 +879,7 @@ const COMPETITOR_ROWS: { name: string; theyWin: string; weAdd: string }[] = [
 function CompetitorTable() {
   return (
     <section
-      aria-label="Competitor positioning"
+      aria-label='Competitor positioning'
       style={{
         margin: '24px auto 0',
         maxWidth: 960,
@@ -868,7 +908,7 @@ function CompetitorTable() {
         Each competitor optimises for an earlier phase of the SDLC. We optimise for the merge.
       </p>
       <div
-        role="table"
+        role='table'
         style={{
           background: 'var(--v3-surface)',
           border: '1px solid var(--v3-border)',
@@ -879,7 +919,7 @@ function CompetitorTable() {
       >
         {/* Header row */}
         <div
-          role="row"
+          role='row'
           style={{
             display: 'grid',
             gridTemplateColumns: '160px 1fr 1fr',
@@ -900,21 +940,20 @@ function CompetitorTable() {
         </div>
         {COMPETITOR_ROWS.map((row, i) => (
           <div
-            role="row"
+            role='row'
             key={row.name}
             style={{
               display: 'grid',
               gridTemplateColumns: '160px 1fr 1fr',
               gap: 12,
               padding: '12px 14px',
-              borderBottom:
-                i < COMPETITOR_ROWS.length - 1 ? '1px solid var(--v3-border)' : 'none',
+              borderBottom: i < COMPETITOR_ROWS.length - 1 ? '1px solid var(--v3-border)' : 'none',
               alignItems: 'start',
             }}
           >
-            <span style={{ color: 'var(--v3-text)', fontWeight: 600 }}>{row.name}</span>
-            <span style={{ color: 'var(--v3-text-muted)', lineHeight: 1.5 }}>{row.theyWin}</span>
-            <span style={{ color: 'var(--v3-text)', lineHeight: 1.5 }}>{row.weAdd}</span>
+            <span style={{color: 'var(--v3-text)', fontWeight: 600}}>{row.name}</span>
+            <span style={{color: 'var(--v3-text-muted)', lineHeight: 1.5}}>{row.theyWin}</span>
+            <span style={{color: 'var(--v3-text)', lineHeight: 1.5}}>{row.weAdd}</span>
           </div>
         ))}
       </div>
@@ -927,7 +966,7 @@ function CompetitorTable() {
         }}
       >
         Want the long version? Check{' '}
-        <Link to="/exec-demo" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>
+        <Link to='/exec-demo' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
           live numbers
         </Link>
         .
@@ -939,7 +978,7 @@ function CompetitorTable() {
 // ─── Per-persona CTA strip (selling-point #4 follow-up) ────────────────────
 
 function PersonaCtaStrip() {
-  const ctas: { title: string; body: string; href: string; cta: string }[] = [
+  const ctas: {title: string; body: string; href: string; cta: string}[] = [
     {
       title: 'For teams',
       body: 'Per-seat collab, BYOK, audit log, SSO. Bring your engineers into one project.',
@@ -954,14 +993,14 @@ function PersonaCtaStrip() {
     },
     {
       title: 'For PgM / CFO',
-      body: 'Watch a real team\'s last 30 days — spend by project, top wins, success rate.',
+      body: "Watch a real team's last 30 days — spend by project, top wins, success rate.",
       href: '/exec-demo',
       cta: 'Public demo →',
     },
   ];
   return (
     <section
-      aria-label="Conversion paths by persona"
+      aria-label='Conversion paths by persona'
       style={{
         margin: '24px auto 0',
         maxWidth: 960,
@@ -987,15 +1026,18 @@ function PersonaCtaStrip() {
             gap: 6,
           }}
         >
-          <span style={{ fontSize: 11, color: 'var(--v3-text-subtle)', textTransform: 'uppercase', letterSpacing: 0.6 }}>
+          <span
+            style={{
+              fontSize: 11,
+              color: 'var(--v3-text-subtle)',
+              textTransform: 'uppercase',
+              letterSpacing: 0.6,
+            }}
+          >
             {c.title}
           </span>
-          <span style={{ fontSize: 13.5, color: 'var(--v3-text)', lineHeight: 1.45 }}>
-            {c.body}
-          </span>
-          <span style={{ marginTop: 'auto', fontSize: 12, color: 'var(--v3-brand)' }}>
-            {c.cta}
-          </span>
+          <span style={{fontSize: 13.5, color: 'var(--v3-text)', lineHeight: 1.45}}>{c.body}</span>
+          <span style={{marginTop: 'auto', fontSize: 12, color: 'var(--v3-brand)'}}>{c.cta}</span>
         </Link>
       ))}
     </section>

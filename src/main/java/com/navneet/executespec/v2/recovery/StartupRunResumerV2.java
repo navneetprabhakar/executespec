@@ -1,283 +1,323 @@
 package com.navneet.executespec.v2.recovery;
 
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
+
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
+
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.context.event.EventListener;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
-import java.time.Instant;
-import java.util.List;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 /**
- * Boot-time recovery for V2 runs left mid-flight by a previous JVM — crash,
- * SIGTERM, or deploy rollover.
+ * Boot-time recovery for V2 runs left mid-flight by a previous JVM — crash, SIGTERM, or deploy
+ * rollover.
  *
- * <p>Phase 1 behaviour (this class): <em>fail-cleanly</em>. The resumer scans
- * non-terminal V2 runs and marks each FAILED with a clear reason + emits an SSE
- * event so the UI shows it. This turns "stuck in WORKING forever" into "user
- * can see and retry" — already a meaningful availability improvement without
- * needing replay logic.
+ * <p>Phase 1 behaviour (this class): <em>fail-cleanly</em>. The resumer scans non-terminal V2 runs
+ * and marks each FAILED with a clear reason + emits an SSE event so the UI shows it. This turns
+ * "stuck in WORKING forever" into "user can see and retry" — already a meaningful availability
+ * improvement without needing replay logic.
  *
- * <p>Phase 2 (follow-up PR): actual replay via
- * {@link com.navneet.executespec.v2.context.ContextStoreV2#load} +
- * {@code WorkerAgentV2.resumeFromSnapshot()} +
- * {@code SequentialExecutorV2.continueFromTask(...)}. Designed as a drop-in
- * replacement for the fail-path below.
+ * <p>Phase 2 (follow-up PR): actual replay via {@link
+ * com.navneet.executespec.v2.context.ContextStoreV2#load} + {@code
+ * WorkerAgentV2.resumeFromSnapshot()} + {@code SequentialExecutorV2.continueFromTask(...)}.
+ * Designed as a drop-in replacement for the fail-path below.
  *
  * <p>Run state handling:
+ *
  * <ul>
- *   <li>{@code AWAITING_APPROVAL} — untouched. The plan gate is user-facing;
- *       the user can approve whenever, and that path does not require the old
- *       orchestrator thread.</li>
- *   <li>{@code PLANNING} — failed. No snapshot yet (worker hadn't started); no
- *       useful recovery other than restart-from-scratch, which we leave to the user.</li>
- *   <li>{@code WORKING} / {@code REVIEWING} — failed with "recovery pending"
- *       reason. Snapshots exist in Redis, but replay wiring is Phase 2.</li>
+ *   <li>{@code AWAITING_APPROVAL} — untouched. The plan gate is user-facing; the user can approve
+ *       whenever, and that path does not require the old orchestrator thread.
+ *   <li>{@code PLANNING} — failed. No snapshot yet (worker hadn't started); no useful recovery
+ *       other than restart-from-scratch, which we leave to the user.
+ *   <li>{@code WORKING} / {@code REVIEWING} — failed with "recovery pending" reason. Snapshots
+ *       exist in Redis, but replay wiring is Phase 2.
  * </ul>
  *
- * <p>Scoping: only touches rows where {@code harnessVersion = "v2"}. V1's
- * {@code StartupRunResumer} remains authoritative for legacy runs until the
- * deprecation-removal plan lands.
+ * <p>Scoping: only touches rows where {@code harnessVersion = "v2"}. V1's {@code StartupRunResumer}
+ * remains authoritative for legacy runs until the deprecation-removal plan lands.
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class StartupRunResumerV2 {
 
-    /** Statuses that indicate a run was in-flight when the JVM died. */
-    private static final List<String> RESUMABLE_STATUSES =
-            List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL");
+  /** Statuses that indicate a run was in-flight when the JVM died. */
+  private static final List<String> RESUMABLE_STATUSES =
+      List.of("PLANNING", "WORKING", "REVIEWING", "AWAITING_APPROVAL");
 
-    /** Hard cap on resume attempts per run. Once exceeded the run is
-     *  permanently FAILED; the user can submit a fresh run instead. */
-    private static final int MAX_RESUME_ATTEMPTS = 3;
+  /**
+   * Hard cap on resume attempts per run. Once exceeded the run is permanently FAILED; the user can
+   * submit a fresh run instead.
+   */
+  private static final int MAX_RESUME_ATTEMPTS = 3;
 
-    /** Runs older than this at boot time are considered abandoned rather
-     *  than interrupted — we fail them cleanly instead of attempting resume. */
-    private static final Duration STALE_CUTOFF = Duration.ofHours(6);
+  /**
+   * Runs older than this at boot time are considered abandoned rather than interrupted — we fail
+   * them cleanly instead of attempting resume.
+   */
+  private static final Duration STALE_CUTOFF = Duration.ofHours(6);
 
-    private final PipelineRunRepository runRepo;
-    private final AgentTaskRepository taskRepo;
-    private final SseBroadcaster broadcaster;
+  private final PipelineRunRepository runRepo;
+  private final AgentTaskRepository taskRepo;
+  private final SseBroadcaster broadcaster;
 
-    @Async
-    @EventListener(ApplicationReadyEvent.class)
-    public void onApplicationReady() {
+  @Async
+  @EventListener(ApplicationReadyEvent.class)
+  public void onApplicationReady() {
+    try {
+      scanAndRecover();
+    } catch (Exception e) {
+      // Never let recovery failures block startup.
+      log.error("StartupRunResumerV2: unexpected error during scan", e);
+    }
+  }
+
+  @Transactional
+  public void scanAndRecover() {
+    List<PipelineRun> candidates =
+        runRepo.findByStatusIn(RESUMABLE_STATUSES).stream()
+            .filter(r -> "v2".equalsIgnoreCase(r.getHarnessVersion()))
+            .toList();
+
+    if (candidates.isEmpty()) {
+      log.info("StartupRunResumerV2: no interrupted V2 runs to recover");
+      return;
+    }
+
+    log.warn("StartupRunResumerV2: found {} interrupted V2 run(s); recovering", candidates.size());
+
+    int awaitingApproval = 0;
+    int failedInterrupted = 0;
+    int failedCapped = 0;
+    int failedStale = 0;
+    int salvaged = 0;
+    Instant cutoff = Instant.now().minus(STALE_CUTOFF);
+    for (PipelineRun run : candidates) {
+      String status = run.getStatus();
+      if ("AWAITING_APPROVAL".equals(status)) {
+        // User-facing gate; no orchestrator thread required to unblock.
+        log.info("StartupRunResumerV2: run={} AWAITING_APPROVAL — left as-is", run.getRunId());
+        awaitingApproval++;
+        continue;
+      }
+
+      // NEW — "salvage" path: if the executor already completed (every
+      // AgentTask is in a terminal status), the generated code is on disk
+      // and the run is effectively done. Only the post-executor phase
+      // (reviewer / validation) was interrupted, which is a strictly
+      // non-destructive loss. Mark the run COMPLETE (with a clear
+      // status_reason) so the user keeps access to the workspace, preview,
+      // chat, and retry-validation — instead of being told to re-run
+      // everything from scratch.
+      if (isExecutorDone(run.getRunId())) {
+        markSalvaged(run, status);
+        salvaged++;
+        continue;
+      }
+
+      int attempts = run.getResumeAttempts() == null ? 0 : run.getResumeAttempts();
+      if (attempts >= MAX_RESUME_ATTEMPTS) {
+        markFailed(
+            run,
+            status,
+            "Resume attempt limit ("
+                + MAX_RESUME_ATTEMPTS
+                + ") reached. "
+                + "Please submit a fresh run.");
+        failedCapped++;
+        continue;
+      }
+
+      Instant startedAt = run.getStartedAt();
+      if (startedAt != null && startedAt.isBefore(cutoff)) {
+        // Abandoned — too old to replay meaningfully. Fail without consuming
+        // an attempt so the counter only reflects real resume attempts.
+        markFailed(
+            run,
+            status,
+            "Run exceeded "
+                + STALE_CUTOFF.toHours()
+                + "h since start; "
+                + "considered stale rather than interrupted.");
+        failedStale++;
+        continue;
+      }
+
+      // Count this as a resume attempt even in Phase 1 (fail-cleanly) so
+      // repeated deploy-interrupt cycles trip the cap and don't thrash.
+      run.setResumeAttempts(attempts + 1);
+
+      // v2.6.2 slice 4 + 5d — outline-checkpoint awareness. When the
+      // hierarchical planner has already written `plan_outline_json`
+      // before the JVM died, surface what was preserved so the user
+      // knows what work would replay vs needs redoing. Slice 5d adds
+      // per-task expansion-status reporting so the picture is precise:
+      // we count agent_task rows by expansion_status to show how much
+      // of phase 2 had completed.
+      String checkpointHint;
+      if (run.getPlanStrategy() != null
+          && run.getPlanOutlineJson() != null
+          && !run.getPlanOutlineJson().isBlank()) {
+        String taskBreakdown = "";
         try {
-            scanAndRecover();
-        } catch (Exception e) {
-            // Never let recovery failures block startup.
-            log.error("StartupRunResumerV2: unexpected error during scan", e);
+          List<AgentTask> tasks = taskRepo.findByRunId(run.getRunId());
+          int total = tasks.size();
+          int expanded =
+              (int) tasks.stream().filter(t -> "EXPANDED".equals(t.getExpansionStatus())).count();
+          int pending =
+              (int) tasks.stream().filter(t -> "PENDING".equals(t.getExpansionStatus())).count();
+          int failed =
+              (int) tasks.stream().filter(t -> "FAILED".equals(t.getExpansionStatus())).count();
+          if (total > 0) {
+            taskBreakdown =
+                ", tasks="
+                    + total
+                    + " (expanded="
+                    + expanded
+                    + ", pending="
+                    + pending
+                    + ", failed="
+                    + failed
+                    + ")";
+          }
+        } catch (Exception breakdownEx) {
+          log.debug(
+              "StartupRunResumerV2: task-breakdown lookup failed for run={}: {}",
+              run.getRunId(),
+              breakdownEx.getMessage());
         }
+        checkpointHint =
+            " Outline-checkpoint preserved (strategy="
+                + run.getPlanStrategy()
+                + ", outline_json size="
+                + run.getPlanOutlineJson().length()
+                + " bytes"
+                + taskBreakdown
+                + ") — a resubmission with the same "
+                + "spec will reuse the classifier verdict via the 1h "
+                + "Redis cache. Auto-replay of the outline + per-task "
+                + "expansion is a slice-5 follow-up; for now please "
+                + "resubmit.";
+      } else {
+        checkpointHint = "";
+      }
+      markFailed(
+          run,
+          status,
+          "Interrupted during "
+              + status
+              + " (JVM restart / deploy). Please retry the run. "
+              + "Resume attempts used: "
+              + (attempts + 1)
+              + "/"
+              + MAX_RESUME_ATTEMPTS
+              + checkpointHint);
+      failedInterrupted++;
     }
+    log.warn(
+        "StartupRunResumerV2: recovery complete — awaiting-approval={} "
+            + "salvaged={} interrupted={} cap-exceeded={} stale={}",
+        awaitingApproval,
+        salvaged,
+        failedInterrupted,
+        failedCapped,
+        failedStale);
+  }
 
-    @Transactional
-    public void scanAndRecover() {
-        List<PipelineRun> candidates = runRepo.findByStatusIn(RESUMABLE_STATUSES).stream()
-                .filter(r -> "v2".equalsIgnoreCase(r.getHarnessVersion()))
-                .toList();
-
-        if (candidates.isEmpty()) {
-            log.info("StartupRunResumerV2: no interrupted V2 runs to recover");
-            return;
-        }
-
-        log.warn("StartupRunResumerV2: found {} interrupted V2 run(s); recovering",
-                candidates.size());
-
-        int awaitingApproval = 0;
-        int failedInterrupted = 0;
-        int failedCapped = 0;
-        int failedStale = 0;
-        int salvaged = 0;
-        Instant cutoff = Instant.now().minus(STALE_CUTOFF);
-        for (PipelineRun run : candidates) {
-            String status = run.getStatus();
-            if ("AWAITING_APPROVAL".equals(status)) {
-                // User-facing gate; no orchestrator thread required to unblock.
-                log.info("StartupRunResumerV2: run={} AWAITING_APPROVAL — left as-is",
-                        run.getRunId());
-                awaitingApproval++;
-                continue;
-            }
-
-            // NEW — "salvage" path: if the executor already completed (every
-            // AgentTask is in a terminal status), the generated code is on disk
-            // and the run is effectively done. Only the post-executor phase
-            // (reviewer / validation) was interrupted, which is a strictly
-            // non-destructive loss. Mark the run COMPLETE (with a clear
-            // status_reason) so the user keeps access to the workspace, preview,
-            // chat, and retry-validation — instead of being told to re-run
-            // everything from scratch.
-            if (isExecutorDone(run.getRunId())) {
-                markSalvaged(run, status);
-                salvaged++;
-                continue;
-            }
-
-            int attempts = run.getResumeAttempts() == null ? 0 : run.getResumeAttempts();
-            if (attempts >= MAX_RESUME_ATTEMPTS) {
-                markFailed(run, status,
-                        "Resume attempt limit (" + MAX_RESUME_ATTEMPTS + ") reached. "
-                                + "Please submit a fresh run.");
-                failedCapped++;
-                continue;
-            }
-
-            Instant startedAt = run.getStartedAt();
-            if (startedAt != null && startedAt.isBefore(cutoff)) {
-                // Abandoned — too old to replay meaningfully. Fail without consuming
-                // an attempt so the counter only reflects real resume attempts.
-                markFailed(run, status,
-                        "Run exceeded " + STALE_CUTOFF.toHours() + "h since start; "
-                                + "considered stale rather than interrupted.");
-                failedStale++;
-                continue;
-            }
-
-            // Count this as a resume attempt even in Phase 1 (fail-cleanly) so
-            // repeated deploy-interrupt cycles trip the cap and don't thrash.
-            run.setResumeAttempts(attempts + 1);
-
-            // v2.6.2 slice 4 + 5d — outline-checkpoint awareness. When the
-            // hierarchical planner has already written `plan_outline_json`
-            // before the JVM died, surface what was preserved so the user
-            // knows what work would replay vs needs redoing. Slice 5d adds
-            // per-task expansion-status reporting so the picture is precise:
-            // we count agent_task rows by expansion_status to show how much
-            // of phase 2 had completed.
-            String checkpointHint;
-            if (run.getPlanStrategy() != null
-                    && run.getPlanOutlineJson() != null
-                    && !run.getPlanOutlineJson().isBlank()) {
-                String taskBreakdown = "";
-                try {
-                    List<AgentTask> tasks = taskRepo.findByRunId(run.getRunId());
-                    int total = tasks.size();
-                    int expanded = (int) tasks.stream()
-                            .filter(t -> "EXPANDED".equals(t.getExpansionStatus()))
-                            .count();
-                    int pending = (int) tasks.stream()
-                            .filter(t -> "PENDING".equals(t.getExpansionStatus()))
-                            .count();
-                    int failed = (int) tasks.stream()
-                            .filter(t -> "FAILED".equals(t.getExpansionStatus()))
-                            .count();
-                    if (total > 0) {
-                        taskBreakdown = ", tasks=" + total
-                                + " (expanded=" + expanded
-                                + ", pending=" + pending
-                                + ", failed=" + failed + ")";
-                    }
-                } catch (Exception breakdownEx) {
-                    log.debug("StartupRunResumerV2: task-breakdown lookup failed for run={}: {}",
-                            run.getRunId(), breakdownEx.getMessage());
-                }
-                checkpointHint = " Outline-checkpoint preserved (strategy="
-                        + run.getPlanStrategy() + ", outline_json size="
-                        + run.getPlanOutlineJson().length() + " bytes"
-                        + taskBreakdown + ") — a resubmission with the same "
-                        + "spec will reuse the classifier verdict via the 1h "
-                        + "Redis cache. Auto-replay of the outline + per-task "
-                        + "expansion is a slice-5 follow-up; for now please "
-                        + "resubmit.";
-            } else {
-                checkpointHint = "";
-            }
-            markFailed(run, status,
-                    "Interrupted during " + status
-                            + " (JVM restart / deploy). Please retry the run. "
-                            + "Resume attempts used: " + (attempts + 1) + "/" + MAX_RESUME_ATTEMPTS
-                            + checkpointHint);
-            failedInterrupted++;
-        }
-        log.warn("StartupRunResumerV2: recovery complete — awaiting-approval={} "
-                        + "salvaged={} interrupted={} cap-exceeded={} stale={}",
-                awaitingApproval, salvaged, failedInterrupted, failedCapped, failedStale);
+  /**
+   * True if every {@link AgentTask} for this run is in a terminal status. "Terminal" = COMPLETE /
+   * PARTIAL / FAILED / BLOCKED. PENDING or WORKING means the executor didn't actually finish → the
+   * run isn't salvageable, it was genuinely interrupted mid-flight.
+   */
+  private boolean isExecutorDone(String runId) {
+    List<AgentTask> tasks = taskRepo.findByRunId(runId);
+    if (tasks.isEmpty()) return false; // planner never made it — not salvageable
+    for (AgentTask t : tasks) {
+      if (t.getParentTaskId() != null) continue; // subtasks follow parent; ignore
+      String s = t.getStatus();
+      if (s == null) return false;
+      if (!("COMPLETE".equals(s)
+          || "PARTIAL".equals(s)
+          || "FAILED".equals(s)
+          || "BLOCKED".equals(s))) {
+        return false;
+      }
     }
+    return true;
+  }
 
-    /**
-     * True if every {@link AgentTask} for this run is in a terminal status.
-     * "Terminal" = COMPLETE / PARTIAL / FAILED / BLOCKED. PENDING or WORKING
-     * means the executor didn't actually finish → the run isn't salvageable,
-     * it was genuinely interrupted mid-flight.
-     */
-    private boolean isExecutorDone(String runId) {
-        List<AgentTask> tasks = taskRepo.findByRunId(runId);
-        if (tasks.isEmpty()) return false;   // planner never made it — not salvageable
-        for (AgentTask t : tasks) {
-            if (t.getParentTaskId() != null) continue; // subtasks follow parent; ignore
-            String s = t.getStatus();
-            if (s == null) return false;
-            if (!("COMPLETE".equals(s) || "PARTIAL".equals(s)
-                    || "FAILED".equals(s) || "BLOCKED".equals(s))) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    /**
-     * Mark a run COMPLETE (or PARTIAL if any task warned) when the executor
-     * already finished but a post-executor phase was interrupted. The code is
-     * on disk; the user keeps access; no resume-attempt consumed; validation
-     * report can be (re-)generated via {@code POST /runs/{id}/retry-validation}.
-     */
-    private void markSalvaged(PipelineRun run, String previousStatus) {
-        String runId = run.getRunId();
-        List<AgentTask> tasks = taskRepo.findByRunId(runId);
-        boolean anyNonClean = tasks.stream()
-                .filter(t -> t.getParentTaskId() == null)
-                .anyMatch(t -> "PARTIAL".equals(t.getStatus()) || "FAILED".equals(t.getStatus())
+  /**
+   * Mark a run COMPLETE (or PARTIAL if any task warned) when the executor already finished but a
+   * post-executor phase was interrupted. The code is on disk; the user keeps access; no
+   * resume-attempt consumed; validation report can be (re-)generated via {@code POST
+   * /runs/{id}/retry-validation}.
+   */
+  private void markSalvaged(PipelineRun run, String previousStatus) {
+    String runId = run.getRunId();
+    List<AgentTask> tasks = taskRepo.findByRunId(runId);
+    boolean anyNonClean =
+        tasks.stream()
+            .filter(t -> t.getParentTaskId() == null)
+            .anyMatch(
+                t ->
+                    "PARTIAL".equals(t.getStatus())
+                        || "FAILED".equals(t.getStatus())
                         || "BLOCKED".equals(t.getStatus()));
-        String terminalStatus = anyNonClean ? "PARTIAL" : "COMPLETE";
-        String reason = "REVIEWER_INTERRUPTED_CODE_PRESERVED";
+    String terminalStatus = anyNonClean ? "PARTIAL" : "COMPLETE";
+    String reason = "REVIEWER_INTERRUPTED_CODE_PRESERVED";
 
-        run.setStatus(terminalStatus);
-        run.setStatusReason(reason);
-        if (run.getFailureReason() == null) {
-            run.setFailureReason("Post-executor phase (" + previousStatus
-                    + ") was interrupted by a JVM restart, but all tasks had already finished and "
-                    + "the workspace is intact. Run marked " + terminalStatus
-                    + ". Click Regenerate on the Validation Report to re-run the reviewer + scoring.");
-        }
-        if (run.getCompletedAt() == null) run.setCompletedAt(Instant.now());
-        runRepo.save(run);
-        log.warn("StartupRunResumerV2: run={} prev={} salvaged → {} ({})",
-                runId, previousStatus, terminalStatus, reason);
-        try {
-            broadcaster.emit(runId, RunEvent.runStatus(runId, terminalStatus));
-            broadcaster.complete(runId);
-        } catch (Exception e) {
-            log.debug("StartupRunResumerV2 salvage: SSE emit failed for run={}: {}",
-                    runId, e.getMessage());
-        }
+    run.setStatus(terminalStatus);
+    run.setStatusReason(reason);
+    if (run.getFailureReason() == null) {
+      run.setFailureReason(
+          "Post-executor phase ("
+              + previousStatus
+              + ") was interrupted by a JVM restart, but all tasks had already finished and "
+              + "the workspace is intact. Run marked "
+              + terminalStatus
+              + ". Click Regenerate on the Validation Report to re-run the reviewer + scoring.");
     }
+    if (run.getCompletedAt() == null) run.setCompletedAt(Instant.now());
+    runRepo.save(run);
+    log.warn(
+        "StartupRunResumerV2: run={} prev={} salvaged → {} ({})",
+        runId,
+        previousStatus,
+        terminalStatus,
+        reason);
+    try {
+      broadcaster.emit(runId, RunEvent.runStatus(runId, terminalStatus));
+      broadcaster.complete(runId);
+    } catch (Exception e) {
+      log.debug(
+          "StartupRunResumerV2 salvage: SSE emit failed for run={}: {}", runId, e.getMessage());
+    }
+  }
 
-    private void markFailed(PipelineRun run, String previousStatus, String reason) {
-        String runId = run.getRunId();
-        run.setStatus("FAILED");
-        run.setFailureReason(reason);
-        run.setCompletedAt(Instant.now());
-        runRepo.save(run);
-        log.warn("StartupRunResumerV2: run={} prev={} → FAILED ({})",
-                runId, previousStatus, reason);
-        try {
-            broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
-            broadcaster.complete(runId);
-        } catch (Exception e) {
-            log.debug("StartupRunResumerV2: SSE emit failed for run={}: {}",
-                    runId, e.getMessage());
-        }
+  private void markFailed(PipelineRun run, String previousStatus, String reason) {
+    String runId = run.getRunId();
+    run.setStatus("FAILED");
+    run.setFailureReason(reason);
+    run.setCompletedAt(Instant.now());
+    runRepo.save(run);
+    log.warn("StartupRunResumerV2: run={} prev={} → FAILED ({})", runId, previousStatus, reason);
+    try {
+      broadcaster.emit(runId, RunEvent.runStatus(runId, "FAILED"));
+      broadcaster.complete(runId);
+    } catch (Exception e) {
+      log.debug("StartupRunResumerV2: SSE emit failed for run={}: {}", runId, e.getMessage());
     }
+  }
 }

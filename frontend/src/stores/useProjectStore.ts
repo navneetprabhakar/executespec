@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 import * as api from '@/lib/api';
 import type {
   ProjectDashboardDTO,
@@ -35,50 +35,58 @@ export const useProjectStore = create<ProjectStore>((set) => ({
   error: null,
 
   fetchDashboard: async (projectId: string) => {
-    set({ loading: true, error: null });
+    set({loading: true, error: null});
     try {
       const dashboard = await api.getProjectDashboard(projectId);
-      set({ dashboard, loading: false });
+      set({dashboard, loading: false});
     } catch (e: unknown) {
-      set({ error: e instanceof Error ? e.message : 'Failed to load dashboard', loading: false });
+      set({error: e instanceof Error ? e.message : 'Failed to load dashboard', loading: false});
     }
   },
 
   fetchRepos: async (projectId: string) => {
     try {
       const repos = await api.getProjectRepos(projectId);
-      set({ repos });
+      set({repos});
     } catch (e: unknown) {
-      set({ error: e instanceof Error ? e.message : 'Failed to load repos' });
+      set({error: e instanceof Error ? e.message : 'Failed to load repos'});
     }
   },
 
   fetchAvailableRepos: async (scope = 'ALL') => {
     try {
       const availableRepos = await api.listRepos(scope);
-      set({ availableRepos });
+      set({availableRepos});
     } catch (e: unknown) {
-      set({ error: e instanceof Error ? e.message : 'Failed to load available repos' });
+      set({error: e instanceof Error ? e.message : 'Failed to load available repos'});
     }
   },
 
   fetchArchitectureDoc: async (projectId: string) => {
     try {
       const architectureDoc = await api.getArchitectureDoc(projectId);
-      set({ architectureDoc });
+      set({architectureDoc});
     } catch (e: unknown) {
-      set({ error: e instanceof Error ? e.message : 'Failed to load architecture doc' });
+      set({error: e instanceof Error ? e.message : 'Failed to load architecture doc'});
     }
   },
 
   fetchScoreTrend: async (projectId: string) => {
     try {
       const scoreTrend = await api.getProjectScores(projectId);
-      set({ scoreTrend });
+      set({scoreTrend});
     } catch (e: unknown) {
-      set({ error: e instanceof Error ? e.message : 'Failed to load scores' });
+      set({error: e instanceof Error ? e.message : 'Failed to load scores'});
     }
   },
 
-  reset: () => set({ dashboard: null, repos: [], availableRepos: [], architectureDoc: null, scoreTrend: [], error: null }),
+  reset: () =>
+    set({
+      dashboard: null,
+      repos: [],
+      availableRepos: [],
+      architectureDoc: null,
+      scoreTrend: [],
+      error: null,
+    }),
 }));

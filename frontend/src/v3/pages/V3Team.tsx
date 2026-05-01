@@ -1,13 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
-import {
-  getMyOrg,
-  getOrgMembers,
-  inviteMember,
-  type OrgDto,
-  type OrgMemberDto,
-} from '@/lib/api';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useEffect, useState} from 'react';
+import {Link, useNavigate} from 'react-router-dom';
+import {getMyOrg, getOrgMembers, inviteMember, type OrgDto, type OrgMemberDto} from '@/lib/api';
+import {useAuthStore} from '@/stores/useAuthStore';
 import Pill from '../components/Pill';
 
 /** Tier ranking used for the user-vs-org reconciliation in V3Team.
@@ -74,19 +68,18 @@ export default function V3Team() {
     }
     let cancelled = false;
     setLoading(true);
-    Promise.all([
-      getMyOrg().catch(() => null),
-      getOrgMembers().catch(() => [] as OrgMemberDto[]),
-    ]).then(([o, m]) => {
-      if (cancelled) return;
-      setOrg(o);
-      setMembers(m);
-      setLoading(false);
-    }).catch((e: Error) => {
-      if (cancelled) return;
-      setError(e?.message ?? 'Failed to load team');
-      setLoading(false);
-    });
+    Promise.all([getMyOrg().catch(() => null), getOrgMembers().catch(() => [] as OrgMemberDto[])])
+      .then(([o, m]) => {
+        if (cancelled) return;
+        setOrg(o);
+        setMembers(m);
+        setLoading(false);
+      })
+      .catch((e: Error) => {
+        if (cancelled) return;
+        setError(e?.message ?? 'Failed to load team');
+        setLoading(false);
+      });
     return () => {
       cancelled = true;
     };
@@ -116,25 +109,23 @@ export default function V3Team() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32}}>
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
-          Team
-        </h1>
-        <p style={{ fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0' }}>
+        <h1 style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>Team</h1>
+        <p style={{fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0'}}>
           Members · seats · invitations · SSO
         </p>
       </div>
 
       {loading && (
-        <div className="v3-placeholder">
+        <div className='v3-placeholder'>
           <p>Loading team…</p>
         </div>
       )}
 
       {error && (
         <div
-          role="alert"
+          role='alert'
           style={{
             padding: 12,
             background: 'rgba(239,68,68,0.12)',
@@ -149,14 +140,10 @@ export default function V3Team() {
       )}
 
       {/* ── Free tier — dedicated upsell card ─────────────────────────── */}
-      {!loading && isFreeTier && (
-        <FreeTierUpsellCard onUpgrade={() => navigate('/pricing')} />
-      )}
+      {!loading && isFreeTier && <FreeTierUpsellCard onUpgrade={() => navigate('/pricing')} />}
 
       {/* ── Pro tier — different upsell (BYOK + collaboration framing) ── */}
-      {!loading && isProTier && (
-        <ProTierUpsellCard onUpgrade={() => navigate('/pricing')} />
-      )}
+      {!loading && isProTier && <ProTierUpsellCard onUpgrade={() => navigate('/pricing')} />}
 
       {/* ── Team / Enterprise — full team surface ──────────────────────── */}
       {!loading && !isFreeTier && !isProTier && (
@@ -180,14 +167,19 @@ export default function V3Team() {
 
 function AnonymousTeamPreview() {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32}}>
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
-          Team
-        </h1>
-        <p style={{ fontSize: 12.5, color: 'var(--v3-text-muted)', margin: '6px 0 0', lineHeight: 1.55 }}>
-          What the Team and Enterprise tiers buy you. Nothing here is gated —
-          look first, sign up later.
+        <h1 style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>Team</h1>
+        <p
+          style={{
+            fontSize: 12.5,
+            color: 'var(--v3-text-muted)',
+            margin: '6px 0 0',
+            lineHeight: 1.55,
+          }}
+        >
+          What the Team and Enterprise tiers buy you. Nothing here is gated — look first, sign up
+          later.
         </p>
       </div>
 
@@ -209,17 +201,28 @@ function AnonymousTeamPreview() {
           }}
         >
           <div>
-            <h2 style={{ margin: 0, fontSize: 17, fontWeight: 600, color: 'var(--v3-text)' }}>
+            <h2 style={{margin: 0, fontSize: 17, fontWeight: 600, color: 'var(--v3-text)'}}>
               Bring your engineering team in.
             </h2>
-            <p style={{ margin: '6px 0 0', fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
-              Per-seat collaboration, shared run pool, audit log, RBAC, SSO.
-              Free 14-day trial — no card. Procurement docs at <Link to="/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/trust</Link>.
+            <p
+              style={{
+                margin: '6px 0 0',
+                fontSize: 12.5,
+                color: 'var(--v3-text-muted)',
+                lineHeight: 1.55,
+              }}
+            >
+              Per-seat collaboration, shared run pool, audit log, RBAC, SSO. Free 14-day trial — no
+              card. Procurement docs at{' '}
+              <Link to='/trust' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
+                /trust
+              </Link>
+              .
             </p>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+          <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end'}}>
             <a
-              href="mailto:admin@executespec.ai?subject=Demo%20request%20—%20Team%20tier"
+              href='mailto:admin@executespec.ai?subject=Demo%20request%20—%20Team%20tier'
               style={{
                 padding: '8px 14px',
                 fontSize: 12.5,
@@ -235,7 +238,7 @@ function AnonymousTeamPreview() {
               Request a demo →
             </a>
             <Link
-              to="/claim"
+              to='/claim'
               style={{
                 padding: '8px 14px',
                 fontSize: 12.5,
@@ -270,9 +273,16 @@ function AnonymousTeamPreview() {
           color: 'var(--v3-text-muted)',
         }}
       >
-        Procurement teams: SOC 2 (audit in progress), SAML/OIDC, EU sub-processor list,
-        DPA, audit-log retention 5 years — all at <Link to="/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/trust</Link>.
-        Pricing at <Link to="/pricing" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/pricing</Link>.
+        Procurement teams: SOC 2 (audit in progress), SAML/OIDC, EU sub-processor list, DPA,
+        audit-log retention 5 years — all at{' '}
+        <Link to='/trust' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
+          /trust
+        </Link>
+        . Pricing at{' '}
+        <Link to='/pricing' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
+          /pricing
+        </Link>
+        .
       </section>
     </div>
   );
@@ -298,11 +308,15 @@ function PreviewCard({
         padding: 16,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <Pill tone="brand" size="sm">{badge}</Pill>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>{title}</h2>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6}}>
+        <Pill tone='brand' size='sm'>
+          {badge}
+        </Pill>
+        <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>{title}</h2>
       </div>
-      <p style={{ margin: '0 0 12px', fontSize: 12, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
+      <p
+        style={{margin: '0 0 12px', fontSize: 12, color: 'var(--v3-text-muted)', lineHeight: 1.55}}
+      >
         {blurb}
       </p>
       <div
@@ -322,17 +336,29 @@ function PreviewCard({
 function PreviewSeatsCard() {
   return (
     <PreviewCard
-      badge="Team"
-      title="Seats and shared run pool"
+      badge='Team'
+      title='Seats and shared run pool'
       blurb="Self-serve seat picker with month-over-month flex. Runs are pooled across the team — one heavy refactor doesn't burn through everyone's budget."
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: 12,
+        }}
+      >
         <div>
-          <div style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)' }}>12 seats</div>
-          <div style={{ fontSize: 11.5, color: 'var(--v3-text-subtle)' }}>$29 BYOK / mo · unlimited runs · pooled</div>
+          <div style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)'}}>12 seats</div>
+          <div style={{fontSize: 11.5, color: 'var(--v3-text-subtle)'}}>
+            $29 BYOK / mo · unlimited runs · pooled
+          </div>
         </div>
-        <div style={{ display: 'flex', gap: 6 }}>
-          <Pill tone="neutral" size="sm">2 · 5 · 10 · 12 · 25 · 50 · 100</Pill>
+        <div style={{display: 'flex', gap: 6}}>
+          <Pill tone='neutral' size='sm'>
+            2 · 5 · 10 · 12 · 25 · 50 · 100
+          </Pill>
         </div>
       </div>
     </PreviewCard>
@@ -341,18 +367,18 @@ function PreviewSeatsCard() {
 
 function PreviewMembersCard() {
   const sample = [
-    { name: 'You', email: 'you@yourco.com', role: 'ORG_ADMIN' },
-    { name: 'Marcus T.', email: 'marcus@yourco.com', role: 'DEVELOPER' },
-    { name: 'Priya S.', email: 'priya@yourco.com', role: 'PROJECT_ADMIN' },
-    { name: 'Finance', email: 'finance@yourco.com', role: 'FINANCE' },
+    {name: 'You', email: 'you@yourco.com', role: 'ORG_ADMIN'},
+    {name: 'Marcus T.', email: 'marcus@yourco.com', role: 'DEVELOPER'},
+    {name: 'Priya S.', email: 'priya@yourco.com', role: 'PROJECT_ADMIN'},
+    {name: 'Finance', email: 'finance@yourco.com', role: 'FINANCE'},
   ];
   return (
     <PreviewCard
-      badge="RBAC"
-      title="Members and role-based access"
-      blurb="Five roles out of the box. Project-scoped access. Finance role sees invoices but not runs. SUPER_ADMIN reserved for emergency override."
+      badge='RBAC'
+      title='Members and role-based access'
+      blurb='Five roles out of the box. Project-scoped access. Finance role sees invoices but not runs. SUPER_ADMIN reserved for emergency override.'
     >
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      <ul style={{margin: 0, padding: 0, listStyle: 'none'}}>
         {sample.map((m, i) => (
           <li
             key={m.email}
@@ -366,10 +392,10 @@ function PreviewMembersCard() {
             }}
           >
             <div>
-              <span style={{ color: 'var(--v3-text)', fontWeight: 500 }}>{m.name}</span>{' '}
-              <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>{m.email}</span>
+              <span style={{color: 'var(--v3-text)', fontWeight: 500}}>{m.name}</span>{' '}
+              <span style={{color: 'var(--v3-text-subtle)', fontSize: 11}}>{m.email}</span>
             </div>
-            <Pill tone={m.role === 'ORG_ADMIN' ? 'brand' : 'neutral'} size="sm">
+            <Pill tone={m.role === 'ORG_ADMIN' ? 'brand' : 'neutral'} size='sm'>
               {m.role.toLowerCase()}
             </Pill>
           </li>
@@ -381,18 +407,18 @@ function PreviewMembersCard() {
 
 function PreviewAuditCard() {
   const sample = [
-    { actor: 'Marcus T.', event: 'submitted run · checkout-flow refactor', when: '2m ago' },
-    { actor: 'Priya S.', event: 'approved plan · OAuth migration', when: '14m ago' },
-    { actor: 'Marcus T.', event: 'merged PR · #2143 to main', when: '1h ago' },
-    { actor: 'Finance', event: 'exported invoice · INV-2026-04', when: 'yesterday' },
+    {actor: 'Marcus T.', event: 'submitted run · checkout-flow refactor', when: '2m ago'},
+    {actor: 'Priya S.', event: 'approved plan · OAuth migration', when: '14m ago'},
+    {actor: 'Marcus T.', event: 'merged PR · #2143 to main', when: '1h ago'},
+    {actor: 'Finance', event: 'exported invoice · INV-2026-04', when: 'yesterday'},
   ];
   return (
     <PreviewCard
-      badge="Compliance"
-      title="Audit log — 5-year retention"
-      blurb="Every billing entity, plan approval, run, merge, export. Retained five years. Filter by actor, project, or event type. CSV export for compliance."
+      badge='Compliance'
+      title='Audit log — 5-year retention'
+      blurb='Every billing entity, plan approval, run, merge, export. Retained five years. Filter by actor, project, or event type. CSV export for compliance.'
     >
-      <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+      <ul style={{margin: 0, padding: 0, listStyle: 'none'}}>
         {sample.map((row, i) => (
           <li
             key={i}
@@ -406,10 +432,10 @@ function PreviewAuditCard() {
             }}
           >
             <div>
-              <span style={{ color: 'var(--v3-text)', fontWeight: 500 }}>{row.actor}</span>{' '}
-              <span style={{ color: 'var(--v3-text-muted)' }}>{row.event}</span>
+              <span style={{color: 'var(--v3-text)', fontWeight: 500}}>{row.actor}</span>{' '}
+              <span style={{color: 'var(--v3-text-muted)'}}>{row.event}</span>
             </div>
-            <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>{row.when}</span>
+            <span style={{color: 'var(--v3-text-subtle)', fontSize: 11}}>{row.when}</span>
           </li>
         ))}
       </ul>
@@ -420,15 +446,29 @@ function PreviewAuditCard() {
 function PreviewSsoCard() {
   return (
     <PreviewCard
-      badge="Enterprise"
-      title="Single sign-on (SAML / OIDC)"
-      blurb="Okta, Auth0, Azure AD, Google Workspace, or any standards-compliant IdP. Domain-pinned email enforcement. MFA inherited from your IdP."
+      badge='Enterprise'
+      title='Single sign-on (SAML / OIDC)'
+      blurb='Okta, Auth0, Azure AD, Google Workspace, or any standards-compliant IdP. Domain-pinned email enforcement. MFA inherited from your IdP.'
     >
-      <div style={{ fontSize: 11.5, color: 'var(--v3-text-muted)', display: 'grid', gap: 4 }}>
-        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Provider:</span> <span style={{ color: 'var(--v3-text)' }}>Okta</span></div>
-        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Domain pinned:</span> <span style={{ color: 'var(--v3-text)' }}>yourco.com</span></div>
-        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Enforcement:</span> <span style={{ color: 'var(--v3-text)' }}>Required for new sign-ins</span></div>
-        <div><span style={{ color: 'var(--v3-text-subtle)' }}>Status:</span> <Pill tone="ok" size="sm">Active</Pill></div>
+      <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)', display: 'grid', gap: 4}}>
+        <div>
+          <span style={{color: 'var(--v3-text-subtle)'}}>Provider:</span>{' '}
+          <span style={{color: 'var(--v3-text)'}}>Okta</span>
+        </div>
+        <div>
+          <span style={{color: 'var(--v3-text-subtle)'}}>Domain pinned:</span>{' '}
+          <span style={{color: 'var(--v3-text)'}}>yourco.com</span>
+        </div>
+        <div>
+          <span style={{color: 'var(--v3-text-subtle)'}}>Enforcement:</span>{' '}
+          <span style={{color: 'var(--v3-text)'}}>Required for new sign-ins</span>
+        </div>
+        <div>
+          <span style={{color: 'var(--v3-text-subtle)'}}>Status:</span>{' '}
+          <Pill tone='ok' size='sm'>
+            Active
+          </Pill>
+        </div>
       </div>
     </PreviewCard>
   );
@@ -436,7 +476,7 @@ function PreviewSsoCard() {
 
 // ─── Free-tier card ─────────────────────────────────────────────────────────
 
-function FreeTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
+function FreeTierUpsellCard({onUpgrade}: {onUpgrade: () => void}) {
   return (
     <section
       style={{
@@ -446,26 +486,24 @@ function FreeTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
         padding: 16,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <Pill tone="info">Paid tiers</Pill>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+        <Pill tone='info'>Paid tiers</Pill>
+        <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
           Upgrade to bring teammates in.
         </h2>
       </div>
-      <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
+      <p style={{margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55}}>
         {/* Task 5 (2026-05-01 fix list) — V145 capped PRO at 20 runs / month
             (grandfathered, hidden from new buyers). Previous copy claimed
             "unlimited managed runs" which contradicted /pricing. */}
-        Free is a one-developer plan with 10 runs / month. Pro ($20/mo,
-        grandfathered) gives 20 runs / month for one developer. Team
-        ($39/seat) adds per-seat collaboration with shared spec templates,
-        audit log, SSO — and runs go through your own Anthropic / OpenAI /
-        Google keys (BYOK), so there's no per-run charge from us beyond the
-        seat fee.
+        Free is a one-developer plan with 10 runs / month. Pro ($20/mo, grandfathered) gives 20 runs
+        / month for one developer. Team ($39/seat) adds per-seat collaboration with shared spec
+        templates, audit log, SSO — and runs go through your own Anthropic / OpenAI / Google keys
+        (BYOK), so there's no per-run charge from us beyond the seat fee.
       </p>
-      <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+      <div style={{display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap'}}>
         <button
-          type="button"
+          type='button'
           onClick={onUpgrade}
           style={{
             padding: '6px 14px',
@@ -492,7 +530,7 @@ function FreeTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
 // volume. Per the audit fix: Pro on /team must not see the same Free
 // upsell card.
 
-function ProTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
+function ProTierUpsellCard({onUpgrade}: {onUpgrade: () => void}) {
   return (
     <section
       style={{
@@ -502,24 +540,44 @@ function ProTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
         padding: 16,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <Pill tone="info">Team tier</Pill>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+        <Pill tone='info'>Team tier</Pill>
+        <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
           Bring your team in. Bring your own keys.
         </h2>
       </div>
-      <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
+      <p style={{margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55}}>
         Pro is a one-developer plan. Team ($39/seat, min 2) adds:
       </p>
-      <ul style={{ margin: '8px 0 0 18px', padding: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.6 }}>
-        <li><strong style={{ color: 'var(--v3-text)' }}>BYOK runs</strong> — route through your own Anthropic / OpenAI / Google keys, no per-run charge from us</li>
-        <li><strong style={{ color: 'var(--v3-text)' }}>Per-seat collaboration</strong> — shared run history, shared spec templates</li>
-        <li><strong style={{ color: 'var(--v3-text)' }}>Org SSO</strong> (SAML / OIDC) and <strong style={{ color: 'var(--v3-text)' }}>audit log export</strong></li>
-        <li><strong style={{ color: 'var(--v3-text)' }}>Activity feed</strong> across every project in the org</li>
+      <ul
+        style={{
+          margin: '8px 0 0 18px',
+          padding: 0,
+          fontSize: 12.5,
+          color: 'var(--v3-text-muted)',
+          lineHeight: 1.6,
+        }}
+      >
+        <li>
+          <strong style={{color: 'var(--v3-text)'}}>BYOK runs</strong> — route through your own
+          Anthropic / OpenAI / Google keys, no per-run charge from us
+        </li>
+        <li>
+          <strong style={{color: 'var(--v3-text)'}}>Per-seat collaboration</strong> — shared run
+          history, shared spec templates
+        </li>
+        <li>
+          <strong style={{color: 'var(--v3-text)'}}>Org SSO</strong> (SAML / OIDC) and{' '}
+          <strong style={{color: 'var(--v3-text)'}}>audit log export</strong>
+        </li>
+        <li>
+          <strong style={{color: 'var(--v3-text)'}}>Activity feed</strong> across every project in
+          the org
+        </li>
       </ul>
-      <div style={{ display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap' }}>
+      <div style={{display: 'flex', gap: 6, marginTop: 12, flexWrap: 'wrap'}}>
         <button
-          type="button"
+          type='button'
           onClick={onUpgrade}
           style={{
             padding: '6px 14px',
@@ -542,7 +600,15 @@ function ProTierUpsellCard({ onUpgrade }: { onUpgrade: () => void }) {
 
 // ─── Seats card ─────────────────────────────────────────────────────────────
 
-function SeatsCard({ org, tier, memberCount }: { org: OrgDto | null; tier: string; memberCount: number }) {
+function SeatsCard({
+  org,
+  tier,
+  memberCount,
+}: {
+  org: OrgDto | null;
+  tier: string;
+  memberCount: number;
+}) {
   const seatCount = org?.seatCount ?? 0;
   // Tier-coherence: ENTERPRISE is always unlimited regardless of any
   // org.seatCount value the backend persisted (some legacy orgs were
@@ -559,12 +625,20 @@ function SeatsCard({ org, tier, memberCount }: { org: OrgDto | null; tier: strin
         padding: 16,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          flexWrap: 'wrap',
+        }}
+      >
         <div>
-          <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+          <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
             {org?.name ?? 'Your team'}
           </h2>
-          <p style={{ margin: '4px 0 0', fontSize: 12, color: 'var(--v3-text-muted)' }}>
+          <p style={{margin: '4px 0 0', fontSize: 12, color: 'var(--v3-text-muted)'}}>
             {/* R3 (2026-05-01 follow-up) — TEAM and ENT used different
                 phrasings for the same workspace state ("1 of 1 seat used"
                 vs "1 member"). Standardised on "X of N seats used" for
@@ -577,7 +651,7 @@ function SeatsCard({ org, tier, memberCount }: { org: OrgDto | null; tier: strin
           </p>
         </div>
         <Link
-          to="/billing"
+          to='/billing'
           style={{
             padding: '5px 12px',
             fontSize: 12,
@@ -599,7 +673,7 @@ function SeatsCard({ org, tier, memberCount }: { org: OrgDto | null; tier: strin
 
 // ─── Members card ───────────────────────────────────────────────────────────
 
-function MembersCard({ members }: { members: OrgMemberDto[] }) {
+function MembersCard({members}: {members: OrgMemberDto[]}) {
   return (
     <section
       style={{
@@ -609,15 +683,15 @@ function MembersCard({ members }: { members: OrgMemberDto[] }) {
         padding: 16,
       }}
     >
-      <h2 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+      <h2 style={{margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Members
       </h2>
       {members.length === 0 ? (
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)' }}>
+        <p style={{margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
           No teammates yet — invite someone below.
         </p>
       ) : (
-        <ul style={{ margin: 0, padding: 0, listStyle: 'none' }}>
+        <ul style={{margin: 0, padding: 0, listStyle: 'none'}}>
           {members.map((m) => (
             <li
               key={m.userId}
@@ -631,14 +705,12 @@ function MembersCard({ members }: { members: OrgMemberDto[] }) {
               }}
             >
               <div>
-                <span style={{ color: 'var(--v3-text)', fontWeight: 500 }}>
+                <span style={{color: 'var(--v3-text)', fontWeight: 500}}>
                   {m.firstName} {m.lastName}
                 </span>{' '}
-                <span style={{ color: 'var(--v3-text-subtle)', fontSize: 11 }}>
-                  {m.email}
-                </span>
+                <span style={{color: 'var(--v3-text-subtle)', fontSize: 11}}>{m.email}</span>
               </div>
-              <Pill tone={m.orgRole === 'ORG_ADMIN' ? 'brand' : 'neutral'} size="sm">
+              <Pill tone={m.orgRole === 'ORG_ADMIN' ? 'brand' : 'neutral'} size='sm'>
                 {m.orgRole.toLowerCase()}
               </Pill>
             </li>
@@ -663,7 +735,7 @@ function InviteCard() {
     setSubmitting(true);
     setErr(null);
     try {
-      await inviteMember({ email: email.trim(), orgRole: 'DEVELOPER' });
+      await inviteMember({email: email.trim(), orgRole: 'DEVELOPER'});
       setSent(true);
       setEmail('');
     } catch (e) {
@@ -682,15 +754,15 @@ function InviteCard() {
         padding: 16,
       }}
     >
-      <h2 style={{ margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+      <h2 style={{margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Invite a teammate
       </h2>
-      <form onSubmit={onSubmit} style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+      <form onSubmit={onSubmit} style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
         <input
-          type="email"
+          type='email'
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          placeholder="teammate@example.com"
+          placeholder='teammate@example.com'
           disabled={submitting}
           style={{
             flex: 1,
@@ -706,14 +778,16 @@ function InviteCard() {
           }}
         />
         <button
-          type="submit"
+          type='submit'
           disabled={!email.trim() || submitting}
           style={{
             padding: '7px 14px',
             fontSize: 12.5,
             fontWeight: 600,
-            background: email.trim() && !submitting ? 'var(--v3-brand)' : 'var(--v3-surface-elevated)',
-            color: email.trim() && !submitting ? 'var(--v3-text-on-brand)' : 'var(--v3-text-subtle)',
+            background:
+              email.trim() && !submitting ? 'var(--v3-brand)' : 'var(--v3-surface-elevated)',
+            color:
+              email.trim() && !submitting ? 'var(--v3-text-on-brand)' : 'var(--v3-text-subtle)',
             border: 'none',
             borderRadius: 6,
             cursor: email.trim() && !submitting ? 'pointer' : 'not-allowed',
@@ -724,15 +798,11 @@ function InviteCard() {
         </button>
       </form>
       {sent && (
-        <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--v3-success)' }}>
+        <p style={{margin: '8px 0 0', fontSize: 11.5, color: 'var(--v3-success)'}}>
           ✓ Invite sent. They'll get an email to join.
         </p>
       )}
-      {err && (
-        <p style={{ margin: '8px 0 0', fontSize: 11.5, color: 'var(--v3-error)' }}>
-          {err}
-        </p>
-      )}
+      {err && <p style={{margin: '8px 0 0', fontSize: 11.5, color: 'var(--v3-error)'}}>{err}</p>}
     </section>
   );
 }
@@ -749,20 +819,20 @@ function SsoPanel() {
         padding: 16,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-        <Pill tone="brand">Enterprise</Pill>
-        <h2 style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8}}>
+        <Pill tone='brand'>Enterprise</Pill>
+        <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
           Single sign-on
         </h2>
       </div>
-      <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
-        Configure SAML / OIDC for Okta, Auth0, Azure AD, Google Workspace,
-        or any standards-compliant IdP. SSO is enabled per-org by your
-        ExecuteSpec rep — set up takes ~30 minutes against your IdP.
+      <p style={{margin: 0, fontSize: 12, color: 'var(--v3-text-muted)', lineHeight: 1.55}}>
+        Configure SAML / OIDC for Okta, Auth0, Azure AD, Google Workspace, or any
+        standards-compliant IdP. SSO is enabled per-org by your ExecuteSpec rep — set up takes ~30
+        minutes against your IdP.
       </p>
-      <div style={{ marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+      <div style={{marginTop: 10, display: 'flex', gap: 8, flexWrap: 'wrap'}}>
         <a
-          href="mailto:admin@executespec.ai?subject=SSO%20config%20%E2%80%94%20%5Borg%20name%5D"
+          href='mailto:admin@executespec.ai?subject=SSO%20config%20%E2%80%94%20%5Borg%20name%5D'
           style={{
             padding: '5px 12px',
             fontSize: 12,
@@ -777,7 +847,7 @@ function SsoPanel() {
           Talk to sales →
         </a>
         <Link
-          to="/admin"
+          to='/admin'
           style={{
             padding: '5px 12px',
             fontSize: 12,

@@ -1,16 +1,18 @@
-import { forwardRef, type InputHTMLAttributes, type ReactNode } from 'react';
-import { Check } from 'lucide-react';
-import { cn } from '@/lib/utils';
+import {forwardRef, type InputHTMLAttributes, type ReactNode} from 'react';
+import {Check} from 'lucide-react';
+import {cn} from '@/lib/utils';
 
-export interface CheckboxProps
-  extends Omit<InputHTMLAttributes<HTMLInputElement>, 'type' | 'size'> {
+export interface CheckboxProps extends Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'type' | 'size'
+> {
   label?: ReactNode;
   description?: ReactNode;
   size?: 'sm' | 'md';
 }
 
 const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
-  ({ className, label, description, size = 'md', checked, disabled, id, ...props }, ref) => {
+  ({className, label, description, size = 'md', checked, disabled, id, ...props}, ref) => {
     const dim = size === 'sm' ? 'w-3.5 h-3.5' : 'w-4 h-4';
     const iconDim = size === 'sm' ? 'w-2.5 h-2.5' : 'w-3 h-3';
     const control = (
@@ -27,13 +29,15 @@ const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
         <input
           ref={ref}
           id={id}
-          type="checkbox"
+          type='checkbox'
           checked={checked}
           disabled={disabled}
-          className="absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed"
+          className='absolute inset-0 opacity-0 cursor-pointer disabled:cursor-not-allowed'
           {...props}
         />
-        {checked && <Check className={cn(iconDim, 'text-white pointer-events-none')} strokeWidth={3} />}
+        {checked && (
+          <Check className={cn(iconDim, 'text-white pointer-events-none')} strokeWidth={3} />
+        )}
       </span>
     );
 
@@ -51,10 +55,10 @@ const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
         )}
       >
         {control}
-        <span className="flex flex-col gap-0.5 leading-tight">
-          {label && <span className="text-sm text-[var(--text-primary)]">{label}</span>}
+        <span className='flex flex-col gap-0.5 leading-tight'>
+          {label && <span className='text-sm text-[var(--text-primary)]'>{label}</span>}
           {description && (
-            <span className="text-xs text-[var(--text-secondary)]">{description}</span>
+            <span className='text-xs text-[var(--text-secondary)]'>{description}</span>
           )}
         </span>
       </label>
@@ -65,4 +69,4 @@ const Checkbox = forwardRef<HTMLInputElement, CheckboxProps>(
 Checkbox.displayName = 'Checkbox';
 
 export default Checkbox;
-export { Checkbox };
+export {Checkbox};

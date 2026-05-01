@@ -1,10 +1,5 @@
-import { create } from 'zustand';
-import {
-  getProject,
-  getRuns,
-  type ProjectDto,
-  type RunSummary,
-} from '@/lib/api';
+import {create} from 'zustand';
+import {getProject, getRuns, type ProjectDto, type RunSummary} from '@/lib/api';
 
 /**
  * R-120 — per-project chat-thread state.
@@ -59,11 +54,11 @@ export const useV3ProjectStore = create<V3ProjectStore>((set, get) => ({
 
   async load(projectId: string) {
     if (get().loaded === projectId && !get().loading) return;
-    set({ loading: true, error: null, bubbles: [], project: null, loaded: projectId });
+    set({loading: true, error: null, bubbles: [], project: null, loaded: projectId});
     try {
       const [project, runs] = await Promise.all([
         getProject(projectId).catch(() => null),
-        getRuns({ projectId, page: 0, size: 30 }).catch(() => ({ content: [] as RunSummary[] })),
+        getRuns({projectId, page: 0, size: 30}).catch(() => ({content: [] as RunSummary[]})),
       ]);
       // Seed bubbles oldest-first from existing runs. Each run becomes a
       // user bubble (the spec) + an assistant bubble (the run result).
@@ -90,7 +85,7 @@ export const useV3ProjectStore = create<V3ProjectStore>((set, get) => ({
           createdAt: r.completedAt ?? r.startedAt,
         });
       }
-      set({ project, bubbles, loading: false });
+      set({project, bubbles, loading: false});
     } catch (e) {
       set({
         error: (e as Error)?.message ?? 'Failed to load project',
@@ -105,15 +100,15 @@ export const useV3ProjectStore = create<V3ProjectStore>((set, get) => ({
         const idx = s.bubbles.findIndex((x) => x.id === b.replacesId);
         if (idx >= 0) {
           const next = s.bubbles.slice();
-          next[idx] = { ...b, id: b.id };
-          return { bubbles: next };
+          next[idx] = {...b, id: b.id};
+          return {bubbles: next};
         }
       }
-      return { bubbles: [...s.bubbles, b] };
+      return {bubbles: [...s.bubbles, b]};
     });
   },
 
   reset() {
-    set({ loaded: null, project: null, bubbles: [], error: null, loading: false });
+    set({loaded: null, project: null, bubbles: [], error: null, loading: false});
   },
 }));

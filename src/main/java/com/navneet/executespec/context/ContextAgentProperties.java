@@ -1,17 +1,19 @@
 package com.navneet.executespec.context;
-import lombok.Data;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.stereotype.Component;
+
+import lombok.Data;
 
 @Component
 @ConfigurationProperties(prefix = "agent.context")
 @Data
 public class ContextAgentProperties {
 
-    private boolean enabled = true;
-    private String model = "claude-haiku-4-5-20251001";
-    private String provider = "anthropic";
+  private boolean enabled = true;
+  private String model = "claude-haiku-4-5-20251001";
+  private String provider = "anthropic";
 
-    /** Run after every N completed runs. 1 = every run. */
-    private int runInterval = 1;
+  /** Run after every N completed runs. 1 = every run. */
+  private int runInterval = 1;
 }

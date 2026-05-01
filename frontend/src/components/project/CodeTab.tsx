@@ -12,7 +12,7 @@
  *   │  Contracts · ADRs · Invariants                         │
  *   └─────────────────────────────────────────────────────────┘
  */
-import { useState } from 'react';
+import {useState} from 'react';
 import ArchitectureViewer from './ArchitectureViewer';
 import TechDebtPanel from './TechDebtPanel';
 import StandardsCompliancePanel from './StandardsCompliancePanel';
@@ -20,18 +20,25 @@ import ContractCoveragePanel from './ContractCoveragePanel';
 import WorkspaceHealthPanel from './WorkspaceHealthPanel';
 import AdrPanel from './AdrPanel';
 import InvariantPanel from './InvariantPanel';
-import { cn } from '@/lib/utils';
+import {cn} from '@/lib/utils';
 
-export type CodeSubTab = 'architecture' | 'tech-debt' | 'standards' | 'contracts' | 'health' | 'adrs' | 'invariants';
+export type CodeSubTab =
+  | 'architecture'
+  | 'tech-debt'
+  | 'standards'
+  | 'contracts'
+  | 'health'
+  | 'adrs'
+  | 'invariants';
 
-const SUB_TABS: { key: CodeSubTab; label: string }[] = [
-  { key: 'architecture', label: 'Architecture' },
-  { key: 'health', label: 'Health' },
-  { key: 'tech-debt', label: 'Tech debt' },
-  { key: 'standards', label: 'Standards' },
-  { key: 'contracts', label: 'Contracts' },
-  { key: 'adrs', label: 'ADRs' },
-  { key: 'invariants', label: 'Invariants' },
+const SUB_TABS: {key: CodeSubTab; label: string}[] = [
+  {key: 'architecture', label: 'Architecture'},
+  {key: 'health', label: 'Health'},
+  {key: 'tech-debt', label: 'Tech debt'},
+  {key: 'standards', label: 'Standards'},
+  {key: 'contracts', label: 'Contracts'},
+  {key: 'adrs', label: 'ADRs'},
+  {key: 'invariants', label: 'Invariants'},
 ];
 
 interface CodeTabProps {
@@ -50,7 +57,14 @@ interface CodeTabProps {
   onSubChange?: (sub: CodeSubTab) => void;
 }
 
-export default function CodeTab({ projectId, orgId, repos, initialSub = 'architecture', sub: controlledSub, onSubChange }: CodeTabProps) {
+export default function CodeTab({
+  projectId,
+  orgId,
+  repos,
+  initialSub = 'architecture',
+  sub: controlledSub,
+  onSubChange,
+}: CodeTabProps) {
   const [internalSub, setInternalSub] = useState<CodeSubTab>(initialSub);
   const sub = controlledSub ?? internalSub;
   const setSub = (next: CodeSubTab) => {
@@ -59,13 +73,17 @@ export default function CodeTab({ projectId, orgId, repos, initialSub = 'archite
   };
 
   return (
-    <div className="space-y-3">
+    <div className='space-y-3'>
       {/* Sub-tab strip — reuses the same chip pattern as the parent IA */}
-      <nav className="flex gap-0.5 overflow-x-auto -mx-3 px-3" role="tablist" aria-label="Code surfaces">
+      <nav
+        className='flex gap-0.5 overflow-x-auto -mx-3 px-3'
+        role='tablist'
+        aria-label='Code surfaces'
+      >
         {SUB_TABS.map((t) => (
           <button
             key={t.key}
-            role="tab"
+            role='tab'
             aria-selected={sub === t.key}
             onClick={() => setSub(t.key)}
             className={cn(
@@ -80,7 +98,7 @@ export default function CodeTab({ projectId, orgId, repos, initialSub = 'archite
         ))}
       </nav>
 
-      <div role="tabpanel" aria-labelledby={sub}>
+      <div role='tabpanel' aria-labelledby={sub}>
         {sub === 'architecture' && (
           <ArchitectureViewer projectId={projectId} repoCount={repos.length} />
         )}
@@ -90,13 +108,11 @@ export default function CodeTab({ projectId, orgId, repos, initialSub = 'archite
           <StandardsCompliancePanel projectId={projectId} orgId={orgId} />
         )}
         {sub === 'standards' && !orgId && (
-          <div className="text-xs text-muted p-3">
-            Standards require an organization context.
-          </div>
+          <div className='text-xs text-muted p-3'>Standards require an organization context.</div>
         )}
-        {sub === 'contracts' && (
-          repos.length > 0 ? (
-            <div className="space-y-2">
+        {sub === 'contracts' &&
+          (repos.length > 0 ? (
+            <div className='space-y-2'>
               {repos.map((r: any) => (
                 <ContractCoveragePanel
                   key={r.id ?? r.repoId}
@@ -107,11 +123,10 @@ export default function CodeTab({ projectId, orgId, repos, initialSub = 'archite
               ))}
             </div>
           ) : (
-            <div className="text-xs text-muted p-3">
+            <div className='text-xs text-muted p-3'>
               Link at least one repository to scan for contracts.
             </div>
-          )
-        )}
+          ))}
         {sub === 'adrs' && <AdrPanel projectId={projectId} />}
         {sub === 'invariants' && <InvariantPanel projectId={projectId} />}
       </div>

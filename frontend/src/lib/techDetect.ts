@@ -72,7 +72,15 @@ export const TECH_DEFS: TechDef[] = [
     textCls: 'text-[#E34F26]',
     bgCls: 'bg-[#E34F26]/10',
     hex: '#E34F26',
-    keywords: ['html', 'css', 'vanilla js', 'vanilla javascript', 'plain html', 'static html', 'index.html'],
+    keywords: [
+      'html',
+      'css',
+      'vanilla js',
+      'vanilla javascript',
+      'plain html',
+      'static html',
+      'index.html',
+    ],
     priority: 15,
   },
   // ── Type systems ─────────────────────────────────────────────────────────
@@ -110,7 +118,13 @@ export const TECH_DEFS: TechDef[] = [
     textCls: 'text-[#6DB33F]',
     bgCls: 'bg-[#6DB33F]/10',
     hex: '#6DB33F',
-    keywords: ['spring boot', 'springboot', 'spring-boot', '@springbootapplication', 'spring framework'],
+    keywords: [
+      'spring boot',
+      'springboot',
+      'spring-boot',
+      '@springbootapplication',
+      'spring framework',
+    ],
     priority: 32,
   },
   {
@@ -211,17 +225,21 @@ export const TECH_DEFS: TechDef[] = [
 const MAX_BADGES = 5;
 
 /** Build a lookup map of tech ID → TechDef for O(1) resolution */
-const TECH_BY_ID: Record<string, TechDef> = Object.fromEntries(
-  TECH_DEFS.map((t) => [t.id, t]),
-);
+const TECH_BY_ID: Record<string, TechDef> = Object.fromEntries(TECH_DEFS.map((t) => [t.id, t]));
 
 /**
  * Resolves a comma-separated tech stack string (from the backend) into TechDef[].
  * Falls back to keyword-based detection from userRequest if techStack is null/empty.
  */
-export function resolveTechStack(techStack: string | null | undefined, userRequest: string): TechDef[] {
+export function resolveTechStack(
+  techStack: string | null | undefined,
+  userRequest: string,
+): TechDef[] {
   if (techStack) {
-    const ids = techStack.split(',').map((s) => s.trim()).filter(Boolean);
+    const ids = techStack
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
     const resolved = ids.map((id) => TECH_BY_ID[id]).filter(Boolean) as TechDef[];
     if (resolved.length > 0) return resolved.slice(0, MAX_BADGES);
   }

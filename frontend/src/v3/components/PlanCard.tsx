@@ -1,6 +1,6 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { approveRun, getRun, type RunDetail } from '@/lib/api';
+import {useState} from 'react';
+import {useNavigate} from 'react-router-dom';
+import {approveRun, getRun, type RunDetail} from '@/lib/api';
 import Pill from './Pill';
 import {
   PLAN_GATE_APPROVE_CTA,
@@ -30,7 +30,7 @@ interface PlanCardProps {
   onApproved?: () => void;
 }
 
-export default function PlanCard({ runId, onApproved }: PlanCardProps) {
+export default function PlanCard({runId, onApproved}: PlanCardProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -81,8 +81,8 @@ export default function PlanCard({ runId, onApproved }: PlanCardProps) {
     detail?.costEstimateLow != null && detail?.costEstimateHigh != null
       ? `${COST_PREFIX} $${detail.costEstimateLow.toFixed(2)}–$${detail.costEstimateHigh.toFixed(2)}`
       : detail?.creditsCharged
-      ? `${COST_PREFIX} ${detail.creditsCharged} credits`
-      : '';
+        ? `${COST_PREFIX} ${detail.creditsCharged} credits`
+        : '';
 
   return (
     <div
@@ -102,19 +102,15 @@ export default function PlanCard({ runId, onApproved }: PlanCardProps) {
           marginBottom: 8,
         }}
       >
-        <Pill tone="info">{PLAN_GATE_HEADER}</Pill>
-        {costEst && (
-          <span style={{ fontSize: 11.5, color: 'var(--v3-text-muted)' }}>{costEst}</span>
-        )}
+        <Pill tone='info'>{PLAN_GATE_HEADER}</Pill>
+        {costEst && <span style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>{costEst}</span>}
       </div>
 
-      {loading && (
-        <div style={{ fontSize: 12, color: 'var(--v3-text-subtle)' }}>Loading plan…</div>
-      )}
+      {loading && <div style={{fontSize: 12, color: 'var(--v3-text-subtle)'}}>Loading plan…</div>}
 
       {error && (
         <div
-          role="alert"
+          role='alert'
           style={{
             padding: '6px 10px',
             background: 'rgba(239,68,68,0.12)',
@@ -175,23 +171,23 @@ export default function PlanCard({ runId, onApproved }: PlanCardProps) {
                     color: 'var(--v3-text-muted)',
                   }}
                 >
-                  <span style={{ color: 'var(--v3-text-subtle)', marginRight: 8 }}>
+                  <span style={{color: 'var(--v3-text-subtle)', marginRight: 8}}>
                     {String(i + 1).padStart(2, '0')}.
                   </span>
                   {t.title}
                 </li>
               ))}
               {detail.tasks.length > 6 && (
-                <li style={{ padding: '3px 0', color: 'var(--v3-text-subtle)', fontSize: 11 }}>
+                <li style={{padding: '3px 0', color: 'var(--v3-text-subtle)', fontSize: 11}}>
                   + {detail.tasks.length - 6} more steps
                 </li>
               )}
             </ul>
           )}
 
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8 }}>
+          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8}}>
             <button
-              type="button"
+              type='button'
               onClick={onApprove}
               disabled={submitting}
               style={{
@@ -209,7 +205,7 @@ export default function PlanCard({ runId, onApproved }: PlanCardProps) {
               {submitting ? 'Submitting…' : PLAN_GATE_APPROVE_CTA}
             </button>
             <button
-              type="button"
+              type='button'
               onClick={() => navigate(`/projects/${detail.projectId ?? ''}/r/${runId}`)}
               style={{
                 padding: '6px 14px',
@@ -226,7 +222,7 @@ export default function PlanCard({ runId, onApproved }: PlanCardProps) {
               {PLAN_GATE_ADJUST_CTA}
             </button>
             <button
-              type="button"
+              type='button'
               onClick={onCancel}
               disabled={submitting}
               style={{

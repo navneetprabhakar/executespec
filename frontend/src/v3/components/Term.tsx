@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { lookupGlossary } from '../lib/glossary';
+import type {ReactNode} from 'react';
+import {lookupGlossary} from '../lib/glossary';
 
 /**
  * R-106 — glossary term wrapper.
@@ -26,7 +26,7 @@ interface TermProps {
   hideHint?: boolean;
 }
 
-export default function Term({ name, children, hideHint = false }: TermProps) {
+export default function Term({name, children, hideHint = false}: TermProps) {
   const entry = lookupGlossary(name);
   const tooltip = entry ? `${entry.term}: ${entry.definition}` : undefined;
 
@@ -52,7 +52,7 @@ export default function Term({ name, children, hideHint = false }: TermProps) {
       {children}
       {!hideHint && (
         <span
-          aria-hidden="true"
+          aria-hidden='true'
           style={{
             display: 'inline-flex',
             alignItems: 'center',

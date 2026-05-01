@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import {useState} from 'react';
 
 interface Props {
   initial: string[];
@@ -6,7 +6,7 @@ interface Props {
   onCancel: () => void;
 }
 
-export default function RepoRelationshipEditor({ initial, onSave, onCancel }: Props) {
+export default function RepoRelationshipEditor({initial, onSave, onCancel}: Props) {
   const [items, setItems] = useState<string[]>(initial);
   const [draft, setDraft] = useState('');
 
@@ -20,23 +20,23 @@ export default function RepoRelationshipEditor({ initial, onSave, onCancel }: Pr
   const remove = (idx: number) => setItems(items.filter((_, i) => i !== idx));
 
   return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-2">
+    <div className='space-y-2'>
+      <div className='flex flex-wrap gap-2'>
         {items.map((item, idx) => (
           <span
             key={`${item}-${idx}`}
-            className="inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs"
+            className='inline-flex items-center gap-1 rounded bg-gray-100 px-2 py-0.5 text-xs'
           >
             {item}
-            <button onClick={() => remove(idx)} className="text-muted hover:text-status-error">
+            <button onClick={() => remove(idx)} className='text-muted hover:text-status-error'>
               ×
             </button>
           </span>
         ))}
       </div>
-      <div className="flex gap-2">
+      <div className='flex gap-2'>
         <input
-          type="text"
+          type='text'
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           onKeyDown={(e) => {
@@ -45,25 +45,19 @@ export default function RepoRelationshipEditor({ initial, onSave, onCancel }: Pr
               add();
             }
           }}
-          placeholder="e.g. calls api-server"
-          className="flex-1 px-2 py-1 text-xs border rounded"
+          placeholder='e.g. calls api-server'
+          className='flex-1 px-2 py-1 text-xs border rounded'
         />
-        <button
-          onClick={add}
-          className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-        >
+        <button onClick={add} className='text-xs px-2 py-1 border rounded hover:bg-gray-50'>
           Add
         </button>
         <button
           onClick={() => onSave(items)}
-          className="text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700"
+          className='text-xs px-2 py-1 bg-blue-600 text-white rounded hover:bg-blue-700'
         >
           Save
         </button>
-        <button
-          onClick={onCancel}
-          className="text-xs px-2 py-1 border rounded hover:bg-gray-50"
-        >
+        <button onClick={onCancel} className='text-xs px-2 py-1 border rounded hover:bg-gray-50'>
           Cancel
         </button>
       </div>

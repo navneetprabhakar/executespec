@@ -8,5 +8,4 @@ public record FeasibilityReport(
     Double budgetUsd,
     double estimatedLowUsd,
     double estimatedHighUsd,
-    List<TaskFeasibility> tasks
-) {}
+    List<TaskFeasibility> tasks) {}

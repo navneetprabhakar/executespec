@@ -1,4 +1,4 @@
-import { create } from 'zustand';
+import {create} from 'zustand';
 
 export interface Toast {
   id: string;
@@ -105,44 +105,45 @@ export const useUiStore = create<UiStore>((set, get) => ({
   })(),
 
   setSidebarExpanded: (v) => {
-    try { localStorage.setItem('es:sidebarExpanded', String(v)); } catch {}
-    set({ sidebarExpanded: v });
+    try {
+      localStorage.setItem('es:sidebarExpanded', String(v));
+    } catch {}
+    set({sidebarExpanded: v});
   },
-  setMobileSidebarOpen: (v) => set({ mobileSidebarOpen: v }),
-  setCommandPaletteOpen: (v) => set({ commandPaletteOpen: v }),
-  setActiveTab: (t) => set({ activeTab: t }),
-  setPendingNewRunConfig: (config) => set({ pendingNewRunConfig: config }),
-  setRunListCollapsed: (v) => set({ runListCollapsed: v }),
+  setMobileSidebarOpen: (v) => set({mobileSidebarOpen: v}),
+  setCommandPaletteOpen: (v) => set({commandPaletteOpen: v}),
+  setActiveTab: (t) => set({activeTab: t}),
+  setPendingNewRunConfig: (config) => set({pendingNewRunConfig: config}),
+  setRunListCollapsed: (v) => set({runListCollapsed: v}),
   setRunListWidth: (w) => {
     localStorage.setItem('es:runListWidth', String(w));
-    set({ runListWidth: w });
+    set({runListWidth: w});
   },
-  setCopilotMaximized: (v) => set({ copilotMaximized: v }),
+  setCopilotMaximized: (v) => set({copilotMaximized: v}),
   setViewMode: (mode) => {
     localStorage.setItem('es:viewMode', mode);
     // R-190 (post-cutover): both surviving modes (pro / project) start on
     // 'overview' tab. The previous Vibe mode started on 'code'; that path
     // is gone with the surface.
-    set({ viewMode: mode, activeTab: 'overview' });
+    set({viewMode: mode, activeTab: 'overview'});
   },
   setTheme: (t) => {
     localStorage.setItem('es:theme', t);
     if (typeof document !== 'undefined') document.documentElement.dataset.theme = t;
-    set({ theme: t });
+    set({theme: t});
   },
   toggleTheme: () => {
     const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
     localStorage.setItem('es:theme', next);
     if (typeof document !== 'undefined') document.documentElement.dataset.theme = next;
-    set({ theme: next });
+    set({theme: next});
   },
 
   addToast: (t) => {
     const id = String(++toastSeq);
-    set((state) => ({ toasts: [...state.toasts, { ...t, id }] }));
-    setTimeout(() => set((state) => ({ toasts: state.toasts.filter((x) => x.id !== id) })), 5000);
+    set((state) => ({toasts: [...state.toasts, {...t, id}]}));
+    setTimeout(() => set((state) => ({toasts: state.toasts.filter((x) => x.id !== id)})), 5000);
   },
 
-  removeToast: (id) =>
-    set((state) => ({ toasts: state.toasts.filter((t) => t.id !== id) })),
+  removeToast: (id) => set((state) => ({toasts: state.toasts.filter((t) => t.id !== id)})),
 }));

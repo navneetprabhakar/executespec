@@ -1,14 +1,14 @@
-import { useEffect, useRef } from 'react';
-import { useSseStore } from '@/stores/useSseStore';
-import { useRunStore } from '@/stores/useRunStore';
-import { getMessages, getSseToken } from '@/lib/api';
-import { refreshUsageBadge } from '@/components/billing/UsageBadge';
+import {useEffect, useRef} from 'react';
+import {useSseStore} from '@/stores/useSseStore';
+import {useRunStore} from '@/stores/useRunStore';
+import {getMessages, getSseToken} from '@/lib/api';
+import {refreshUsageBadge} from '@/components/billing/UsageBadge';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
 export function useSse(runId: string | null) {
-  const { setStatus, addEntry, clearEntries, setRunId } = useSseStore();
-  const { patchRunStatus, fetchRun } = useRunStore();
+  const {setStatus, addEntry, clearEntries, setRunId} = useSseStore();
+  const {patchRunStatus, fetchRun} = useRunStore();
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -35,16 +35,23 @@ export function useSse(runId: string | null) {
     // Pre-populate with historical messages so revisiting a completed run shows its log.
     // Only do this for NEW run IDs so we don't double-prepend history on remount.
     if (isNewRun) {
-      getMessages(runId).then((msgs) => {
-        msgs.forEach((msg, i) => {
-          addEntry({
-            id: `hist-${i}-${msg.sentAt}`,
-            type: 'LOG',
-            data: { message: `[${msg.fromAgent}] ${msg.contentSummary}`, payload: `[${msg.fromAgent}] ${msg.contentSummary}` },
-            timestamp: new Date(msg.sentAt).getTime(),
+      getMessages(runId)
+        .then((msgs) => {
+          msgs.forEach((msg, i) => {
+            addEntry({
+              id: `hist-${i}-${msg.sentAt}`,
+              type: 'LOG',
+              data: {
+                message: `[${msg.fromAgent}] ${msg.contentSummary}`,
+                payload: `[${msg.fromAgent}] ${msg.contentSummary}`,
+              },
+              timestamp: new Date(msg.sentAt).getTime(),
+            });
           });
+        })
+        .catch(() => {
+          /* non-fatal */
         });
-      }).catch(() => { /* non-fatal */ });
     }
 
     async function connect() {
@@ -54,7 +61,7 @@ export function useSse(runId: string | null) {
       // Fetch a short-lived scoped SSE token (avoids exposing full JWT in URL)
       let sseUrl = `/api/runs/${runId}/events`;
       try {
-        const { token: sseToken } = await getSseToken(runId!);
+        const {token: sseToken} = await getSseToken(runId!);
         sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(sseToken)}`;
       } catch {
         console.warn('Failed to obtain scoped SSE token, connecting without auth');
@@ -78,7 +85,7 @@ export function useSse(runId: string | null) {
           if (data.type === 'RUN_DETAIL' && data.payload) {
             try {
               const detail = JSON.parse(data.payload);
-              useRunStore.setState({ activeRun: detail });
+              useRunStore.setState({activeRun: detail});
             } catch {
               // Malformed payload — fall back to refetch
               fetchRun(runId!);
@@ -99,7 +106,17 @@ export function useSse(runId: string | null) {
             patchRunStatus(runId!, data.payload);
             // RUN_DETAIL push handles the full refetch — only fetch here as fallback
             // for terminal states where the SSE stream may close before RUN_DETAIL arrives.
-            if (['COMPLETE', 'FAILED', 'CANCELLED', 'COMPILING', 'WORKING', 'QUEUED_BATCH', 'IN_PROGRESS_BATCH'].includes(data.payload)) {
+            if (
+              [
+                'COMPLETE',
+                'FAILED',
+                'CANCELLED',
+                'COMPILING',
+                'WORKING',
+                'QUEUED_BATCH',
+                'IN_PROGRESS_BATCH',
+              ].includes(data.payload)
+            ) {
               fetchRun(runId!);
             }
             // Credits charged when run transitions to WORKING — refresh sidebar usage
@@ -116,7 +133,11 @@ export function useSse(runId: string | null) {
             fetchRun(runId!);
           }
           // Batch progress/completion triggers refetch
-          if (data.type === 'BATCH_PROGRESS' || data.type === 'BATCH_COMPLETE' || data.type === 'BATCH_FAILED') {
+          if (
+            data.type === 'BATCH_PROGRESS' ||
+            data.type === 'BATCH_COMPLETE' ||
+            data.type === 'BATCH_FAILED'
+          ) {
             fetchRun(runId!);
           }
         } catch {}

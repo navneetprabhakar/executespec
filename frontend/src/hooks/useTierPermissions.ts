@@ -1,4 +1,4 @@
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
  * Tier-based permission flags computed by the backend.

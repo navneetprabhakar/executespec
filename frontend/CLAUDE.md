@@ -3,6 +3,7 @@
 > Last updated: 2026-04-26 (v2.6.4 — UX overhaul v4 IA cleanup on `feature/ux-overhaul-v4-pulse-tab` — 6 top tabs → 4 (Pulse / Runs / Code / Chat) + More drawer + Pulse hero card + RunStamp share component + EmptyProjectLanding sample gallery; v2.6.1 chat UX bundle on dev; v2.5.12: design-system primitives + GeneratedDocsPanel)
 >
 > **v2.6.4 — UX overhaul v4 (`feature/ux-overhaul-v4-pulse-tab`, NOT yet merged):** 6→4 top-tab IA cleanup per docs/plans/ux-overhaul-v4.md (was `/tmp/eval-reports/wireframe-report.md`). Project dashboard's first paint dropped from 25 affordances to ~10. Five new components, one large refactor.
+>
 > - **Top tabs collapsed**: Overview · Work · Knowledge · Activity · Settings · Chat → **Pulse · Runs · Code · Chat** + **More ▾** drawer. Long-tail surfaces (Settings · Generated Docs · Memory · Activity full feed · Documents · Team) live in the drawer. Backward-compat: `?tab=overview/launches/prs/tasks/architecture/repos/docs/memory/activity/team` all map to the right new home (see `legacyTabToNew` in `ProjectDashboardPage.tsx`).
 > - **`PulseTab.tsx`** (NEW, ~280 LOC): replaces the legacy 7-section Overview pane with a focused 4-card layout — (1) Last Run hero card (status + signal chips + View report + Open run), (2) Score ring (verified > est, with `est. N` strikethrough when they disagree), (3) Health & debt rollup (repos / stale codemaps / open PRs / last-analysed time), (4) Activity preview (last 5 events). Plus a compact "Recent pull requests" list when present. Empty state defers to `EmptyProjectLanding` only when **both** runs and repos are zero.
 > - **`CodeTab.tsx`** (NEW, ~80 LOC): consolidates Architecture · Repos · Health · Tech debt · Standards · Contracts into one tab with a chip-style sub-tab strip. Was previously stitched across Knowledge → Architecture, Settings → Repos, and 4 standalone Overview panels. No new components — re-uses every panel verbatim.
@@ -13,6 +14,7 @@
 > - **Reused unchanged**: every existing panel (`ArchitectureViewer`, `ProjectRepoManager`, `TechDebtPanel`, `StandardsCompliancePanel`, `ContractCoveragePanel`, `WorkspaceHealthPanel`, `GeneratedDocsPanel`, `ProjectMemoryPanel`, `ActivityTab`, `ProjectDocumentsPanel`, `ProjectChatPanel`, `ProjectLaunchesList`, `ProjectPrRollup`, `InlineRunDetail`). UX-preservation contract held: no new tokens, no new fonts, no new primitives — just rearranged.
 >
 > **v2.6.1 (project-chat UX bundle, commit `ddf9c498` on dev):**
+>
 > - **Live cost polling on RunDetail Overview tab** (`RunDetailTabs.tsx`): the `liveCost`/`liveTokens` `useEffect` now polls `/runs/{id}/cost` every 5s while the run is non-terminal. Was firing once on mount + only re-firing on `run.status` change, so the cost chip stayed frozen at mount-time snapshot through the entire WORKING phase. The polling interval is cleared on unmount or status flip to terminal.
 > - **Project Chat panel rebuild** (`ProjectChatPanel.tsx`):
 >   - Layout fix: hardcoded `h-[600px]` → `h-full min-h-0`. `ProjectDashboardPage` main pane now opts out of padding/overflow on the chat tab so the panel fills the pane without double-scroll.
@@ -25,6 +27,7 @@
 > - New API helpers in `lib/api.ts`: `clearProjectChat(projectId)`, `compactProjectChat(projectId)`.
 >
 > **v2.5.12 (design primitives + Generate Docs UI + per-repo arch hooks):** new shared primitives in `src/components/shared/`:
+>
 > - `Button.tsx` — `class-variance-authority` (cva) variants (primary/secondary/tertiary/ghost/danger/success) × sizes (sm/md/lg/icon) + loading state with spinner.
 > - `Checkbox.tsx` + `Radio.tsx` — native input wrapper that hides OS defaults and renders consistent dark-theme controls with optional label + description.
 > - `ResponsiveModal.tsx` hardened: focus-trap (Tab/Shift+Tab cycling), Escape to close, body scroll lock, `disableDismiss` + `hideCloseButton` props, role=dialog + aria-modal + aria-label.
@@ -40,7 +43,7 @@
 >
 > **v2.5.11 (Validation v3 / Pillar 1, PR #21 — backend only):** no frontend changes yet. Pillar 5 (upcoming) will add `src/components/runs/RequirementCoverageTable.tsx` inside the expanded `ValidationReportPanel` rendering each `RequirementEvidence` row (req id | status | impl cite | test cite | note) and extend `SignalBreakdown` with a `Coverage N/M` segment. Gated behind `validation.v3-strict` flag.
 >
-> v2.5.5 — Batch 7: `ArchitectureViewer` gains a source-file-changes section under the text diff (per-repo Added/Modified/Removed/Renamed with ±LoC, `getArchitectureDiff`). — Batch 6: `FailureDecisionModal` rewrite (button grid + blocked-downstream list); new `ResetWorkspaceSheet` with SHA preview; `PostMergeBar` stacks up to 2 full rows + "+N more merged" chip (backend list changed to `PostMergeBar[]`); estimate chip has a skeleton pulsing state + basis tooltip. — Batch 5 UX polish: `ExecutionStepper` with friendly labels + elapsed time; new `RepoChip`/`extractRepoShortName` on `TaskCard`; new `StalenessWarning` in `ExecutionSetup` (non-blocking amber block + Analyse CTA); `TechDebtPanel` upgraded to recharts horizontal `BarChart` with color-coded categories + severity chips. — Batch 4: `TechDebtPanel` on Project Overview (issues-by-category/severity + file hotspots, `getTechDebt`); `TemplatePicker` dropdown above the requirement textarea in `ExecutionSetup` (`listSpecTemplates`/`createProjectSpecTemplate`/`deleteSpecTemplate`); TDD mode checkbox in `NewRunModal` (threads `tddMode: boolean` into `RunRequest`); `CancellationPanel` renders live cleanup steps on the ABORTED execution view (`useExecutionStore.compensations` slice fed by EXEC_COMPENSATION_UPDATE/_DONE SSE events). — Batch 3: `WorkspaceHealthPanel` on Project Overview (origin-SHA drift + webhook + open-PR chips, cached 10 min in Redis via `getWorkspaceHealth`); `PostMergeBar` above the tab strip renders a "✓ PR merged — Start next requirement →" banner polled on mount (`getPostMergeBar`, `dismissPostMergeBar`); `ExecutionSetup` shows a debounced `~M–N tasks · ~$X–$Y` chip below the requirement textarea (`estimateRun`, no LLM call). — Batch 2: "Reset to run state" button on `InlineRunDetail` (`syncRunToOriginal`), webhook status chip + "Install webhook" button on `RepoCard` (`installRepoWebhook`), "Reset workspace" button on `ProjectRepoManager` (re-analyses all linked repos). New `webhookInstalled: boolean` on `ProjectRepo`. — v2.5.1: PR refresh button (`ProjectPrRollup`), Architecture diff + branch input (`ArchitectureViewer`), Run Sync from branch (`InlineRunDetail`), persistent Cancel on Launch header + Resume button on `ExecutionMonitor`, `ExecutionSetup` shows repo githubRepoFullName instead of UUID, new API helpers `refreshProjectPrs` / `analyseProject(branch)` / `syncRun` / `executionApi.resume`)
+> v2.5.5 — Batch 7: `ArchitectureViewer` gains a source-file-changes section under the text diff (per-repo Added/Modified/Removed/Renamed with ±LoC, `getArchitectureDiff`). — Batch 6: `FailureDecisionModal` rewrite (button grid + blocked-downstream list); new `ResetWorkspaceSheet` with SHA preview; `PostMergeBar` stacks up to 2 full rows + "+N more merged" chip (backend list changed to `PostMergeBar[]`); estimate chip has a skeleton pulsing state + basis tooltip. — Batch 5 UX polish: `ExecutionStepper` with friendly labels + elapsed time; new `RepoChip`/`extractRepoShortName` on `TaskCard`; new `StalenessWarning` in `ExecutionSetup` (non-blocking amber block + Analyse CTA); `TechDebtPanel` upgraded to recharts horizontal `BarChart` with color-coded categories + severity chips. — Batch 4: `TechDebtPanel` on Project Overview (issues-by-category/severity + file hotspots, `getTechDebt`); `TemplatePicker` dropdown above the requirement textarea in `ExecutionSetup` (`listSpecTemplates`/`createProjectSpecTemplate`/`deleteSpecTemplate`); TDD mode checkbox in `NewRunModal` (threads `tddMode: boolean` into `RunRequest`); `CancellationPanel` renders live cleanup steps on the ABORTED execution view (`useExecutionStore.compensations` slice fed by EXEC_COMPENSATION_UPDATE/\_DONE SSE events). — Batch 3: `WorkspaceHealthPanel` on Project Overview (origin-SHA drift + webhook + open-PR chips, cached 10 min in Redis via `getWorkspaceHealth`); `PostMergeBar` above the tab strip renders a "✓ PR merged — Start next requirement →" banner polled on mount (`getPostMergeBar`, `dismissPostMergeBar`); `ExecutionSetup` shows a debounced `~M–N tasks · ~$X–$Y` chip below the requirement textarea (`estimateRun`, no LLM call). — Batch 2: "Reset to run state" button on `InlineRunDetail` (`syncRunToOriginal`), webhook status chip + "Install webhook" button on `RepoCard` (`installRepoWebhook`), "Reset workspace" button on `ProjectRepoManager` (re-analyses all linked repos). New `webhookInstalled: boolean` on `ProjectRepo`. — v2.5.1: PR refresh button (`ProjectPrRollup`), Architecture diff + branch input (`ArchitectureViewer`), Run Sync from branch (`InlineRunDetail`), persistent Cancel on Launch header + Resume button on `ExecutionMonitor`, `ExecutionSetup` shows repo githubRepoFullName instead of UUID, new API helpers `refreshProjectPrs` / `analyseProject(branch)` / `syncRun` / `executionApi.resume`)
 >
 > v2.5.0 (Project Workspace + RAG): `ProjectDashboardPage` gains a Docs tab driven by new `ProjectDocumentsPanel` (drag-drop upload, async status, delete); Overview tab gains a Project Summary panel + Analyse button (`getProjectSummary` / `analyseProject`); `ArchitectureViewer` gets a "Diff vs v{N-1}" button + LCS line-diff renderer; `text-[12]` body rows on Project components normalised to `text-[11]` to match Run/Pro view density; new API helpers `listProjectDocuments` / `uploadProjectDocument` / `deleteProjectDocument`)
 
@@ -49,6 +52,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 ## Structure
 
 ### Pages (`src/pages/`)
+
 - **Standalone** (15): DashboardPage, RunsPage, BillingPage, SettingsPage, DeploymentsPage, IntegrationsPage, SharedReportPage, AccountingPage, AuditPage, PricingPage, PlansPage, DpaPage, InvoicesPage, PrivacyPage, TermsPage
 - **`admin/`** (6): AdminPage, AdminInviteModal, FeatureFlagsPage, GrantRunsModal, OrgAdminDashboard, PricingManager
 - **`auth/`** (7): LoginPage, RegisterPage, ForgotPasswordPage, ResetPasswordPage, VerifyEmailPage, AuthCallbackPage, AcceptInvitePage
@@ -56,6 +60,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **`project/`** (1, pilot v3.0; v2.6.4 IA cleanup): ProjectDashboardPage — route `/projects/:projectId/dashboard`. **4 top tabs (Pulse / Runs / Code / Chat) + More drawer** (was 6 tabs + 9 sub-tabs). Reads `useProjectStore`.
 
 ### Components (`src/components/`)
+
 - **`runs/`** — RunDetail, RunDetailTabs (batch badge + per-run PR list), RunCard (batch badge), RunList, RunConversation, NewRunModal (now: project-linked multi-repo select + Figma URL), TaskCard, TaskGraph (subtask grouping), PreviewTab ("Run Tests" button, Beta), LiveLog, ValidationReportPanel (now: ScoreCard at top), TestReportPanel, TestProgressTracker, ProviderModelSelector, FirstRunSuggestions, VibeProgressNarrative, VibeRunSummary, **AssessmentPanel** (pilot R4 — appears above the plan-approval gate when `RunDetail.assessmentResult` is set), **ScoreCard** (pilot R6 — 6 colored progress bars + overall accuracy), **VerdictPill** (Plan 1 #3 on `feature/product-split-prep` — Shippable/Needs review/Blocked derived from build+tests+reviewer+verifiedScore+statusReason; leads ValidationReportPanel/ScoreCard/SignalBreakdown header; numeric scores demoted to disclosure). **SignalBreakdown** (Plan 1 #3) — Verified+Est numeric segments dropped (collapsed into VerdictPill); kept on prop API for back-compat.
 - **`project/`** (pilot v3.0 + v2.2.0 + v2.5.12 + **v2.6.4 IA cleanup**) — ProjectRepoManager, RepoCard (scope chip), AddRepoModal (Pick existing / Create new — migrated to ResponsiveModal v2.5.12), RepoRelationshipEditor, StackBadge, ArchitectureViewer (markdown + version dropdown + amber stale badge driven by `getArchitectureStaleness`), ProjectTaskList, ProjectPrList, ProjectScoreTrend (recharts LineChart, overall + per-dimension), **ProjectMemoryPanel** (v2.2.0), **GeneratedDocsPanel** (v2.5.12), TechDebtPanel, WorkspaceHealthPanel, PostMergeBar, ResetWorkspaceSheet, **PulseTab** (v2.6.4 — last-run hero + verified-score ring + health rollup + activity preview), **CodeTab** (v2.6.4 — Architecture / Repos / Health / Tech debt / Standards / Contracts inline), **MoreDrawer** (v2.6.4 — slide-over for Settings / Generated Docs / Memory / Activity / Documents / Team), **RunStamp** (v2.6.4 — 1-line shareable summary + share-link + embed HTML, wired into ValidationReportPanel via stampMeta), **EmptyProjectLanding** (v2.6.4 — single-textbox empty state + sample-spec gallery + share-link continue)
 - **`run/`** — FileTree, FileViewer (RunTimeline removed — V2 has no COMPILING/MERGING/AWAITING_MERGE phases)
@@ -68,10 +73,12 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - **`shared/`** — AnimatedCounter, EmptyState, GlassPanel, GlowDot, MarkdownContent, SkeletonLoader, StatusBadge, Toast, ViewModeToggle, ResponsiveModal (v2.5.12 hardened), **Button** (v2.5.12 cva primitive), **Checkbox** (v2.5.12), **Radio** (v2.5.12), **Tooltip** (v2.6.1 + Plan 1 #4 — `wrap` + `maxWidthClass` props for multi-line definitions), **Glossary** (Plan 1 #4 — wraps any term with hover/focus tooltip carrying the definition from `lib/glossary.ts`; falls through cleanly when term unknown)
 
 > **Per-seat TEAM UI restored (on `feature/product-split-prep`, NOT yet merged):** `PlanCard.tsx` regains its per-seat picker for TEAM (2-20 seats); `OrgAdminDashboard.tsx` regains its TEAM seats panel + `handleSeatsAdjust` handler; tier union types in `lib/api.ts` / `useViewMode.ts` / `TierBadge.tsx` re-expand to `'FREE' \| 'PRO' \| 'TEAM' \| 'MAX' \| 'ENTERPRISE'`; `adjustOrgSeats` helper restored in `lib/api.ts`. Plus 11 tier-string flips across `QuotaUsageBar` / `Header` / `Sidebar` / `ViewModeToggle` / `NewRunModal` / `ProviderModelSelector` / `UsageBadge` / `SettingsPage` / `BillingPage` / `OrgSettingsPage` / `ProjectsListPage` reverse V141's `'MAX'` → `'TEAM'` rename. Surface mapping (TEAM → Build, MAX → Vibe) policed by backend `TierProductSurfaceMapper`; frontend reads it via the `/api/billing/plans` payload (no client-side enforcement yet).
+
 - **`ui/`** — LockedFeature, UpgradeModal
 - **`auth/`** — Auth-related UI components
 
 ### Hooks (`src/hooks/`)
+
 - `useSse.ts` — SSE event stream hook (generic handler, auto-parses all event types). Fetches scoped SSE token per-runId before connecting (falls back to full JWT).
 - `useViewMode.ts` — Toggle between standard and Vibe view modes
 - `useKeyboardShortcuts.ts` — Global keyboard shortcut registration
@@ -81,6 +88,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - `useTierPermissions.ts` — Tier-based feature gating
 
 ### Lib (`src/lib/`)
+
 - `api.ts` — API client (axios-based, JWT auth). Includes `getSseToken(runId)` for scoped SSE tokens.
 - `billing-api.ts` — Billing/subscription API client
 - `invoice-api.ts` — Invoice API client
@@ -94,6 +102,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - `glossary.ts` — Plain-English definitions for ExecuteSpec jargon (Plan 1 #4 on `feature/product-split-prep`). Seed: codemap, wiring pass, verified score, status reason, classifier. Consumed by `<Glossary term="...">`. Add new entries as they surface in user testing.
 
 ### Stores (`src/stores/` — Zustand)
+
 - `useAuthStore.ts` — Auth state, JWT token management
 - `useRunStore.ts` — Run list and active run state. `createRun` now accepts `selectedRepoIds` + `figmaUrl`.
 - `useSseStore.ts` — SSE connection state and event buffering
@@ -102,22 +111,25 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 - `useProjectStore.ts` — pilot v3.0: per-project dashboard, repos, architecture doc, score trend. Exposed actions: `fetchDashboard`, `fetchRepos`, `fetchAvailableRepos`, `fetchArchitectureDoc`, `fetchScoreTrend`, `reset`.
 
 ### Types (`src/types/`)
+
 - `project.ts` — pilot v3.0: `ProjectRepo`, `ProjectRepoLink`, `RepoScope`, `StackInfo`, `ProjectDashboardDTO`, `ScoreEntry`, `PrSummary`, `TaskSummary`, `ArchitectureDoc`, `AssessmentResult`, `LinkRepoRequest`.
 
 ## Key Components
+
 - **RunDetail.tsx** — Main run view with Vibe View toggle. Shows gate banners (with credit count for multi-credit runs), task list, review, report, cost estimate. Plan approval sends `creditsConfirmed` to prevent stale approvals (409 on mismatch). Completed-run review banner surfaces the validation-report `accuracyScore` (colored by threshold: ≥90 green, ≥75 amber, else red); V1 `recommendation`/`recommendationCompat` fields no longer rendered. Batch UI (`batchAvailable`, dual-option cards, IN_PROGRESS_BATCH/QUEUED_BATCH progress) is still wired on the client but V2 backend does not produce batch runs yet — re-activates once the V2 batch plan ships.
 - **NotificationBell.tsx** — Header notification bell with unread count badge. Polls every 30s.
 - **NotificationPanel.tsx** — Dropdown notification list. Marks read, navigates to run on click.
 - **RunDetailTabs.tsx** — Tabbed detail view. Overview tab shows GitHub PR link (`githubPrUrl`), per-copilot-run token breakdown, batch/realtime badge. Graph tab uses `TaskGraphGroups` to split copilot/review nodes into separate collapsible sections.
 - **ProviderModelSelector.tsx** — AI provider selection (Anthropic/Gemini/OpenAI) for run submission.
 - **CommandPalette.tsx** — Global command palette (keyboard shortcut activated).
-- **Vibe* components** — VibeRunSummary, VibeProgressNarrative: simplified UX for non-technical users.
+- **Vibe\* components** — VibeRunSummary, VibeProgressNarrative: simplified UX for non-technical users.
 - **FileTree.tsx / FileViewer.tsx** — Workspace file browsing and viewing with Monaco editor. `.md` files show a Preview/Source toggle: Preview renders via `MarkdownContent`, Source shows Monaco.
 - **TestProgressTracker.tsx** — Real-time test execution progress display.
 - **DeployWizardModal.tsx** — Multi-step deploy configuration wizard.
 - **FeasibilityEstimator.tsx** — Pre-run feasibility and complexity estimation.
 
 ## Patterns
+
 - SSE events flow through generic `onmessage` handler — no per-type wiring needed
 - Event type checks use SCREAMING_SNAKE_CASE (matches backend)
 - Review display on COMPLETE runs uses `ValidationReport.accuracyScore` (fetched via `getValidationReport` + refreshed on `VALIDATION_REPORT_READY` SSE event). V1 `recommendation`/`overallConfidence` path retired.
@@ -143,6 +155,7 @@ React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3
 ## V2 migration notes (backend deleted V1 on 2026-04-13)
 
 The following client endpoints now return **HTTP 410 Gone** on V2 runs. UI call sites still exist and need a follow-up sweep to hide/remove them (tracked in `docs/plans/harness-v2-remaining-work.md` Gap 3):
+
 - `POST /runs/{id}/clarify` · `/chat` · `/apply` · `/iterate` (V2 chat/iterate flow not specced)
 - `POST /runs/{id}/merge` · `/reopen-merge` (permanent — V2 auto-merges per task)
 - `POST /runs/{id}/retry` · `/pause` · `/resume` (blocked on V2 full-replay recovery)
@@ -152,6 +165,7 @@ The following client endpoints now return **HTTP 410 Gone** on V2 runs. UI call 
 `POST /runs/{id}/tasks/{taskId}/retry` and `POST /runs/{id}/retry-validation` are **live** under V2.
 
 ## Build
+
 ```bash
 npm --prefix frontend run build
 npm --prefix frontend run dev  # dev server on :5173

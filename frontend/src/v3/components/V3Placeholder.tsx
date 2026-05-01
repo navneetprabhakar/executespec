@@ -1,5 +1,5 @@
-import { Link } from 'react-router-dom';
-import { ArrowRight, Construction } from 'lucide-react';
+import {Link} from 'react-router-dom';
+import {ArrowRight, Construction} from 'lucide-react';
 
 /**
  * R-201 — Wave-4 placeholder for routes whose v2 surface still works but
@@ -62,12 +62,9 @@ export default function V3Placeholder({
           justifyContent: 'center',
         }}
       >
-        <Construction
-          className="h-7 w-7"
-          style={{ color: 'var(--v3-brand, #5B8DEF)' }}
-        />
+        <Construction className='h-7 w-7' style={{color: 'var(--v3-brand, #5B8DEF)'}} />
       </div>
-      <div style={{ textAlign: 'center', maxWidth: 480 }}>
+      <div style={{textAlign: 'center', maxWidth: 480}}>
         <h1
           style={{
             fontSize: 22,
@@ -90,7 +87,14 @@ export default function V3Placeholder({
           The v2 page still works — we haven't ported this surface yet.
           {futureV3Route ? (
             <>
-              {' '}It will move to <code style={{ fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12 }}>{futureV3Route}</code> in a future wave.
+              {' '}
+              It will move to{' '}
+              <code
+                style={{fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12}}
+              >
+                {futureV3Route}
+              </code>{' '}
+              in a future wave.
             </>
           ) : null}
         </p>
@@ -114,7 +118,7 @@ export default function V3Placeholder({
           {/* Task 13 (2026-05-01 fix list) — drop user-facing "v2" label;
               the route prefix is an implementation detail. */}
           {v2RouteLabel ? `Open ${v2RouteLabel} →` : 'Open the full page →'}
-          <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+          <ArrowRight className='h-3.5 w-3.5' aria-hidden='true' />
         </Link>
       )}
     </div>

@@ -51,7 +51,9 @@ export function initAnalytics(): void {
     disable_session_recording: true,
     autocapture: false,
     persistence: 'localStorage',
-    loaded: () => { /* client already assigned below */ },
+    loaded: () => {
+      /* client already assigned below */
+    },
   });
   client = posthog;
 }
@@ -71,7 +73,7 @@ export function reset(): void {
 /** Record a pageview. Called by the app's route-change hook. */
 export function page(path?: string): void {
   if (!client) return;
-  client.capture('$pageview', { $current_url: path || window.location.pathname });
+  client.capture('$pageview', {$current_url: path || window.location.pathname});
 }
 
 /**
@@ -109,4 +111,3 @@ export function readSignupAttribution(): {
     return {};
   }
 }
-

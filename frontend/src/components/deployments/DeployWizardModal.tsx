@@ -1,17 +1,37 @@
-import { useState, useEffect, useRef } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import {useState, useEffect, useRef} from 'react';
+import {motion, AnimatePresence} from 'framer-motion';
 import {
-  X, Rocket, Search, ArrowRight, ArrowLeft, CheckCircle2, XCircle,
-  AlertTriangle, Loader2, Cloud, Server, Database, Globe, Shield,
-  Upload, Eye, ChevronDown, ChevronUp, Plus, Trash2,
+  X,
+  Rocket,
+  Search,
+  ArrowRight,
+  ArrowLeft,
+  CheckCircle2,
+  XCircle,
+  AlertTriangle,
+  Loader2,
+  Cloud,
+  Server,
+  Database,
+  Globe,
+  Shield,
+  Upload,
+  Eye,
+  ChevronDown,
+  ChevronUp,
+  Plus,
+  Trash2,
 } from 'lucide-react';
-import { cn } from '@/lib/utils';
-import { useUiStore } from '@/stores/useUiStore';
-import { useIsMobile } from '@/hooks/useIsMobile';
+import {cn} from '@/lib/utils';
+import {useUiStore} from '@/stores/useUiStore';
+import {useIsMobile} from '@/hooks/useIsMobile';
 import * as api from '@/lib/api';
 import type {
-  RunSummary, DeployAnalysisResult, RequiredPermission,
-  CredentialSummary, ValidationResult,
+  RunSummary,
+  DeployAnalysisResult,
+  RequiredPermission,
+  CredentialSummary,
+  ValidationResult,
 } from '@/lib/api';
 
 interface Props {
@@ -24,12 +44,18 @@ interface Props {
 type WizardStep = 'select-run' | 'credentials' | 'analyze' | 'configure' | 'deploying';
 
 const GCP_REGIONS = [
-  'us-central1', 'us-east1', 'us-west1', 'europe-west1',
-  'europe-west2', 'asia-south1', 'asia-east1', 'asia-northeast1',
+  'us-central1',
+  'us-east1',
+  'us-west1',
+  'europe-west1',
+  'europe-west2',
+  'asia-south1',
+  'asia-east1',
+  'asia-northeast1',
 ];
 
-export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId }: Props) {
-  const { addToast } = useUiStore();
+export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}: Props) {
+  const {addToast} = useUiStore();
   const isMobile = useIsMobile();
 
   // Wizard state
@@ -58,7 +84,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
   // Step 4: Configure
   const [selectedPath, setSelectedPath] = useState('');
   const [region, setRegion] = useState('us-central1');
-  const [envVars, setEnvVars] = useState<Array<{ key: string; value: string }>>([]);
+  const [envVars, setEnvVars] = useState<Array<{key: string; value: string}>>([]);
 
   // Step 5: Deploying
   const [deploying, setDeploying] = useState(false);
@@ -72,15 +98,17 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
   useEffect(() => {
     if (step !== 'select-run') return;
     setRunsLoading(true);
-    api.getRuns({ status: 'COMPLETE', size: 100 })
+    api
+      .getRuns({status: 'COMPLETE', size: 100})
       .then((res) => setRuns(res.content))
       .catch(() => setRuns([]))
       .finally(() => setRunsLoading(false));
   }, [step]);
 
-  const filteredRuns = runs.filter((r) =>
-    (r.userRequest ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
-    r.runId.toLowerCase().includes(searchQuery.toLowerCase())
+  const filteredRuns = runs.filter(
+    (r) =>
+      (r.userRequest ?? '').toLowerCase().includes(searchQuery.toLowerCase()) ||
+      r.runId.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
   // ── Load credentials (Step 2) ───────────────────────────────────────────────
@@ -91,10 +119,12 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
     Promise.all([
       api.getGcpCredential().catch(() => null),
       api.getRequiredPermissions().catch(() => []),
-    ]).then(([cred, perms]) => {
-      setCredential(cred);
-      setRequiredPerms(perms);
-    }).finally(() => setCredLoading(false));
+    ])
+      .then(([cred, perms]) => {
+        setCredential(cred);
+        setRequiredPerms(perms);
+      })
+      .finally(() => setCredLoading(false));
   }, [step]);
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -106,9 +136,9 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
       const cred = await api.storeGcpCredential(text);
       setCredential(cred);
       setValidationResult(null);
-      addToast({ type: 'success', message: 'Credentials uploaded successfully' });
+      addToast({type: 'success', message: 'Credentials uploaded successfully'});
     } catch (err: any) {
-      addToast({ type: 'error', message: err.message });
+      addToast({type: 'error', message: err.message});
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -121,10 +151,10 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
       const result = await api.validateGcpCredential();
       setValidationResult(result);
       if (result.valid) {
-        addToast({ type: 'success', message: 'All required permissions verified' });
+        addToast({type: 'success', message: 'All required permissions verified'});
       }
     } catch (err: any) {
-      addToast({ type: 'error', message: err.message });
+      addToast({type: 'error', message: err.message});
     } finally {
       setValidating(false);
     }
@@ -141,10 +171,10 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
       setSelectedPath(result.decision.recommendedPath);
       // Pre-populate env vars from detected ones
       if (result.manifest.envVars?.length) {
-        setEnvVars(result.manifest.envVars.map((key) => ({ key, value: '' })));
+        setEnvVars(result.manifest.envVars.map((key) => ({key, value: ''})));
       }
     } catch (err: any) {
-      addToast({ type: 'error', message: `Analysis failed: ${err.message}` });
+      addToast({type: 'error', message: `Analysis failed: ${err.message}`});
       setStep('credentials');
     } finally {
       setAnalyzing(false);
@@ -161,7 +191,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
     try {
       const envMap: Record<string, string> = {};
-      envVars.forEach(({ key, value }) => {
+      envVars.forEach(({key, value}) => {
         if (key.trim()) envMap[key.trim()] = value;
       });
 
@@ -205,7 +235,6 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
           // Ignore polling errors
         }
       }, 5000);
-
     } catch (err: any) {
       setDeployError(err.message);
       setDeployStatus('Deployment failed');
@@ -215,37 +244,37 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
   // Cleanup polling on unmount
   useEffect(() => {
-    return () => { if (pollRef.current) clearInterval(pollRef.current); };
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
   }, []);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4"
-      style={{ backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)' }}
+      className='fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4'
+      style={{backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)'}}
       onClick={onClose}
     >
       <motion.div
-        initial={{ opacity: 0, scale: 0.96 }}
-        animate={{ opacity: 1, scale: 1 }}
+        initial={{opacity: 0, scale: 0.96}}
+        animate={{opacity: 1, scale: 1}}
         onClick={(e) => e.stopPropagation()}
         className={cn(
           'bg-[var(--gray-200)] border border-[var(--border-default)] flex flex-col overflow-hidden',
-          isMobile
-            ? 'fixed inset-0 rounded-none'
-            : 'w-full max-w-2xl max-h-[85vh] rounded-sm'
+          isMobile ? 'fixed inset-0 rounded-none' : 'w-full max-w-2xl max-h-[85vh] rounded-sm',
         )}
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-4 sm:px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0">
-          <div className="flex items-center gap-3">
-            <div className="h-8 w-8 rounded-sm bg-accent-blue/20 flex items-center justify-center">
-              <Rocket className="h-4 w-4 text-accent-blue" />
+        <div className='flex items-center justify-between px-4 sm:px-6 py-4 border-b border-[var(--border-default)] flex-shrink-0'>
+          <div className='flex items-center gap-3'>
+            <div className='h-8 w-8 rounded-sm bg-accent-blue/20 flex items-center justify-center'>
+              <Rocket className='h-4 w-4 text-accent-blue' />
             </div>
             <div>
-              <h2 className="text-base font-semibold text-primary">Deploy to GCP</h2>
-              <p className="text-xs text-muted">
+              <h2 className='text-base font-semibold text-primary'>Deploy to GCP</h2>
+              <p className='text-xs text-muted'>
                 {step === 'select-run' && 'Select a completed run to deploy'}
                 {step === 'credentials' && 'Configure GCP credentials'}
                 {step === 'analyze' && 'Analyzing workspace...'}
@@ -254,60 +283,80 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
               </p>
             </div>
           </div>
-          <button onClick={onClose} className="text-muted hover:text-secondary transition-colors">
-            <X className="h-5 w-5" />
+          <button onClick={onClose} className='text-muted hover:text-secondary transition-colors'>
+            <X className='h-5 w-5' />
           </button>
         </div>
 
         {/* Step indicator */}
-        <div className="flex items-center gap-1 px-4 sm:px-6 py-3 border-b border-[var(--border-default)] flex-shrink-0 overflow-x-auto">
-          {(['select-run', 'credentials', 'analyze', 'configure', 'deploying'] as WizardStep[]).map((s, i) => {
-            const labels = ['Run', 'GCP Auth', 'Analyze', 'Configure', 'Deploy'];
-            const isCurrent = s === step;
-            const isPast = ['select-run', 'credentials', 'analyze', 'configure', 'deploying'].indexOf(step) > i;
-            return (
-              <div key={s} className="flex items-center gap-1">
-                {i > 0 && <div className={cn('w-6 h-px', isPast ? 'bg-accent-blue' : 'bg-[var(--border-default)]')} />}
-                <div className={cn(
-                  'text-[10px] px-2 py-0.5 rounded-sm font-medium transition-colors',
-                  isCurrent ? 'bg-accent-blue/20 text-accent-blue' :
-                  isPast ? 'bg-accent-green/10 text-accent-green' :
-                  'bg-[var(--gray-200)] text-muted'
-                )}>
-                  {labels[i]}
+        <div className='flex items-center gap-1 px-4 sm:px-6 py-3 border-b border-[var(--border-default)] flex-shrink-0 overflow-x-auto'>
+          {(['select-run', 'credentials', 'analyze', 'configure', 'deploying'] as WizardStep[]).map(
+            (s, i) => {
+              const labels = ['Run', 'GCP Auth', 'Analyze', 'Configure', 'Deploy'];
+              const isCurrent = s === step;
+              const isPast =
+                ['select-run', 'credentials', 'analyze', 'configure', 'deploying'].indexOf(step) >
+                i;
+              return (
+                <div key={s} className='flex items-center gap-1'>
+                  {i > 0 && (
+                    <div
+                      className={cn(
+                        'w-6 h-px',
+                        isPast ? 'bg-accent-blue' : 'bg-[var(--border-default)]',
+                      )}
+                    />
+                  )}
+                  <div
+                    className={cn(
+                      'text-[10px] px-2 py-0.5 rounded-sm font-medium transition-colors',
+                      isCurrent
+                        ? 'bg-accent-blue/20 text-accent-blue'
+                        : isPast
+                          ? 'bg-accent-green/10 text-accent-green'
+                          : 'bg-[var(--gray-200)] text-muted',
+                    )}
+                  >
+                    {labels[i]}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            },
+          )}
         </div>
 
         {/* Content */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
-          <AnimatePresence mode="wait">
+        <div className='flex-1 overflow-y-auto p-4 sm:p-6'>
+          <AnimatePresence mode='wait'>
             {/* ── Step 1: Select Run ── */}
             {step === 'select-run' && (
-              <motion.div key="select-run" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="space-y-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted" />
+              <motion.div
+                key='select-run'
+                initial={{opacity: 0, x: 20}}
+                animate={{opacity: 1, x: 0}}
+                exit={{opacity: 0, x: -20}}
+                className='space-y-4'
+              >
+                <div className='relative'>
+                  <Search className='absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted' />
                   <input
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    placeholder="Search completed runs..."
-                    className="w-full pl-9 pr-3 py-2 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm text-sm text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue/40"
+                    placeholder='Search completed runs...'
+                    className='w-full pl-9 pr-3 py-2 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm text-sm text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue/40'
                   />
                 </div>
 
                 {runsLoading ? (
-                  <div className="flex items-center justify-center py-12">
-                    <Loader2 className="h-5 w-5 text-muted animate-spin" />
+                  <div className='flex items-center justify-center py-12'>
+                    <Loader2 className='h-5 w-5 text-muted animate-spin' />
                   </div>
                 ) : filteredRuns.length === 0 ? (
-                  <div className="text-center py-12 text-muted text-sm">
+                  <div className='text-center py-12 text-muted text-sm'>
                     No completed runs found
                   </div>
                 ) : (
-                  <div className="space-y-1.5 max-h-[50vh] overflow-y-auto">
+                  <div className='space-y-1.5 max-h-[50vh] overflow-y-auto'>
                     {filteredRuns.slice(0, 20).map((run) => (
                       <button
                         key={run.runId}
@@ -316,14 +365,16 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                           'w-full text-left p-3 rounded-sm border transition-all',
                           selectedRunId === run.runId
                             ? 'border-accent-blue/40 bg-accent-blue/5'
-                            : 'border-[var(--border-default)] bg-[var(--gray-100)] hover:border-[var(--border-default)]'
+                            : 'border-[var(--border-default)] bg-[var(--gray-100)] hover:border-[var(--border-default)]',
                         )}
                       >
-                        <p className="text-sm text-primary line-clamp-2">{run.userRequest ?? ''}</p>
-                        <div className="flex items-center gap-3 mt-1.5">
-                          <span className="text-[10px] font-mono text-muted">{run.runId.slice(0, 12)}</span>
+                        <p className='text-sm text-primary line-clamp-2'>{run.userRequest ?? ''}</p>
+                        <div className='flex items-center gap-3 mt-1.5'>
+                          <span className='text-[10px] font-mono text-muted'>
+                            {run.runId.slice(0, 12)}
+                          </span>
                           {run.completedAt && (
-                            <span className="text-[10px] text-muted">
+                            <span className='text-[10px] text-muted'>
                               {new Date(run.completedAt).toLocaleDateString()}
                             </span>
                           )}
@@ -337,40 +388,52 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
             {/* ── Step 2: Credentials ── */}
             {step === 'credentials' && (
-              <motion.div key="credentials" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="space-y-4">
-
+              <motion.div
+                key='credentials'
+                initial={{opacity: 0, x: 20}}
+                animate={{opacity: 1, x: 0}}
+                exit={{opacity: 0, x: -20}}
+                className='space-y-4'
+              >
                 {/* Required Permissions (show before upload) */}
-                <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden">
+                <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] overflow-hidden'>
                   <button
                     onClick={() => setShowPerms(!showPerms)}
-                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--gray-100)] transition-colors"
+                    className='w-full flex items-center justify-between px-4 py-3 hover:bg-[var(--gray-100)] transition-colors'
                   >
-                    <div className="flex items-center gap-2">
-                      <Shield className="h-4 w-4 text-accent-amber" />
-                      <span className="text-sm font-medium text-secondary">Required GCP Permissions</span>
+                    <div className='flex items-center gap-2'>
+                      <Shield className='h-4 w-4 text-accent-amber' />
+                      <span className='text-sm font-medium text-secondary'>
+                        Required GCP Permissions
+                      </span>
                     </div>
-                    {showPerms ? <ChevronUp className="h-4 w-4 text-muted" /> : <ChevronDown className="h-4 w-4 text-muted" />}
+                    {showPerms ? (
+                      <ChevronUp className='h-4 w-4 text-muted' />
+                    ) : (
+                      <ChevronDown className='h-4 w-4 text-muted' />
+                    )}
                   </button>
                   {showPerms && (
-                    <div className="px-4 pb-3 space-y-2 border-t border-[var(--border-default)]">
-                      <p className="text-xs text-muted pt-2 pb-1">
+                    <div className='px-4 pb-3 space-y-2 border-t border-[var(--border-default)]'>
+                      <p className='text-xs text-muted pt-2 pb-1'>
                         Your GCP service account needs these roles to deploy:
                       </p>
                       {requiredPerms.map((perm) => (
-                        <div key={perm.role} className="flex items-start gap-2 py-1.5">
-                          <div className={cn(
-                            'mt-0.5 h-4 w-4 rounded-full flex items-center justify-center flex-shrink-0',
-                            perm.required ? 'bg-accent-blue/20' : 'bg-[var(--gray-400)]/50'
-                          )}>
-                            <span className="text-[8px] font-bold text-accent-blue">
+                        <div key={perm.role} className='flex items-start gap-2 py-1.5'>
+                          <div
+                            className={cn(
+                              'mt-0.5 h-4 w-4 rounded-full flex items-center justify-center flex-shrink-0',
+                              perm.required ? 'bg-accent-blue/20' : 'bg-[var(--gray-400)]/50',
+                            )}
+                          >
+                            <span className='text-[8px] font-bold text-accent-blue'>
                               {perm.required ? 'R' : 'O'}
                             </span>
                           </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-xs font-medium text-secondary">{perm.label}</p>
-                            <p className="text-[10px] text-muted mt-0.5">{perm.reason}</p>
-                            <p className="text-[10px] font-mono text-muted">{perm.role}</p>
+                          <div className='flex-1 min-w-0'>
+                            <p className='text-xs font-medium text-secondary'>{perm.label}</p>
+                            <p className='text-[10px] text-muted mt-0.5'>{perm.reason}</p>
+                            <p className='text-[10px] font-mono text-muted'>{perm.role}</p>
                           </div>
                         </div>
                       ))}
@@ -380,49 +443,61 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
                 {/* Current credential status */}
                 {credLoading ? (
-                  <div className="flex items-center justify-center py-8">
-                    <Loader2 className="h-5 w-5 text-muted animate-spin" />
+                  <div className='flex items-center justify-center py-8'>
+                    <Loader2 className='h-5 w-5 text-muted animate-spin' />
                   </div>
                 ) : credential ? (
-                  <div className="rounded-sm border border-accent-green/20 bg-accent-green/5 p-4 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <CheckCircle2 className="h-4 w-4 text-accent-green" />
-                      <span className="text-sm font-medium text-accent-green">Credentials configured</span>
+                  <div className='rounded-sm border border-accent-green/20 bg-accent-green/5 p-4 space-y-2'>
+                    <div className='flex items-center gap-2'>
+                      <CheckCircle2 className='h-4 w-4 text-accent-green' />
+                      <span className='text-sm font-medium text-accent-green'>
+                        Credentials configured
+                      </span>
                     </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+                    <div className='grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs'>
                       <div>
-                        <span className="text-muted">GCP Project:</span>
-                        <span className="ml-1 text-secondary font-mono">{credential.gcpProjectId}</span>
+                        <span className='text-muted'>GCP Project:</span>
+                        <span className='ml-1 text-secondary font-mono'>
+                          {credential.gcpProjectId}
+                        </span>
                       </div>
                       <div>
-                        <span className="text-muted">Service Account:</span>
-                        <span className="ml-1 text-secondary font-mono text-[10px] break-all">{credential.serviceAccountEmail}</span>
+                        <span className='text-muted'>Service Account:</span>
+                        <span className='ml-1 text-secondary font-mono text-[10px] break-all'>
+                          {credential.serviceAccountEmail}
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 pt-1">
+                    <div className='flex items-center gap-2 pt-1'>
                       <button
                         onClick={handleValidate}
                         disabled={validating}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-100)] border border-[var(--border-default)] text-xs text-secondary hover:border-accent-blue/30 transition-colors disabled:opacity-40"
+                        className='flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-100)] border border-[var(--border-default)] text-xs text-secondary hover:border-accent-blue/30 transition-colors disabled:opacity-40'
                       >
-                        {validating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Eye className="h-3 w-3" />}
+                        {validating ? (
+                          <Loader2 className='h-3 w-3 animate-spin' />
+                        ) : (
+                          <Eye className='h-3 w-3' />
+                        )}
                         Validate Permissions
                       </button>
                       <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={uploading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-100)] border border-[var(--border-default)] text-xs text-secondary hover:border-accent-amber/30 transition-colors disabled:opacity-40"
+                        className='flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--gray-100)] border border-[var(--border-default)] text-xs text-secondary hover:border-accent-amber/30 transition-colors disabled:opacity-40'
                       >
-                        <Upload className="h-3 w-3" /> Replace
+                        <Upload className='h-3 w-3' /> Replace
                       </button>
                     </div>
                   </div>
                 ) : (
-                  <div className="rounded-sm border border-dashed border-[var(--border-default)] bg-[var(--gray-100)] p-6 text-center space-y-3">
-                    <Cloud className="h-8 w-8 text-muted mx-auto" />
+                  <div className='rounded-sm border border-dashed border-[var(--border-default)] bg-[var(--gray-100)] p-6 text-center space-y-3'>
+                    <Cloud className='h-8 w-8 text-muted mx-auto' />
                     <div>
-                      <p className="text-sm font-medium text-secondary">No GCP credentials configured</p>
-                      <p className="text-xs text-muted mt-1">
+                      <p className='text-sm font-medium text-secondary'>
+                        No GCP credentials configured
+                      </p>
+                      <p className='text-xs text-muted mt-1'>
                         Upload a GCP service account JSON key file to deploy
                       </p>
                     </div>
@@ -432,10 +507,14 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                       className={cn(
                         'inline-flex items-center gap-2 px-4 py-2 rounded-sm text-sm font-medium',
                         'bg-accent-blue text-primary hover:bg-accent-blue/80 transition-colors',
-                        'disabled:opacity-40 disabled:cursor-not-allowed'
+                        'disabled:opacity-40 disabled:cursor-not-allowed',
                       )}
                     >
-                      {uploading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                      {uploading ? (
+                        <Loader2 className='h-4 w-4 animate-spin' />
+                      ) : (
+                        <Upload className='h-4 w-4' />
+                      )}
                       Upload Service Account Key
                     </button>
                   </div>
@@ -444,59 +523,76 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 {/* Hidden file input */}
                 <input
                   ref={fileInputRef}
-                  type="file"
-                  accept=".json"
+                  type='file'
+                  accept='.json'
                   onChange={handleFileUpload}
-                  className="hidden"
+                  className='hidden'
                 />
 
                 {/* Validation Results */}
                 {validationResult && (
-                  <div className={cn(
-                    'rounded-sm border p-4 space-y-3',
-                    validationResult.valid
-                      ? 'border-accent-green/20 bg-accent-green/5'
-                      : 'border-accent-amber/20 bg-accent-amber/5'
-                  )}>
-                    <div className="flex items-center gap-2">
-                      {validationResult.valid
-                        ? <CheckCircle2 className="h-4 w-4 text-accent-green" />
-                        : <AlertTriangle className="h-4 w-4 text-accent-amber" />
-                      }
-                      <span className={cn('text-sm font-medium',
-                        validationResult.valid ? 'text-accent-green' : 'text-accent-amber'
-                      )}>
-                        {validationResult.valid ? 'All permissions verified' : 'Some permissions missing'}
+                  <div
+                    className={cn(
+                      'rounded-sm border p-4 space-y-3',
+                      validationResult.valid
+                        ? 'border-accent-green/20 bg-accent-green/5'
+                        : 'border-accent-amber/20 bg-accent-amber/5',
+                    )}
+                  >
+                    <div className='flex items-center gap-2'>
+                      {validationResult.valid ? (
+                        <CheckCircle2 className='h-4 w-4 text-accent-green' />
+                      ) : (
+                        <AlertTriangle className='h-4 w-4 text-accent-amber' />
+                      )}
+                      <span
+                        className={cn(
+                          'text-sm font-medium',
+                          validationResult.valid ? 'text-accent-green' : 'text-accent-amber',
+                        )}
+                      >
+                        {validationResult.valid
+                          ? 'All permissions verified'
+                          : 'Some permissions missing'}
                       </span>
                     </div>
 
                     {validationResult.permissionChecks.length > 0 && (
-                      <div className="space-y-1.5">
+                      <div className='space-y-1.5'>
                         {validationResult.permissionChecks.map((check) => (
-                          <div key={check.role} className="flex items-center gap-2 text-xs">
-                            {check.granted
-                              ? <CheckCircle2 className="h-3.5 w-3.5 text-accent-green flex-shrink-0" />
-                              : <XCircle className="h-3.5 w-3.5 text-accent-red flex-shrink-0" />
-                            }
-                            <span className={cn(
-                              'font-medium',
-                              check.granted ? 'text-secondary' : 'text-accent-red'
-                            )}>
+                          <div key={check.role} className='flex items-center gap-2 text-xs'>
+                            {check.granted ? (
+                              <CheckCircle2 className='h-3.5 w-3.5 text-accent-green flex-shrink-0' />
+                            ) : (
+                              <XCircle className='h-3.5 w-3.5 text-accent-red flex-shrink-0' />
+                            )}
+                            <span
+                              className={cn(
+                                'font-medium',
+                                check.granted ? 'text-secondary' : 'text-accent-red',
+                              )}
+                            >
                               {check.label}
                             </span>
                             {!check.required && (
-                              <span className="text-[10px] text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded">optional</span>
+                              <span className='text-[10px] text-muted bg-[var(--gray-200)] px-1.5 py-0.5 rounded'>
+                                optional
+                              </span>
                             )}
-                            <span className="text-muted ml-auto text-[10px] truncate max-w-[200px]">{check.detail}</span>
+                            <span className='text-muted ml-auto text-[10px] truncate max-w-[200px]'>
+                              {check.detail}
+                            </span>
                           </div>
                         ))}
                       </div>
                     )}
 
                     {validationResult.issues.length > 0 && (
-                      <div className="space-y-1">
+                      <div className='space-y-1'>
                         {validationResult.issues.map((issue, i) => (
-                          <p key={i} className="text-xs text-accent-red">{issue}</p>
+                          <p key={i} className='text-xs text-accent-red'>
+                            {issue}
+                          </p>
                         ))}
                       </div>
                     )}
@@ -507,36 +603,68 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
             {/* ── Step 3: Analyze ── */}
             {step === 'analyze' && (
-              <motion.div key="analyze" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}>
+              <motion.div
+                key='analyze'
+                initial={{opacity: 0, x: 20}}
+                animate={{opacity: 1, x: 0}}
+                exit={{opacity: 0, x: -20}}
+              >
                 {analyzing ? (
-                  <div className="flex flex-col items-center justify-center py-16 space-y-4">
-                    <div className="relative">
-                      <Loader2 className="h-8 w-8 text-accent-blue animate-spin" />
+                  <div className='flex flex-col items-center justify-center py-16 space-y-4'>
+                    <div className='relative'>
+                      <Loader2 className='h-8 w-8 text-accent-blue animate-spin' />
                     </div>
-                    <div className="text-center">
-                      <p className="text-sm font-medium text-secondary">Analyzing workspace</p>
-                      <p className="text-xs text-muted mt-1">
+                    <div className='text-center'>
+                      <p className='text-sm font-medium text-secondary'>Analyzing workspace</p>
+                      <p className='text-xs text-muted mt-1'>
                         Detecting databases, frameworks, ports, and infrastructure requirements...
                       </p>
                     </div>
                   </div>
                 ) : analysis ? (
-                  <div className="space-y-4">
+                  <div className='space-y-4'>
                     {/* Manifest summary */}
-                    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3">
-                      <h3 className="text-sm font-semibold text-primary">Infrastructure Analysis</h3>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <InfoRow icon={<Server className="h-3.5 w-3.5" />} label="Project Type" value={analysis.manifest.projectType} />
-                        <InfoRow icon={<Globe className="h-3.5 w-3.5" />} label="Framework" value={analysis.manifest.framework || 'None detected'} />
-                        <InfoRow icon={<Database className="h-3.5 w-3.5" />} label="Databases" value={analysis.manifest.databases?.length ? analysis.manifest.databases.join(', ') : 'None'} />
-                        <InfoRow icon={<Cloud className="h-3.5 w-3.5" />} label="Port" value={String(analysis.manifest.detectedPort || 8080)} />
+                    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-4 space-y-3'>
+                      <h3 className='text-sm font-semibold text-primary'>
+                        Infrastructure Analysis
+                      </h3>
+                      <div className='grid grid-cols-1 sm:grid-cols-2 gap-3'>
+                        <InfoRow
+                          icon={<Server className='h-3.5 w-3.5' />}
+                          label='Project Type'
+                          value={analysis.manifest.projectType}
+                        />
+                        <InfoRow
+                          icon={<Globe className='h-3.5 w-3.5' />}
+                          label='Framework'
+                          value={analysis.manifest.framework || 'None detected'}
+                        />
+                        <InfoRow
+                          icon={<Database className='h-3.5 w-3.5' />}
+                          label='Databases'
+                          value={
+                            analysis.manifest.databases?.length
+                              ? analysis.manifest.databases.join(', ')
+                              : 'None'
+                          }
+                        />
+                        <InfoRow
+                          icon={<Cloud className='h-3.5 w-3.5' />}
+                          label='Port'
+                          value={String(analysis.manifest.detectedPort || 8080)}
+                        />
                       </div>
                       {analysis.manifest.envVars?.length > 0 && (
-                        <div className="pt-2 border-t border-[var(--border-default)]">
-                          <p className="text-xs text-muted mb-1">Detected environment variables:</p>
-                          <div className="flex flex-wrap gap-1">
+                        <div className='pt-2 border-t border-[var(--border-default)]'>
+                          <p className='text-xs text-muted mb-1'>Detected environment variables:</p>
+                          <div className='flex flex-wrap gap-1'>
                             {analysis.manifest.envVars.map((v) => (
-                              <span key={v} className="text-[10px] font-mono text-secondary bg-[var(--gray-200)] px-1.5 py-0.5 rounded">{v}</span>
+                              <span
+                                key={v}
+                                className='text-[10px] font-mono text-secondary bg-[var(--gray-200)] px-1.5 py-0.5 rounded'
+                              >
+                                {v}
+                              </span>
                             ))}
                           </div>
                         </div>
@@ -544,12 +672,14 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                     </div>
 
                     {/* Recommended path */}
-                    <div className="rounded-sm border border-accent-blue/20 bg-accent-blue/5 p-4">
-                      <div className="flex items-center gap-2 mb-2">
-                        <Rocket className="h-4 w-4 text-accent-blue" />
-                        <span className="text-sm font-medium text-accent-blue">Recommended: {analysis.decision.recommendedPath}</span>
+                    <div className='rounded-sm border border-accent-blue/20 bg-accent-blue/5 p-4'>
+                      <div className='flex items-center gap-2 mb-2'>
+                        <Rocket className='h-4 w-4 text-accent-blue' />
+                        <span className='text-sm font-medium text-accent-blue'>
+                          Recommended: {analysis.decision.recommendedPath}
+                        </span>
                       </div>
-                      <p className="text-xs text-secondary">{analysis.decision.reasoning}</p>
+                      <p className='text-xs text-secondary'>{analysis.decision.reasoning}</p>
                     </div>
                   </div>
                 ) : null}
@@ -558,12 +688,17 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
             {/* ── Step 4: Configure ── */}
             {step === 'configure' && analysis && (
-              <motion.div key="configure" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="space-y-4">
+              <motion.div
+                key='configure'
+                initial={{opacity: 0, x: 20}}
+                animate={{opacity: 1, x: 0}}
+                exit={{opacity: 0, x: -20}}
+                className='space-y-4'
+              >
                 {/* Deployment path selection */}
                 <div>
-                  <label className="block text-sm text-secondary mb-2">Deployment Path</label>
-                  <div className="space-y-1.5">
+                  <label className='block text-sm text-secondary mb-2'>Deployment Path</label>
+                  <div className='space-y-1.5'>
                     {analysis.decision.availablePaths?.map((p) => (
                       <button
                         key={p.path}
@@ -574,23 +709,25 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                           !p.available && 'opacity-40 cursor-not-allowed',
                           selectedPath === p.path
                             ? 'border-accent-blue/40 bg-accent-blue/5'
-                            : 'border-[var(--border-default)] bg-[var(--gray-100)] hover:border-[var(--border-default)]'
+                            : 'border-[var(--border-default)] bg-[var(--gray-100)] hover:border-[var(--border-default)]',
                         )}
                       >
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium text-primary">{p.label || p.path}</span>
+                        <div className='flex items-center justify-between'>
+                          <span className='text-sm font-medium text-primary'>
+                            {p.label || p.path}
+                          </span>
                           {p.path === analysis.decision.recommendedPath && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-sm bg-accent-blue/20 text-accent-blue font-medium">
+                            <span className='text-[10px] px-2 py-0.5 rounded-sm bg-accent-blue/20 text-accent-blue font-medium'>
                               Recommended
                             </span>
                           )}
                           {!p.available && (
-                            <span className="text-[10px] px-2 py-0.5 rounded-sm bg-[var(--gray-400)]/50 text-muted font-medium">
+                            <span className='text-[10px] px-2 py-0.5 rounded-sm bg-[var(--gray-400)]/50 text-muted font-medium'>
                               Coming Soon
                             </span>
                           )}
                         </div>
-                        <p className="text-xs text-muted mt-1">{p.description || p.reason}</p>
+                        <p className='text-xs text-muted mt-1'>{p.description || p.reason}</p>
                       </button>
                     ))}
                   </div>
@@ -598,59 +735,63 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
                 {/* Region */}
                 <div>
-                  <label className="block text-sm text-secondary mb-1.5">GCP Region</label>
+                  <label className='block text-sm text-secondary mb-1.5'>GCP Region</label>
                   <select
                     value={region}
                     onChange={(e) => setRegion(e.target.value)}
-                    className="w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none focus:border-accent-blue/40"
+                    className='w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-secondary focus:outline-none focus:border-accent-blue/40'
                   >
-                    {GCP_REGIONS.map((r) => <option key={r} value={r}>{r}</option>)}
+                    {GCP_REGIONS.map((r) => (
+                      <option key={r} value={r}>
+                        {r}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
                 {/* Environment Variables */}
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-sm text-secondary">Environment Variables</label>
+                  <div className='flex items-center justify-between mb-1.5'>
+                    <label className='text-sm text-secondary'>Environment Variables</label>
                     <button
-                      onClick={() => setEnvVars([...envVars, { key: '', value: '' }])}
-                      className="flex items-center gap-1 text-xs text-accent-blue hover:text-accent-blue/80"
+                      onClick={() => setEnvVars([...envVars, {key: '', value: ''}])}
+                      className='flex items-center gap-1 text-xs text-accent-blue hover:text-accent-blue/80'
                     >
-                      <Plus className="h-3 w-3" /> Add
+                      <Plus className='h-3 w-3' /> Add
                     </button>
                   </div>
                   {envVars.length === 0 ? (
-                    <p className="text-xs text-muted italic">No environment variables configured</p>
+                    <p className='text-xs text-muted italic'>No environment variables configured</p>
                   ) : (
-                    <div className="space-y-1.5">
+                    <div className='space-y-1.5'>
                       {envVars.map((env, i) => (
-                        <div key={i} className="flex items-center gap-2">
+                        <div key={i} className='flex items-center gap-2'>
                           <input
                             value={env.key}
                             onChange={(e) => {
                               const copy = [...envVars];
-                              copy[i] = { ...copy[i], key: e.target.value };
+                              copy[i] = {...copy[i], key: e.target.value};
                               setEnvVars(copy);
                             }}
-                            placeholder="KEY"
-                            className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-1.5 text-xs font-mono text-secondary focus:outline-none focus:border-accent-blue/40"
+                            placeholder='KEY'
+                            className='flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-1.5 text-xs font-mono text-secondary focus:outline-none focus:border-accent-blue/40'
                           />
                           <input
                             value={env.value}
                             onChange={(e) => {
                               const copy = [...envVars];
-                              copy[i] = { ...copy[i], value: e.target.value };
+                              copy[i] = {...copy[i], value: e.target.value};
                               setEnvVars(copy);
                             }}
-                            placeholder="value"
-                            type="password"
-                            className="flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-1.5 text-xs font-mono text-secondary focus:outline-none focus:border-accent-blue/40"
+                            placeholder='value'
+                            type='password'
+                            className='flex-1 bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-1.5 text-xs font-mono text-secondary focus:outline-none focus:border-accent-blue/40'
                           />
                           <button
                             onClick={() => setEnvVars(envVars.filter((_, j) => j !== i))}
-                            className="text-muted hover:text-accent-red"
+                            className='text-muted hover:text-accent-red'
                           >
-                            <Trash2 className="h-3.5 w-3.5" />
+                            <Trash2 className='h-3.5 w-3.5' />
                           </button>
                         </div>
                       ))}
@@ -662,45 +803,50 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
 
             {/* ── Step 5: Deploying ── */}
             {step === 'deploying' && (
-              <motion.div key="deploying" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }}
-                className="flex flex-col items-center justify-center py-12 space-y-6">
+              <motion.div
+                key='deploying'
+                initial={{opacity: 0, x: 20}}
+                animate={{opacity: 1, x: 0}}
+                exit={{opacity: 0, x: -20}}
+                className='flex flex-col items-center justify-center py-12 space-y-6'
+              >
                 {deploying ? (
                   <>
-                    <div className="relative">
-                      <div className="h-16 w-16 rounded-full border-2 border-accent-blue/30 flex items-center justify-center">
-                        <Loader2 className="h-8 w-8 text-accent-blue animate-spin" />
+                    <div className='relative'>
+                      <div className='h-16 w-16 rounded-full border-2 border-accent-blue/30 flex items-center justify-center'>
+                        <Loader2 className='h-8 w-8 text-accent-blue animate-spin' />
                       </div>
                     </div>
-                    <div className="text-center space-y-1">
-                      <p className="text-sm font-medium text-primary">{deployStatus}</p>
-                      <p className="text-xs text-muted">This may take a few minutes</p>
+                    <div className='text-center space-y-1'>
+                      <p className='text-sm font-medium text-primary'>{deployStatus}</p>
+                      <p className='text-xs text-muted'>This may take a few minutes</p>
                     </div>
                   </>
                 ) : deployError ? (
                   <>
-                    <div className="h-16 w-16 rounded-full bg-accent-red/10 flex items-center justify-center">
-                      <XCircle className="h-8 w-8 text-accent-red" />
+                    <div className='h-16 w-16 rounded-full bg-accent-red/10 flex items-center justify-center'>
+                      <XCircle className='h-8 w-8 text-accent-red' />
                     </div>
-                    <div className="text-center space-y-1">
-                      <p className="text-sm font-medium text-accent-red">Deployment Failed</p>
-                      <p className="text-xs text-muted max-w-sm">{deployError}</p>
+                    <div className='text-center space-y-1'>
+                      <p className='text-sm font-medium text-accent-red'>Deployment Failed</p>
+                      <p className='text-xs text-muted max-w-sm'>{deployError}</p>
                     </div>
                   </>
                 ) : deployResult?.status === 'LIVE' ? (
                   <>
-                    <div className="h-16 w-16 rounded-full bg-accent-green/10 flex items-center justify-center">
-                      <CheckCircle2 className="h-8 w-8 text-accent-green" />
+                    <div className='h-16 w-16 rounded-full bg-accent-green/10 flex items-center justify-center'>
+                      <CheckCircle2 className='h-8 w-8 text-accent-green' />
                     </div>
-                    <div className="text-center space-y-2">
-                      <p className="text-sm font-medium text-accent-green">Deployment is Live!</p>
+                    <div className='text-center space-y-2'>
+                      <p className='text-sm font-medium text-accent-green'>Deployment is Live!</p>
                       {deployResult.serviceUrl && (
                         <a
                           href={deployResult.serviceUrl}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1.5 text-xs text-secondary hover:text-secondary/80"
+                          target='_blank'
+                          rel='noopener noreferrer'
+                          className='inline-flex items-center gap-1.5 text-xs text-secondary hover:text-secondary/80'
                         >
-                          <Globe className="h-3 w-3" /> {deployResult.serviceUrl}
+                          <Globe className='h-3 w-3' /> {deployResult.serviceUrl}
                         </a>
                       )}
                     </div>
@@ -712,7 +858,7 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
         </div>
 
         {/* Footer buttons */}
-        <div className="flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 sm:px-6 py-4 border-t border-[var(--border-default)] flex-shrink-0">
+        <div className='flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 px-4 sm:px-6 py-4 border-t border-[var(--border-default)] flex-shrink-0'>
           <div>
             {step !== 'select-run' && step !== 'deploying' && (
               <button
@@ -721,13 +867,13 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                   else if (step === 'analyze' && !analyzing) setStep('credentials');
                   else if (step === 'configure') setStep('analyze');
                 }}
-                className="flex items-center gap-1.5 px-3 py-2 rounded-sm text-sm text-secondary hover:text-primary transition-colors"
+                className='flex items-center gap-1.5 px-3 py-2 rounded-sm text-sm text-secondary hover:text-primary transition-colors'
               >
-                <ArrowLeft className="h-4 w-4" /> Back
+                <ArrowLeft className='h-4 w-4' /> Back
               </button>
             )}
           </div>
-          <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className='flex items-center gap-2 w-full sm:w-auto'>
             {step === 'select-run' && (
               <button
                 onClick={() => setStep('credentials')}
@@ -735,10 +881,10 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 className={cn(
                   'w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-blue text-primary hover:bg-accent-blue/80',
-                  'disabled:opacity-40 disabled:cursor-not-allowed'
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
                 )}
               >
-                Next <ArrowRight className="h-4 w-4" />
+                Next <ArrowRight className='h-4 w-4' />
               </button>
             )}
             {step === 'credentials' && (
@@ -748,18 +894,18 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 className={cn(
                   'w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-blue text-primary hover:bg-accent-blue/80',
-                  'disabled:opacity-40 disabled:cursor-not-allowed'
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
                 )}
               >
-                Analyze & Continue <ArrowRight className="h-4 w-4" />
+                Analyze & Continue <ArrowRight className='h-4 w-4' />
               </button>
             )}
             {step === 'analyze' && !analyzing && analysis && (
               <button
                 onClick={() => setStep('configure')}
-                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-all"
+                className='w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-accent-blue text-primary hover:bg-accent-blue/80 transition-all'
               >
-                Configure <ArrowRight className="h-4 w-4" />
+                Configure <ArrowRight className='h-4 w-4' />
               </button>
             )}
             {step === 'configure' && (
@@ -769,16 +915,16 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
                 className={cn(
                   'w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium transition-all',
                   'bg-accent-green text-primary hover:bg-accent-green/80',
-                  'disabled:opacity-40 disabled:cursor-not-allowed'
+                  'disabled:opacity-40 disabled:cursor-not-allowed',
                 )}
               >
-                <Rocket className="h-4 w-4" /> Deploy
+                <Rocket className='h-4 w-4' /> Deploy
               </button>
             )}
             {step === 'deploying' && !deploying && (
               <button
                 onClick={onClose}
-                className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-[var(--gray-100)] border border-[var(--border-default)] text-secondary hover:border-[var(--border-default)] transition-all"
+                className='w-full sm:w-auto flex items-center justify-center gap-1.5 px-4 py-2 rounded-sm text-sm font-medium bg-[var(--gray-100)] border border-[var(--border-default)] text-secondary hover:border-[var(--border-default)] transition-all'
               >
                 Close
               </button>
@@ -790,13 +936,13 @@ export default function DeployWizardModal({ onClose, onRefresh, preselectedRunId
   );
 }
 
-function InfoRow({ icon, label, value }: { icon: React.ReactNode; label: string; value: string }) {
+function InfoRow({icon, label, value}: {icon: React.ReactNode; label: string; value: string}) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="text-muted">{icon}</span>
+    <div className='flex items-center gap-2'>
+      <span className='text-muted'>{icon}</span>
       <div>
-        <p className="text-[10px] text-muted uppercase tracking-wider">{label}</p>
-        <p className="text-xs text-secondary">{value}</p>
+        <p className='text-[10px] text-muted uppercase tracking-wider'>{label}</p>
+        <p className='text-xs text-secondary'>{value}</p>
       </div>
     </div>
   );

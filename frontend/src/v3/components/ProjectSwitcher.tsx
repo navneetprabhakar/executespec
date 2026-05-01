@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { getProjects, type ProjectDto } from '@/lib/api';
-import { useAuthStore } from '@/stores/useAuthStore';
-import { PROVIDER_DISPLAY } from '../lib/terminology';
+import {useEffect, useMemo, useRef, useState} from 'react';
+import {useNavigate, useParams} from 'react-router-dom';
+import {getProjects, type ProjectDto} from '@/lib/api';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {PROVIDER_DISPLAY} from '../lib/terminology';
 import RepoAttachPopover from './RepoAttachPopover';
 
 /**
@@ -27,7 +27,7 @@ export default function ProjectSwitcher() {
   const ref = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
-  const params = useParams<{ slug?: string }>();
+  const params = useParams<{slug?: string}>();
   const isAuthed = useAuthStore((s) => s.isAuthenticated);
 
   // Fetch projects on mount when authed + on auth state change. Need
@@ -95,16 +95,14 @@ export default function ProjectSwitcher() {
     const q = query.trim().toLowerCase();
     if (!q) return projects;
     return projects.filter(
-      (p) =>
-        p.name.toLowerCase().includes(q) ||
-        (p.description ?? '').toLowerCase().includes(q)
+      (p) => p.name.toLowerCase().includes(q) || (p.description ?? '').toLowerCase().includes(q),
     );
   }, [projects, query]);
 
   // Logged-out: nothing useful in this slot.
   if (!isAuthed) {
     return (
-      <span className="v3-topbar__placeholder" aria-hidden="true">
+      <span className='v3-topbar__placeholder' aria-hidden='true'>
         Sign in to pick a project
       </span>
     );
@@ -113,13 +111,13 @@ export default function ProjectSwitcher() {
   const triggerLabel = current?.name ?? 'Pick a project';
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} style={{position: 'relative'}}>
       <button
-        type="button"
+        type='button'
         onClick={() => setOpen((o) => !o)}
-        aria-haspopup="menu"
+        aria-haspopup='menu'
         aria-expanded={open}
-        aria-label="Switch project"
+        aria-label='Switch project'
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -145,13 +143,13 @@ export default function ProjectSwitcher() {
         >
           {triggerLabel}
         </span>
-        <span style={{ color: 'var(--v3-text-subtle)', fontSize: 10 }}>▾</span>
+        <span style={{color: 'var(--v3-text-subtle)', fontSize: 10}}>▾</span>
       </button>
 
       {open && (
         <div
-          role="menu"
-          aria-label="Projects"
+          role='menu'
+          aria-label='Projects'
           style={{
             position: 'absolute',
             top: 'calc(100% + 6px)',
@@ -169,12 +167,12 @@ export default function ProjectSwitcher() {
             maxHeight: '70vh',
           }}
         >
-          <div style={{ padding: 8, borderBottom: '1px solid var(--v3-border)' }}>
+          <div style={{padding: 8, borderBottom: '1px solid var(--v3-border)'}}>
             <input
               ref={inputRef}
               value={query}
               onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search projects…"
+              placeholder='Search projects…'
               style={{
                 width: '100%',
                 padding: '6px 8px',
@@ -188,27 +186,27 @@ export default function ProjectSwitcher() {
             />
           </div>
 
-          <ul style={{ margin: 0, padding: 6, listStyle: 'none', overflowY: 'auto' }}>
+          <ul style={{margin: 0, padding: 6, listStyle: 'none', overflowY: 'auto'}}>
             {projects === null && (
-              <li style={{ padding: '10px 12px', fontSize: 12, color: 'var(--v3-text-subtle)' }}>
+              <li style={{padding: '10px 12px', fontSize: 12, color: 'var(--v3-text-subtle)'}}>
                 Loading projects…
               </li>
             )}
             {error && (
-              <li style={{ padding: '10px 12px', fontSize: 12, color: 'var(--v3-error)' }}>
+              <li style={{padding: '10px 12px', fontSize: 12, color: 'var(--v3-error)'}}>
                 {error}
               </li>
             )}
             {projects !== null && filtered.length === 0 && !error && (
-              <li style={{ padding: '10px 12px', fontSize: 12, color: 'var(--v3-text-subtle)' }}>
+              <li style={{padding: '10px 12px', fontSize: 12, color: 'var(--v3-text-subtle)'}}>
                 No projects match. Press "+ New project" below.
               </li>
             )}
             {filtered.map((p) => (
-              <li key={p.id} role="none">
+              <li key={p.id} role='none'>
                 <button
-                  role="menuitem"
-                  type="button"
+                  role='menuitem'
+                  type='button'
                   onClick={() => {
                     navigate(`/projects/${p.id}`);
                     setOpen(false);
@@ -273,7 +271,7 @@ export default function ProjectSwitcher() {
             }}
           >
             <button
-              type="button"
+              type='button'
               onClick={() => {
                 // R-120 will own the inline "+ New project" form. For
                 // now route to the v2 OrgProjectsPage so the link is
@@ -296,7 +294,7 @@ export default function ProjectSwitcher() {
               + New project
             </button>
             <button
-              type="button"
+              type='button'
               onClick={() => {
                 setOpen(false);
                 setRepoPopoverOpen(true);
@@ -320,10 +318,7 @@ export default function ProjectSwitcher() {
       )}
 
       {/* R-125 — repo-attach popover */}
-      <RepoAttachPopover
-        open={repoPopoverOpen}
-        onClose={() => setRepoPopoverOpen(false)}
-      />
+      <RepoAttachPopover open={repoPopoverOpen} onClose={() => setRepoPopoverOpen(false)} />
     </div>
   );
 }

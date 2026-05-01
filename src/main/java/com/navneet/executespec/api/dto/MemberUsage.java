@@ -9,5 +9,4 @@ public record MemberUsage(
     String email,
     int runCount,
     double successRate,
-    Instant lastRunDate
-) {}
+    Instant lastRunDate) {}

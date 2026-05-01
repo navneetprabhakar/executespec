@@ -1,8 +1,8 @@
-import { useEffect } from 'react';
-import { useUiStore } from '@/stores/useUiStore';
+import {useEffect} from 'react';
+import {useUiStore} from '@/stores/useUiStore';
 
 export function useKeyboardShortcuts() {
-  const { setCommandPaletteOpen } = useUiStore();
+  const {setCommandPaletteOpen} = useUiStore();
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {

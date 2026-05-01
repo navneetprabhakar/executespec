@@ -1,14 +1,11 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import {
-  authMe,
-  type AuthUser,
-} from '@/lib/api';
-import { useUiStore } from '@/stores/useUiStore';
-import { useAuthStore } from '@/stores/useAuthStore';
-import { TIER_DISPLAY } from '../lib/terminology';
+import {useEffect, useState} from 'react';
+import {useNavigate, Link} from 'react-router-dom';
+import {authMe, type AuthUser} from '@/lib/api';
+import {useUiStore} from '@/stores/useUiStore';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {TIER_DISPLAY} from '../lib/terminology';
 import Pill from '../components/Pill';
-import { isV3OptedIn, setV3OptedIn } from '../lib/optIn';
+import {isV3OptedIn, setV3OptedIn} from '../lib/optIn';
 
 /**
  * R-140 — single-page settings stack.
@@ -28,7 +25,7 @@ import { isV3OptedIn, setV3OptedIn } from '../lib/optIn';
  */
 export default function V3Settings() {
   const navigate = useNavigate();
-  const { theme, setTheme } = useUiStore();
+  const {theme, setTheme} = useUiStore();
   const logout = useAuthStore((s) => s.logout);
   const storeUser = useAuthStore((s) => s.user);
   const [user, setUser] = useState<AuthUser | null>(storeUser ?? null);
@@ -65,7 +62,7 @@ export default function V3Settings() {
 
   if (loading) {
     return (
-      <div className="v3-placeholder">
+      <div className='v3-placeholder'>
         <p>Loading settings…</p>
       </div>
     );
@@ -73,10 +70,13 @@ export default function V3Settings() {
 
   if (!user) {
     return (
-      <div className="v3-placeholder" style={{ borderColor: 'var(--v3-error)', color: 'var(--v3-error)' }}>
+      <div
+        className='v3-placeholder'
+        style={{borderColor: 'var(--v3-error)', color: 'var(--v3-error)'}}
+      >
         <h1>Not signed in</h1>
         <p>Sign in to manage your account.</p>
-        <Link to="/login" style={{ color: 'var(--v3-brand)', fontSize: 12 }}>
+        <Link to='/login' style={{color: 'var(--v3-brand)', fontSize: 12}}>
           Sign in →
         </Link>
       </div>
@@ -86,12 +86,12 @@ export default function V3Settings() {
   const tierDisplay = TIER_DISPLAY[user.tier ?? 'FREE'] ?? user.tier ?? 'Free';
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32}}>
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
+        <h1 style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>
           Settings
         </h1>
-        <p style={{ fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0' }}>
+        <p style={{fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0'}}>
           {/* R9 (2026-05-01 follow-up Option B) — "Danger zone" was
               misleading: the section only contains Sign out, which
               isn't destructive. Renamed to "Account actions" to match
@@ -102,21 +102,19 @@ export default function V3Settings() {
       </div>
 
       {/* ── Account ─────────────────────────────────────────────────────── */}
-      <Card title="Account">
-        <Row label="Display name">
+      <Card title='Account'>
+        <Row label='Display name'>
           <span>
             {user.firstName ?? ''} {user.lastName ?? ''}
           </span>
         </Row>
-        <Row label="Email">
+        <Row label='Email'>
           <span>{user.email}</span>
         </Row>
-        <Row label="Plan">
+        <Row label='Plan'>
           <Pill
-            tone={
-              user.tier === 'FREE' ? 'neutral' : user.tier === 'ENTERPRISE' ? 'brand' : 'info'
-            }
-            size="sm"
+            tone={user.tier === 'FREE' ? 'neutral' : user.tier === 'ENTERPRISE' ? 'brand' : 'info'}
+            size='sm'
           >
             {tierDisplay}
           </Pill>
@@ -124,26 +122,32 @@ export default function V3Settings() {
         {/* Task 13 (2026-05-01 fix list) — user-facing label dropped the
             "(v2 surfaces)" qualifier; users don't care about internal
             version branches. */}
-        <Row label="Theme">
-          <ThemeChooser current={theme} onPick={(t) => { setTheme(t); flashSaved(); }} />
+        <Row label='Theme'>
+          <ThemeChooser
+            current={theme}
+            onPick={(t) => {
+              setTheme(t);
+              flashSaved();
+            }}
+          />
         </Row>
       </Card>
 
       {/* ── AI provider summary ─────────────────────────────────────────── */}
-      <Card title="AI provider">
-        <Row label="Default">
+      <Card title='AI provider'>
+        <Row label='Default'>
           <span>{user.tier === 'FREE' ? 'Anthropic (system credits)' : 'Project default'}</span>
         </Row>
-        <Row label="BYOK">
+        <Row label='BYOK'>
           {user.tier === 'TEAM' || user.tier === 'ENTERPRISE' ? (
             <Link
-              to="/settings#api-keys"
-              style={{ color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none' }}
+              to='/settings#api-keys'
+              style={{color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none'}}
             >
               Manage your Anthropic / OpenAI / Google keys →
             </Link>
           ) : (
-            <span style={{ color: 'var(--v3-text-subtle)' }}>
+            <span style={{color: 'var(--v3-text-subtle)'}}>
               Bring-your-own-keys is available on Team and Enterprise.
             </span>
           )}
@@ -156,22 +160,22 @@ export default function V3Settings() {
           surface by default. */}
 
       {/* ── Repos / integrations ────────────────────────────────────────── */}
-      <Card title="Repos & integrations">
-        <Row label="GitHub">
+      <Card title='Repos & integrations'>
+        <Row label='GitHub'>
           <span>{user.hasGithubPat ? 'PAT configured ✓' : 'Not connected'}</span>
         </Row>
-        <Row label="More integrations">
+        <Row label='More integrations'>
           <Link
-            to="/integrations"
-            style={{ color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none' }}
+            to='/integrations'
+            style={{color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none'}}
           >
             Manage integrations →
           </Link>
         </Row>
-        <Row label="More">
+        <Row label='More'>
           <Link
-            to="/integrations"
-            style={{ color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none' }}
+            to='/integrations'
+            style={{color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none'}}
           >
             Slack · Bitbucket · Jira · Confluence →
           </Link>
@@ -184,9 +188,9 @@ export default function V3Settings() {
        *  "Danger zone" for delete-account / revoke-tokens / transfer-
        *  ownership. Rename today; promote back to "Danger zone" the
        *  moment real destructive ops land in this section. */}
-      <Card title="Account actions" tone="warn">
+      <Card title='Account actions' tone='warn'>
         <button
-          type="button"
+          type='button'
           onClick={async () => {
             if (!confirm('Sign out everywhere?')) return;
             await logout();
@@ -210,7 +214,7 @@ export default function V3Settings() {
 
       {savedToast && (
         <div
-          role="status"
+          role='status'
           style={{
             position: 'fixed',
             bottom: 24,
@@ -242,14 +246,14 @@ function V3OptInCard() {
     setOptedIn(next);
   }
   return (
-    <Card title="Try the new ExecuteSpec everywhere">
-      <Row label="Use v3 for v2 routes too">
-        <span style={{ display: 'inline-flex', gap: 8, alignItems: 'center' }}>
-          <Pill tone={optedIn ? 'ok' : 'neutral'} size="sm">
+    <Card title='Try the new ExecuteSpec everywhere'>
+      <Row label='Use v3 for v2 routes too'>
+        <span style={{display: 'inline-flex', gap: 8, alignItems: 'center'}}>
+          <Pill tone={optedIn ? 'ok' : 'neutral'} size='sm'>
             {optedIn ? 'On' : 'Off'}
           </Pill>
           <button
-            type="button"
+            type='button'
             onClick={toggle}
             style={{
               padding: '4px 10px',
@@ -267,11 +271,13 @@ function V3OptInCard() {
           </button>
         </span>
       </Row>
-      <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--v3-text-subtle)', lineHeight: 1.55 }}>
-        When on, v2 routes (<code>/dashboard</code>, <code>/billing</code>, <code>/integrations</code>,{' '}
-        <code>/settings</code>, etc.) automatically redirect to their v3
-        equivalents. Old browser bookmarks and email links keep working.
-        Turn off any time to switch back.
+      <p
+        style={{margin: '6px 0 0', fontSize: 11, color: 'var(--v3-text-subtle)', lineHeight: 1.55}}
+      >
+        When on, v2 routes (<code>/dashboard</code>, <code>/billing</code>,{' '}
+        <code>/integrations</code>, <code>/settings</code>, etc.) automatically redirect to their v3
+        equivalents. Old browser bookmarks and email links keep working. Turn off any time to switch
+        back.
       </p>
     </Card>
   );
@@ -279,23 +285,12 @@ function V3OptInCard() {
 
 // ─── Layout primitives ───────────────────────────────────────────────────────
 
-function Card({
-  title,
-  children,
-  tone,
-}: {
-  title: string;
-  children: React.ReactNode;
-  tone?: 'warn';
-}) {
+function Card({title, children, tone}: {title: string; children: React.ReactNode; tone?: 'warn'}) {
   return (
     <section
       style={{
         background: 'var(--v3-surface)',
-        border:
-          tone === 'warn'
-            ? '1px solid rgba(245,158,11,0.4)'
-            : '1px solid var(--v3-border)',
+        border: tone === 'warn' ? '1px solid rgba(245,158,11,0.4)' : '1px solid var(--v3-border)',
         borderRadius: 8,
         padding: 14,
       }}
@@ -310,12 +305,12 @@ function Card({
       >
         {title}
       </h2>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>{children}</div>
+      <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>{children}</div>
     </section>
   );
 }
 
-function Row({ label, children }: { label: string; children: React.ReactNode }) {
+function Row({label, children}: {label: string; children: React.ReactNode}) {
   return (
     <div
       style={{
@@ -328,7 +323,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
         borderBottom: '1px dashed var(--v3-border)',
       }}
     >
-      <span style={{ color: 'var(--v3-text-muted)' }}>{label}</span>
+      <span style={{color: 'var(--v3-text-muted)'}}>{label}</span>
       <span>{children}</span>
     </div>
   );
@@ -342,11 +337,11 @@ function ThemeChooser({
   onPick: (t: 'dark' | 'light') => void;
 }) {
   return (
-    <div style={{ display: 'inline-flex', gap: 4 }}>
+    <div style={{display: 'inline-flex', gap: 4}}>
       {(['dark', 'light'] as const).map((t) => (
         <button
           key={t}
-          type="button"
+          type='button'
           onClick={() => onPick(t)}
           style={{
             padding: '3px 10px',
