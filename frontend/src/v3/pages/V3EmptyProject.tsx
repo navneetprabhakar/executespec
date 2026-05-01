@@ -285,10 +285,14 @@ export default function V3EmptyProject() {
 
 /**
  * D3 (round-3 audit) — tier-aware "what does this plan get me" framing.
- * Surfaces the run quota in human terms ("≈ 10 small or 6 large PRs / month")
- * instead of the bare "10 runs / month" the persona-test report flagged
+ * Surfaces the run quota in human terms ("≈ 5 small or 3 large PRs / month")
+ * instead of the bare "5 runs / month" the persona-test report flagged
  * as too restrictive-feeling next to consumer competitors. Paid tiers get
  * a neutral framing because the run cap is unlimited.
+ *
+ * 2026-05-04: FREE tier policy is held at 5 runs / month
+ * (post-V145 bump-to-10 was reverted as a positioning decision —
+ * "free tier will always remain 5"). Reflect that here.
  */
 function tierBlurb(tier?: string): string {
   const normalized = (tier || 'FREE').toUpperCase();
@@ -298,6 +302,6 @@ function tierBlurb(tier?: string): string {
   if (normalized === 'PRO') {
     return "Describe what you want to build and we'll ship a draft PR you can actually merge. Your Pro plan covers 20 runs / month (≈ 20 small or 6 large PRs).";
   }
-  // FREE (and everything unrecognised) — surface what 10 runs actually buys.
-  return "Describe what you want to build and we'll ship a draft PR you can actually merge. Your free plan covers 10 PRs / month — about 10 small features or 6 large refactors.";
+  // FREE (and everything unrecognised) — surface what 5 runs actually buys.
+  return "Describe what you want to build and we'll ship a draft PR you can actually merge. Your free plan covers 5 PRs / month — about 5 small features or 3 large refactors.";
 }

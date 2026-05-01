@@ -5,6 +5,8 @@
 **Deployed SHA:** `59def018` — main = dev tip after PRs #55, #56, #57 all landed
 **Method:** puppeteer-core driving system Chrome (1440×900, dpr 1) + direct API probes against `https://dev.executespec.ai/api`
 
+> **Note on FREE-tier numbers in this report:** the API probes captured `runLimitMonthly=10` for FREE because the dev DB carried the V145 transient bump. The team's positioning decision is that **FREE tier holds at 5 runs / month** going forward (recorded 2026-05-04); customer-facing copy in `website/index.html`, `website/llms.txt`, and `frontend/src/v3/pages/V3EmptyProject.tsx` reflects the 5/month policy. A follow-up V-migration will revert `tier_config.FREE.monthly_run_limit` 10 → 5; the screenshots below are accurate to the dev DB at capture time (10) and will need re-captures once that migration ships.
+
 ---
 
 ## §0 — Deployment trail
