@@ -6,15 +6,14 @@ import java.util.Set;
 
 /**
  * Single source of truth for the tier → product_surface mapping introduced
- * by V143 (product-split discriminator) + V144 (per-seat TEAM reinstated).
+ * by V143 (product-split discriminator). V165 dropped MAX from the ladder.
  *
- * <p>Decision (2026-04-26, after the tier ladder restoration):
+ * <p>Decision (audit Sprint 4, 2026-05-01):
  * <table>
  *   <tr><th>Tier</th><th>Product surface</th><th>Why</th></tr>
  *   <tr><td>FREE</td>      <td>vibe</td>        <td>Top-of-funnel consumer signup default.</td></tr>
  *   <tr><td>PRO</td>       <td>vibe</td>        <td>Grandfathered individual tier — Vibe Pro post-split.</td></tr>
- *   <tr><td>MAX</td>       <td>vibe</td>        <td>Power individual ($29/mo BYOK) — Vibe surface.</td></tr>
- *   <tr><td>TEAM</td>      <td>executespec</td> <td>Multi-seat business product ($49/seat) — Build surface.</td></tr>
+ *   <tr><td>TEAM</td>      <td>executespec</td> <td>Multi-seat business product ($39/seat, BYOK or managed) — Build surface.</td></tr>
  *   <tr><td>ENTERPRISE</td><td>executespec</td> <td>B2B sales-led — Build surface.</td></tr>
  * </table>
  *
@@ -40,7 +39,6 @@ public final class TierProductSurfaceMapper {
     private static final Map<String, String> TIER_TO_DEFAULT_SURFACE = Map.of(
         "FREE",       SURFACE_VIBE,
         "PRO",        SURFACE_VIBE,
-        "MAX",        SURFACE_VIBE,
         "TEAM",       SURFACE_EXECUTESPEC,
         "ENTERPRISE", SURFACE_EXECUTESPEC
     );
@@ -49,13 +47,12 @@ public final class TierProductSurfaceMapper {
      * Surfaces a tier may be granted access to (org-level + per-user
      * extensions). Used to validate {@code app_user_product_access} grants
      * — e.g. a TEAM org can extend a member's access to the Vibe surface
-     * (so they can use their own personal MAX-style flows), but a FREE
-     * user can't be granted Build access without a subscription change.
+     * for personal projects, but a FREE user can't be granted Build access
+     * without a subscription change.
      */
     private static final Map<String, Set<String>> ALLOWED_SURFACES_FOR_TIER = Map.of(
         "FREE",       Set.of(SURFACE_VIBE),
         "PRO",        Set.of(SURFACE_VIBE),
-        "MAX",        Set.of(SURFACE_VIBE),
         "TEAM",       Set.of(SURFACE_VIBE, SURFACE_EXECUTESPEC),
         "ENTERPRISE", Set.of(SURFACE_VIBE, SURFACE_EXECUTESPEC)
     );

@@ -86,9 +86,9 @@ public class BillingService {
     @Value("${billing.founder-pricing.max-slots:100}")
     private int founderMaxSlots;
 
-    /** Tier rank for upgrade/downgrade detection. Higher = better. */
+    /** Tier rank for upgrade/downgrade detection. Higher = better. V165 dropped MAX. */
     private static final Map<String, Integer> TIER_RANK = Map.of(
-            "FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "MAX", 4, "ENTERPRISE", 5);
+            "FREE", 0, "STARTER", 1, "PRO", 2, "TEAM", 3, "ENTERPRISE", 4);
 
     private static int tierRank(String tier) {
         return TIER_RANK.getOrDefault(tier, 0);
@@ -853,7 +853,7 @@ public class BillingService {
 
         // Phase 2 wiring — stamp org.product_id from the new tier so the V143
         // discriminator is set when an org first subscribes. TEAM/ENTERPRISE
-        // → executespec (Build); MAX/PRO/FREE → vibe (Vibe). Read tier from
+        // → executespec (Build); PRO/FREE → vibe (Vibe). Read tier from
         // the looked-up plan rather than the org row (org.tier may not have
         // been bumped yet on first subscribe).
         if ("ORG".equals(billingEntityType) && !billingEntityId.isBlank() && !planId.isBlank()) {
@@ -989,8 +989,10 @@ public class BillingService {
         String authTier = switch (plan.getTier()) {
             case "STARTER" -> "FREE";       // Legacy — billing controls run limit
             case "PRO" -> "PRO";
-            case "MAX" -> "MAX";
+            case "TEAM" -> "TEAM";
             case "ENTERPRISE" -> "ENTERPRISE";
+            // V165 — MAX deprecated; legacy MAX subscriptions roll up to TEAM.
+            case "MAX" -> "TEAM";
             default -> "FREE";
         };
         user.setTier(authTier);

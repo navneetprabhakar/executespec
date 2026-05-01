@@ -269,15 +269,16 @@ public class TierPermissionService {
         int used = user.getPersonalRunCount();
         int maxApply = resolveMaxApplySuggestions(tier);
         int maxPreviews = resolveMaxPreviewStarts(tier);
-        boolean isMaxOrEnterprise = "MAX".equals(tier) || "ENTERPRISE".equals(tier);
+        // V165 — MAX deprecated, BYOK now lives on TEAM + ENTERPRISE.
+        boolean isTeamOrEnterprise = "TEAM".equals(tier) || "ENTERPRISE".equals(tier);
         boolean isFree = "FREE".equals(tier);
 
         return new TierPermissions(
-                isMaxOrEnterprise, // canManageAiKeys — MAX/ENTERPRISE need BYOK
+                isTeamOrEnterprise, // canManageAiKeys — TEAM/ENTERPRISE can configure BYOK
                 false, // canViewPricing — admin-only; consistent with admin-page gating
                 false, // canManageIntegrations
                 true,  // canViewMetrics — unlocked for all tiers
-                isMaxOrEnterprise, // [F-03] canViewCostBreakdown — MAX/ENT solo can see their own cost breakdown (was: false hardcoded)
+                isTeamOrEnterprise, // [F-03] canViewCostBreakdown — TEAM/ENT solo can see their own cost breakdown (was: false hardcoded)
                 true,  // canViewTokenUsage — unlocked for all tiers
                 true,  // canUseChat — unlocked for all tiers
                 false, // canCreateOrg

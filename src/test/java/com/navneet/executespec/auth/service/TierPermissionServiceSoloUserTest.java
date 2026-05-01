@@ -105,13 +105,14 @@ class TierPermissionServiceSoloUserTest {
     }
 
     @Test
-    void maxSoloUser_canManageAiKeysAndCostBreakdown() {
-        solo("MAX");
-        seed("MAX", -1, true, -1, -1, -1);
-        TierPermissionService.TierPermissions p = svc.getPermissions("u-MAX");
+    void teamSoloUser_canManageAiKeysAndCostBreakdown() {
+        // V165 — MAX dropped; TEAM is now the BYOK-enabled paid tier.
+        solo("TEAM");
+        seed("TEAM", -1, true, -1, -1, -1);
+        TierPermissionService.TierPermissions p = svc.getPermissions("u-TEAM");
 
         assertThat(p.canManageAiKeys()).isTrue();
-        assertThat(p.canViewCostBreakdown()).as("MAX solo can see their own cost breakdown").isTrue();
+        assertThat(p.canViewCostBreakdown()).as("TEAM solo can see their own cost breakdown").isTrue();
         assertThat(p.canDeploy()).isTrue();
     }
 
@@ -123,8 +124,8 @@ class TierPermissionServiceSoloUserTest {
 
         assertThat(p.canDeploy()).as("PRO solo can deploy per tier_config").isTrue();
         assertThat(p.maxDeployments()).isEqualTo(3);
-        assertThat(p.canManageAiKeys()).as("PRO solo cannot BYOK (only MAX/ENT)").isFalse();
-        assertThat(p.canViewCostBreakdown()).as("PRO solo cannot see cost breakdown (admin/MAX/ENT only)").isFalse();
+        assertThat(p.canManageAiKeys()).as("PRO solo cannot BYOK (only TEAM/ENT)").isFalse();
+        assertThat(p.canViewCostBreakdown()).as("PRO solo cannot see cost breakdown (admin/TEAM/ENT only)").isFalse();
     }
 
     @Test

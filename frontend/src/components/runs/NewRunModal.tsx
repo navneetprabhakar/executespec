@@ -564,15 +564,17 @@ export default function NewRunModal({ onClose, initialConfig }: NewRunModalProps
                   )}
                 </AnimatePresence>
 
-            {/* BYOK warning for TEAM tier without API keys + inline drawer.
-                Tier-coherence: TEAM + ENTERPRISE are BYOK; if no keys are
-                configured the run cannot dispatch. (Old MAX tier was renamed
-                to TEAM in V141; this check now matches the live tier.) */}
+            {/* BYOK nudge for TEAM tier without API keys + inline drawer.
+                Tier-coherence: TEAM + ENTERPRISE are BYOK-first — runs will
+                dispatch on platform keys when none are configured (HYBRID
+                default), but BYOK is the price-justifying value prop so we
+                surface a soft prompt to add keys. (V165 dropped the old MAX
+                tier; legacy MAX subscriptions roll up to TEAM.) */}
             {user?.tier === 'TEAM' && !user?.hasOpenAiKey && !user?.hasAnthropicKey && !user?.hasGeminiKey && (
               <div className="flex items-start gap-2 p-3 rounded-sm bg-accent-amber/10 border border-accent-amber/30 text-sm text-secondary">
                 <AlertCircle className="h-4 w-4 text-accent-amber flex-shrink-0 mt-0.5" />
                 <span className="flex-1">
-                  Team plan requires your own API keys.
+                  Add your own provider keys to run unlimited on Team.
                 </span>
                 <button
                   type="button"

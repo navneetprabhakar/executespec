@@ -15,7 +15,7 @@ const STATUS_COLOR: Record<string, string> = {
 /**
  * Landing page for PROJECT view mode (v2.4.0). Lists projects the user has
  * access to; clicking a project opens its dashboard with Launches + PRs +
- * Overview tabs. ENTERPRISE / MAX tiers only — lower tiers bounce to /.
+ * Overview tabs. TEAM / ENTERPRISE tiers only — lower tiers bounce to /.
  */
 export default function ProjectsListPage() {
   const { canUseProjectMode } = useViewMode();
