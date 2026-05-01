@@ -7,6 +7,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import Toast from '@/components/shared/Toast';
 import { useUiStore } from '@/stores/useUiStore';
 import ChangePasswordModal from '@/components/auth/ChangePasswordModal';
+import ErrorBoundary from '@/components/shared/ErrorBoundary';
 
 export default function AppLayout() {
   useKeyboardShortcuts();
@@ -31,7 +32,14 @@ export default function AppLayout() {
               transition={{ duration: 0.15, ease: 'easeOut' }}
               className="h-full"
             >
-              <Outlet />
+              {/* Task 2 (2026-05-01 fix list): page-level error boundary so
+               *  a single broken page can't blank the entire app. The key
+               *  on AnimatePresence already remounts on route change, which
+               *  also resets the boundary so users aren't stuck on an
+               *  error fallback when they navigate away. */}
+              <ErrorBoundary region="v2-app">
+                <Outlet />
+              </ErrorBoundary>
             </motion.div>
           </AnimatePresence>
         </main>

@@ -1,10 +1,11 @@
-import { Outlet } from 'react-router-dom';
+import { Outlet, useLocation } from 'react-router-dom';
 import { useEffect } from 'react';
 import V3TopBar from './V3TopBar';
 import CmdK from './CmdK';
 import { FreeCapToast, FreeCapBlockingModal } from './FreeCapNudge';
 import UpgradeNudge from './UpgradeNudge';
 import { useV3Ui } from '../stores/useV3Ui';
+import ErrorBoundary from '@/components/shared/ErrorBoundary';
 import '../v3.css';
 
 /**
@@ -37,6 +38,7 @@ function CapModalMount() {
 }
 
 export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean }) {
+  const location = useLocation();
   useEffect(() => {
     const root = document.documentElement;
     // R-307 (Wave 6): just mark v3-active. Theme attribute stays under
@@ -64,7 +66,13 @@ export default function V3Shell({ withTopBar = true }: { withTopBar?: boolean })
           Bypass Blocks (Level A). tabIndex=-1 lets the link's target
           receive programmatic focus without making <main> a tab stop. */}
       <main id="main" tabIndex={-1} className="v3-main">
-        <Outlet />
+        {/* Task 2 (2026-05-01 fix list): page-level error boundary so a
+         *  single broken page can't blank the entire v3 surface. The
+         *  `key` on pathname remounts the boundary on route change so
+         *  navigating away from a failed page recovers cleanly. */}
+        <ErrorBoundary key={location.pathname} region="v3-shell">
+          <Outlet />
+        </ErrorBoundary>
       </main>
       <CmdK />
       <FreeCapToast />
