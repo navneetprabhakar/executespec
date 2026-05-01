@@ -95,7 +95,7 @@ export default function LoginPage() {
     <AuthShell>
       <div className="mb-6">
         <h2 className="text-2xl font-semibold text-primary">Welcome back</h2>
-        <p className="mt-1 text-sm text-muted">Sign in to ship a spec.</p>
+        <p className="mt-1 text-sm text-muted">Ship AI-written PRs you can actually merge.</p>
       </div>
 
       {/* OAuth — M-047 (Backlog): route through /api/auth/oauth2/init so the
@@ -198,18 +198,18 @@ export function AuthShell({ children }: { children: React.ReactNode }) {
         </Link>
 
         <div className="max-w-md space-y-6">
+          {/* R13 (2026-05-01 follow-up) — replaced "Sign in to ship a
+              spec." which used internal jargon ("spec" is our noun for
+              a requirements doc; first-time visitors don't know that).
+              The actual product line was already further down on the
+              page; promoted to H1 so the hero says what we do plainly.
+              "PRs" stays mixed-case as the brand pop-accent. */}
           <h1 className="text-3xl xl:text-4xl font-semibold text-primary leading-[1.1] tracking-tight">
-            Sign in to ship a <span className="text-transparent bg-clip-text" style={{ backgroundImage: 'linear-gradient(90deg, #fb923c, #f59e0b)' }}>spec.</span>
+            Ship AI-written <span className="text-transparent bg-clip-text" style={{ backgroundImage: 'linear-gradient(90deg, #ec4899, #f59e0b)' }}>PRs</span> you can actually merge.
           </h1>
-          {/* R-191 (post-cutover) — replaced "Don't prompt. Specify." +
-              the "spec-driven coding platform with autonomous CI/CD
-              validation" subtitle (v1-era jargon flagged by R-191) with
-              the v3-aligned "AI-written PRs you can actually merge"
-              framing. Hero gradient on "spec." preserved per the design
-              system's brand-pop-on-one-word treatment. */}
           <p className="text-base text-secondary leading-relaxed">
-            ExecuteSpec ships AI-written pull requests you can actually merge —
-            for one repo or for twenty. Plan, build, test, review, open a PR.
+            ExecuteSpec turns your specs into draft pull requests — across
+            one repo or twenty. Plan, build, test, review, open a PR.
           </p>
           <ul className="space-y-3 text-sm text-secondary">
             <Feature icon={<Zap className="h-4 w-4 text-accent-blue" />} title="Prototype in minutes">
