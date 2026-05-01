@@ -48,16 +48,33 @@
   /* ── Brand · Signal Blue + teal pair ─────────────────────────────────── */
   /* The ONLY brand colours. Used for primary CTA + brand mark. Not for
    * status, not for info, not for "active tab" — those have their own
-   * tokens. Keeps brand blue from going visual-noise. */
-  --c-signal-blue: #5B8DEF;
-  --c-signal-blue-hover: #7AA5F5;
+   * tokens. Keeps brand blue from going visual-noise.
+   *
+   * R7 (2026-05-01 follow-up) — darkened from #5B8DEF → #3B6FCC so
+   * white text on the primary CTA hits WCAG AA for body (≥4.5
+   * contrast; was 3.23 = AA-large only, fail for normal body). Hover
+   * goes DARKER not lighter (#2B5BB3) — the previous lighter hover
+   * #7AA5F5 dropped contrast to 2.46. Teal destination preserved for
+   * brand-gradient continuity. */
+  --c-signal-blue: #3B6FCC;
+  --c-signal-blue-hover: #2B5BB3;
   --c-signal-teal: #7AD1C8;
 
-  /* ── Pop · orange→amber ──────────────────────────────────────────────── */
+  /* ── Pop · marketing accent ─────────────────────────────────────────── */
   /* The brand-accent gradient. ONE word per page max — applied to the
    * italic accent in the hero headline only. Cribbed from Cursor's
-   * "gradient-as-occasion" discipline (see briefing §C). */
-  --c-pop-orange: #F97316;
+   * "gradient-as-occasion" discipline (see briefing §C).
+   *
+   * R10 (2026-05-01 follow-up) — retargeted from #F97316 → #EC4899
+   * (pink). The previous orange shared hue with --c-warning (#F59E0B)
+   * and --status-partial (#F5A524), so the login hero "spec." accent
+   * read as a warning to procurement evaluators. Pink is distinct
+   * from every status hue (success/warning/error/partial/info/
+   * executing/thinking/queued) and reads as a brand-occasion not a
+   * "something needs attention" cue. The variable name keeps "orange"
+   * so existing call-sites (--c-pop-amber gradient pair, UpgradeNudge
+   * accent) don't churn — this is a hex retarget, not a rename. */
+  --c-pop-orange: #EC4899;
   --c-pop-amber:  #FBBF24;
 
   /* ── Semantic states · distinct hue per group ────────────────────────── */
