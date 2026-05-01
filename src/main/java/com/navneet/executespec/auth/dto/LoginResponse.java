@@ -1,6 +1,3 @@
 package com.navneet.executespec.auth.dto;
 
-public record LoginResponse(
-        String accessToken,
-        UserDto user
-) {}
+public record LoginResponse(String accessToken, UserDto user) {}

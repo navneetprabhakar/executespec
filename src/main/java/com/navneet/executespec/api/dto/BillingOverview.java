@@ -14,13 +14,7 @@ public record BillingOverview(
     int runLimit,
     String gateway,
     int topupCredits,
-    List<RecentInvoice> recentInvoices
-) {
-    public record RecentInvoice(
-        String invoiceNumber,
-        double amount,
-        String currency,
-        String status,
-        Instant issuedAt
-    ) {}
+    List<RecentInvoice> recentInvoices) {
+  public record RecentInvoice(
+      String invoiceNumber, double amount, String currency, String status, Instant issuedAt) {}
 }

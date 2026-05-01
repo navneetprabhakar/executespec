@@ -1,6 +1,6 @@
-import { useEffect } from 'react';
-import { Navigate } from 'react-router-dom';
-import { useUiStore } from '@/stores/useUiStore';
+import {useEffect} from 'react';
+import {Navigate} from 'react-router-dom';
+import {useUiStore} from '@/stores/useUiStore';
 
 /**
  * Wave 2.2 — thin landing that reads {@code sandboxPrefill} (set by
@@ -14,7 +14,7 @@ import { useUiStore } from '@/stores/useUiStore';
  * just opens an empty NewRunModal.
  */
 export default function RunsNewLanding() {
-  const { setPendingNewRunConfig } = useUiStore();
+  const {setPendingNewRunConfig} = useUiStore();
 
   useEffect(() => {
     try {
@@ -23,7 +23,7 @@ export default function RunsNewLanding() {
       const payload = JSON.parse(raw);
       setPendingNewRunConfig({
         goal: payload?.spec ?? '',
-        executionMode: 'PROTOTYPE',  // onboarding: skip plan gate for instant feedback
+        executionMode: 'PROTOTYPE', // onboarding: skip plan gate for instant feedback
         provider: payload?.preferredProvider ?? undefined,
         projectId: payload?.projectId ?? undefined,
         repoMode: 'NONE',
@@ -34,5 +34,5 @@ export default function RunsNewLanding() {
     }
   }, [setPendingNewRunConfig]);
 
-  return <Navigate to="/" replace />;
+  return <Navigate to='/' replace />;
 }

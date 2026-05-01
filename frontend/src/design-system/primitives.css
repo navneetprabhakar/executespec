@@ -24,13 +24,13 @@
 
 :root {
   /* ── Surface ladder · graphite (dark default) · 8 steps ─────────────── */
-  --c-graphite-0: #0B0D10; /* page bg — was --geist-bg / --v3-bg / --bg */
-  --c-graphite-1: #11151B; /* lowest surface — was --v3-surface */
-  --c-graphite-2: #14171C; /* card — was --surface / --gray-100 */
-  --c-graphite-3: #1B1F26; /* card-elevated — was --surface-2 / --gray-200 */
-  --c-graphite-4: #242A33; /* surface border (subtle) — was --surface-border / --gray-300 */
-  --c-graphite-5: #333B46; /* surface divider — was --gray-400 */
-  --c-graphite-6: #4C5662; /* disabled fg — was --gray-500 */
+  --c-graphite-0: #0b0d10; /* page bg — was --geist-bg / --v3-bg / --bg */
+  --c-graphite-1: #11151b; /* lowest surface — was --v3-surface */
+  --c-graphite-2: #14171c; /* card — was --surface / --gray-100 */
+  --c-graphite-3: #1b1f26; /* card-elevated — was --surface-2 / --gray-200 */
+  --c-graphite-4: #242a33; /* surface border (subtle) — was --surface-border / --gray-300 */
+  --c-graphite-5: #333b46; /* surface divider — was --gray-400 */
+  --c-graphite-6: #4c5662; /* disabled fg — was --gray-500 */
   /* F-15 (2026-05-01 round-3 audit) — graphite-7 added for AA-passing
    * card boundaries. WCAG SC 1.4.11 requires non-text contrast ≥ 3.0
    * for UI components. graphite-5 (the previous --border-default value)
@@ -38,21 +38,21 @@
    * (#5E6771) hits 3.05 on graphite-2 (3.31 on graphite-1, 3.05+ on
    * graphite-3), which is the minimum to pass AA-non-text without
    * flipping cards into a "heavy boxy" aesthetic. */
-  --c-graphite-7: #5E6771; /* border-default (AA-non-text passing) */
-  --c-graphite-8: #7B8593; /* border-hover (AA-large body passing) */
+  --c-graphite-7: #5e6771; /* border-default (AA-non-text passing) */
+  --c-graphite-8: #7b8593; /* border-hover (AA-large body passing) */
 
   /* ── Surface ladder · paper (light) · 5 steps ───────────────────────── */
-  --c-paper-0: #FAFAFB;    /* page bg */
-  --c-paper-1: #F3F4F6;    /* card */
-  --c-paper-2: #E7E9EE;    /* card-elevated */
-  --c-paper-3: #D8DCE3;    /* border */
-  --c-paper-4: #BFC6D0;    /* border-strong */
+  --c-paper-0: #fafafb; /* page bg */
+  --c-paper-1: #f3f4f6; /* card */
+  --c-paper-2: #e7e9ee; /* card-elevated */
+  --c-paper-3: #d8dce3; /* border */
+  --c-paper-4: #bfc6d0; /* border-strong */
 
   /* ── Text · ink scale ────────────────────────────────────────────────── */
-  --c-ink-100: #ECEEF2; /* primary */
-  --c-ink-200: #C9D1DB; /* secondary */
-  --c-ink-300: #8A94A6; /* muted */
-  --c-ink-400: #5E6771; /* subtle, captions */
+  --c-ink-100: #eceef2; /* primary */
+  --c-ink-200: #c9d1db; /* secondary */
+  --c-ink-300: #8a94a6; /* muted */
+  --c-ink-400: #5e6771; /* subtle, captions */
 
   /* ── Brand · Signal Blue + teal pair ─────────────────────────────────── */
   /* The ONLY brand colours. Used for primary CTA + brand mark. Not for
@@ -65,9 +65,9 @@
    * goes DARKER not lighter (#2B5BB3) — the previous lighter hover
    * #7AA5F5 dropped contrast to 2.46. Teal destination preserved for
    * brand-gradient continuity. */
-  --c-signal-blue: #3B6FCC;
-  --c-signal-blue-hover: #2B5BB3;
-  --c-signal-teal: #7AD1C8;
+  --c-signal-blue: #3b6fcc;
+  --c-signal-blue-hover: #2b5bb3;
+  --c-signal-teal: #7ad1c8;
 
   /* F-16 (2026-05-01 round-3 audit) — body-text-on-dark variant. The
    * canonical --c-signal-blue (#3B6FCC) was tuned for contrast against
@@ -78,7 +78,7 @@
    * --text-sm (13px). White-text-on-this-blue would FAIL (~2.4), so it
    * is for color (text/icon) only — never for backgrounds with light
    * text on top. Buttons stay on --c-signal-blue. */
-  --c-signal-blue-on-dark: #7AA5F5;
+  --c-signal-blue-on-dark: #7aa5f5;
 
   /* ── Pop · marketing accent ─────────────────────────────────────────── */
   /* The brand-accent gradient. ONE word per page max — applied to the
@@ -94,18 +94,18 @@
    * "something needs attention" cue. The variable name keeps "orange"
    * so existing call-sites (--c-pop-amber gradient pair, UpgradeNudge
    * accent) don't churn — this is a hex retarget, not a rename. */
-  --c-pop-orange: #EC4899;
-  --c-pop-amber:  #FBBF24;
+  --c-pop-orange: #ec4899;
+  --c-pop-amber: #fbbf24;
 
   /* ── Semantic states · distinct hue per group ────────────────────────── */
   /* Never aliased to brand. Stripe-style discipline: brand is brand,
    * success/warning/error/info each get their own family. */
-  --c-success: #10B981; /* green */
-  --c-warning: #F59E0B; /* amber, distinct from --c-pop-amber by saturation */
-  --c-error:   #EF4444; /* red — v3 default; v2's softer #F26D6D was a drift */
-  --c-info:    #22D3EE; /* cyan-teal — distinct from brand blue per E.2 split */
+  --c-success: #10b981; /* green */
+  --c-warning: #f59e0b; /* amber, distinct from --c-pop-amber by saturation */
+  --c-error: #ef4444; /* red — v3 default; v2's softer #F26D6D was a drift */
+  --c-info: #22d3ee; /* cyan-teal — distinct from brand blue per E.2 split */
 
   /* ── Accent · for non-brand visual variety ───────────────────────────── */
-  --c-accent-purple: #A78BFA; /* harness, planner, thinking-state */
-  --c-accent-pink:   #EC4899; /* blocked status */
+  --c-accent-purple: #a78bfa; /* harness, planner, thinking-state */
+  --c-accent-pink: #ec4899; /* blocked status */
 }

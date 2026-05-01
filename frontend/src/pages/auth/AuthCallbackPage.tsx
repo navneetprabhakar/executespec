@@ -1,6 +1,6 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useEffect, useState} from 'react';
+import {useNavigate, useSearchParams} from 'react-router-dom';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
  * OAuth2 callback page — receives JWT tokens from the backend redirect
@@ -9,7 +9,7 @@ import { useAuthStore } from '@/stores/useAuthStore';
 export default function AuthCallbackPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { loadMe } = useAuthStore();
+  const {loadMe} = useAuthStore();
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -18,7 +18,7 @@ export default function AuthCallbackPage() {
 
     if (!token) {
       setError('Authentication failed. No token received.');
-      setTimeout(() => navigate('/login', { replace: true }), 2000);
+      setTimeout(() => navigate('/login', {replace: true}), 2000);
       return;
     }
 
@@ -56,29 +56,29 @@ export default function AuthCallbackPage() {
     // OAuth-init URL flow through to the backend's OAuth init endpoint
     // and back here as part of the state param (per OAuthInitController).
     const stashedSpec = searchParams.get('spec');
-    const homeUrl = stashedSpec
-      ? `/home?spec=${encodeURIComponent(stashedSpec)}`
-      : '/home';
-    loadMe().then(() => {
-      navigate(homeUrl, { replace: true });
-    }).catch(() => {
-      navigate(homeUrl, { replace: true });
-    });
+    const homeUrl = stashedSpec ? `/home?spec=${encodeURIComponent(stashedSpec)}` : '/home';
+    loadMe()
+      .then(() => {
+        navigate(homeUrl, {replace: true});
+      })
+      .catch(() => {
+        navigate(homeUrl, {replace: true});
+      });
   }, [searchParams, navigate, loadMe]);
 
   if (error) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-[#0f1117]">
-        <p className="text-accent-red">{error}</p>
+      <div className='flex min-h-screen items-center justify-center bg-[#0f1117]'>
+        <p className='text-accent-red'>{error}</p>
       </div>
     );
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-[#0f1117]">
-      <div className="text-center">
-        <div className="mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
-        <p className="text-muted">Completing sign in...</p>
+    <div className='flex min-h-screen items-center justify-center bg-[#0f1117]'>
+      <div className='text-center'>
+        <div className='mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent' />
+        <p className='text-muted'>Completing sign in...</p>
       </div>
     </div>
   );

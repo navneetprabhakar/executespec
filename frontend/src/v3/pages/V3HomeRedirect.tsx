@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
-import { Navigate } from 'react-router-dom';
-import { getProjects } from '@/lib/api';
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useEffect, useState} from 'react';
+import {Navigate} from 'react-router-dom';
+import {getProjects} from '@/lib/api';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
  * /home — silent dispatcher.
@@ -46,7 +46,9 @@ export default function V3HomeRedirect() {
         try {
           persona = sessionStorage.getItem('v3-signup-persona');
           if (persona) sessionStorage.removeItem('v3-signup-persona');
-        } catch (_) { /* private mode — ignore */ }
+        } catch (_) {
+          /* private mode — ignore */
+        }
 
         if (persona === 'enterprise') {
           setTarget('/trust');
@@ -76,7 +78,7 @@ export default function V3HomeRedirect() {
   if (target) return <Navigate to={target} replace />;
 
   return (
-    <div style={{ padding: 48, textAlign: 'center', color: 'var(--v3-text-muted)', fontSize: 12 }}>
+    <div style={{padding: 48, textAlign: 'center', color: 'var(--v3-text-muted)', fontSize: 12}}>
       Loading…
     </div>
   );

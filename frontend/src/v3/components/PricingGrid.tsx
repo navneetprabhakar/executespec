@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import {useState} from 'react';
+import {Link} from 'react-router-dom';
 import {
   PRICING_CARDS,
   ENTERPRISE_FOOTER,
@@ -43,7 +43,7 @@ export default function PricingGrid({
   showPeriodToggle = true,
 }: PricingGridProps) {
   const [currency, setCurrency] = useState<'USD' | 'INR'>(
-    initialCurrency ?? detectDefaultCurrency()
+    initialCurrency ?? detectDefaultCurrency(),
   );
   const [annual, setAnnual] = useState(false);
 
@@ -61,16 +61,16 @@ export default function PricingGrid({
         >
           <ToggleButton
             options={[
-              { value: 'USD', label: 'USD' },
-              { value: 'INR', label: 'INR' },
+              {value: 'USD', label: 'USD'},
+              {value: 'INR', label: 'INR'},
             ]}
             value={currency}
             onChange={(v) => setCurrency(v as 'USD' | 'INR')}
           />
           <ToggleButton
             options={[
-              { value: 'monthly', label: 'Monthly' },
-              { value: 'annual', label: `Annual · save ${ANNUAL_DISCOUNT_PCT}%` },
+              {value: 'monthly', label: 'Monthly'},
+              {value: 'annual', label: `Annual · save ${ANNUAL_DISCOUNT_PCT}%`},
             ]}
             value={annual ? 'annual' : 'monthly'}
             onChange={(v) => setAnnual(v === 'annual')}
@@ -115,17 +115,23 @@ export default function PricingGrid({
           alignItems: 'center',
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Pill tone="brand" size="sm">Enterprise</Pill>
-            <span style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)' }}>Custom</span>
+        <div style={{display: 'flex', flexDirection: 'column', gap: 6}}>
+          <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+            <Pill tone='brand' size='sm'>
+              Enterprise
+            </Pill>
+            <span style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)'}}>Custom</span>
           </div>
-          <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
-            For 50+ engineers. SAML/OIDC SSO, SOC 2 evidence, signed DPA, dedicated infrastructure region, audit-log retention, custom MSA. Procurement docs at{' '}
-            <Link to="/trust" style={{ color: 'var(--v3-brand)', textDecoration: 'none' }}>/trust</Link>.
+          <p style={{margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55}}>
+            For 50+ engineers. SAML/OIDC SSO, SOC 2 evidence, signed DPA, dedicated infrastructure
+            region, audit-log retention, custom MSA. Procurement docs at{' '}
+            <Link to='/trust' style={{color: 'var(--v3-brand)', textDecoration: 'none'}}>
+              /trust
+            </Link>
+            .
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+        <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end'}}>
           {/*
             R-318 (Wave 7) — Enterprise demo CTA. F2 EM Mike named the
             "Custom · Contact us" copy as a leak; he wants to self-serve
@@ -137,7 +143,7 @@ export default function PricingGrid({
             is shorter even on the email path.
           */}
           <a
-            href="mailto:admin@executespec.ai?subject=Enterprise%20demo%20request%20%E2%80%94%20%5Borg%5D&body=Hi%20%E2%80%94%20I%27d%20like%20a%2030-min%20demo%20of%20ExecuteSpec%20Enterprise.%0A%0AOrg%3A%20%5Bcompany%20name%5D%0ATeam%20size%3A%20%5BN%20engineers%5D%0AWhat%20I%20want%20to%20validate%3A%20%5Bmerge-gate%20%2F%20multi-repo%20Execution%20View%20%2F%20SSO%20%2F%20audit%20%2F%20BYOK%5D%0ATime%20zone%3A%20%5Bzone%5D%0A%0AThanks!"
+            href='mailto:admin@executespec.ai?subject=Enterprise%20demo%20request%20%E2%80%94%20%5Borg%5D&body=Hi%20%E2%80%94%20I%27d%20like%20a%2030-min%20demo%20of%20ExecuteSpec%20Enterprise.%0A%0AOrg%3A%20%5Bcompany%20name%5D%0ATeam%20size%3A%20%5BN%20engineers%5D%0AWhat%20I%20want%20to%20validate%3A%20%5Bmerge-gate%20%2F%20multi-repo%20Execution%20View%20%2F%20SSO%20%2F%20audit%20%2F%20BYOK%5D%0ATime%20zone%3A%20%5Bzone%5D%0A%0AThanks!'
             style={{
               padding: '8px 16px',
               fontSize: 13,
@@ -191,9 +197,7 @@ function Card({
 }) {
   const baseAmount = currency === 'USD' ? card.priceUsd : card.priceInr;
   const displayAmount =
-    annual && baseAmount && card.tier !== 'FREE'
-      ? annualPriceUsd(baseAmount)
-      : baseAmount;
+    annual && baseAmount && card.tier !== 'FREE' ? annualPriceUsd(baseAmount) : baseAmount;
   const price = formatPrice(displayAmount, currency);
   const unit = annual && card.tier !== 'FREE' ? '/ year' : card.priceUnit;
 
@@ -233,7 +237,7 @@ function Card({
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+      <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8}}>
         <h3
           style={{
             margin: 0,
@@ -245,7 +249,7 @@ function Card({
           {card.name}
         </h3>
         {isCurrent && (
-          <Pill tone="ok" size="sm">
+          <Pill tone='ok' size='sm'>
             Current
           </Pill>
         )}
@@ -261,7 +265,7 @@ function Card({
         {card.subhead}
       </p>
 
-      <div style={{ marginBottom: 12 }}>
+      <div style={{marginBottom: 12}}>
         <span
           style={{
             fontSize: 26,
@@ -272,9 +276,7 @@ function Card({
           {price}
         </span>
         {unit && (
-          <span style={{ marginLeft: 4, fontSize: 12, color: 'var(--v3-text-muted)' }}>
-            {unit}
-          </span>
+          <span style={{marginLeft: 4, fontSize: 12, color: 'var(--v3-text-muted)'}}>{unit}</span>
         )}
       </div>
 
@@ -298,14 +300,14 @@ function Card({
               alignItems: 'baseline',
             }}
           >
-            <span style={{ color: 'var(--v3-success)', flexShrink: 0 }}>✓</span>
+            <span style={{color: 'var(--v3-success)', flexShrink: 0}}>✓</span>
             <span>{b}</span>
           </li>
         ))}
       </ul>
 
       <button
-        type="button"
+        type='button'
         onClick={onPick}
         disabled={isCurrent}
         style={{
@@ -315,16 +317,14 @@ function Card({
           background: isCurrent
             ? 'var(--v3-surface-elevated)'
             : card.badge === 'Most popular'
-            ? 'var(--v3-brand)'
-            : 'transparent',
+              ? 'var(--v3-brand)'
+              : 'transparent',
           color: isCurrent
             ? 'var(--v3-text-subtle)'
             : card.badge === 'Most popular'
-            ? 'var(--v3-text-on-brand)'
-            : 'var(--v3-text)',
-          border: card.badge === 'Most popular'
-            ? 'none'
-            : '1px solid var(--v3-border-strong)',
+              ? 'var(--v3-text-on-brand)'
+              : 'var(--v3-text)',
+          border: card.badge === 'Most popular' ? 'none' : '1px solid var(--v3-border-strong)',
           borderRadius: 6,
           cursor: isCurrent ? 'not-allowed' : 'pointer',
           fontFamily: 'inherit',
@@ -343,13 +343,13 @@ function ToggleButton({
   value,
   onChange,
 }: {
-  options: { value: string; label: string }[];
+  options: {value: string; label: string}[];
   value: string;
   onChange: (v: string) => void;
 }) {
   return (
     <div
-      role="group"
+      role='group'
       style={{
         display: 'inline-flex',
         background: 'var(--v3-surface)',
@@ -361,7 +361,7 @@ function ToggleButton({
       {options.map((o) => (
         <button
           key={o.value}
-          type="button"
+          type='button'
           onClick={() => onChange(o.value)}
           style={{
             padding: '4px 12px',

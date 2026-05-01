@@ -1,11 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
-import {
-  getLibraryFacets,
-  listLibrary,
-  type LibraryFacets,
-  type ReadymadeListItem,
-} from '@/lib/api';
+import {useEffect, useMemo, useState} from 'react';
+import {Link} from 'react-router-dom';
+import {getLibraryFacets, listLibrary, type LibraryFacets, type ReadymadeListItem} from '@/lib/api';
 
 /**
  * R-330 — Readymade Solutions gallery.
@@ -35,10 +30,7 @@ export default function V3Library() {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    Promise.all([
-      listLibrary({}),
-      getLibraryFacets().catch(() => null),
-    ])
+    Promise.all([listLibrary({}), getLibraryFacets().catch(() => null)])
       .then(([list, facetData]) => {
         if (cancelled) return;
         setItems(list ?? []);
@@ -58,7 +50,7 @@ export default function V3Library() {
 
   const macroGroups = useMemo(() => {
     if (!facets) return [];
-    return Object.entries(facets.macroGroups).map(([k, n]) => ({ key: k, count: n }));
+    return Object.entries(facets.macroGroups).map(([k, n]) => ({key: k, count: n}));
   }, [facets]);
 
   const categories = useMemo(() => {
@@ -66,9 +58,11 @@ export default function V3Library() {
       // Fallback: derive from items in case facets endpoint failed
       const set = new Set<string>();
       items.forEach((it) => set.add(it.solution.category));
-      return Array.from(set).sort().map((c) => ({ key: c, count: 0 }));
+      return Array.from(set)
+        .sort()
+        .map((c) => ({key: c, count: 0}));
     }
-    return Object.entries(facets.categories).map(([k, n]) => ({ key: k, count: n }));
+    return Object.entries(facets.categories).map(([k, n]) => ({key: k, count: n}));
   }, [facets, items]);
 
   const filtered = useMemo(() => {
@@ -87,44 +81,46 @@ export default function V3Library() {
   }, [items, search, tierFilter, categoryFilter, macroFilter]);
 
   return (
-    <div style={{ padding: 16, paddingBottom: 48 }}>
+    <div style={{padding: 16, paddingBottom: 48}}>
       {/* Header */}
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 24, fontWeight: 700, color: 'var(--v3-text)', margin: 0 }}>
-          Library
-        </h1>
-        <p style={{ fontSize: 13, color: 'var(--v3-text-subtle)', margin: '6px 0 0', maxWidth: 700 }}>
-          Pluggable solutions that adapt to your stack.  Sign-in, payments, notifications, data,
-          AI — pick a card → fill in the slots → ship it as a PR.  Free starters for everyone,
-          premium catalog for paid tiers.
+      <div style={{marginBottom: 20}}>
+        <h1 style={{fontSize: 24, fontWeight: 700, color: 'var(--v3-text)', margin: 0}}>Library</h1>
+        <p style={{fontSize: 13, color: 'var(--v3-text-subtle)', margin: '6px 0 0', maxWidth: 700}}>
+          Pluggable solutions that adapt to your stack. Sign-in, payments, notifications, data, AI —
+          pick a card → fill in the slots → ship it as a PR. Free starters for everyone, premium
+          catalog for paid tiers.
         </p>
       </div>
 
       {/* Macro-group tabs (top-of-page) */}
       {macroGroups.length > 0 && (
-        <div style={{ display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap' }}>
-          <button type="button" onClick={() => setMacroFilter('')} style={macroPill(macroFilter === '')}>
+        <div style={{display: 'flex', gap: 6, marginBottom: 12, flexWrap: 'wrap'}}>
+          <button
+            type='button'
+            onClick={() => setMacroFilter('')}
+            style={macroPill(macroFilter === '')}
+          >
             All
           </button>
-          {macroGroups.map(({ key, count }) => (
+          {macroGroups.map(({key, count}) => (
             <button
               key={key}
-              type="button"
+              type='button'
               onClick={() => setMacroFilter(macroFilter === key ? '' : key)}
               style={macroPill(macroFilter === key)}
             >
-              {humanize(key)} <span style={{ opacity: 0.55, marginLeft: 4 }}>{count}</span>
+              {humanize(key)} <span style={{opacity: 0.55, marginLeft: 4}}>{count}</span>
             </button>
           ))}
         </div>
       )}
 
       {/* Filters row */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
+      <div style={{display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap'}}>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="Search solutions…"
+          placeholder='Search solutions…'
           style={{
             flex: '1 1 280px',
             padding: '8px 12px',
@@ -142,9 +138,11 @@ export default function V3Library() {
           onChange={(e) => setCategoryFilter(e.target.value)}
           style={selectStyle}
         >
-          <option value="">All categories</option>
-          {categories.map(({ key }) => (
-            <option key={key} value={key}>{humanize(key)}</option>
+          <option value=''>All categories</option>
+          {categories.map(({key}) => (
+            <option key={key} value={key}>
+              {humanize(key)}
+            </option>
           ))}
         </select>
         <select
@@ -152,23 +150,23 @@ export default function V3Library() {
           onChange={(e) => setTierFilter(e.target.value)}
           style={selectStyle}
         >
-          <option value="">All tiers</option>
-          <option value="FREE">Free</option>
-          <option value="PRO">Pro</option>
-          <option value="TEAM">Team</option>
-          <option value="ENTERPRISE">Enterprise</option>
+          <option value=''>All tiers</option>
+          <option value='FREE'>Free</option>
+          <option value='PRO'>Pro</option>
+          <option value='TEAM'>Team</option>
+          <option value='ENTERPRISE'>Enterprise</option>
         </select>
       </div>
 
       {/* Body */}
       {loading && (
-        <div style={{ padding: 24, textAlign: 'center', color: 'var(--v3-text-subtle)', fontSize: 13 }}>
+        <div
+          style={{padding: 24, textAlign: 'center', color: 'var(--v3-text-subtle)', fontSize: 13}}
+        >
           Loading library…
         </div>
       )}
-      {error && !loading && (
-        <div style={errorBox}>{error}</div>
-      )}
+      {error && !loading && <div style={errorBox}>{error}</div>}
       {!loading && !error && filtered.length === 0 && (
         <div style={emptyState}>
           No solutions match your filters. {search && `(searching for "${search}")`}
@@ -176,19 +174,23 @@ export default function V3Library() {
       )}
 
       {!loading && !error && filtered.length > 0 && (
-        <div style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
-          gap: 12,
-        }}>
-          {filtered.map((item) => <SolutionCard key={item.solution.slug} item={item} />)}
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+            gap: 12,
+          }}
+        >
+          {filtered.map((item) => (
+            <SolutionCard key={item.solution.slug} item={item} />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function SolutionCard({ item }: { item: ReadymadeListItem }) {
+function SolutionCard({item}: {item: ReadymadeListItem}) {
   const s = item.solution;
   const credits = formatCreditRange(s.estCreditsLow, s.estCreditsHigh);
   const files = formatFileRange(s.estFilesLow, s.estFilesHigh);
@@ -208,8 +210,8 @@ function SolutionCard({ item }: { item: ReadymadeListItem }) {
         position: 'relative',
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between' }}>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}>{s.name}</div>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, justifyContent: 'space-between'}}>
+        <div style={{fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>{s.name}</div>
         {item.locked && (
           <span title={`Upgrade to ${item.unlockTier ?? 'PRO'} to use`} style={lockChipStyle}>
             🔒 {item.unlockTier ?? 'PRO'}
@@ -217,13 +219,13 @@ function SolutionCard({ item }: { item: ReadymadeListItem }) {
         )}
       </div>
       {s.tagline && (
-        <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)', lineHeight: 1.5 }}>
+        <p style={{margin: 0, fontSize: 12, color: 'var(--v3-text-subtle)', lineHeight: 1.5}}>
           {s.tagline}
         </p>
       )}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4 }}>
+      <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 4}}>
         <span style={categoryChip}>{humanize(s.category)}</span>
-        <span style={{ ...chipStyle, color: 'var(--v3-text-subtle)' }}>{s.kind.toLowerCase()}</span>
+        <span style={{...chipStyle, color: 'var(--v3-text-subtle)'}}>{s.kind.toLowerCase()}</span>
         {credits && <span style={chipStyle}>{credits}</span>}
         {files && <span style={chipStyle}>{files}</span>}
       </div>
@@ -232,13 +234,13 @@ function SolutionCard({ item }: { item: ReadymadeListItem }) {
 
   if (item.locked) {
     return (
-      <Link to="/pricing" style={{ textDecoration: 'none' }}>
+      <Link to='/pricing' style={{textDecoration: 'none'}}>
         {inner}
       </Link>
     );
   }
   return (
-    <Link to={`/library/${s.slug}`} style={{ textDecoration: 'none' }}>
+    <Link to={`/library/${s.slug}`} style={{textDecoration: 'none'}}>
       {inner}
     </Link>
   );

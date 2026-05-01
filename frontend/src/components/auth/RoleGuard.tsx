@@ -1,4 +1,4 @@
-import { useAuthStore } from '@/stores/useAuthStore';
+import {useAuthStore} from '@/stores/useAuthStore';
 import AccessDenied from '@/components/shared/AccessDenied';
 
 interface Props {
@@ -22,28 +22,30 @@ interface Props {
  * R-311 wired into AuditPage — RoleGuard now uses the same component for
  * the role-gated front-of-page path.
  */
-export default function RoleGuard({ requireSuperAdmin, requireOrgAdmin, featureName, children, fallback }: Props) {
-  const { user } = useAuthStore();
+export default function RoleGuard({
+  requireSuperAdmin,
+  requireOrgAdmin,
+  featureName,
+  children,
+  fallback,
+}: Props) {
+  const {user} = useAuthStore();
 
   if (!user) return null;
 
   if (requireSuperAdmin && user.globalRole !== 'SUPER_ADMIN') {
-    return fallback ? <>{fallback}</> : (
-      <AccessDenied
-        feature={featureName ?? 'Admin console'}
-        requiredRole="SUPER_ADMIN"
-      />
+    return fallback ? (
+      <>{fallback}</>
+    ) : (
+      <AccessDenied feature={featureName ?? 'Admin console'} requiredRole='SUPER_ADMIN' />
     );
   }
 
-  if (requireOrgAdmin &&
-      user.globalRole !== 'SUPER_ADMIN' &&
-      user.orgRole !== 'ORG_ADMIN') {
-    return fallback ? <>{fallback}</> : (
-      <AccessDenied
-        feature={featureName ?? 'This page'}
-        requiredRole="ORG_ADMIN"
-      />
+  if (requireOrgAdmin && user.globalRole !== 'SUPER_ADMIN' && user.orgRole !== 'ORG_ADMIN') {
+    return fallback ? (
+      <>{fallback}</>
+    ) : (
+      <AccessDenied feature={featureName ?? 'This page'} requiredRole='ORG_ADMIN' />
     );
   }
 

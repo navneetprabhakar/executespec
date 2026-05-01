@@ -1,5 +1,5 @@
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
+import {clsx, type ClassValue} from 'clsx';
+import {twMerge} from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -46,17 +46,16 @@ export function truncate(s: string | null | undefined, n: number): string {
  */
 export function describeRunStatus(
   status: string,
-  tasks?: { status: string; title: string }[],
+  tasks?: {status: string; title: string}[],
   failureReason?: string | null,
   executionMode?: string | null,
 ): string {
   const total = tasks?.length ?? 0;
-  const completed = tasks?.filter(t => t.status === 'COMPLETE').length ?? 0;
-  const failed = tasks?.filter(t => t.status === 'FAILED').length ?? 0;
-  const retryable = tasks?.filter(t =>
-    ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status)
-  ).length ?? 0;
-  const working = tasks?.find(t => t.status === 'IN_PROGRESS' || t.status === 'WORKING');
+  const completed = tasks?.filter((t) => t.status === 'COMPLETE').length ?? 0;
+  const failed = tasks?.filter((t) => t.status === 'FAILED').length ?? 0;
+  const retryable =
+    tasks?.filter((t) => ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status)).length ?? 0;
+  const working = tasks?.find((t) => t.status === 'IN_PROGRESS' || t.status === 'WORKING');
 
   switch (status) {
     case 'QUEUED':
@@ -91,7 +90,8 @@ export function describeRunStatus(
       return 'Code generated';
     case 'FAILED':
       if (failureReason) return truncate(failureReason, 50);
-      if (retryable > 0 && total > 0) return `Failed — ${retryable} task${retryable !== 1 ? 's' : ''} can be retried`;
+      if (retryable > 0 && total > 0)
+        return `Failed — ${retryable} task${retryable !== 1 ? 's' : ''} can be retried`;
       if (failed > 0 && total > 0) return `Failed — ${failed}/${total} tasks errored`;
       return 'Run failed';
     case 'PARTIAL':
@@ -99,7 +99,8 @@ export function describeRunStatus(
       // sidebar doesn't show "0/0 tasks completed" on a PARTIAL run whose
       // RunSummary doesn't include the tasks array.
       if (total === 0) return 'Some tasks need manual retry';
-      if (retryable > 0) return `${completed}/${total} tasks done — ${retryable} ${retryable === 1 ? 'needs' : 'need'} manual retry`;
+      if (retryable > 0)
+        return `${completed}/${total} tasks done — ${retryable} ${retryable === 1 ? 'needs' : 'need'} manual retry`;
       return `${completed}/${total} tasks completed`;
     case 'PAUSED':
       if (total > 0) return `Paused — ${completed}/${total} tasks done`;

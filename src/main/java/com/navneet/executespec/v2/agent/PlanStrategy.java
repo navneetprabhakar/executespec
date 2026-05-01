@@ -1,9 +1,8 @@
 package com.navneet.executespec.v2.agent;
 
 /**
- * Hierarchical-planner strategy. Produced by {@link SmartClassifierAgent}
- * and persisted on {@code pipeline_run.plan_strategy}. Controls which
- * planner phases run downstream:
+ * Hierarchical-planner strategy. Produced by {@link SmartClassifierAgent} and persisted on {@code
+ * pipeline_run.plan_strategy}. Controls which planner phases run downstream:
  *
  * <pre>
  *   SINGLE_SHOT — synthesised plan, no LLM
@@ -16,15 +15,18 @@ package com.navneet.executespec.v2.agent;
  * See {@code docs/hierarchical-planner-plan.md}.
  */
 public enum PlanStrategy {
-    SINGLE_SHOT,
-    SMALL,
-    MEDIUM,
-    LARGE,
-    LEGACY;
+  SINGLE_SHOT,
+  SMALL,
+  MEDIUM,
+  LARGE,
+  LEGACY;
 
-    public static PlanStrategy fromStringSafe(String s) {
-        if (s == null) return null;
-        try { return PlanStrategy.valueOf(s.trim().toUpperCase()); }
-        catch (IllegalArgumentException e) { return null; }
+  public static PlanStrategy fromStringSafe(String s) {
+    if (s == null) return null;
+    try {
+      return PlanStrategy.valueOf(s.trim().toUpperCase());
+    } catch (IllegalArgumentException e) {
+      return null;
     }
+  }
 }

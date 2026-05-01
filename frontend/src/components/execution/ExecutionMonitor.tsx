@@ -1,12 +1,12 @@
-import { useState } from 'react';
-import { useExecutionStore } from '@/stores/useExecutionStore';
-import { executionApi } from '@/lib/execution-api';
+import {useState} from 'react';
+import {useExecutionStore} from '@/stores/useExecutionStore';
+import {executionApi} from '@/lib/execution-api';
 import SolutionSection from './SolutionSection';
 import SolutionLogStream from './SolutionLogStream';
 import FailureDecisionModal from './FailureDecisionModal';
 
-export default function ExecutionMonitor({ executionId }: { executionId: string }) {
-  const { executionRun, showLogs, toggleLogs, abort } = useExecutionStore();
+export default function ExecutionMonitor({executionId}: {executionId: string}) {
+  const {executionRun, showLogs, toggleLogs, abort} = useExecutionStore();
   const [failureOpen, setFailureOpen] = useState(true);
   const [resuming, setResuming] = useState(false);
   const [resumeStatus, setResumeStatus] = useState<string | null>(null);
@@ -19,44 +19,49 @@ export default function ExecutionMonitor({ executionId }: { executionId: string 
   const paused = executionRun.status === 'PAUSED' && failed && failureOpen;
 
   return (
-    <div className="space-y-3">
+    <div className='space-y-3'>
       <div>
-        <div className="flex items-center justify-between text-xs text-muted mb-1">
+        <div className='flex items-center justify-between text-xs text-muted mb-1'>
           <span>Progress</span>
-          <span className="font-mono tabular-nums">{done}/{solutions.length} · {pct}%</span>
+          <span className='font-mono tabular-nums'>
+            {done}/{solutions.length} · {pct}%
+          </span>
         </div>
-        <div className="w-full h-1.5 bg-[var(--gray-200)] rounded-full">
-          <div className="h-1.5 bg-accent-blue rounded-full" style={{ width: `${pct}%` }} />
+        <div className='w-full h-1.5 bg-[var(--gray-200)] rounded-full'>
+          <div className='h-1.5 bg-accent-blue rounded-full' style={{width: `${pct}%`}} />
         </div>
       </div>
 
-      <div className="flex items-center gap-2 text-xs">
-        <button onClick={toggleLogs} className="text-muted hover:text-primary">
+      <div className='flex items-center gap-2 text-xs'>
+        <button onClick={toggleLogs} className='text-muted hover:text-primary'>
           {showLogs ? 'Hide' : 'Show'} log stream
         </button>
         <button
           onClick={async () => {
-            setResuming(true); setResumeStatus(null);
+            setResuming(true);
+            setResumeStatus(null);
             try {
               await executionApi.resume(executionId);
               setResumeStatus('Re-kicked execution');
             } catch (e) {
               setResumeStatus(`Resume failed: ${e instanceof Error ? e.message : String(e)}`);
-            } finally { setResuming(false); }
+            } finally {
+              setResuming(false);
+            }
           }}
           disabled={resuming}
-          className="text-accent-blue hover:underline ml-auto disabled:opacity-50"
-          title="Re-trigger execution from the Plan step without redoing Setup/Analysis"
+          className='text-accent-blue hover:underline ml-auto disabled:opacity-50'
+          title='Re-trigger execution from the Plan step without redoing Setup/Analysis'
         >
           {resuming ? 'Resuming…' : 'Resume'}
         </button>
-        <button onClick={() => abort(executionId)} className="text-accent-red hover:underline">
+        <button onClick={() => abort(executionId)} className='text-accent-red hover:underline'>
           Abort
         </button>
       </div>
-      {resumeStatus && <div className="text-[11px] text-muted">{resumeStatus}</div>}
+      {resumeStatus && <div className='text-[11px] text-muted'>{resumeStatus}</div>}
 
-      <div className="space-y-1.5">
+      <div className='space-y-1.5'>
         {solutions.map((s) => (
           <SolutionSection key={s.id} executionId={executionId} solution={s} />
         ))}
@@ -65,7 +70,11 @@ export default function ExecutionMonitor({ executionId }: { executionId: string 
       {showLogs && <SolutionLogStream />}
 
       {paused && failed && (
-        <FailureDecisionModal executionId={executionId} failed={failed} onClose={() => setFailureOpen(false)} />
+        <FailureDecisionModal
+          executionId={executionId}
+          failed={failed}
+          onClose={() => setFailureOpen(false)}
+        />
       )}
     </div>
   );

@@ -10,16 +10,16 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class TestExecutionSummary {
-    private int totalTests;
-    private int passed;
-    private int failed;
-    private int skipped;
-    private int errors;
-    private long executionDurationMs;
-    private boolean allConnectionRefused;
+  private int totalTests;
+  private int passed;
+  private int failed;
+  private int skipped;
+  private int errors;
+  private long executionDurationMs;
+  private boolean allConnectionRefused;
 
-    /** Empty summary for pipeline failures where no tests were executed. */
-    public static TestExecutionSummary empty() {
-        return TestExecutionSummary.builder().build();
-    }
+  /** Empty summary for pipeline failures where no tests were executed. */
+  public static TestExecutionSummary empty() {
+    return TestExecutionSummary.builder().build();
+  }
 }

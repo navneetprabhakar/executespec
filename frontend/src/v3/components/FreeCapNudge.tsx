@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { getV3Entitlements, sendV3Referral, type V3Entitlements } from '../lib/api';
-import { useV3Ui } from '../stores/useV3Ui';
-import { trackV3, V3_EVENTS } from '../lib/events';
+import {useEffect, useState} from 'react';
+import {useNavigate} from 'react-router-dom';
+import {getV3Entitlements, sendV3Referral, type V3Entitlements} from '../lib/api';
+import {useV3Ui} from '../stores/useV3Ui';
+import {trackV3, V3_EVENTS} from '../lib/events';
 
 /**
  * R-163 — free-cap upgrade-or-invite nudge.
@@ -70,11 +70,11 @@ export function FreeCapToast() {
   const message =
     cap.balance === 1
       ? '1 free run left — invite a friend for +5 or upgrade to Pro for unlimited.'
-      : 'You\'re out of free runs — upgrade to Pro or invite a friend for +5.';
+      : "You're out of free runs — upgrade to Pro or invite a friend for +5.";
 
   return (
     <div
-      role="status"
+      role='status'
       style={{
         position: 'fixed',
         bottom: 24,
@@ -94,11 +94,11 @@ export function FreeCapToast() {
         boxShadow: '0 12px 32px rgba(0,0,0,0.45)',
       }}
     >
-      <span style={{ flex: 1, lineHeight: 1.5 }}>{message}</span>
+      <span style={{flex: 1, lineHeight: 1.5}}>{message}</span>
       <button
-        type="button"
+        type='button'
         onClick={() => {
-          trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: 'FREE', toTier: 'PRO', source: 'cap_toast' });
+          trackV3(V3_EVENTS.TIER_UPGRADED, {fromTier: 'FREE', toTier: 'PRO', source: 'cap_toast'});
           navigate('/billing');
         }}
         style={{
@@ -116,9 +116,9 @@ export function FreeCapToast() {
         Upgrade
       </button>
       <button
-        type="button"
+        type='button'
         onClick={dismiss}
-        aria-label="Dismiss"
+        aria-label='Dismiss'
         style={{
           padding: '4px 6px',
           background: 'transparent',
@@ -141,7 +141,7 @@ interface FreeCapBlockingModalProps {
   onClose: () => void;
 }
 
-export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProps) {
+export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps) {
   const cap = useFreeCap();
   const navigate = useNavigate();
   const [inviteEmail, setInviteEmail] = useState('');
@@ -157,7 +157,7 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
   if (!open || !cap) return null;
 
   function onUpgrade() {
-    trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: 'FREE', toTier: 'PRO', source: 'cap_modal' });
+    trackV3(V3_EVENTS.TIER_UPGRADED, {fromTier: 'FREE', toTier: 'PRO', source: 'cap_modal'});
     navigate('/billing');
     onClose();
   }
@@ -182,9 +182,9 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      aria-label="Free runs exhausted"
+      role='dialog'
+      aria-modal='true'
+      aria-label='Free runs exhausted'
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -218,13 +218,13 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
         >
           That was your last free run.
         </h2>
-        <p style={{ margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55 }}>
-          Get unlimited runs for $20/month — cancel any time. Or invite a
-          friend; you both get +5 runs.
+        <p style={{margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55}}>
+          Get unlimited runs for $20/month — cancel any time. Or invite a friend; you both get +5
+          runs.
         </p>
 
         <button
-          type="button"
+          type='button'
           onClick={onUpgrade}
           style={{
             width: '100%',
@@ -253,20 +253,20 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
             fontSize: 10.5,
           }}
         >
-          <div style={{ flex: 1, height: 1, background: 'var(--v3-border)' }} />
+          <div style={{flex: 1, height: 1, background: 'var(--v3-border)'}} />
           <span>or invite a friend</span>
-          <div style={{ flex: 1, height: 1, background: 'var(--v3-border)' }} />
+          <div style={{flex: 1, height: 1, background: 'var(--v3-border)'}} />
         </div>
 
         {!inviteSent ? (
           <>
-            <form onSubmit={onInvite} style={{ display: 'flex', gap: 6 }}>
+            <form onSubmit={onInvite} style={{display: 'flex', gap: 6}}>
               <input
-                type="email"
-                autoComplete="email"
+                type='email'
+                autoComplete='email'
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
-                placeholder="friend@example.com"
+                placeholder='friend@example.com'
                 style={{
                   flex: 1,
                   padding: '8px 10px',
@@ -280,11 +280,13 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
                 }}
               />
               <button
-                type="submit"
+                type='submit'
                 disabled={!inviteEmail.trim()}
                 style={{
                   padding: '8px 14px',
-                  background: inviteEmail.trim() ? 'var(--v3-surface-elevated)' : 'var(--v3-surface)',
+                  background: inviteEmail.trim()
+                    ? 'var(--v3-surface-elevated)'
+                    : 'var(--v3-surface)',
                   color: inviteEmail.trim() ? 'var(--v3-text)' : 'var(--v3-text-subtle)',
                   border: '1px solid var(--v3-border)',
                   borderRadius: 6,
@@ -298,21 +300,28 @@ export function FreeCapBlockingModal({ open, onClose }: FreeCapBlockingModalProp
               </button>
             </form>
             {inviteError && (
-              <p style={{ margin: '6px 0 0', fontSize: 11, color: 'var(--v3-error)' }}>
+              <p style={{margin: '6px 0 0', fontSize: 11, color: 'var(--v3-error)'}}>
                 {inviteError}
               </p>
             )}
           </>
         ) : (
-          <p style={{ margin: 0, fontSize: 12, color: 'var(--v3-success)' }}>
+          <p style={{margin: 0, fontSize: 12, color: 'var(--v3-success)'}}>
             ✓ Invite sent. You'll see +5 runs once they ship their first run.
           </p>
         )}
 
-        <p style={{ margin: '14px 0 0', fontSize: 10.5, color: 'var(--v3-text-subtle)', textAlign: 'center' }}>
+        <p
+          style={{
+            margin: '14px 0 0',
+            fontSize: 10.5,
+            color: 'var(--v3-text-subtle)',
+            textAlign: 'center',
+          }}
+        >
           Cap is {cap.cap} lifetime runs (5 base + 4 invites × 5).{' '}
           <button
-            type="button"
+            type='button'
             onClick={onClose}
             style={{
               background: 'transparent',

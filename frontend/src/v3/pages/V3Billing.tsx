@@ -1,17 +1,12 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { getV3Entitlements, type V3Entitlements } from '../lib/api';
+import {useEffect, useState} from 'react';
+import {Link} from 'react-router-dom';
+import {getV3Entitlements, type V3Entitlements} from '../lib/api';
 import PricingGrid from '../components/PricingGrid';
 import Pill from './../components/Pill';
-import { trackV3, V3_EVENTS } from '../lib/events';
-import type { TierKey } from '../lib/pricing';
-import { useAuthStore } from '@/stores/useAuthStore';
-import {
-  canonicalDisplayName,
-  canonicalTier,
-  formatRunUsage,
-  isPaidTier,
-} from '../lib/tierDisplay';
+import {trackV3, V3_EVENTS} from '../lib/events';
+import type {TierKey} from '../lib/pricing';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {canonicalDisplayName, canonicalTier, formatRunUsage, isPaidTier} from '../lib/tierDisplay';
 
 /**
  * R-141 — billing & plan, v3.
@@ -60,7 +55,7 @@ export default function V3Billing() {
       window.location.href = '/trust';
       return;
     }
-    trackV3(V3_EVENTS.TIER_UPGRADED, { fromTier: ent?.tierKey, toTier: tier });
+    trackV3(V3_EVENTS.TIER_UPGRADED, {fromTier: ent?.tierKey, toTier: tier});
     // Wave 2 follow-up: real Stripe checkout. Today the click logs the
     // intent + sends the user to v2's /plans page where existing
     // checkout still works.
@@ -68,19 +63,19 @@ export default function V3Billing() {
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32 }}>
+    <div style={{display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 32}}>
       <div>
-        <h1 style={{ fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0 }}>
+        <h1 style={{fontSize: 22, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>
           Billing & plan
         </h1>
-        <p style={{ fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0' }}>
+        <p style={{fontSize: 12, color: 'var(--v3-text-muted)', margin: '4px 0 0'}}>
           What you're on · what you've used · what an upgrade buys you.
         </p>
       </div>
 
       {error && (
         <div
-          role="alert"
+          role='alert'
           style={{
             padding: 14,
             background: 'rgba(239,68,68,0.12)',
@@ -90,12 +85,15 @@ export default function V3Billing() {
             fontSize: 12,
           }}
         >
-          {error} · <Link to="/home" style={{ color: 'var(--v3-brand)' }}>Back home</Link>
+          {error} ·{' '}
+          <Link to='/home' style={{color: 'var(--v3-brand)'}}>
+            Back home
+          </Link>
         </div>
       )}
 
       {loading && !ent && (
-        <div className="v3-placeholder">
+        <div className='v3-placeholder'>
           <p>Loading your plan…</p>
         </div>
       )}
@@ -117,7 +115,7 @@ export default function V3Billing() {
               padding: 16,
             }}
           >
-            <div style={{ marginBottom: 12, textAlign: 'center' }}>
+            <div style={{marginBottom: 12, textAlign: 'center'}}>
               <h2
                 style={{
                   margin: 0,
@@ -157,7 +155,7 @@ export default function V3Billing() {
 
 // ─── Plan card ──────────────────────────────────────────────────────────────
 
-function PlanCard({ ent, meTier }: { ent: V3Entitlements; meTier: string | null }) {
+function PlanCard({ent, meTier}: {ent: V3Entitlements; meTier: string | null}) {
   // Task 1 + Task 4 (2026-05-01 fix list): canonical tier comes from me.tier;
   // run-usage line is computed defensively so MAX_VALUE leaks from the
   // backend's unlimited sentinel never reach the UI.
@@ -200,17 +198,17 @@ function PlanCard({ ent, meTier }: { ent: V3Entitlements; meTier: string | null 
             }}
           >
             You're on {displayName}.
-            <Pill tone={pillTone} size="sm">
+            <Pill tone={pillTone} size='sm'>
               {displayName}
             </Pill>
           </h2>
-          <p style={{ margin: '4px 0 0', fontSize: 12.5, color: 'var(--v3-text-muted)' }}>
+          <p style={{margin: '4px 0 0', fontSize: 12.5, color: 'var(--v3-text-muted)'}}>
             {usage.line}
           </p>
         </div>
         {showFreeUpgrade && (
           <a
-            href="#plans-grid"
+            href='#plans-grid'
             style={{
               padding: '6px 14px',
               fontSize: 12.5,
@@ -236,7 +234,7 @@ function PlanCard({ ent, meTier }: { ent: V3Entitlements; meTier: string | null 
        * sidebar, pricing card) all agree on one number — see
        * Task 3 of the 2026-05-01 fix list. */}
       {usage.showBalanceBar && ent.runLimitMonthly > 0 && (
-        <div style={{ marginTop: 10 }}>
+        <div style={{marginTop: 10}}>
           <div
             style={{
               height: 6,
@@ -251,9 +249,10 @@ function PlanCard({ ent, meTier }: { ent: V3Entitlements; meTier: string | null 
                 height: '100%',
                 width: `${Math.min(
                   100,
-                  ((ent.runLimitMonthly - Math.min(ent.currentPeriodRunCount, ent.runLimitMonthly)) /
+                  ((ent.runLimitMonthly -
+                    Math.min(ent.currentPeriodRunCount, ent.runLimitMonthly)) /
                     ent.runLimitMonthly) *
-                    100
+                    100,
                 )}%`,
                 background:
                   ent.runLimitMonthly - ent.currentPeriodRunCount <= 1
@@ -270,7 +269,7 @@ function PlanCard({ ent, meTier }: { ent: V3Entitlements; meTier: string | null 
 
 // ─── Usage card ─────────────────────────────────────────────────────────────
 
-function UsageCard({ ent }: { ent: V3Entitlements }) {
+function UsageCard({ent}: {ent: V3Entitlements}) {
   // Suppress the "soft budget" banner entirely on unlimited tiers — the
   // strict-review fix.
   const showBudget = !ent.isUnlimited && ent.softCostBudgetUsd != null;
@@ -283,9 +282,7 @@ function UsageCard({ ent }: { ent: V3Entitlements }) {
         padding: 16,
       }}
     >
-      <h2
-        style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}
-      >
+      <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Usage this month
       </h2>
       <div
@@ -297,20 +294,16 @@ function UsageCard({ ent }: { ent: V3Entitlements }) {
           fontSize: 12,
         }}
       >
-        <Stat label="Runs" value={String(ent.currentPeriodRunCount)} />
+        <Stat label='Runs' value={String(ent.currentPeriodRunCount)} />
         <Stat
-          label="Spend"
-          value={
-            ent.currentPeriodCostUsd != null
-              ? `$${ent.currentPeriodCostUsd.toFixed(2)}`
-              : '—'
-          }
+          label='Spend'
+          value={ent.currentPeriodCostUsd != null ? `$${ent.currentPeriodCostUsd.toFixed(2)}` : '—'}
         />
         {showBudget && (
           <Stat
-            label="Soft budget"
+            label='Soft budget'
             value={`$${ent.softCostBudgetUsd?.toFixed(2)}`}
-            hint="advisory"
+            hint='advisory'
           />
         )}
       </div>
@@ -318,23 +311,19 @@ function UsageCard({ ent }: { ent: V3Entitlements }) {
   );
 }
 
-function Stat({ label, value, hint }: { label: string; value: string; hint?: string }) {
+function Stat({label, value, hint}: {label: string; value: string; hint?: string}) {
   return (
     <div>
-      <div style={{ color: 'var(--v3-text-muted)', fontSize: 11 }}>{label}</div>
-      <div style={{ color: 'var(--v3-text)', fontSize: 18, fontWeight: 600 }}>
-        {value}
-      </div>
-      {hint && (
-        <div style={{ color: 'var(--v3-text-subtle)', fontSize: 10 }}>{hint}</div>
-      )}
+      <div style={{color: 'var(--v3-text-muted)', fontSize: 11}}>{label}</div>
+      <div style={{color: 'var(--v3-text)', fontSize: 18, fontWeight: 600}}>{value}</div>
+      {hint && <div style={{color: 'var(--v3-text-subtle)', fontSize: 10}}>{hint}</div>}
     </div>
   );
 }
 
 // ─── Receipts ───────────────────────────────────────────────────────────────
 
-function ReceiptsSection({ ent }: { ent: V3Entitlements }) {
+function ReceiptsSection({ent}: {ent: V3Entitlements}) {
   // GST tab only renders when the org is in India. Geo-gate per
   // strict-review §R-035 — we don't have org.country in the
   // entitlements response yet, so we conservatively hide the GST
@@ -350,9 +339,7 @@ function ReceiptsSection({ ent }: { ent: V3Entitlements }) {
         padding: 16,
       }}
     >
-      <h2
-        style={{ margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)' }}
-      >
+      <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Receipts and billing profile
       </h2>
       <div
@@ -365,7 +352,7 @@ function ReceiptsSection({ ent }: { ent: V3Entitlements }) {
         }}
       >
         <Link
-          to="/invoices"
+          to='/invoices'
           style={{
             padding: '5px 12px',
             border: '1px solid var(--v3-border)',
@@ -381,7 +368,7 @@ function ReceiptsSection({ ent }: { ent: V3Entitlements }) {
             below for India users. */}
         {showGst && (
           <Link
-            to="/accounting"
+            to='/accounting'
             style={{
               padding: '5px 12px',
               border: '1px solid var(--v3-border)',
@@ -401,9 +388,8 @@ function ReceiptsSection({ ent }: { ent: V3Entitlements }) {
           color: 'var(--v3-text-subtle)',
         }}
       >
-        Tier: <strong style={{ color: 'var(--v3-text-muted)' }}>{ent.tierKey}</strong>{' '}
-        · run limit:{' '}
-        <strong style={{ color: 'var(--v3-text-muted)' }}>
+        Tier: <strong style={{color: 'var(--v3-text-muted)'}}>{ent.tierKey}</strong> · run limit:{' '}
+        <strong style={{color: 'var(--v3-text-muted)'}}>
           {ent.runLimitMonthly === -1 ? 'unlimited' : ent.runLimitMonthly}
         </strong>
       </p>

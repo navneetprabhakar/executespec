@@ -12,7 +12,7 @@
  * clicked, mobile vs desktop, time-on-page before submit, etc.).
  */
 
-import { capture } from '@/lib/analytics';
+import {capture} from '@/lib/analytics';
 
 /** Lower-case identifiers — match PostHog convention. The backend
  *  enum values stay SCREAMING_CASE (Java) but on the wire/PostHog
@@ -44,7 +44,7 @@ export type V3EventName = (typeof V3_EVENTS)[keyof typeof V3_EVENTS];
 /** Convenience wrapper that always tags `surface: 'v3'`. */
 export function trackV3(
   event: V3EventName,
-  props?: Record<string, string | number | boolean | null | undefined>
+  props?: Record<string, string | number | boolean | null | undefined>,
 ): void {
-  capture(event, { surface: 'v3', ...(props ?? {}) });
+  capture(event, {surface: 'v3', ...(props ?? {})});
 }

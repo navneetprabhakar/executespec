@@ -8,7 +8,7 @@
  *
  * v2.6.0 · UI polish v1 — part of the marketing-to-app alignment pass.
  */
-import { cn } from '@/lib/utils';
+import {cn} from '@/lib/utils';
 
 interface ScoreRingProps {
   /** 0-100 score — caller is responsible for filtering null. */
@@ -52,27 +52,27 @@ export default function ScoreRing({
         borderRadius: '50%',
         background: `conic-gradient(${stroke} 0% ${clamped}%, var(--border-default) ${clamped}% 100%)`,
       }}
-      role="img"
+      role='img'
       aria-label={`${clamped} out of 100 — ${label}`}
     >
       <div
-        className="absolute rounded-full"
+        className='absolute rounded-full'
         style={{
           inset: innerInset,
           background: 'var(--gray-100)',
         }}
       />
-      <div className="relative flex flex-col items-center leading-none">
+      <div className='relative flex flex-col items-center leading-none'>
         <div
-          className="font-mono font-semibold tabular-nums text-primary"
-          style={{ fontSize: size * 0.34 }}
+          className='font-mono font-semibold tabular-nums text-primary'
+          style={{fontSize: size * 0.34}}
         >
           {clamped}
         </div>
         {label && (
           <div
-            className="font-mono tracking-wider uppercase text-muted mt-1"
-            style={{ fontSize: Math.max(9, size * 0.065) }}
+            className='font-mono tracking-wider uppercase text-muted mt-1'
+            style={{fontSize: Math.max(9, size * 0.065)}}
           >
             {label}
           </div>

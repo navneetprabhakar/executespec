@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
-import { Sparkles, FolderPlus, ArrowRight, MessageSquareText } from 'lucide-react';
-import { useAuthStore } from '@/stores/useAuthStore';
-import { createProject } from '@/lib/api';
+import {useEffect, useState} from 'react';
+import {useNavigate, Link} from 'react-router-dom';
+import {Sparkles, FolderPlus, ArrowRight, MessageSquareText} from 'lucide-react';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {createProject} from '@/lib/api';
 
 /**
  * R-310 (Wave 7) — explicit empty-state for users with zero projects.
@@ -70,11 +70,9 @@ export default function V3EmptyProject() {
     setCreating(true);
     setError(null);
     try {
-      const defaultName = firstName
-        ? `${firstName}'s first project`
-        : 'My first project';
-      const project = await createProject({ name: defaultName });
-      navigate(`/projects/${project.id}`, { replace: true });
+      const defaultName = firstName ? `${firstName}'s first project` : 'My first project';
+      const project = await createProject({name: defaultName});
+      navigate(`/projects/${project.id}`, {replace: true});
     } catch (e) {
       setError((e as Error)?.message ?? 'Failed to create project');
       setCreating(false);
@@ -105,7 +103,7 @@ export default function V3EmptyProject() {
           marginBottom: 18,
         }}
       >
-        <Sparkles className="h-7 w-7" style={{ color: 'var(--v3-brand)' }} aria-hidden="true" />
+        <Sparkles className='h-7 w-7' style={{color: 'var(--v3-brand)'}} aria-hidden='true' />
       </div>
 
       <h1
@@ -121,9 +119,7 @@ export default function V3EmptyProject() {
             Matches the login hero ("Ship AI-written PRs you can actually
             merge.") which leads with outcome, and v0/Lovable/Bolt's
             zero-state which open with a question, not a noun. */}
-        {firstName
-          ? `What do you want to build, ${firstName}?`
-          : 'What do you want to build?'}
+        {firstName ? `What do you want to build, ${firstName}?` : 'What do you want to build?'}
       </h1>
       <p
         style={{
@@ -172,9 +168,13 @@ export default function V3EmptyProject() {
               flexShrink: 0,
             }}
           >
-            <MessageSquareText className="h-4 w-4" style={{ color: 'var(--v3-brand)' }} aria-hidden="true" />
+            <MessageSquareText
+              className='h-4 w-4'
+              style={{color: 'var(--v3-brand)'}}
+              aria-hidden='true'
+            />
           </div>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{flex: 1, minWidth: 0}}>
             <div
               style={{
                 fontSize: 11,
@@ -215,7 +215,7 @@ export default function V3EmptyProject() {
       )}
 
       <button
-        type="button"
+        type='button'
         onClick={onCreate}
         disabled={creating}
         style={{
@@ -234,14 +234,14 @@ export default function V3EmptyProject() {
           fontFamily: 'inherit',
         }}
       >
-        <FolderPlus className="h-4 w-4" aria-hidden="true" />
+        <FolderPlus className='h-4 w-4' aria-hidden='true' />
         {creating ? 'Creating…' : 'Create my first project'}
-        <ArrowRight className="h-4 w-4" aria-hidden="true" />
+        <ArrowRight className='h-4 w-4' aria-hidden='true' />
       </button>
 
       {error && (
         <div
-          role="alert"
+          role='alert'
           style={{
             marginTop: 12,
             padding: '6px 10px',
@@ -269,7 +269,7 @@ export default function V3EmptyProject() {
             choice is "attach a repo first" not "do it the slow way". */}
         Already have a GitHub repo?{' '}
         <Link
-          to="/org/projects"
+          to='/org/projects'
           style={{
             color: 'var(--v3-brand)',
             textDecoration: 'none',

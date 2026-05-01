@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import {useEffect, useState} from 'react';
 import {
   getStandardsReport,
   type ComplianceReport,
@@ -51,32 +51,32 @@ export default function StandardsCompliancePanel({
   }, [projectId, orgId]);
 
   return (
-    <div className="rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-primary">Standards compliance</h3>
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3'>
+      <div className='flex items-center justify-between mb-2'>
+        <h3 className='text-sm font-medium text-primary'>Standards compliance</h3>
         <button
           onClick={load}
           disabled={loading}
-          className="text-[11px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50"
+          className='text-[11px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50'
         >
           {loading ? 'Refreshing…' : 'Refresh'}
         </button>
       </div>
 
-      {error && <div className="text-xs text-accent-red">{error}</div>}
+      {error && <div className='text-xs text-accent-red'>{error}</div>}
 
       {!error && report && (
         <>
           {/* In-effect standards */}
-          <div className="text-[11px] text-muted mb-1">
+          <div className='text-[11px] text-muted mb-1'>
             {report.standards.length} standard{report.standards.length === 1 ? '' : 's'} in effect
           </div>
           {report.standards.length === 0 ? (
-            <div className="text-[11px] text-muted">
+            <div className='text-[11px] text-muted'>
               No standards configured at the org level for {report.orgId}.
             </div>
           ) : (
-            <div className="space-y-1 mb-3">
+            <div className='space-y-1 mb-3'>
               {report.standards.map((s) => (
                 <StandardRow key={s.id} s={s} />
               ))}
@@ -84,18 +84,17 @@ export default function StandardsCompliancePanel({
           )}
 
           {/* Recent violations */}
-          <div className="mt-3 pt-2 border-t border-[var(--border-default)]">
-            <div className="text-[11px] text-muted mb-1">
-              Recent violations (last {report.sinceDays} days):{' '}
-              {report.recentViolations.length}
+          <div className='mt-3 pt-2 border-t border-[var(--border-default)]'>
+            <div className='text-[11px] text-muted mb-1'>
+              Recent violations (last {report.sinceDays} days): {report.recentViolations.length}
             </div>
             {report.recentViolations.length > 0 && (
-              <div className="space-y-1">
+              <div className='space-y-1'>
                 {report.recentViolations.slice(0, 10).map((v) => (
                   <ViolationRow key={v.id} v={v} />
                 ))}
                 {report.recentViolations.length > 10 && (
-                  <div className="text-[10px] text-muted">
+                  <div className='text-[10px] text-muted'>
                     +{report.recentViolations.length - 10} older violation
                     {report.recentViolations.length - 10 === 1 ? '' : 's'}
                   </div>
@@ -106,11 +105,11 @@ export default function StandardsCompliancePanel({
 
           {/* Persistent overrides */}
           {report.persistentOverrides.length > 0 && (
-            <div className="mt-3 pt-2 border-t border-[var(--border-default)]">
-              <div className="text-[11px] text-muted mb-1">
+            <div className='mt-3 pt-2 border-t border-[var(--border-default)]'>
+              <div className='text-[11px] text-muted mb-1'>
                 Persistent project overrides: {report.persistentOverrides.length}
               </div>
-              <div className="space-y-1">
+              <div className='space-y-1'>
                 {report.persistentOverrides.map((o) => (
                   <OverrideRow key={o.id} o={o} />
                 ))}
@@ -123,38 +122,40 @@ export default function StandardsCompliancePanel({
   );
 }
 
-function StandardRow({ s }: { s: StandardEntry }) {
+function StandardRow({s}: {s: StandardEntry}) {
   const sevCls =
-    s.severity === 'BLOCKING' ? 'bg-accent-red/10 text-accent-red'
-      : s.severity === 'WARNING' ? 'bg-accent-amber/10 text-accent-amber'
-      : 'bg-accent-blue/10 text-accent-blue';
+    s.severity === 'BLOCKING'
+      ? 'bg-accent-red/10 text-accent-red'
+      : s.severity === 'WARNING'
+        ? 'bg-accent-amber/10 text-accent-amber'
+        : 'bg-accent-blue/10 text-accent-blue';
   return (
-    <div className="flex items-center justify-between gap-2 text-xs py-1 border-b border-[var(--border-default)] last:border-b-0">
-      <div className="flex items-center gap-2 min-w-0">
-        <span className="font-mono truncate text-primary">{s.id}</span>
-        <span className="text-[11px] text-muted">{s.enforcementType}</span>
+    <div className='flex items-center justify-between gap-2 text-xs py-1 border-b border-[var(--border-default)] last:border-b-0'>
+      <div className='flex items-center gap-2 min-w-0'>
+        <span className='font-mono truncate text-primary'>{s.id}</span>
+        <span className='text-[11px] text-muted'>{s.enforcementType}</span>
       </div>
-      <div className="flex items-center gap-1.5 shrink-0">
+      <div className='flex items-center gap-1.5 shrink-0'>
         <span className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${sevCls}`}>
           {s.severity.toLowerCase()}
         </span>
         {s.overridden && (
           <span
             title={`Project downgraded from ${s.originalSeverity}`}
-            className="inline-flex items-center rounded-sm bg-accent-amber/10 text-accent-amber px-1.5 py-0.5 text-[9px]"
+            className='inline-flex items-center rounded-sm bg-accent-amber/10 text-accent-amber px-1.5 py-0.5 text-[9px]'
           >
             ↓ from {s.originalSeverity.toLowerCase()}
           </span>
         )}
         {s.orgLevelLocked && (
           <span
-            title="Org-level locked — cannot be overridden at project level"
-            className="inline-flex items-center rounded-sm bg-[var(--gray-400)]/50 text-muted px-1.5 py-0.5 text-[9px]"
+            title='Org-level locked — cannot be overridden at project level'
+            className='inline-flex items-center rounded-sm bg-[var(--gray-400)]/50 text-muted px-1.5 py-0.5 text-[9px]'
           >
             locked
           </span>
         )}
-        <span className="inline-flex items-center rounded-sm bg-[var(--gray-400)]/30 text-muted px-1.5 py-0.5 text-[9px]">
+        <span className='inline-flex items-center rounded-sm bg-[var(--gray-400)]/30 text-muted px-1.5 py-0.5 text-[9px]'>
           {s.source.toLowerCase()}
         </span>
       </div>
@@ -162,22 +163,26 @@ function StandardRow({ s }: { s: StandardEntry }) {
   );
 }
 
-function ViolationRow({ v }: { v: ViolationEntry }) {
+function ViolationRow({v}: {v: ViolationEntry}) {
   const sevCls =
-    v.severity === 'BLOCKING' ? 'bg-accent-red/10 text-accent-red'
-      : v.severity === 'WARNING' ? 'bg-accent-amber/10 text-accent-amber'
-      : 'bg-accent-blue/10 text-accent-blue';
+    v.severity === 'BLOCKING'
+      ? 'bg-accent-red/10 text-accent-red'
+      : v.severity === 'WARNING'
+        ? 'bg-accent-amber/10 text-accent-amber'
+        : 'bg-accent-blue/10 text-accent-blue';
   return (
-    <div className="flex items-start justify-between gap-2 text-[11px] py-0.5">
-      <div className="flex items-start gap-2 min-w-0">
-        <span className={`shrink-0 inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${sevCls}`}>
+    <div className='flex items-start justify-between gap-2 text-[11px] py-0.5'>
+      <div className='flex items-start gap-2 min-w-0'>
+        <span
+          className={`shrink-0 inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${sevCls}`}
+        >
           {v.severity.toLowerCase()}
         </span>
-        <span className="font-mono text-primary truncate">{v.standardId}</span>
-        <span className="text-muted truncate">{v.summary}</span>
+        <span className='font-mono text-primary truncate'>{v.standardId}</span>
+        <span className='text-muted truncate'>{v.summary}</span>
       </div>
       {v.overrideApplied && (
-        <span className="shrink-0 inline-flex items-center rounded-sm bg-status-success/10 text-status-success px-1.5 py-0.5 text-[9px]">
+        <span className='shrink-0 inline-flex items-center rounded-sm bg-status-success/10 text-status-success px-1.5 py-0.5 text-[9px]'>
           overridden
         </span>
       )}
@@ -185,17 +190,17 @@ function ViolationRow({ v }: { v: ViolationEntry }) {
   );
 }
 
-function OverrideRow({ o }: { o: OverrideEntry }) {
+function OverrideRow({o}: {o: OverrideEntry}) {
   return (
-    <div className="text-[11px] py-0.5">
-      <div className="flex items-center gap-2">
-        <span className="font-mono text-primary">{o.standardId}</span>
-        <span className="text-muted">{o.overrideType}</span>
+    <div className='text-[11px] py-0.5'>
+      <div className='flex items-center gap-2'>
+        <span className='font-mono text-primary'>{o.standardId}</span>
+        <span className='text-muted'>{o.overrideType}</span>
         {o.newSeverity && (
-          <span className="text-[10px] text-muted">→ {o.newSeverity.toLowerCase()}</span>
+          <span className='text-[10px] text-muted'>→ {o.newSeverity.toLowerCase()}</span>
         )}
       </div>
-      <div className="text-[10px] text-muted ml-1 mt-0.5 italic">"{o.rationale}"</div>
+      <div className='text-[10px] text-muted ml-1 mt-0.5 italic'>"{o.rationale}"</div>
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { req } from './api';
+import {req} from './api';
 import type {
   ExecutionRunDto,
   CreateExecutionRequest,
@@ -21,12 +21,11 @@ export const executionApi = {
   get: (id: string) => req<ExecutionRunDto>(`/executions/${id}`),
 
   list: (projectId: string, page = 0, size = 20) =>
-    req<{ content: ExecutionRunDto[]; totalElements: number }>(
+    req<{content: ExecutionRunDto[]; totalElements: number}>(
       `/projects/${projectId}/executions?page=${page}&size=${size}`,
     ),
 
-  triggerAnalysis: (id: string) =>
-    req<void>(`/executions/${id}/analyse`, { method: 'POST' }),
+  triggerAnalysis: (id: string) => req<void>(`/executions/${id}/analyse`, {method: 'POST'}),
 
   approveArch: (id: string, body: ArchApprovalRequest) =>
     req<void>(`/executions/${id}/arch-review`, {
@@ -34,11 +33,9 @@ export const executionApi = {
       body: JSON.stringify(body),
     }),
 
-  generatePlan: (id: string) =>
-    req<void>(`/executions/${id}/plan`, { method: 'POST' }),
+  generatePlan: (id: string) => req<void>(`/executions/${id}/plan`, {method: 'POST'}),
 
-  approvePlan: (id: string) =>
-    req<void>(`/executions/${id}/plan/approve`, { method: 'PUT' }),
+  approvePlan: (id: string) => req<void>(`/executions/${id}/plan/approve`, {method: 'PUT'}),
 
   decide: (id: string, solutionId: string, body: DecisionRequest) =>
     req<void>(`/executions/${id}/solutions/${solutionId}/decide`, {
@@ -51,19 +48,14 @@ export const executionApi = {
       method: 'POST',
     }),
 
-  abort: (id: string) =>
-    req<void>(`/executions/${id}/abort`, { method: 'POST' }),
+  abort: (id: string) => req<void>(`/executions/${id}/abort`, {method: 'POST'}),
 
-  resume: (id: string) =>
-    req<void>(`/executions/${id}/resume`, { method: 'POST' }),
+  resume: (id: string) => req<void>(`/executions/${id}/resume`, {method: 'POST'}),
 
   getReport: (id: string) =>
-    req<{ markdown: string; status: string; solutionCount: number }>(
-      `/executions/${id}/report`,
-    ),
+    req<{markdown: string; status: string; solutionCount: number}>(`/executions/${id}/report`),
 
-  getSseToken: (id: string) =>
-    req<{ token: string }>(`/executions/${id}/sse-token`),
+  getSseToken: (id: string) => req<{token: string}>(`/executions/${id}/sse-token`),
 
   // v2.4.0 additions
   listScaffolds: () => req<Scaffold[]>(`/scaffolds`),
@@ -72,19 +64,17 @@ export const executionApi = {
     req<SolutionRun[]>(`/executions/${id}/solutions/${solutionId}/runs`),
 
   listProjectLaunches: (projectId: string, page = 0, size = 20) =>
-    req<{ content: ExecutionRunDto[]; totalElements: number }>(
+    req<{content: ExecutionRunDto[]; totalElements: number}>(
       `/projects/${projectId}/launches?page=${page}&size=${size}`,
     ),
 
-  listProjectPrs: (projectId: string) =>
-    req<PrRollupEntry[]>(`/projects/${projectId}/prs`),
+  listProjectPrs: (projectId: string) => req<PrRollupEntry[]>(`/projects/${projectId}/prs`),
 
-  projectOverview: (projectId: string) =>
-    req<ProjectOverview>(`/projects/${projectId}/overview`),
+  projectOverview: (projectId: string) => req<ProjectOverview>(`/projects/${projectId}/overview`),
 
   validateOwner: (projectId: string, githubOwner: string) =>
     req<ValidateOwnerResult>(`/projects/${projectId}/launches/validate-repo-access`, {
       method: 'POST',
-      body: JSON.stringify({ githubOwner }),
+      body: JSON.stringify({githubOwner}),
     }),
 };
