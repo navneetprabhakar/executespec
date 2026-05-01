@@ -106,23 +106,20 @@ export function formatRunUsage(
     ? ent.currentPeriodRunCount
     : 0;
 
-  // Paid tiers — always render as unlimited regardless of what the
-  // entitlements payload says about caps. The balance-bar /
-  // referral copy stays hidden.
-  if (isPaidTier(tier)) {
-    return {
-      line: `Unlimited runs · ${periodRuns} this period`,
-      unlimited: true,
-      showBalanceBar: false,
-    };
-  }
-
-  // FREE tier — read the canonical monthly cap.
+  // F-21 (round-3 audit follow-on): trust `runLimitMonthly` as the
+  // source of truth for paid tiers too. The previous code hardcoded
+  // "Unlimited" for any paid tier, which was correct as long as the
+  // F-14 resolver bug kept everyone falling back to FREE. After F-14
+  // PRO users correctly resolve to PRO — but PRO has a 20/month cap
+  // per `tier_config.monthly_run_limit`, so the hardcode would have
+  // shown "Unlimited runs" to a tier that bills at 20/month. Read
+  // the cap once and branch on the sentinel below for both paid and
+  // free tiers.
   const rawCap = ent.runLimitMonthly;
 
-  // Backend leak guard: any cap at or above the sentinel threshold
-  // means the unlimited marker leaked through. Treat as unlimited
-  // even though the user's tier is FREE.
+  // Unlimited path — `-1` is the canonical sentinel; anything at or
+  // above MAX_DISPLAYABLE_BALANCE means the unlimited marker leaked
+  // through. Both render the same way regardless of the tier.
   if (rawCap >= MAX_DISPLAYABLE_BALANCE || rawCap === -1) {
     return {
       line: `Unlimited runs · ${periodRuns} this period`,
@@ -143,10 +140,12 @@ export function formatRunUsage(
 
   const used = Math.max(0, Math.min(periodRuns, rawCap));
   const remaining = Math.max(0, rawCap - used);
+  // showBalanceBar stays FREE-only — paid tiers shouldn't surface the
+  // lifetime-credit affordance even when the monthly cap is finite.
   return {
     line: `${remaining} of ${rawCap} runs left this month`,
     unlimited: false,
-    showBalanceBar: true,
+    showBalanceBar: !isPaidTier(tier),
   };
 }
 

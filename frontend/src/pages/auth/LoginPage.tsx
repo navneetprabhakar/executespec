@@ -131,7 +131,7 @@ export default function LoginPage() {
           />
         </Field>
         <Field label="Password" id="password"
-               right={<Link to="/forgot-password" className="text-xs text-accent-blue hover:underline">Forgot?</Link>}>
+               right={<Link to="/forgot-password" className="text-xs text-accent-blue-text hover:underline">Forgot?</Link>}>
           <div className="relative">
             <input
               id="password"
@@ -170,7 +170,7 @@ export default function LoginPage() {
 
       <p className="mt-5 text-center text-sm text-muted">
         Don't have an account?{' '}
-        <Link to="/register" className="text-accent-blue hover:underline font-medium">Sign up free</Link>
+        <Link to="/register" className="text-accent-blue-text hover:underline font-medium">Sign up free</Link>
       </p>
     </AuthShell>
   );

@@ -1,0 +1,52 @@
+{
+  "_doc": "F-A11Y (round-3 audit) — pa11y-ci config for the public, unauthenticated surface. Run `npm run a11y` while a dev server is up at :5173. Auth-gated routes (/projects, /v3/*, /admin) need a follow-up that primes a session cookie before crawling — tracked in docs/plans/a11y-coverage-plan.md (TODO).\n\nThe rule set below is pa11y's WCAG2AA preset plus explicit thresholds for the contrast classes the round-3 audit flagged:\n  - color-contrast    (text vs surface, AA-body 4.5)\n  - link-name         (links must have accessible names)\n  - image-alt         (images must have alt text)\n  - heading-order     (no skipped h-levels)\n  - aria-required-attr  (a11y tree completeness)\n\nThe `runners` array uses axe-core under pa11y because axe has the more rigorous SC 1.4.11 non-text contrast check that flags the border-default and status-executing regressions our token sweep just fixed.",
+  "defaults": {
+    "standard": "WCAG2AA",
+    "runners": ["axe", "htmlcs"],
+    "timeout": 30000,
+    "wait": 1500,
+    "viewport": { "width": 1440, "height": 900 },
+    "ignore": [
+      "warning",
+      "notice"
+    ],
+    "chromeLaunchConfig": {
+      "executablePath": "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+      "args": ["--no-sandbox", "--disable-dev-shm-usage"]
+    }
+  },
+  "urls": [
+    {
+      "url": "http://localhost:5173/login",
+      "screenCapture": "pa11y-ci-screenshots/login.png"
+    },
+    {
+      "url": "http://localhost:5173/register",
+      "screenCapture": "pa11y-ci-screenshots/register.png"
+    },
+    {
+      "url": "http://localhost:5173/forgot-password",
+      "screenCapture": "pa11y-ci-screenshots/forgot-password.png"
+    },
+    {
+      "url": "http://localhost:5173/plans",
+      "screenCapture": "pa11y-ci-screenshots/plans.png"
+    },
+    {
+      "url": "http://localhost:5173/pricing",
+      "screenCapture": "pa11y-ci-screenshots/pricing.png"
+    },
+    {
+      "url": "http://localhost:5173/terms",
+      "screenCapture": "pa11y-ci-screenshots/terms.png"
+    },
+    {
+      "url": "http://localhost:5173/privacy",
+      "screenCapture": "pa11y-ci-screenshots/privacy.png"
+    },
+    {
+      "url": "http://localhost:5173/dpa",
+      "screenCapture": "pa11y-ci-screenshots/dpa.png"
+    }
+  ]
+}
