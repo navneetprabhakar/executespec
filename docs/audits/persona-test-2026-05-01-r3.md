@@ -1,11 +1,11 @@
-# Persona Test — Round 3
+# Persona Test — Round 3 (regenerated, post-fix)
 
 **Date:** 2026-05-01
-**Branch:** `audit/v2-5-11-ux-product` (post 27c1c3c3)
-**Stack:** local backend (Spring Boot 3.3, profile `local`) + Vite dev (5173) + Postgres 18
-**Method:** puppeteer-core driving system Chrome (1440×900, dpr 1) + direct API probes against `localhost:8080`. 110 screenshots total under `persona-test-2026-05-01-r3-assets/`.
+**Branch:** `audit/v2-5-11-ux-product` (post round-3 fix commit)
+**Stack:** restarted local backend (Spring Boot 3.3, profile `local`) + Vite dev (5173) + Postgres 18
+**Method:** puppeteer-core driving system Chrome (1440×900, dpr 1) + direct API probes against `localhost:8080`. 110 screenshots under `persona-test-2026-05-01-r3-assets/`.
 
-> Round 3 follows the auto-execute fix-list batch + R-batch follow-ups from rounds 1–2 (now deleted). The goal here is **revalidation**: confirm what landed, find what regressed, and surface anything new.
+> This is the **post-fix** revalidation. The original round-3 audit report (now superseded) flagged five items: F-14 (V3 entitlement tier-leak), F-15/F-16/F-17 (WCAG-AA contrast), D3 (empty-state copy), and tier-lifecycle audit-log churn. All five shipped on the audit branch in the commit immediately preceding this report. F-14 also exposed F-21 (PRO V3 billing rendering "Unlimited" despite a 20/month cap), which was patched in the same batch. This document is the screenshot-driven proof that every item is gone.
 
 ---
 
@@ -19,79 +19,104 @@
 | pro    | `revalidate-pro@test.local`          | PRO (HIDDEN)| ORG_ADMIN | vibe  |
 | free   | `revalidate-free@test.local`         | FREE        | ORG_ADMIN | vibe  |
 
-All five logged in cleanly on the first attempt — the V165 Flyway crash and OAuth localhost redirect from the prior session are stable.
+All five authenticate cleanly against the freshly-restarted JVM.
 
 ---
 
-## Score card
+## §0 — Score card (after fixes)
 
-| # | Item                                                          | Status   | Source                       |
-|---|---------------------------------------------------------------|----------|------------------------------|
-| 1 | V165 Flyway boot crash                                        | ✅ Fixed | backend up                   |
-| 2 | Google OAuth localhost redirect                               | ✅ Fixed | `OAuthSurfaceResolver`       |
-| 3 | Admin tier dropdown shows "Pro (grandfathered)"               | ✅ Live  | `<select>` options dump      |
-| 4 | Personal-org permission gap (R8) — ENT/TEAM `canViewAudit` etc | ✅ Live  | `/api/auth/me/permissions`   |
-| 5 | `Integer.MAX_VALUE` clamp in entitlements                     | ✅ Live  | `/api/v3/entitlements`       |
-| 6 | `--c-signal-blue` darkened to `#3B6FCC`                       | ✅ Live  | computed-style probe         |
-| 7 | `--c-pop-orange` retargeted to pink `#EC4899`                 | ✅ Live  | computed-style probe         |
-| 8 | `--status-executing` separated to `#4A77D6`                   | ✅ Live  | computed-style probe         |
-| 9 | Login hero "Ship AI-written PRs you can actually merge."      | ✅ Live  | screenshot + DOM             |
-| 10| TypedConfirmModal on Halt all runs                            | ✅ Live  | screenshot                   |
-| 11| TEAM card flat at $39/seat (V165)                             | ✅ Live  | V3 billing screenshot        |
-| 12| EmptyProjectLanding (v2.6.4) on `/projects` empty path        | ✅ Live  | screenshot                   |
-| 13| Tier lifecycle console — 4-tier post-V165 ladder              | ✅ Live  | screenshot                   |
-| **14** | **V3 entitlement endpoint returns FREE for ENT/TEAM/PRO test users** | ❌ Bug | `/api/v3/entitlements`       |
-| **15** | **Border contrast 1.59 fails WCAG SC 1.4.11 (≥3.0)**       | ⚠ Partial| computed-style probe         |
-| **16** | **Signal-blue text on dark surface 3.71 fails AA-body**    | ⚠ Partial| computed-style probe         |
-| **17** | **`--status-executing` 4.19 fails AA-body**                | ⚠ Partial| computed-style probe         |
-| 18| Sidebar still says "Runs" (Phase 1.1 "Missions" rename pending) | ℹ Info  | sidebar dump                 |
-| 19| V3 dashboard route `/v3/dashboard` actually renders **Insights** | ℹ Info  | screenshot                   |
-| 20| ENT V3 billing capture initially 429 (rate limit during walk) | ℹ Note   | re-captured cleanly          |
+| ID | Item                                                          | Pre-fix | Post-fix | Source |
+|----|---------------------------------------------------------------|---------|----------|--------|
+| F-14 | `/api/v3/entitlements.tierKey` for paid users                | FREE for ENT/TEAM/PRO | matches `me.tier` for all 5 personas | API probe + V3 billing footer screenshots |
+| F-15 | `--border-default` contrast on graphite-2                    | 1.59 (FAIL SC 1.4.11) | **3.13** (PASS) | live computed-style probe |
+| F-16 | Body-text-on-dark for signal-blue (`--accent-blue-text`)     | n/a — would have used `--accent-blue` at 3.71 | **7.29** (AA-body PASS) | live computed-style probe |
+| F-17 | `--status-executing` contrast on graphite-2                  | 4.19 (AA-large only) | **5.22** (AA-body PASS) | live computed-style probe |
+| F-21 | V3Billing run-usage line for paid tiers                       | "Unlimited runs" hardcoded for any non-FREE tier | reads `runLimitMonthly` per tier — PRO renders 20 of 20, TEAM/ENT unlimited | screenshot |
+| D3 | V3EmptyProject copy                                            | "Welcome, Reval." + body-noun-only + "the long way" link | "What do you want to build, Reval?" + tier-aware body + "Already have a GitHub repo? Attach it first →" | screenshot |
+| TL | Tier lifecycle audit-log leak                                  | "TEAM tier reinstated (V144) — pro..." inline truncate | date-only column with dashed-underline hover for full reason | screenshot |
+| Process | Token-contrast regression coverage                       | none — process gap | `frontend/src/design-system/contrast.{ts,test.ts}` (dormant vitest) + `.pa11yci.json` + `A11Y.md` | files |
 
-Net: **13 confirmed-fixed**, **3 partial WCAG misses still present**, **1 backend bug surfaced** (#14), **3 informational** (#18-20).
+**Net:** 7 confirmed-fixed, 1 process-gap closure, 0 net-new bugs.
 
 ---
 
-## §1 — Super-admin walkthrough
+## §1 — F-14 verification (live API)
 
-### 1.1 Admin console — Users tab (`/admin`)
+`me.tier` (legacy) vs `entitlements.tierKey` (v3) probed against the freshly-restarted JVM:
+
+| persona | `me.tier` | `entitlements.tierKey` | `runLimitMonthly` | Match? |
+|---------|-----------|------------------------|-------------------|--------|
+| admin   | ENTERPRISE| ENTERPRISE             | -1                | ✅     |
+| ent     | ENTERPRISE| ENTERPRISE             | -1                | ✅     |
+| team    | TEAM      | TEAM                   | -1                | ✅     |
+| pro     | PRO       | PRO                    | 20                | ✅     |
+| free    | FREE      | FREE                   | 10                | ✅     |
+
+The "every paid user falls back to FREE" class is gone end-to-end. The frontend `canonicalTier(meTier, ent.tierKey)` patch is now redundant defence-in-depth — the backend resolver picks the higher rank itself, so `me.tier` and `ent.tierKey` agree at the source.
+
+---
+
+## §2 — F-15/16/17 verification (live computed-style probe)
+
+Sampled against the live dark theme (gray-100 = `#14171C`).
+
+| Token | Pair                              | Pre-fix | Post-fix | AA-Body (4.5)? | AA-Non-text (3.0)? |
+|-------|-----------------------------------|---------|----------|----------------|---------------------|
+| `--border-default` (`#5E6771`)    | on graphite-2 | 1.59 | **3.13** | n/a | ✅ |
+| `--border-hover` (`#7B8593`)      | on graphite-2 | 2.41 | **4.81** | n/a | ✅ + AA-large |
+| `--status-executing` (`#5B89E0`)  | on graphite-2 | 4.19 | **5.22** | ✅ | ✅ |
+| `--accent-blue-text` (`#7AA5F5`)  | on graphite-2 | n/a (was --accent-blue at 3.71) | **7.29** | ✅ | ✅ |
+| `--accent-blue` (`#3B6FCC`)       | on white      | 4.85 | 4.85 (unchanged — button surface) | ✅ | ✅ |
+| `--text-primary` / on graphite-2  | n/a | 15.46 | ✅ | ✅ |
+| `--text-muted` / on graphite-2    | n/a | 5.87  | ✅ | ✅ |
+| `--status-success` / on graphite-2| n/a | 7.08  | ✅ | ✅ |
+| `--c-pop-orange` (#EC4899)        | on graphite-2 | 5.09 | 5.09 (unchanged) | ✅ | ✅ |
+
+Every dark-theme pair the round-3 audit flagged is now AA-passing. The math is now anchored against the live surface (graphite-2), not white — closing the process gap that produced the original misses.
+
+---
+
+## §3 — Surface-by-surface walkthrough (post-fix)
+
+### 3.1 Super-admin
+
+#### Admin console — Users tab
 
 ![](persona-test-2026-05-01-r3-assets/admin-console.png)
 
-- Quick-action header has 6 buttons: Analytics · Pricing · Feature Flags · Tier lifecycle · Verify audit chain · Halt all runs (red).
-- 9 tabs: Users (24) · Organisations (19) · Tier Config · Escalations · Top-Up Pkgs (5) · Usage Reports · Payment Audit · Webhooks.
-- **Tier dropdown** in user rows now shows: `Free` / `Team` / `Pro (grandfathered)` / `Enterprise`. ✅ R-batch fix landed.
+- 6 quick-action buttons: Analytics · Pricing · Feature Flags · Tier lifecycle · Verify audit chain · Halt all runs
+- 9 tabs: Users (24) · Organisations (19) · Tier Config · Escalations · Top-Up Pkgs (5) · Usage Reports · Payment Audit · Webhooks
+- **Tier dropdown dump (live):** `['Free', 'Team', 'Pro (grandfathered)', 'Enterprise']` — 4-tier post-V165 ladder, PRO copy carries the grandfathered hint inline.
 
-### 1.2 Tier lifecycle (`/admin/tiers`)
+#### Tier lifecycle (`/admin/tiers`) — TL fix landed
 
 ![](persona-test-2026-05-01-r3-assets/admin-tiers.png)
 
-- Post-V165 4-tier ladder confirmed: **Free LISTED · Team LISTED · Pro HIDDEN · Enterprise LISTED**.
-- Audit trail leaks the historical churn: "26/04/2026 — TEAM tier reinstated (V144)" + "23/04/2026 — TEAM launch (v2.6.0) — PRO gran...". Live state is correct (V165 retired MAX → renamed to TEAM); the audit log is just historically accurate.
-- Pro row exposes **List · Sunset** actions. Other rows show only **Hide**.
-- `RoleGuard requireSuperAdmin` deep-link fix from R-batch confirmed working — no auth-hydration bounce.
+- 4-tier ladder: **Free LISTED · Team LISTED · Pro HIDDEN · Enterprise LISTED**.
+- **"Changed" column is date-only.** Dashed-underline indicates hover-availability for the full reason. The previous inline truncation ("TEAM tier reinstated (V144) — pro...") that leaked migration-version churn into screenshots is gone.
+- PRO row exposes List · Sunset; other rows show Hide.
+- **Card / table border contrast is visibly tighter** (F-15 — graphite-7 instead of graphite-5). Compare with the pre-fix where dividers were nearly invisible.
 
-### 1.3 Halt all runs — TypedConfirmModal
+#### Halt-all-runs typed-confirm modal
 
 ![](persona-test-2026-05-01-r3-assets/admin-halt-modal.png)
 
-- Headline "Halt all running operations?" + warning copy + optional reason input + **"Type HALT to confirm"** keyword gate.
-- Submit button stays disabled until both criteria pass.
-- This is the new `TypedConfirmModal` primitive from the fix-list batch. ✅
+Headline + warning copy + optional reason input + "Type HALT to confirm" keyword gate. Submit stays disabled until both pass. Border contrast on the modal (which sits on graphite-3) is visibly stronger.
 
-### 1.4 Other admin tabs (clean captures)
+#### Other admin tabs
 
-| Tab           | Screenshot                                                          |
-|---------------|---------------------------------------------------------------------|
-| Organisations | `admin-tab-orgs.png`                                                |
-| Tier Config   | `admin-tab-tier-config.png`                                         |
-| Escalations   | `admin-tab-escalations.png`                                         |
-| Top-Up Pkgs   | `admin-tab-topup-pkgs.png`                                          |
-| Usage Reports | `admin-tab-usage-reports.png`                                       |
-| Payment Audit | `admin-tab-payment-audit.png`                                       |
-| Webhooks      | `admin-tab-webhooks.png`                                            |
+| Tab           | Screenshot                                  |
+|---------------|---------------------------------------------|
+| Organisations | `admin-tab-orgs.png`                        |
+| Tier Config   | `admin-tab-tier-config.png`                 |
+| Escalations   | `admin-tab-escalations.png`                 |
+| Top-Up Pkgs   | `admin-tab-topup-pkgs.png`                  |
+| Usage Reports | `admin-tab-usage-reports.png`               |
+| Payment Audit | `admin-tab-payment-audit.png`               |
+| Webhooks      | `admin-tab-webhooks.png`                    |
+| Users         | `admin-tab-users.png`                       |
 
-### 1.5 Side surfaces
+#### Side admin pages
 
 - Pricing manager (`/admin/pricing`) — `admin-pricing.png`
 - Analytics (`/admin/analytics`) — `admin-analytics.png`
@@ -99,11 +124,104 @@ Net: **13 confirmed-fixed**, **3 partial WCAG misses still present**, **1 backen
 - Audit log (`/audit`) — `admin-audit.png`
 - Exec summary (`/exec`) — `admin-exec-summary.png`
 
+### 3.2 ENTERPRISE persona
+
+#### V3 Billing — F-14 fix landed
+
+![](persona-test-2026-05-01-r3-assets/ent-v3-billing.png)
+
+- "**You're on Enterprise. Unlimited runs · 0 this period**" — tier banner ✅
+- TEAM card has no "Current" badge; ENTERPRISE custom card sits at the bottom with Schedule a 30-min demo + Trust + compliance.
+- **Footer audit row: `Tier: ENTERPRISE · run limit: unlimited`** (was `Tier: FREE · run limit: 10` pre-fix).
+
+#### V3 Team — SSO panel (ENTERPRISE-only)
+
+![](persona-test-2026-05-01-r3-assets/ent-v3-team.png)
+
+SeatsCard "1 member · unlimited seats" + Members list + Invite form + Single-sign-on section with Talk to sales / Open admin buttons. SSO panel correctly hidden on TEAM.
+
+#### V3 Insights (`/v3/dashboard` → redirected `/insights`)
+
+![](persona-test-2026-05-01-r3-assets/ent-v3-dashboard.png)
+
+5 KPI tiles (Runs · Spend · Success rate · Active projects · Needs attention) + 30d/90d/365d period selector + "✓ All clear in the last 30 days." Empty state passes the "is anything broken?" sniff test.
+
+### 3.3 TEAM persona
+
+#### V3 Billing — F-14 + F-21 verified
+
+![](persona-test-2026-05-01-r3-assets/team-v3-billing.png)
+
+- "**You're on Team. Unlimited runs · 0 this period**" — tier banner ✅
+- TEAM card has "Current" badge ✅; Add seats → CTA on TEAM
+- **Footer: `Tier: TEAM · run limit: unlimited`** (was `Tier: FREE · run limit: 10`)
+- TEAM pricing: $39 / seat / month ✅ (post-V165)
+
+#### V3 Team — TEAM has no SSO row
+
+![](persona-test-2026-05-01-r3-assets/team-v3-team.png)
+
+SeatsCard "1 of 1 seat used" + Manage seats CTA + Members list + Invite form. SSO section correctly hidden.
+
+### 3.4 PRO persona (grandfathered)
+
+#### V3 Billing — F-21 verified
+
+![](persona-test-2026-05-01-r3-assets/pro-v3-billing.png)
+
+- "**You're on Pro. 20 of 20 runs left this month**" — tier banner now reads the actual 20-cap (was "Unlimited runs · 0 this period" pre-F-21)
+- Top-bar usage badge: **0/20 runs**
+- **Soft budget: $40.00** (correctly derived from 20 runs × $2 baseline)
+- PRO card highlighted "Current"; copy: "Existing subscribers only — new buyers, choose Team"
+- Manage subscription → CTA
+- **Footer: `Tier: PRO · run limit: 20`** (was `Tier: FREE · run limit: 10`)
+
+### 3.5 FREE persona
+
+#### V3 Billing — unchanged shape, but now AA-correct borders
+
+![](persona-test-2026-05-01-r3-assets/free-v3-billing.png)
+
+"You're on Free. 10 of 10 runs left this month" + full progress bar + Upgrade → CTA. FREE card has "Current" badge. Footer: `Tier: FREE · run limit: 10`.
+
+#### V2 sidebar empty workspace — D3 reframe landed
+
+![](persona-test-2026-05-01-r3-assets/free-projects.png)
+
+- **H1: "What do you want to build, Reval?"** — outcome-led question (was "Welcome, Reval.")
+- **Body: "Describe what you want to build and we'll ship a draft PR you can actually merge. Your free plan covers 10 PRs / month — about 10 small features or 6 large refactors."** — tier-aware, surfaces the human meaning of 10 runs
+- Primary CTA: "Create my first project →"
+- **Secondary: "Already have a GitHub repo? Attach it first →"** (was "Set up a project the long way →" — "long way" framing removed)
+- Top-right: 0/10 runs progress bar visible
+
+#### Plans page (V2 — public)
+
+![](persona-test-2026-05-01-r3-assets/free-plans-detailed.png)
+
+USD default + grandfathered PRO badge + "for new buyers, choose Team" copy.
+
+### 3.6 Login hero (logged-out) — F-16 link contrast landed
+
+![](persona-test-2026-05-01-r3-assets/login-hero.png)
+
+- H1: **"Ship AI-written PRs you can actually merge."** with "PRs" in pink-amber gradient
+- 3-bullet feature list with brand-blue icon chips
+- Right pane: Sign in form with Google / GitHub OAuth above email/password
+- **"Forgot?" + "Sign up free" links now use `--accent-blue-text` (#7AA5F5, 7.29 contrast)** — visibly more legible than the previous brand-blue (#3B6FCC, 3.71).
+
+### 3.7 Mobile breakpoint + light theme
+
+| Mobile — V3 dashboard | Mobile — projects |
+|------|------|
+| ![](persona-test-2026-05-01-r3-assets/ent-v3-dashboard-mobile.png) | ![](persona-test-2026-05-01-r3-assets/ent-projects-mobile.png) |
+
+| Light theme — projects | Light theme — V3 dashboard |
+|------|------|
+| ![](persona-test-2026-05-01-r3-assets/admin-projects-light.png) | ![](persona-test-2026-05-01-r3-assets/admin-v3-dashboard-light.png) |
+
 ---
 
-## §2 — Per-tier permission matrix (live API)
-
-`GET /api/auth/me/permissions` (legacy) for each persona — verifies **R8 (personal-org permission gap)** end-to-end:
+## §4 — Per-tier permission matrix (legacy `/api/auth/me/permissions`)
 
 | Permission                | admin | ent  | team | pro   | free  |
 |---------------------------|-------|------|------|-------|-------|
@@ -120,257 +238,45 @@ Net: **13 confirmed-fixed**, **3 partial WCAG misses still present**, **1 backen
 | `monthlyRunLimit`         | -1    | -1   | -1   | 20    | 10    |
 | `maxDeployments`          | -1    | -1   | -1   | 5     | 0     |
 
-**R8 verdict:** ENT and TEAM personal-org users now correctly receive the org-management bundle (`canViewAudit / canInviteMembers / canViewOrgMembers / canManageIntegrations / canViewPricing`). PRO and FREE correctly stay denied (PRO is HIDDEN/grandfathered; FREE is the public free tier). No regressions vs. round 2.
+R8 (personal-org permission gap) holds across the matrix — paid-tier ORG_ADMINs on personal orgs get the org-management bundle, FREE/PRO stay denied.
 
 ---
 
-## §3 — V3 entitlement bug (NEW — F-14)
+## §5 — Process gap closure
 
-`GET /api/v3/entitlements` returns the **wrong tier** for paid test fixtures:
+The audit's "single most ROI-positive piece of CI tooling not yet in place" line landed as three artefacts:
 
-| persona | `me.tier` | `entitlements.tierKey` | Match? |
-|---------|-----------|------------------------|--------|
-| admin   | ENTERPRISE| ENTERPRISE             | ✅     |
-| **ent** | **ENTERPRISE** | **FREE**           | ❌     |
-| **team**| **TEAM**       | **FREE**           | ❌     |
-| **pro** | **PRO**        | **FREE**           | ❌     |
-| free    | FREE      | FREE                   | ✅     |
+- **`frontend/src/design-system/contrast.ts`** — pure-function WCAG ratio helpers (parseHex, luminance, contrastRatio, WCAG threshold constants). Zero deps, works in any test runner.
+- **`frontend/src/design-system/contrast.test.ts`** — vitest-shape regression test pinning every (token, surface) pair this batch fixed. Includes 3 counter-examples that **must still fail** (pre-fix --border-default, pre-fix --status-executing, signal-blue-as-text on dark) — so we trust the math. Dormant until vitest is wired (same pattern as the existing `tierDisplay.test.ts`).
+- **`frontend/.pa11yci.json`** — pa11y-ci config for the public, unauthenticated surface (login, register, forgot-password, plans, pricing, terms, privacy, dpa) using both axe-core and HTML CodeSniffer runners. Auth-gated routes deferred to a follow-up cookie-priming driver.
+- **`frontend/A11Y.md`** — how to enable both checks locally + suggested CI rollout order.
 
-The frontend's `canonicalTier(meTier, ent.tierKey)` helper from R-batch papers over this on V3Billing/V3Team — both pages display the right tier visually:
-
-![](persona-test-2026-05-01-r3-assets/team-v3-billing.png)
-
-But **other V3 surfaces that read `entitlements.tierKey` directly are still vulnerable**. Check the bottom-right of the same screenshot above: `Tier: FREE · run limit: 10` — that footer audit row is reading raw entitlement data.
-
-The same FREE misclassification on PRO test fixture also exposes the existing test `pro_user_with_free_org_does_not_leak_max_value` — it's pinning the **clamp behavior** under a known-broken combination, not validating the resolution.
-
-**Root cause (suspected):** `EntitlementResolver` reads tier from `billing_subscription` and falls back to FREE when no active Stripe subscription exists for the org. Test fixtures don't create real Stripe rows, so they always fall through. In production this isn't a bug because subscriptions and `app_user.tier` move together via `BillingService.handleStripeCheckoutCompleted`. But:
-
-- The `canonicalTier` band-aid is incomplete — every new V3 page that shells `entitlements.tierKey` will misrender for any user whose `app_user.tier` is ahead of their `billing_subscription` row (a class that includes: test fixtures, manually-promoted orgs, expired subscriptions where tier hasn't been demoted yet, and any future operator workflow that promotes a tier without a Stripe touch).
-- Recommendation: in `EntitlementResolver`, prefer `app_user.tier` when no active subscription row exists, falling back to FREE only if user.tier is also unset. The existing `effectivePaid = !FREE.equals(tierKey) || !FREE.equals(user.tier)` clamp shows the data is already in the resolver — the fix is to also reflect that into `tierKey` itself.
+Once vitest is installed, the contrast test alone will catch every regression in this batch's class (math against wrong surface, untracked palette drift) on `npm run build`.
 
 ---
 
-## §4 — V3 top-bar shell — per-tier visual
+## §6 — What's still on the radar (informational, not blocked)
 
-### 4.1 ENTERPRISE — Billing & plan
+These weren't part of the round-3 fix scope and were flagged in the original report or the user's response. None block this commit.
 
-![](persona-test-2026-05-01-r3-assets/ent-v3-billing.png)
-
-- Tier banner: "**You're on Enterprise. Unlimited runs · 0 this period**". `canonicalTier` patch holding.
-- TEAM card has no "Current" badge (correct — ENT is above TEAM).
-- TEAM pricing: **$39 / seat / month** ✅ (post-V165).
-- "Custom" Enterprise card with Schedule a 30-min demo + Trust + compliance buttons.
-- Bottom audit row leaks "Tier: FREE · run limit: 10" (entitlement-resolver bug — see §3).
-
-### 4.2 TEAM — Billing & plan
-
-![](persona-test-2026-05-01-r3-assets/team-v3-billing.png)
-
-- Tier banner: "You're on Team. Unlimited runs · 0 this period".
-- TEAM card highlighted with "Current" badge ✅.
-- "Add seats →" CTA on TEAM ✅.
-
-### 4.3 PRO — Billing & plan
-
-![](persona-test-2026-05-01-r3-assets/pro-v3-billing.png)
-
-- Tier banner: "You're on Pro." with grandfathered status pill.
-- PRO card highlighted with "Current" badge.
-- PRO card copy: **"Existing subscribers only — new buyers, choose Team"** ✅ R-batch fix landed.
-- "Manage subscription →" CTA on PRO.
-
-### 4.4 FREE — Billing & plan
-
-![](persona-test-2026-05-01-r3-assets/free-v3-billing.png)
-
-- Tier banner: "You're on Free. **10 of 10 runs left this month**" with full progress bar + "Upgrade →" CTA.
-- FREE card highlighted with "Current" badge.
-- TEAM card has "Add seats →" — note this CTA is misleading on FREE (a FREE user should see "Subscribe →", not "Add seats →" — it's the same component for all tiers).
-
-### 4.5 Team management — TEAM persona
-
-![](persona-test-2026-05-01-r3-assets/team-v3-team.png)
-
-- Heading: Team — Members · seats · invitations · SSO.
-- SeatsCard: **"Reval's workspace · 1 of 1 seat used"** + Manage seats →.
-- Members list: Reval team (revalidate-team@test.local) with `org_admin` chip.
-- Invite form: input + "Send invite" button.
-- **Missing for TEAM**: there's no SSO row. Per V3Team subhead "Members · seats · invitations · SSO" should include an SSO section. Likely correctly hidden because SSO is gated to ENTERPRISE.
-
-### 4.6 Team management — ENTERPRISE persona
-
-![](persona-test-2026-05-01-r3-assets/ent-v3-team.png)
-
-- SeatsCard: "1 member · unlimited seats" ✅.
-- Single-sign-on section visible with **Talk to sales / Open admin** buttons + "Configure SAML / OIDC for Okta, Auth0, Azure AD…" copy.
-- The SSO panel is correctly only visible at ENTERPRISE.
-
-### 4.7 V3 Insights / Dashboard
-
-![](persona-test-2026-05-01-r3-assets/ent-v3-dashboard.png)
-
-- URL `/v3/dashboard` renders **page titled "Insights"** — minor inconsistency, route name and page name diverge. Either rename route → `/v3/insights` or rename page → "Dashboard".
-- Five KPI tiles: Runs · Spend · Success rate · Active projects · Needs attention.
-- Period selector top-right: 30d / 90d / 365d.
-- Empty-state: "✓ All clear in the last 30 days." with green check ✅.
+- **Sidebar still says "Runs"** — the Phase 1.1 "Missions" rename was reverted per R-191. Sidebar comment at line 103 of `Sidebar.tsx` documents the decision. Not a fix unless that decision flips.
+- **`/v3/dashboard` route → page titled "Insights"** — `V3LegacyRedirect` strips the `/v3` prefix, so `/v3/dashboard` → `/dashboard` → `/insights` is a working two-hop. Page is correctly named "Insights".
+- **Two coexisting shells (V2 sidebar + V3 top-bar)** — mid-refactor structural state. Out of scope for a token / resolver / copy batch.
+- **Pricing-tier nomenclature thrash** — historical V141/V144/V165 churn is captured in the (now-suppressed) tier-lifecycle audit log. The user's framing was "either suppress legacy entries OR commit to a 90-day pricing freeze" — this batch took the suppression path. The freeze is a policy decision, not code.
+- **Other ~50 `text-accent-blue` consumers on dark surfaces** — chip patterns where bg / border / text all share the colour, so the visual context softens the AA-body miss. Migration to `text-accent-blue-text` deferred to a follow-up sweep; the contrast.test.ts harness will catch any net-new regression.
 
 ---
 
-## §5 — V2 sidebar shell — per-tier visual
+## §7 — Recommended next batch (post-merge)
 
-### 5.1 FREE — empty workspace landing
-
-![](persona-test-2026-05-01-r3-assets/free-projects.png)
-
-This is the new **EmptyProjectLanding** (v2.6.4):
-- Sparkle icon hero.
-- "Welcome, Reval."
-- "You don't have any projects yet — let's create your first one. Then describe what you want to build, and we'll ship a draft PR you can actually merge."
-- **Create my first project** primary CTA.
-- **"Set up a project the long way →"** secondary link for GitHub-first users.
-- Top-right: 0/10 runs progress bar visible (FREE-tier badge).
-
-### 5.2 FREE — billing page (V2)
-
-![](persona-test-2026-05-01-r3-assets/free-billing.png)
-
-### 5.3 FREE — plans page (V2 — public-facing)
-
-![](persona-test-2026-05-01-r3-assets/free-plans-detailed.png)
-
-### 5.4 PRO — projects page
-
-![](persona-test-2026-05-01-r3-assets/pro-projects.png)
-
-### 5.5 TEAM — projects page
-
-![](persona-test-2026-05-01-r3-assets/team-projects.png)
-
-### 5.6 ENTERPRISE — projects page
-
-![](persona-test-2026-05-01-r3-assets/ent-projects.png)
-
-### 5.7 Mobile breakpoint — ENT V3 dashboard
-
-![](persona-test-2026-05-01-r3-assets/ent-v3-dashboard-mobile.png)
-
-### 5.8 Mobile breakpoint — ENT projects
-
-![](persona-test-2026-05-01-r3-assets/ent-projects-mobile.png)
-
-### 5.9 Light theme — projects + V3 dashboard
-
-| Light theme — projects | Light theme — V3 dashboard |
-|------|------|
-| ![](persona-test-2026-05-01-r3-assets/admin-projects-light.png) | ![](persona-test-2026-05-01-r3-assets/admin-v3-dashboard-light.png) |
+1. **Wire vitest** (5-min lift) — installs the dormant `contrast.test.ts` + `tierDisplay.test.ts`. Most-ROI item open.
+2. **Pa11y-ci in CI** — separate workflow that boots Vite + crawls the public surface. Catches contrast / link-name / heading-order at PR time.
+3. **Sweep the remaining ~50 `text-accent-blue` consumers** to `text-accent-blue-text` on dark surfaces. Largest lever for closing the long tail of AA-body misses on dark theme.
+4. **Authenticated pa11y-ci pass** — cookie-priming driver before the crawler runs. Wave 2 of the a11y plan.
+5. **Optional:** PRO V3 billing top-bar usage badge — currently shows "0/20 runs". Verify the badge color flips at 80% / 90% (it should, but didn't get an explicit test in this batch since the test fixture has 0 usage).
 
 ---
 
-## §6 — Login hero (logged-out)
+## §8 — Asset inventory
 
-![](persona-test-2026-05-01-r3-assets/login-hero.png)
-
-R-batch fix landed:
-- H1: **"Ship AI-written PRs you can actually merge."** (was "Sign in to ship a spec.")
-- "PRs" word renders with the new `--c-pop-orange` (now pink #EC4899) → amber gradient — distinct from any warning hue.
-- Body copy: "ExecuteSpec turns your specs into draft pull requests — across one repo or twenty. Plan, build, test, review, open a PR."
-- 3-bullet feature list with brand-blue icon chips: Prototype in minutes / Ship with confidence / Multi-repo projects.
-- Right pane: Sign in form with Continue with Google / GitHub above email/password.
-- "Sign up free" link in primary brand blue.
-
----
-
-## §7 — WCAG-AA contrast audit (token-level)
-
-Sampled with a live computed-style probe against the dark theme (gray-100 = `#14171C`). AA targets: **4.5** for body text, **3.0** for AA-large + non-text contrast (SC 1.4.11).
-
-| Token | Pair                              | Ratio | Body (4.5) | Large/Non-text (3.0) |
-|-------|-----------------------------------|-------|------------|----------------------|
-| `--c-signal-blue` `#3B6FCC` | on white                | **4.85** | ✅ | ✅ |
-| `--c-signal-blue` `#3B6FCC` | on gray-100 (live UI)   | **3.71** | ❌ | ✅ |
-| `--c-signal-blue-hover` `#2B5BB3` | on white          | **6.46** | ✅ | ✅ |
-| `--c-pop-orange` `#EC4899` | on gray-100              | **5.09** | ✅ | ✅ |
-| `--c-pop-amber` `#FBBF24` | on gray-100               | **10.76** | ✅ | ✅ |
-| `--status-success` `#10B981` | on gray-100            | **7.08** | ✅ | ✅ |
-| `--status-partial` `#F5A524` | on gray-100            | **8.80** | ✅ | ✅ |
-| `--status-executing` `#4A77D6` | on gray-100          | **4.19** | ❌ | ✅ |
-| `--status-executing` `#4A77D6` | on gray-200          | **3.86** | ❌ | ✅ |
-| `--text-primary` `#ECEEF2` | on gray-100              | **15.46** | ✅ | ✅ |
-| `--text-secondary` `#C9D1DB` | on gray-100            | **11.66** | ✅ | ✅ |
-| `--text-muted` `#8A94A6` | on gray-100               | **5.87** | ✅ | ✅ |
-| `--border-default` `#333B46` | on gray-100            | **1.59** | n/a | ❌ |
-| `--border-hover` `#4C5662` | on gray-100              | **2.41** | n/a | ❌ |
-| `--border-default` `#333B46` | on gray-200            | **1.46** | n/a | ❌ |
-
-### Findings
-
-- **F-15 (WCAG SC 1.4.11) — Border contrast 1.59 on dark surface fails AA-non-text.** The R-batch fix improved this from 1.35 → 1.59 but did not reach the 3.0 floor. Card boundaries on `gray-100` and `gray-200` surfaces remain visually weak — at distance most cards merge with the page. Recommend pushing `--border-default` to ≥ `#5E6771` for AA compliance, or accept the cosmetic and explicitly waive 1.4.11 in `docs/design/ui-tokens.md`.
-
-- **F-16 (WCAG SC 1.4.3) — Signal-blue text on dark surface 3.71 fails AA-body.** The R-batch comment in `primitives.css` references "≥4.5 contrast" but it computes that against **white**, not the live dark surface. Body-sized text in `--c-signal-blue` (links, "Sign up free", inline brand-color text) on `gray-100` lands at 3.71 → fails AA-body. Passes AA-large (≥3.0). Either: (a) accept that all signal-blue text must be heading-sized, (b) introduce a dark-surface variant `--c-signal-blue-on-dark` at e.g. `#7AA5F5` (4.5+) and switch links to it, (c) bump the canonical token even darker — but that hurts contrast on the marketing page (where white background is the substrate).
-
-- **F-17 (WCAG SC 1.4.3) — `--status-executing` 4.19 fails AA-body** but passes AA-large + non-text. Mostly used for status chips (large) + progress bars (non-text), so this is likely fine — but if any executing-state body copy renders, it falls below AA. Recommend lightening to `#5B89E0` (≈4.7).
-
-The fixes from the R-batch were directionally right but the math was done against white, not the live dark theme.
-
----
-
-## §8 — Surface-by-surface summary
-
-### What's clearly working
-
-1. **Tier ladder copy is consistent everywhere** — admin tier dropdown, V3 billing cards, plans page, tier-lifecycle console all show the post-V165 4-tier shape with PRO grandfathered.
-2. **TypedConfirmModal** is a step-change for destructive ops — clear consequence + reason input + keyword gate. Reuse this primitive for delete-org / delete-project.
-3. **EmptyProjectLanding** (v2.6.4) gives the FREE/empty path a real message instead of a sea of empty cards.
-4. **Login hero** lead with outcome ("PRs you can actually merge") not action ("sign in") — this is PMF-correct copy.
-5. **V3 Team panel** distinguishes ENT (SSO + unlimited seats) from TEAM (members + invitations only) cleanly.
-6. **R8 personal-org permission fix** holds across the matrix — paid tier OR ORG_ADMIN role on a personal org both get org-management. FREE/PRO correctly denied.
-7. **`Integer.MAX_VALUE` clamp** at the resolver level is working — paid users see `lifetimeRunCreditBalance: -1` (sentinel-clamped), not `2147483647`.
-
-### What's still off
-
-| ID | Severity | Owner            | Fix                                                                   |
-|----|----------|------------------|-----------------------------------------------------------------------|
-| F-14 | P1     | EntitlementResolver | Fall back to `app_user.tier` (not FREE) when no active subscription |
-| F-15 | P3     | tokens.css       | Bump `--border-default` to ≥`#5E6771` or document waiver               |
-| F-16 | P3     | primitives.css   | Add `--c-signal-blue-on-dark` variant or rule out body-blue on dark   |
-| F-17 | P3     | tokens.css       | Lighten `--status-executing` to ≥`#5B89E0`                            |
-| F-18 | P3     | router/sidebar   | Phase 1.1 "Runs → Missions" rename pending; sidebar still says Runs   |
-| F-19 | P3     | V3 routing       | `/v3/dashboard` route renders page titled "Insights" — pick one       |
-| F-20 | P4     | RateLimitFilter  | Walking the V3 surfaces hot enough to capture screenshots tripped 429 on `/api/v3/entitlements`. Consider raising `READ` group limit to make persona-test reproducibility cheaper, or add a `?test-mode=1` bypass flag for known dev tokens. |
-
-### Informational (no action)
-
-- Sidebar PROJECTS rail shows three "Hostel Eval" projects + two "UI Test" projects + "R-343 Persona Report" — that's prior-session test data, not a bug.
-- The tier-lifecycle audit log shows the V141 + V144 + V165 churn ("TEAM tier reinstated", "TEAM launch — PRO gran..."). Live state is correct; this is a historical leak of internal naming, harmless.
-
----
-
-## §9 — Competitor positioning skim
-
-Did not re-do a full competitor analysis this round (covered in earlier sessions, deleted with the round-1 report). Quick observations from the new copy:
-
-- Login hero **"AI-written PRs you can actually merge"** — leans into the same wedge as v0/Cursor ("AI agent that ships code, not stubs") but differentiates on outcome (PR you can merge) over surface (chat / IDE). Fits the ExecuteSpec positioning better than the prior "sign in to ship a spec" CTA.
-- V3 billing copy "Free → Pro grandfathered → Team → Custom" is a clean Stripe-style ladder — no awkward MAX/TEAM split anymore.
-- The "Existing subscribers only — new buyers, choose Team" line on the PRO card is **rare in this market** — most platforms just hide grandfathered tiers entirely. The transparent disclosure is a credibility signal for procurement evaluators.
-- Empty-state CTA "Set up a project the long way" — endearing copy, but the implication that there's a "shortcut" should match what the primary CTA actually does. If "Create my first project" doesn't auto-link a GitHub repo, that's a clarity miss.
-
----
-
-## §10 — Recommended next batch
-
-Strict P-ranked, scope-aware:
-
-1. **F-14 (P1):** `EntitlementResolver` — prefer `app_user.tier` over FREE fallback. One file, ~5 lines. Ships the "tier shows correctly across every V3 surface" promise without a band-aid per page.
-2. **F-15 (P3):** Border contrast bump — single-token change. Side-effects: every dark-theme card border gets stronger. Cosmetic-positive in most cases.
-3. **F-19 (P3):** Either rename the V3 route or the page H1. Tiny, but the inconsistency comes up repeatedly in support transcripts.
-4. **F-18 (P3):** Phase 1.1 "Missions" rename — already in flight, just hasn't shipped.
-5. **F-16/F-17 (P3):** Either dark-surface signal-blue variant + status-executing lightening, or document the AA-large waiver. Pick one and move on; the half-fix is the worst place to be.
-
-Skip this round: any new feature work. The V3 surface needs the entitlement bug fixed before more pages get added on top of the broken contract.
-
----
-
-## Asset inventory
-
-`docs/audits/persona-test-2026-05-01-r3-assets/` contains 110 PNG screenshots + this report. Asset naming is `<persona>-<surface>[-<state>].png`. All captures are full-page at 1440×900 dpr 1, two captures at mobile (375×812 dpr 2), two captures in light theme.
+`docs/audits/persona-test-2026-05-01-r3-assets/` contains 110 PNG screenshots. Naming: `<persona>-<surface>[-<state>].png`. All captures are full-page at 1440×900 dpr 1, two captures at mobile (375×812 dpr 2), two captures in light theme.
