@@ -122,8 +122,23 @@ UPDATE billing_plan
 DELETE FROM billing_plan_limit
  WHERE billing_plan_id IN (SELECT id FROM billing_plan WHERE tier = 'MAX');
 
-DELETE FROM billing_plan_feature
- WHERE billing_plan_id IN (SELECT id FROM billing_plan WHERE tier = 'MAX');
+-- billing_plan_feature is referenced by some installs but is not created by
+-- any migration in this repo (see V141 for the same pattern). Defensive
+-- IF EXISTS check skips the DELETE on schemas that don't have the table.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+     WHERE table_schema = current_schema()
+       AND table_name   = 'billing_plan_feature'
+  ) THEN
+    EXECUTE '
+      DELETE FROM billing_plan_feature
+       WHERE billing_plan_id IN (
+              SELECT id FROM billing_plan WHERE tier = ''MAX''
+       )';
+  END IF;
+END $$;
 
 DELETE FROM billing_plan
  WHERE tier = 'MAX';
