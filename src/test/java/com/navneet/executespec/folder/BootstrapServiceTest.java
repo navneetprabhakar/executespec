@@ -20,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -37,6 +38,7 @@ class BootstrapServiceTest {
   private FolderReadmeGenerator readme;
   private ProjectRepoRepository repoRepo;
   private ActivityEventEmitter emitter;
+  private PullRequestRecordService prRecordService;
   private CannedHttpClient http;
   private BootstrapService bootstrap;
 
@@ -51,8 +53,14 @@ class BootstrapServiceTest {
     readme = mock(FolderReadmeGenerator.class);
     repoRepo = mock(ProjectRepoRepository.class);
     emitter = mock(ActivityEventEmitter.class);
+    prRecordService = mock(PullRequestRecordService.class);
     http = new CannedHttpClient();
-    bootstrap = new BootstrapService(writer, readme, repoRepo, emitter, http);
+    // 2026-05-02 — fix: BootstrapService picked up a 5th constructor argument
+    // (PullRequestRecordService, prior to V169 PR-record dispatch) but this test wasn't
+    // updated, so the file no longer compiled and blocked the entire test build. Now passes
+    // both prRecordService and the canned HttpClient to the package-private test seam.
+    bootstrap =
+        new BootstrapService(writer, readme, repoRepo, emitter, prRecordService, http);
 
     repoId = UUID.randomUUID();
     projectId = UUID.randomUUID();

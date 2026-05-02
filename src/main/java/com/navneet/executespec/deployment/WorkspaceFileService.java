@@ -40,6 +40,11 @@ public class WorkspaceFileService {
 
   private static final long MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 
+  // 2026-05-02 — kept aligned with com.navneet.executespec.harness.VendoredPathGuard.VENDORED_DIRS
+  // so the file-tree, accuracy-assessor, and pre-commit guard all share one definition of
+  // "vendored / build-artefact path that doesn't belong in the run." The SKIP_DIRS list here is
+  // strictly a superset (also includes .git / .agent-context / worktrees, which are pipeline
+  // infrastructure rather than vendored content).
   private static final List<String> SKIP_DIRS =
       List.of(
           ".git",
@@ -47,9 +52,20 @@ public class WorkspaceFileService {
           "target",
           "build",
           "node_modules",
+          "venv",
+          ".venv",
+          "__pycache__",
           ".gradle",
           ".idea",
           ".vscode",
+          ".next",
+          "coverage",
+          "bower_components",
+          "vendor",
+          ".pytest_cache",
+          ".mypy_cache",
+          ".tox",
+          ".nyc_output",
           "worktrees");
   private static final List<String> SKIP_EXTENSIONS =
       List.of(
