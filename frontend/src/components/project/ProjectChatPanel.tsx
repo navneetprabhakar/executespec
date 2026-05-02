@@ -16,7 +16,13 @@ import {
 } from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {req, clearProjectChat, compactProjectChat} from '@/lib/api';
+import {
+  req,
+  clearProjectChat,
+  compactProjectChat,
+  getProjectChatInfo,
+  type ProjectChatInfo,
+} from '@/lib/api';
 import type {ProjectRepoLink} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {cn} from '@/lib/utils';
@@ -51,7 +57,34 @@ const QUICK_ACTIONS = [
   },
 ];
 
-export default function ProjectChatPanel({projectId}: {projectId: string}) {
+/**
+ * Last-resort context window when the chat-info round-trip hasn't returned yet. 128k is a safe
+ * lower bound on every frontier model we ship today, so the chip degrades to "128k window"
+ * rather than blank during the brief in-flight window.
+ */
+const FALLBACK_CONTEXT_WINDOW = 128_000;
+
+/** Format a token count as `1.2k` / `12.3k` / `123k`. */
+function formatTokens(n: number): string {
+  if (n < 1000) return `${n}`;
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+export default function ProjectChatPanel({
+  projectId,
+  aiProvider: _aiProvider,
+}: {
+  projectId: string;
+  /**
+   * Kept for back-compat — the panel now fetches the resolved model + window via
+   * `getProjectChatInfo(projectId)` so the chip reflects the actual model the chat answers
+   * with (gpt-4o = 128k vs gpt-5.4 = 256k vs Sonnet 200k vs the 1M-context Opus variant), not a
+   * provider-level guess.
+   */
+  aiProvider?: string | null;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -61,6 +94,9 @@ export default function ProjectChatPanel({projectId}: {projectId: string}) {
   const [resetting, setResetting] = useState(false);
   const [compacting, setCompacting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 2026-05-02 — resolved model + context window driven by the backend so the chip is
+  // model-accurate (gpt-4o=128k vs gpt-5.4=256k, Sonnet=200k vs Opus-1M=1M, etc).
+  const [chatInfo, setChatInfo] = useState<ProjectChatInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -84,6 +120,23 @@ export default function ProjectChatPanel({projectId}: {projectId: string}) {
     },
     [],
   );
+
+  // Fetch resolved-model metadata once per mount / projectId switch. Best-effort: any failure
+  // leaves chatInfo null and the chip silently falls back to the FALLBACK_CONTEXT_WINDOW guess.
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectId) return;
+    getProjectChatInfo(projectId)
+      .then((info) => {
+        if (!cancelled) setChatInfo(info);
+      })
+      .catch(() => {
+        /* surfaced via chip fallback; no toast */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const handleResetHistory = async () => {
     if (resetting) return;
@@ -180,6 +233,18 @@ export default function ProjectChatPanel({projectId}: {projectId: string}) {
 
   const hasConversation = messages.length > 0;
 
+  // 2026-05-02 — surface chat-specific token totals + the model's context
+  // window so the user can gauge how close they are to needing a Compact.
+  // Tokens are summed across every persisted message (input + output);
+  // window comes from the static provider map above. Both render only when
+  // the conversation has at least one round-trip with token metadata —
+  // before that, "0 / 200k" is noise.
+  const totalIn = messages.reduce((acc, m) => acc + (m.tokensIn ?? 0), 0);
+  const totalOut = messages.reduce((acc, m) => acc + (m.tokensOut ?? 0), 0);
+  const totalTokens = totalIn + totalOut;
+  const contextWindow = chatInfo?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
+  const tokenPercent = contextWindow > 0 ? Math.min(100, (totalIn / contextWindow) * 100) : 0;
+
   return (
     <div className='flex flex-col h-full min-h-0 bg-[var(--gray-100)]'>
       {/* Slim header — only when conversation exists, so the empty state stays clean */}
@@ -191,6 +256,34 @@ export default function ProjectChatPanel({projectId}: {projectId: string}) {
             <span className='text-muted'>
               · {messages.length} message{messages.length === 1 ? '' : 's'}
             </span>
+            {totalTokens > 0 && (
+              <>
+                <span
+                  className='text-muted'
+                  title={`Input tokens: ${totalIn.toLocaleString()} · Output tokens: ${totalOut.toLocaleString()} · Cumulative across this conversation`}
+                >
+                  · {formatTokens(totalIn)} in / {formatTokens(totalOut)} out
+                </span>
+                <span
+                  className={cn(
+                    'text-muted',
+                    tokenPercent >= 80 && 'text-accent-amber',
+                    tokenPercent >= 95 && 'text-accent-red',
+                  )}
+                  title={
+                    `Model: ${chatInfo?.model ?? 'resolving…'}` +
+                    (chatInfo?.provider ? ` (${chatInfo.provider.toLowerCase()})` : '') +
+                    `\nContext window: ${formatTokens(contextWindow)} tokens` +
+                    `\nCumulative input is ${tokenPercent.toFixed(0)}% of the window — ` +
+                    `the chat windows to the last 20 messages so older turns drop off ` +
+                    `automatically, but Compact rewrites the trailing tail into a single ` +
+                    `summary when answers start drifting.`
+                  }
+                >
+                  · {formatTokens(contextWindow)} window
+                </span>
+              </>
+            )}
           </div>
           <div className='flex items-center gap-1.5'>
             <button

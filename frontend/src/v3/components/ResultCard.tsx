@@ -1,6 +1,13 @@
 import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
-import {getRun, getValidationReport, type RunDetail, type ValidationReportData} from '@/lib/api';
+import {
+  getRun,
+  getValidationReport,
+  getRunPrs,
+  type RunDetail,
+  type ValidationReportData,
+} from '@/lib/api';
+import type {PrSummary} from '@/types/project';
 import Pill from './Pill';
 import {STATUS_LABELS, VERDICT_LABELS, type V3Verdict, COST_PREFIX} from '../lib/terminology';
 
@@ -60,6 +67,9 @@ function verdictTone(v: V3Verdict | null): 'ok' | 'warn' | 'err' | 'neutral' {
 export default function ResultCard({runId, initialStatus}: ResultCardProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [report, setReport] = useState<ValidationReportData | null>(null);
+  // Multi-repo PR list — same fallback as V3RunDetail. detail.githubPrUrl is null on multi-repo
+  // runs, so we have to consult the registry to know if there are any PRs at all.
+  const [prs, setPrs] = useState<PrSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const navigate = useNavigate();
 
@@ -70,13 +80,16 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
       .then((d) => {
         if (cancelled) return;
         setDetail(d);
-        // Pull report only if terminal (no point thrashing on in-flight).
+        // Pull report + PR list only if terminal (no point thrashing on in-flight).
         if (d.status === 'COMPLETE' || d.status === 'PARTIAL') {
-          return getValidationReport(runId)
-            .then((r) => {
-              if (!cancelled) setReport(r);
-            })
-            .catch(() => {});
+          return Promise.all([
+            getValidationReport(runId).catch(() => null),
+            getRunPrs(runId).catch(() => [] as PrSummary[]),
+          ]).then(([r, p]) => {
+            if (cancelled) return;
+            setReport(r);
+            setPrs(p);
+          });
         }
       })
       .catch(() => {})
@@ -172,7 +185,25 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
             <button
               type='button'
-              onClick={() => navigate(`/projects/${detail.projectId ?? ''}/r/${runId}`)}
+              // 2026-05-02 — was `/r/${runId}` which only matches the short
+              // alias `/p/:slug/r/:run` (rewritten in App.tsx). The long form
+              // `/projects/:slug/...` has NO `/r/` rewrite, so the path
+              // dropped through every route and rendered the landing page.
+              // Fix: route to canonical `/projects/:slug/runs/:runShort` when
+              // we have the projectId; fall back to `/runs/{runId}` (which
+              // mounts RunsPage with a focused detail view) when the bubble
+              // didn't carry projectId — happens for older bubbles + when the
+              // run detail blob is loading. Either way, NEVER produce
+              // `/projects//runs/...` (the empty-projectId double-slash that
+              // also dropped through to the landing page).
+              onClick={() => {
+                const pid = detail.projectId;
+                if (pid && pid.length > 0) {
+                  navigate(`/projects/${pid}/runs/${runId}`);
+                } else {
+                  navigate(`/runs/${runId}`);
+                }
+              }}
               style={{
                 padding: '5px 12px',
                 fontSize: 12,
@@ -187,27 +218,65 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
             >
               Open run
             </button>
-            {detail.githubPrUrl && (
-              <a
-                href={detail.githubPrUrl}
-                target='_blank'
-                rel='noreferrer'
-                style={{
-                  padding: '5px 12px',
-                  fontSize: 12,
-                  fontWeight: 500,
-                  background: 'transparent',
-                  color: 'var(--v3-text-muted)',
-                  border: '1px solid var(--v3-border)',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  textDecoration: 'none',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Open PR ↗
-              </a>
-            )}
+            {/* Multi-repo aware: same logic as V3RunDetail. 0 → none, 1 → "Open PR", N>1 →
+                 one button per repo labeled "<short>#<num>". Falls back to detail.githubPrUrl
+                 for legacy runs without registry rows. */}
+            {(() => {
+              const legacyUrl = detail.githubPrUrl;
+              if (prs.length === 0 && !legacyUrl) return null;
+              if (prs.length <= 1) {
+                const single = prs[0]?.prUrl ?? legacyUrl!;
+                return (
+                  <a
+                    href={single}
+                    target='_blank'
+                    rel='noreferrer'
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      background: 'transparent',
+                      color: 'var(--v3-text-muted)',
+                      border: '1px solid var(--v3-border)',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      textDecoration: 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Open PR ↗
+                  </a>
+                );
+              }
+              return prs.map((pr) => {
+                const shortRepo = pr.repoFullName?.includes('/')
+                  ? pr.repoFullName.slice(pr.repoFullName.lastIndexOf('/') + 1)
+                  : pr.repoFullName;
+                return (
+                  <a
+                    key={`${pr.repoFullName}-${pr.prNumber}`}
+                    href={pr.prUrl}
+                    target='_blank'
+                    rel='noreferrer'
+                    title={`${pr.repoFullName} · ${pr.status}`}
+                    style={{
+                      padding: '5px 10px',
+                      fontSize: 12,
+                      fontWeight: 500,
+                      background: 'transparent',
+                      color: 'var(--v3-text-muted)',
+                      border: '1px solid var(--v3-border)',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      textDecoration: 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {shortRepo}#{pr.prNumber} ↗
+                  </a>
+                );
+              });
+            })()}
           </div>
         </>
       )}

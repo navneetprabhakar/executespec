@@ -39,8 +39,12 @@ const CARDS: IntegrationCard[] = [
     name: 'GitHub (PAT)',
     group: 'Source control',
     oneLiner: 'Personal access token — auto-detected when you sign in with GitHub OAuth.',
-    manageHref: '/settings',
-    connectHref: '/settings',
+    // R-141 (2026-05-02): pointed at /settings (V3Settings — read-only stub
+    // with no form). Routes now deep-link into the SettingsPage form via
+    // the new /settings/manage route + anchor; the section auto-opens +
+    // scrolls into view on hash match.
+    manageHref: '/settings/manage#github',
+    connectHref: '/settings/manage#github',
     isConnected: (u) => Boolean(u?.hasGithubPat),
   },
   {
@@ -58,8 +62,12 @@ const CARDS: IntegrationCard[] = [
     name: 'Bitbucket',
     group: 'Source control',
     oneLiner: 'App password + workspace.',
-    manageHref: '/settings',
-    connectHref: '/settings',
+    // R-141 (2026-05-02): the SettingsPage Bitbucket form was never built
+    // (backend endpoint exists at PUT /api/auth/settings/bitbucket).
+    // Pointing here lands users on the same page where GitHub/AI keys
+    // forms are; the Bitbucket form itself is a separate follow-up.
+    manageHref: '/settings/manage',
+    connectHref: '/settings/manage',
     isConnected: (u) => Boolean(u?.bitbucketUsername && u?.hasBitbucketAppPassword),
   },
   {

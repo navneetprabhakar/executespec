@@ -69,6 +69,15 @@ public class ProjectArchitectureService {
       activityEmitterProvider;
 
   /**
+   * V169 (2026-05-02) — surfaces architecture-write PRs in the project dashboard's PR rollup. Same
+   * Optional-pattern as the folder writer so non-publishing call sites (unit tests, admin tooling)
+   * don't need to wire the project.pr package.
+   */
+  private final org.springframework.beans.factory.ObjectProvider<
+          com.navneet.executespec.project.pr.PullRequestRecordService>
+      prRecordServiceProvider;
+
+  /**
    * Regenerate codemaps for every linked repo, then synthesise a fresh architecture doc. Versioned:
    * existing docs are preserved.
    */
@@ -434,9 +443,22 @@ public class ProjectArchitectureService {
                         + "Generated from SHA: "
                         + shortSha(cm.getGeneratedFromSha())
                         + "\n\n"
-                        + "If you'd rather these updates skip the PR step entirely, "
-                        + "ask a project admin to flip this repo's "
-                        + "`executespec_pr_mode` to `DIRECT_PUSH`.",
+                        + "## What happens after you merge this?\n\n"
+                        + "* **Merging is optional.** This PR refreshes "
+                        + "`.executespec/arch/codemap.md` so the cached arch "
+                        + "matches the latest source. ExecuteSpec keeps a "
+                        + "DB-side copy regardless — the file in your repo "
+                        + "is the customer-facing artefact.\n"
+                        + "* **No empty-PR cycle.** When you do merge, the next "
+                        + "analyse will check whether the codemap content has "
+                        + "actually changed before opening another PR. If the "
+                        + "default-branch HEAD bumped but the codemap is "
+                        + "byte-identical, the writer skips the PR entirely.\n"
+                        + "* **Skip the PR step entirely.** If you'd rather "
+                        + "these regenerations write straight to the default "
+                        + "branch instead of through a PR, ask a project admin "
+                        + "to flip this repo's `executespec_pr_mode` to "
+                        + "`DIRECT_PUSH`.",
                     patOverride);
         if (result.isEmpty()) {
           log.warn(
@@ -468,6 +490,34 @@ public class ProjectArchitectureService {
                   result.get().openedNewPr(),
                   "prUrl",
                   result.get().prUrl() == null ? "" : result.get().prUrl()));
+        }
+
+        // V169 (2026-05-02) — persist the architecture PR so the project
+        // dashboard's Pull requests tab surfaces it. Skip the DIRECT_PUSH
+        // branch (no PR was opened, prUrl is null). Best-effort: any
+        // failure logs and continues so codemap publish itself isn't blocked.
+        if (result.get().openedNewPr() && result.get().prUrl() != null) {
+          com.navneet.executespec.project.pr.PullRequestRecordService prRec =
+              prRecordServiceProvider.getIfAvailable();
+          if (prRec != null) {
+            try {
+              prRec.recordCreated(
+                  null,
+                  projectId,
+                  repo.getId(),
+                  fullName,
+                  result.get().prUrl(),
+                  result.get().branchName(),
+                  null,
+                  com.navneet.executespec.project.pr.PullRequestRecord.Kind.ARCHITECTURE);
+            } catch (Exception recEx) {
+              log.warn(
+                  "[{}] could not record architecture PR for {}: {}",
+                  projectId,
+                  fullName,
+                  recEx.getMessage());
+            }
+          }
         }
       } catch (Exception ex) {
         log.warn("[{}] codemap publish to {} failed: {}", projectId, fullName, ex.getMessage());

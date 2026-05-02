@@ -61,7 +61,7 @@ Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-
 
 This architecture document describes the V2 pipeline as it ships on `dev` today. A 5-pillar rewrite of the validation layer is in progress — Pillar 1 (planner requirement graph) is open as PR #21. The full plan lives at `.claude/plans/immutable-painting-platypus.md`. Tracked behind the feature flag `validation.v3-strict` (default OFF in prod).
 
-**Pillar 1 — planner requirement graph (v2.5.11, open)**
+**Pillar 1 — planner requirement graph (v1.0.0-M1, open)**
 
 The planner emits a structured requirement graph alongside the task list:
 

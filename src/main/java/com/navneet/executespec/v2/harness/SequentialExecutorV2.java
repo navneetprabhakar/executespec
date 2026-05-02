@@ -167,7 +167,11 @@ public class SequentialExecutorV2 {
     String refDocs = fetchReferenceDocs(req.projectId(), task);
     String systemPrompt =
         composeSystemPrompt(
-            task, req.designBlock(), refDocs, req.plan() == null ? null : req.plan().projectType());
+            task,
+            req.designBlock(),
+            refDocs,
+            req.plan() == null ? null : req.plan().projectType(),
+            req.workspaceSummary());
     String userPrompt = composeUserPrompt(task, null);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -217,7 +221,17 @@ public class SequentialExecutorV2 {
             task.id(),
             primary.outcome(),
             fileWrites);
-        persistTaskStatus(runId, task.id(), "PARTIAL");
+        // 2026-05-02 — pass the structured failure reason so RunMapper#extractFailureReason
+        // surfaces it on the task card. Without this the per-task PARTIAL chip is silent and
+        // users have to dig through worker logs to see why.
+        String reason =
+            "Worker stopped without completion but wrote "
+                + fileWrites
+                + " file"
+                + (fileWrites == 1 ? "" : "s")
+                + " — "
+                + describeWorkerFailure(primary);
+        persistTaskStatus(runId, task.id(), "PARTIAL", reason);
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
         return TaskOutcome.builder()
             .taskId(task.id())
@@ -226,6 +240,8 @@ public class SequentialExecutorV2 {
             .workerOutcome(primary)
             .totalLatencyMs(System.currentTimeMillis() - taskStart)
             .toolCallsDispatched(primary.toolCallsDispatched())
+            .dispatchedProvider(cfg.provider)
+            .dispatchedModel(cfg.model)
             .build();
       }
       log.warn(
@@ -245,6 +261,8 @@ public class SequentialExecutorV2 {
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -259,6 +277,8 @@ public class SequentialExecutorV2 {
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -283,6 +303,8 @@ public class SequentialExecutorV2 {
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -305,6 +327,8 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(smoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -347,6 +371,8 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(smoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(totalToolCalls)
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -368,6 +394,8 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(retrySmoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(totalToolCalls)
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -398,11 +426,26 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(retrySmoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(totalToolCalls)
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
     log.warn("Executor task={} smoke still fails after retry; COMPLETED_WITH_WARNING", task.id());
-    persistTaskStatus(runId, task.id(), "PARTIAL");
+    // 2026-05-02 — surface the smoke failure inline on the task card. Use exit code +
+    // a tail of the smoke output so the user sees something like "Build smoke failed
+    // (exit 1): SHELL BLOCKED 'bun' in: cd repos/frontend && bun install" instead of a
+    // bare PARTIAL with no explanation.
+    String smokeTail = retrySmoke.output() == null ? "" : retrySmoke.output();
+    if (smokeTail.length() > 240) {
+      smokeTail = smokeTail.substring(smokeTail.length() - 240);
+    }
+    String reason =
+        "Build smoke failed (exit "
+            + retrySmoke.exitCode()
+            + ") even after one retry"
+            + (smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " "));
+    persistTaskStatus(runId, task.id(), "PARTIAL", reason);
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
     return TaskOutcome.builder()
         .taskId(task.id())
@@ -416,6 +459,8 @@ public class SequentialExecutorV2 {
         .smokeTestOutput(retrySmoke.output())
         .totalLatencyMs(System.currentTimeMillis() - taskStart)
         .toolCallsDispatched(totalToolCalls)
+        .dispatchedProvider(cfg.provider)
+        .dispatchedModel(cfg.model)
         .build();
   }
 
@@ -613,9 +658,25 @@ public class SequentialExecutorV2 {
 
   // ─── prompt composition ─────────────────────────────────────────────────
 
-  private String composeSystemPrompt(
-      PlannedTaskV2 task, String designBlock, String refDocs, String projectType) {
+  // VisibleForTesting — package-private so MultiRepoWorkerPromptTest can pin the
+  // workspace-summary forwarding without spinning up the full ExecutionRequest pipeline.
+  String composeSystemPrompt(
+      PlannedTaskV2 task,
+      String designBlock,
+      String refDocs,
+      String projectType,
+      String workspaceSummary) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
+
+    // Multi-repo correctness (2026-05-02 fix). When the orchestrator targets a multi-repo project
+    // it ships a workspaceSummary with "MULTI-REPO PROJECT WORKSPACE" + the per-repo subdir list.
+    // Without forwarding it to the worker the planner-side `repos/<name>/` directives are
+    // invisible — the worker's writeFile lands files at the workspace root, the per-repo push
+    // step finds no diff to ship, runs finish COMPLETE with empty PRs. See
+    // V2RunOrchestrator.buildMultiRepoSummary + MultiRepoWorkerPromptTest.
+    if (workspaceSummary != null && workspaceSummary.contains("MULTI-REPO")) {
+      sb.append("\n\n").append(workspaceSummary);
+    }
     // v2.5.13 — RN/Expo scaffold adherence directive. When the planner declared
     // react-native-expo, inject the scaffold template verbatim so the worker
     // stops drifting to Expo SDK 51 (stable-ish but doesn't match our smoke
