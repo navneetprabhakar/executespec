@@ -240,6 +240,8 @@ public class SequentialExecutorV2 {
             .workerOutcome(primary)
             .totalLatencyMs(System.currentTimeMillis() - taskStart)
             .toolCallsDispatched(primary.toolCallsDispatched())
+            .dispatchedProvider(cfg.provider)
+            .dispatchedModel(cfg.model)
             .build();
       }
       log.warn(
@@ -259,6 +261,8 @@ public class SequentialExecutorV2 {
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -273,6 +277,8 @@ public class SequentialExecutorV2 {
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -297,6 +303,8 @@ public class SequentialExecutorV2 {
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -319,6 +327,8 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(smoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -361,6 +371,8 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(smoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(totalToolCalls)
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -382,6 +394,8 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(retrySmoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(totalToolCalls)
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -412,6 +426,8 @@ public class SequentialExecutorV2 {
           .smokeTestOutput(retrySmoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(totalToolCalls)
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
           .build();
     }
 
@@ -443,6 +459,8 @@ public class SequentialExecutorV2 {
         .smokeTestOutput(retrySmoke.output())
         .totalLatencyMs(System.currentTimeMillis() - taskStart)
         .toolCallsDispatched(totalToolCalls)
+        .dispatchedProvider(cfg.provider)
+        .dispatchedModel(cfg.model)
         .build();
   }
 
