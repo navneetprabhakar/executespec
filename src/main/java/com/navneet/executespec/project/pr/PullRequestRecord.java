@@ -28,10 +28,53 @@ public class PullRequestRecord {
     CLOSED
   }
 
+  /**
+   * Origin of the PR. {@link #RUN} is the V82 default — every existing row has this. The remaining
+   * values were added in V169 (2026-05-02) so PRs opened by system flows are visible on the
+   * project dashboard alongside run/launch PRs.
+   *
+   * <ul>
+   *   <li>{@link #RUN}: ExecutionRun + per-run worker pushes (ScmPushService /
+   *       ExecutionBranchService).
+   *   <li>{@link #BOOTSTRAP}: initial {@code .executespec/} folder seed at repo-link time
+   *       (BootstrapService).
+   *   <li>{@link #ARCHITECTURE}: codemap + architecture write-back PRs from
+   *       ProjectArchitectureService.
+   *   <li>{@link #CONTRACT}: contract drift / consumer mirror PRs from contracts.* controllers.
+   *   <li>{@link #CHAT_TOOL}: PRs opened by project-chat tool calls (V169 companion feature).
+   * </ul>
+   */
+  public enum Kind {
+    RUN,
+    BOOTSTRAP,
+    ARCHITECTURE,
+    CONTRACT,
+    CHAT_TOOL
+  }
+
   @Id @Builder.Default private UUID id = UUID.randomUUID();
 
-  @Column(name = "run_id", nullable = false)
+  /**
+   * Pipeline-run id when this PR is tied to a single V2 run; null for system PRs (BOOTSTRAP /
+   * ARCHITECTURE / CONTRACT / CHAT_TOOL). V169 made the column nullable so non-run PR sources can
+   * persist into the same table without a synthetic id.
+   */
+  @Column(name = "run_id")
   private String runId;
+
+  /**
+   * Project the PR belongs to. Run-scoped PRs may leave this null (the dashboard rollup falls back
+   * to {@code pipeline_run.project_id} via the run_id join), but system PRs MUST set it because
+   * they have no run to look up. Added in V169.
+   */
+  @Column(name = "project_id")
+  private String projectId;
+
+  /** Origin classifier — see {@link Kind}. Defaults to RUN to keep the V82 contract intact. */
+  @Enumerated(EnumType.STRING)
+  @Column(name = "kind", nullable = false, length = 32)
+  @Builder.Default
+  private Kind kind = Kind.RUN;
 
   /** Project-linked repo, if the run was fed from the project catalogue. */
   @Column(name = "repo_id")

@@ -139,8 +139,16 @@ export interface PrRollupEntry {
   prNumber: number | null;
   repoFullName: string | null;
   status: string;
-  launchId: string;
+  /** Run / launch id when {@link kind} = 'RUN'. Null for system PRs. */
+  launchId: string | null;
   createdAt: string | null;
+  /**
+   * V169 (2026-05-02) — origin classifier. `RUN` = per-run code push.
+   * `BOOTSTRAP` / `ARCHITECTURE` / `CONTRACT` / `CHAT_TOOL` = system PRs
+   * opened by the corresponding ExecuteSpec subsystem. UI groups by this
+   * to keep the dashboard rollup readable.
+   */
+  kind?: 'RUN' | 'BOOTSTRAP' | 'ARCHITECTURE' | 'CONTRACT' | 'CHAT_TOOL' | string;
 }
 
 export interface ProjectOverview {

@@ -30,6 +30,10 @@ public class PullRequestRecordService {
   /** Wave 2.1 — activation funnel PR_MERGED step. */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
+  /**
+   * V82 contract — record a PR opened by a per-run code push. Defaults kind to {@link
+   * PullRequestRecord.Kind#RUN} and leaves projectId null (the run row carries it).
+   */
   @Transactional
   public PullRequestRecord recordCreated(
       String runId,
@@ -38,6 +42,33 @@ public class PullRequestRecordService {
       String prUrl,
       String headBranch,
       String baseBranch) {
+    return recordCreated(
+        runId,
+        null,
+        repoId,
+        repoFullName,
+        prUrl,
+        headBranch,
+        baseBranch,
+        PullRequestRecord.Kind.RUN);
+  }
+
+  /**
+   * V169 (2026-05-02) — full constructor, used by system flows that aren't tied to a single run
+   * (BootstrapService, ProjectArchitectureService, contract writers, project-chat tools). Pass
+   * {@code runId=null} for system PRs and a non-null {@code projectId} so the project dashboard
+   * surfaces the PR.
+   */
+  @Transactional
+  public PullRequestRecord recordCreated(
+      String runId,
+      String projectId,
+      UUID repoId,
+      String repoFullName,
+      String prUrl,
+      String headBranch,
+      String baseBranch,
+      PullRequestRecord.Kind kind) {
     Integer number = extractPrNumber(prUrl);
     if (number == null) {
       log.warn("Cannot extract PR number from URL {} — skipping record", prUrl);
@@ -51,6 +82,8 @@ public class PullRequestRecordService {
     PullRequestRecord record =
         PullRequestRecord.builder()
             .runId(runId)
+            .projectId(projectId)
+            .kind(kind == null ? PullRequestRecord.Kind.RUN : kind)
             .repoId(repoId)
             .repoFullName(repoFullName)
             .prNumber(number)

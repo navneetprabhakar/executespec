@@ -15,6 +15,8 @@ import java.util.UUID;
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.pr.PullRequestRecord;
+import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +67,7 @@ public class BootstrapService {
   private final FolderReadmeGenerator readmeGenerator;
   private final ProjectRepoRepository repoRepo;
   private final ActivityEventEmitter activityEmitter;
+  private final PullRequestRecordService prRecordService;
   private final HttpClient http;
 
   @Value("${agent.github.pat:#{null}}")
@@ -75,8 +78,15 @@ public class BootstrapService {
       ExecutespecFolderWriter writer,
       FolderReadmeGenerator readmeGenerator,
       ProjectRepoRepository repoRepo,
-      ActivityEventEmitter activityEmitter) {
-    this(writer, readmeGenerator, repoRepo, activityEmitter, HttpClient.newHttpClient());
+      ActivityEventEmitter activityEmitter,
+      PullRequestRecordService prRecordService) {
+    this(
+        writer,
+        readmeGenerator,
+        repoRepo,
+        activityEmitter,
+        prRecordService,
+        HttpClient.newHttpClient());
   }
 
   /** Test seam: inject a mock {@link HttpClient}. */
@@ -85,11 +95,13 @@ public class BootstrapService {
       FolderReadmeGenerator readmeGenerator,
       ProjectRepoRepository repoRepo,
       ActivityEventEmitter activityEmitter,
+      PullRequestRecordService prRecordService,
       HttpClient http) {
     this.writer = writer;
     this.readmeGenerator = readmeGenerator;
     this.repoRepo = repoRepo;
     this.activityEmitter = activityEmitter;
+    this.prRecordService = prRecordService;
     this.http = http;
   }
 
@@ -202,6 +214,28 @@ public class BootstrapService {
     repo.setExecutespecLastSyncedAt(Instant.now());
     repo.setUpdatedAt(Instant.now());
     repoRepo.save(repo);
+
+    // V169 (2026-05-02) — persist the bootstrap PR so the project dashboard's
+    // Pull requests tab surfaces it. Best-effort: any failure is logged and
+    // ignored so the bootstrap flow completes regardless.
+    try {
+      prRecordService.recordCreated(
+          null,
+          projectId == null ? null : projectId.toString(),
+          repoId,
+          repo.getGithubRepoFullName(),
+          pr.get().prUrl(),
+          pr.get().branchName(),
+          null,
+          PullRequestRecord.Kind.BOOTSTRAP);
+    } catch (Exception e) {
+      log.warn(
+          "Failed to record bootstrap PR for repo {} in project {}: {}",
+          repoId,
+          projectId,
+          e.getMessage());
+    }
+
     activityEmitter.emit(
         projectId,
         ActivityEventType.EXECUTESPEC_BOOTSTRAP_INITIATED,
