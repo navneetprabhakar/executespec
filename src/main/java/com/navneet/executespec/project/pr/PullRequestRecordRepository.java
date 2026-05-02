@@ -22,4 +22,12 @@ public interface PullRequestRecordRepository extends JpaRepository<PullRequestRe
    */
   List<PullRequestRecord> findByProjectIdAndKindNotOrderByCreatedAtDesc(
       String projectId, PullRequestRecord.Kind excludeKind);
+
+  /**
+   * 2026-05-02 — used by {@code CiFailureAutoFixService} to find the PR (and originating run)
+   * a {@code check_run} failure webhook is targeting. One row is created per (repo, PR); the
+   * branch is unique within that pair so {@code findFirst} is unambiguous.
+   */
+  Optional<PullRequestRecord> findFirstByRepoFullNameAndHeadBranchOrderByCreatedAtDesc(
+      String repoFullName, String headBranch);
 }
