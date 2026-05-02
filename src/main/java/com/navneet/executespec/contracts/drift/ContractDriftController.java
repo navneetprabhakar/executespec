@@ -52,6 +52,7 @@ public class ContractDriftController {
   private final ExecutespecFolderWriter folderWriter;
   private final GitHubRepoService gitHub;
   private final AppUserRepository userRepo;
+  private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
       activityEmitterProvider;
 
@@ -123,6 +124,27 @@ public class ContractDriftController {
             pat);
     if (pr.isEmpty()) {
       throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, "writer returned empty");
+    }
+
+    // V169 (2026-05-02) — surface this PR in the project dashboard rollup.
+    if (pr.get().openedNewPr() && pr.get().prUrl() != null) {
+      try {
+        prRecordService.recordCreated(
+            null,
+            projectId,
+            repo.getId(),
+            repo.getGithubRepoFullName(),
+            pr.get().prUrl(),
+            pr.get().branchName(),
+            null,
+            com.navneet.executespec.project.pr.PullRequestRecord.Kind.CONTRACT);
+      } catch (Exception e) {
+        log.warn(
+            "[{}] could not record contract refresh PR for {}: {}",
+            projectId,
+            repo.getGithubRepoFullName(),
+            e.getMessage());
+      }
     }
 
     // Mark every unresolved drift event for this contract as REFRESHED

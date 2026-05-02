@@ -77,13 +77,22 @@ public class ProjectLaunchController {
 
   // ── PR rollup (cross-launch) ──────────────────────────────────────────
 
+  /**
+   * Wire format for the project PR rollup.
+   *
+   * @param launchId pipeline-run id when {@code kind=RUN}; null for system PRs (kind != RUN)
+   * @param kind PR origin classifier — {@code RUN}, {@code BOOTSTRAP}, {@code ARCHITECTURE},
+   *     {@code CONTRACT}, {@code CHAT_TOOL}. Frontend filters / groups by this. Added in V169
+   *     (2026-05-02) so system PRs are visible alongside run/launch PRs.
+   */
   public record PrRollupEntry(
       String prUrl,
       Integer prNumber,
       String repoFullName,
       String status,
       String launchId,
-      String createdAt) {}
+      String createdAt,
+      String kind) {}
 
   @GetMapping("/api/projects/{projectId}/prs")
   @Transactional(readOnly = true)
@@ -107,7 +116,8 @@ public class ProjectLaunchController {
                 null,
                 s.getPrStatus() == null ? "OPEN" : s.getPrStatus(),
                 r.getId(),
-                s.getCompletedAt() == null ? null : s.getCompletedAt().toString()));
+                s.getCompletedAt() == null ? null : s.getCompletedAt().toString(),
+                "RUN"));
       }
     }
 
@@ -124,9 +134,30 @@ public class ProjectLaunchController {
                 rec.getRepoFullName(),
                 rec.getStatus() == null ? "OPEN" : rec.getStatus().name(),
                 pr.getRunId(),
-                rec.getCreatedAt() == null ? null : rec.getCreatedAt().toString()));
+                rec.getCreatedAt() == null ? null : rec.getCreatedAt().toString(),
+                rec.getKind() == null ? "RUN" : rec.getKind().name()));
       }
     }
+
+    // V169 (2026-05-02) — system PRs (BOOTSTRAP / ARCHITECTURE / CONTRACT /
+    // CHAT_TOOL) aren't tied to a PipelineRun. Query directly by project_id
+    // + kind != RUN. These show up next to run-scoped PRs in the dashboard
+    // rollup so users can see every PR ExecuteSpec opened on their behalf.
+    var systemPrs =
+        prRepo.findByProjectIdAndKindNotOrderByCreatedAtDesc(
+            projectId, com.navneet.executespec.project.pr.PullRequestRecord.Kind.RUN);
+    for (var rec : systemPrs) {
+      out.add(
+          new PrRollupEntry(
+              rec.getPrUrl(),
+              rec.getPrNumber(),
+              rec.getRepoFullName(),
+              rec.getStatus() == null ? "OPEN" : rec.getStatus().name(),
+              null,
+              rec.getCreatedAt() == null ? null : rec.getCreatedAt().toString(),
+              rec.getKind() == null ? "SYSTEM" : rec.getKind().name()));
+    }
+
     return ResponseEntity.ok(out);
   }
 
