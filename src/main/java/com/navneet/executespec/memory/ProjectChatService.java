@@ -21,9 +21,11 @@ import com.navneet.executespec.v2.tool.ExecutionContext;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.ToolResponseMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
+import org.springframework.ai.tool.ToolCallback;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -295,10 +297,21 @@ public class ProjectChatService {
     return send(projectId, orgId, userId, userText, null);
   }
 
+  /** Hard cap on tool-execution rounds per chat turn. */
+  private static final int MAX_TOOL_ROUNDS = 6;
+
   /**
    * V169 (2026-05-02) — chat with project-action tools enabled. The caller's GitHub PAT is
    * threaded into tools that hit private repos (regenerate_architecture). When {@code callerPat}
    * is null, those tools still bind but return a clear error if the project's repos are private.
+   *
+   * <p>2026-05-02 fix — runs a manual tool-execution loop because {@code LlmRouterV2} hardcodes
+   * {@code internalToolExecutionEnabled(false)} (the V2 worker pattern handles its own loop).
+   * Without this loop, the model emits a {@code tool_use} block and we'd save just the
+   * pre-tool-call text ("Let me pull the latest architecture...") and stop, never getting the
+   * follow-through. We mirror the loop in {@code WorkerAgentV2}: dispatch each {@code ToolCall}
+   * through the matching {@link ToolCallback}, append a {@link ToolResponseMessage}, and re-call
+   * the LLM until the model stops emitting tool calls (or we hit {@link #MAX_TOOL_ROUNDS}).
    */
   @Transactional
   public ProjectChatMessage send(
@@ -318,7 +331,7 @@ public class ProjectChatService {
             .build();
     chatRepo.save(userMsg);
 
-    List<Message> messages = buildMessages(project);
+    List<Message> conversation = new ArrayList<>(buildMessages(project));
 
     LlmProvider provider =
         project.getAiProvider() != null ? project.getAiProvider() : LlmProvider.ANTHROPIC;
@@ -334,36 +347,136 @@ public class ProjectChatService {
     // V169 — bind project-action tools for this turn. Long-running tools
     // (regenerate_architecture, generate_project_doc) trade chat latency
     // for the ability to actually act on the project from inside chat.
-    var tools =
+    List<ToolCallback> tools =
         projectChatTools.bind(
             new com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext(
                 projectId, userId, callerPat));
 
-    String assistantText;
-    Integer tokensIn = null, tokensOut = null;
+    StringBuilder finalText = new StringBuilder();
+    int totalTokensIn = 0, totalTokensOut = 0;
+    String terminationReason = "ok";
+
     try {
-      ChatResponse resp =
-          router.call(
-              LlmRequestV2.builder()
-                  .provider(resolved.getActualProvider().name().toLowerCase())
-                  .model(resolved.getModel())
-                  .messages(messages)
-                  .context(ctx)
-                  .temperature(0.3)
-                  .maxTokens(2048)
-                  .toolsOverride(tools)
-                  .build());
-      assistantText = resp.getResult().getOutput().getText();
-      if (assistantText == null) assistantText = "(no response)";
-      Usage usage = resp.getMetadata() != null ? resp.getMetadata().getUsage() : null;
-      if (usage != null) {
-        if (usage.getPromptTokens() != null) tokensIn = usage.getPromptTokens().intValue();
-        if (usage.getCompletionTokens() != null) tokensOut = usage.getCompletionTokens().intValue();
+      for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
+        ChatResponse resp =
+            router.call(
+                LlmRequestV2.builder()
+                    .provider(resolved.getActualProvider().name().toLowerCase())
+                    .model(resolved.getModel())
+                    .messages(conversation)
+                    .context(ctx)
+                    .temperature(0.3)
+                    .maxTokens(2048)
+                    .toolsOverride(tools)
+                    .build());
+
+        Usage usage = resp.getMetadata() != null ? resp.getMetadata().getUsage() : null;
+        if (usage != null) {
+          if (usage.getPromptTokens() != null) totalTokensIn += usage.getPromptTokens().intValue();
+          if (usage.getCompletionTokens() != null)
+            totalTokensOut += usage.getCompletionTokens().intValue();
+        }
+
+        // Aggregate text + tool calls across all generations (Spring AI normally
+        // returns a single Generation; the loop guards against fan-out).
+        StringBuilder turnText = new StringBuilder();
+        List<AssistantMessage.ToolCall> calls = new ArrayList<>();
+        for (var gen : resp.getResults()) {
+          String t = gen.getOutput().getText();
+          if (t != null && !t.isEmpty()) {
+            if (turnText.length() > 0) turnText.append("\n");
+            turnText.append(t);
+          }
+          if (gen.getOutput().getToolCalls() != null) {
+            calls.addAll(gen.getOutput().getToolCalls());
+          }
+        }
+
+        // Accumulate any narration the model emits BEFORE / BETWEEN tool calls.
+        if (turnText.length() > 0) {
+          if (finalText.length() > 0) finalText.append("\n\n");
+          finalText.append(turnText);
+        }
+
+        // No tool calls → final answer reached, exit the loop.
+        if (calls.isEmpty()) {
+          break;
+        }
+
+        // Append assistant turn (text + tool_calls) to the conversation, then dispatch.
+        conversation.add(
+            AssistantMessage.builder().content(turnText.toString()).toolCalls(calls).build());
+
+        List<ToolResponseMessage.ToolResponse> toolResponses = new ArrayList<>();
+        for (AssistantMessage.ToolCall tc : calls) {
+          ToolCallback callback = findCallback(tools, tc.name());
+          String envelope;
+          if (callback == null) {
+            envelope =
+                "{\"ok\":false,\"message\":\"unknown tool '"
+                    + tc.name()
+                    + "' — chat tools bound: "
+                    + tools.stream()
+                        .map(t -> t.getToolDefinition().name())
+                        .toList()
+                    + "\"}";
+            log.warn("Project chat: model called unknown tool '{}'", tc.name());
+          } else {
+            try {
+              envelope = callback.call(tc.arguments());
+            } catch (Exception ex) {
+              log.warn(
+                  "Project chat tool '{}' threw {}: {}",
+                  tc.name(),
+                  ex.getClass().getSimpleName(),
+                  ex.getMessage());
+              envelope =
+                  "{\"ok\":false,\"message\":\""
+                      + ex.getClass().getSimpleName()
+                      + ": "
+                      + (ex.getMessage() == null
+                          ? "(no message)"
+                          : ex.getMessage().replace("\"", "\\\""))
+                      + "\"}";
+            }
+          }
+          toolResponses.add(
+              new ToolResponseMessage.ToolResponse(
+                  tc.id() == null ? "tc-" + System.nanoTime() : tc.id(), tc.name(), envelope));
+        }
+        conversation.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+        if (round == MAX_TOOL_ROUNDS - 1) {
+          terminationReason = "max-rounds";
+          log.warn(
+              "Project chat hit MAX_TOOL_ROUNDS={} for project {} — assistant message will note"
+                  + " that more tool calls were truncated.",
+              MAX_TOOL_ROUNDS,
+              projectId);
+          if (finalText.length() > 0) finalText.append("\n\n");
+          finalText.append(
+              "_(I hit my tool-call limit for this turn. Ask me to continue if you want me to"
+                  + " keep going.)_");
+        }
       }
     } catch (RuntimeException e) {
       log.warn("Project chat LLM call failed for project {}: {}", projectId, e.getMessage());
-      assistantText = "Sorry — chat failed: " + e.getMessage();
+      if (finalText.length() == 0) {
+        finalText.append("Sorry — chat failed: ").append(e.getMessage());
+      } else {
+        finalText.append("\n\n_(Chat aborted mid-tool-loop: ").append(e.getMessage()).append(")_");
+      }
+      terminationReason = "error:" + e.getClass().getSimpleName();
     }
+
+    String assistantText = finalText.length() == 0 ? "(no response)" : finalText.toString();
+    log.info(
+        "Project chat project={} terminationReason={} tokens(in/out)={}/{} finalLen={}chars",
+        projectId,
+        terminationReason,
+        totalTokensIn,
+        totalTokensOut,
+        assistantText.length());
 
     ProjectChatMessage assistantMsg =
         ProjectChatMessage.builder()
@@ -372,11 +485,20 @@ public class ProjectChatService {
             .userId(userId)
             .role("ASSISTANT")
             .content(assistantText)
-            .tokensIn(tokensIn)
-            .tokensOut(tokensOut)
+            .tokensIn(totalTokensIn == 0 ? null : totalTokensIn)
+            .tokensOut(totalTokensOut == 0 ? null : totalTokensOut)
             .build();
     chatRepo.save(assistantMsg);
     return assistantMsg;
+  }
+
+  /** Lookup a {@link ToolCallback} by tool name. Returns null when the model calls an unknown tool. */
+  private static ToolCallback findCallback(List<ToolCallback> tools, String name) {
+    if (name == null) return null;
+    for (ToolCallback t : tools) {
+      if (name.equals(t.getToolDefinition().name())) return t;
+    }
+    return null;
   }
 
   private List<Message> buildMessages(Project project) {

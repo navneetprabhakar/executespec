@@ -51,7 +51,46 @@ const QUICK_ACTIONS = [
   },
 ];
 
-export default function ProjectChatPanel({projectId}: {projectId: string}) {
+/**
+ * Static context-window sizes for the planner-tier model each provider resolves to. Numbers
+ * mirror the model matrix in `application.yml` + the upstream provider docs:
+ * - Anthropic claude-sonnet-4-6 → 200k input
+ * - OpenAI gpt-5.4 → 256k input
+ * - Gemini 3 flash preview → 1M input
+ *
+ * Falls back to 128k when the project's provider is unknown — a safe lower bound on every
+ * frontier model we ship today. Frontend-only by design: the chat resolves at request time and
+ * the window doesn't change per turn, so a static map avoids a chat/info round-trip just to
+ * paint the header chip.
+ */
+const CONTEXT_WINDOW_BY_PROVIDER: Record<string, number> = {
+  ANTHROPIC: 200_000,
+  OPENAI: 256_000,
+  GEMINI: 1_000_000,
+  GOOGLE: 1_000_000, // legacy alias kept so older projects render correctly
+};
+
+const FALLBACK_CONTEXT_WINDOW = 128_000;
+
+/** Format a token count as `1.2k` / `12.3k` / `123k`. */
+function formatTokens(n: number): string {
+  if (n < 1000) return `${n}`;
+  if (n < 10_000) return `${(n / 1000).toFixed(1)}k`;
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+export default function ProjectChatPanel({
+  projectId,
+  aiProvider,
+}: {
+  projectId: string;
+  /**
+   * Project's configured AI provider — drives the context-window chip. Optional so the V2.6.4
+   * IA cleanup mounts that haven't yet threaded project metadata through still render.
+   */
+  aiProvider?: string | null;
+}) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -180,6 +219,20 @@ export default function ProjectChatPanel({projectId}: {projectId: string}) {
 
   const hasConversation = messages.length > 0;
 
+  // 2026-05-02 — surface chat-specific token totals + the model's context
+  // window so the user can gauge how close they are to needing a Compact.
+  // Tokens are summed across every persisted message (input + output);
+  // window comes from the static provider map above. Both render only when
+  // the conversation has at least one round-trip with token metadata —
+  // before that, "0 / 200k" is noise.
+  const totalIn = messages.reduce((acc, m) => acc + (m.tokensIn ?? 0), 0);
+  const totalOut = messages.reduce((acc, m) => acc + (m.tokensOut ?? 0), 0);
+  const totalTokens = totalIn + totalOut;
+  const contextWindow =
+    (aiProvider && CONTEXT_WINDOW_BY_PROVIDER[aiProvider.toUpperCase()]) ||
+    FALLBACK_CONTEXT_WINDOW;
+  const tokenPercent = contextWindow > 0 ? Math.min(100, (totalIn / contextWindow) * 100) : 0;
+
   return (
     <div className='flex flex-col h-full min-h-0 bg-[var(--gray-100)]'>
       {/* Slim header — only when conversation exists, so the empty state stays clean */}
@@ -191,6 +244,33 @@ export default function ProjectChatPanel({projectId}: {projectId: string}) {
             <span className='text-muted'>
               · {messages.length} message{messages.length === 1 ? '' : 's'}
             </span>
+            {totalTokens > 0 && (
+              <>
+                <span
+                  className='text-muted'
+                  title={`Input tokens: ${totalIn.toLocaleString()} · Output tokens: ${totalOut.toLocaleString()} · Cumulative across this conversation`}
+                >
+                  · {formatTokens(totalIn)} in / {formatTokens(totalOut)} out
+                </span>
+                <span
+                  className={cn(
+                    'text-muted',
+                    tokenPercent >= 80 && 'text-accent-amber',
+                    tokenPercent >= 95 && 'text-accent-red',
+                  )}
+                  title={
+                    `Model context window: ${formatTokens(contextWindow)} tokens` +
+                    (aiProvider ? ` (${aiProvider.toLowerCase()} planner tier)` : '') +
+                    `. Cumulative input is ${tokenPercent.toFixed(0)}% of the window — ` +
+                    `the chat windows to the last 20 messages so older turns drop off ` +
+                    `automatically, but Compact rewrites the trailing tail into a single ` +
+                    `summary when answers start drifting.`
+                  }
+                >
+                  · {formatTokens(contextWindow)} window
+                </span>
+              </>
+            )}
           </div>
           <div className='flex items-center gap-1.5'>
             <button
