@@ -210,6 +210,84 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     assertThat(picked).hasSize(6);
   }
 
+  // ── Tiered structural detection (2026-05-02 b171fa52 follow-up) ─────────
+
+  @Test
+  void multiRepo_structuralDirBeatsTopLevelStructuralFilename() throws Exception {
+    // b171fa52: pplai-api repo had top-level files (auth.py, cache.py, models.py, schemas.py)
+    // that all matched the structural keyword regex AND were shorter than the actual deliverable
+    // app/routers/ai.py — so the structural-then-shortest sort burned all 6 picks on the
+    // top-level files and missed the route the assessor needed to confirm.
+    // Post-fix: files inside a structural DIRECTORY (routers/, services/, …) jump to TIER A,
+    // beating top-level structural-NAMED files (TIER B). Top-up still happens at TIER C.
+    String tree =
+        String.join(
+            "\n",
+            "repos/pplai-api/app/auth.py",
+            "repos/pplai-api/app/cache.py",
+            "repos/pplai-api/app/models.py",
+            "repos/pplai-api/app/schemas.py",
+            "repos/pplai-api/app/storage.py",
+            "repos/pplai-api/app/database.py",
+            "repos/pplai-api/app/routers/ai.py",
+            "repos/pplai-api/app/routers/contacts.py",
+            "repos/pplai-api/app/services/contact_ai.py",
+            "repos/pplai-frontend-mobile/services/aiService.ts",
+            "repos/pplai-frontend-mobile/hooks/useAISummary.ts",
+            "repos/pplai-frontend-mobile/components/AISummaryCard.tsx",
+            "repos/frontend/services/aiService.ts");
+
+    List<String> picked = infer(tree);
+
+    // The deliverable files (under structural dirs) MUST be picked.
+    assertThat(picked).contains("repos/pplai-api/app/routers/ai.py");
+    assertThat(picked).contains("repos/pplai-frontend-mobile/services/aiService.ts");
+    assertThat(picked).contains("repos/pplai-frontend-mobile/hooks/useAISummary.ts");
+    assertThat(picked).contains("repos/pplai-frontend-mobile/components/AISummaryCard.tsx");
+    assertThat(picked).contains("repos/frontend/services/aiService.ts");
+  }
+
+  @Test
+  void boilerplateFilenamesAreDeprioritised() throws Exception {
+    // index/main/app/server.<ext> are entry-point boilerplate — they almost always exist
+    // (Express server bootstrap / Next.js app shell / FastAPI main) and rarely contain the
+    // business logic. Push them to TIER C (non-structural) so meaningful files win.
+    String tree =
+        String.join(
+            "\n",
+            "repos/api/app.ts",
+            "repos/api/server.ts",
+            "repos/api/index.js",
+            "repos/api/main.py",
+            "repos/api/routes/users.ts", // structural dir → TIER A
+            "repos/api/routes/orders.ts");
+
+    List<String> picked = infer(tree);
+
+    // Routes win over boilerplate even though boilerplate paths are shorter.
+    assertThat(picked).contains("repos/api/routes/users.ts");
+    assertThat(picked).contains("repos/api/routes/orders.ts");
+    assertThat(picked.indexOf("repos/api/routes/users.ts"))
+        .isLessThan(picked.indexOf("repos/api/main.py"));
+  }
+
+  @Test
+  void repoNameInPathDoesNotTriggerStructuralKeyword() throws Exception {
+    // pplai-api in the path no longer counts toward the "api" keyword — only the part AFTER
+    // the repos/<name>/ prefix is matched against structural keywords.
+    String tree =
+        String.join(
+            "\n",
+            "repos/pplai-api/start.sh", // not structural under any tier
+            "repos/pplai-api/fix_files.py", // not structural under any tier
+            "repos/pplai-api/app/routers/ai.py"); // TIER A
+
+    List<String> picked = infer(tree);
+
+    // ai.py should be FIRST (TIER A) regardless of length.
+    assertThat(picked.get(0)).isEqualTo("repos/pplai-api/app/routers/ai.py");
+  }
+
   @Test
   void mixedTree_workspaceRootCountsAsOneBucket() throws Exception {
     // Workspace-root files (no repos/ prefix) collapse into one bucket; if mixed with a repos/

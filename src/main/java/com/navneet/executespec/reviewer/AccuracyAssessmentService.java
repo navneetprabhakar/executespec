@@ -496,16 +496,71 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * so a Spring Boot project with 30 controllers doesn't crowd out non-structural fallbacks.
    * Top up with the smallest non-structural source files until {@code budget} is reached so a
    * project with only one structurally-named file doesn't leave 5 slots empty (R-343 fix).
+   *
+   * <p>2026-05-02 — match the structural regex against the path with the {@code repos/<name>/}
+   * prefix stripped, so the repo name itself doesn't trigger keywords. b171fa52 had a repo
+   * called {@code pplai-api}; the original regex matched "api" inside the repo name and treated
+   * EVERY file in pplai-api as structural — sorted by length, that meant {@code start.sh} +
+   * {@code fix_files.py} won over {@code app/routers/ai.py}, which is exactly the file the
+   * accuracy assessor needed to read. Stripping the prefix and re-matching against the
+   * repo-internal path (e.g. {@code app/routers/ai.py}) makes the regex actually discriminate.
+   *
+   * <p>Boilerplate filenames ({@code index|main|app|server}.<ext>) are also DE-PRIORITISED by
+   * being treated as non-structural for the structural-tier sort — they almost always exist
+   * (entry points / Express server bootstrap / Next.js app shell) but rarely contain the
+   * business logic the assessor needs to verify.
+   */
+  private static final java.util.regex.Pattern REPO_PREFIX_PATTERN =
+      java.util.regex.Pattern.compile("^repos/[^/]+/");
+
+  private static final java.util.regex.Pattern BOILERPLATE_FILENAME =
+      java.util.regex.Pattern.compile("(?i)(^|/)(index|main|app|server)\\.[a-z0-9]+$");
+
+  /**
+   * TIER A — files inside a structural directory ({@code routers/}, {@code services/}, …). These
+   * are nearly always the deliverable: the worker added a route to {@code app/routers/ai.py},
+   * not to a top-level {@code auth.py}. Anchored on the directory segment so a filename like
+   * {@code Service.java} doesn't match (it would, in TIER B).
+   */
+  private static final java.util.regex.Pattern STRUCTURAL_DIR_PATTERN =
+      java.util.regex.Pattern.compile(
+          "(?i)(^|/)(routes?|routers?|controllers?|handlers?|resolvers?|services?|models?|"
+              + "schemas?|entities|repositories|migrations?|api|apis|graphql|domain|usecases?|"
+              + "components|hooks|pages)/");
+
+  private static int structuralTier(String path, java.util.regex.Pattern filenameStructural) {
+    String stripped = REPO_PREFIX_PATTERN.matcher(path).replaceFirst("");
+    if (BOILERPLATE_FILENAME.matcher(stripped).find()) return 2; // bottom — entry-point fluff
+    if (STRUCTURAL_DIR_PATTERN.matcher(stripped).find()) return 0; // top — under a structural dir
+    if (filenameStructural.matcher(stripped).matches()) return 1; // middle — name only
+    return 2; // non-structural
+  }
+
+  /**
+   * Pick {@code budget} files from {@code source}, preferring structural directories over
+   * structural filenames over non-structural fallbacks. Within a tier, shortest path wins as
+   * a tiebreaker (smallest-first ordering preserved from caller via {@code source} sort).
+   *
+   * <p>2026-05-02 cap-at-10 from R-343 retained per tier to keep the read budget honest when a
+   * Spring Boot project has 30 files in {@code controllers/}.
    */
   private static java.util.List<String> pickWithStructuralPreference(
       java.util.List<String> source, java.util.regex.Pattern structural, int budget) {
     if (budget <= 0 || source.isEmpty()) return java.util.List.of();
-    java.util.List<String> structuralMatches =
-        source.stream().filter(l -> structural.matcher(l).matches()).limit(10).toList();
-    if (structuralMatches.size() >= budget) {
-      return structuralMatches.subList(0, budget);
+    java.util.List<String> tierA =
+        source.stream().filter(p -> structuralTier(p, structural) == 0).limit(10).toList();
+    java.util.List<String> tierB =
+        source.stream().filter(p -> structuralTier(p, structural) == 1).limit(10).toList();
+    java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>();
+    for (String p : tierA) {
+      if (picked.size() >= budget) break;
+      picked.add(p);
     }
-    java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>(structuralMatches);
+    for (String p : tierB) {
+      if (picked.size() >= budget) break;
+      picked.add(p);
+    }
+    // TIER C — top up with the smallest non-structural source files until budget is reached.
     for (String path : source) {
       if (picked.size() >= budget) break;
       picked.add(path);
