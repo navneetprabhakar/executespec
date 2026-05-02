@@ -216,6 +216,26 @@ public class ShellSandboxPolicy {
           "tsc",
           "jest", // React Native / Expo toolchain (for direct invocations; `npx <tool>` also
           // allowed)
+          // 2026-05-02 — modern JS package managers + non-Node language toolchains.
+          // Risk model is identical to npm (already allowed): all five JS managers can run
+          // arbitrary code via package lifecycle scripts, supply-chain attacks, and registry
+          // network egress. They run with the same workspace permissions as npm; nothing new
+          // is unlocked. Without this list the worker can't `bun install` / `pnpm i` /
+          // `yarn add` / `deno cache` / `cargo build` / `go build` / `make`, which blocks
+          // every non-npm JS project + every Rust / Go / Make project from passing the
+          // build smoke test. NOT added: `bash` / `sh` (defeats the allowlist via `-c`),
+          // `chmod` / `chown` (chain unknown binaries), `apt` / `brew` / `sudo` (system
+          // mutation), `ssh` / `scp` / `rsync` (remote exfiltration paths). HIGH-mode
+          // strict verb checks for these still need a per-tool verb list — TODO when
+          // someone flips the org to HIGH guardrails.
+          "bun",
+          "pnpm",
+          "yarn",
+          "deno",
+          "cargo",
+          "rustc",
+          "go",
+          "make",
           "curl",
           "wget" // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload, exfil)
           // are caught by BLOCKED_PATTERNS
