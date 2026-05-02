@@ -213,10 +213,16 @@ function ProjectCard({
   return (
     <div
       className={cn(
-        'rounded-sm border transition-colors',
-        isArchived
-          ? 'border-[var(--border-default)] bg-[var(--gray-100)]'
-          : 'border-[var(--border-default)] bg-[#0f1117]',
+        'rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] transition-colors',
+        // 2026-05-02: dropped the active/archived bg split. Active was hardcoded
+        // `#0f1117` (near-black, pure hex) while everything else on the page —
+        // sidebar, hero, KPI tiles, archived cards — uses `var(--gray-100)`. The
+        // intended "active stands out" visual was achieved by punching a darker
+        // card into a lighter page, which read as inconsistent rather than
+        // emphasised. Active vs archived is now conveyed by icon (FolderOpen /
+        // FolderArchive) + text colour (text-primary / text-muted) only, matching
+        // the rest of the design system. Reintroduces the v2.6.0 UX-overhaul
+        // rule: "no raw hex; everything goes through `var(--*)` tokens."
       )}
     >
       {/* Card header — stacks to 2 rows on mobile so chips + actions don't overlap the title */}
