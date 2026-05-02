@@ -1066,21 +1066,31 @@ function PlanTab({run}: {run: RunDetail}) {
 
   const canEdit = run.status === 'AWAITING_APPROVAL';
 
-  // 2026-05-02 — index live tasks by task_id so the per-card render can pull real-time
-  // status / duration / token consumption / failure reason alongside the planner-static
-  // metadata. Falls back to undefined when the live row hasn't been written yet (e.g.
-  // pre-execution, plan-approval gate).
-  const liveTaskById = new Map<string, (typeof run.tasks)[number]>();
+  // 2026-05-02 — index live tasks so the per-card render can pull real-time status / duration /
+  // token consumption / failure reason alongside the planner-static metadata. The plan stores
+  // tasks under the field `id` (e.g. "T1"); the live row's `taskId` is prefixed with the run-id
+  // short, e.g. "b171fa52_T1". Match by exact taskId first, then by `endsWith("_" + plan.id)`
+  // so both shapes resolve to the same live row. Falls back to undefined when the live row
+  // hasn't been written yet (pre-execution / plan-approval gate).
+  const liveByTaskId = new Map<string, (typeof run.tasks)[number]>();
+  const liveByPlanIdSuffix = new Map<string, (typeof run.tasks)[number]>();
   for (const t of run.tasks) {
-    if (t.taskId) liveTaskById.set(t.taskId, t);
+    if (!t.taskId) continue;
+    liveByTaskId.set(t.taskId, t);
+    const idx = t.taskId.lastIndexOf('_');
+    if (idx >= 0) liveByPlanIdSuffix.set(t.taskId.slice(idx + 1), t);
   }
+  const matchLive = (planTaskId: unknown): (typeof run.tasks)[number] | undefined => {
+    if (typeof planTaskId !== 'string' || !planTaskId) return undefined;
+    return liveByTaskId.get(planTaskId) ?? liveByPlanIdSuffix.get(planTaskId);
+  };
 
   // Roll-up across plan tasks: total tokens consumed + per-task progress.
   let totalTokens = 0;
   let completed = 0;
   const planTasks: any[] = Array.isArray(plan.tasks) ? plan.tasks : [];
   for (const pt of planTasks) {
-    const live = liveTaskById.get(pt.task_id);
+    const live = matchLive(pt.id ?? pt.task_id);
     if (live) {
       totalTokens += (live.inputTokens ?? 0) + (live.outputTokens ?? 0);
       if (live.status === 'COMPLETE') completed++;
@@ -1116,12 +1126,12 @@ function PlanTab({run}: {run: RunDetail}) {
           </div>
           {planTasks.map((t: any, i: number) => (
             <PlanTaskCard
-              key={t.task_id ?? i}
+              key={t.id ?? t.task_id ?? i}
               task={t}
               index={i}
               runId={run.runId}
               canEdit={canEdit}
-              live={t.task_id ? liveTaskById.get(t.task_id) : undefined}
+              live={matchLive(t.id ?? t.task_id)}
             />
           ))}
         </div>
