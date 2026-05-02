@@ -221,7 +221,17 @@ public class SequentialExecutorV2 {
             task.id(),
             primary.outcome(),
             fileWrites);
-        persistTaskStatus(runId, task.id(), "PARTIAL");
+        // 2026-05-02 — pass the structured failure reason so RunMapper#extractFailureReason
+        // surfaces it on the task card. Without this the per-task PARTIAL chip is silent and
+        // users have to dig through worker logs to see why.
+        String reason =
+            "Worker stopped without completion but wrote "
+                + fileWrites
+                + " file"
+                + (fileWrites == 1 ? "" : "s")
+                + " — "
+                + describeWorkerFailure(primary);
+        persistTaskStatus(runId, task.id(), "PARTIAL", reason);
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
         return TaskOutcome.builder()
             .taskId(task.id())
@@ -406,7 +416,20 @@ public class SequentialExecutorV2 {
     }
 
     log.warn("Executor task={} smoke still fails after retry; COMPLETED_WITH_WARNING", task.id());
-    persistTaskStatus(runId, task.id(), "PARTIAL");
+    // 2026-05-02 — surface the smoke failure inline on the task card. Use exit code +
+    // a tail of the smoke output so the user sees something like "Build smoke failed
+    // (exit 1): SHELL BLOCKED 'bun' in: cd repos/frontend && bun install" instead of a
+    // bare PARTIAL with no explanation.
+    String smokeTail = retrySmoke.output() == null ? "" : retrySmoke.output();
+    if (smokeTail.length() > 240) {
+      smokeTail = smokeTail.substring(smokeTail.length() - 240);
+    }
+    String reason =
+        "Build smoke failed (exit "
+            + retrySmoke.exitCode()
+            + ") even after one retry"
+            + (smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " "));
+    persistTaskStatus(runId, task.id(), "PARTIAL", reason);
     broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
     return TaskOutcome.builder()
         .taskId(task.id())

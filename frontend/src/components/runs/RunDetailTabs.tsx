@@ -75,7 +75,11 @@ import '@/lib/monacoSetup';
 
 const BASE_TABS = [
   {value: 'overview', label: 'Overview'},
-  {value: 'plan', label: 'Plan'},
+  // 2026-05-02 — Plan + Tasks tabs were duplicating the same per-task list with
+  // different framing (Plan = static plan-from-JSON, Tasks = live status). Merged
+  // into a single Tasks tab that prepends the plan_summary banner above the live
+  // task cards. PlanTab + PlanTaskCard helpers below are kept for the future
+  // edit-plan flow but no longer mounted as a separate tab.
   {value: 'tasks', label: 'Tasks'},
   {value: 'timeline', label: 'Timeline'},
   {value: 'log', label: 'Live Log'},
@@ -229,6 +233,26 @@ export default function RunDetailTabs() {
         </Tabs.Content>
 
         <Tabs.Content value='tasks' className='p-4 space-y-2'>
+          {/* 2026-05-02 — surface plan_summary above the task list (Plan tab merged in).
+              Hidden when planJson is absent so old runs render unchanged. */}
+          {(() => {
+            if (!activeRun.planJson) return null;
+            try {
+              const plan = JSON.parse(activeRun.planJson);
+              if (!plan.plan_summary) return null;
+              return (
+                <div className='p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] mb-3'>
+                  <p className='text-[10px] uppercase tracking-wider text-muted mb-1'>
+                    Plan summary
+                  </p>
+                  <p className='text-sm text-primary leading-relaxed'>{plan.plan_summary}</p>
+                </div>
+              );
+            } catch {
+              return null;
+            }
+          })()}
+
           {activeRun.tasks.length === 0 && testTasks.length === 0 ? (
             <p className='text-sm text-muted'>No tasks yet.</p>
           ) : (
@@ -320,10 +344,6 @@ export default function RunDetailTabs() {
 
         <Tabs.Content value='log' className='h-[calc(100vh-180px)]'>
           <LiveLog />
-        </Tabs.Content>
-
-        <Tabs.Content value='plan' className='p-4'>
-          <PlanTab run={activeRun} />
         </Tabs.Content>
 
         <Tabs.Content value='code' className='h-[calc(100vh-180px)] overflow-hidden'>
