@@ -114,4 +114,14 @@ public class PullRequestRecord {
   @Column(name = "updated_at", nullable = false)
   @Builder.Default
   private Instant updatedAt = Instant.now();
+
+  /**
+   * 2026-05-02 (V170) — count of auto-fix re-runs triggered against this PR's head branch in
+   * response to {@code check_run.failure} webhooks. Capped by {@code
+   * CiFailureAutoFixService.MAX_AUTO_FIX_ATTEMPTS} (default 3) so a runaway CI ↔ planner loop
+   * cannot burn credits indefinitely.
+   */
+  @Column(name = "ci_auto_fix_attempts", nullable = false)
+  @Builder.Default
+  private Integer ciAutoFixAttempts = 0;
 }
