@@ -15,7 +15,9 @@ import {
   getFiles,
   getFilesWithStatus,
   type FileChangeStatus,
+  type FileDiffPayload,
   getFile,
+  getFileDiff,
   getOpenApiSpec,
   getProjects,
   createProject,
@@ -68,7 +70,7 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
-import Editor from '@monaco-editor/react';
+import Editor, {DiffEditor} from '@monaco-editor/react';
 import type {editor as monacoEditor} from 'monaco-editor';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
@@ -1954,18 +1956,63 @@ function getMonacoLanguage(filePath: string): string {
   return MONACO_LANG_MAP[ext] ?? 'plaintext';
 }
 
-// ── IDE file viewer (Monaco-based with native folding) ────────────────────────
+// ── IDE file viewer (Monaco-based with native folding + 2026-05-02 diff mode) ──
 function IDEFileViewer({
   filePath,
   content,
   loading,
+  runId,
+  fileStatus,
 }: {
   filePath: string | null;
   content: string;
   loading: boolean;
+  /** 2026-05-02 — needed to lazy-fetch the diff payload via getFileDiff. */
+  runId?: string;
+  /** ADDED/MODIFIED → default to diff view; UNCHANGED → full view + toggle disabled. */
+  fileStatus?: FileChangeStatus;
 }) {
   const [copied, setCopied] = useState(false);
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
+
+  // 2026-05-02 — view-mode toggle. Default is 'diff' for ADDED/MODIFIED files (the user's
+  // ask: "I can see which file changed in Code section, but I can't see what changed"). Falls
+  // back to 'full' for UNCHANGED files (no diff to show) or when the run id isn't wired through.
+  const canShowDiff =
+    !!runId && (fileStatus === 'ADDED' || fileStatus === 'MODIFIED');
+  const [viewMode, setViewMode] = useState<'full' | 'diff'>(canShowDiff ? 'diff' : 'full');
+  const [diff, setDiff] = useState<FileDiffPayload | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  // Reset to default view-mode whenever the file changes — picks 'diff' for changed files,
+  // 'full' for unchanged ones — and clear any cached diff payload from the previous file.
+  useEffect(() => {
+    setViewMode(canShowDiff ? 'diff' : 'full');
+    setDiff(null);
+  }, [filePath, canShowDiff]);
+
+  // Lazy-fetch diff content when entering diff mode for a new file.
+  useEffect(() => {
+    if (viewMode !== 'diff' || !filePath || !runId) return;
+    let cancelled = false;
+    setDiffLoading(true);
+    getFileDiff(runId, filePath)
+      .then((d) => {
+        if (!cancelled) {
+          setDiff(d);
+          setDiffLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDiff({path: filePath, base: '', head: content, status: 'ADDED'});
+          setDiffLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, filePath, runId, content]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -2070,6 +2117,22 @@ function IDEFileViewer({
             </>
           )}
         </button>
+        {/* 2026-05-02 — Diff/Full toggle. Visible only when the file has a diff to show
+             (ADDED/MODIFIED + runId wired). Hidden for UNCHANGED files (nothing to diff). */}
+        {canShowDiff && (
+          <button
+            onClick={() => setViewMode((m) => (m === 'diff' ? 'full' : 'diff'))}
+            title={viewMode === 'diff' ? 'Show full file' : 'Show only the diff'}
+            className={cn(
+              'flex items-center gap-1 px-2 py-2 text-xs transition-colors flex-shrink-0',
+              viewMode === 'diff'
+                ? 'text-accent-blue hover:text-accent-blue/80'
+                : 'text-muted hover:text-secondary',
+            )}
+          >
+            <span className='font-mono'>{viewMode === 'diff' ? 'Diff' : 'Full'}</span>
+          </button>
+        )}
         {/* Fold controls */}
         <button
           onClick={() => editorRef.current?.trigger('fold', 'editor.foldAll', {})}
@@ -2089,9 +2152,48 @@ function IDEFileViewer({
         <span className='px-3 py-2 text-[10px] font-mono text-muted flex-shrink-0'>{hljsLang}</span>
       </div>
 
-      {/* ── Code area (Monaco editor — read-only with native folding) ── */}
+      {/* ── Code area (Monaco editor — diff or full file) ── */}
       <div className='flex-1 overflow-hidden bg-[var(--geist-bg)]'>
-        {loading ? (
+        {viewMode === 'diff' ? (
+          diffLoading || !diff ? (
+            <div className='p-4 text-sm text-muted animate-pulse'>Loading diff…</div>
+          ) : (
+            <DiffEditor
+              key={`${filePath}-diff`}
+              language={monacoLang}
+              original={diff.base}
+              modified={diff.head}
+              theme={GEIST_THEME_NAME}
+              options={{
+                readOnly: true,
+                renderSideBySide: false,
+                hideUnchangedRegions: {
+                  enabled: true,
+                  contextLineCount: 3,
+                  minimumLineCount: 3,
+                  revealLineCount: 20,
+                },
+                minimap: {enabled: false},
+                scrollBeyondLastLine: false,
+                fontSize: 12,
+                lineNumbers: 'on',
+                folding: true,
+                showFoldingControls: 'always',
+                wordWrap: 'off',
+                renderLineHighlight: 'line',
+                contextmenu: false,
+                domReadOnly: true,
+                cursorStyle: 'line-thin',
+                scrollbar: {verticalScrollbarSize: 6, horizontalScrollbarSize: 6},
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                overviewRulerBorder: false,
+                guides: {indentation: true, bracketPairs: true},
+                padding: {top: 8},
+              }}
+            />
+          )
+        ) : loading ? (
           <div className='p-4 text-sm text-muted animate-pulse'>Loading…</div>
         ) : (
           <Editor
@@ -2348,7 +2450,13 @@ export function CodeTab({
           </div>
         )}
         <div className='flex-1 overflow-hidden'>
-          <IDEFileViewer filePath={selected} content={content} loading={loadingContent} />
+          <IDEFileViewer
+            filePath={selected}
+            content={content}
+            loading={loadingContent}
+            runId={runId}
+            fileStatus={selected ? fileStatus?.get(selected) : undefined}
+          />
         </div>
       </div>
     </div>
