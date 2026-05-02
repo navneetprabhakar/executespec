@@ -21,22 +21,30 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Pilot R6 — produces six review dimensions anchored to the LLM-judged {@code specAdherenceScore}
- * (the same score that populates {@code accuracyScore} on the validation report). The anchor
- * guarantees the dimensions move together with the overall judgment — no more "the overall is 5 but
- * codeQuality is 100."
+ * Pilot R6 — produces review dimensions when there's real signal, suppresses them (returns
+ * {@code null}) when the only signal would be the anchor passthrough. Closes the b171fa52 follow-up
+ * where the dashboard showed Code quality = 0, Architecture = 0, Security = 40, Performance = 40
+ * for a run where: (a) every issue double-counted into codeQuality + its category, (b) we have no
+ * actual security or performance measurement so those bars showed the anchor unchanged and looked
+ * like authoritative scores.
  *
- * <p>Each dimension then applies its own targeted signals:
+ * <p>Honesty rules per dimension:
  *
  * <ul>
- *   <li>{@code codeQuality} — anchor − weighted issue count.
- *   <li>{@code testCoverage} — workspace filesystem scan (ratio of test files to source files),
- *       cross-checked against the LLM's coverage level.
- *   <li>{@code architecture} — anchor − architectural issues (cross-task, logic, error-handling,
- *       spec-mismatch).
- *   <li>{@code security} — anchor − security issues; detects auth/validation patterns in the
- *       workspace as a small bonus.
- *   <li>{@code performance} — anchor − deployability issues.
+ *   <li>{@code codeQuality} — always {@code null}. The verifiedScore IS the run's code-quality
+ *       summary; surfacing a separate "code quality" bar that's just anchor − issues was a
+ *       double-count and a misleading framing.
+ *   <li>{@code testCoverage} — real measurement (workspace test/source file ratio cross-checked
+ *       with the LLM's coverage level). Already returned {@code null} for doc-only runs.
+ *   <li>{@code architecture} — anchor − arch-category issues, but only when there's at least one
+ *       arch-category issue (CROSS_TASK_MISMATCH / LOGIC_ERROR / ERROR_HANDLING /
+ *       SPEC_MISMATCH / MISSING_ENDPOINT / MISSING_FEATURE). When there are none, returns
+ *       {@code null} instead of showing the anchor with no adjustment.
+ *   <li>{@code security} — anchor − security issues, plus +5 when auth/validation patterns are
+ *       detected in the workspace. Returns {@code null} when neither signal fires.
+ *   <li>{@code performance} — always {@code null}. We never benchmark performance; deployability
+ *       was a poor proxy and the bar misleadingly read as "X performance score" when it's just
+ *       anchor − a handful of CI / Dockerfile issues.
  *   <li>{@code designCompliance} — only when {@code figmaUrl} is set.
  * </ul>
  *
@@ -127,14 +135,18 @@ public class ReviewScoringService {
 
     WorkspaceStats ws = scanWorkspace(run);
 
-    int codeQuality = clamp(anchor - codeIssuePenalty);
-    // v2.5.12 honest-scoring: deriveTestCoverage may return null for
-    // doc-only runs (no source files changed). Keep it as Integer so the
-    // report hides the row instead of NPE-ing on auto-unbox.
+    // 2026-05-02 — honest dimensions. codeIssuePenalty / perfIssuePenalty are no longer used
+    // to drive a visible dimension; verifiedScore (the anchor) is the run-level code-quality
+    // summary, and we don't actually benchmark performance. archIssuePenalty + secIssuePenalty
+    // gate their dimensions on having a real category signal (or auth hint, for security).
+    Integer codeQuality = null;
     Integer testCoverage = deriveTestCoverage(ws, accuracy);
-    int architecture = clamp(anchor - archIssuePenalty);
-    int security = clamp(anchor - secIssuePenalty + (ws.hasAuthHints ? 5 : 0));
-    int performance = clamp(anchor - perfIssuePenalty);
+    Integer architecture = (archIssuePenalty > 0) ? clamp(anchor - archIssuePenalty) : null;
+    Integer security =
+        (secIssuePenalty > 0 || ws.hasAuthHints)
+            ? clamp(anchor - secIssuePenalty + (ws.hasAuthHints ? 5 : 0))
+            : null;
+    Integer performance = null;
 
     Integer designCompliance = null;
     if (figmaUrl != null && !figmaUrl.isBlank()) {
@@ -144,11 +156,16 @@ public class ReviewScoringService {
     Scores scores =
         new Scores(
             codeQuality, testCoverage, architecture, security, performance, designCompliance);
+    // codeIssuePenalty + perfIssuePenalty intentionally logged but not surfaced — they're
+    // useful for back-end scoring telemetry / future revival of those dimensions, but never
+    // bound to a UI bar.
     log.info(
-        "Scored run={} anchor={} scores={} srcChanged={} testChanged={}",
+        "Scored run={} anchor={} scores={} codePenalty={} perfPenalty={} srcChanged={} testChanged={}",
         run != null ? run.getRunId() : "?",
         anchor,
         scores,
+        codeIssuePenalty,
+        perfIssuePenalty,
         ws.sourceFilesChanged,
         ws.testFilesChanged);
     return scores;

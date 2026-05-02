@@ -106,10 +106,11 @@ class AccuracyAssessmentInferKeyFilePathsTest {
   }
 
   @Test
-  void manyStructuralFiles_capAt10ProtectsAgainst30Controllers() throws Exception {
-    // A Spring Boot project with 30 controllers — the structural matcher
-    // caps at 10 to keep token budgets bounded. Top-up doesn't expand
-    // beyond the cap.
+  void manyStructuralFiles_capAtSingleRepoBudget() throws Exception {
+    // A Spring Boot project with 30 controllers — single-repo runs cap at the read budget
+    // (SINGLE_REPO_BUDGET = 6). 2026-05-02: previously inferKeyFilePaths returned 10 and
+    // buildKeyFileSnippets enforced the 6-file read cap; now both layers agree on the budget
+    // value so the API contract reflects what's actually read.
     StringBuilder tree = new StringBuilder();
     for (int i = 0; i < 30; i++) {
       tree.append(String.format("Controller%02d.java%n", i));
@@ -118,7 +119,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
 
     List<String> picked = infer(tree.toString());
 
-    assertThat(picked).hasSize(10);
+    assertThat(picked).hasSize(6);
     assertThat(picked).allMatch(p -> p.startsWith("Controller"));
     assertThat(picked).doesNotContain("Helper.java");
   }
@@ -140,6 +141,96 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     assertThat(infer("")).isEmpty();
     assertThat(infer("   ")).isEmpty();
     assertThat(infer(null)).isEmpty();
+  }
+
+  // ── Multi-repo budget (2026-05-02) ───────────────────────────────────────
+
+  @Test
+  void multiRepo_perRepoBudgetGivesEachRepoEvidence() throws Exception {
+    // 3-repo workspace shape from b171fa52 — pplai-api + pplai-frontend-mobile + frontend.
+    // Pre-fix: 6-file flat budget burned on routes from one repo, leaving the assessor unable
+    // to confirm spec items in the others ("ai.py exists but content unread, cannot confirm" ×N).
+    // Post-fix: each repo gets PER_REPO_BUDGET (6) picks, capped at MULTI_REPO_TOTAL_CAP (18).
+    StringBuilder tree = new StringBuilder();
+    // pplai-api (Python/Node) — 8 candidates, only 6 should make it past the budget
+    for (int i = 0; i < 4; i++) tree.append(String.format("repos/pplai-api/src/routes/r%d.ts%n", i));
+    for (int i = 0; i < 4; i++)
+      tree.append(String.format("repos/pplai-api/app/services/s%d.py%n", i));
+    // pplai-frontend-mobile (RN) — 5 candidates
+    for (int i = 0; i < 5; i++)
+      tree.append(String.format("repos/pplai-frontend-mobile/services/m%d.ts%n", i));
+    // frontend (web) — 5 candidates
+    for (int i = 0; i < 5; i++) tree.append(String.format("repos/frontend/src/pages/p%d.tsx%n", i));
+
+    List<String> picked = infer(tree.toString());
+
+    // Each repo represented; total ≤ MULTI_REPO_TOTAL_CAP (18).
+    assertThat(picked).hasSizeLessThanOrEqualTo(18);
+    assertThat(picked).anyMatch(p -> p.startsWith("repos/pplai-api/"));
+    assertThat(picked).anyMatch(p -> p.startsWith("repos/pplai-frontend-mobile/"));
+    assertThat(picked).anyMatch(p -> p.startsWith("repos/frontend/"));
+    // At least 4 picks per repo (5 candidates each for mobile + frontend; 8 for pplai-api).
+    long apiPicks = picked.stream().filter(p -> p.startsWith("repos/pplai-api/")).count();
+    long mobilePicks =
+        picked.stream().filter(p -> p.startsWith("repos/pplai-frontend-mobile/")).count();
+    long fePicks = picked.stream().filter(p -> p.startsWith("repos/frontend/")).count();
+    assertThat(apiPicks).isGreaterThanOrEqualTo(4);
+    assertThat(mobilePicks).isGreaterThanOrEqualTo(4);
+    assertThat(fePicks).isGreaterThanOrEqualTo(4);
+  }
+
+  @Test
+  void multiRepo_totalCapBoundsTokenCost() throws Exception {
+    // 5 repos × 10 candidates each — total picks must not exceed MULTI_REPO_TOTAL_CAP (18)
+    // even though the per-repo budget × repo count would otherwise be 30.
+    StringBuilder tree = new StringBuilder();
+    for (int r = 0; r < 5; r++) {
+      for (int i = 0; i < 10; i++) {
+        tree.append(String.format("repos/repo%d/src/route%d.ts%n", r, i));
+      }
+    }
+
+    List<String> picked = infer(tree.toString());
+
+    assertThat(picked).hasSizeLessThanOrEqualTo(18);
+    // First 3 repos should each get the full 6 (3 × 6 = 18 = cap), repos 4 + 5 get 0.
+    assertThat(picked.stream().filter(p -> p.startsWith("repos/repo0/")).count())
+        .isEqualTo(6);
+  }
+
+  @Test
+  void singleRepo_keepsFlatBudget() throws Exception {
+    // Single repos/ subdir (or no repos/ prefix at all) keeps the V162 single-repo budget
+    // of 6 — no behavior change for the common case.
+    StringBuilder tree = new StringBuilder();
+    for (int i = 0; i < 12; i++) {
+      tree.append(String.format("repos/only-one/src/route%d.ts%n", i));
+    }
+    List<String> picked = infer(tree.toString());
+    assertThat(picked).hasSize(6);
+  }
+
+  @Test
+  void mixedTree_workspaceRootCountsAsOneBucket() throws Exception {
+    // Workspace-root files (no repos/ prefix) collapse into one bucket; if mixed with a repos/
+    // bucket, the run is treated as multi-bucket and per-bucket budgets apply.
+    String tree =
+        String.join(
+            "\n",
+            ".agent-context/notes.md",
+            "tools/probe.py",
+            "tools/seed.py",
+            "tools/migrate.py",
+            "repos/api/src/routes/users.ts",
+            "repos/api/src/services/auth.ts",
+            "repos/api/src/models/user.ts");
+
+    List<String> picked = infer(tree);
+
+    // Both buckets represented (the _root_ bucket only has tools/*.py since
+    // .agent-context/notes.md is not a source extension).
+    assertThat(picked).anyMatch(p -> p.startsWith("repos/api/"));
+    assertThat(picked).anyMatch(p -> p.startsWith("tools/"));
   }
 
   @Test
