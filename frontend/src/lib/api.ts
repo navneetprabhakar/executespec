@@ -754,6 +754,22 @@ export const getTimeline = (runId: string) => req<TimelineData>(`/runs/${runId}/
 export const getFiles = (runId: string) => req<string[]>(`/runs/${runId}/files`);
 
 /**
+ * 2026-05-02 — file listing with per-path git-derived change status. Multi-repo aware (the
+ * backend runs `git status --porcelain` per `repos/<name>/` checkout). Lets the run-detail
+ * file tree decorate paths with A/M badges so the user can see at a glance which files the
+ * worker has added or modified.
+ */
+export type FileChangeStatus = 'ADDED' | 'MODIFIED' | 'UNCHANGED';
+
+export interface FileWithStatus {
+  path: string;
+  status: FileChangeStatus;
+}
+
+export const getFilesWithStatus = (runId: string) =>
+  req<FileWithStatus[]>(`/runs/${runId}/files/status`);
+
+/**
  * Trigger a browser download of the workspace zip.
  * Uses fetch with auth header, then creates an object URL for the browser download.
  */
@@ -785,6 +801,21 @@ export const pushToScm = (runId: string) =>
 /** File content is served as text/plain — must NOT use res.json(). */
 export const getFile = (runId: string, filePath: string) =>
   reqText(`/runs/${runId}/file?path=${encodeURIComponent(filePath)}`);
+
+/**
+ * 2026-05-02 — base + head content for a single file so the run-detail UI can render a Monaco
+ * `DiffEditor`. ADDED files come back with empty `base`; deleted files have empty `head`.
+ * `status` mirrors `FileChangeStatus` (ADDED/MODIFIED/UNCHANGED).
+ */
+export interface FileDiffPayload {
+  path: string;
+  base: string;
+  head: string;
+  status: FileChangeStatus;
+}
+
+export const getFileDiff = (runId: string, filePath: string) =>
+  req<FileDiffPayload>(`/runs/${runId}/file/diff?path=${encodeURIComponent(filePath)}`);
 
 // ── Messages (historical log) ────────────────────────────────────────────────
 
@@ -2807,6 +2838,20 @@ export const compactProjectChat = (projectId: string) =>
     `/projects/${projectId}/chat/compact`,
     {method: 'POST'},
   );
+
+/**
+ * 2026-05-02 — chat-resolution metadata for the project's current AI provider. The header chip
+ * uses {@code contextWindow} so the "200k window" / "1M window" segment matches the actual
+ * model the chat resolves to (gpt-4o = 128k vs gpt-5.4 = 256k vs gemini = 1M).
+ */
+export interface ProjectChatInfo {
+  model: string;
+  provider: string;
+  contextWindow: number;
+}
+
+export const getProjectChatInfo = (projectId: string) =>
+  req<ProjectChatInfo>(`/projects/${projectId}/chat/info`);
 
 // ── Migrations product (R-336..R-339) ─────────────────────────────────────
 

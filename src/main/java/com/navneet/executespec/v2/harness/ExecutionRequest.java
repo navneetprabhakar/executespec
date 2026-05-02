@@ -32,7 +32,19 @@ public record ExecutionRequest(
      * small {@code REFERENCE DOCS} block retrieved from {@code RetrievalService} keyed on the task
      * description.
      */
-    String projectId) {
+    String projectId,
+
+    /**
+     * Workspace summary built by the orchestrator (V2RunOrchestrator.buildMultiRepoSummary or the
+     * codemap fallback). When the run targets a multi-repo project the summary contains the
+     * "MULTI-REPO PROJECT WORKSPACE" header + the {@code repos/<name>/} subdir list. The worker's
+     * system prompt receives this block verbatim so generated files land inside the right subdir;
+     * without it the worker treats the workspace as an empty scratch dir, writes to root, and the
+     * per-repo push step finds no diff to ship. See {@code
+     * SequentialExecutorV2.composeSystemPrompt} + the regression test in {@code
+     * MultiRepoWorkerPromptTest}. Null is allowed (single-repo / scratch-workspace runs).
+     */
+    String workspaceSummary) {
 
   public ExecutionRequest {
     if (plan == null) throw new IllegalArgumentException("plan required");

@@ -1,6 +1,8 @@
 # ExecuteSpec
 
-**v2.5.11** · Multi-agent autonomous coding system. Decomposes natural-language goals into tasks, executes them sequentially with tier-routed LLM worker agents, validates, reviews, ships a PR, and remembers what was built. **v2.5.11** kicks off the Validation v3 rewrite (Pillar 1 of 5) — planner now enumerates every spec requirement as a graph and every task cites which requirement IDs it covers. **v2.5.10** rebuilds the scoring layer: `verifiedScore` is derived deterministically from build + tests + reviewer verdict (no LLM hallucination); PARTIAL status now always carries an explicit `status_reason` (`CLEAN_WITH_INTERMEDIATE_WARNINGS`, `FINAL_BUILD_FAILED`, `TESTS_FAILED:N_OF_M`, etc.) surfaced via the StatusBadge tooltip + a new `SignalBreakdown` chip (`Build ✓ · Tests 73/73 · Reviewer CLEAN · Verified 92 · Est. 97`). **v2.5.9** — cross-provider eval hardening: `ExecutionPlannerService` honours `run.aiProvider`, strict NO_FALLBACK mode, `execution_solution_dependency` dedup, Gemini default → `gemini-3-flash-preview`, `RUN_PROVIDER_SWITCHED` SSE event. Premium feature: ENTERPRISE + TEAM tiers (V141 renamed MAX → TEAM as the stable 4-tier ladder; the per-seat TEAM + MAX co-existence only lives on the un-merged `feature/product-split-prep` branch). Full changelog in [CHANGELOG.md](CHANGELOG.md); Validation v3 5-pillar plan at [`.claude/plans/immutable-painting-platypus.md`](.claude/plans/immutable-painting-platypus.md).
+**v1.0.0-M1** · Multi-agent autonomous coding system. Decomposes natural-language goals into tasks, executes them sequentially with tier-routed LLM worker agents, validates, reviews, ships a PR, and remembers what was built.
+
+**v1.0.0-M1 (2026-05-02 — first public milestone):** consolidates every shipping feature from the v2.5.x development line into the first numbered release. Highlights — V2 multi-agent pipeline (Smart classifier → outline planner → sequential executor → reviewer → final smoke + auto-preview); validation v3 pillar 1 (planner emits a requirement graph, every task cites which requirement IDs it implements); deterministic verifiedScore (derived from build + tests + reviewer verdict, not LLM self-rating); 4-tier ladder (Free 5 runs/month, Pro $20/mo grandfathered, Team $39/seat BYOK, Enterprise); audit r3 fix batch (EntitlementResolver tier-rank, WCAG-AA token contrast, V3 billing PRO cap render, outcome-led empty-state copy); Google Java + TypeScript style refactor with CI lint enforcement; multi-repo project runs now correctly route worker writes into per-repo `repos/<name>/` subdirs; pause/resume on V2 runs (interrupt + resume-from-disk semantic, behind the `v2.pause.enabled` flag). Full inventory in [CHANGELOG.md](CHANGELOG.md); deviations from Google style guides in [docs/design/code-style.md](docs/design/code-style.md); live dev verification in [docs/audits/dev-verification-2026-05-04.md](docs/audits/dev-verification-2026-05-04.md).
 
 **Stack:** Java 21 · Spring Boot 3.3 · Spring AI 1.1.0 · PostgreSQL · Redis · React 18 · Vite 5 · Tailwind · GCP
 
@@ -29,7 +31,7 @@ Default admin: `admin@executespec.ai` / `REDACTED_FOR_PUBLIC_RELEASE` (forced pa
 
 ---
 
-## Pipeline (V2 — current as of v2.5.11)
+## Pipeline (V2 — current as of v1.0.0-M1)
 
 ```
 POST /api/runs  →  V2RunOrchestrator

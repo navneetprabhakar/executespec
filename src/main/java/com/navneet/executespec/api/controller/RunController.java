@@ -507,11 +507,34 @@ public class RunController {
   /** Optional overrides for {@code POST /api/runs/{id}/fork}. All fields nullable. */
   public record ForkOverrides(String userRequest, String executionMode) {}
 
+  /**
+   * Pause a running V2 run. The pause request is observed at the next task / iteration boundary
+   * (NOT mid-LLM-call); the in-flight LLM round-trip completes before pause takes effect to avoid
+   * orphaning provider tokens. Valid only from {@code WORKING} or {@code REVIEWING}; the controller
+   * returns 409 from any other status (planning is short-bounded; awaiting-approval is already
+   * paused via the plan gate; queued runs should use cancel; terminal states are no-ops).
+   *
+   * <p>Gated behind the {@code v2.pause.enabled} feature flag (V168) so ops can flip it on after
+   * smoke-verifying on dev. When OFF the endpoint returns 503 with the flag name in the message —
+   * matches the pre-V168 behaviour where pause was 410 Gone but with a clearer "feature is off, not
+   * gone" framing.
+   */
   @PostMapping("/{runId}/pause")
   public ResponseEntity<Void> pauseRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
-    throw new ResponseStatusException(HttpStatus.GONE, "Pause/resume not yet supported in V2.");
+    if (!featureFlagService.isEnabled("v2.pause.enabled")) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Pause/resume is feature-flagged off (v2.pause.enabled). Ask an admin to enable it.");
+    }
+    boolean paused = v2Orchestrator.pause(runId);
+    if (!paused) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT,
+          "Pause not valid from this status — only WORKING and REVIEWING runs can be paused.");
+    }
+    return ResponseEntity.accepted().build();
   }
 
   @PostMapping("/{runId}/edit-and-restart")
@@ -524,11 +547,36 @@ public class RunController {
         HttpStatus.GONE, "Edit-and-restart not supported in V2 — submit a fresh run.");
   }
 
+  /**
+   * Resume a paused V2 run. Valid only from {@code PAUSED}; 409 from anywhere else. Implementation
+   * is same-JVM only today — the workspace lives on local disk and cross-JVM resume requires GCS
+   * shipping (deferred chunk #3 of the pause/resume design). When the workspace is gone the
+   * orchestrator returns false and the controller returns 409 with a recovery hint pointing at
+   * {@code POST /runs/{id}/retry} for cross-JVM cases.
+   */
   @PostMapping("/{runId}/resume")
   public ResponseEntity<Void> resumeRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
-    throw new ResponseStatusException(HttpStatus.GONE, "Pause/resume not yet supported in V2.");
+    if (!featureFlagService.isEnabled("v2.pause.enabled")) {
+      throw new ResponseStatusException(
+          HttpStatus.SERVICE_UNAVAILABLE,
+          "Pause/resume is feature-flagged off (v2.pause.enabled). Ask an admin to enable it.");
+    }
+    com.navneet.executespec.v2.integration.V2RunOrchestrator.ResumeOutcome outcome =
+        v2Orchestrator.resume(runId);
+    return switch (outcome) {
+      case OK -> ResponseEntity.accepted().build();
+      case NOT_PAUSED ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT, "Resume valid only for PAUSED runs.");
+      case WORKSPACE_GONE ->
+          throw new ResponseStatusException(
+              HttpStatus.CONFLICT,
+              "Workspace is no longer on this node. Use POST /api/runs/{id}/retry to start a fresh"
+                  + " run with the same spec.");
+      case NOT_FOUND -> throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Run not found.");
+    };
   }
 
   /**
@@ -930,6 +978,25 @@ public class RunController {
     }
   }
 
+  /**
+   * 2026-05-02 — same listing as {@link #listWorkspaceFiles} but each entry carries a
+   * git-derived {@code status} (ADDED / MODIFIED / UNCHANGED) so the run-detail file tree can
+   * decorate paths with badges. User report: "no way to know which classes have been
+   * added/updated in code." Multi-repo aware — runs {@code git status --porcelain} per
+   * {@code repos/<name>/} subdir.
+   */
+  @GetMapping("/{id}/files/status")
+  public ResponseEntity<List<com.navneet.executespec.deployment.WorkspaceFileService.FileEntry>>
+      listWorkspaceFilesWithStatus(
+          @PathVariable String id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(id, userDetails);
+    try {
+      return ResponseEntity.ok(workspaceFileService.listFilesWithStatus(id));
+    } catch (IOException e) {
+      return ResponseEntity.ok(List.of());
+    }
+  }
+
   /** Serve the generated OpenAPI 3.0 YAML spec for a run. */
   @GetMapping(value = "/{runId}/openapi.yaml", produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> getOpenApiSpec(
@@ -974,6 +1041,33 @@ public class RunController {
     } catch (IOException e) {
       throw new ResponseStatusException(
           HttpStatus.INTERNAL_SERVER_ERROR, "Failed to read file: " + e.getMessage());
+    }
+  }
+
+  /**
+   * 2026-05-02 — base + head content for a single workspace file so the run-detail UI can render
+   * a Monaco {@code DiffEditor} (only the diff is visible, not the whole file). The base is the
+   * snapshot the run was cloned against ({@code RunRepoSnapshot.commitSha}); head is the current
+   * filesystem state. ADDED files have empty {@code base}; deleted files have empty {@code head}.
+   * Outside any {@code repos/<name>/} subdir there is no base — the worker is the only writer for
+   * those (e.g. {@code .agent-context/project.json}) so they come back as ADDED.
+   */
+  @GetMapping(value = "/{id}/file/diff", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<com.navneet.executespec.deployment.WorkspaceFileService.FileDiff>
+      readWorkspaceFileDiff(
+          @PathVariable String id,
+          @RequestParam String path,
+          @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(id, userDetails);
+    try {
+      return ResponseEntity.ok(workspaceFileService.readFileDiff(id, path));
+    } catch (SecurityException e) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+    } catch (java.nio.file.NoSuchFileException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + path);
+    } catch (IOException e) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "Failed to read file diff: " + e.getMessage());
     }
   }
 

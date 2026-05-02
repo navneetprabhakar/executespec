@@ -94,16 +94,28 @@ export default function ProjectPrRollup({
     );
   }
 
+  // V169 (2026-05-02) — three categories now:
+  //   1. Launch PRs: entries with no repoFullName (ExecutionSolution-driven).
+  //   2. Run PRs: entries with kind=RUN (or absent kind, for back-compat) AND a launchId.
+  //   3. System PRs: entries with kind != RUN — bootstrap, architecture, contract, chat-tool.
+  // The grouping mirrors the categories so the dashboard reads as
+  // "what users started" + "what the platform did automatically".
   const launchEntries = prs.filter((p) => !p.repoFullName);
-  const runEntries = prs.filter((p) => !!p.repoFullName);
+  const runEntries = prs.filter((p) => !!p.repoFullName && (!p.kind || p.kind === 'RUN'));
+  const systemEntries = prs.filter((p) => !!p.kind && p.kind !== 'RUN');
 
   const byLaunch: Record<string, PrRollupEntry[]> = {};
   launchEntries.forEach((p) => {
-    (byLaunch[p.launchId] ??= []).push(p);
+    if (p.launchId) (byLaunch[p.launchId] ??= []).push(p);
   });
   const byRun: Record<string, PrRollupEntry[]> = {};
   runEntries.forEach((p) => {
-    (byRun[p.launchId] ??= []).push(p);
+    if (p.launchId) (byRun[p.launchId] ??= []).push(p);
+  });
+  const bySystemKind: Record<string, PrRollupEntry[]> = {};
+  systemEntries.forEach((p) => {
+    const k = p.kind || 'SYSTEM';
+    (bySystemKind[k] ??= []).push(p);
   });
 
   return (
@@ -131,9 +143,29 @@ export default function ProjectPrRollup({
           onAddressReview={onAddressReview}
         />
       ))}
+      {Object.entries(bySystemKind).map(([kind, group]) => (
+        <PrGroup
+          key={`system-${kind}`}
+          label={SYSTEM_KIND_LABEL[kind] ?? kind}
+          idShort={`${group.length} PR${group.length > 1 ? 's' : ''}`}
+          to={null}
+          prs={group}
+          projectId={projectId}
+          onAddressReview={onAddressReview}
+        />
+      ))}
     </div>
   );
 }
+
+/** Display labels for the V169 system-PR kinds. */
+const SYSTEM_KIND_LABEL: Record<string, string> = {
+  BOOTSTRAP: 'Bootstrap',
+  ARCHITECTURE: 'Architecture',
+  CONTRACT: 'Contract',
+  CHAT_TOOL: 'Chat tool',
+  SYSTEM: 'System',
+};
 
 function PrGroup({
   label,
@@ -145,7 +177,8 @@ function PrGroup({
 }: {
   label: string;
   idShort: string;
-  to: string;
+  /** Target route for the group header; null when the label is its own group key (system PRs). */
+  to: string | null;
   prs: PrRollupEntry[];
   projectId: string;
   onAddressReview?: (config: ContinueOnPrConfig) => void;
@@ -154,9 +187,13 @@ function PrGroup({
     <div>
       <div className='flex items-center gap-2 mb-1 text-xs text-muted'>
         <span>{label}</span>
-        <Link to={to} className='font-mono text-accent-blue hover:underline'>
-          {idShort}
-        </Link>
+        {to ? (
+          <Link to={to} className='font-mono text-accent-blue hover:underline'>
+            {idShort}
+          </Link>
+        ) : (
+          <span className='font-mono'>{idShort}</span>
+        )}
         <span>
           · {prs.length} PR{prs.length > 1 ? 's' : ''}
         </span>
@@ -241,8 +278,11 @@ function PrRow({
                   snap?.headBranch ??
                   (await getPullRequestSnapshot(pr.repoFullName!, pr.prNumber!)).headBranch ??
                   '';
+                // Address-review only fires for run/launch PRs (filtered upstream by
+                // !!p.repoFullName + kind=RUN|undefined), so launchId is always set here.
+                // The non-null assertion mirrors prNumber/repoFullName above.
                 onAddressReview({
-                  sourceExecutionId: pr.launchId,
+                  sourceExecutionId: pr.launchId!,
                   prNumber: pr.prNumber!,
                   repoFullName: pr.repoFullName!,
                   headBranch,

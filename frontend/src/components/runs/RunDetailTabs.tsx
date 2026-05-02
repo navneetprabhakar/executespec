@@ -13,7 +13,11 @@ import {useTierPermissions} from '@/hooks/useTierPermissions';
 import {useIsMobile} from '@/hooks/useIsMobile';
 import {
   getFiles,
+  getFilesWithStatus,
+  type FileChangeStatus,
+  type FileDiffPayload,
   getFile,
+  getFileDiff,
   getOpenApiSpec,
   getProjects,
   createProject,
@@ -35,7 +39,7 @@ import TaskTimeline from './TaskTimeline';
 import PreviewTab from './PreviewTab';
 import {PIPELINE_STEPS, V2_LEGACY_UI} from '@/lib/constants';
 import {useSseStore} from '@/stores/useSseStore';
-import {fmtTokens, relativeTime, cn} from '@/lib/utils';
+import {fmtTokens, fmtMs, relativeTime, cn} from '@/lib/utils';
 import {
   ChevronDown,
   ChevronRight,
@@ -66,15 +70,20 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
-import Editor from '@monaco-editor/react';
+import Editor, {DiffEditor} from '@monaco-editor/react';
 import type {editor as monacoEditor} from 'monaco-editor';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
 
 const BASE_TABS = [
   {value: 'overview', label: 'Overview'},
+  // 2026-05-02 (corrected) — earlier this session the Plan tab was removed and the
+  // plan_summary banner was banner-attached above the live Tasks cards. User correction:
+  // keep Plan as the primary, drop Tasks, surface per-task live data (status + duration +
+  // token count + reason on failure) inside the PlanTaskCard footer. PlanTab now takes the
+  // live `tasks` array so each plan task can render its real-time signal alongside the
+  // planner's static metadata (objective / acceptance criteria / complexity / model).
   {value: 'plan', label: 'Plan'},
-  {value: 'tasks', label: 'Tasks'},
   {value: 'timeline', label: 'Timeline'},
   {value: 'log', label: 'Live Log'},
   {value: 'code', label: 'Code'},
@@ -89,6 +98,10 @@ export default function RunDetailTabs() {
 
   // Hoist files so both Code and Preview tabs share them
   const [files, setFiles] = useState<string[]>([]);
+  // 2026-05-02 — git-derived per-path change status. Map keyed on workspace-relative path
+  // (e.g. `repos/frontend/app/page.tsx`) → 'ADDED' | 'MODIFIED' | 'UNCHANGED'. Drives the
+  // A / M badges + collapsed-folder dot in the file tree.
+  const [fileStatus, setFileStatus] = useState<Map<string, FileChangeStatus>>(new Map());
   const [filesLoading, setFilesLoading] = useState(false);
   // Bump this to force re-fetch files (e.g. on manual refresh)
   const [filesTick, bumpFiles] = useReducer((n: number) => n + 1, 0);
@@ -96,9 +109,18 @@ export default function RunDetailTabs() {
   const loadFiles = useCallback((runId: string) => {
     setFilesLoading(true);
     setFiles([]);
-    getFiles(runId)
-      .then(setFiles)
-      .catch(() => {})
+    setFileStatus(new Map());
+    getFilesWithStatus(runId)
+      .then((rows) => {
+        setFiles(rows.map((r) => r.path));
+        setFileStatus(new Map(rows.map((r) => [r.path, r.status])));
+      })
+      .catch(() => {
+        // Endpoint not available (older backend) → fall through to plain listing without status.
+        getFiles(runId)
+          .then(setFiles)
+          .catch(() => {});
+      })
       .finally(() => setFilesLoading(false));
   }, []);
 
@@ -213,102 +235,56 @@ export default function RunDetailTabs() {
           <OverviewTab run={activeRun} fetchRun={fetchRun} fetchRuns={fetchRuns} />
         </Tabs.Content>
 
-        <Tabs.Content value='tasks' className='p-4 space-y-2'>
-          {activeRun.tasks.length === 0 && testTasks.length === 0 ? (
-            <p className='text-sm text-muted'>No tasks yet.</p>
-          ) : (
-            <>
-              {(() => {
-                // Group: show parent tasks, nest subtasks underneath.
-                // Exclude gap-closing tasks (taskId contains _gap_) — they're background best-effort
-                // and shown separately below; including them inflates the count and alarms users.
-                const parentTasks = activeRun.tasks.filter(
-                  (t) => !t.parentTaskId && !t.taskId?.includes('_gap_'),
-                );
-                const subtaskMap = new Map<string, typeof activeRun.tasks>();
-                activeRun.tasks
-                  .filter((t) => t.parentTaskId)
-                  .forEach((t) => {
-                    const list = subtaskMap.get(t.parentTaskId!) || [];
-                    list.push(t);
-                    subtaskMap.set(t.parentTaskId!, list);
-                  });
-                return parentTasks.map((t) => (
-                  <div key={t.taskId}>
+        <Tabs.Content value='plan' className='p-4 space-y-2'>
+          <PlanTab run={activeRun} />
+
+          {/* Gap-closing tasks — background best-effort, shown collapsed under the plan */}
+          {(() => {
+            const gapTasks = activeRun.tasks.filter((t) => t.taskId?.includes('_gap_'));
+            const seen = new Map<string, (typeof gapTasks)[0]>();
+            gapTasks.forEach((t) => seen.set(t.title, t));
+            const uniqueGapTasks = Array.from(seen.values());
+            if (uniqueGapTasks.length === 0) return null;
+            const doneCount = uniqueGapTasks.filter((t) => t.status === 'COMPLETE').length;
+            return (
+              <details className='mt-4 border-t border-[var(--border-default)]'>
+                <summary className='flex items-center gap-2 pt-3 pb-1 cursor-pointer select-none text-muted hover:text-secondary'>
+                  <Wrench className='h-3.5 w-3.5' />
+                  <span className='text-xs font-medium'>Gap fixes (background)</span>
+                  <span className='text-xs opacity-60'>
+                    {doneCount}/{uniqueGapTasks.length} completed
+                  </span>
+                </summary>
+                <div className='mt-1 space-y-1'>
+                  {uniqueGapTasks.map((t) => (
                     <TaskCard
+                      key={t.taskId}
                       task={t}
                       runId={activeRun.runId}
                       runStatus={activeRun.status}
-                      subtasks={subtaskMap.get(t.taskId)}
                     />
-                    {subtaskMap.get(t.taskId)?.map((st) => (
-                      <TaskCard
-                        key={st.taskId}
-                        task={st}
-                        runId={activeRun.runId}
-                        runStatus={activeRun.status}
-                      />
-                    ))}
-                  </div>
-                ));
-              })()}
-
-              {/* Gap-closing tasks — background best-effort, shown collapsed */}
-              {(() => {
-                const gapTasks = activeRun.tasks.filter((t) => t.taskId?.includes('_gap_'));
-                // Deduplicate by title — keep most recent (last in array)
-                const seen = new Map<string, (typeof gapTasks)[0]>();
-                gapTasks.forEach((t) => seen.set(t.title, t));
-                const uniqueGapTasks = Array.from(seen.values());
-                if (uniqueGapTasks.length === 0) return null;
-                const doneCount = uniqueGapTasks.filter((t) => t.status === 'COMPLETE').length;
-                return (
-                  <details className='mt-2 border-t border-[var(--border-default)]'>
-                    <summary className='flex items-center gap-2 pt-3 pb-1 cursor-pointer select-none text-muted hover:text-secondary'>
-                      <Wrench className='h-3.5 w-3.5' />
-                      <span className='text-xs font-medium'>Gap fixes (background)</span>
-                      <span className='text-xs opacity-60'>
-                        {doneCount}/{uniqueGapTasks.length} completed
-                      </span>
-                    </summary>
-                    <div className='mt-1 space-y-1'>
-                      {uniqueGapTasks.map((t) => (
-                        <TaskCard
-                          key={t.taskId}
-                          task={t}
-                          runId={activeRun.runId}
-                          runStatus={activeRun.status}
-                        />
-                      ))}
-                    </div>
-                  </details>
-                );
-              })()}
-
-              {testTasks.length > 0 && (
-                <>
-                  <div className='flex items-center gap-2 pt-4 pb-1 border-t border-[var(--border-default)]'>
-                    <TestTube2 className='h-4 w-4 text-accent-blue' />
-                    <span className='text-sm font-medium text-secondary'>
-                      Test Generation Tasks
-                    </span>
-                    <span className='text-xs text-muted'>({testTasks.length})</span>
-                  </div>
-                  {testTasks.map((tt) => (
-                    <TestTaskCard key={tt.id} task={tt} />
                   ))}
-                </>
-              )}
+                </div>
+              </details>
+            );
+          })()}
+
+          {testTasks.length > 0 && (
+            <>
+              <div className='flex items-center gap-2 pt-4 pb-1 border-t border-[var(--border-default)]'>
+                <TestTube2 className='h-4 w-4 text-accent-blue' />
+                <span className='text-sm font-medium text-secondary'>Test Generation Tasks</span>
+                <span className='text-xs text-muted'>({testTasks.length})</span>
+              </div>
+              {testTasks.map((tt) => (
+                <TestTaskCard key={tt.id} task={tt} />
+              ))}
             </>
           )}
         </Tabs.Content>
 
         <Tabs.Content value='log' className='h-[calc(100vh-180px)]'>
           <LiveLog />
-        </Tabs.Content>
-
-        <Tabs.Content value='plan' className='p-4'>
-          <PlanTab run={activeRun} />
         </Tabs.Content>
 
         <Tabs.Content value='code' className='h-[calc(100vh-180px)] overflow-hidden'>
@@ -319,6 +295,7 @@ export default function RunDetailTabs() {
             repoUrl={activeRun.repoUrl}
             status={activeRun.status}
             scmProvider={activeRun.scmProvider}
+            fileStatus={fileStatus}
           />
         </Tabs.Content>
 
@@ -1091,6 +1068,37 @@ function PlanTab({run}: {run: RunDetail}) {
 
   const canEdit = run.status === 'AWAITING_APPROVAL';
 
+  // 2026-05-02 — index live tasks so the per-card render can pull real-time status / duration /
+  // token consumption / failure reason alongside the planner-static metadata. The plan stores
+  // tasks under the field `id` (e.g. "T1"); the live row's `taskId` is prefixed with the run-id
+  // short, e.g. "b171fa52_T1". Match by exact taskId first, then by `endsWith("_" + plan.id)`
+  // so both shapes resolve to the same live row. Falls back to undefined when the live row
+  // hasn't been written yet (pre-execution / plan-approval gate).
+  const liveByTaskId = new Map<string, (typeof run.tasks)[number]>();
+  const liveByPlanIdSuffix = new Map<string, (typeof run.tasks)[number]>();
+  for (const t of run.tasks) {
+    if (!t.taskId) continue;
+    liveByTaskId.set(t.taskId, t);
+    const idx = t.taskId.lastIndexOf('_');
+    if (idx >= 0) liveByPlanIdSuffix.set(t.taskId.slice(idx + 1), t);
+  }
+  const matchLive = (planTaskId: unknown): (typeof run.tasks)[number] | undefined => {
+    if (typeof planTaskId !== 'string' || !planTaskId) return undefined;
+    return liveByTaskId.get(planTaskId) ?? liveByPlanIdSuffix.get(planTaskId);
+  };
+
+  // Roll-up across plan tasks: total tokens consumed + per-task progress.
+  let totalTokens = 0;
+  let completed = 0;
+  const planTasks: any[] = Array.isArray(plan.tasks) ? plan.tasks : [];
+  for (const pt of planTasks) {
+    const live = matchLive(pt.id ?? pt.task_id);
+    if (live) {
+      totalTokens += (live.inputTokens ?? 0) + (live.outputTokens ?? 0);
+      if (live.status === 'COMPLETE') completed++;
+    }
+  }
+
   return (
     <div className='space-y-4'>
       {plan.plan_summary && (
@@ -1100,18 +1108,32 @@ function PlanTab({run}: {run: RunDetail}) {
         </div>
       )}
 
-      {Array.isArray(plan.tasks) && plan.tasks.length > 0 && (
+      {planTasks.length > 0 && (
         <div className='space-y-3'>
-          <h4 className='text-xs font-medium text-muted uppercase tracking-wider'>
-            Tasks ({plan.tasks.length})
-          </h4>
-          {plan.tasks.map((t: any, i: number) => (
+          <div className='flex items-center justify-between gap-2'>
+            <h4 className='text-xs font-medium text-muted uppercase tracking-wider'>
+              Tasks ({planTasks.length})
+            </h4>
+            {/* Live roll-up — replaces what the old Tasks tab carried at the top. */}
+            <div className='flex items-center gap-3 text-[10px] text-muted'>
+              <span>
+                <span className='text-secondary'>{completed}</span>/{planTasks.length} complete
+              </span>
+              {totalTokens > 0 && (
+                <span>
+                  <span className='text-secondary'>{fmtTokens(totalTokens)}</span> total tokens
+                </span>
+              )}
+            </div>
+          </div>
+          {planTasks.map((t: any, i: number) => (
             <PlanTaskCard
-              key={t.task_id ?? i}
+              key={t.id ?? t.task_id ?? i}
               task={t}
               index={i}
               runId={run.runId}
               canEdit={canEdit}
+              live={matchLive(t.id ?? t.task_id)}
             />
           ))}
         </div>
@@ -1127,11 +1149,20 @@ function PlanTaskCard({
   index: i,
   runId,
   canEdit,
+  live,
 }: {
   task: any;
   index: number;
   runId: string;
   canEdit: boolean;
+  /** Matched live row from `activeRun.tasks` — undefined pre-execution. */
+  live?: {
+    status?: string | null;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    durationMs?: number | null;
+    failureReason?: string | null;
+  };
 }) {
   const [objExpanded, setObjExpanded] = useState(false);
   const [critExpanded, setCritExpanded] = useState(false);
@@ -1149,9 +1180,23 @@ function PlanTaskCard({
   const displayObj = objExpanded || !objLong ? objective : objective.slice(0, TRUNCATE) + '…';
   const displayCrit = critExpanded || !critLong ? criteria : criteria.slice(0, TRUNCATE) + '…';
 
+  // 2026-05-02 — live signals previously rendered inside the (now-removed) Tasks tab.
+  const liveTokens = live ? (live.inputTokens ?? 0) + (live.outputTokens ?? 0) : 0;
+  const liveStatus = live?.status;
+  const statusTone =
+    liveStatus === 'COMPLETE'
+      ? 'text-accent-green bg-accent-green/10'
+      : liveStatus === 'FAILED'
+        ? 'text-accent-red bg-accent-red/10'
+        : liveStatus === 'PARTIAL'
+          ? 'text-accent-amber bg-accent-amber/10'
+          : liveStatus === 'IN_PROGRESS' || liveStatus === 'WORKING'
+            ? 'text-accent-blue bg-accent-blue/10'
+            : 'text-muted bg-[var(--gray-200)]';
+
   return (
     <div className='rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden'>
-      {/* ── Header: index · title · complexity badge ── */}
+      {/* ── Header: index · title · status · complexity badge ── */}
       <div className='flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[var(--border-default)]'>
         <div className='flex items-center gap-2 min-w-0'>
           <span className='text-[10px] text-muted flex-shrink-0 font-mono tabular-nums'>
@@ -1167,6 +1212,17 @@ function PlanTaskCard({
             >
               Edit
             </button>
+          )}
+          {liveStatus && (
+            <span
+              className={cn(
+                'text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wider',
+                statusTone,
+              )}
+              title={live?.failureReason ?? ''}
+            >
+              {liveStatus}
+            </span>
           )}
           <span
             className={cn(
@@ -1225,11 +1281,24 @@ function PlanTaskCard({
           </div>
         )}
 
-        {/* Footer: model chip + depends_on chips */}
+        {/* Footer: model chip + live tokens + duration + depends_on chips. */}
         <div className='flex items-center flex-wrap gap-2 pt-0.5'>
           {t.assigned_model && (
             <span className='text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]'>
               {t.assigned_model}
+            </span>
+          )}
+          {liveTokens > 0 && (
+            <span
+              className='text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]'
+              title={`Input ${fmtTokens(live?.inputTokens ?? 0)} · Output ${fmtTokens(live?.outputTokens ?? 0)}`}
+            >
+              {fmtTokens(liveTokens)} tok
+            </span>
+          )}
+          {live?.durationMs != null && live.durationMs > 0 && (
+            <span className='text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]'>
+              {fmtMs(live.durationMs)}
             </span>
           )}
           {Array.isArray(t.depends_on) && t.depends_on.length > 0 && (
@@ -1246,6 +1315,16 @@ function PlanTaskCard({
             </div>
           )}
         </div>
+
+        {/* Failure reason — surface concisely so users see WHY without expanding logs. */}
+        {live?.failureReason && (liveStatus === 'FAILED' || liveStatus === 'PARTIAL') && (
+          <div className='mt-2 px-2 py-1.5 rounded bg-accent-red/5 border border-accent-red/20'>
+            <p className='text-[10px] uppercase tracking-wider text-accent-red/80 mb-0.5'>
+              Failure reason
+            </p>
+            <p className='text-xs text-accent-red/90 leading-snug'>{live.failureReason}</p>
+          </div>
+        )}
 
         {/* Inline task edit */}
         {editing && (
@@ -1628,6 +1707,12 @@ interface TreeNodeViewProps {
   expandSignal?: number;
   /** Increment to force-collapse all folders; 0 = initial state */
   collapseSignal?: number;
+  /**
+   * 2026-05-02 — git-derived per-path change status. Map keyed on workspace-relative path
+   * (e.g. `repos/frontend/app/page.tsx`). Drives the A / M leaf badge and a colored dot on
+   * directory rows when a descendant is changed.
+   */
+  fileStatus?: Map<string, FileChangeStatus>;
 }
 
 function TreeNodeView({
@@ -1637,6 +1722,7 @@ function TreeNodeView({
   depth = 0,
   expandSignal = 0,
   collapseSignal = 0,
+  fileStatus,
 }: TreeNodeViewProps) {
   const [open, setOpen] = useState(depth < 2);
 
@@ -1649,6 +1735,13 @@ function TreeNodeView({
   }, [collapseSignal]);
 
   const indent = depth * 12 + 8;
+
+  // 2026-05-02 — leaf rows show an A/M chip; directory rows show a small colored dot when any
+  // descendant changed. Lookup is cheap since fileStatus is a Map; aggregateChildStatus walks
+  // each render-time but the tree is small enough that memoising adds more code than it saves.
+  const leafStatus = node.isFile && fileStatus ? fileStatus.get(node.path) : undefined;
+  const dirStatus =
+    !node.isFile && fileStatus ? aggregateChildStatus(node, fileStatus) : undefined;
 
   if (node.isFile) {
     return (
@@ -1664,7 +1757,8 @@ function TreeNodeView({
         title={node.path}
       >
         <FileTypeIcon name={node.name} />
-        <span className='truncate'>{node.name}</span>
+        <span className='truncate flex-1'>{node.name}</span>
+        {leafStatus && leafStatus !== 'UNCHANGED' && renderLeafBadge(leafStatus)}
       </button>
     );
   }
@@ -1684,7 +1778,8 @@ function TreeNodeView({
         ) : (
           <Folder className='h-3 w-3 flex-shrink-0 text-accent-amber/60' />
         )}
-        <span>{node.name}</span>
+        <span className='flex-1'>{node.name}</span>
+        {dirStatus && dirStatus !== 'UNCHANGED' && !open && renderDirDot(dirStatus)}
       </button>
       {open && (
         <div>
@@ -1697,11 +1792,74 @@ function TreeNodeView({
               depth={depth + 1}
               expandSignal={expandSignal}
               collapseSignal={collapseSignal}
+              fileStatus={fileStatus}
             />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** Walk the subtree once and return the dominant change status (ADDED ⩾ MODIFIED ⩾ undefined). */
+function aggregateChildStatus(
+  node: FileTreeNode,
+  fileStatus: Map<string, FileChangeStatus>,
+): FileChangeStatus | undefined {
+  let best: FileChangeStatus | undefined;
+  function walk(n: FileTreeNode) {
+    if (n.isFile) {
+      const s = fileStatus.get(n.path);
+      if (s === 'ADDED') {
+        best = 'ADDED';
+      } else if (s === 'MODIFIED' && best !== 'ADDED') {
+        best = 'MODIFIED';
+      }
+      return;
+    }
+    for (const c of n.children) {
+      walk(c);
+      if (best === 'ADDED') return; // can't get higher
+    }
+  }
+  walk(node);
+  return best;
+}
+
+function renderLeafBadge(status: FileChangeStatus) {
+  const base =
+    'text-[9px] font-bold leading-none px-1 py-[1px] rounded-sm flex-shrink-0 border';
+  if (status === 'ADDED') {
+    return (
+      <span
+        className={`${base} text-status-success border-status-success/40 bg-status-success/10`}
+        title='Added by this run'
+      >
+        A
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`${base} text-accent-amber border-accent-amber/40 bg-accent-amber/10`}
+      title='Modified by this run'
+    >
+      M
+    </span>
+  );
+}
+
+function renderDirDot(status: FileChangeStatus) {
+  const cls = status === 'ADDED' ? 'bg-status-success' : 'bg-accent-amber';
+  return (
+    <span
+      className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${cls}`}
+      title={
+        status === 'ADDED'
+          ? 'Contains files added by this run'
+          : 'Contains files modified by this run'
+      }
+    />
   );
 }
 
@@ -1798,18 +1956,63 @@ function getMonacoLanguage(filePath: string): string {
   return MONACO_LANG_MAP[ext] ?? 'plaintext';
 }
 
-// ── IDE file viewer (Monaco-based with native folding) ────────────────────────
+// ── IDE file viewer (Monaco-based with native folding + 2026-05-02 diff mode) ──
 function IDEFileViewer({
   filePath,
   content,
   loading,
+  runId,
+  fileStatus,
 }: {
   filePath: string | null;
   content: string;
   loading: boolean;
+  /** 2026-05-02 — needed to lazy-fetch the diff payload via getFileDiff. */
+  runId?: string;
+  /** ADDED/MODIFIED → default to diff view; UNCHANGED → full view + toggle disabled. */
+  fileStatus?: FileChangeStatus;
 }) {
   const [copied, setCopied] = useState(false);
   const editorRef = useRef<monacoEditor.IStandaloneCodeEditor | null>(null);
+
+  // 2026-05-02 — view-mode toggle. Default is 'diff' for ADDED/MODIFIED files (the user's
+  // ask: "I can see which file changed in Code section, but I can't see what changed"). Falls
+  // back to 'full' for UNCHANGED files (no diff to show) or when the run id isn't wired through.
+  const canShowDiff =
+    !!runId && (fileStatus === 'ADDED' || fileStatus === 'MODIFIED');
+  const [viewMode, setViewMode] = useState<'full' | 'diff'>(canShowDiff ? 'diff' : 'full');
+  const [diff, setDiff] = useState<FileDiffPayload | null>(null);
+  const [diffLoading, setDiffLoading] = useState(false);
+
+  // Reset to default view-mode whenever the file changes — picks 'diff' for changed files,
+  // 'full' for unchanged ones — and clear any cached diff payload from the previous file.
+  useEffect(() => {
+    setViewMode(canShowDiff ? 'diff' : 'full');
+    setDiff(null);
+  }, [filePath, canShowDiff]);
+
+  // Lazy-fetch diff content when entering diff mode for a new file.
+  useEffect(() => {
+    if (viewMode !== 'diff' || !filePath || !runId) return;
+    let cancelled = false;
+    setDiffLoading(true);
+    getFileDiff(runId, filePath)
+      .then((d) => {
+        if (!cancelled) {
+          setDiff(d);
+          setDiffLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDiff({path: filePath, base: '', head: content, status: 'ADDED'});
+          setDiffLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [viewMode, filePath, runId, content]);
 
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
@@ -1914,6 +2117,22 @@ function IDEFileViewer({
             </>
           )}
         </button>
+        {/* 2026-05-02 — Diff/Full toggle. Visible only when the file has a diff to show
+             (ADDED/MODIFIED + runId wired). Hidden for UNCHANGED files (nothing to diff). */}
+        {canShowDiff && (
+          <button
+            onClick={() => setViewMode((m) => (m === 'diff' ? 'full' : 'diff'))}
+            title={viewMode === 'diff' ? 'Show full file' : 'Show only the diff'}
+            className={cn(
+              'flex items-center gap-1 px-2 py-2 text-xs transition-colors flex-shrink-0',
+              viewMode === 'diff'
+                ? 'text-accent-blue hover:text-accent-blue/80'
+                : 'text-muted hover:text-secondary',
+            )}
+          >
+            <span className='font-mono'>{viewMode === 'diff' ? 'Diff' : 'Full'}</span>
+          </button>
+        )}
         {/* Fold controls */}
         <button
           onClick={() => editorRef.current?.trigger('fold', 'editor.foldAll', {})}
@@ -1933,9 +2152,48 @@ function IDEFileViewer({
         <span className='px-3 py-2 text-[10px] font-mono text-muted flex-shrink-0'>{hljsLang}</span>
       </div>
 
-      {/* ── Code area (Monaco editor — read-only with native folding) ── */}
+      {/* ── Code area (Monaco editor — diff or full file) ── */}
       <div className='flex-1 overflow-hidden bg-[var(--geist-bg)]'>
-        {loading ? (
+        {viewMode === 'diff' ? (
+          diffLoading || !diff ? (
+            <div className='p-4 text-sm text-muted animate-pulse'>Loading diff…</div>
+          ) : (
+            <DiffEditor
+              key={`${filePath}-diff`}
+              language={monacoLang}
+              original={diff.base}
+              modified={diff.head}
+              theme={GEIST_THEME_NAME}
+              options={{
+                readOnly: true,
+                renderSideBySide: false,
+                hideUnchangedRegions: {
+                  enabled: true,
+                  contextLineCount: 3,
+                  minimumLineCount: 3,
+                  revealLineCount: 20,
+                },
+                minimap: {enabled: false},
+                scrollBeyondLastLine: false,
+                fontSize: 12,
+                lineNumbers: 'on',
+                folding: true,
+                showFoldingControls: 'always',
+                wordWrap: 'off',
+                renderLineHighlight: 'line',
+                contextmenu: false,
+                domReadOnly: true,
+                cursorStyle: 'line-thin',
+                scrollbar: {verticalScrollbarSize: 6, horizontalScrollbarSize: 6},
+                overviewRulerLanes: 0,
+                hideCursorInOverviewRuler: true,
+                overviewRulerBorder: false,
+                guides: {indentation: true, bracketPairs: true},
+                padding: {top: 8},
+              }}
+            />
+          )
+        ) : loading ? (
           <div className='p-4 text-sm text-muted animate-pulse'>Loading…</div>
         ) : (
           <Editor
@@ -1987,6 +2245,7 @@ export function CodeTab({
   repoUrl,
   status,
   scmProvider,
+  fileStatus,
 }: {
   runId: string;
   files: string[];
@@ -1994,6 +2253,8 @@ export function CodeTab({
   repoUrl?: string | null;
   status?: string;
   scmProvider?: string | null;
+  /** 2026-05-02 — git-derived per-path change status; drives A/M chips on file rows. */
+  fileStatus?: Map<string, FileChangeStatus>;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
@@ -2146,6 +2407,7 @@ export function CodeTab({
                 }}
                 expandSignal={expandSignal}
                 collapseSignal={collapseSignal}
+                fileStatus={fileStatus}
               />
             ))}
           </div>
@@ -2188,7 +2450,13 @@ export function CodeTab({
           </div>
         )}
         <div className='flex-1 overflow-hidden'>
-          <IDEFileViewer filePath={selected} content={content} loading={loadingContent} />
+          <IDEFileViewer
+            filePath={selected}
+            content={content}
+            loading={loadingContent}
+            runId={runId}
+            fileStatus={selected ? fileStatus?.get(selected) : undefined}
+          />
         </div>
       </div>
     </div>

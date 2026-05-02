@@ -112,14 +112,30 @@ public class RunTokenAttributor {
       int[] real = realPerTask.get(outcome.taskId());
       int finalIn = real[0] + residualPerTaskIn;
       int finalOut = real[1] + residualPerTaskOut;
+      // 2026-05-02 — write the model the worker ACTUALLY ran on (tier-resolved from
+      // SequentialExecutorV2.tierConfigFor) instead of the run-level default. Previously every
+      // task row got the run default (e.g. claude-haiku for anthropic), masking the workhorse/
+      // planning escalation for MEDIUM/HIGH tasks. b171fa52 had 14 MEDIUM + 7 HIGH tasks all
+      // showing Haiku in the DB even though they ran on Sonnet at runtime. Falls back to the
+      // run-default for legacy outcomes (TaskOutcome from older serialised runs lacked the
+      // dispatchedProvider/Model fields).
+      String taskProvider =
+          outcome.dispatchedProvider() != null
+                  && !outcome.dispatchedProvider().isBlank()
+              ? outcome.dispatchedProvider().toUpperCase()
+              : providerUpper;
+      String taskModel =
+          outcome.dispatchedModel() != null && !outcome.dispatchedModel().isBlank()
+              ? outcome.dispatchedModel()
+              : model;
       taskRepo
           .findById(taskRowId)
           .ifPresent(
               t -> {
                 t.setInputTokens(finalIn);
                 t.setOutputTokens(finalOut);
-                t.setProvider(providerUpper);
-                t.setModel(model);
+                t.setProvider(taskProvider);
+                t.setModel(taskModel);
                 taskRepo.save(t);
               });
     }

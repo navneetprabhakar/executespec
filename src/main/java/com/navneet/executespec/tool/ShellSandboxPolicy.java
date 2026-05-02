@@ -66,15 +66,54 @@ public class ShellSandboxPolicy {
   private static final Set<String> HIGH_STRICT_EAS_VERBS = Set.of("build", "submit");
 
   private final GuardrailLevelResolver guardrailLevelResolver;
+  /**
+   * 2026-05-02 — dependency-install enforcement at MEDIUM+. ObjectProvider so unit tests that
+   * construct {@code ShellSandboxPolicy} directly without booting the full Spring context still
+   * work. Null-safe — when absent, the segment-level dep checks are skipped.
+   */
+  private final org.springframework.beans.factory.ObjectProvider<
+          com.navneet.executespec.security.dependency.DependencySecurityPolicy>
+      dependencySecurityProvider;
 
   @Autowired
-  public ShellSandboxPolicy(GuardrailLevelResolver guardrailLevelResolver) {
+  public ShellSandboxPolicy(
+      GuardrailLevelResolver guardrailLevelResolver,
+      org.springframework.beans.factory.ObjectProvider<
+              com.navneet.executespec.security.dependency.DependencySecurityPolicy>
+          dependencySecurityProvider) {
     this.guardrailLevelResolver = guardrailLevelResolver;
+    this.dependencySecurityProvider = dependencySecurityProvider;
   }
 
-  /** Back-compat constructor — assumes LOW. */
+  /** Test-friendly constructor — no dep-security enforcement. */
+  public ShellSandboxPolicy(GuardrailLevelResolver guardrailLevelResolver) {
+    this(guardrailLevelResolver, new org.springframework.beans.factory.ObjectProvider<>() {
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject() {
+        return null;
+      }
+
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject(
+          Object... args) {
+        return null;
+      }
+
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getIfAvailable() {
+        return null;
+      }
+
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getIfUnique() {
+        return null;
+      }
+    });
+  }
+
+  /** Back-compat constructor — assumes LOW + no dep-security enforcement. */
   public ShellSandboxPolicy() {
-    this.guardrailLevelResolver = null;
+    this(null);
   }
 
   // Commands that are NEVER allowed regardless of context
@@ -216,6 +255,26 @@ public class ShellSandboxPolicy {
           "tsc",
           "jest", // React Native / Expo toolchain (for direct invocations; `npx <tool>` also
           // allowed)
+          // 2026-05-02 — modern JS package managers + non-Node language toolchains.
+          // Risk model is identical to npm (already allowed): all five JS managers can run
+          // arbitrary code via package lifecycle scripts, supply-chain attacks, and registry
+          // network egress. They run with the same workspace permissions as npm; nothing new
+          // is unlocked. Without this list the worker can't `bun install` / `pnpm i` /
+          // `yarn add` / `deno cache` / `cargo build` / `go build` / `make`, which blocks
+          // every non-npm JS project + every Rust / Go / Make project from passing the
+          // build smoke test. NOT added: `bash` / `sh` (defeats the allowlist via `-c`),
+          // `chmod` / `chown` (chain unknown binaries), `apt` / `brew` / `sudo` (system
+          // mutation), `ssh` / `scp` / `rsync` (remote exfiltration paths). HIGH-mode
+          // strict verb checks for these still need a per-tool verb list — TODO when
+          // someone flips the org to HIGH guardrails.
+          "bun",
+          "pnpm",
+          "yarn",
+          "deno",
+          "cargo",
+          "rustc",
+          "go",
+          "make",
           "curl",
           "wget" // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload, exfil)
           // are caught by BLOCKED_PATTERNS
@@ -394,6 +453,17 @@ public class ShellSandboxPolicy {
           originalCommand);
       return ValidationResult.block(
           "Chained command '" + firstToken + "' is not in the allowed command list");
+    }
+
+    // 2026-05-02 — dependency-install security enforcement (MEDIUM+).
+    // Each install segment must carry --ignore-scripts + lockfile-strict + audit + registry pin
+    // per the active guardrail level. LOW preserves historical behaviour (legacy allowlist only).
+    if (level != null && level.atLeastMedium() && dependencySecurityProvider != null) {
+      var depSec = dependencySecurityProvider.getIfAvailable();
+      if (depSec != null) {
+        ValidationResult depResult = depSec.validateSegment(segment, originalCommand, level);
+        if (!depResult.permitted()) return depResult;
+      }
     }
 
     // Docker subcommand validation

@@ -14,7 +14,7 @@
 > Phase 3 (multi-month moats) deferral rationale below remains
 > authoritative. Per-item first-slice + owner-needed + trigger notes
 > for the still-pending Phase-2+ items now live in
-> [`../backlog-deferred-items.md`](../backlog-deferred-items.md).
+> [`../backlog-deferred-items.md`](backlog-deferred-items.md).
 
 ## Summary
 

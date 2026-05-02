@@ -52,6 +52,40 @@ public record ExecutionRunDto(
         r.getUpdatedAt());
   }
 
+  /**
+   * 2026-05-02 — synthetic Launch row for project-scoped {@code pipeline_run}s (the runs
+   * submitted from the project chat / V3ProjectHome composer). User report: "no launches being
+   * shown although run is progressing" — pipeline_run rows weren't surfaced on the Launches
+   * tab because that tab originally only iterated {@code execution_run}. This factory adapts a
+   * pipeline_run into the same shape so both kinds of run live in the same Launches list. No
+   * solution rows (those are an ExecutionRun-only concept); the per-repo PRs surface separately
+   * via the project's Pull requests tab.
+   */
+  public static ExecutionRunDto fromPipelineRun(
+      com.navneet.executespec.state.entity.PipelineRun r) {
+    return new ExecutionRunDto(
+        r.getRunId(),
+        r.getProjectId(),
+        r.getStatus(),
+        r.getUserRequest(),
+        null, // unifiedArchDoc — pipeline_run doesn't carry one
+        null, // archApprovedAt
+        null, // executionPlan
+        r.getStartedAt(), // planApprovedAt — pipeline_run pre-approves at submit
+        null, // totalEstimatedTokens
+        (r.getTotalInputTokens() == null && r.getTotalOutputTokens() == null)
+            ? null
+            : (long) (r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens())
+                + (r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens()),
+        r.getActualCostUsd() == null ? null : BigDecimal.valueOf(r.getActualCostUsd()),
+        false, // jiraEnabled
+        null, // confluenceUrl
+        r.getFigmaUrl(),
+        List.of(), // solutions — pipeline_run has no per-solution rows
+        r.getStartedAt(),
+        r.getCompletedAt() == null ? r.getStartedAt() : r.getCompletedAt());
+  }
+
   public record SolutionDto(
       String id,
       int sequenceNumber,

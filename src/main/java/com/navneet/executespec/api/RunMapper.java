@@ -226,6 +226,11 @@ public class RunMapper {
         .coherenceInputTokens(r.getCoherenceInputTokens())
         .coherenceOutputTokens(r.getCoherenceOutputTokens())
         .techStack(r.getTechStack())
+        // V169-companion (2026-05-02) — projectId on the wire so V3 "Open run"
+        // can route to /projects/{id}/runs/{runId}. Was missing → frontend
+        // dropped to the /runs/{id} fallback → v2 dispatcher redirected to a
+        // default project (wrong project entirely).
+        .projectId(r.getProjectId())
         .projectName(resolveProjectName(r.getProjectId()))
         .createdByName(resolveCreatorName(r.getCreatedByUserId()))
         .agentTokens(buildAgentTokens(r))

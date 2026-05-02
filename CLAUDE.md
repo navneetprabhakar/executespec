@@ -2,6 +2,76 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
+> **2026-05-01 — audit r3 fix batch + Google-style refactor + CI lint enforcement (shipped to main via PRs #55 + #56 + #57):**
+> Round-3 persona-test audit closed seven credibility-class bugs and
+> the Google Java + TypeScript style refactor landed on top, including
+> CI lint enforcement so the baseline can't drift.
+>
+> **Audit fixes (PR #55):**
+> - **F-14 (P1)** — `EntitlementResolver.resolveTier` now picks the
+>   higher rank between `app_user.tier` and `org.tier` instead of
+>   "org always wins". Closes the FREE-leak class for operator-promoted
+>   accounts, expired-but-not-demoted subs, and test fixtures whose
+>   `app_user.tier` outpaces their org row. Three new regression tests
+>   (10/10 green) pin ENT/TEAM/PRO with a FREE org all resolving to
+>   their paid tier.
+> - **F-15 / F-16 / F-17** — WCAG-AA contrast closed end-to-end.
+>   `--border-default` 1.59 → **3.13** (graphite-7 `#5e6771`, passes
+>   SC 1.4.11), `--status-executing` 4.19 → **5.22** (`#5b89e0`,
+>   AA-body), new `--c-signal-blue-on-dark` (`#7aa5f5`) at **7.29** for
+>   body links on dark surfaces. Light-theme parity preserved.
+> - **F-21** — V3 billing was hardcoding "Unlimited runs" for any
+>   paid tier. F-14 exposed it because PRO has a 20-cap per
+>   `tier_config`; `tierDisplay.formatRunUsage` now reads
+>   `runLimitMonthly` per tier — PRO renders "20 of 20 runs left this
+>   month", TEAM/ENT keep "Unlimited".
+> - **D3** — `V3EmptyProject` H1 "Welcome, Reval." → "What do you want
+>   to build, Reval?" (outcome-led; matches login hero). Body is
+>   tier-aware: FREE surfaces the 10-PR/month cap in human terms;
+>   paid tiers omit the line. Secondary link "Set up a project the
+>   long way →" → "Already have a GitHub repo? Attach it first →".
+> - **Tier-lifecycle reason hover-only** — `TierLifecyclePage` shows
+>   date-only with reason on hover. Migration-version churn ("TEAM
+>   tier reinstated (V144)") no longer leaks into screenshots.
+> - **Process-gap closure** — `frontend/src/design-system/contrast.{ts,test.ts}`
+>   (vitest-shape, dormant) pins every (token, surface) ratio fixed in
+>   the batch + 3 counter-examples that must still fail.
+>   `frontend/.pa11yci.json` for the public surface. `frontend/A11Y.md`
+>   documenting how to enable both.
+>
+> **Google-style refactor (PR #56):** spotless-maven-plugin 2.43.0 +
+> google-java-format 1.22.0 (GOOGLE profile, reflowLongStrings) wired
+> into `mvn verify`; 1043 .java files reformatted. Frontend got
+> prettier 3.3 + eslint 8.57 + @typescript-eslint/* 7.18 + react /
+> react-hooks plugins; 260 .ts/.tsx/.css files reformatted. New
+> `frontend/.prettierrc.json` + `.prettierignore` + `.eslintrc.cjs` +
+> npm scripts (`format` / `format:check` / `lint` / `lint:fix`). Pure
+> mechanical pass — zero semantic changes; mvn test 839/839 green
+> through the entire batch. Seven documented deviations in
+> [`docs/design/code-style.md`](docs/design/code-style.md): D-J1
+> wildcard imports retained (217 files; OpenRewrite recipe available
+> for follow-up), D-J2 Javadoc only on top-level + REST controllers,
+> D-J3 `// VisibleForTesting` comment vs annotation, D-T1 default
+> exports OK for `*.tsx`, D-T2 `any` warn-mode, D-T3 interface/type
+> both ok, D-T4 JSDoc on internal types skipped.
+>
+> **CI lint enforcement (PR #56):** `.github/workflows/deploy.yml`
+> bumped `mvn package -q` → `mvn verify -q` (fires the spotless
+> binding); added `npm run format:check` + `npm run lint` between
+> `npm ci` and `npm run build`. New `.github/workflows/lint.yml`
+> runs on every PR to dev/main with parallel Java + frontend lint
+> jobs (typically <2min vs ~12min for the full deploy job). Failure
+> messages point at the local fix command + the deviations doc.
+>
+> **Round-4 dev-deployment verification (PR #57 → main):**
+> [`docs/audits/dev-verification-2026-05-04.md`](docs/audits/dev-verification-2026-05-04.md)
+> — 31 screenshots of every super-admin surface on
+> `https://dev.executespec.ai` + live API + token-contrast probe.
+> All audit fixes confirmed live in production deployment; both CI
+> gates (`Lint` workflow + `Build & Deploy` workflow) succeeded on
+> first run after merge — enforcement layer fires correctly on push,
+> not just locally.
+>
 > **2026-04-30 — audit Sprint 1 fixes batch on `audit/v2-5-11-ux-product`:**
 > Version-string drift fix [F-22] (pom 2.5.1 → 2.5.11 + frontend
 > package.json + Version file). Permission map fix [F-03] in

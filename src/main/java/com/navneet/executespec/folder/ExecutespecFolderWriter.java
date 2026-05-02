@@ -213,6 +213,33 @@ public class ExecutespecFolderWriter {
       return Optional.empty();
     }
 
+    // 2026-05-02 — pre-flight content compare against the default branch.
+    // Empty-PR cycle fix: ProjectArchitectureService keys codemap idempotency
+    // on the default-branch HEAD SHA. After a user merges any system PR, HEAD
+    // advances → next analyse re-runs codemap generation → publishes a new
+    // codemap.md to .executespec/ → opens a PR. If the source code itself
+    // didn't change, the new codemap content is identical to what's already
+    // on the default branch, so the PR has zero diff. Catching that here
+    // keeps the PR list clean. The hash comparison uses the SAME SHA-256 the
+    // hasDrift() probe uses, so the two stay in sync.
+    Map<String, String> drifted = new java.util.LinkedHashMap<>();
+    for (Map.Entry<String, String> e : files.entrySet()) {
+      String desiredHash = sha256(e.getValue());
+      Optional<FileSnapshot> existing = getContents(repoFullName, defaultBranch, e.getKey(), pat);
+      if (existing.isPresent() && existing.get().contentHash().equals(desiredHash)) {
+        continue; // content unchanged — nothing to write for this path
+      }
+      drifted.put(e.getKey(), e.getValue());
+    }
+    if (drifted.isEmpty()) {
+      log.info(
+          "[ExecutespecFolderWriter] every requested file already up to date on {}/{} — "
+              + "skipping branch + PR (would have been a no-op)",
+          repoFullName,
+          defaultBranch);
+      return Optional.empty();
+    }
+
     String branchName = synthesiseBranchName(prTitle);
     if (!createBranch(repoFullName, branchName, baseSha.get(), pat)) {
       log.warn(
@@ -221,7 +248,7 @@ public class ExecutespecFolderWriter {
     }
 
     List<String> writtenPaths = new ArrayList<>();
-    for (Map.Entry<String, String> e : files.entrySet()) {
+    for (Map.Entry<String, String> e : drifted.entrySet()) {
       // Read existing SHA (if file exists on default branch) so PUT becomes an update.
       String existingSha =
           getContents(repoFullName, defaultBranch, e.getKey(), pat)

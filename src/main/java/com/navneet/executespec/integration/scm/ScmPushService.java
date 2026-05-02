@@ -301,9 +301,9 @@ public class ScmPushService {
     if (ids.isEmpty()) return;
 
     String branchName = resolveBranchName(project, run);
-    String commitMsg =
+    String runTitle =
         StringUtils.hasText(run.getRunTitle()) ? run.getRunTitle() : "ExecuteSpec changes";
-    String prTitle = commitMsg;
+    String prTitle = runTitle;
     String prBodyBase =
         StringUtils.hasText(run.getRunSummary()) ? run.getRunSummary() : run.getUserRequest();
     List<String> reviewers = parseReviewers(project);
@@ -316,6 +316,12 @@ public class ScmPushService {
       if (repo == null) continue;
       String subPath = "repos/" + lastPathSegment(repo.getGithubRepoFullName());
       String remote = "https://github.com/" + repo.getGithubRepoFullName();
+
+      // 2026-05-02 — Per-repo commit messages (user ask): the message body is the file list
+      // for THIS repo only, plus a Co-Authored-By trailer crediting admin@executespec.ai. Avoids
+      // the previous behaviour where every repo got the same generic "ExecuteSpec changes" /
+      // run-title message regardless of what actually changed in that repo.
+      String commitMsg = buildPerRepoCommitMessage(run, runTitle, repo, subPath);
 
       var pushResult =
           gitTool.commitAndPushSubdir(run.getRunId(), subPath, remote, pat, branchName, commitMsg);
@@ -414,6 +420,107 @@ public class ScmPushService {
           objectMapper.getTypeFactory().constructCollectionType(List.class, String.class));
     } catch (Exception e) {
       log.warn("Failed to parse project.defaultReviewers: {}", e.getMessage());
+      return List.of();
+    }
+  }
+
+  /**
+   * Co-author trailer added to every per-repo commit so the agent's authorship is credited and
+   * GitHub's avatar / search surfaces both the human owner and the bot. Address chosen to match
+   * the SUPER_ADMIN account that drives most ExecuteSpec test runs; can be made org-configurable
+   * later if customers want a different handle.
+   */
+  private static final String CO_AUTHOR_TRAILER =
+      "Co-Authored-By: ExecuteSpec Agent <admin@executespec.ai>";
+
+  /**
+   * 2026-05-02 — build a repo-scoped commit message:
+   *
+   * <pre>
+   * &lt;run title&gt; (&lt;repo short&gt;)
+   *
+   * Repo: &lt;owner/repo&gt;
+   * Run:  &lt;runIdShort&gt;
+   *
+   * Files changed (N):
+   *   &lt;path1&gt;
+   *   &lt;path2&gt;
+   *   ...
+   *
+   * Co-Authored-By: ExecuteSpec Agent &lt;admin@executespec.ai&gt;
+   * </pre>
+   *
+   * <p>The file list is enumerated via {@code git status --porcelain} on the per-repo subdir
+   * (everything is staged just before this; {@code commitAndPushSubdir} does {@code add -A} after
+   * we return). Capped at 30 lines so a 9605-file leak (b171fa52 class) doesn't blow the
+   * commit message past GitHub's 100KB body limit.
+   */
+  private String buildPerRepoCommitMessage(
+      PipelineRun run, String runTitle, ProjectRepo repo, String subPath) {
+    String shortRepo = lastPathSegment(repo.getGithubRepoFullName());
+    String runIdShort =
+        run.getRunId() != null && run.getRunId().length() >= 8
+            ? run.getRunId().substring(0, 8)
+            : run.getRunId();
+    StringBuilder sb = new StringBuilder();
+    sb.append(runTitle).append(" (").append(shortRepo).append(")\n\n");
+    sb.append("Repo: ").append(repo.getGithubRepoFullName()).append("\n");
+    sb.append("Run:  ").append(runIdShort).append("\n");
+    List<String> files = listPerRepoChangedFiles(run.getRunId(), subPath);
+    if (!files.isEmpty()) {
+      sb.append("\nFiles changed (").append(files.size()).append("):\n");
+      int cap = Math.min(files.size(), 30);
+      for (int i = 0; i < cap; i++) {
+        sb.append("  ").append(files.get(i)).append("\n");
+      }
+      if (files.size() > cap) {
+        sb.append("  ... ").append(files.size() - cap).append(" more\n");
+      }
+    }
+    sb.append("\n").append(CO_AUTHOR_TRAILER).append("\n");
+    return sb.toString();
+  }
+
+  /**
+   * Read the staged + untracked file list inside the per-repo subdir via {@code git status
+   * --porcelain --untracked-files=all}. Best-effort: returns an empty list on any subprocess
+   * failure (the commit message just degrades to title + repo + co-author trailer).
+   */
+  private List<String> listPerRepoChangedFiles(String runId, String subPath) {
+    try {
+      java.nio.file.Path repoDir =
+          java.nio.file.Path.of(props.getWorkspace(), runId, subPath).toAbsolutePath().normalize();
+      if (!java.nio.file.Files.isDirectory(repoDir.resolve(".git"))) return List.of();
+      ProcessBuilder pb =
+          new ProcessBuilder("git", "status", "--porcelain", "--untracked-files=all")
+              .directory(repoDir.toFile())
+              .redirectErrorStream(true);
+      Process p = pb.start();
+      List<String> out = new java.util.ArrayList<>();
+      try (var br =
+          new java.io.BufferedReader(
+              new java.io.InputStreamReader(
+                  p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+        String line;
+        while ((line = br.readLine()) != null) {
+          if (line.length() < 4) continue;
+          String path = line.substring(3).trim();
+          // Renames look like "old -> new" — keep just the new path.
+          int sep = path.indexOf(" -> ");
+          if (sep > 0) path = path.substring(sep + 4).trim();
+          if (path.startsWith("\"") && path.endsWith("\"")) {
+            path = path.substring(1, path.length() - 1);
+          }
+          out.add(path);
+        }
+      }
+      if (!p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS)) {
+        p.destroyForcibly();
+        return List.of();
+      }
+      return out;
+    } catch (Exception e) {
+      log.debug("listPerRepoChangedFiles failed run={} sub={}: {}", runId, subPath, e.getMessage());
       return List.of();
     }
   }
