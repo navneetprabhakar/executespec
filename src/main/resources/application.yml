@@ -494,6 +494,32 @@ agent:
       signing-secret: ""
       redirect-uri: http://localhost:8080/api/integrations/slack/oauth/callback
       dashboard-url: http://localhost:8080
+  # 2026-05-02 — dependency-install security policy. Layered enforcement:
+  #   LOW    (default for most installs today): legacy ShellSandboxPolicy allowlist only.
+  #   MEDIUM: every JS install command (npm/bun/pnpm/yarn) MUST carry --ignore-scripts +
+  #           lockfile-strict mode + must NOT pull from off-registry (git+, github tarball,
+  #           http URL, file://). Worker LLM that omits these flags gets a clear error +
+  #           retries with the right shape. Closes lifecycle-script RCE + lockfile-drift +
+  #           off-registry typosquats.
+  #   HIGH:   + audit step REQUIRED on the chained command (npm: --audit-level=high; bun /
+  #           pnpm / yarn: separate audit subcommand chained via &&) + pre-release versions
+  #           (alpha / beta / rc / canary / nightly) blocked + --registry= flag must point at
+  #           an allowed registry. Closes known-CVE deps + supply-chain pre-release attacks
+  #           + registry hijacks.
+  # Active level resolves via the existing GuardrailLevelResolver feature flag (key:
+  # "security.guardrail_level"). Each switch below is independently flippable so an org can
+  # tighten one threat class without flipping the global guardrail.
+  security:
+    deps:
+      require-ignore-scripts: ${AGENT_SECURITY_DEPS_IGNORE_SCRIPTS:true}
+      require-lockfile: ${AGENT_SECURITY_DEPS_LOCKFILE:true}
+      require-audit: ${AGENT_SECURITY_DEPS_AUDIT:true}
+      allow-prerelease: ${AGENT_SECURITY_DEPS_PRERELEASE:false}
+      allowed-registries: ${AGENT_SECURITY_DEPS_REGISTRIES:https://registry.npmjs.org,https://registry.bun.sh,https://registry.pnpm.io,https://registry.yarnpkg.com}
+      # Vendor-neutral supply-chain scanner (Socket.dev / Snyk / Phylum / Sonatype). Default
+      # binding is NoopSupplyChainScanner — wire a real one as a Spring bean to enable.
+      scanner:
+        vendor: ${AGENT_SECURITY_DEPS_SCANNER_VENDOR:none}
 
 # ── Preview ────────────────────────────────────────────────────────────────
 preview:
