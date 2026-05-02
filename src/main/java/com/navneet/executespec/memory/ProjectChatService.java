@@ -409,7 +409,25 @@ public class ProjectChatService {
         .append("relevant rows — don't dump the JSON envelope verbatim. If a tool returns ")
         .append("ok=false, surface the message field and suggest the next step.\n\n")
         .append("Settings (GitHub PAT, AI provider keys, billing) are deliberately NOT exposed ")
-        .append("as tools. If the user asks you to update those, point them to /settings/manage.\n\n");
+        .append("as tools. If the user asks you to update those, point them to /settings/manage.\n\n")
+        // Lifecycle FAQ — included so the assistant can answer common
+        // questions without firing a tool call. Mirrors the merged-PR
+        // explanation in the bootstrap + architecture PR bodies.
+        .append("## LIFECYCLE FAQ\n")
+        .append("- **\"Do I need to sync after merging the bootstrap / architecture PR?\"** No. ")
+        .append("ExecuteSpec listens on the GitHub webhook — when a bootstrap PR merges the ")
+        .append("repo's folder status flips automatically to BOOTSTRAPPED. Codemap state is ")
+        .append("refreshed on the next analyse / regenerate_architecture call.\n")
+        .append("- **\"Will the bootstrap PRs be regenerated if I re-trigger setup?\"** No. The ")
+        .append("bootstrap path checks for `.executespec/README.md` first; once it's on the ")
+        .append("default branch, no new PR is opened.\n")
+        .append("- **\"Will the architecture PRs keep regenerating?\"** Only when the source code ")
+        .append("actually changes. ExecuteSpec compares content hashes before opening a PR, so a ")
+        .append("merge of an arch PR doesn't trigger a follow-up empty PR.\n")
+        .append("- **\"What happens for a new project / new repo?\"** Linking a repo to a project ")
+        .append("(`POST /api/projects/{id}/repos/{repoId}`) opens exactly one bootstrap PR for ")
+        .append("that repo. Architecture PRs only open when the user (or this chat) explicitly ")
+        .append("calls regenerate_architecture, or when a launch runs.\n\n");
 
     String memory = memoryProvider.buildPlannerContext(project.getId());
     if (memory != null && !memory.isBlank()) {
