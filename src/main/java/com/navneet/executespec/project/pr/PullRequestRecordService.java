@@ -26,6 +26,8 @@ public class PullRequestRecordService {
   private final InAppNotificationService notificationService;
   private final NotificationRepository notificationRepository;
   private final PipelineRunRepository pipelineRunRepo;
+  // V169-companion (2026-05-02) — needed to flip folder_status on bootstrap-merge.
+  private final com.navneet.executespec.project.repository.ProjectRepoRepository projectRepoRepo;
 
   /** Wave 2.1 — activation funnel PR_MERGED step. */
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
@@ -124,6 +126,25 @@ public class PullRequestRecordService {
     repo.save(r);
     log.info("PR {}#{} updated via webhook -> {}", repoFullName, prNumber, r.getStatus());
 
+    // V169-companion (2026-05-02) — when a BOOTSTRAP PR merges, flip the
+    // corresponding repo's folder_status from BOOTSTRAP_PR_OPEN to
+    // BOOTSTRAPPED so the dashboard badge isn't stuck. Without this the
+    // user has to re-trigger bootstrap (or the migrate endpoint) for the
+    // status to refresh — a poor UX surfaced when a user asked "do I need
+    // to sync again after merging the PR?". Best-effort: any failure logs
+    // and continues so the webhook still completes.
+    if (merged && wasNotMerged && r.getKind() == PullRequestRecord.Kind.BOOTSTRAP) {
+      try {
+        flipFolderStatusToBootstrapped(r);
+      } catch (Exception e) {
+        log.warn(
+            "Could not flip folder_status to BOOTSTRAPPED for PR {}#{}: {}",
+            repoFullName,
+            prNumber,
+            e.getMessage());
+      }
+    }
+
     // v2.5.12 — fire a notification for the run owner on the merged transition.
     if (merged && wasNotMerged && r.getRunId() != null) {
       try {
@@ -156,6 +177,44 @@ public class PullRequestRecordService {
             e.getMessage());
       }
     }
+  }
+
+  /**
+   * V169-companion (2026-05-02) — flips a repo's {@code executespec_folder_status} from
+   * {@code BOOTSTRAP_PR_OPEN} to {@code BOOTSTRAPPED} when its bootstrap PR merges. Looked up
+   * by {@link PullRequestRecord#getRepoId()} (set by BootstrapService when the PR was opened).
+   *
+   * <p>Idempotent — only writes when the status actually changes. Doesn't downgrade
+   * {@code BOOTSTRAP_FAILED} (operator may need to investigate) or overwrite a status that's
+   * already {@code BOOTSTRAPPED} (race-safe).
+   */
+  private void flipFolderStatusToBootstrapped(PullRequestRecord r) {
+    if (r.getRepoId() == null) return;
+    var found = projectRepoRepo.findById(r.getRepoId());
+    if (found.isEmpty()) return;
+    var repoRow = found.get();
+    String current = repoRow.getExecutespecFolderStatus();
+    if (current != null
+        && current.equals(
+            com.navneet.executespec.project.entity.ProjectRepo.FolderStatus.BOOTSTRAPPED.name())) {
+      return; // already there — nothing to do
+    }
+    if (current != null
+        && current.equals(
+            com.navneet.executespec.project.entity.ProjectRepo.FolderStatus.BOOTSTRAP_FAILED
+                .name())) {
+      return; // operator-attention state; don't auto-recover from a webhook
+    }
+    repoRow.setExecutespecFolderStatus(
+        com.navneet.executespec.project.entity.ProjectRepo.FolderStatus.BOOTSTRAPPED.name());
+    repoRow.setExecutespecLastSyncedAt(Instant.now());
+    repoRow.setUpdatedAt(Instant.now());
+    projectRepoRepo.save(repoRow);
+    log.info(
+        "Bootstrap PR {} #{} merged — folder_status flipped {} -> BOOTSTRAPPED",
+        r.getRepoFullName(),
+        r.getPrNumber(),
+        current);
   }
 
   private void notifyMerged(PullRequestRecord r) {

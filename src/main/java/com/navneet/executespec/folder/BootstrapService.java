@@ -195,9 +195,26 @@ public class BootstrapService {
                 + "link time. See `.executespec/README.md` for what each "
                 + "subfolder is for and which paths are regenerable vs "
                 + "review-worthy.\n\n"
-                + "After merging, ExecuteSpec will start writing the "
-                + "per-repo codemap (E1.2) and any contract auto-detections "
-                + "to this folder via additional PRs.",
+                + "## What happens after you merge this?\n\n"
+                + "* **You don't need to sync.** ExecuteSpec watches the GitHub "
+                + "webhook — when this PR merges, the project dashboard "
+                + "automatically flips this repo from \"Bootstrap PR open\" "
+                + "to \"Bootstrapped\". No manual click required.\n"
+                + "* **No duplicate bootstrap PRs.** If something later re-triggers "
+                + "the bootstrap path (e.g. an admin re-runs `/api/admin/projects/"
+                + "{id}/migrate-codemaps`), ExecuteSpec sees `.executespec/README.md` "
+                + "already on the default branch and short-circuits to "
+                + "BOOTSTRAPPED instead of opening a second PR.\n"
+                + "* **Architecture / codemap PRs.** Once you click *Analyse* "
+                + "on the project (or the chat tool `regenerate_architecture` "
+                + "fires), ExecuteSpec writes per-repo codemaps + an "
+                + "architecture doc to `.executespec/arch/`. Those land as "
+                + "their own PRs (kind=ARCHITECTURE in the dashboard rollup) "
+                + "and only re-open when source code actually changes — "
+                + "the writer compares content hashes and skips empty PRs.\n"
+                + "* **New repos joining this project.** Linking another repo "
+                + "to the project triggers exactly one bootstrap PR for *that* "
+                + "repo. This repo's bootstrap state is untouched.",
             pat);
     if (pr.isEmpty()) {
       String msg =

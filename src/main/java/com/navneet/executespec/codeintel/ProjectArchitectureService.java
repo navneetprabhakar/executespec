@@ -443,9 +443,22 @@ public class ProjectArchitectureService {
                         + "Generated from SHA: "
                         + shortSha(cm.getGeneratedFromSha())
                         + "\n\n"
-                        + "If you'd rather these updates skip the PR step entirely, "
-                        + "ask a project admin to flip this repo's "
-                        + "`executespec_pr_mode` to `DIRECT_PUSH`.",
+                        + "## What happens after you merge this?\n\n"
+                        + "* **Merging is optional.** This PR refreshes "
+                        + "`.executespec/arch/codemap.md` so the cached arch "
+                        + "matches the latest source. ExecuteSpec keeps a "
+                        + "DB-side copy regardless — the file in your repo "
+                        + "is the customer-facing artefact.\n"
+                        + "* **No empty-PR cycle.** When you do merge, the next "
+                        + "analyse will check whether the codemap content has "
+                        + "actually changed before opening another PR. If the "
+                        + "default-branch HEAD bumped but the codemap is "
+                        + "byte-identical, the writer skips the PR entirely.\n"
+                        + "* **Skip the PR step entirely.** If you'd rather "
+                        + "these regenerations write straight to the default "
+                        + "branch instead of through a PR, ask a project admin "
+                        + "to flip this repo's `executespec_pr_mode` to "
+                        + "`DIRECT_PUSH`.",
                     patOverride);
         if (result.isEmpty()) {
           log.warn(
