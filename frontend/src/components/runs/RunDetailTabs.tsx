@@ -37,7 +37,7 @@ import TaskTimeline from './TaskTimeline';
 import PreviewTab from './PreviewTab';
 import {PIPELINE_STEPS, V2_LEGACY_UI} from '@/lib/constants';
 import {useSseStore} from '@/stores/useSseStore';
-import {fmtTokens, relativeTime, cn} from '@/lib/utils';
+import {fmtTokens, fmtMs, relativeTime, cn} from '@/lib/utils';
 import {
   ChevronDown,
   ChevronRight,
@@ -75,12 +75,13 @@ import '@/lib/monacoSetup';
 
 const BASE_TABS = [
   {value: 'overview', label: 'Overview'},
-  // 2026-05-02 — Plan + Tasks tabs were duplicating the same per-task list with
-  // different framing (Plan = static plan-from-JSON, Tasks = live status). Merged
-  // into a single Tasks tab that prepends the plan_summary banner above the live
-  // task cards. PlanTab + PlanTaskCard helpers below are kept for the future
-  // edit-plan flow but no longer mounted as a separate tab.
-  {value: 'tasks', label: 'Tasks'},
+  // 2026-05-02 (corrected) — earlier this session the Plan tab was removed and the
+  // plan_summary banner was banner-attached above the live Tasks cards. User correction:
+  // keep Plan as the primary, drop Tasks, surface per-task live data (status + duration +
+  // token count + reason on failure) inside the PlanTaskCard footer. PlanTab now takes the
+  // live `tasks` array so each plan task can render its real-time signal alongside the
+  // planner's static metadata (objective / acceptance criteria / complexity / model).
+  {value: 'plan', label: 'Plan'},
   {value: 'timeline', label: 'Timeline'},
   {value: 'log', label: 'Live Log'},
   {value: 'code', label: 'Code'},
@@ -232,112 +233,50 @@ export default function RunDetailTabs() {
           <OverviewTab run={activeRun} fetchRun={fetchRun} fetchRuns={fetchRuns} />
         </Tabs.Content>
 
-        <Tabs.Content value='tasks' className='p-4 space-y-2'>
-          {/* 2026-05-02 — surface plan_summary above the task list (Plan tab merged in).
-              Hidden when planJson is absent so old runs render unchanged. */}
-          {(() => {
-            if (!activeRun.planJson) return null;
-            try {
-              const plan = JSON.parse(activeRun.planJson);
-              if (!plan.plan_summary) return null;
-              return (
-                <div className='p-3 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] mb-3'>
-                  <p className='text-[10px] uppercase tracking-wider text-muted mb-1'>
-                    Plan summary
-                  </p>
-                  <p className='text-sm text-primary leading-relaxed'>{plan.plan_summary}</p>
-                </div>
-              );
-            } catch {
-              return null;
-            }
-          })()}
+        <Tabs.Content value='plan' className='p-4 space-y-2'>
+          <PlanTab run={activeRun} />
 
-          {activeRun.tasks.length === 0 && testTasks.length === 0 ? (
-            <p className='text-sm text-muted'>No tasks yet.</p>
-          ) : (
-            <>
-              {(() => {
-                // Group: show parent tasks, nest subtasks underneath.
-                // Exclude gap-closing tasks (taskId contains _gap_) — they're background best-effort
-                // and shown separately below; including them inflates the count and alarms users.
-                const parentTasks = activeRun.tasks.filter(
-                  (t) => !t.parentTaskId && !t.taskId?.includes('_gap_'),
-                );
-                const subtaskMap = new Map<string, typeof activeRun.tasks>();
-                activeRun.tasks
-                  .filter((t) => t.parentTaskId)
-                  .forEach((t) => {
-                    const list = subtaskMap.get(t.parentTaskId!) || [];
-                    list.push(t);
-                    subtaskMap.set(t.parentTaskId!, list);
-                  });
-                return parentTasks.map((t) => (
-                  <div key={t.taskId}>
+          {/* Gap-closing tasks — background best-effort, shown collapsed under the plan */}
+          {(() => {
+            const gapTasks = activeRun.tasks.filter((t) => t.taskId?.includes('_gap_'));
+            const seen = new Map<string, (typeof gapTasks)[0]>();
+            gapTasks.forEach((t) => seen.set(t.title, t));
+            const uniqueGapTasks = Array.from(seen.values());
+            if (uniqueGapTasks.length === 0) return null;
+            const doneCount = uniqueGapTasks.filter((t) => t.status === 'COMPLETE').length;
+            return (
+              <details className='mt-4 border-t border-[var(--border-default)]'>
+                <summary className='flex items-center gap-2 pt-3 pb-1 cursor-pointer select-none text-muted hover:text-secondary'>
+                  <Wrench className='h-3.5 w-3.5' />
+                  <span className='text-xs font-medium'>Gap fixes (background)</span>
+                  <span className='text-xs opacity-60'>
+                    {doneCount}/{uniqueGapTasks.length} completed
+                  </span>
+                </summary>
+                <div className='mt-1 space-y-1'>
+                  {uniqueGapTasks.map((t) => (
                     <TaskCard
+                      key={t.taskId}
                       task={t}
                       runId={activeRun.runId}
                       runStatus={activeRun.status}
-                      subtasks={subtaskMap.get(t.taskId)}
                     />
-                    {subtaskMap.get(t.taskId)?.map((st) => (
-                      <TaskCard
-                        key={st.taskId}
-                        task={st}
-                        runId={activeRun.runId}
-                        runStatus={activeRun.status}
-                      />
-                    ))}
-                  </div>
-                ));
-              })()}
-
-              {/* Gap-closing tasks — background best-effort, shown collapsed */}
-              {(() => {
-                const gapTasks = activeRun.tasks.filter((t) => t.taskId?.includes('_gap_'));
-                // Deduplicate by title — keep most recent (last in array)
-                const seen = new Map<string, (typeof gapTasks)[0]>();
-                gapTasks.forEach((t) => seen.set(t.title, t));
-                const uniqueGapTasks = Array.from(seen.values());
-                if (uniqueGapTasks.length === 0) return null;
-                const doneCount = uniqueGapTasks.filter((t) => t.status === 'COMPLETE').length;
-                return (
-                  <details className='mt-2 border-t border-[var(--border-default)]'>
-                    <summary className='flex items-center gap-2 pt-3 pb-1 cursor-pointer select-none text-muted hover:text-secondary'>
-                      <Wrench className='h-3.5 w-3.5' />
-                      <span className='text-xs font-medium'>Gap fixes (background)</span>
-                      <span className='text-xs opacity-60'>
-                        {doneCount}/{uniqueGapTasks.length} completed
-                      </span>
-                    </summary>
-                    <div className='mt-1 space-y-1'>
-                      {uniqueGapTasks.map((t) => (
-                        <TaskCard
-                          key={t.taskId}
-                          task={t}
-                          runId={activeRun.runId}
-                          runStatus={activeRun.status}
-                        />
-                      ))}
-                    </div>
-                  </details>
-                );
-              })()}
-
-              {testTasks.length > 0 && (
-                <>
-                  <div className='flex items-center gap-2 pt-4 pb-1 border-t border-[var(--border-default)]'>
-                    <TestTube2 className='h-4 w-4 text-accent-blue' />
-                    <span className='text-sm font-medium text-secondary'>
-                      Test Generation Tasks
-                    </span>
-                    <span className='text-xs text-muted'>({testTasks.length})</span>
-                  </div>
-                  {testTasks.map((tt) => (
-                    <TestTaskCard key={tt.id} task={tt} />
                   ))}
-                </>
-              )}
+                </div>
+              </details>
+            );
+          })()}
+
+          {testTasks.length > 0 && (
+            <>
+              <div className='flex items-center gap-2 pt-4 pb-1 border-t border-[var(--border-default)]'>
+                <TestTube2 className='h-4 w-4 text-accent-blue' />
+                <span className='text-sm font-medium text-secondary'>Test Generation Tasks</span>
+                <span className='text-xs text-muted'>({testTasks.length})</span>
+              </div>
+              {testTasks.map((tt) => (
+                <TestTaskCard key={tt.id} task={tt} />
+              ))}
             </>
           )}
         </Tabs.Content>
@@ -1127,6 +1066,27 @@ function PlanTab({run}: {run: RunDetail}) {
 
   const canEdit = run.status === 'AWAITING_APPROVAL';
 
+  // 2026-05-02 — index live tasks by task_id so the per-card render can pull real-time
+  // status / duration / token consumption / failure reason alongside the planner-static
+  // metadata. Falls back to undefined when the live row hasn't been written yet (e.g.
+  // pre-execution, plan-approval gate).
+  const liveTaskById = new Map<string, (typeof run.tasks)[number]>();
+  for (const t of run.tasks) {
+    if (t.taskId) liveTaskById.set(t.taskId, t);
+  }
+
+  // Roll-up across plan tasks: total tokens consumed + per-task progress.
+  let totalTokens = 0;
+  let completed = 0;
+  const planTasks: any[] = Array.isArray(plan.tasks) ? plan.tasks : [];
+  for (const pt of planTasks) {
+    const live = liveTaskById.get(pt.task_id);
+    if (live) {
+      totalTokens += (live.inputTokens ?? 0) + (live.outputTokens ?? 0);
+      if (live.status === 'COMPLETE') completed++;
+    }
+  }
+
   return (
     <div className='space-y-4'>
       {plan.plan_summary && (
@@ -1136,18 +1096,32 @@ function PlanTab({run}: {run: RunDetail}) {
         </div>
       )}
 
-      {Array.isArray(plan.tasks) && plan.tasks.length > 0 && (
+      {planTasks.length > 0 && (
         <div className='space-y-3'>
-          <h4 className='text-xs font-medium text-muted uppercase tracking-wider'>
-            Tasks ({plan.tasks.length})
-          </h4>
-          {plan.tasks.map((t: any, i: number) => (
+          <div className='flex items-center justify-between gap-2'>
+            <h4 className='text-xs font-medium text-muted uppercase tracking-wider'>
+              Tasks ({planTasks.length})
+            </h4>
+            {/* Live roll-up — replaces what the old Tasks tab carried at the top. */}
+            <div className='flex items-center gap-3 text-[10px] text-muted'>
+              <span>
+                <span className='text-secondary'>{completed}</span>/{planTasks.length} complete
+              </span>
+              {totalTokens > 0 && (
+                <span>
+                  <span className='text-secondary'>{fmtTokens(totalTokens)}</span> total tokens
+                </span>
+              )}
+            </div>
+          </div>
+          {planTasks.map((t: any, i: number) => (
             <PlanTaskCard
               key={t.task_id ?? i}
               task={t}
               index={i}
               runId={run.runId}
               canEdit={canEdit}
+              live={t.task_id ? liveTaskById.get(t.task_id) : undefined}
             />
           ))}
         </div>
@@ -1163,11 +1137,20 @@ function PlanTaskCard({
   index: i,
   runId,
   canEdit,
+  live,
 }: {
   task: any;
   index: number;
   runId: string;
   canEdit: boolean;
+  /** Matched live row from `activeRun.tasks` — undefined pre-execution. */
+  live?: {
+    status?: string | null;
+    inputTokens?: number | null;
+    outputTokens?: number | null;
+    durationMs?: number | null;
+    failureReason?: string | null;
+  };
 }) {
   const [objExpanded, setObjExpanded] = useState(false);
   const [critExpanded, setCritExpanded] = useState(false);
@@ -1185,9 +1168,23 @@ function PlanTaskCard({
   const displayObj = objExpanded || !objLong ? objective : objective.slice(0, TRUNCATE) + '…';
   const displayCrit = critExpanded || !critLong ? criteria : criteria.slice(0, TRUNCATE) + '…';
 
+  // 2026-05-02 — live signals previously rendered inside the (now-removed) Tasks tab.
+  const liveTokens = live ? (live.inputTokens ?? 0) + (live.outputTokens ?? 0) : 0;
+  const liveStatus = live?.status;
+  const statusTone =
+    liveStatus === 'COMPLETE'
+      ? 'text-accent-green bg-accent-green/10'
+      : liveStatus === 'FAILED'
+        ? 'text-accent-red bg-accent-red/10'
+        : liveStatus === 'PARTIAL'
+          ? 'text-accent-amber bg-accent-amber/10'
+          : liveStatus === 'IN_PROGRESS' || liveStatus === 'WORKING'
+            ? 'text-accent-blue bg-accent-blue/10'
+            : 'text-muted bg-[var(--gray-200)]';
+
   return (
     <div className='rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden'>
-      {/* ── Header: index · title · complexity badge ── */}
+      {/* ── Header: index · title · status · complexity badge ── */}
       <div className='flex items-center justify-between gap-2 px-3 py-2.5 border-b border-[var(--border-default)]'>
         <div className='flex items-center gap-2 min-w-0'>
           <span className='text-[10px] text-muted flex-shrink-0 font-mono tabular-nums'>
@@ -1203,6 +1200,17 @@ function PlanTaskCard({
             >
               Edit
             </button>
+          )}
+          {liveStatus && (
+            <span
+              className={cn(
+                'text-[10px] font-medium px-1.5 py-0.5 rounded uppercase tracking-wider',
+                statusTone,
+              )}
+              title={live?.failureReason ?? ''}
+            >
+              {liveStatus}
+            </span>
           )}
           <span
             className={cn(
@@ -1261,11 +1269,24 @@ function PlanTaskCard({
           </div>
         )}
 
-        {/* Footer: model chip + depends_on chips */}
+        {/* Footer: model chip + live tokens + duration + depends_on chips. */}
         <div className='flex items-center flex-wrap gap-2 pt-0.5'>
           {t.assigned_model && (
             <span className='text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]'>
               {t.assigned_model}
+            </span>
+          )}
+          {liveTokens > 0 && (
+            <span
+              className='text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]'
+              title={`Input ${fmtTokens(live?.inputTokens ?? 0)} · Output ${fmtTokens(live?.outputTokens ?? 0)}`}
+            >
+              {fmtTokens(liveTokens)} tok
+            </span>
+          )}
+          {live?.durationMs != null && live.durationMs > 0 && (
+            <span className='text-[10px] font-mono text-muted bg-[var(--gray-100)] px-1.5 py-0.5 rounded border border-[var(--border-default)]'>
+              {fmtMs(live.durationMs)}
             </span>
           )}
           {Array.isArray(t.depends_on) && t.depends_on.length > 0 && (
@@ -1282,6 +1303,16 @@ function PlanTaskCard({
             </div>
           )}
         </div>
+
+        {/* Failure reason — surface concisely so users see WHY without expanding logs. */}
+        {live?.failureReason && (liveStatus === 'FAILED' || liveStatus === 'PARTIAL') && (
+          <div className='mt-2 px-2 py-1.5 rounded bg-accent-red/5 border border-accent-red/20'>
+            <p className='text-[10px] uppercase tracking-wider text-accent-red/80 mb-0.5'>
+              Failure reason
+            </p>
+            <p className='text-xs text-accent-red/90 leading-snug'>{live.failureReason}</p>
+          </div>
+        )}
 
         {/* Inline task edit */}
         {editing && (
