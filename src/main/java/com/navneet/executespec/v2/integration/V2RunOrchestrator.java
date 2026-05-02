@@ -161,6 +161,15 @@ public class V2RunOrchestrator {
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
   /**
+   * 2026-05-02 — re-review path needs to delete the existing {@code validation_report} row before
+   * the reviewer + accuracy assessor + report generator re-run with the expanded vendored-path
+   * exclusion regex. Wired here (rather than calling {@link ValidationReportService}) so the
+   * transactional boundary stays a single repository call instead of bouncing through the report
+   * service's read/write/index-rebuild path.
+   */
+  private final com.navneet.executespec.report.ValidationReportRepository validationReportRepository;
+
+  /**
    * V165 BYOK fix — resolves customer-configured keys at run-start; LlmRouterV2 reads back per
    * dispatch.
    */
@@ -1739,6 +1748,233 @@ public class V2RunOrchestrator {
             log.error("V2RunOrchestrator retryValidation failed run={}", runId, e);
           }
         });
+  }
+
+  /**
+   * 2026-05-02 — full re-review flow for SUPER_ADMINs. Unlike {@link #retryValidation} (which only
+   * regenerates the report from cached signals), this path:
+   *
+   * <ol>
+   *   <li>Deletes the existing {@code validation_report} row entirely
+   *   <li>Resets {@code pipeline_run.status} to {@code REVIEWING} + clears {@code statusReason} +
+   *       {@code completedAt} + {@code reviewJson}
+   *   <li>Submits an async job that runs {@link ReviewerAgentV3#review} from scratch against the
+   *       persisted workspace, calls {@link #persistReview} + {@link #generateValidationReport},
+   *       then re-resolves the terminal status via {@link #resolveTerminalStatus}
+   *   <li>Emits {@code STATUS} (REVIEWING) and {@code COMPLETE} SSE events so the UI mirrors the
+   *       transition live
+   * </ol>
+   *
+   * <p>Use case: shipped a fix to the reviewer / accuracy-assessor / vendored-exclusion path and
+   * want to re-derive an existing run's score under the new code without re-running the whole
+   * pipeline. Cost: one full reviewer pass (general + wiring + final build) + one accuracy
+   * assessment + one validation report generation. Runs in the same {@code pool} as the main
+   * pipeline so admin re-reviews queue behind active runs.
+   *
+   * @throws IllegalArgumentException run not found
+   * @throws IllegalStateException run is still in a non-terminal state (PLANNING / WORKING /
+   *     REVIEWING / AWAITING_APPROVAL)
+   */
+  public void reReview(String runId) {
+    var run =
+        runRepo
+            .findById(runId)
+            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+    if (!java.util.List.of("COMPLETE", "PARTIAL", "FAILED").contains(run.getStatus())) {
+      throw new IllegalStateException(
+          "re-review requires a terminal run (current: " + run.getStatus() + ")");
+    }
+    log.info("V2RunOrchestrator reReview: run={} previous status={}", runId, run.getStatus());
+
+    // Synchronous reset so the caller's 202 reflects the live state — once we return, the run is
+    // already showing REVIEWING in any subsequent GET. The actual reviewer pass kicks off async.
+    validationReportRepository
+        .findByRunId(runId)
+        .ifPresent(
+            existing -> {
+              log.info(
+                  "V2RunOrchestrator reReview: deleting existing validation_report id={} for run={}",
+                  existing.getId(),
+                  runId);
+              validationReportRepository.delete(existing);
+            });
+    run.setStatus("REVIEWING");
+    run.setStatusReason(null);
+    run.setCompletedAt(null);
+    run.setReviewJson(null);
+    runRepo.save(run);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+
+    pool.submit(
+        () -> {
+          try {
+            runReReviewBlocking(runId);
+          } catch (Exception e) {
+            log.error("V2RunOrchestrator reReview run={} failed unexpectedly", runId, e);
+            // Best-effort terminal flip so the run doesn't stay stuck at REVIEWING forever.
+            try {
+              var stuck = runRepo.findById(runId).orElse(null);
+              if (stuck != null && "REVIEWING".equals(stuck.getStatus())) {
+                stuck.setStatus("PARTIAL");
+                stuck.setStatusReason("RE_REVIEW_FAILED");
+                stuck.setCompletedAt(Instant.now());
+                runRepo.save(stuck);
+                broadcaster.emit(
+                    runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
+              }
+            } catch (Exception ignored) {
+              // give up — operator can hit the endpoint again
+            }
+          }
+        });
+  }
+
+  /**
+   * Synchronous body of the {@link #reReview(String)} async task. Resolves the provider/model,
+   * builds a fresh {@link ExecutionContext}, runs reviewer + validation report generation, then
+   * derives + persists the new terminal status. Extracted so the outer method can wrap it in a
+   * blanket try/catch that flips the run back out of REVIEWING on unexpected failure.
+   */
+  private void runReReviewBlocking(String runId) {
+    var run = runRepo.findById(runId).orElse(null);
+    if (run == null) {
+      log.warn("V2RunOrchestrator reReview: run {} disappeared mid-flight", runId);
+      return;
+    }
+    LlmProvider provider;
+    try {
+      provider =
+          LlmProvider.valueOf(
+              (run.getAiProvider() == null ? "openai" : run.getAiProvider()).toUpperCase());
+    } catch (IllegalArgumentException e) {
+      provider = LlmProvider.OPENAI;
+    }
+    ResolvedModel reviewerModel =
+        modelResolver.resolve("ReviewerAgentV3", provider, AgentTier.PLANNING);
+
+    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!Files.isDirectory(workspace)) {
+      log.warn(
+          "V2RunOrchestrator reReview: workspace {} missing for run {}, marking PARTIAL", workspace, runId);
+      run.setStatus("PARTIAL");
+      run.setStatusReason("RE_REVIEW_NO_WORKSPACE");
+      run.setCompletedAt(Instant.now());
+      runRepo.save(run);
+      broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_NO_WORKSPACE"));
+      return;
+    }
+    ExecutionContext rootCtx = new ExecutionContext(runId, "_re_review_", workspace);
+
+    // Recover the planner-declared build command from persisted plan_json so the reviewer's
+    // final-build step uses the same command the original run did. Fall back to null — the
+    // reviewer's BuildCommandResolver then auto-detects from the workspace shape.
+    String buildCommand = null;
+    if (run.getPlanJson() != null && !run.getPlanJson().isBlank()) {
+      try {
+        PlanV2 plan = objectMapper.readValue(run.getPlanJson(), PlanV2.class);
+        buildCommand = plan.buildCommand();
+      } catch (Exception e) {
+        log.debug(
+            "V2RunOrchestrator reReview run={} could not parse planJson; relying on auto-detect",
+            runId);
+      }
+    }
+
+    ReviewerResult reviewResult = null;
+    try {
+      log.info(
+          "V2RunOrchestrator reReview run={} provider={} model={} buildCmd={}",
+          runId,
+          provider,
+          reviewerModel.getModel(),
+          buildCommand == null ? "(auto)" : buildCommand);
+      reviewResult =
+          reviewer.review(
+              ReviewerRequestV2.builder()
+                  .provider(provider.name().toLowerCase())
+                  .model(reviewerModel.getModel())
+                  .context(rootCtx)
+                  .buildCommand(buildCommand)
+                  .skipWiringPass(false)
+                  .build());
+      persistReview(runId, reviewResult);
+    } catch (Exception e) {
+      log.warn(
+          "V2RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
+      persistReviewFailure(runId, e);
+      // reviewResult stays null — generateValidationReport handles that branch (it sets
+      // verdict=APPROVED with summary="Review did not run." which trips status to LEGACY_UNKNOWN
+      // below, surfacing the failure on the UI).
+    }
+
+    // Reconstruct a minimal ExecutionResult from persisted task rows — perTask isn't read by
+    // resolveTerminalStatus or the generateValidationReport(execResult != null) branch when we
+    // pass null for execResult below. We use this purely to get tasksSuccessful / tasksFailed /
+    // anyIntermediateWarning into the status decision.
+    ExecutionResult execResult = reconstructExecResultFromTasks(runId);
+
+    try {
+      generateValidationReport(runId, null, reviewResult, null);
+    } catch (Exception e) {
+      log.warn("V2RunOrchestrator reReview run={} report generation failed: {}", runId, e.getMessage());
+    }
+
+    StatusAndReason terminal = resolveTerminalStatus(execResult, reviewResult);
+    var refreshed = runRepo.findById(runId).orElse(run);
+    refreshed.setStatus(terminal.status());
+    refreshed.setStatusReason(terminal.reason());
+    refreshed.setCompletedAt(Instant.now());
+    runRepo.save(refreshed);
+    broadcaster.emit(runId, RunEvent.complete(runId, terminal.status(), terminal.reason()));
+    log.info(
+        "V2RunOrchestrator reReview run={} done status={} reason={} reviewerVerdict={}",
+        runId,
+        terminal.status(),
+        terminal.reason(),
+        reviewResult == null ? "n/a" : reviewResult.overall());
+  }
+
+  /**
+   * Build a minimal {@link ExecutionResult} from the persisted {@code agent_task} rows, just
+   * enough that {@link #resolveTerminalStatus} can read the four counters it cares about
+   * ({@code overall}, {@code tasksSuccessful}, {@code tasksFailed}, {@code anyIntermediateWarning}).
+   * {@code perTask} is intentionally empty — the only consumer that iterates it
+   * ({@code generateValidationReport}) is invoked with {@code execResult=null} on the re-review
+   * path so it falls through to its own task-row reconstruction branch.
+   */
+  private ExecutionResult reconstructExecResultFromTasks(String runId) {
+    var tasks = taskRepo.findByRunId(runId);
+    int success = 0;
+    int warn = 0;
+    int failed = 0;
+    int skipped = 0;
+    for (var t : tasks) {
+      String s = t.getStatus() == null ? "COMPLETE" : t.getStatus();
+      switch (s) {
+        case "COMPLETE" -> success++;
+        case "PARTIAL" -> warn++;
+        case "FAILED" -> failed++;
+        case "BLOCKED", "SKIPPED" -> skipped++;
+        default -> success++;
+      }
+    }
+    ExecutionResult.Overall overall;
+    if (failed > 0 && success == 0) overall = ExecutionResult.Overall.FAILED;
+    else if (failed > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
+    else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
+    else overall = ExecutionResult.Overall.ALL_SUCCESS;
+    return ExecutionResult.builder()
+        .overall(overall)
+        .tasksExecuted(tasks.size() - skipped)
+        .tasksSuccessful(success)
+        .tasksWithWarning(warn)
+        .tasksFailed(failed)
+        .tasksSkipped(skipped)
+        .perTask(java.util.List.of())
+        .totalLatencyMs(0L)
+        .finalTaskStatus(null)
+        .anyIntermediateWarning(warn > 0)
+        .build();
   }
 
   private static boolean isTerminal(String status) {
