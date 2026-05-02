@@ -167,7 +167,11 @@ public class SequentialExecutorV2 {
     String refDocs = fetchReferenceDocs(req.projectId(), task);
     String systemPrompt =
         composeSystemPrompt(
-            task, req.designBlock(), refDocs, req.plan() == null ? null : req.plan().projectType());
+            task,
+            req.designBlock(),
+            refDocs,
+            req.plan() == null ? null : req.plan().projectType(),
+            req.workspaceSummary());
     String userPrompt = composeUserPrompt(task, null);
 
     log.info("Executor task={} ('{}') START", task.id(), task.title());
@@ -613,9 +617,25 @@ public class SequentialExecutorV2 {
 
   // ─── prompt composition ─────────────────────────────────────────────────
 
-  private String composeSystemPrompt(
-      PlannedTaskV2 task, String designBlock, String refDocs, String projectType) {
+  // VisibleForTesting — package-private so MultiRepoWorkerPromptTest can pin the
+  // workspace-summary forwarding without spinning up the full ExecutionRequest pipeline.
+  String composeSystemPrompt(
+      PlannedTaskV2 task,
+      String designBlock,
+      String refDocs,
+      String projectType,
+      String workspaceSummary) {
     StringBuilder sb = new StringBuilder(SYSTEM_PROMPT_BASE);
+
+    // Multi-repo correctness (2026-05-02 fix). When the orchestrator targets a multi-repo project
+    // it ships a workspaceSummary with "MULTI-REPO PROJECT WORKSPACE" + the per-repo subdir list.
+    // Without forwarding it to the worker the planner-side `repos/<name>/` directives are
+    // invisible — the worker's writeFile lands files at the workspace root, the per-repo push
+    // step finds no diff to ship, runs finish COMPLETE with empty PRs. See
+    // V2RunOrchestrator.buildMultiRepoSummary + MultiRepoWorkerPromptTest.
+    if (workspaceSummary != null && workspaceSummary.contains("MULTI-REPO")) {
+      sb.append("\n\n").append(workspaceSummary);
+    }
     // v2.5.13 — RN/Expo scaffold adherence directive. When the planner declared
     // react-native-expo, inject the scaffold template verbatim so the worker
     // stops drifting to Expo SDK 51 (stable-ish but doesn't match our smoke

@@ -969,6 +969,16 @@ public class V2RunOrchestrator {
                     .enableSmokeTests(true)
                     .designBlock(designBlock)
                     .projectId(projectId)
+                    // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
+                    // WORKSPACE" header + the per-repo subdir list — without it the worker
+                    // writes generated files at workspace root and the per-repo push step
+                    // opens empty PRs. The planner already received this block at line 816;
+                    // recompute fresh here from the same inputs (projectId + selectedRepoIds)
+                    // so executor + planner can never drift, and so we don't have to widen
+                    // the scope of an inner-block local variable. Returns null on single-repo
+                    // / scratch-workspace runs; the worker's composeSystemPrompt skips the
+                    // block when null.
+                    .workspaceSummary(buildMultiRepoSummary(projectId, selectedRepoIds))
                     .build());
       } catch (Exception e) {
         log.error("V2RunOrchestrator run={} executor failed", runId, e);
