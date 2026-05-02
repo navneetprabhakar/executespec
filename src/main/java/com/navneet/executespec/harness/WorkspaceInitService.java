@@ -30,6 +30,7 @@ public class WorkspaceInitService {
   private final AgentProperties props;
   private final WorkspaceRestoreService restoreService;
   private final com.navneet.executespec.state.repository.RunRepoSnapshotRepository snapshotRepo;
+  private final VendoredPathGuard vendoredPathGuard;
 
   /**
    * Creates and initialises a fresh, isolated workspace for {@code runId}.
@@ -135,6 +136,10 @@ public class WorkspaceInitService {
     // Override commit identity for agent commits
     runGit(workspace, "git", "config", "user.email", "agent@executespec.local");
     runGit(workspace, "git", "config", "user.name", "ExecuteSpec Agent");
+    // 2026-05-02 — same vendored-path guard as cloneMultipleRepos. The legacy single-repo
+    // path lands the clone at the workspace root rather than a repos/<name>/ subdir, but the
+    // class of bug is identical (committed node_modules/ etc.).
+    vendoredPathGuard.augmentGitignore(workspace);
     log.info("Cloned workspace ready for run {}", runId);
   }
 
@@ -305,6 +310,10 @@ public class WorkspaceInitService {
         runGitStrict(reposRoot, "git", "clone", authUrl, target.toString());
       }
       persistCloneSnapshot(runId, r, target);
+      // 2026-05-02 — augment .gitignore with vendored-path patterns BEFORE the worker starts
+      // running. Closes the run-b171fa52 class of bug where the worker added Node code to a
+      // Python repo whose .gitignore was Python-only and committed 9605 node_modules/ files.
+      vendoredPathGuard.augmentGitignore(target);
     }
   }
 

@@ -417,9 +417,15 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     java.util.regex.Pattern ext =
         java.util.regex.Pattern.compile(
             "(?i).*\\.(java|js|jsx|ts|tsx|py|go|rb|php|kt|kts|swift|rs|cs|scala|sh|sql)$");
+    // 2026-05-02 — exclusion list aligned with VendoredPathGuard.VENDORED_DIRS so the assessor's
+    // 6-file read budget can never be wasted on vendored picks. Closes the b171fa52 class of
+    // bug where pplai-api committed 9605 node_modules/ files (workspace SKIP_DIRS already drops
+    // them, but defense in depth: this regex also drops fixture / lock-file / generated paths).
     java.util.regex.Pattern exclude =
         java.util.regex.Pattern.compile(
-            "(?i).*(test|spec|__pycache__|node_modules|target|build|dist|\\.min\\.).*");
+            "(?i).*(test|spec|__pycache__|\\bvenv\\b|\\.venv|node_modules|target|build|dist|"
+                + "\\.next|\\.gradle|coverage|bower_components|vendor|\\.idea|\\.vscode|"
+                + "\\.pytest_cache|\\.mypy_cache|\\.tox|\\.nyc_output|\\.min\\.).*");
     java.util.regex.Pattern structural =
         java.util.regex.Pattern.compile(
             "(?i).*(route|router|controller|handler|resolver|service|model|schema|"
