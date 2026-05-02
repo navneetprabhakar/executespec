@@ -469,7 +469,9 @@ export default function ProjectDashboardPage() {
               onSubChange={setCodeSub}
             />
           )}
-          {tab === 'chat' && <ProjectChatPanel projectId={projectId} />}
+          {tab === 'chat' && (
+            <ProjectChatPanel projectId={projectId} aiProvider={project?.aiProvider} />
+          )}
         </main>
       </div>
 
