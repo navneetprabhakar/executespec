@@ -134,24 +134,47 @@ export default function V3Settings() {
       </Card>
 
       {/* ── AI provider summary ─────────────────────────────────────────── */}
+      {/* R-141 (deferred Wave-1 follow-up, shipped 2026-05-02) — was a
+          read-only summary that pointed at `/settings#api-keys`, a
+          non-existent anchor on this same page (circular link). Now
+          links to the dedicated form route at `/settings/manage`. BYOK
+          gating mirrors backend `canManageAiKeys` (TEAM / ENTERPRISE) —
+          FREE / PRO see the upsell line instead of dead Connect buttons. */}
       <Card title='AI provider'>
         <Row label='Default'>
           <span>{user.tier === 'FREE' ? 'Anthropic (system credits)' : 'Project default'}</span>
         </Row>
-        <Row label='BYOK'>
-          {user.tier === 'TEAM' || user.tier === 'ENTERPRISE' ? (
-            <Link
-              to='/settings#api-keys'
-              style={{color: 'var(--v3-brand)', fontSize: 12, textDecoration: 'none'}}
-            >
-              Manage your Anthropic / OpenAI / Google keys →
-            </Link>
-          ) : (
+        {user.tier === 'TEAM' || user.tier === 'ENTERPRISE' ? (
+          <>
+            <Row label='OpenAI key'>
+              <KeyRow
+                present={Boolean(user.hasOpenAiKey)}
+                href='/settings/manage#api-keys'
+                label='OpenAI'
+              />
+            </Row>
+            <Row label='Anthropic key'>
+              <KeyRow
+                present={Boolean(user.hasAnthropicKey)}
+                href='/settings/manage#api-keys'
+                label='Anthropic'
+              />
+            </Row>
+            <Row label='Gemini key'>
+              <KeyRow
+                present={Boolean(user.hasGeminiKey)}
+                href='/settings/manage#api-keys'
+                label='Gemini'
+              />
+            </Row>
+          </>
+        ) : (
+          <Row label='BYOK'>
             <span style={{color: 'var(--v3-text-subtle)'}}>
               Bring-your-own-keys is available on Team and Enterprise.
             </span>
-          )}
-        </Row>
+          </Row>
+        )}
       </Card>
 
       {/* R-342 (2026-04-29): the v3 opt-in card was retired here.  URL
@@ -162,7 +185,11 @@ export default function V3Settings() {
       {/* ── Repos / integrations ────────────────────────────────────────── */}
       <Card title='Repos & integrations'>
         <Row label='GitHub'>
-          <span>{user.hasGithubPat ? 'PAT configured ✓' : 'Not connected'}</span>
+          <KeyRow
+            present={Boolean(user.hasGithubPat)}
+            href='/settings/manage#github'
+            label='GitHub PAT'
+          />
         </Row>
         <Row label='More integrations'>
           <Link
@@ -307,6 +334,34 @@ function Card({title, children, tone}: {title: string; children: React.ReactNode
       </h2>
       <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>{children}</div>
     </section>
+  );
+}
+
+/**
+ * R-141 (2026-05-02) — status pill + Update / Connect button for keys
+ * surfaced on V3Settings. Replaces dead-end read-only labels. The href
+ * deep-links into the SettingsPage form (which auto-opens + scrolls to
+ * the matching section).
+ */
+function KeyRow({present, href, label}: {present: boolean; href: string; label: string}) {
+  return (
+    <span style={{display: 'inline-flex', gap: 8, alignItems: 'center'}}>
+      <Pill tone={present ? 'ok' : 'neutral'} size='sm'>
+        {present ? 'Connected' : 'Not connected'}
+      </Pill>
+      <Link
+        to={href}
+        style={{
+          color: 'var(--v3-brand)',
+          fontSize: 11.5,
+          fontWeight: 500,
+          textDecoration: 'none',
+        }}
+        aria-label={`${present ? 'Update' : 'Connect'} ${label}`}
+      >
+        {present ? 'Update →' : 'Connect →'}
+      </Link>
+    </span>
   );
 }
 
