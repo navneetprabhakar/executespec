@@ -947,13 +947,20 @@
             <!-- 2026-04-28: nudged the Beta Live pill lower so it doesn't
                  crowd the top nav. Anchor is inline-block so margin-top
                  applies inside the flex-centered .container. -->
-            <a href="https://dev.executespec.ai" target="_blank" style="text-decoration: none; display: inline-block; margin-top: 40px;"><span class="section-label mono" style="color: var(--yellow); border: 1px solid var(--yellow); padding: 4px 12px; border-radius: 20px;">Beta Live — Try Free →</span></a>
-            <h1 class="h1" style="margin-top: 24px;">
-                ExecuteSpec ships <span class="text-gradient-orange">AI-written pull requests</span> you can actually merge — for one repo or for twenty.
+            <a href="https://dev.executespec.ai" target="_blank" style="text-decoration: none; display: inline-block; margin-top: 28px;"><span class="section-label mono" style="color: var(--yellow); border: 1px solid var(--yellow); padding: 4px 12px; border-radius: 20px;">Beta Live — Try Free →</span></a>
+            <!--
+                2026-05-02 — chat-first hero. Previous H1 was 17 words +
+                a 45-word subtitle, both centered, pushing the composer
+                below the fold on most laptops. Replaced with a
+                single-line outcome ("AI-written PRs you can actually
+                merge.") matching the login hero copy. The 80%-Ready /
+                catalog / verdict claims now live in a one-line proof
+                strip below the composer (see #hero-proof-line) so the
+                chat textarea is the dominant element above the fold.
+            -->
+            <h1 class="h1" style="margin-top: 18px;">
+                <span class="text-gradient-orange">AI-written PRs</span> you can actually merge.
             </h1>
-            <p class="subtitle" style="margin: 24px auto 0;">
-                Type a spec, or pick from a catalog of <a href="#catalog" style="color: var(--blue-light); text-decoration: none;">28 readymade solutions and 11 modernization recipes</a>. Plan, build, test, review, open a PR. ~80% of real runs land Ready — with a verdict (Ready / Needs review / Failed) on every one of yours.
-            </p>
 
             <!-- Chat-first composer + sample prompts + live stats card.
                  Migrated 2026-04-29 (R-338) from the in-app V3Landing page
@@ -985,6 +992,17 @@
                     <span style="font-size: 0.78rem; color: var(--text-muted);">Free preview · no card · ~60s · sign up to ship the code</span>
                 </div>
             </form>
+
+            <!--
+                2026-05-02 — proof strip. Compresses the previous 45-word
+                subtitle (catalog + ~80%-Ready + verdict) into a single
+                muted line below the composer. Keeps the supporting
+                claims discoverable without competing with the composer
+                for visual weight.
+            -->
+            <p id="hero-proof-line" style="margin: 16px auto 0; max-width: 720px; font-size: 0.85rem; color: var(--text-muted); text-align: left;">
+                Or pick from <a href="#catalog" style="color: var(--blue-light); text-decoration: none;">28 readymades + 11 migrations</a>. ~80% of real runs land Ready, verdict on every PR.
+            </p>
 
             <!-- Sample-prompt chip rail.  Six canned prompts you can click
                  to seed the textarea (matches V3Landing's SAMPLE_PROMPTS).
