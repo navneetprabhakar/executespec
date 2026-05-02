@@ -121,24 +121,50 @@ export default function V3ProjectHome() {
               set so the picked repo links into THIS project rather
               than spawning a new one. */}
           {slug && (
-            <button
-              type='button'
-              onClick={() => setAttachOpen(true)}
-              style={{
-                marginLeft: 'auto',
-                padding: '4px 10px',
-                background: 'transparent',
-                color: 'var(--v3-text-subtle)',
-                border: '1px solid var(--v3-border)',
-                borderRadius: 4,
-                cursor: 'pointer',
-                fontSize: 11.5,
-                fontFamily: 'inherit',
-              }}
-              title='Attach another GitHub repo to this project'
-            >
-              + Attach repo
-            </button>
+            <div style={{marginLeft: 'auto', display: 'flex', gap: 8}}>
+              {/* 2026-05-02 — V3ProjectHome is iteration-only (Re-launch
+                  with a follow-up change). The actual chat surface, with
+                  the new project-action tools (regenerate_architecture,
+                  generate_project_doc, list_repos, list_recent_runs,
+                  list_pull_requests, get_project_memory,
+                  get_latest_architecture), lives on the dashboard's Chat
+                  tab. Send the user there. */}
+              <button
+                type='button'
+                onClick={() => navigate(`/projects/${slug}/dashboard?tab=chat`)}
+                style={{
+                  padding: '4px 10px',
+                  background: 'transparent',
+                  color: 'var(--v3-brand)',
+                  border: '1px solid var(--v3-brand)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 11.5,
+                  fontFamily: 'inherit',
+                  fontWeight: 500,
+                }}
+                title='Open project chat — regenerate architecture, generate docs, list runs / PRs / repos, and more'
+              >
+                Chat with project →
+              </button>
+              <button
+                type='button'
+                onClick={() => setAttachOpen(true)}
+                style={{
+                  padding: '4px 10px',
+                  background: 'transparent',
+                  color: 'var(--v3-text-subtle)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 11.5,
+                  fontFamily: 'inherit',
+                }}
+                title='Attach another GitHub repo to this project'
+              >
+                + Attach repo
+              </button>
+            </div>
           )}
         </div>
       )}
