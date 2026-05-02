@@ -35,12 +35,49 @@ public class ProjectChatController {
   private final ProjectRepository projectRepo;
   private final OrgRepository orgRepo;
   private final TierConfigRepository tierConfigRepo;
+  // 2026-05-02 — drive the chat header's context-window chip from the actual resolved model
+  // (provider-level guess was wrong: gpt-4o = 128k vs gpt-5.4 = 256k; Sonnet 200k vs Opus-1M).
+  private final com.navneet.executespec.router.ModelResolver modelResolver;
+  private final com.navneet.executespec.router.ModelContextWindowMap contextWindowMap;
 
   @GetMapping
   public ResponseEntity<List<ProjectChatMessage>> history(
       @AuthenticationPrincipal AppUserDetails principal, @PathVariable String projectId) {
     requireChatAccess(principal, projectId);
     return ResponseEntity.ok(chatService.history(projectId));
+  }
+
+  /**
+   * 2026-05-02 — surface the resolved model + its context window so the chat header chip can
+   * render an accurate "Nk window" segment instead of a per-provider guess. Mirrors the
+   * resolution path used in {@link ProjectChatService#send} so the chip never drifts from the
+   * model that's actually answering the next turn.
+   */
+  public record ChatInfo(String model, String provider, int contextWindow) {}
+
+  @GetMapping("/info")
+  public ResponseEntity<ChatInfo> info(
+      @AuthenticationPrincipal AppUserDetails principal, @PathVariable String projectId) {
+    AppUser user = requireChatAccess(principal, projectId);
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "project"));
+    com.navneet.executespec.router.LlmProvider provider =
+        project.getAiProvider() != null
+            ? project.getAiProvider()
+            : com.navneet.executespec.router.LlmProvider.ANTHROPIC;
+    com.navneet.executespec.router.ResolvedModel resolved =
+        modelResolver.resolve(
+            "ProjectChatAgent", provider, com.navneet.executespec.router.AgentTier.PLANNING);
+    String model = resolved.getModel();
+    return ResponseEntity.ok(
+        new ChatInfo(
+            model,
+            resolved.getActualProvider() == null
+                ? provider.name()
+                : resolved.getActualProvider().name(),
+            contextWindowMap.forModel(model)));
   }
 
   @PostMapping
@@ -52,8 +89,12 @@ public class ProjectChatController {
     if (body == null || body.message == null || body.message.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message required");
     }
+    // V169 (2026-05-02) — caller's PAT threads into project-action tools (regenerate_architecture
+    // hits private repos with this PAT). May be null for users who haven't connected a PAT yet;
+    // tools that need it return a clear error in that case.
     ProjectChatMessage reply =
-        chatService.send(projectId, user.getOrgId(), user.getId(), body.message);
+        chatService.send(
+            projectId, user.getOrgId(), user.getId(), body.message, user.getGithubPat());
     return ResponseEntity.ok(reply);
   }
 

@@ -359,17 +359,17 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
 
   /**
    * Reads key source files (routes, controllers, models, entry points) and returns their content as
-   * annotated snippets for the accuracy scorer. Capped at 6 files × 2,500 chars each to control
-   * token cost (~15K extra tokens max).
+   * annotated snippets for the accuracy scorer. Cap is whatever {@link #inferKeyFilePaths} hands
+   * back — single-repo runs stay at 6, multi-repo runs scale up to {@code MULTI_REPO_TOTAL_CAP}
+   * (18 by default = 6 per repo × 3 repos). Per-file char cap stays at 2,500 so token cost grows
+   * linearly with repo count rather than file count.
    */
   private String buildKeyFileSnippets(String runId, String fileTree) {
     List<String> candidates = inferKeyFilePaths(fileTree);
     if (candidates.isEmpty()) return "";
 
     StringBuilder sb = new StringBuilder();
-    int filesRead = 0;
     for (String path : candidates) {
-      if (filesRead >= 6) break;
       try {
         String content = fileSystemTool.readFile(runId, path);
         if (content == null || content.isBlank()) continue;
@@ -381,7 +381,6 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
                     + " chars total)"
                 : content;
         sb.append("### ").append(path).append("\n```\n").append(snip).append("\n```\n\n");
-        filesRead++;
       } catch (Exception e) {
         log.debug(
             "[AccuracyAssessment] Could not read key file {} for run {}: {}",
@@ -394,21 +393,38 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   }
 
   /**
+   * Per-repo read budget for multi-repo workspaces. Single-repo runs use {@link
+   * #SINGLE_REPO_BUDGET}; runs whose file tree contains paths under {@code repos/<name>/} for two
+   * or more distinct names get a per-repo budget of this size, capped at {@link
+   * #MULTI_REPO_TOTAL_CAP} total files.
+   */
+  static final int PER_REPO_BUDGET = 6;
+
+  /** Read budget for single-repo / no-repos-prefix workspaces. */
+  static final int SINGLE_REPO_BUDGET = 6;
+
+  /**
+   * Hard cap on total files read for the accuracy assessment regardless of how many repos a run
+   * touches. Keeps per-call token cost bounded (18 × 2,500 chars ≈ 45K chars ≈ 11K extra tokens).
+   */
+  static final int MULTI_REPO_TOTAL_CAP = 18;
+
+  /**
    * Heuristically identifies key structural files from the file tree listing. Targets route
    * handlers, controllers, models, and entry points — the files most likely to contain endpoint
    * implementations the spec auditor needs to verify. Excludes test files, compiled output, and
-   * node_modules.
+   * vendored content (full list aligned with {@code VendoredPathGuard.VENDORED_DIRS}).
    *
-   * <p>V162 (R-343 hotfix) — top-up logic. The previous implementation returned structuralMatches
-   * as-is when non-empty, even if it was just 1 file out of a 6-slot budget. For small projects
-   * with one structurally-named file (e.g. {@code main.py}) and the actual logic in a
-   * non-structural file (e.g. {@code wordfreq.py}), the LLM saw only {@code main.py}'s content + a
-   * file tree mentioning {@code wordfreq.py}, then emitted "file exists but content not readable in
-   * KEY SOURCE FILES" false-positives across every spec requirement. The R-343 v2 report
-   * mis-attributed this to "context exhaustion / truncation"; the actual cause was that wordfreq.py
-   * was never read because it didn't match a structural keyword. Fix: top up structural matches
-   * with remaining source files until we hit the 6-file read budget enforced by
-   * buildKeyFileSnippets.
+   * <p>V162 (R-343 hotfix) added top-up: structural matches that don't fill the budget get padded
+   * with the smallest non-structural source files so small projects (one structurally-named file
+   * + the real logic in a sibling) don't see "file exists but content not readable" false-positives
+   * across every spec requirement.
+   *
+   * <p>2026-05-02 multi-repo expansion: when the file tree contains paths under {@code
+   * repos/<name>/} for two or more repos, allocate {@link #PER_REPO_BUDGET} per repo (capped at
+   * {@link #MULTI_REPO_TOTAL_CAP} total). Closes the b171fa52 follow-up where a 3-repo workspace
+   * had its 6-file budget burned on routes from one repo, leaving the assessor unable to confirm
+   * spec items in the others ("ai.py router exists but content unread, cannot confirm" × N).
    */
   private List<String> inferKeyFilePaths(String fileTree) {
     if (fileTree == null || fileTree.isBlank()) return List.of();
@@ -417,9 +433,14 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
     java.util.regex.Pattern ext =
         java.util.regex.Pattern.compile(
             "(?i).*\\.(java|js|jsx|ts|tsx|py|go|rb|php|kt|kts|swift|rs|cs|scala|sh|sql)$");
+    // exclusion list aligned with VendoredPathGuard.VENDORED_DIRS so the assessor's read budget
+    // can never be wasted on vendored picks. workspace SKIP_DIRS already drops them, but
+    // defense in depth: this regex also drops fixture / lock-file / generated paths.
     java.util.regex.Pattern exclude =
         java.util.regex.Pattern.compile(
-            "(?i).*(test|spec|__pycache__|node_modules|target|build|dist|\\.min\\.).*");
+            "(?i).*(test|spec|__pycache__|\\bvenv\\b|\\.venv|node_modules|target|build|dist|"
+                + "\\.next|\\.gradle|coverage|bower_components|vendor|\\.idea|\\.vscode|"
+                + "\\.pytest_cache|\\.mypy_cache|\\.tox|\\.nyc_output|\\.min\\.).*");
     java.util.regex.Pattern structural =
         java.util.regex.Pattern.compile(
             "(?i).*(route|router|controller|handler|resolver|service|model|schema|"
@@ -438,28 +459,113 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
 
     if (allSource.isEmpty()) return List.of();
 
-    // Prefer structurally-named files. Cap at 10 so a Spring Boot project
-    // with 30 controllers doesn't crowd out the budget.
-    List<String> structuralMatches =
-        allSource.stream().filter(l -> structural.matcher(l).matches()).limit(10).toList();
-
-    // V162 — Read budget is 6 files (enforced by buildKeyFileSnippets). If the
-    // structural list under-fills it, top up with the smallest non-structural
-    // files. Smallest-first ordering (allSource is already sorted by length)
-    // makes it likely the LLM gets to read entire files instead of truncated
-    // 2,500-char windows. LinkedHashSet de-dupes structural overlap and
-    // preserves insertion order so structural matches stay first.
-    final int READ_BUDGET = 6;
-    if (structuralMatches.size() >= READ_BUDGET) {
-      return structuralMatches;
+    // Group by repo subdir (paths starting with "repos/<name>/"). Files outside any repos/
+    // prefix collapse into a single bucket "_root_" so a mixed workspace (some workspace-root
+    // files + some per-repo files) still gets processed.
+    java.util.regex.Pattern repoPrefix = java.util.regex.Pattern.compile("^repos/([^/]+)/");
+    java.util.LinkedHashMap<String, java.util.List<String>> byRepo =
+        new java.util.LinkedHashMap<>();
+    for (String path : allSource) {
+      java.util.regex.Matcher m = repoPrefix.matcher(path);
+      String key = m.find() ? m.group(1) : "_root_";
+      byRepo.computeIfAbsent(key, k -> new java.util.ArrayList<>()).add(path);
     }
 
-    java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>(structuralMatches);
-    for (String path : allSource) {
-      if (picked.size() >= READ_BUDGET) break;
+    // Single bucket → flat budget. Preserves the V162 behavior for single-repo runs.
+    if (byRepo.size() <= 1) {
+      java.util.List<String> bucket = byRepo.values().iterator().next();
+      return pickWithStructuralPreference(bucket, structural, SINGLE_REPO_BUDGET);
+    }
+
+    // Multi-repo → per-repo budget, capped at MULTI_REPO_TOTAL_CAP. Each repo gets at least
+    // PER_REPO_BUDGET picks (or fewer if the cap runs out), so the LLM sees evidence from every
+    // repo instead of 6 picks all from one.
+    java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>();
+    for (var entry : byRepo.entrySet()) {
+      if (picked.size() >= MULTI_REPO_TOTAL_CAP) break;
+      int repoBudget = Math.min(PER_REPO_BUDGET, MULTI_REPO_TOTAL_CAP - picked.size());
+      java.util.List<String> repoPicks =
+          pickWithStructuralPreference(entry.getValue(), structural, repoBudget);
+      picked.addAll(repoPicks);
+    }
+    return java.util.List.copyOf(picked);
+  }
+
+  /**
+   * Prefer structurally-named files (route, controller, service, …); cap structural picks at 10
+   * so a Spring Boot project with 30 controllers doesn't crowd out non-structural fallbacks.
+   * Top up with the smallest non-structural source files until {@code budget} is reached so a
+   * project with only one structurally-named file doesn't leave 5 slots empty (R-343 fix).
+   *
+   * <p>2026-05-02 — match the structural regex against the path with the {@code repos/<name>/}
+   * prefix stripped, so the repo name itself doesn't trigger keywords. b171fa52 had a repo
+   * called {@code pplai-api}; the original regex matched "api" inside the repo name and treated
+   * EVERY file in pplai-api as structural — sorted by length, that meant {@code start.sh} +
+   * {@code fix_files.py} won over {@code app/routers/ai.py}, which is exactly the file the
+   * accuracy assessor needed to read. Stripping the prefix and re-matching against the
+   * repo-internal path (e.g. {@code app/routers/ai.py}) makes the regex actually discriminate.
+   *
+   * <p>Boilerplate filenames ({@code index|main|app|server}.<ext>) are also DE-PRIORITISED by
+   * being treated as non-structural for the structural-tier sort — they almost always exist
+   * (entry points / Express server bootstrap / Next.js app shell) but rarely contain the
+   * business logic the assessor needs to verify.
+   */
+  private static final java.util.regex.Pattern REPO_PREFIX_PATTERN =
+      java.util.regex.Pattern.compile("^repos/[^/]+/");
+
+  private static final java.util.regex.Pattern BOILERPLATE_FILENAME =
+      java.util.regex.Pattern.compile("(?i)(^|/)(index|main|app|server)\\.[a-z0-9]+$");
+
+  /**
+   * TIER A — files inside a structural directory ({@code routers/}, {@code services/}, …). These
+   * are nearly always the deliverable: the worker added a route to {@code app/routers/ai.py},
+   * not to a top-level {@code auth.py}. Anchored on the directory segment so a filename like
+   * {@code Service.java} doesn't match (it would, in TIER B).
+   */
+  private static final java.util.regex.Pattern STRUCTURAL_DIR_PATTERN =
+      java.util.regex.Pattern.compile(
+          "(?i)(^|/)(routes?|routers?|controllers?|handlers?|resolvers?|services?|models?|"
+              + "schemas?|entities|repositories|migrations?|api|apis|graphql|domain|usecases?|"
+              + "components|hooks|pages)/");
+
+  private static int structuralTier(String path, java.util.regex.Pattern filenameStructural) {
+    String stripped = REPO_PREFIX_PATTERN.matcher(path).replaceFirst("");
+    if (BOILERPLATE_FILENAME.matcher(stripped).find()) return 2; // bottom — entry-point fluff
+    if (STRUCTURAL_DIR_PATTERN.matcher(stripped).find()) return 0; // top — under a structural dir
+    if (filenameStructural.matcher(stripped).matches()) return 1; // middle — name only
+    return 2; // non-structural
+  }
+
+  /**
+   * Pick {@code budget} files from {@code source}, preferring structural directories over
+   * structural filenames over non-structural fallbacks. Within a tier, shortest path wins as
+   * a tiebreaker (smallest-first ordering preserved from caller via {@code source} sort).
+   *
+   * <p>2026-05-02 cap-at-10 from R-343 retained per tier to keep the read budget honest when a
+   * Spring Boot project has 30 files in {@code controllers/}.
+   */
+  private static java.util.List<String> pickWithStructuralPreference(
+      java.util.List<String> source, java.util.regex.Pattern structural, int budget) {
+    if (budget <= 0 || source.isEmpty()) return java.util.List.of();
+    java.util.List<String> tierA =
+        source.stream().filter(p -> structuralTier(p, structural) == 0).limit(10).toList();
+    java.util.List<String> tierB =
+        source.stream().filter(p -> structuralTier(p, structural) == 1).limit(10).toList();
+    java.util.LinkedHashSet<String> picked = new java.util.LinkedHashSet<>();
+    for (String p : tierA) {
+      if (picked.size() >= budget) break;
+      picked.add(p);
+    }
+    for (String p : tierB) {
+      if (picked.size() >= budget) break;
+      picked.add(p);
+    }
+    // TIER C — top up with the smallest non-structural source files until budget is reached.
+    for (String path : source) {
+      if (picked.size() >= budget) break;
       picked.add(path);
     }
-    return List.copyOf(picked);
+    return java.util.List.copyOf(picked);
   }
 
   // ──────────────────────────────────────────────────────────────────────────

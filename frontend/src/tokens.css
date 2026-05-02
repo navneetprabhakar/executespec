@@ -46,6 +46,13 @@
    */
   --geist-bg: var(--c-graphite-0);
   --geist-bg-secondary: var(--c-graphite-2);
+  /* 2026-05-02 — `--bg-primary` was used by MoreDrawer / Drawer / RunStamp
+     / EmptyProjectLanding without ever being defined; CSS fell back to
+     transparent and the slide-over drawer rendered see-through (page
+     header buttons + repo card chips visible through the panel). Aliased
+     to --geist-bg so it matches the page background and is fully opaque.
+     Light-theme override below mirrors this. */
+  --bg-primary: var(--geist-bg);
   --gray-100: var(--c-graphite-2);
   --gray-200: var(--c-graphite-3);
   --gray-300: var(--c-graphite-4);
@@ -192,6 +199,8 @@
    * places. */
   --geist-bg: var(--c-paper-0);
   --geist-bg-secondary: var(--c-paper-1);
+  /* 2026-05-02 — light-theme parity with the dark alias. See dark block. */
+  --bg-primary: var(--geist-bg);
   --gray-100: var(--c-paper-1);
   --gray-200: var(--c-paper-2);
   --gray-300: var(--c-paper-3);

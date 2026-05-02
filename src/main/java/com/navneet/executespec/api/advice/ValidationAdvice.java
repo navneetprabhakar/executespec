@@ -9,6 +9,7 @@ import java.util.stream.Collectors;
 import org.springframework.context.support.DefaultMessageSourceResolvable;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
@@ -73,7 +74,7 @@ public class ValidationAdvice {
     if (!globalErrors.isEmpty()) body.put("globalErrors", globalErrors);
 
     log.debug("Bean Validation failure: {}", body);
-    return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(body);
+    return jsonError(HttpStatus.BAD_REQUEST, body);
   }
 
   @ExceptionHandler(ResponseStatusException.class)
@@ -89,27 +90,24 @@ public class ValidationAdvice {
     if (log.isDebugEnabled()) {
       log.debug("ResponseStatusException: status={} reason={}", code, reason);
     }
-    return ResponseEntity.status(code).body(body);
+    return jsonError(code, body);
   }
 
   @ExceptionHandler(AccessDeniedException.class)
   public ResponseEntity<Map<String, Object>> onAccessDenied(AccessDeniedException ex) {
-    return ResponseEntity.status(HttpStatus.FORBIDDEN)
-        .body(
-            baseBody(
-                HttpStatus.FORBIDDEN,
-                "forbidden",
-                ex.getMessage() == null ? "Access denied" : ex.getMessage()));
+    return jsonError(
+        HttpStatus.FORBIDDEN,
+        baseBody(
+            HttpStatus.FORBIDDEN,
+            "forbidden",
+            ex.getMessage() == null ? "Access denied" : ex.getMessage()));
   }
 
   @ExceptionHandler(HttpMessageNotReadableException.class)
   public ResponseEntity<Map<String, Object>> onBadJson(HttpMessageNotReadableException ex) {
-    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-        .body(
-            baseBody(
-                HttpStatus.BAD_REQUEST,
-                "bad_request",
-                "Request body is missing or not valid JSON"));
+    return jsonError(
+        HttpStatus.BAD_REQUEST,
+        baseBody(HttpStatus.BAD_REQUEST, "bad_request", "Request body is missing or not valid JSON"));
   }
 
   @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -117,12 +115,26 @@ public class ValidationAdvice {
       MethodArgumentTypeMismatchException ex) {
     String name = ex.getName();
     String expected = ex.getRequiredType() == null ? "value" : ex.getRequiredType().getSimpleName();
-    return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-        .body(
-            baseBody(
-                HttpStatus.BAD_REQUEST,
-                "bad_request",
-                "Parameter '" + name + "' must be a valid " + expected));
+    return jsonError(
+        HttpStatus.BAD_REQUEST,
+        baseBody(
+            HttpStatus.BAD_REQUEST,
+            "bad_request",
+            "Parameter '" + name + "' must be a valid " + expected));
+  }
+
+  /**
+   * 2026-05-02 — every error response is forced to {@code application/json} regardless of the
+   * incoming request's {@code Accept} header. Without the explicit content type, Spring tries
+   * to negotiate against the request's accepted types — which fails with
+   * {@link org.springframework.web.HttpMediaTypeNotAcceptableException} on endpoints that
+   * declared a non-JSON producer (e.g. {@code GET /runs/&#123;id&#125;/report/pdf} sends
+   * {@code Accept: application/pdf}). The fallback was an opaque 500 instead of the intended
+   * 4xx body. Setting the content type bypasses the negotiation since the JSON body is what we
+   * always serve from this advice.
+   */
+  private static <T> ResponseEntity<T> jsonError(HttpStatusCode code, T body) {
+    return ResponseEntity.status(code).contentType(MediaType.APPLICATION_JSON).body(body);
   }
 
   private static Map<String, Object> baseBody(

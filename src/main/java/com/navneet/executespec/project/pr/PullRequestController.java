@@ -67,8 +67,12 @@ public class PullRequestController {
    */
   @PostMapping("/api/projects/{projectId}/prs/refresh")
   public ResponseEntity<PrRefreshService.RefreshResult> refreshProjectPrs(
-      @PathVariable String projectId) {
-    return ResponseEntity.ok(refreshService.refreshProject(projectId));
+      @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    // 2026-05-02 — thread the caller's PAT so private-repo snapshots succeed. Without
+    // this, getPullRequestSnapshot returned null on private repos and the refresh
+    // silently no-op'd; user clicked Refresh + saw merged PRs still showing OPEN.
+    String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
+    return ResponseEntity.ok(refreshService.refreshProject(projectId, pat));
   }
 
   @GetMapping("/api/prs/snapshot")

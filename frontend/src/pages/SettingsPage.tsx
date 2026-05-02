@@ -35,6 +35,13 @@ interface IntegrationCardProps {
   statusBadge: React.ReactNode;
   children: React.ReactNode;
   defaultOpen?: boolean;
+  /**
+   * Optional anchor id for deep-linking. When the URL hash matches this id (e.g.
+   * `/settings/manage#github`), the card auto-opens and scrolls into view —
+   * V3Settings and V3Integrations rely on this to land users straight on the
+   * relevant form. Plain DOM id, not a React key.
+   */
+  id?: string;
 }
 
 function IntegrationCard({
@@ -43,10 +50,29 @@ function IntegrationCard({
   statusBadge,
   children,
   defaultOpen = false,
+  id,
 }: IntegrationCardProps) {
   const [open, setOpen] = useState(defaultOpen);
+  // Open + scroll on hash match (R-141 deep-link). Re-runs if the user
+  // changes the hash without navigating away (anchor click within the page).
+  useEffect(() => {
+    if (!id) return;
+    const sync = () => {
+      if (window.location.hash === `#${id}`) {
+        setOpen(true);
+        // RAF gives the panel a frame to expand before we scroll, so the
+        // target ends up centred instead of at the very top.
+        requestAnimationFrame(() => {
+          document.getElementById(id)?.scrollIntoView({behavior: 'smooth', block: 'start'});
+        });
+      }
+    };
+    sync();
+    window.addEventListener('hashchange', sync);
+    return () => window.removeEventListener('hashchange', sync);
+  }, [id]);
   return (
-    <GlassPanel className='overflow-hidden'>
+    <GlassPanel className='overflow-hidden' id={id}>
       <button
         type='button'
         onClick={() => setOpen((v) => !v)}
@@ -481,6 +507,7 @@ export default function SettingsPage() {
 
       {/* ── GitHub (user-level — shown to all users, not org-admin gated) ── */}
       <IntegrationCard
+        id='github'
         icon={<Github className='h-4 w-4 text-secondary' />}
         title='GitHub Integration'
         statusBadge={
@@ -548,6 +575,7 @@ export default function SettingsPage() {
       {/* ── AI Provider Keys (requires canManageAiKeys) ─────────────────────── */}
       {permissions?.canManageAiKeys && (
         <IntegrationCard
+          id='api-keys'
           icon={<Key className='h-4 w-4 text-secondary' />}
           title='AI Provider Keys'
           statusBadge={

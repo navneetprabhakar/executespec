@@ -50,6 +50,7 @@ public class ContractConsumerController {
   private final ProjectRepoRepository projectRepoRepo;
   private final ExecutespecFolderWriter folderWriter;
   private final com.navneet.executespec.auth.repository.AppUserRepository userRepo;
+  private final com.navneet.executespec.project.pr.PullRequestRecordService prRecordService;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
       activityEmitterProvider;
 
@@ -109,27 +110,53 @@ public class ContractConsumerController {
     String yaml = composeConsumerYaml(contract, body.versionConstraint());
     String path = ".executespec/contracts/consumed/" + contract.getName() + ".consumer.yaml";
     try {
-      folderWriter.writeFiles(
-          consumerRepo2,
-          null,
-          java.util.Map.of(path, yaml),
-          "ExecuteSpec: declare "
-              + contract.getName()
-              + " consumer in "
-              + consumerRepo2.getGithubRepoFullName(),
-          "Auto-declared consumer relationship.\n\n"
-              + "Contract: "
-              + contract.getName()
-              + "\n"
-              + "Producer repo: contract row "
-              + contract.getId()
-              + "\n"
-              + "Consumer repo: "
-              + consumerRepo2.getGithubRepoFullName()
-              + "\n"
-              + "Version constraint: "
-              + (body.versionConstraint() == null ? "(any)" : body.versionConstraint()),
-          pat);
+      java.util.Optional<
+              com.navneet.executespec.folder.ExecutespecFolderWriter.PullRequestInfo>
+          prInfo =
+              folderWriter.writeFiles(
+                  consumerRepo2,
+                  null,
+                  java.util.Map.of(path, yaml),
+                  "ExecuteSpec: declare "
+                      + contract.getName()
+                      + " consumer in "
+                      + consumerRepo2.getGithubRepoFullName(),
+                  "Auto-declared consumer relationship.\n\n"
+                      + "Contract: "
+                      + contract.getName()
+                      + "\n"
+                      + "Producer repo: contract row "
+                      + contract.getId()
+                      + "\n"
+                      + "Consumer repo: "
+                      + consumerRepo2.getGithubRepoFullName()
+                      + "\n"
+                      + "Version constraint: "
+                      + (body.versionConstraint() == null ? "(any)" : body.versionConstraint()),
+                  pat);
+      // V169 (2026-05-02) — surface the consumer-declaration PR in the
+      // dashboard PR rollup. Best-effort; the DB row already persisted
+      // above so the planner-injection path works regardless.
+      if (prInfo.isPresent()
+          && prInfo.get().openedNewPr()
+          && prInfo.get().prUrl() != null) {
+        try {
+          prRecordService.recordCreated(
+              null,
+              projectId,
+              consumerRepo2.getId(),
+              consumerRepo2.getGithubRepoFullName(),
+              prInfo.get().prUrl(),
+              prInfo.get().branchName(),
+              null,
+              com.navneet.executespec.project.pr.PullRequestRecord.Kind.CONTRACT);
+        } catch (Exception recEx) {
+          log.warn(
+              "[ContractConsumerController] could not record consumer PR for {}: {}",
+              consumerRepo2.getGithubRepoFullName(),
+              recEx.getMessage());
+        }
+      }
     } catch (Exception ex) {
       log.warn(
           "[ContractConsumerController] consumer PR open failed (DB row persisted): {}",

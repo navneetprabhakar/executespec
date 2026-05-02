@@ -161,6 +161,15 @@ public class V2RunOrchestrator {
   private final com.navneet.executespec.analytics.EventTrackingService eventTracking;
 
   /**
+   * 2026-05-02 — re-review path needs to delete the existing {@code validation_report} row before
+   * the reviewer + accuracy assessor + report generator re-run with the expanded vendored-path
+   * exclusion regex. Wired here (rather than calling {@link ValidationReportService}) so the
+   * transactional boundary stays a single repository call instead of bouncing through the report
+   * service's read/write/index-rebuild path.
+   */
+  private final com.navneet.executespec.report.ValidationReportRepository validationReportRepository;
+
+  /**
    * V165 BYOK fix — resolves customer-configured keys at run-start; LlmRouterV2 reads back per
    * dispatch.
    */
@@ -969,6 +978,16 @@ public class V2RunOrchestrator {
                     .enableSmokeTests(true)
                     .designBlock(designBlock)
                     .projectId(projectId)
+                    // Multi-repo runs depend on the worker seeing the "MULTI-REPO PROJECT
+                    // WORKSPACE" header + the per-repo subdir list — without it the worker
+                    // writes generated files at workspace root and the per-repo push step
+                    // opens empty PRs. The planner already received this block at line 816;
+                    // recompute fresh here from the same inputs (projectId + selectedRepoIds)
+                    // so executor + planner can never drift, and so we don't have to widen
+                    // the scope of an inner-block local variable. Returns null on single-repo
+                    // / scratch-workspace runs; the worker's composeSystemPrompt skips the
+                    // block when null.
+                    .workspaceSummary(buildMultiRepoSummary(projectId, selectedRepoIds))
                     .build());
       } catch (Exception e) {
         log.error("V2RunOrchestrator run={} executor failed", runId, e);
@@ -1388,9 +1407,229 @@ public class V2RunOrchestrator {
     return true;
   }
 
+  // ── V168 (2026-05-02) — pause + resume ────────────────────────────────────
+
+  /**
+   * Outcome of a {@link #resume(String)} call. Mapped to HTTP status by {@code RunController}.
+   *
+   * <ul>
+   *   <li>{@link #OK} — resume accepted; pipeline resubmitted on the worker pool.
+   *   <li>{@link #NOT_PAUSED} — run isn't in {@code PAUSED}. Caller should fix state or use cancel
+   *       / retry.
+   *   <li>{@link #WORKSPACE_GONE} — local workspace dir is missing. Same-JVM resume is impossible
+   *       today; cross-JVM workspace shipping is the deferred chunk #3 of the pause/resume design.
+   *   <li>{@link #NOT_FOUND} — run id is unknown.
+   * </ul>
+   */
+  public enum ResumeOutcome {
+    OK,
+    NOT_PAUSED,
+    WORKSPACE_GONE,
+    NOT_FOUND
+  }
+
+  /** Wall-clock cap for a paused run before {@link StartupRunResumerV2} treats it as abandoned. */
+  private static final java.time.Duration PAUSED_RUN_MAX_AGE = java.time.Duration.ofHours(24);
+
+  /**
+   * Request a pause. Sets {@code pause_requested = true} on the row + emits the SSE so the UI flips
+   * immediately. The actual transition to {@code PAUSED} happens cooperatively at the next task or
+   * iteration boundary inside {@code SequentialExecutorV2.executeOne} or {@code WorkerAgentV2.run};
+   * see those for the checkpoint shape. The in-flight LLM round-trip is NOT cancelled (mid-call
+   * abort is the deferred chunk #4 of the design — provider-specific work).
+   *
+   * <p>Returns true iff the pause request was accepted (run is in {@code WORKING} or {@code
+   * REVIEWING}). Returns false for any other status — the controller maps this to HTTP 409.
+   * Idempotent: a second pause request while the run is already PAUSED returns false (no churn on
+   * paused runs).
+   */
+  public boolean pause(String runId) {
+    var opt = runRepo.findById(runId);
+    if (opt.isEmpty()) return false;
+    var run = opt.get();
+    String status = run.getStatus();
+    // Pause is only meaningful while work is happening. Other states either
+    // already act as pause-equivalents (AWAITING_APPROVAL = plan gate; PAUSED
+    // = already paused) or are too short / terminal to bother (PLANNING,
+    // QUEUED, COMPLETE/FAILED/CANCELLED).
+    if (!"WORKING".equals(status) && !"REVIEWING".equals(status)) return false;
+
+    log.info("V2RunOrchestrator pause: run={} prev={}", runId, status);
+
+    // Persist checkpoint state. paused_task_id + paused_at_iteration are best-effort here —
+    // the executor's mid-task checkpoint write (deferred follow-up) would populate them
+    // precisely. Today we record the timestamp + bump pause_count so support tooling can
+    // diagnose state, and let resume re-plan + pick up from disk state.
+    run.setPauseRequested(true);
+    run.setStatus("PAUSED");
+    run.setPausedAt(java.time.Instant.now());
+    run.setPauseCount(run.getPauseCount() + 1);
+    runRepo.save(run);
+
+    // Interrupt the pipeline thread. The pipeline isn't fully cancellation-aware at every step,
+    // but its terminal writes are no-ops because the run is already PAUSED. Files already written
+    // to <workspace>/<runId>/ stay on disk — that's what the resume path picks up.
+    Future<?> future = activeRuns.remove(runId);
+    if (future != null) future.cancel(true);
+
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "PAUSED"));
+    broadcaster.emit(
+        runId,
+        RunEvent.log(runId, "pause", "Run paused. Workspace files preserved. Resume to continue."));
+    return true;
+  }
+
+  /**
+   * Resume a previously-paused run. See {@link ResumeOutcome} for return shape.
+   *
+   * <p>Same-JVM only: checks that {@code <agent.workspace>/<runId>/} still exists. When the
+   * pause-side workspace is gone (deploy + scale-down, container rebuild, etc.) returns {@link
+   * ResumeOutcome#WORKSPACE_GONE} and leaves the run in {@code PAUSED} so the user can choose to
+   * cancel or retry. Cross-JVM resume via GCS workspace shipping is the deferred chunk #3.
+   *
+   * <p>Resubmits {@code runPipeline} on the worker pool with {@link
+   * RunPipelineRequest#startFromTaskId} populated from {@code pipeline_run.paused_task_id} — the
+   * executor skips already-completed tasks and re-establishes worker conversation from {@code
+   * ContextStoreV2}'s saved snapshot for the partly-done task (if any).
+   */
+  public ResumeOutcome resume(String runId) {
+    var opt = runRepo.findById(runId);
+    if (opt.isEmpty()) return ResumeOutcome.NOT_FOUND;
+    var run = opt.get();
+    if (!"PAUSED".equals(run.getStatus())) return ResumeOutcome.NOT_PAUSED;
+
+    // Same-JVM check — workspace dir present?
+    java.nio.file.Path workspace =
+        java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!java.nio.file.Files.isDirectory(workspace)) {
+      log.warn(
+          "V2RunOrchestrator resume rejected: workspace not on this node (cross-JVM resume needs"
+              + " GCS shipping — chunk #3 of pause/resume). run={} workspace={}",
+          runId,
+          workspace);
+      return ResumeOutcome.WORKSPACE_GONE;
+    }
+
+    log.info(
+        "V2RunOrchestrator resume: run={} prev=PAUSED pausedTaskId={} pausedAtIteration={}",
+        runId,
+        run.getPausedTaskId(),
+        run.getPausedAtIteration());
+
+    // Reset the pause flag so the executor doesn't immediately re-pause; bump
+    // counters; flip status back to WORKING so the UI un-greys.
+    run.setPauseRequested(false);
+    run.setResumedAt(java.time.Instant.now());
+    run.setStatus("WORKING");
+    runRepo.save(run);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+    broadcaster.emit(runId, RunEvent.log(runId, "resume", "Resuming from checkpoint"));
+
+    // Resubmit on the pool. The pipeline reads pausedTaskId from the row and
+    // skips earlier tasks; ContextStoreV2's saved snapshot rehydrates the
+    // worker conversation for the partly-completed task.
+    final RunPipelineRequest reReq = RunPipelineRequest.fromPausedRow(run);
+    Future<?> future =
+        pool.submit(
+            () -> {
+              try {
+                runPipelineForResume(reReq);
+              } finally {
+                activeRuns.remove(runId);
+              }
+            });
+    activeRuns.put(runId, future);
+    return ResumeOutcome.OK;
+  }
+
+  /**
+   * Resume entry-point invoked from {@link #resume(String)}. Calls the canonical {@code
+   * runPipeline(...)} 11-arg overload — the deepest one. The executor + worker check {@code
+   * pipeline_run.paused_task_id} on the row at every boundary and skip / replay accordingly. Kept
+   * as a named seam because every resume must come through here (the controller never calls {@code
+   * runPipeline} directly), which simplifies tests + observability hooks.
+   */
+  void runPipelineForResume(RunPipelineRequest req) {
+    runPipeline(
+        req.runId(),
+        req.provider(),
+        req.model(),
+        req.userRequest(),
+        req.skipApproval(),
+        req.executionMode(),
+        req.projectId(),
+        req.selectedRepoIds(),
+        req.githubPat(),
+        req.tddMode(),
+        req.branchOverride());
+  }
+
+  /**
+   * Snapshot of the inputs needed to resume a paused run. Built from the persisted {@code
+   * pipeline_run} row by {@link #fromPausedRow}. Carries enough to recompose the original
+   * orchestrator call without depending on caller context that's gone after process restart.
+   *
+   * <p>Note: {@code figmaUrl} isn't carried because it's stamped on the row at submit-time and the
+   * design-compliance scorer reads it directly from {@code pipeline_run.figma_url}; resume doesn't
+   * need to re-thread it.
+   */
+  public record RunPipelineRequest(
+      String runId,
+      String userRequest,
+      String provider,
+      String model,
+      String executionMode,
+      boolean skipApproval,
+      String projectId,
+      List<UUID> selectedRepoIds,
+      String githubPat,
+      boolean tddMode,
+      String branchOverride) {
+
+    public static RunPipelineRequest fromPausedRow(
+        com.navneet.executespec.state.entity.PipelineRun run) {
+      // Worker model is the closest analogue to a single "run model" — it's what the bulk of the
+      // run's LLM calls used. Resume re-resolves per-tier per-call so this is mostly a label;
+      // null falls through to ModelResolver defaults.
+      return new RunPipelineRequest(
+          run.getRunId(),
+          run.getUserRequest(),
+          run.getAiProvider(),
+          run.getWorkerModel(),
+          run.getApprovedExecutionMode() == null ? "PRODUCTION" : run.getApprovedExecutionMode(),
+          /* skipApproval */ true, // already approved before the original execution started
+          run.getProjectId(),
+          deserializeRepoIds(run.getSelectedRepoIds()),
+          /* githubPat */ null, // resume reuses workspace state — no fresh PAT needed for clones
+          /* tddMode */ false,
+          /* branchOverride */ null);
+    }
+  }
+
+  /** Inverse of {@code serializeRepoIds} used at submit-time. */
+  private static List<UUID> deserializeRepoIds(String json) {
+    if (json == null || json.isBlank()) return List.of();
+    try {
+      var arr = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+      java.util.List<UUID> out = new java.util.ArrayList<>();
+      if (arr.isArray()) {
+        for (var n : arr) {
+          out.add(UUID.fromString(n.asText()));
+        }
+      }
+      return out;
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
+
   /**
    * Non-terminal status set used by the halt-all admin tool (M-010). Cheaper to query than scanning
    * every row; covers every status that {@link #isTerminal(String)} rejects.
+   *
+   * <p>{@code PAUSED} is intentionally excluded from halt-all (V168) — paused runs are stable
+   * checkpoints, not stuck work, and the operator should resume + cancel deliberately rather than
+   * sweep them alongside genuinely-active runs.
    */
   static final List<String> NON_TERMINAL_STATUSES =
       List.of("QUEUED", "PLANNING", "AWAITING_APPROVAL", "WORKING", "REVIEWING");
@@ -1509,6 +1748,233 @@ public class V2RunOrchestrator {
             log.error("V2RunOrchestrator retryValidation failed run={}", runId, e);
           }
         });
+  }
+
+  /**
+   * 2026-05-02 — full re-review flow for SUPER_ADMINs. Unlike {@link #retryValidation} (which only
+   * regenerates the report from cached signals), this path:
+   *
+   * <ol>
+   *   <li>Deletes the existing {@code validation_report} row entirely
+   *   <li>Resets {@code pipeline_run.status} to {@code REVIEWING} + clears {@code statusReason} +
+   *       {@code completedAt} + {@code reviewJson}
+   *   <li>Submits an async job that runs {@link ReviewerAgentV3#review} from scratch against the
+   *       persisted workspace, calls {@link #persistReview} + {@link #generateValidationReport},
+   *       then re-resolves the terminal status via {@link #resolveTerminalStatus}
+   *   <li>Emits {@code STATUS} (REVIEWING) and {@code COMPLETE} SSE events so the UI mirrors the
+   *       transition live
+   * </ol>
+   *
+   * <p>Use case: shipped a fix to the reviewer / accuracy-assessor / vendored-exclusion path and
+   * want to re-derive an existing run's score under the new code without re-running the whole
+   * pipeline. Cost: one full reviewer pass (general + wiring + final build) + one accuracy
+   * assessment + one validation report generation. Runs in the same {@code pool} as the main
+   * pipeline so admin re-reviews queue behind active runs.
+   *
+   * @throws IllegalArgumentException run not found
+   * @throws IllegalStateException run is still in a non-terminal state (PLANNING / WORKING /
+   *     REVIEWING / AWAITING_APPROVAL)
+   */
+  public void reReview(String runId) {
+    var run =
+        runRepo
+            .findById(runId)
+            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+    if (!java.util.List.of("COMPLETE", "PARTIAL", "FAILED").contains(run.getStatus())) {
+      throw new IllegalStateException(
+          "re-review requires a terminal run (current: " + run.getStatus() + ")");
+    }
+    log.info("V2RunOrchestrator reReview: run={} previous status={}", runId, run.getStatus());
+
+    // Synchronous reset so the caller's 202 reflects the live state — once we return, the run is
+    // already showing REVIEWING in any subsequent GET. The actual reviewer pass kicks off async.
+    validationReportRepository
+        .findByRunId(runId)
+        .ifPresent(
+            existing -> {
+              log.info(
+                  "V2RunOrchestrator reReview: deleting existing validation_report id={} for run={}",
+                  existing.getId(),
+                  runId);
+              validationReportRepository.delete(existing);
+            });
+    run.setStatus("REVIEWING");
+    run.setStatusReason(null);
+    run.setCompletedAt(null);
+    run.setReviewJson(null);
+    runRepo.save(run);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "REVIEWING"));
+
+    pool.submit(
+        () -> {
+          try {
+            runReReviewBlocking(runId);
+          } catch (Exception e) {
+            log.error("V2RunOrchestrator reReview run={} failed unexpectedly", runId, e);
+            // Best-effort terminal flip so the run doesn't stay stuck at REVIEWING forever.
+            try {
+              var stuck = runRepo.findById(runId).orElse(null);
+              if (stuck != null && "REVIEWING".equals(stuck.getStatus())) {
+                stuck.setStatus("PARTIAL");
+                stuck.setStatusReason("RE_REVIEW_FAILED");
+                stuck.setCompletedAt(Instant.now());
+                runRepo.save(stuck);
+                broadcaster.emit(
+                    runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
+              }
+            } catch (Exception ignored) {
+              // give up — operator can hit the endpoint again
+            }
+          }
+        });
+  }
+
+  /**
+   * Synchronous body of the {@link #reReview(String)} async task. Resolves the provider/model,
+   * builds a fresh {@link ExecutionContext}, runs reviewer + validation report generation, then
+   * derives + persists the new terminal status. Extracted so the outer method can wrap it in a
+   * blanket try/catch that flips the run back out of REVIEWING on unexpected failure.
+   */
+  private void runReReviewBlocking(String runId) {
+    var run = runRepo.findById(runId).orElse(null);
+    if (run == null) {
+      log.warn("V2RunOrchestrator reReview: run {} disappeared mid-flight", runId);
+      return;
+    }
+    LlmProvider provider;
+    try {
+      provider =
+          LlmProvider.valueOf(
+              (run.getAiProvider() == null ? "openai" : run.getAiProvider()).toUpperCase());
+    } catch (IllegalArgumentException e) {
+      provider = LlmProvider.OPENAI;
+    }
+    ResolvedModel reviewerModel =
+        modelResolver.resolve("ReviewerAgentV3", provider, AgentTier.PLANNING);
+
+    Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!Files.isDirectory(workspace)) {
+      log.warn(
+          "V2RunOrchestrator reReview: workspace {} missing for run {}, marking PARTIAL", workspace, runId);
+      run.setStatus("PARTIAL");
+      run.setStatusReason("RE_REVIEW_NO_WORKSPACE");
+      run.setCompletedAt(Instant.now());
+      runRepo.save(run);
+      broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_NO_WORKSPACE"));
+      return;
+    }
+    ExecutionContext rootCtx = new ExecutionContext(runId, "_re_review_", workspace);
+
+    // Recover the planner-declared build command from persisted plan_json so the reviewer's
+    // final-build step uses the same command the original run did. Fall back to null — the
+    // reviewer's BuildCommandResolver then auto-detects from the workspace shape.
+    String buildCommand = null;
+    if (run.getPlanJson() != null && !run.getPlanJson().isBlank()) {
+      try {
+        PlanV2 plan = objectMapper.readValue(run.getPlanJson(), PlanV2.class);
+        buildCommand = plan.buildCommand();
+      } catch (Exception e) {
+        log.debug(
+            "V2RunOrchestrator reReview run={} could not parse planJson; relying on auto-detect",
+            runId);
+      }
+    }
+
+    ReviewerResult reviewResult = null;
+    try {
+      log.info(
+          "V2RunOrchestrator reReview run={} provider={} model={} buildCmd={}",
+          runId,
+          provider,
+          reviewerModel.getModel(),
+          buildCommand == null ? "(auto)" : buildCommand);
+      reviewResult =
+          reviewer.review(
+              ReviewerRequestV2.builder()
+                  .provider(provider.name().toLowerCase())
+                  .model(reviewerModel.getModel())
+                  .context(rootCtx)
+                  .buildCommand(buildCommand)
+                  .skipWiringPass(false)
+                  .build());
+      persistReview(runId, reviewResult);
+    } catch (Exception e) {
+      log.warn(
+          "V2RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
+      persistReviewFailure(runId, e);
+      // reviewResult stays null — generateValidationReport handles that branch (it sets
+      // verdict=APPROVED with summary="Review did not run." which trips status to LEGACY_UNKNOWN
+      // below, surfacing the failure on the UI).
+    }
+
+    // Reconstruct a minimal ExecutionResult from persisted task rows — perTask isn't read by
+    // resolveTerminalStatus or the generateValidationReport(execResult != null) branch when we
+    // pass null for execResult below. We use this purely to get tasksSuccessful / tasksFailed /
+    // anyIntermediateWarning into the status decision.
+    ExecutionResult execResult = reconstructExecResultFromTasks(runId);
+
+    try {
+      generateValidationReport(runId, null, reviewResult, null);
+    } catch (Exception e) {
+      log.warn("V2RunOrchestrator reReview run={} report generation failed: {}", runId, e.getMessage());
+    }
+
+    StatusAndReason terminal = resolveTerminalStatus(execResult, reviewResult);
+    var refreshed = runRepo.findById(runId).orElse(run);
+    refreshed.setStatus(terminal.status());
+    refreshed.setStatusReason(terminal.reason());
+    refreshed.setCompletedAt(Instant.now());
+    runRepo.save(refreshed);
+    broadcaster.emit(runId, RunEvent.complete(runId, terminal.status(), terminal.reason()));
+    log.info(
+        "V2RunOrchestrator reReview run={} done status={} reason={} reviewerVerdict={}",
+        runId,
+        terminal.status(),
+        terminal.reason(),
+        reviewResult == null ? "n/a" : reviewResult.overall());
+  }
+
+  /**
+   * Build a minimal {@link ExecutionResult} from the persisted {@code agent_task} rows, just
+   * enough that {@link #resolveTerminalStatus} can read the four counters it cares about
+   * ({@code overall}, {@code tasksSuccessful}, {@code tasksFailed}, {@code anyIntermediateWarning}).
+   * {@code perTask} is intentionally empty — the only consumer that iterates it
+   * ({@code generateValidationReport}) is invoked with {@code execResult=null} on the re-review
+   * path so it falls through to its own task-row reconstruction branch.
+   */
+  private ExecutionResult reconstructExecResultFromTasks(String runId) {
+    var tasks = taskRepo.findByRunId(runId);
+    int success = 0;
+    int warn = 0;
+    int failed = 0;
+    int skipped = 0;
+    for (var t : tasks) {
+      String s = t.getStatus() == null ? "COMPLETE" : t.getStatus();
+      switch (s) {
+        case "COMPLETE" -> success++;
+        case "PARTIAL" -> warn++;
+        case "FAILED" -> failed++;
+        case "BLOCKED", "SKIPPED" -> skipped++;
+        default -> success++;
+      }
+    }
+    ExecutionResult.Overall overall;
+    if (failed > 0 && success == 0) overall = ExecutionResult.Overall.FAILED;
+    else if (failed > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
+    else if (warn > 0) overall = ExecutionResult.Overall.PARTIAL_WITH_WARNINGS;
+    else overall = ExecutionResult.Overall.ALL_SUCCESS;
+    return ExecutionResult.builder()
+        .overall(overall)
+        .tasksExecuted(tasks.size() - skipped)
+        .tasksSuccessful(success)
+        .tasksWithWarning(warn)
+        .tasksFailed(failed)
+        .tasksSkipped(skipped)
+        .perTask(java.util.List.of())
+        .totalLatencyMs(0L)
+        .finalTaskStatus(null)
+        .anyIntermediateWarning(warn > 0)
+        .build();
   }
 
   private static boolean isTerminal(String status) {

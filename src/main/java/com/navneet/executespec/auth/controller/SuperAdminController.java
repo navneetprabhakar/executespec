@@ -102,6 +102,43 @@ public class SuperAdminController {
     return ResponseEntity.ok(adminReconciliationService.reconcileOrphans(staleMinutes));
   }
 
+  // ── Re-review (2026-05-02 — vendored-path exclusion follow-up) ────────────
+
+  /**
+   * Drop the existing validation report for a terminal V2 run, reset its status to {@code
+   * REVIEWING}, and re-run reviewer + accuracy assessment + report generation under the current
+   * code. Used after shipping fixes to the reviewer / accuracy assessor / vendored-path exclusion
+   * regex so an existing run's score reflects the fix without resubmitting the spec.
+   *
+   * <p>Returns 202 immediately — the reviewer pass runs async on the V2 pipeline pool, and SSE
+   * subscribers see {@code STATUS} (REVIEWING) followed by {@code COMPLETE} (with the new status +
+   * reason) when the pass finishes. Audit row written before the async submit so the action is
+   * traceable even if the reviewer call itself errors out.
+   *
+   * <p>409 if the run is still in a non-terminal state (PLANNING / WORKING / REVIEWING /
+   * AWAITING_APPROVAL); 404 if the run id is unknown.
+   */
+  @PostMapping("/runs/{runId}/re-review")
+  public ResponseEntity<Map<String, Object>> reReviewRun(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails admin) {
+    try {
+      v2RunOrchestrator.reReview(runId);
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (IllegalStateException e) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    }
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("RUN_RE_REVIEWED")
+            .entityType("RUN")
+            .entityId(runId)
+            .actorId(admin == null ? null : admin.getUser().getId())
+            .build());
+    return ResponseEntity.accepted()
+        .body(Map.of("status", "queued", "runId", runId, "message", "re-review submitted"));
+  }
+
   // ── Audit hash chain verifier (M-019) ─────────────────────────────────────
 
   /**

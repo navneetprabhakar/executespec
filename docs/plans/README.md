@@ -16,7 +16,7 @@
 | [`pending-distributed-processing-plan.md`](pending-distributed-processing-plan.md) | **STILL PENDING** — Phase A NFS workspace + Phase B worker-lease pool. Multi-quarter scaling work. | Self |
 | [`pending-vscode-extension-plan.md`](pending-vscode-extension-plan.md) | **STILL PENDING** — separate-repo VS Code extension scaffold. Stub plan; the actual extension lives outside this repo when it ships. | Self |
 | [`pending-complimentary-pro-promo-2026-04-30-plan.md`](pending-complimentary-pro-promo-2026-04-30-plan.md) | **TIME-WINDOWED — 2026-04-30 promo date passed mid-execution.** Worth re-deciding whether to relaunch with a new date or close. Marketing decision; engineering scope unchanged. | Self (but needs a Go/No-Go) |
-| [`phase-2-3-deferred.md`](phase-2-3-deferred.md) | **PARTIALLY SUPERSEDED by M-* execution + `docs/backlog-deferred-items.md`.** Phase 1.0 / 1.1 / 1.2 / 1.3 items are now SHIPPED via Wave 1+2+3+Backlog (see `CHANGELOG.md` v2.7 entry). Phase 2 + Phase 3 deferral rationale still authoritative — the cookie-domain switch, multi-org work, etc., remain deferred per the same reasons. | Combined: this file (Phase 2 + 3 reasoning) + [`backlog-deferred-items.md`](../backlog-deferred-items.md) (per-item first-slice + owner) |
+| [`phase-2-3-deferred.md`](phase-2-3-deferred.md) | **PARTIALLY SUPERSEDED by M-* execution + `docs/backlog-deferred-items.md`.** Phase 1.0 / 1.1 / 1.2 / 1.3 items are now SHIPPED via Wave 1+2+3+Backlog (see `CHANGELOG.md` v2.7 entry). Phase 2 + Phase 3 deferral rationale still authoritative — the cookie-domain switch, multi-org work, etc., remain deferred per the same reasons. | Combined: this file (Phase 2 + 3 reasoning) + [`backlog-deferred-items.md`](backlog-deferred-items.md) (per-item first-slice + owner) |
 | [`ux-overhaul-v4.md`](ux-overhaul-v4.md) | **SHIPPED** on `feature/ux-overhaul-v4-pulse-tab`. Operational truth in `frontend/CLAUDE.md`; this file remains as the design rationale + before/after screenshots. | `frontend/CLAUDE.md` |
 | [`eval-2026-04-26-partial-and-openai-degradation.md`](eval-2026-04-26-partial-and-openai-degradation.md) | **HISTORICAL INVESTIGATION** — root-cause analysis of the booking-spec PARTIAL pattern + OpenAI iteration count. Two of the three findings are now closed by code fixes that landed before the v2.7 batch; the smoke-test bug is still pending. Keep as evidence; don't update. | Self |
 | [`pending-project-surface-vite-split.md`](pending-project-surface-vite-split.md) | **STILL PENDING** — Phase 2 of the v2.7 product-split. Splits the project-surface (TEAM/ENTERPRISE → Build) into a separate Vite bundle from the consumer-surface (FREE/PRO/MAX → Vibe). Multi-week effort, not yet scheduled. Today's surfaces co-habit one bundle (cohabitation invariant under `frontend/src/v3/`). | Self |
@@ -59,7 +59,7 @@ looking:
    `eval-YYYY-MM-DD-*.md` and leave them as historical record (no
    updates after the investigation closes).
 5. **For deferred items**, the canonical home is now
-   [`docs/backlog-deferred-items.md`](../backlog-deferred-items.md)
+   [`docs/backlog-deferred-items.md`](backlog-deferred-items.md)
    (per-item first-slice + owner-needed + when-to-re-open). Plans
    in this folder should be self-contained design docs, not
    deferred-tracker entries.
