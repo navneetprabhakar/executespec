@@ -10,6 +10,8 @@ import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.entity.RunRepoSnapshot;
+import com.navneet.executespec.state.repository.RunRepoSnapshotRepository;
 
 import org.springframework.stereotype.Service;
 
@@ -34,9 +36,15 @@ public class WorkspaceFileService {
   private final StateStore stateStore;
   private final GitHubRepoService gitHubRepoService;
   private final WorkspaceRestoreService restoreService;
+  private final RunRepoSnapshotRepository runRepoSnapshotRepository;
 
   private static final long MAX_FILE_SIZE = 1024 * 1024; // 1 MB
 
+  // 2026-05-02 — kept aligned with com.navneet.executespec.harness.VendoredPathGuard.VENDORED_DIRS
+  // so the file-tree, accuracy-assessor, and pre-commit guard all share one definition of
+  // "vendored / build-artefact path that doesn't belong in the run." The SKIP_DIRS list here is
+  // strictly a superset (also includes .git / .agent-context / worktrees, which are pipeline
+  // infrastructure rather than vendored content).
   private static final List<String> SKIP_DIRS =
       List.of(
           ".git",
@@ -44,9 +52,20 @@ public class WorkspaceFileService {
           "target",
           "build",
           "node_modules",
+          "venv",
+          ".venv",
+          "__pycache__",
           ".gradle",
           ".idea",
           ".vscode",
+          ".next",
+          "coverage",
+          "bower_components",
+          "vendor",
+          ".pytest_cache",
+          ".mypy_cache",
+          ".tox",
+          ".nyc_output",
           "worktrees");
   private static final List<String> SKIP_EXTENSIONS =
       List.of(
@@ -199,6 +218,385 @@ public class WorkspaceFileService {
     return (run.getGithubPat() != null && !run.getGithubPat().isBlank())
         ? run.getGithubPat()
         : null;
+  }
+
+  // ── File-status (V169-companion 2026-05-02) ──────────────────────────────
+
+  /**
+   * Per-file change status surfaced on the run-detail file tree so the user can see at a glance
+   * what the worker has added vs modified vs left untouched. {@link Status#UNCHANGED} files
+   * already existed on the cloned source and the run hasn't touched them; the rest are deltas.
+   */
+  public enum Status {
+    /** New file the worker created (untracked + staged-add both surface as ADDED). */
+    ADDED,
+    /** File existed on the cloned base but the worker rewrote part of it. */
+    MODIFIED,
+    /** File existed on the cloned base, untouched by the worker. */
+    UNCHANGED
+  }
+
+  public record FileEntry(String path, Status status) {}
+
+  /**
+   * 2026-05-02 — base + head content for a single workspace file, so the run-detail UI can render
+   * a Monaco {@code DiffEditor} (only the diff is visible, not the full file). {@code base} is the
+   * snapshot the run was cloned against ({@link RunRepoSnapshot#commitSha}); {@code head} is the
+   * current FS content. ADDED files have empty {@code base}; deleted files have empty {@code head}
+   * (rare on this pipeline). Outside any {@code repos/<name>/} subdir there is no base — the
+   * worker is the only writer for those (e.g. {@code .agent-context/project.json}).
+   */
+  public record FileDiff(String path, String base, String head, Status status) {}
+
+  /**
+   * Read base + head content for a single file. Pulls the cloned base SHA from
+   * {@link RunRepoSnapshot} (V100), then runs {@code git show <sha>:<rel>} per repo subdir. Falls
+   * back to {@code git merge-base HEAD origin/HEAD} when no snapshot row exists (older runs
+   * pre-V100). Best-effort: every git failure degrades to {@code base=""} so the UI still gets a
+   * one-sided "added" diff instead of an opaque error.
+   */
+  public FileDiff readFileDiff(String runId, String relativePath) throws IOException {
+    if (relativePath.contains("..")) {
+      throw new SecurityException("Path traversal not allowed: " + relativePath);
+    }
+
+    Path root = workspaceRoot(runId);
+    if (!Files.isDirectory(root)) {
+      try {
+        root = restoreService.ensureWorkspaceAvailable(runId);
+      } catch (Exception e) {
+        // No local checkout — diff isn't meaningful; serve head-only via the GitHub fallback.
+        String head;
+        try {
+          head = readFromGitHub(runId, relativePath);
+        } catch (NoSuchFileException nsf) {
+          throw nsf;
+        }
+        return new FileDiff(relativePath, "", head, Status.ADDED);
+      }
+    }
+
+    // Files outside any repos/<name>/ subdir — no base in any repo, treat as ADDED.
+    if (!relativePath.startsWith("repos/")) {
+      String head = readLocalFile(root, relativePath);
+      return new FileDiff(relativePath, "", head, Status.ADDED);
+    }
+
+    String[] parts = relativePath.split("/", 3);
+    if (parts.length < 3) {
+      throw new NoSuchFileException(relativePath);
+    }
+    String repoName = parts[1];
+    String repoRelativePath = parts[2];
+    Path repoDir = root.resolve("repos").resolve(repoName);
+    if (!Files.isDirectory(repoDir)) {
+      throw new NoSuchFileException(relativePath);
+    }
+
+    // Resolve base SHA: prefer the persisted snapshot, fall back to merge-base.
+    String baseSha = lookupBaseSha(runId, repoName, repoDir);
+
+    String head;
+    boolean headExists;
+    try {
+      head = readLocalFile(root, relativePath);
+      headExists = true;
+    } catch (NoSuchFileException e) {
+      head = "";
+      headExists = false;
+    }
+
+    String base = "";
+    boolean baseExists = false;
+    if (baseSha != null) {
+      try {
+        base = runGitShow(repoDir, baseSha, repoRelativePath);
+        baseExists = base != null;
+        if (!baseExists) base = "";
+      } catch (Exception e) {
+        log.debug("git show failed for {}#{} @ {}: {}", repoName, repoRelativePath, baseSha, e.getMessage());
+      }
+    }
+
+    Status status;
+    if (!baseExists && headExists) status = Status.ADDED;
+    else if (baseExists && !headExists) status = Status.MODIFIED; // worker deletion — coarse
+    else if (baseExists && head.equals(base)) status = Status.UNCHANGED;
+    else status = Status.MODIFIED;
+
+    return new FileDiff(relativePath, base, head, status);
+  }
+
+  /**
+   * Look up the cloned base SHA for one repo subdir of a run. Tries the persisted
+   * {@link RunRepoSnapshot} first (V100, set by {@code WorkspaceInitService.cloneMultipleRepos}).
+   * Falls back to {@code git merge-base HEAD origin/HEAD} for runs that pre-date V100 or where
+   * the snapshot row is missing for any reason. Returns {@code null} when neither path resolves.
+   */
+  private String lookupBaseSha(String runId, String repoName, Path repoDir) {
+    try {
+      List<RunRepoSnapshot> snaps = runRepoSnapshotRepository.findByRunId(runId);
+      for (RunRepoSnapshot s : snaps) {
+        // repo_full_name is "owner/repo"; the workspace subdir uses just "repo".
+        String full = s.getRepoFullName();
+        if (full == null) continue;
+        String shortName = full.contains("/") ? full.substring(full.lastIndexOf('/') + 1) : full;
+        if (shortName.equals(repoName)) {
+          return s.getCommitSha();
+        }
+      }
+    } catch (Exception e) {
+      log.debug("snapshot lookup failed for {}/{}: {}", runId, repoName, e.getMessage());
+    }
+    // Fallback — origin/HEAD points at the cloned tip.
+    try {
+      List<String> out = runGit(repoDir, List.of("merge-base", "HEAD", "origin/HEAD"), 5);
+      if (!out.isEmpty()) return out.get(0).trim();
+    } catch (Exception e) {
+      log.debug("merge-base fallback failed for {}: {}", repoName, e.getMessage());
+    }
+    return null;
+  }
+
+  /**
+   * {@code git show <sha>:<path>} — returns the file content at that commit, or {@code null} when
+   * the file did not exist there (so the caller can classify ADDED). Output is captured as UTF-8.
+   */
+  private String runGitShow(Path repoDir, String sha, String path) throws IOException, InterruptedException {
+    ProcessBuilder pb =
+        new ProcessBuilder("git", "show", sha + ":" + path)
+            .directory(repoDir.toFile())
+            .redirectErrorStream(false);
+    Process p = pb.start();
+    StringBuilder sb = new StringBuilder();
+    try (var br =
+        new java.io.BufferedReader(
+            new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+      char[] buf = new char[4096];
+      int n;
+      while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
+    }
+    boolean done = p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+    if (!done) {
+      p.destroyForcibly();
+      throw new IOException("git show timed out");
+    }
+    if (p.exitValue() != 0) {
+      // Most common reason: file didn't exist at that commit. Caller classifies as ADDED.
+      return null;
+    }
+    return sb.toString();
+  }
+
+  private List<String> runGit(Path repoDir, List<String> args, int timeoutSeconds)
+      throws IOException, InterruptedException {
+    List<String> cmd = new ArrayList<>(args.size() + 1);
+    cmd.add("git");
+    cmd.addAll(args);
+    ProcessBuilder pb = new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
+    Process p = pb.start();
+    List<String> lines = new ArrayList<>();
+    try (var br =
+        new java.io.BufferedReader(
+            new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = br.readLine()) != null) lines.add(line);
+    }
+    boolean done = p.waitFor(timeoutSeconds, java.util.concurrent.TimeUnit.SECONDS);
+    if (!done) {
+      p.destroyForcibly();
+      throw new IOException("git command timed out: " + cmd);
+    }
+    if (p.exitValue() != 0) {
+      throw new IOException("git exit=" + p.exitValue() + " for " + cmd);
+    }
+    return lines;
+  }
+
+  /**
+   * Same listing as {@link #listFiles(String)} but each entry also carries a git-derived
+   * {@link Status}. Multi-repo aware: each {@code repos/<name>/} subdir is its own git checkout
+   * so we run {@code git status --porcelain} per repo and union the results, prefixing every
+   * relative path with {@code repos/<name>/} so they line up with what the file tree
+   * already shows.
+   *
+   * <p>Files outside any {@code repos/<name>/} subdir (e.g. workspace-root scaffolding,
+   * {@code .agent-context/}) are reported as {@link Status#ADDED} when present, since the worker
+   * is the only writer for those paths.
+   */
+  public List<FileEntry> listFilesWithStatus(String runId) throws IOException {
+    Path root = workspaceRoot(runId);
+    if (!Files.isDirectory(root)) {
+      // GCS / GitHub fallback — no per-file status available; return everything as UNCHANGED so
+      // the UI degrades gracefully instead of showing every file as ADDED.
+      return listFiles(runId).stream().map(p -> new FileEntry(p, Status.UNCHANGED)).toList();
+    }
+
+    List<String> all = listLocalFiles(root);
+    java.util.Map<String, Status> statusByRepo = collectGitStatusForAllRepos(root);
+    // 2026-05-02 — porcelain only shows uncommitted changes; once the worker calls gitCommit
+    // every changed file flips back to UNCHANGED and the A/M chips on the file tree go blank.
+    // Layer in committed-since-clone deltas via `git diff --name-status <baseSha>..HEAD` so
+    // file-tree status remains accurate end-to-end.
+    java.util.Map<String, Status> committedByRepo = collectCommittedDeltasForAllRepos(runId, root);
+
+    List<FileEntry> out = new ArrayList<>(all.size());
+    for (String path : all) {
+      Status s = statusByRepo.get(path);
+      if (s == null || s == Status.UNCHANGED) {
+        s = committedByRepo.getOrDefault(path, Status.UNCHANGED);
+      }
+      // Files outside repos/<name>/ that aren't tracked anywhere → treat as ADDED (the
+      // worker created them; e.g. .agent-context/project.json).
+      if (s == Status.UNCHANGED && !path.startsWith("repos/") && !path.contains("/.git/")) {
+        s = Status.ADDED;
+      }
+      out.add(new FileEntry(path, s));
+    }
+    return out;
+  }
+
+  /**
+   * Per-repo {@code git diff --name-status <baseSha>..HEAD} merged into the same workspace-relative
+   * map shape as {@link #collectGitStatusForAllRepos}. Picks up files that the worker added or
+   * modified <i>and committed</i>, which {@code git status --porcelain} alone misses. Falls back
+   * silently per repo when the base SHA can't be resolved.
+   */
+  private java.util.Map<String, Status> collectCommittedDeltasForAllRepos(String runId, Path workspaceRoot) {
+    java.util.Map<String, Status> merged = new java.util.HashMap<>();
+    Path reposDir = workspaceRoot.resolve("repos");
+    if (!Files.isDirectory(reposDir)) return merged;
+
+    try (var stream = Files.list(reposDir)) {
+      stream
+          .filter(Files::isDirectory)
+          .forEach(
+              repoDir -> {
+                String repoName = repoDir.getFileName().toString();
+                String baseSha = lookupBaseSha(runId, repoName, repoDir);
+                if (baseSha == null) return;
+                String prefix = "repos/" + repoName + "/";
+                try {
+                  for (var line :
+                      runGit(repoDir, List.of("diff", "--name-status", baseSha + "..HEAD"), 15)) {
+                    if (line.isBlank()) continue;
+                    char code = line.charAt(0);
+                    int tab = line.indexOf('\t');
+                    if (tab < 0) continue;
+                    String rest = line.substring(tab + 1).trim();
+                    // Renames: "R100\told\tnew" — take the "new" path.
+                    if (code == 'R' || code == 'C') {
+                      int sep = rest.indexOf('\t');
+                      if (sep > 0) rest = rest.substring(sep + 1).trim();
+                    }
+                    Status s;
+                    if (code == 'A') s = Status.ADDED;
+                    else if (code == 'D') continue; // deletion — head doesn't exist, skip
+                    else if (code == 'R' || code == 'C') s = Status.ADDED; // rename target
+                    else s = Status.MODIFIED;
+                    merged.put(prefix + rest, s);
+                  }
+                } catch (Exception e) {
+                  log.debug(
+                      "git diff --name-status failed in {} ({}): {}",
+                      repoDir,
+                      repoName,
+                      e.getMessage());
+                }
+              });
+    } catch (IOException ignored) {
+      // listing failure is non-fatal — UI gets UNCHANGED everywhere
+    }
+    return merged;
+  }
+
+  /**
+   * Walk every {@code repos/<name>/} subdir, run {@code git status --porcelain}, and merge the
+   * results into a path → status map keyed on the workspace-relative path (so the keys line up
+   * with what {@link #listLocalFiles} produces). Best-effort — git failures log + the repo's
+   * files fall through to UNCHANGED.
+   */
+  private java.util.Map<String, Status> collectGitStatusForAllRepos(Path workspaceRoot) {
+    java.util.Map<String, Status> merged = new java.util.HashMap<>();
+    Path reposDir = workspaceRoot.resolve("repos");
+    if (!Files.isDirectory(reposDir)) return merged;
+
+    try (var stream = Files.list(reposDir)) {
+      stream
+          .filter(Files::isDirectory)
+          .forEach(
+              repoDir -> {
+                String repoName = repoDir.getFileName().toString();
+                String prefix = "repos/" + repoName + "/";
+                try {
+                  for (var line : runGitStatusPorcelain(repoDir)) {
+                    // Porcelain v1: 2-char status, space, path. e.g. " M src/foo.ts",
+                    // "?? src/bar.ts", "A  src/baz.ts". Renames look like "R  old -> new".
+                    if (line.length() < 3) continue;
+                    String code = line.substring(0, 2);
+                    String rest = line.substring(3).trim();
+                    String path = rest.contains(" -> ") ? rest.substring(rest.indexOf(" -> ") + 4) : rest;
+                    // Quoted paths (when special chars present) — strip surrounding quotes.
+                    if (path.startsWith("\"") && path.endsWith("\"")) {
+                      path = path.substring(1, path.length() - 1);
+                    }
+                    Status s = classifyPorcelainCode(code);
+                    if (s != Status.UNCHANGED) {
+                      merged.put(prefix + path, s);
+                    }
+                  }
+                } catch (Exception e) {
+                  log.debug(
+                      "git status failed in {} ({}); leaving repo as UNCHANGED: {}",
+                      repoDir,
+                      repoName,
+                      e.getMessage());
+                }
+              });
+    } catch (IOException ignored) {
+      // listing failure is non-fatal — UI gets UNCHANGED everywhere
+    }
+    return merged;
+  }
+
+  private List<String> runGitStatusPorcelain(Path repoDir) throws IOException, InterruptedException {
+    ProcessBuilder pb =
+        new ProcessBuilder("git", "status", "--porcelain", "--untracked-files=all")
+            .directory(repoDir.toFile())
+            .redirectErrorStream(true);
+    Process p = pb.start();
+    List<String> lines = new ArrayList<>();
+    try (var br =
+        new java.io.BufferedReader(
+            new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+      String line;
+      while ((line = br.readLine()) != null) lines.add(line);
+    }
+    boolean done = p.waitFor(15, java.util.concurrent.TimeUnit.SECONDS);
+    if (!done) {
+      p.destroyForcibly();
+      throw new IOException("git status timed out");
+    }
+    if (p.exitValue() != 0) {
+      throw new IOException("git status exit=" + p.exitValue());
+    }
+    return lines;
+  }
+
+  /** Map porcelain v1 2-char code → our coarse Status enum. */
+  private static Status classifyPorcelainCode(String code) {
+    if (code == null || code.length() < 2) return Status.UNCHANGED;
+    char index = code.charAt(0);
+    char wt = code.charAt(1);
+    // Untracked → ADDED.
+    if (index == '?' && wt == '?') return Status.ADDED;
+    // Index has a new file (A_) or worktree has a new file (_A) → ADDED.
+    if (index == 'A' || wt == 'A') return Status.ADDED;
+    // Anything else with an M / R / D / T marker is a modification of an existing file.
+    if (index == 'M' || wt == 'M' || index == 'R' || wt == 'R' || index == 'T' || wt == 'T') {
+      return Status.MODIFIED;
+    }
+    return Status.UNCHANGED;
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────

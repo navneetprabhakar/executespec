@@ -15,6 +15,8 @@ import java.util.UUID;
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
 import com.navneet.executespec.project.entity.ProjectRepo;
+import com.navneet.executespec.project.pr.PullRequestRecord;
+import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 
 import org.springframework.beans.factory.annotation.Autowired;
@@ -65,6 +67,7 @@ public class BootstrapService {
   private final FolderReadmeGenerator readmeGenerator;
   private final ProjectRepoRepository repoRepo;
   private final ActivityEventEmitter activityEmitter;
+  private final PullRequestRecordService prRecordService;
   private final HttpClient http;
 
   @Value("${agent.github.pat:#{null}}")
@@ -75,8 +78,15 @@ public class BootstrapService {
       ExecutespecFolderWriter writer,
       FolderReadmeGenerator readmeGenerator,
       ProjectRepoRepository repoRepo,
-      ActivityEventEmitter activityEmitter) {
-    this(writer, readmeGenerator, repoRepo, activityEmitter, HttpClient.newHttpClient());
+      ActivityEventEmitter activityEmitter,
+      PullRequestRecordService prRecordService) {
+    this(
+        writer,
+        readmeGenerator,
+        repoRepo,
+        activityEmitter,
+        prRecordService,
+        HttpClient.newHttpClient());
   }
 
   /** Test seam: inject a mock {@link HttpClient}. */
@@ -85,11 +95,13 @@ public class BootstrapService {
       FolderReadmeGenerator readmeGenerator,
       ProjectRepoRepository repoRepo,
       ActivityEventEmitter activityEmitter,
+      PullRequestRecordService prRecordService,
       HttpClient http) {
     this.writer = writer;
     this.readmeGenerator = readmeGenerator;
     this.repoRepo = repoRepo;
     this.activityEmitter = activityEmitter;
+    this.prRecordService = prRecordService;
     this.http = http;
   }
 
@@ -183,9 +195,26 @@ public class BootstrapService {
                 + "link time. See `.executespec/README.md` for what each "
                 + "subfolder is for and which paths are regenerable vs "
                 + "review-worthy.\n\n"
-                + "After merging, ExecuteSpec will start writing the "
-                + "per-repo codemap (E1.2) and any contract auto-detections "
-                + "to this folder via additional PRs.",
+                + "## What happens after you merge this?\n\n"
+                + "* **You don't need to sync.** ExecuteSpec watches the GitHub "
+                + "webhook — when this PR merges, the project dashboard "
+                + "automatically flips this repo from \"Bootstrap PR open\" "
+                + "to \"Bootstrapped\". No manual click required.\n"
+                + "* **No duplicate bootstrap PRs.** If something later re-triggers "
+                + "the bootstrap path (e.g. an admin re-runs `/api/admin/projects/"
+                + "{id}/migrate-codemaps`), ExecuteSpec sees `.executespec/README.md` "
+                + "already on the default branch and short-circuits to "
+                + "BOOTSTRAPPED instead of opening a second PR.\n"
+                + "* **Architecture / codemap PRs.** Once you click *Analyse* "
+                + "on the project (or the chat tool `regenerate_architecture` "
+                + "fires), ExecuteSpec writes per-repo codemaps + an "
+                + "architecture doc to `.executespec/arch/`. Those land as "
+                + "their own PRs (kind=ARCHITECTURE in the dashboard rollup) "
+                + "and only re-open when source code actually changes — "
+                + "the writer compares content hashes and skips empty PRs.\n"
+                + "* **New repos joining this project.** Linking another repo "
+                + "to the project triggers exactly one bootstrap PR for *that* "
+                + "repo. This repo's bootstrap state is untouched.",
             pat);
     if (pr.isEmpty()) {
       String msg =
@@ -202,6 +231,28 @@ public class BootstrapService {
     repo.setExecutespecLastSyncedAt(Instant.now());
     repo.setUpdatedAt(Instant.now());
     repoRepo.save(repo);
+
+    // V169 (2026-05-02) — persist the bootstrap PR so the project dashboard's
+    // Pull requests tab surfaces it. Best-effort: any failure is logged and
+    // ignored so the bootstrap flow completes regardless.
+    try {
+      prRecordService.recordCreated(
+          null,
+          projectId == null ? null : projectId.toString(),
+          repoId,
+          repo.getGithubRepoFullName(),
+          pr.get().prUrl(),
+          pr.get().branchName(),
+          null,
+          PullRequestRecord.Kind.BOOTSTRAP);
+    } catch (Exception e) {
+      log.warn(
+          "Failed to record bootstrap PR for repo {} in project {}: {}",
+          repoId,
+          projectId,
+          e.getMessage());
+    }
+
     activityEmitter.emit(
         projectId,
         ActivityEventType.EXECUTESPEC_BOOTSTRAP_INITIATED,

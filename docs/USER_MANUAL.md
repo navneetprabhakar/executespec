@@ -190,7 +190,7 @@ PROTOTYPE runs skip some validation phases and are significantly faster.
 > `docs/plans/pending-v2-batch-execution-plan.md` but has not shipped.
 > Until it does, every approved run dispatches in real-time and is
 > billed at standard credit cost. The in-app dual-option "Real-time vs
-> Batch" plan-approval card has been hidden in the v2.5.11 UI; the
+> Batch" plan-approval card has been hidden in the v1.0.0-M1 UI; the
 > RunCard "Batch" badge has been hidden as well. This section will be
 > reinstated when V2 batch lands.
 

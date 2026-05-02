@@ -261,6 +261,12 @@ export default function App() {
           <Route path='/projects/:slug' element={<V3ProjectHome />} />
           <Route path='/projects/:slug/runs/:runShort' element={<V3RunDetail />} />
           <Route path='/settings' element={<V3Settings />} />
+          {/* R-141 (deferred Wave-1 follow-up, shipped 2026-05-02) — full
+              key-management surface (GitHub PAT, AI provider keys, Bitbucket,
+              JIRA, Confluence). V3Settings is a read-only summary; this is
+              the actual form page. Deep-linkable via `#github`, `#api-keys`,
+              `#bitbucket`, `#jira`, `#confluence`. */}
+          <Route path='/settings/manage' element={<SettingsPage />} />
           <Route path='/billing' element={<V3Billing />} />
           <Route path='/pricing' element={<V3Pricing />} />
           <Route path='/integrations' element={<V3Integrations />} />

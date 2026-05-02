@@ -70,20 +70,55 @@ public class ProjectLaunchController {
     // v2.5.2 — use @EntityGraph-backed finder so solutions + repoMappings
     // come back in the same query chain, avoiding the per-row solution
     // fetch that caused N+1 on the Launches list.
-    Page<ExecutionRun> runs =
+    Page<ExecutionRun> execRuns =
         execRunRepo.findListByProjectId(projectId, PageRequest.of(page, size));
-    return ResponseEntity.ok(runs.map(r -> ExecutionRunDto.from(r, r.getSolutions())));
+
+    // 2026-05-02 — also pull project-scoped pipeline_run rows (the runs submitted from
+    // the V3 project-home composer / project-chat Launch button). User report: "no
+    // launches being shown although run is progressing" — those runs hit pipeline_run
+    // not execution_run, so the V82 query missed them entirely.
+    var pipelineRuns =
+        pipelineRunRepo.findByProjectIdOrderByStartedAtDesc(projectId, PageRequest.of(0, 500));
+
+    java.util.List<ExecutionRunDto> merged = new java.util.ArrayList<>();
+    execRuns.getContent().forEach(r -> merged.add(ExecutionRunDto.from(r, r.getSolutions())));
+    pipelineRuns.forEach(r -> merged.add(ExecutionRunDto.fromPipelineRun(r)));
+    // Newest-first across both sources.
+    merged.sort(
+        (a, b) -> {
+          var ad = a.createdAt();
+          var bd = b.createdAt();
+          if (ad == null && bd == null) return 0;
+          if (ad == null) return 1;
+          if (bd == null) return -1;
+          return bd.compareTo(ad);
+        });
+
+    int from = Math.min(page * size, merged.size());
+    int to = Math.min(from + size, merged.size());
+    return ResponseEntity.ok(
+        new org.springframework.data.domain.PageImpl<>(
+            merged.subList(from, to), PageRequest.of(page, size), merged.size()));
   }
 
   // ── PR rollup (cross-launch) ──────────────────────────────────────────
 
+  /**
+   * Wire format for the project PR rollup.
+   *
+   * @param launchId pipeline-run id when {@code kind=RUN}; null for system PRs (kind != RUN)
+   * @param kind PR origin classifier — {@code RUN}, {@code BOOTSTRAP}, {@code ARCHITECTURE},
+   *     {@code CONTRACT}, {@code CHAT_TOOL}. Frontend filters / groups by this. Added in V169
+   *     (2026-05-02) so system PRs are visible alongside run/launch PRs.
+   */
   public record PrRollupEntry(
       String prUrl,
       Integer prNumber,
       String repoFullName,
       String status,
       String launchId,
-      String createdAt) {}
+      String createdAt,
+      String kind) {}
 
   @GetMapping("/api/projects/{projectId}/prs")
   @Transactional(readOnly = true)
@@ -107,7 +142,8 @@ public class ProjectLaunchController {
                 null,
                 s.getPrStatus() == null ? "OPEN" : s.getPrStatus(),
                 r.getId(),
-                s.getCompletedAt() == null ? null : s.getCompletedAt().toString()));
+                s.getCompletedAt() == null ? null : s.getCompletedAt().toString(),
+                "RUN"));
       }
     }
 
@@ -124,9 +160,30 @@ public class ProjectLaunchController {
                 rec.getRepoFullName(),
                 rec.getStatus() == null ? "OPEN" : rec.getStatus().name(),
                 pr.getRunId(),
-                rec.getCreatedAt() == null ? null : rec.getCreatedAt().toString()));
+                rec.getCreatedAt() == null ? null : rec.getCreatedAt().toString(),
+                rec.getKind() == null ? "RUN" : rec.getKind().name()));
       }
     }
+
+    // V169 (2026-05-02) — system PRs (BOOTSTRAP / ARCHITECTURE / CONTRACT /
+    // CHAT_TOOL) aren't tied to a PipelineRun. Query directly by project_id
+    // + kind != RUN. These show up next to run-scoped PRs in the dashboard
+    // rollup so users can see every PR ExecuteSpec opened on their behalf.
+    var systemPrs =
+        prRepo.findByProjectIdAndKindNotOrderByCreatedAtDesc(
+            projectId, com.navneet.executespec.project.pr.PullRequestRecord.Kind.RUN);
+    for (var rec : systemPrs) {
+      out.add(
+          new PrRollupEntry(
+              rec.getPrUrl(),
+              rec.getPrNumber(),
+              rec.getRepoFullName(),
+              rec.getStatus() == null ? "OPEN" : rec.getStatus().name(),
+              null,
+              rec.getCreatedAt() == null ? null : rec.getCreatedAt().toString(),
+              rec.getKind() == null ? "SYSTEM" : rec.getKind().name()));
+    }
+
     return ResponseEntity.ok(out);
   }
 
