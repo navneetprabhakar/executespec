@@ -978,6 +978,25 @@ public class RunController {
     }
   }
 
+  /**
+   * 2026-05-02 — same listing as {@link #listWorkspaceFiles} but each entry carries a
+   * git-derived {@code status} (ADDED / MODIFIED / UNCHANGED) so the run-detail file tree can
+   * decorate paths with badges. User report: "no way to know which classes have been
+   * added/updated in code." Multi-repo aware — runs {@code git status --porcelain} per
+   * {@code repos/<name>/} subdir.
+   */
+  @GetMapping("/{id}/files/status")
+  public ResponseEntity<List<com.navneet.executespec.deployment.WorkspaceFileService.FileEntry>>
+      listWorkspaceFilesWithStatus(
+          @PathVariable String id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(id, userDetails);
+    try {
+      return ResponseEntity.ok(workspaceFileService.listFilesWithStatus(id));
+    } catch (IOException e) {
+      return ResponseEntity.ok(List.of());
+    }
+  }
+
   /** Serve the generated OpenAPI 3.0 YAML spec for a run. */
   @GetMapping(value = "/{runId}/openapi.yaml", produces = MediaType.TEXT_PLAIN_VALUE)
   public ResponseEntity<String> getOpenApiSpec(
