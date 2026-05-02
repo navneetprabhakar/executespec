@@ -53,6 +53,7 @@ public class ProjectChatService {
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
   private final ModelResolver modelResolver;
   private final LlmRouterV2 router;
+  private final com.navneet.executespec.memory.chattools.ProjectChatTools projectChatTools;
 
   public List<ProjectChatMessage> history(String projectId) {
     return chatRepo.findByProjectIdOrderByCreatedAtAsc(projectId);
@@ -285,8 +286,23 @@ public class ProjectChatService {
     return fb.toString();
   }
 
+  /**
+   * V82 contract — chat without project-action tools. Kept so any non-controller caller (tests,
+   * scripts) doesn't need a PAT.
+   */
   @Transactional
   public ProjectChatMessage send(String projectId, String orgId, String userId, String userText) {
+    return send(projectId, orgId, userId, userText, null);
+  }
+
+  /**
+   * V169 (2026-05-02) — chat with project-action tools enabled. The caller's GitHub PAT is
+   * threaded into tools that hit private repos (regenerate_architecture). When {@code callerPat}
+   * is null, those tools still bind but return a clear error if the project's repos are private.
+   */
+  @Transactional
+  public ProjectChatMessage send(
+      String projectId, String orgId, String userId, String userText, String callerPat) {
     Project project =
         projectRepo
             .findById(projectId)
@@ -315,6 +331,14 @@ public class ProjectChatService {
             "__project_chat__",
             Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
 
+    // V169 — bind project-action tools for this turn. Long-running tools
+    // (regenerate_architecture, generate_project_doc) trade chat latency
+    // for the ability to actually act on the project from inside chat.
+    var tools =
+        projectChatTools.bind(
+            new com.navneet.executespec.memory.chattools.ProjectChatTools.ToolContext(
+                projectId, userId, callerPat));
+
     String assistantText;
     Integer tokensIn = null, tokensOut = null;
     try {
@@ -327,7 +351,7 @@ public class ProjectChatService {
                   .context(ctx)
                   .temperature(0.3)
                   .maxTokens(2048)
-                  .toolsOverride(Collections.emptyList())
+                  .toolsOverride(tools)
                   .build());
       assistantText = resp.getResult().getOutput().getText();
       if (assistantText == null) assistantText = "(no response)";
@@ -363,6 +387,29 @@ public class ProjectChatService {
         .append("' strictly using the context ")
         .append("below. Be concise and direct. If the answer is not in the context, say so ")
         .append("plainly — do not fabricate.\n\n");
+
+    // V169 (2026-05-02) — surface project-action tools to the model. The
+    // body restates intent rather than enumerating schemas (the runtime
+    // already exposes those via the ToolDefinition list); this paragraph
+    // exists so the model knows when tool calls are appropriate vs when
+    // to answer from context.
+    sys.append("## TOOLS\n")
+        .append("You can call project-action tools when the user asks you to DO something on the ")
+        .append("project. Examples that should trigger a tool call rather than a text answer:\n")
+        .append("- \"regenerate / refresh / update the architecture\" → call regenerate_architecture\n")
+        .append("- \"generate / update the explanation doc\" → call generate_project_doc with docType=EXPLANATION\n")
+        .append("- \"generate / update the setup doc\" → call generate_project_doc with docType=SETUP\n")
+        .append("- \"what repos are linked / show me the repos\" → call list_repos\n")
+        .append("- \"recent runs / what has shipped lately\" → call list_recent_runs\n")
+        .append("- \"open PRs / merged PRs / pull requests\" → call list_pull_requests\n")
+        .append("- \"what does the project remember / project history\" → call get_project_memory\n")
+        .append("- \"explain the project's architecture / data flow / module boundaries\" → call get_latest_architecture\n")
+        .append("After a write tool returns, briefly narrate what changed (1-2 sentences) so the ")
+        .append("user knows where to look in the dashboard. After a read tool, summarise the ")
+        .append("relevant rows — don't dump the JSON envelope verbatim. If a tool returns ")
+        .append("ok=false, surface the message field and suggest the next step.\n\n")
+        .append("Settings (GitHub PAT, AI provider keys, billing) are deliberately NOT exposed ")
+        .append("as tools. If the user asks you to update those, point them to /settings/manage.\n\n");
 
     String memory = memoryProvider.buildPlannerContext(project.getId());
     if (memory != null && !memory.isBlank()) {

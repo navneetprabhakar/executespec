@@ -52,8 +52,12 @@ public class ProjectChatController {
     if (body == null || body.message == null || body.message.isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message required");
     }
+    // V169 (2026-05-02) — caller's PAT threads into project-action tools (regenerate_architecture
+    // hits private repos with this PAT). May be null for users who haven't connected a PAT yet;
+    // tools that need it return a clear error in that case.
     ProjectChatMessage reply =
-        chatService.send(projectId, user.getOrgId(), user.getId(), body.message);
+        chatService.send(
+            projectId, user.getOrgId(), user.getId(), body.message, user.getGithubPat());
     return ResponseEntity.ok(reply);
   }
 
