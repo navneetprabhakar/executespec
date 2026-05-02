@@ -103,6 +103,15 @@ public class RunDetail {
   /** Comma-separated tech stack IDs derived from the plan (e.g. "react,typescript,nodejs"). */
   String techStack;
 
+  /**
+   * Project this run belongs to (UUID). Drives "Open run" navigation in V3ProjectHome — without
+   * this field the frontend can't construct {@code /projects/{projectId}/runs/{runId}} and falls
+   * back to {@code /runs/{runId}}, which the v2 dispatcher then redirects to the user's default
+   * project home (i.e. wrong project entirely). Added 2026-05-02 after pinning that exact
+   * misroute to a missing wire field.
+   */
+  String projectId;
+
   /** Human-readable project name. Null if projectId is null or project was deleted. */
   String projectName;
 
