@@ -16,7 +16,13 @@ import {
 } from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import * as api from '@/lib/api';
-import {req, clearProjectChat, compactProjectChat} from '@/lib/api';
+import {
+  req,
+  clearProjectChat,
+  compactProjectChat,
+  getProjectChatInfo,
+  type ProjectChatInfo,
+} from '@/lib/api';
 import type {ProjectRepoLink} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {cn} from '@/lib/utils';
@@ -52,24 +58,10 @@ const QUICK_ACTIONS = [
 ];
 
 /**
- * Static context-window sizes for the planner-tier model each provider resolves to. Numbers
- * mirror the model matrix in `application.yml` + the upstream provider docs:
- * - Anthropic claude-sonnet-4-6 → 200k input
- * - OpenAI gpt-5.4 → 256k input
- * - Gemini 3 flash preview → 1M input
- *
- * Falls back to 128k when the project's provider is unknown — a safe lower bound on every
- * frontier model we ship today. Frontend-only by design: the chat resolves at request time and
- * the window doesn't change per turn, so a static map avoids a chat/info round-trip just to
- * paint the header chip.
+ * Last-resort context window when the chat-info round-trip hasn't returned yet. 128k is a safe
+ * lower bound on every frontier model we ship today, so the chip degrades to "128k window"
+ * rather than blank during the brief in-flight window.
  */
-const CONTEXT_WINDOW_BY_PROVIDER: Record<string, number> = {
-  ANTHROPIC: 200_000,
-  OPENAI: 256_000,
-  GEMINI: 1_000_000,
-  GOOGLE: 1_000_000, // legacy alias kept so older projects render correctly
-};
-
 const FALLBACK_CONTEXT_WINDOW = 128_000;
 
 /** Format a token count as `1.2k` / `12.3k` / `123k`. */
@@ -82,12 +74,14 @@ function formatTokens(n: number): string {
 
 export default function ProjectChatPanel({
   projectId,
-  aiProvider,
+  aiProvider: _aiProvider,
 }: {
   projectId: string;
   /**
-   * Project's configured AI provider — drives the context-window chip. Optional so the V2.6.4
-   * IA cleanup mounts that haven't yet threaded project metadata through still render.
+   * Kept for back-compat — the panel now fetches the resolved model + window via
+   * `getProjectChatInfo(projectId)` so the chip reflects the actual model the chat answers
+   * with (gpt-4o = 128k vs gpt-5.4 = 256k vs Sonnet 200k vs the 1M-context Opus variant), not a
+   * provider-level guess.
    */
   aiProvider?: string | null;
 }) {
@@ -100,6 +94,9 @@ export default function ProjectChatPanel({
   const [resetting, setResetting] = useState(false);
   const [compacting, setCompacting] = useState(false);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  // 2026-05-02 — resolved model + context window driven by the backend so the chip is
+  // model-accurate (gpt-4o=128k vs gpt-5.4=256k, Sonnet=200k vs Opus-1M=1M, etc).
+  const [chatInfo, setChatInfo] = useState<ProjectChatInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -123,6 +120,23 @@ export default function ProjectChatPanel({
     },
     [],
   );
+
+  // Fetch resolved-model metadata once per mount / projectId switch. Best-effort: any failure
+  // leaves chatInfo null and the chip silently falls back to the FALLBACK_CONTEXT_WINDOW guess.
+  useEffect(() => {
+    let cancelled = false;
+    if (!projectId) return;
+    getProjectChatInfo(projectId)
+      .then((info) => {
+        if (!cancelled) setChatInfo(info);
+      })
+      .catch(() => {
+        /* surfaced via chip fallback; no toast */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   const handleResetHistory = async () => {
     if (resetting) return;
@@ -228,9 +242,7 @@ export default function ProjectChatPanel({
   const totalIn = messages.reduce((acc, m) => acc + (m.tokensIn ?? 0), 0);
   const totalOut = messages.reduce((acc, m) => acc + (m.tokensOut ?? 0), 0);
   const totalTokens = totalIn + totalOut;
-  const contextWindow =
-    (aiProvider && CONTEXT_WINDOW_BY_PROVIDER[aiProvider.toUpperCase()]) ||
-    FALLBACK_CONTEXT_WINDOW;
+  const contextWindow = chatInfo?.contextWindow ?? FALLBACK_CONTEXT_WINDOW;
   const tokenPercent = contextWindow > 0 ? Math.min(100, (totalIn / contextWindow) * 100) : 0;
 
   return (
@@ -259,9 +271,10 @@ export default function ProjectChatPanel({
                     tokenPercent >= 95 && 'text-accent-red',
                   )}
                   title={
-                    `Model context window: ${formatTokens(contextWindow)} tokens` +
-                    (aiProvider ? ` (${aiProvider.toLowerCase()} planner tier)` : '') +
-                    `. Cumulative input is ${tokenPercent.toFixed(0)}% of the window — ` +
+                    `Model: ${chatInfo?.model ?? 'resolving…'}` +
+                    (chatInfo?.provider ? ` (${chatInfo.provider.toLowerCase()})` : '') +
+                    `\nContext window: ${formatTokens(contextWindow)} tokens` +
+                    `\nCumulative input is ${tokenPercent.toFixed(0)}% of the window — ` +
                     `the chat windows to the last 20 messages so older turns drop off ` +
                     `automatically, but Compact rewrites the trailing tail into a single ` +
                     `summary when answers start drifting.`
