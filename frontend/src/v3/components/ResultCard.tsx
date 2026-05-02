@@ -172,7 +172,25 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
             <button
               type='button'
-              onClick={() => navigate(`/projects/${detail.projectId ?? ''}/r/${runId}`)}
+              // 2026-05-02 — was `/r/${runId}` which only matches the short
+              // alias `/p/:slug/r/:run` (rewritten in App.tsx). The long form
+              // `/projects/:slug/...` has NO `/r/` rewrite, so the path
+              // dropped through every route and rendered the landing page.
+              // Fix: route to canonical `/projects/:slug/runs/:runShort` when
+              // we have the projectId; fall back to `/runs/{runId}` (which
+              // mounts RunsPage with a focused detail view) when the bubble
+              // didn't carry projectId — happens for older bubbles + when the
+              // run detail blob is loading. Either way, NEVER produce
+              // `/projects//runs/...` (the empty-projectId double-slash that
+              // also dropped through to the landing page).
+              onClick={() => {
+                const pid = detail.projectId;
+                if (pid && pid.length > 0) {
+                  navigate(`/projects/${pid}/runs/${runId}`);
+                } else {
+                  navigate(`/runs/${runId}`);
+                }
+              }}
               style={{
                 padding: '5px 12px',
                 fontSize: 12,

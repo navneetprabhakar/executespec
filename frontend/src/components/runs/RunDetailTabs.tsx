@@ -13,6 +13,8 @@ import {useTierPermissions} from '@/hooks/useTierPermissions';
 import {useIsMobile} from '@/hooks/useIsMobile';
 import {
   getFiles,
+  getFilesWithStatus,
+  type FileChangeStatus,
   getFile,
   getOpenApiSpec,
   getProjects,
@@ -89,6 +91,10 @@ export default function RunDetailTabs() {
 
   // Hoist files so both Code and Preview tabs share them
   const [files, setFiles] = useState<string[]>([]);
+  // 2026-05-02 — git-derived per-path change status. Map keyed on workspace-relative path
+  // (e.g. `repos/frontend/app/page.tsx`) → 'ADDED' | 'MODIFIED' | 'UNCHANGED'. Drives the
+  // A / M badges + collapsed-folder dot in the file tree.
+  const [fileStatus, setFileStatus] = useState<Map<string, FileChangeStatus>>(new Map());
   const [filesLoading, setFilesLoading] = useState(false);
   // Bump this to force re-fetch files (e.g. on manual refresh)
   const [filesTick, bumpFiles] = useReducer((n: number) => n + 1, 0);
@@ -96,9 +102,18 @@ export default function RunDetailTabs() {
   const loadFiles = useCallback((runId: string) => {
     setFilesLoading(true);
     setFiles([]);
-    getFiles(runId)
-      .then(setFiles)
-      .catch(() => {})
+    setFileStatus(new Map());
+    getFilesWithStatus(runId)
+      .then((rows) => {
+        setFiles(rows.map((r) => r.path));
+        setFileStatus(new Map(rows.map((r) => [r.path, r.status])));
+      })
+      .catch(() => {
+        // Endpoint not available (older backend) → fall through to plain listing without status.
+        getFiles(runId)
+          .then(setFiles)
+          .catch(() => {});
+      })
       .finally(() => setFilesLoading(false));
   }, []);
 
@@ -319,6 +334,7 @@ export default function RunDetailTabs() {
             repoUrl={activeRun.repoUrl}
             status={activeRun.status}
             scmProvider={activeRun.scmProvider}
+            fileStatus={fileStatus}
           />
         </Tabs.Content>
 
@@ -1628,6 +1644,12 @@ interface TreeNodeViewProps {
   expandSignal?: number;
   /** Increment to force-collapse all folders; 0 = initial state */
   collapseSignal?: number;
+  /**
+   * 2026-05-02 — git-derived per-path change status. Map keyed on workspace-relative path
+   * (e.g. `repos/frontend/app/page.tsx`). Drives the A / M leaf badge and a colored dot on
+   * directory rows when a descendant is changed.
+   */
+  fileStatus?: Map<string, FileChangeStatus>;
 }
 
 function TreeNodeView({
@@ -1637,6 +1659,7 @@ function TreeNodeView({
   depth = 0,
   expandSignal = 0,
   collapseSignal = 0,
+  fileStatus,
 }: TreeNodeViewProps) {
   const [open, setOpen] = useState(depth < 2);
 
@@ -1649,6 +1672,13 @@ function TreeNodeView({
   }, [collapseSignal]);
 
   const indent = depth * 12 + 8;
+
+  // 2026-05-02 — leaf rows show an A/M chip; directory rows show a small colored dot when any
+  // descendant changed. Lookup is cheap since fileStatus is a Map; aggregateChildStatus walks
+  // each render-time but the tree is small enough that memoising adds more code than it saves.
+  const leafStatus = node.isFile && fileStatus ? fileStatus.get(node.path) : undefined;
+  const dirStatus =
+    !node.isFile && fileStatus ? aggregateChildStatus(node, fileStatus) : undefined;
 
   if (node.isFile) {
     return (
@@ -1664,7 +1694,8 @@ function TreeNodeView({
         title={node.path}
       >
         <FileTypeIcon name={node.name} />
-        <span className='truncate'>{node.name}</span>
+        <span className='truncate flex-1'>{node.name}</span>
+        {leafStatus && leafStatus !== 'UNCHANGED' && renderLeafBadge(leafStatus)}
       </button>
     );
   }
@@ -1684,7 +1715,8 @@ function TreeNodeView({
         ) : (
           <Folder className='h-3 w-3 flex-shrink-0 text-accent-amber/60' />
         )}
-        <span>{node.name}</span>
+        <span className='flex-1'>{node.name}</span>
+        {dirStatus && dirStatus !== 'UNCHANGED' && !open && renderDirDot(dirStatus)}
       </button>
       {open && (
         <div>
@@ -1697,11 +1729,74 @@ function TreeNodeView({
               depth={depth + 1}
               expandSignal={expandSignal}
               collapseSignal={collapseSignal}
+              fileStatus={fileStatus}
             />
           ))}
         </div>
       )}
     </div>
+  );
+}
+
+/** Walk the subtree once and return the dominant change status (ADDED ⩾ MODIFIED ⩾ undefined). */
+function aggregateChildStatus(
+  node: FileTreeNode,
+  fileStatus: Map<string, FileChangeStatus>,
+): FileChangeStatus | undefined {
+  let best: FileChangeStatus | undefined;
+  function walk(n: FileTreeNode) {
+    if (n.isFile) {
+      const s = fileStatus.get(n.path);
+      if (s === 'ADDED') {
+        best = 'ADDED';
+      } else if (s === 'MODIFIED' && best !== 'ADDED') {
+        best = 'MODIFIED';
+      }
+      return;
+    }
+    for (const c of n.children) {
+      walk(c);
+      if (best === 'ADDED') return; // can't get higher
+    }
+  }
+  walk(node);
+  return best;
+}
+
+function renderLeafBadge(status: FileChangeStatus) {
+  const base =
+    'text-[9px] font-bold leading-none px-1 py-[1px] rounded-sm flex-shrink-0 border';
+  if (status === 'ADDED') {
+    return (
+      <span
+        className={`${base} text-status-success border-status-success/40 bg-status-success/10`}
+        title='Added by this run'
+      >
+        A
+      </span>
+    );
+  }
+  return (
+    <span
+      className={`${base} text-accent-amber border-accent-amber/40 bg-accent-amber/10`}
+      title='Modified by this run'
+    >
+      M
+    </span>
+  );
+}
+
+function renderDirDot(status: FileChangeStatus) {
+  const cls = status === 'ADDED' ? 'bg-status-success' : 'bg-accent-amber';
+  return (
+    <span
+      className={`inline-block h-1.5 w-1.5 rounded-full flex-shrink-0 ${cls}`}
+      title={
+        status === 'ADDED'
+          ? 'Contains files added by this run'
+          : 'Contains files modified by this run'
+      }
+    />
   );
 }
 
@@ -1987,6 +2082,7 @@ export function CodeTab({
   repoUrl,
   status,
   scmProvider,
+  fileStatus,
 }: {
   runId: string;
   files: string[];
@@ -1994,6 +2090,8 @@ export function CodeTab({
   repoUrl?: string | null;
   status?: string;
   scmProvider?: string | null;
+  /** 2026-05-02 — git-derived per-path change status; drives A/M chips on file rows. */
+  fileStatus?: Map<string, FileChangeStatus>;
 }) {
   const [selected, setSelected] = useState<string | null>(null);
   const [content, setContent] = useState<string>('');
@@ -2146,6 +2244,7 @@ export function CodeTab({
                 }}
                 expandSignal={expandSignal}
                 collapseSignal={collapseSignal}
+                fileStatus={fileStatus}
               />
             ))}
           </div>

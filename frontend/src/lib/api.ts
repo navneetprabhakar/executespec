@@ -754,6 +754,22 @@ export const getTimeline = (runId: string) => req<TimelineData>(`/runs/${runId}/
 export const getFiles = (runId: string) => req<string[]>(`/runs/${runId}/files`);
 
 /**
+ * 2026-05-02 — file listing with per-path git-derived change status. Multi-repo aware (the
+ * backend runs `git status --porcelain` per `repos/<name>/` checkout). Lets the run-detail
+ * file tree decorate paths with A/M badges so the user can see at a glance which files the
+ * worker has added or modified.
+ */
+export type FileChangeStatus = 'ADDED' | 'MODIFIED' | 'UNCHANGED';
+
+export interface FileWithStatus {
+  path: string;
+  status: FileChangeStatus;
+}
+
+export const getFilesWithStatus = (runId: string) =>
+  req<FileWithStatus[]>(`/runs/${runId}/files/status`);
+
+/**
  * Trigger a browser download of the workspace zip.
  * Uses fetch with auth header, then creates an object URL for the browser download.
  */
