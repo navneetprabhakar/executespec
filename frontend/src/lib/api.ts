@@ -802,6 +802,21 @@ export const pushToScm = (runId: string) =>
 export const getFile = (runId: string, filePath: string) =>
   reqText(`/runs/${runId}/file?path=${encodeURIComponent(filePath)}`);
 
+/**
+ * 2026-05-02 — base + head content for a single file so the run-detail UI can render a Monaco
+ * `DiffEditor`. ADDED files come back with empty `base`; deleted files have empty `head`.
+ * `status` mirrors `FileChangeStatus` (ADDED/MODIFIED/UNCHANGED).
+ */
+export interface FileDiffPayload {
+  path: string;
+  base: string;
+  head: string;
+  status: FileChangeStatus;
+}
+
+export const getFileDiff = (runId: string, filePath: string) =>
+  req<FileDiffPayload>(`/runs/${runId}/file/diff?path=${encodeURIComponent(filePath)}`);
+
 // ── Messages (historical log) ────────────────────────────────────────────────
 
 export interface MessageResponse {

@@ -1044,6 +1044,33 @@ public class RunController {
     }
   }
 
+  /**
+   * 2026-05-02 — base + head content for a single workspace file so the run-detail UI can render
+   * a Monaco {@code DiffEditor} (only the diff is visible, not the whole file). The base is the
+   * snapshot the run was cloned against ({@code RunRepoSnapshot.commitSha}); head is the current
+   * filesystem state. ADDED files have empty {@code base}; deleted files have empty {@code head}.
+   * Outside any {@code repos/<name>/} subdir there is no base — the worker is the only writer for
+   * those (e.g. {@code .agent-context/project.json}) so they come back as ADDED.
+   */
+  @GetMapping(value = "/{id}/file/diff", produces = MediaType.APPLICATION_JSON_VALUE)
+  public ResponseEntity<com.navneet.executespec.deployment.WorkspaceFileService.FileDiff>
+      readWorkspaceFileDiff(
+          @PathVariable String id,
+          @RequestParam String path,
+          @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(id, userDetails);
+    try {
+      return ResponseEntity.ok(workspaceFileService.readFileDiff(id, path));
+    } catch (SecurityException e) {
+      throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Access denied");
+    } catch (java.nio.file.NoSuchFileException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "File not found: " + path);
+    } catch (IOException e) {
+      throw new ResponseStatusException(
+          HttpStatus.INTERNAL_SERVER_ERROR, "Failed to read file diff: " + e.getMessage());
+    }
+  }
+
   // ── Plan Versioning ──────────────────────────────────────────────────────
 
   @GetMapping("/{runId}/plan-versions")
