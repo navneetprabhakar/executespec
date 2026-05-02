@@ -66,15 +66,54 @@ public class ShellSandboxPolicy {
   private static final Set<String> HIGH_STRICT_EAS_VERBS = Set.of("build", "submit");
 
   private final GuardrailLevelResolver guardrailLevelResolver;
+  /**
+   * 2026-05-02 — dependency-install enforcement at MEDIUM+. ObjectProvider so unit tests that
+   * construct {@code ShellSandboxPolicy} directly without booting the full Spring context still
+   * work. Null-safe — when absent, the segment-level dep checks are skipped.
+   */
+  private final org.springframework.beans.factory.ObjectProvider<
+          com.navneet.executespec.security.dependency.DependencySecurityPolicy>
+      dependencySecurityProvider;
 
   @Autowired
-  public ShellSandboxPolicy(GuardrailLevelResolver guardrailLevelResolver) {
+  public ShellSandboxPolicy(
+      GuardrailLevelResolver guardrailLevelResolver,
+      org.springframework.beans.factory.ObjectProvider<
+              com.navneet.executespec.security.dependency.DependencySecurityPolicy>
+          dependencySecurityProvider) {
     this.guardrailLevelResolver = guardrailLevelResolver;
+    this.dependencySecurityProvider = dependencySecurityProvider;
   }
 
-  /** Back-compat constructor — assumes LOW. */
+  /** Test-friendly constructor — no dep-security enforcement. */
+  public ShellSandboxPolicy(GuardrailLevelResolver guardrailLevelResolver) {
+    this(guardrailLevelResolver, new org.springframework.beans.factory.ObjectProvider<>() {
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject() {
+        return null;
+      }
+
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject(
+          Object... args) {
+        return null;
+      }
+
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getIfAvailable() {
+        return null;
+      }
+
+      @Override
+      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getIfUnique() {
+        return null;
+      }
+    });
+  }
+
+  /** Back-compat constructor — assumes LOW + no dep-security enforcement. */
   public ShellSandboxPolicy() {
-    this.guardrailLevelResolver = null;
+    this(null);
   }
 
   // Commands that are NEVER allowed regardless of context
@@ -414,6 +453,17 @@ public class ShellSandboxPolicy {
           originalCommand);
       return ValidationResult.block(
           "Chained command '" + firstToken + "' is not in the allowed command list");
+    }
+
+    // 2026-05-02 — dependency-install security enforcement (MEDIUM+).
+    // Each install segment must carry --ignore-scripts + lockfile-strict + audit + registry pin
+    // per the active guardrail level. LOW preserves historical behaviour (legacy allowlist only).
+    if (level != null && level.atLeastMedium() && dependencySecurityProvider != null) {
+      var depSec = dependencySecurityProvider.getIfAvailable();
+      if (depSec != null) {
+        ValidationResult depResult = depSec.validateSegment(segment, originalCommand, level);
+        if (!depResult.permitted()) return depResult;
+      }
     }
 
     // Docker subcommand validation
