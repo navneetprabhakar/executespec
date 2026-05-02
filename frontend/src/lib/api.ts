@@ -2808,6 +2808,20 @@ export const compactProjectChat = (projectId: string) =>
     {method: 'POST'},
   );
 
+/**
+ * 2026-05-02 — chat-resolution metadata for the project's current AI provider. The header chip
+ * uses {@code contextWindow} so the "200k window" / "1M window" segment matches the actual
+ * model the chat resolves to (gpt-4o = 128k vs gpt-5.4 = 256k vs gemini = 1M).
+ */
+export interface ProjectChatInfo {
+  model: string;
+  provider: string;
+  contextWindow: number;
+}
+
+export const getProjectChatInfo = (projectId: string) =>
+  req<ProjectChatInfo>(`/projects/${projectId}/chat/info`);
+
 // ── Migrations product (R-336..R-339) ─────────────────────────────────────
 
 export interface MigrationRecipeSummary {
