@@ -21,7 +21,7 @@
 > on the StatusBadge renders human copy per reason. Gated behind
 > `scoring.v2-verified` feature flag.
 >
-> **v2.5.11 — planner requirement graph (Pillar 1 of Validation v3).**
+> **v1.0.0-M1 — planner requirement graph (Pillar 1 of Validation v3).**
 > Planning step extracts every spec requirement into `PlanV2.requirements`
 > (`{id, text, kind}` where `kind ∈ {FUNCTIONAL, NON_FUNCTIONAL, TEST, CONSTRAINT}`).
 > Each task cites covered IDs via `meetsRequirements`. `PlannerOutputUtils.validatePlan`
