@@ -514,4 +514,49 @@ public class PipelineRun {
   @Column(name = "selected_repo_ids", columnDefinition = "jsonb")
   @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
   private String selectedRepoIds;
+
+  // ── V168 — Pause / resume (2026-05-02) ───────────────────────────────────
+
+  /**
+   * Pause request flag. Set by {@code RunController.pauseRun} (POST /api/runs/{id}/pause). Read by
+   * the executor at every task boundary AND by the worker at every iteration boundary; on TRUE the
+   * agent persists a checkpoint and transitions the run to {@code PAUSED}. Reset to FALSE when the
+   * run resumes, terminates, or cancels — so a re-pause request after resume gets a fresh trigger.
+   */
+  @Column(name = "pause_requested", nullable = false)
+  private boolean pauseRequested = false;
+
+  /** Wall-clock timestamp the executor wrote when it observed the pause request. */
+  @Column(name = "paused_at")
+  private Instant pausedAt;
+
+  /** Most recent resume timestamp. Updated on every resume; older resumes are not retained. */
+  @Column(name = "resumed_at")
+  private Instant resumedAt;
+
+  /**
+   * The {@code agent_task.id} the worker was on when pause took effect. {@code null} when pause was
+   * observed between tasks (no task was in flight). Resume uses this to restart the executor at the
+   * right task index — combined with {@link #pausedAtIteration} for mid-task resume from the
+   * correct worker iteration.
+   */
+  @Column(name = "paused_task_id", length = 64)
+  private String pausedTaskId;
+
+  /**
+   * Worker iteration count within the paused task (0-based). {@code null} when pause was observed
+   * between tasks. Combined with {@link #pausedTaskId} and {@code ContextStoreV2}'s per-(runId,
+   * taskId) snapshot to resume mid-task from the exact iteration the worker was on.
+   */
+  @Column(name = "paused_at_iteration")
+  private Integer pausedAtIteration;
+
+  /**
+   * How many times this run has been paused. Hard cap at the controller (default 10, configurable
+   * via {@code v2.pause.max_pauses_per_run}). Keeps an adversarial / buggy client from
+   * pause-spamming a run forever — each pause re-locks resources, persists a checkpoint, and costs
+   * Redis writes.
+   */
+  @Column(name = "pause_count", nullable = false)
+  private int pauseCount = 0;
 }

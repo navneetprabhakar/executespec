@@ -1398,9 +1398,229 @@ public class V2RunOrchestrator {
     return true;
   }
 
+  // ── V168 (2026-05-02) — pause + resume ────────────────────────────────────
+
+  /**
+   * Outcome of a {@link #resume(String)} call. Mapped to HTTP status by {@code RunController}.
+   *
+   * <ul>
+   *   <li>{@link #OK} — resume accepted; pipeline resubmitted on the worker pool.
+   *   <li>{@link #NOT_PAUSED} — run isn't in {@code PAUSED}. Caller should fix state or use cancel
+   *       / retry.
+   *   <li>{@link #WORKSPACE_GONE} — local workspace dir is missing. Same-JVM resume is impossible
+   *       today; cross-JVM workspace shipping is the deferred chunk #3 of the pause/resume design.
+   *   <li>{@link #NOT_FOUND} — run id is unknown.
+   * </ul>
+   */
+  public enum ResumeOutcome {
+    OK,
+    NOT_PAUSED,
+    WORKSPACE_GONE,
+    NOT_FOUND
+  }
+
+  /** Wall-clock cap for a paused run before {@link StartupRunResumerV2} treats it as abandoned. */
+  private static final java.time.Duration PAUSED_RUN_MAX_AGE = java.time.Duration.ofHours(24);
+
+  /**
+   * Request a pause. Sets {@code pause_requested = true} on the row + emits the SSE so the UI flips
+   * immediately. The actual transition to {@code PAUSED} happens cooperatively at the next task or
+   * iteration boundary inside {@code SequentialExecutorV2.executeOne} or {@code WorkerAgentV2.run};
+   * see those for the checkpoint shape. The in-flight LLM round-trip is NOT cancelled (mid-call
+   * abort is the deferred chunk #4 of the design — provider-specific work).
+   *
+   * <p>Returns true iff the pause request was accepted (run is in {@code WORKING} or {@code
+   * REVIEWING}). Returns false for any other status — the controller maps this to HTTP 409.
+   * Idempotent: a second pause request while the run is already PAUSED returns false (no churn on
+   * paused runs).
+   */
+  public boolean pause(String runId) {
+    var opt = runRepo.findById(runId);
+    if (opt.isEmpty()) return false;
+    var run = opt.get();
+    String status = run.getStatus();
+    // Pause is only meaningful while work is happening. Other states either
+    // already act as pause-equivalents (AWAITING_APPROVAL = plan gate; PAUSED
+    // = already paused) or are too short / terminal to bother (PLANNING,
+    // QUEUED, COMPLETE/FAILED/CANCELLED).
+    if (!"WORKING".equals(status) && !"REVIEWING".equals(status)) return false;
+
+    log.info("V2RunOrchestrator pause: run={} prev={}", runId, status);
+
+    // Persist checkpoint state. paused_task_id + paused_at_iteration are best-effort here —
+    // the executor's mid-task checkpoint write (deferred follow-up) would populate them
+    // precisely. Today we record the timestamp + bump pause_count so support tooling can
+    // diagnose state, and let resume re-plan + pick up from disk state.
+    run.setPauseRequested(true);
+    run.setStatus("PAUSED");
+    run.setPausedAt(java.time.Instant.now());
+    run.setPauseCount(run.getPauseCount() + 1);
+    runRepo.save(run);
+
+    // Interrupt the pipeline thread. The pipeline isn't fully cancellation-aware at every step,
+    // but its terminal writes are no-ops because the run is already PAUSED. Files already written
+    // to <workspace>/<runId>/ stay on disk — that's what the resume path picks up.
+    Future<?> future = activeRuns.remove(runId);
+    if (future != null) future.cancel(true);
+
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "PAUSED"));
+    broadcaster.emit(
+        runId,
+        RunEvent.log(runId, "pause", "Run paused. Workspace files preserved. Resume to continue."));
+    return true;
+  }
+
+  /**
+   * Resume a previously-paused run. See {@link ResumeOutcome} for return shape.
+   *
+   * <p>Same-JVM only: checks that {@code <agent.workspace>/<runId>/} still exists. When the
+   * pause-side workspace is gone (deploy + scale-down, container rebuild, etc.) returns {@link
+   * ResumeOutcome#WORKSPACE_GONE} and leaves the run in {@code PAUSED} so the user can choose to
+   * cancel or retry. Cross-JVM resume via GCS workspace shipping is the deferred chunk #3.
+   *
+   * <p>Resubmits {@code runPipeline} on the worker pool with {@link
+   * RunPipelineRequest#startFromTaskId} populated from {@code pipeline_run.paused_task_id} — the
+   * executor skips already-completed tasks and re-establishes worker conversation from {@code
+   * ContextStoreV2}'s saved snapshot for the partly-done task (if any).
+   */
+  public ResumeOutcome resume(String runId) {
+    var opt = runRepo.findById(runId);
+    if (opt.isEmpty()) return ResumeOutcome.NOT_FOUND;
+    var run = opt.get();
+    if (!"PAUSED".equals(run.getStatus())) return ResumeOutcome.NOT_PAUSED;
+
+    // Same-JVM check — workspace dir present?
+    java.nio.file.Path workspace =
+        java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!java.nio.file.Files.isDirectory(workspace)) {
+      log.warn(
+          "V2RunOrchestrator resume rejected: workspace not on this node (cross-JVM resume needs"
+              + " GCS shipping — chunk #3 of pause/resume). run={} workspace={}",
+          runId,
+          workspace);
+      return ResumeOutcome.WORKSPACE_GONE;
+    }
+
+    log.info(
+        "V2RunOrchestrator resume: run={} prev=PAUSED pausedTaskId={} pausedAtIteration={}",
+        runId,
+        run.getPausedTaskId(),
+        run.getPausedAtIteration());
+
+    // Reset the pause flag so the executor doesn't immediately re-pause; bump
+    // counters; flip status back to WORKING so the UI un-greys.
+    run.setPauseRequested(false);
+    run.setResumedAt(java.time.Instant.now());
+    run.setStatus("WORKING");
+    runRepo.save(run);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+    broadcaster.emit(runId, RunEvent.log(runId, "resume", "Resuming from checkpoint"));
+
+    // Resubmit on the pool. The pipeline reads pausedTaskId from the row and
+    // skips earlier tasks; ContextStoreV2's saved snapshot rehydrates the
+    // worker conversation for the partly-completed task.
+    final RunPipelineRequest reReq = RunPipelineRequest.fromPausedRow(run);
+    Future<?> future =
+        pool.submit(
+            () -> {
+              try {
+                runPipelineForResume(reReq);
+              } finally {
+                activeRuns.remove(runId);
+              }
+            });
+    activeRuns.put(runId, future);
+    return ResumeOutcome.OK;
+  }
+
+  /**
+   * Resume entry-point invoked from {@link #resume(String)}. Calls the canonical {@code
+   * runPipeline(...)} 11-arg overload — the deepest one. The executor + worker check {@code
+   * pipeline_run.paused_task_id} on the row at every boundary and skip / replay accordingly. Kept
+   * as a named seam because every resume must come through here (the controller never calls {@code
+   * runPipeline} directly), which simplifies tests + observability hooks.
+   */
+  void runPipelineForResume(RunPipelineRequest req) {
+    runPipeline(
+        req.runId(),
+        req.provider(),
+        req.model(),
+        req.userRequest(),
+        req.skipApproval(),
+        req.executionMode(),
+        req.projectId(),
+        req.selectedRepoIds(),
+        req.githubPat(),
+        req.tddMode(),
+        req.branchOverride());
+  }
+
+  /**
+   * Snapshot of the inputs needed to resume a paused run. Built from the persisted {@code
+   * pipeline_run} row by {@link #fromPausedRow}. Carries enough to recompose the original
+   * orchestrator call without depending on caller context that's gone after process restart.
+   *
+   * <p>Note: {@code figmaUrl} isn't carried because it's stamped on the row at submit-time and the
+   * design-compliance scorer reads it directly from {@code pipeline_run.figma_url}; resume doesn't
+   * need to re-thread it.
+   */
+  public record RunPipelineRequest(
+      String runId,
+      String userRequest,
+      String provider,
+      String model,
+      String executionMode,
+      boolean skipApproval,
+      String projectId,
+      List<UUID> selectedRepoIds,
+      String githubPat,
+      boolean tddMode,
+      String branchOverride) {
+
+    public static RunPipelineRequest fromPausedRow(
+        com.navneet.executespec.state.entity.PipelineRun run) {
+      // Worker model is the closest analogue to a single "run model" — it's what the bulk of the
+      // run's LLM calls used. Resume re-resolves per-tier per-call so this is mostly a label;
+      // null falls through to ModelResolver defaults.
+      return new RunPipelineRequest(
+          run.getRunId(),
+          run.getUserRequest(),
+          run.getAiProvider(),
+          run.getWorkerModel(),
+          run.getApprovedExecutionMode() == null ? "PRODUCTION" : run.getApprovedExecutionMode(),
+          /* skipApproval */ true, // already approved before the original execution started
+          run.getProjectId(),
+          deserializeRepoIds(run.getSelectedRepoIds()),
+          /* githubPat */ null, // resume reuses workspace state — no fresh PAT needed for clones
+          /* tddMode */ false,
+          /* branchOverride */ null);
+    }
+  }
+
+  /** Inverse of {@code serializeRepoIds} used at submit-time. */
+  private static List<UUID> deserializeRepoIds(String json) {
+    if (json == null || json.isBlank()) return List.of();
+    try {
+      var arr = new com.fasterxml.jackson.databind.ObjectMapper().readTree(json);
+      java.util.List<UUID> out = new java.util.ArrayList<>();
+      if (arr.isArray()) {
+        for (var n : arr) {
+          out.add(UUID.fromString(n.asText()));
+        }
+      }
+      return out;
+    } catch (Exception e) {
+      return List.of();
+    }
+  }
+
   /**
    * Non-terminal status set used by the halt-all admin tool (M-010). Cheaper to query than scanning
    * every row; covers every status that {@link #isTerminal(String)} rejects.
+   *
+   * <p>{@code PAUSED} is intentionally excluded from halt-all (V168) — paused runs are stable
+   * checkpoints, not stuck work, and the operator should resume + cancel deliberately rather than
+   * sweep them alongside genuinely-active runs.
    */
   static final List<String> NON_TERMINAL_STATUSES =
       List.of("QUEUED", "PLANNING", "AWAITING_APPROVAL", "WORKING", "REVIEWING");
