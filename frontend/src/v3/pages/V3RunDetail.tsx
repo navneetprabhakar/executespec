@@ -6,11 +6,13 @@ import {
   getValidationReport,
   getFilesWithStatus,
   getFileDiff,
+  getRunPrs,
   type FileWithStatus,
   type FileDiffPayload,
   type RunDetail,
   type ValidationReportData,
 } from '@/lib/api';
+import type {PrSummary} from '@/types/project';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
 import Pill from '../components/Pill';
@@ -89,11 +91,16 @@ export default function V3RunDetail() {
   const [filesWithStatus, setFilesWithStatus] = useState<FileWithStatus[] | null>(null);
   const [active, setActive] = useState<string | null>(null);
   const [diff, setDiff] = useState<FileDiffPayload | null>(null);
+  // 2026-05-02 — multi-repo PR list. The legacy `detail.githubPrUrl` is null on multi-repo runs
+  // (it's the V1 single-repo column); per-repo PRs live on `pull_request_record` and surface via
+  // `/api/runs/{id}/prs`. The action row falls back to detail.githubPrUrl only when this list is
+  // empty (legacy runs without registry rows).
+  const [prs, setPrs] = useState<PrSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Lazy-load run + report + files in parallel
+  // Lazy-load run + report + files + PRs in parallel
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
@@ -105,11 +112,13 @@ export default function V3RunDetail() {
       }),
       getValidationReport(runId).catch(() => null),
       getFilesWithStatus(runId).catch(() => [] as FileWithStatus[]),
-    ]).then(([d, r, f]) => {
+      getRunPrs(runId).catch(() => [] as PrSummary[]),
+    ]).then(([d, r, f, p]) => {
       if (cancelled) return;
       setDetail(d);
       setReport(r);
       setFilesWithStatus(f);
+      setPrs(p);
       setLoading(false);
     });
     return () => {
@@ -300,27 +309,76 @@ export default function V3RunDetail() {
 
           {/* Action row */}
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
-            {detail.githubPrUrl && (
-              <a
-                href={detail.githubPrUrl}
-                target='_blank'
-                rel='noreferrer'
-                style={{
-                  padding: '5px 12px',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  background: 'var(--v3-brand)',
-                  color: 'var(--v3-text-on-brand)',
-                  border: 'none',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  textDecoration: 'none',
-                  fontFamily: 'inherit',
-                }}
-              >
-                Open PR ↗
-              </a>
-            )}
+            {/* Multi-repo aware PR action.
+                 - 0 PRs + no legacy URL → no button.
+                 - 1 PR (registry or legacy) → single primary "Open PR ↗" button.
+                 - N>1 PRs → one tertiary button per repo, labeled "<short>#<num>". */}
+            {(() => {
+              const legacyUrl = detail.githubPrUrl;
+              if (prs.length === 0 && !legacyUrl) return null;
+              if (prs.length <= 1) {
+                const single =
+                  prs[0]?.prUrl ?? legacyUrl!;
+                return (
+                  <a
+                    href={single}
+                    target='_blank'
+                    rel='noreferrer'
+                    style={{
+                      padding: '5px 12px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background: 'var(--v3-brand)',
+                      color: 'var(--v3-text-on-brand)',
+                      border: 'none',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      textDecoration: 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    Open PR ↗
+                  </a>
+                );
+              }
+              return prs.map((pr) => {
+                const shortRepo = pr.repoFullName?.includes('/')
+                  ? pr.repoFullName.slice(pr.repoFullName.lastIndexOf('/') + 1)
+                  : pr.repoFullName;
+                return (
+                  <a
+                    key={`${pr.repoFullName}-${pr.prNumber}`}
+                    href={pr.prUrl}
+                    target='_blank'
+                    rel='noreferrer'
+                    title={`${pr.repoFullName} · ${pr.status}`}
+                    style={{
+                      padding: '5px 10px',
+                      fontSize: 12,
+                      fontWeight: 600,
+                      background:
+                        pr.status === 'MERGED'
+                          ? 'var(--v3-brand)'
+                          : 'transparent',
+                      color:
+                        pr.status === 'MERGED'
+                          ? 'var(--v3-text-on-brand)'
+                          : 'var(--v3-text)',
+                      border:
+                        pr.status === 'MERGED'
+                          ? 'none'
+                          : '1px solid var(--v3-brand)',
+                      borderRadius: 6,
+                      cursor: 'pointer',
+                      textDecoration: 'none',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {shortRepo}#{pr.prNumber} ↗
+                  </a>
+                );
+              });
+            })()}
             {slug && (
               <Link
                 to={`/projects/${slug}`}
