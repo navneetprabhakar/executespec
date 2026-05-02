@@ -158,6 +158,126 @@ public class VendoredPathGuard {
   }
 
   /**
+   * Scrub vendored content from a repo's <i>committed</i> history-of-record by listing every
+   * tracked path, identifying vendored ones, augmenting {@code .gitignore}, and creating a single
+   * cleanup commit that runs {@code git rm --cached -r} for each affected root segment. The
+   * worktree is left untouched (so {@code npm install} output stays usable). Designed for the
+   * "clean up an existing run's workspace before re-running the reviewer" path — cleaner than
+   * {@link #purgeStagedVendored} which only catches uncommitted staged files.
+   *
+   * <p>Idempotent: a second invocation finds nothing tracked + no-ops.
+   *
+   * <p>Returns a small report so callers can log/expose how much was scrubbed.
+   */
+  public ScrubResult scrubCommittedVendored(Path repoDir) {
+    if (!Files.isDirectory(repoDir.resolve(".git"))) {
+      return new ScrubResult(0, 0, java.util.Set.of());
+    }
+    try {
+      List<String> tracked = runGit(repoDir, List.of("ls-files"), 30);
+      java.util.LinkedHashSet<String> vendoredRoots = new java.util.LinkedHashSet<>();
+      int vendoredFileCount = 0;
+      for (String path : tracked) {
+        if (isVendored(path)) {
+          vendoredFileCount++;
+          // Use the SECOND-LEVEL parent in case the vendored dir is nested (e.g.
+          // "repos/api/node_modules/foo/index.js" → root segment is "node_modules", but the
+          // actual rm path needs to be relative to the repo we're operating on, which is
+          // already the case since we're running inside repoDir).
+          vendoredRoots.add(firstVendoredSegmentOf(path));
+        }
+      }
+      if (vendoredRoots.isEmpty()) {
+        log.debug(
+            "VendoredPathGuard.scrub: {} has no tracked vendored content (no-op)",
+            repoDir.getFileName());
+        return new ScrubResult(0, tracked.size(), java.util.Set.of());
+      }
+
+      log.info(
+          "VendoredPathGuard.scrub: {} has {} tracked vendored file(s) under {} root(s): {}",
+          repoDir.getFileName(),
+          vendoredFileCount,
+          vendoredRoots.size(),
+          vendoredRoots);
+
+      // 1. Make sure .gitignore covers them so the next `git add -A` doesn't re-stage.
+      augmentGitignore(repoDir);
+
+      // 2. Remove from index without touching the worktree. --ignore-unmatch keeps us
+      //    idempotent on retries / when a sub-path has already been cleaned by the
+      //    augmentation commit.
+      ensureLocalIdentity(repoDir);
+      for (String segment : vendoredRoots) {
+        try {
+          runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", segment), 60);
+        } catch (Exception inner) {
+          log.warn(
+              "git rm --cached failed for {}/{}: {}", repoDir.getFileName(), segment, inner.getMessage());
+        }
+      }
+      // Re-stage .gitignore in case augmentGitignore's auto-commit captured it before the rm.
+      try {
+        runGit(repoDir, List.of("add", ".gitignore"), 5);
+      } catch (Exception ignored) {
+        // best-effort
+      }
+      // 3. One scrub commit so the cleanup is atomic in history.
+      try {
+        runGit(
+            repoDir,
+            List.of(
+                "commit",
+                "--allow-empty",
+                "-m",
+                "chore(executespec): scrub committed vendored content ("
+                    + vendoredFileCount
+                    + " files across "
+                    + vendoredRoots.size()
+                    + " roots)"),
+            30);
+      } catch (Exception e) {
+        log.warn(
+            "VendoredPathGuard.scrub: scrub commit failed in {}: {}",
+            repoDir.getFileName(),
+            e.getMessage());
+        // index is already updated; lack of a commit just means subsequent `git status` shows
+        // a big staged removal. Acceptable.
+      }
+      return new ScrubResult(vendoredFileCount, tracked.size(), vendoredRoots);
+    } catch (Exception e) {
+      log.warn(
+          "VendoredPathGuard.scrub failed for {}: {}", repoDir.getFileName(), e.getMessage());
+      return new ScrubResult(0, 0, java.util.Set.of());
+    }
+  }
+
+  /** Result of a {@link #scrubCommittedVendored} call. */
+  public record ScrubResult(int filesRemoved, int totalTrackedAtScan, java.util.Set<String> roots) {
+    public boolean changed() {
+      return filesRemoved > 0;
+    }
+  }
+
+  /**
+   * Like {@link #rootSegmentOf} but returns the FIRST path segment that matches a vendored dir
+   * (instead of always the first segment). Lets us scrub the right level when vendored dirs are
+   * nested under non-vendored prefixes — though for the multi-repo workspace shape we use, the
+   * vendored dir is always at the repo root, so this collapses to {@code rootSegmentOf} in
+   * practice.
+   */
+  private String firstVendoredSegmentOf(String path) {
+    String[] parts = path.split("/");
+    StringBuilder accum = new StringBuilder();
+    for (String p : parts) {
+      if (accum.length() > 0) accum.append('/');
+      accum.append(p);
+      if (VENDORED_DIRS.contains(p)) return accum.toString();
+    }
+    return rootSegmentOf(path); // shouldn't reach here — caller already checked isVendored
+  }
+
+  /**
    * After {@code git add -A}, scan the staged files for vendored paths. If any are present:
    *
    * <ol>
