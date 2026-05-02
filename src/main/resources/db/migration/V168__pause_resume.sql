@@ -73,10 +73,14 @@ CREATE INDEX IF NOT EXISTS idx_pipeline_run_paused
 
 -- Feature flag (single — auto-resume-on-boot was scoped out). Defaults OFF
 -- so existing behaviour is preserved on first deploy; ops flips it on after
--- smoke-verifying pause/resume on dev.
-INSERT INTO feature_flag (key, enabled, description)
+-- smoke-verifying pause/resume on dev. Schema mirrors V124 / V128 / V150 —
+-- flag_key (VARCHAR), flag_value (VARCHAR — boolean stored as 'true'/'false'),
+-- value_type ('BOOLEAN'), scope ('PLATFORM'), description.
+INSERT INTO feature_flag (flag_key, flag_value, value_type, scope, description)
 VALUES
   ('v2.pause.enabled',
-   FALSE,
+   'false',
+   'BOOLEAN',
+   'PLATFORM',
    'V2 pause/resume endpoints. When OFF, /api/runs/{id}/pause + /resume return 503 with the flag name. When ON, the endpoints accept requests from runs in WORKING / REVIEWING and PAUSED statuses respectively. Resume is same-JVM-only today; cross-JVM resume requires GCS workspace shipping (deferred follow-up).')
-ON CONFLICT (key) DO NOTHING;
+ON CONFLICT (flag_key) DO NOTHING;
