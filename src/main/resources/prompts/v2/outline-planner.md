@@ -54,6 +54,12 @@ If the spec truly imposes only one requirement (e.g. "write fibonacci to fib.py"
 
 9. **Requirement coverage is non-negotiable (Validation v3).** Every entry in the top-level `requirements` array MUST be cited by at least one task's `meetsRequirements`. A task may cite multiple requirement IDs (comma-free array). If a plan violates coverage, the validator will ask you to re-emit it once; a second failure fails the run with `PLAN_COVERAGE_INVALID`.
 
+10. **Honor the LANGUAGE PARITY block (when present).** If the workspace summary contains a "LANGUAGE PARITY (do not violate)" section, every task description and every entry in `touchesFiles` MUST use the conventions of the repo's detected language — even when the user's spec uses different conventions. Concretely:
+    - User spec says `scan.service.ts`, repo is Python → write `scan_service.py` in the description, `repos/<name>/scan_service.py` in `touchesFiles`.
+    - User spec says `os.getenv("X")`, repo is TypeScript → translate to `process.env.X` in the description.
+    - Apply the same translation to module imports, naming style, and config-access idioms.
+    Never paraphrase the user's wording verbatim if it would violate the repo's actual language. The downstream worker treats your task description as the user prompt — wrong-language file paths force it to spend its iteration budget on language-reconciliation instead of code.
+
    **CONSTRAINT PROPAGATION — READ CAREFULLY:**
 
    This is the single most common planner mistake. Every constraint in the spec MUST appear in the `hardConstraints` array of every task whose work could violate it. Scan the spec for these signal phrases and extract them as constraints:

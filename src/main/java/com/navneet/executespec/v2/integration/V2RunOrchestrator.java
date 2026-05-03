@@ -2863,7 +2863,102 @@ public class V2RunOrchestrator {
           .append(r.getDefaultBranch() == null ? "main" : r.getDefaultBranch())
           .append(")\n");
     }
+
+    // Fix D (2026-05-03, run a076c876 T2 diagnosis) — append a language parity
+    // block per repo from ProjectRepo.detectedStack so the planner doesn't
+    // template TypeScript filenames into a Python repo and vice versa. T2's
+    // task description told the worker to edit `repos/pplai-api/src/config/index.ts`
+    // when pplai-api is FastAPI/Python; the worker spent iters 1-10 reconciling
+    // the spec's TypeScript wording against the actual Python code on disk.
+    String languageBlock = buildLanguageParityBlock(repos);
+    if (!languageBlock.isEmpty()) {
+      sb.append('\n').append(languageBlock);
+    }
     return sb.toString();
+  }
+
+  /**
+   * Render a per-repo language parity block from the {@link ProjectRepo#getDetectedStack()} JSON
+   * shape produced by {@code StackDetector} ({@code {language, framework, version}}). Returns the
+   * empty string when no repo has a non-blank detected language — there's nothing useful to say.
+   *
+   * <p>The block instructs the planner to TRANSLATE filename / extension conventions in the
+   * spec to match the repo's actual language. Without this block, planners templated TypeScript
+   * filenames into Python repos because the user's spec wording happened to use {@code .ts}
+   * extensions (run a076c876 / T2). The planner now sees an explicit rule and either translates
+   * up-front or rejects the mismatch.
+   */
+  private String buildLanguageParityBlock(List<ProjectRepo> repos) {
+    if (repos == null || repos.isEmpty()) return "";
+    StringBuilder lines = new StringBuilder();
+    for (ProjectRepo r : repos) {
+      String stackJson = r.getDetectedStack();
+      if (stackJson == null || stackJson.isBlank()) continue;
+      String language = null;
+      String framework = null;
+      try {
+        var node = objectMapper.readTree(stackJson);
+        language = node.path("language").asText("");
+        framework = node.path("framework").asText("");
+        if (language == null || language.isBlank()) continue;
+      } catch (Exception e) {
+        // detectedStack is malformed JSON — skip this repo's hint, no big deal.
+        continue;
+      }
+      String name = lastPathSegment(r.getGithubRepoFullName());
+      String hint = languageConventionHint(language, framework);
+      lines
+          .append("- `repos/")
+          .append(name)
+          .append("/` is **")
+          .append(language);
+      if (framework != null && !framework.isBlank()) {
+        lines.append(" / ").append(framework);
+      }
+      lines.append("** — ").append(hint).append('\n');
+    }
+    if (lines.length() == 0) return "";
+    return "LANGUAGE PARITY (do not violate):\n"
+        + lines
+        + "If the user's spec uses different language conventions for a repo (e.g. asks for"
+        + " `scan.service.ts` in a Python repo), TRANSLATE the filenames + idioms to match the"
+        + " repo's actual language before emitting the task description. The repo's detected"
+        + " language is authoritative.\n";
+  }
+
+  /**
+   * Map a detected (language, framework) pair to a short worker-actionable convention hint.
+   * Conservative: when the language doesn't match any known mapping, return a generic
+   * "match the existing repo conventions" line so the planner at least sees the language
+   * name in the parity block.
+   */
+  static String languageConventionHint(String language, String framework) {
+    String l = language == null ? "" : language.trim().toLowerCase();
+    return switch (l) {
+      case "python" ->
+          "use snake_case `.py` filenames, `os.getenv()` / pydantic-settings for config,"
+              + " pytest for tests.";
+      case "typescript", "typescript/js", "javascript", "node", "nodejs" ->
+          "use kebab-case or camelCase `.ts` / `.tsx` filenames (match what's already in the"
+              + " repo), `process.env` for config, vitest / jest for tests.";
+      case "go", "golang" ->
+          "use lower_snake_case `.go` filenames, `os.Getenv` for config, `_test.go` for tests.";
+      case "rust" ->
+          "use snake_case `.rs` filenames, `std::env::var` for config, `#[cfg(test)]` modules"
+              + " or `tests/` dir.";
+      case "java" ->
+          "use PascalCase `.java` filenames, Spring `@Value` / `application.yml` for config,"
+              + " JUnit for tests.";
+      case "kotlin" ->
+          "use PascalCase `.kt` filenames, Spring `@Value` / `application.yml` for config,"
+              + " JUnit / Kotest for tests.";
+      case "ruby" ->
+          "use snake_case `.rb` filenames, `ENV[]` for config, RSpec for tests.";
+      case "csharp", "c#", "cs" ->
+          "use PascalCase `.cs` filenames, `IConfiguration` / `appsettings.json` for config,"
+              + " xUnit for tests.";
+      default -> "match the existing repo's filename + config + test conventions.";
+    };
   }
 
   private static String lastPathSegment(String fullName) {
