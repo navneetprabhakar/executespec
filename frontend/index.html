@@ -7,6 +7,11 @@
     <!-- R-171 — PWA manifest + iOS home-screen support. -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0B0D10" />
+    <!-- Fix K (2026-05-03): apple-mobile-web-app-capable is deprecated as of
+         iOS 16. The standard meta name is mobile-web-app-capable; we keep the
+         apple-* one for back-compat with older iOS PWA installers. Both must
+         carry the same value. -->
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="apple-mobile-web-app-title" content="ExecuteSpec" />

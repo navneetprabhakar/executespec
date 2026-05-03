@@ -37,6 +37,14 @@ public record WorkerResult(
     /** LLM router or tool dispatch threw an unrecoverable exception. */
     ERROR,
     /** Run hit its hard cap mid-task; worker stopped cleanly. */
-    BUDGET_EXCEEDED
+    BUDGET_EXCEEDED,
+    /**
+     * Worker made no new file writes for {@link
+     * com.navneet.executespec.v2.agent.WorkerAgentV2#STAGNATION_FORCE_AFTER_N} consecutive
+     * iterations after a one-shot "PROGRESS CHECK" warning. The change set is presumably already in
+     * the workspace (otherwise we'd see writes); the worker is just being indecisive. The smoke
+     * gate downstream decides whether the change set actually compiles.
+     */
+    COMPLETED_BY_STAGNATION
   }
 }

@@ -74,4 +74,30 @@ public record RunRequest(
      * structure, just different ordering. Higher accuracy on logic-heavy specs at the cost of more
      * tokens.
      */
-    Boolean tddMode) {}
+    Boolean tddMode,
+    /**
+     * Fix M (2026-05-03) — incremental-update branch override. When set, every cloned repo is
+     * checked out to this branch instead of its default ({@code git clone -b <branch>}); the
+     * post-run push lands commits on this branch instead of creating a new {@code
+     * executespec/<runIdShort>}. The frontend's {@code LaunchFromChatModal} sends this when the
+     * user fills the per-launch branch input — previously the field was silently dropped because
+     * the DTO didn't expose it. Also accepted as {@code branchOverride} for forward-compat with
+     * external callers that prefer the longer name.
+     *
+     * <p>Use cases: (1) re-launch on an existing PR's head branch to address review comments; (2)
+     * stack a staged launch onto an in-progress branch.
+     */
+    @Size(max = 200, message = "Branch must not exceed 200 characters")
+        @JsonAlias({"branchOverride"})
+        String branch,
+    /**
+     * Fix M (2026-05-03) — feed prior PR review comments into the planner. {@link
+     * com.navneet.executespec.v2.agent.PlannerRequestV2#prReviewComments} already plumbed this
+     * field through to the {@code outline-planner.md} {@code {{PR_REVIEW_COMMENTS}}} placeholder;
+     * exposing it via the public DTO lets external clients request a "address these review comments
+     * on this PR" run without copy-pasting the comments into the spec body.
+     *
+     * <p>Free-form text — the planner treats it as advisory context, not as a hard task list.
+     */
+    @Size(max = 20_000, message = "PR review comments must not exceed 20,000 characters")
+        String prReviewComments) {}
