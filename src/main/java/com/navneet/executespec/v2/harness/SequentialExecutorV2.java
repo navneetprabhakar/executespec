@@ -69,8 +69,8 @@ public class SequentialExecutorV2 {
       """
       You are a code-execution agent operating in a sandboxed workspace. You have
       access to filesystem (readFile, writeFile, editFile, listFiles, searchFiles),
-      shell, git (status, diff, commit), and buildProject tools. Use the tools to
-      complete the task — do not explain or hedge.
+      shell, read-only git (status, diff), and buildProject tools. Use the tools
+      to complete the task — do not explain or hedge.
 
       Important rules:
       - The shell runs in the workspace root already. Do NOT `cd /workspace` or use
@@ -83,6 +83,12 @@ public class SequentialExecutorV2 {
         compiles.
       - When the task is fully complete, call completeTask with a brief summary.
         Do not output any text that is not needed to complete the task.
+
+      DO NOT commit, stage, or push. Workspace changes are committed and pushed
+      automatically at run-end by a downstream service. You have NO gitCommit
+      tool — attempts to call it return FORBIDDEN. Do not run shell commands that
+      mutate git state (`git add`, `git commit`, `git reset`, `git stash`,
+      `git push`). Edit files; call completeTask. That's it.
 
       Efficiency — BATCH AGGRESSIVELY. Every extra turn costs tokens and latency:
       - Emit ALL independent tool calls in ONE turn (reads, writes, edits, builds).

@@ -153,6 +153,9 @@ public class WorkerAgentV2 {
                     .context(req.context())
                     .temperature(req.temperature())
                     .maxTokens(req.maxTokensPerCall())
+                    // Strip gitCommit from the worker's tool authorities. See
+                    // ToolRegistryV2#WORKER_DENY_TOOLS for the rationale.
+                    .toolsOverride(toolRegistry.bindForWorker(req.context()))
                     .build());
       } catch (Exception e) {
         log.error("WorkerAgentV2 router failure at iter={}", iter, e);
@@ -272,6 +275,17 @@ public class WorkerAgentV2 {
   }
 
   private String dispatchOne(AssistantMessage.ToolCall tc, WorkerTaskRequest req) {
+    // Belt-and-suspenders: even if the model somehow tries to invoke a denied
+    // tool by name (e.g. cached tool list, hand-crafted payload), refuse at
+    // dispatch time with a clear error envelope so the model can self-correct.
+    if (ToolRegistryV2.WORKER_DENY_TOOLS.contains(tc.name())) {
+      return errEnvelope(
+          "FORBIDDEN",
+          tc.name()
+              + " is not available to the worker — workspace changes are committed automatically"
+              + " at run-end. Use writeFile/editFile to modify files and call completeTask when"
+              + " done.");
+    }
     Tool tool = toolRegistry.find(tc.name());
     if (tool == null) {
       return errEnvelope("INVALID_ARGS", "unknown tool: " + tc.name());
