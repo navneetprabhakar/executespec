@@ -374,8 +374,7 @@ public class SequentialExecutorV2 {
               + smoke.exitCode()
               + ")"
               + (smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " "));
-      log.warn(
-          "Executor task={} soft-completion + smoke failed; marking PARTIAL", task.id());
+      log.warn("Executor task={} soft-completion + smoke failed; marking PARTIAL", task.id());
       persistTaskStatus(runId, task.id(), "PARTIAL", reason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
       return TaskOutcome.builder()

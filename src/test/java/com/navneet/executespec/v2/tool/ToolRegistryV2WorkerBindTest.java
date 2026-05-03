@@ -76,8 +76,7 @@ class ToolRegistryV2WorkerBindTest {
             new ObjectMapper());
 
     List<ToolCallback> workerTools = registry.bindForWorker(ctx());
-    List<String> workerNames =
-        workerTools.stream().map(t -> t.getToolDefinition().name()).toList();
+    List<String> workerNames = workerTools.stream().map(t -> t.getToolDefinition().name()).toList();
 
     assertFalse(
         workerNames.contains("gitCommit"),
