@@ -88,9 +88,9 @@ public class WorkerAgentV2 {
   /**
    * Stagnation guard threshold — after this many consecutive iterations without a write-class tool
    * call (writeFile / editFile), inject a one-shot "PROGRESS CHECK" system message. Calibrated from
-   * run a076c876 task T2 (2026-05-03): the worker had finished writing files at iter ~16 and
-   * burned the next 44 iters on read+verify+git loops. Eight iterations is enough headroom for
-   * legitimate "read several files, then write one big edit" patterns without rewarding loops.
+   * run a076c876 task T2 (2026-05-03): the worker had finished writing files at iter ~16 and burned
+   * the next 44 iters on read+verify+git loops. Eight iterations is enough headroom for legitimate
+   * "read several files, then write one big edit" patterns without rewarding loops.
    */
   public static final int STAGNATION_WARN_AFTER_N = 8;
 

@@ -2882,11 +2882,11 @@ public class V2RunOrchestrator {
    * shape produced by {@code StackDetector} ({@code {language, framework, version}}). Returns the
    * empty string when no repo has a non-blank detected language — there's nothing useful to say.
    *
-   * <p>The block instructs the planner to TRANSLATE filename / extension conventions in the
-   * spec to match the repo's actual language. Without this block, planners templated TypeScript
-   * filenames into Python repos because the user's spec wording happened to use {@code .ts}
-   * extensions (run a076c876 / T2). The planner now sees an explicit rule and either translates
-   * up-front or rejects the mismatch.
+   * <p>The block instructs the planner to TRANSLATE filename / extension conventions in the spec to
+   * match the repo's actual language. Without this block, planners templated TypeScript filenames
+   * into Python repos because the user's spec wording happened to use {@code .ts} extensions (run
+   * a076c876 / T2). The planner now sees an explicit rule and either translates up-front or rejects
+   * the mismatch.
    */
   private String buildLanguageParityBlock(List<ProjectRepo> repos) {
     if (repos == null || repos.isEmpty()) return "";
@@ -2907,11 +2907,7 @@ public class V2RunOrchestrator {
       }
       String name = lastPathSegment(r.getGithubRepoFullName());
       String hint = languageConventionHint(language, framework);
-      lines
-          .append("- `repos/")
-          .append(name)
-          .append("/` is **")
-          .append(language);
+      lines.append("- `repos/").append(name).append("/` is **").append(language);
       if (framework != null && !framework.isBlank()) {
         lines.append(" / ").append(framework);
       }
@@ -2928,9 +2924,9 @@ public class V2RunOrchestrator {
 
   /**
    * Map a detected (language, framework) pair to a short worker-actionable convention hint.
-   * Conservative: when the language doesn't match any known mapping, return a generic
-   * "match the existing repo conventions" line so the planner at least sees the language
-   * name in the parity block.
+   * Conservative: when the language doesn't match any known mapping, return a generic "match the
+   * existing repo conventions" line so the planner at least sees the language name in the parity
+   * block.
    */
   static String languageConventionHint(String language, String framework) {
     String l = language == null ? "" : language.trim().toLowerCase();
@@ -2952,8 +2948,7 @@ public class V2RunOrchestrator {
       case "kotlin" ->
           "use PascalCase `.kt` filenames, Spring `@Value` / `application.yml` for config,"
               + " JUnit / Kotest for tests.";
-      case "ruby" ->
-          "use snake_case `.rb` filenames, `ENV[]` for config, RSpec for tests.";
+      case "ruby" -> "use snake_case `.rb` filenames, `ENV[]` for config, RSpec for tests.";
       case "csharp", "c#", "cs" ->
           "use PascalCase `.cs` filenames, `IConfiguration` / `appsettings.json` for config,"
               + " xUnit for tests.";

@@ -4,26 +4,24 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import com.navneet.executespec.v2.integration.V2RunOrchestrator;
-
 import org.junit.jupiter.api.Test;
 
 /**
  * Pins the language-convention hint mapping introduced for Fix D (run a076c876 T2 diagnosis,
- * 2026-05-03). The planner uses this block via {@code buildMultiRepoSummary} → workspaceSummary
- * → outline-planner.md prompt to translate user-spec filename conventions into the repo's
- * detected language.
+ * 2026-05-03). The planner uses this block via {@code buildMultiRepoSummary} → workspaceSummary →
+ * outline-planner.md prompt to translate user-spec filename conventions into the repo's detected
+ * language.
  *
  * <p>The block is critical: T2's failure mode was the planner templating TypeScript
  * (`src/config/index.ts`, `process.env.SCAN_CONFIDENCE_THRESHOLD`) into a Python repo's task
- * description, after which the worker had to spend 10 iterations reconciling the spec's
- * TypeScript wording against the actual Python code on disk. With this hint visible to the
- * planner, the description gets translated up-front (`src/config.py`, {@code os.getenv(...)}).
+ * description, after which the worker had to spend 10 iterations reconciling the spec's TypeScript
+ * wording against the actual Python code on disk. With this hint visible to the planner, the
+ * description gets translated up-front (`src/config.py`, {@code os.getenv(...)}).
  *
- * <p>This test pins the hint mapping for known languages + the conservative fallback. The
- * actual block-rendering logic (per-repo iteration, JSON parsing) lives in
- * {@code buildLanguageParityBlock} which is exercised by the {@code V2RunOrchestrator}'s
- * integration path; these are unit tests of the pure mapping function.
+ * <p>This test pins the hint mapping for known languages + the conservative fallback. The actual
+ * block-rendering logic (per-repo iteration, JSON parsing) lives in {@code
+ * buildLanguageParityBlock} which is exercised by the {@code V2RunOrchestrator}'s integration path;
+ * these are unit tests of the pure mapping function.
  */
 class LanguageParityBlockTest {
 
@@ -41,7 +39,8 @@ class LanguageParityBlockTest {
     String hint = V2RunOrchestrator.languageConventionHint("TypeScript/JS", "React");
     assertTrue(hint.contains(".ts"), "TS hint must mention .ts: " + hint);
     assertTrue(
-        hint.contains("vitest") || hint.contains("jest"), "TS hint must mention test framework: " + hint);
+        hint.contains("vitest") || hint.contains("jest"),
+        "TS hint must mention test framework: " + hint);
     assertTrue(hint.contains("process.env"), "TS hint must mention process.env: " + hint);
   }
 

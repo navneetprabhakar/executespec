@@ -7,7 +7,6 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.when;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -36,8 +35,8 @@ import org.springframework.ai.chat.model.Generation;
  * Pins the stagnation guard introduced for the run {@code a076c876} task T2 runaway (2026-05-03).
  * The worker burned 22 iterations re-reading + verifying its own writes after the change set was
  * already applied; the new guard injects a one-shot PROGRESS CHECK at {@link
- * WorkerAgentV2#STAGNATION_WARN_AFTER_N} consecutive non-write iterations and force-terminates
- * with {@link WorkerResult.Outcome#COMPLETED_BY_STAGNATION} at {@link
+ * WorkerAgentV2#STAGNATION_WARN_AFTER_N} consecutive non-write iterations and force-terminates with
+ * {@link WorkerResult.Outcome#COMPLETED_BY_STAGNATION} at {@link
  * WorkerAgentV2#STAGNATION_FORCE_AFTER_N}.
  *
  * <p>Tests stub the LLM router so each iteration returns a deterministic tool call. {@code

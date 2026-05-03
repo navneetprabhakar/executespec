@@ -39,26 +39,41 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Mutates the existing {@code pipeline_run.workspace_path} — no new run id
  * </ul>
  *
- * <p>Limits: 25 iterations hard cap (same as MEDIUM task), WORKHORSE tier model. Workspace-level
- * concurrency is the caller's responsibility — if two Applies fire on the same run, git may throw
- * dirty-index errors; that's acceptable for now since the UI only surfaces one button at a time.
+ * <p>Limits (2026-05-03 — Fix I): 60 iterations base cap (was 25 — too low for multi-file applies).
+ * Project-scoped runs (workspace contains {@code repos/<name>/} subdirs) get the cap doubled to
+ * 120, mirroring {@code SequentialExecutorV2.tierConfigFor}'s "project runs need 2× the
+ * fresh-scratch budget because every readFile/writeFile crosses a directory boundary" rule.
+ * Workspace-level concurrency is the caller's responsibility — if two Applies fire on the same run,
+ * git may throw dirty-index errors; that's acceptable for now since the UI only surfaces one button
+ * at a time.
  *
  * <p>Intentionally NOT annotated {@code @Transactional}. Callers dispatch async (see {@code
  * RunConversationController.applyExecutor}) and the inner JPA calls manage their own short tx scope
- * — wrapping this 25-iteration loop in an outer tx would pin a Hikari connection for the entire
- * worker run.
+ * — wrapping the worker loop in an outer tx would pin a Hikari connection for the entire worker
+ * run.
+ *
+ * <p>Lifecycle state (Fix I): every invocation writes to {@link ApplyResultStore} (Redis, 1h TTL)
+ * so the UI can poll {@code GET /api/runs/{id}/apply/status} after the original POST response
+ * stream is severed (broken pipe, browser navigation, Monaco crash, etc.). Without this, the
+ * a076c876 apply hit ITERATION_LIMIT_EXCEEDED in the background but the user had no way to learn
+ * the outcome because the response channel had died at the 3-second mark.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class V2ApplyService {
 
-  private static final int APPLY_ITER_CAP = 25;
+  /** Base iter cap — single-repo / scratch-workspace applies. */
+  static final int APPLY_BASE_ITER_CAP = 60;
+
+  /** Multiplier for project-scoped applies (multi-repo / large existing codebase). */
+  static final int APPLY_PROJECT_MULTIPLIER = 2;
 
   private final PipelineRunRepository runRepo;
   private final WorkerAgentV2 worker;
   private final ModelResolver modelResolver;
   private final AgentProperties agentProps;
+  private final ApplyResultStore resultStore;
 
   public record ApplyResult(
       int taskCount, List<TaskSummary> tasks, String workerOutcome, String summary) {}
@@ -113,8 +128,18 @@ public class V2ApplyService {
     String taskId = "APPLY-" + System.currentTimeMillis();
     String commitPrefix = "REVIEW".equalsIgnoreCase(source) ? "review" : "copilot";
     String title = firstLine(suggestion, 60);
+    int iterCap =
+        run.getProjectId() != null
+            ? APPLY_BASE_ITER_CAP * APPLY_PROJECT_MULTIPLIER
+            : APPLY_BASE_ITER_CAP;
 
     ExecutionContext ctx = new ExecutionContext(runId, taskId, workspace);
+
+    // Stamp lifecycle state to Redis so the UI can poll the outcome even if the
+    // POST response stream dies (broken pipe, Monaco crash, browser navigation).
+    ApplyResultStore.ApplyState pending =
+        ApplyResultStore.ApplyState.running(runId, taskId, commitPrefix, model.getModel());
+    resultStore.put(pending);
 
     String systemPrompt =
         """
@@ -145,7 +170,7 @@ public class V2ApplyService {
             .systemPrompt(systemPrompt)
             .userPrompt(userPrompt)
             .context(ctx)
-            .maxIterations(APPLY_ITER_CAP)
+            .maxIterations(iterCap)
             .temperature(0.0)
             .build();
 
@@ -154,7 +179,7 @@ public class V2ApplyService {
         runId,
         commitPrefix,
         model.getModel(),
-        APPLY_ITER_CAP,
+        iterCap,
         preview(suggestion, 100));
 
     WorkerResult result;
@@ -162,6 +187,7 @@ public class V2ApplyService {
       result = worker.run(req);
     } catch (Exception e) {
       log.error("V2ApplyService run={} worker failed: {}", runId, e.getMessage(), e);
+      resultStore.put(pending.toFailed(e.getClass().getSimpleName() + ": " + e.getMessage()));
       throw new RuntimeException("Apply worker failed: " + e.getMessage(), e);
     }
 
@@ -186,6 +212,11 @@ public class V2ApplyService {
           result.iterations(),
           result.toolCallsDispatched());
     }
+
+    // Persist the terminal lifecycle state so the polling endpoint can return it.
+    resultStore.put(
+        pending.toCompleted(
+            result.outcome().name(), summary, result.iterations(), result.toolCallsDispatched()));
 
     return new ApplyResult(
         1, List.of(new TaskSummary(taskId, title)), result.outcome().name(), summary);

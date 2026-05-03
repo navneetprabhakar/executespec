@@ -77,9 +77,9 @@ public class ToolRegistryV2 {
 
   /**
    * Worker-restricted bind — same as {@link #bind(ExecutionContext)} but excludes any tool listed
-   * in {@link #WORKER_DENY_TOOLS} (currently just {@code gitCommit}). Use this instead of
-   * {@code bind} when constructing the worker's LLM request so the model can't get itself stuck in
-   * a per-task git-plumbing loop.
+   * in {@link #WORKER_DENY_TOOLS} (currently just {@code gitCommit}). Use this instead of {@code
+   * bind} when constructing the worker's LLM request so the model can't get itself stuck in a
+   * per-task git-plumbing loop.
    */
   public List<ToolCallback> bindForWorker(ExecutionContext ctx) {
     return allTools.stream()

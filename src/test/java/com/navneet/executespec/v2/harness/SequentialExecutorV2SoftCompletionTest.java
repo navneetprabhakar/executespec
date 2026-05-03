@@ -31,16 +31,16 @@ import org.junit.jupiter.api.Test;
 /**
  * Pins the soft-completion gate introduced by Fix C (2026-05-03, run a076c876 T2 diagnosis).
  *
- * <p>Pre-Fix-C behavior: any worker outcome other than {@code COMPLETED} with files written →
- * task immediately persisted as {@code PARTIAL}, even for intermediate tasks in multi-task
- * plans where the reviewer's final build is the authoritative gate. T2 was a multi-task,
- * intermediate, LOW-complexity task that wrote 5 correct files but couldn't shut up — and
- * landed PARTIAL when it should have landed COMPLETE-with-warning.
+ * <p>Pre-Fix-C behavior: any worker outcome other than {@code COMPLETED} with files written → task
+ * immediately persisted as {@code PARTIAL}, even for intermediate tasks in multi-task plans where
+ * the reviewer's final build is the authoritative gate. T2 was a multi-task, intermediate,
+ * LOW-complexity task that wrote 5 correct files but couldn't shut up — and landed PARTIAL when it
+ * should have landed COMPLETE-with-warning.
  *
- * <p>Post-Fix-C behavior: outcome != COMPLETED + files written → fall through to the SAME gate
- * the COMPLETED path uses (multi-task skip / smoke test). Final status is decided by the gate;
- * the soft-completion warning rides along on {@code lastLlmFailure} so the user sees what
- * happened regardless of which final bucket the task landed in.
+ * <p>Post-Fix-C behavior: outcome != COMPLETED + files written → fall through to the SAME gate the
+ * COMPLETED path uses (multi-task skip / smoke test). Final status is decided by the gate; the
+ * soft-completion warning rides along on {@code lastLlmFailure} so the user sees what happened
+ * regardless of which final bucket the task landed in.
  *
  * <p>Tests cover the four corners:
  *
@@ -76,8 +76,15 @@ class SequentialExecutorV2SoftCompletionTest {
         .when(modelResolver.resolve(anyString(), any()))
         .thenThrow(new RuntimeException("not wired in unit test"));
     return new SequentialExecutorV2(
-        worker, buildProjectTool, objectMapper, metrics, broadcaster, taskRepo, modelResolver,
-        retrievalService, costTracker);
+        worker,
+        buildProjectTool,
+        objectMapper,
+        metrics,
+        broadcaster,
+        taskRepo,
+        modelResolver,
+        retrievalService,
+        costTracker);
   }
 
   /** Snapshot of the (status, lastLlmFailure) tuple at the moment of saveAndFlush. */
@@ -86,9 +93,9 @@ class SequentialExecutorV2SoftCompletionTest {
   private final java.util.List<SaveSnapshot> saveLog = new java.util.ArrayList<>();
 
   /**
-   * Make the task repo return a fresh AgentTask row per id and snapshot every saveAndFlush so
-   * the test can assert what was actually persisted at each transition (vs the final mutated
-   * state of a reused row instance).
+   * Make the task repo return a fresh AgentTask row per id and snapshot every saveAndFlush so the
+   * test can assert what was actually persisted at each transition (vs the final mutated state of a
+   * reused row instance).
    */
   private void stubTaskRow() {
     java.util.Map<String, AgentTask> rowsByKey = new java.util.HashMap<>();
@@ -123,8 +130,16 @@ class SequentialExecutorV2SoftCompletionTest {
         .planTitle("Test plan")
         .tasks(
             List.of(
-                PlannedTaskV2.builder().id("T1").title("write five files").complexity(Complexity.LOW).build(),
-                PlannedTaskV2.builder().id("T2").title("write more files").complexity(Complexity.LOW).build()))
+                PlannedTaskV2.builder()
+                    .id("T1")
+                    .title("write five files")
+                    .complexity(Complexity.LOW)
+                    .build(),
+                PlannedTaskV2.builder()
+                    .id("T2")
+                    .title("write more files")
+                    .complexity(Complexity.LOW)
+                    .build()))
         .buildCommand("echo build")
         .build();
   }
