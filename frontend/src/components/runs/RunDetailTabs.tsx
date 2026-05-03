@@ -1740,8 +1740,7 @@ function TreeNodeView({
   // descendant changed. Lookup is cheap since fileStatus is a Map; aggregateChildStatus walks
   // each render-time but the tree is small enough that memoising adds more code than it saves.
   const leafStatus = node.isFile && fileStatus ? fileStatus.get(node.path) : undefined;
-  const dirStatus =
-    !node.isFile && fileStatus ? aggregateChildStatus(node, fileStatus) : undefined;
+  const dirStatus = !node.isFile && fileStatus ? aggregateChildStatus(node, fileStatus) : undefined;
 
   if (node.isFile) {
     return (
@@ -1827,8 +1826,7 @@ function aggregateChildStatus(
 }
 
 function renderLeafBadge(status: FileChangeStatus) {
-  const base =
-    'text-[9px] font-bold leading-none px-1 py-[1px] rounded-sm flex-shrink-0 border';
+  const base = 'text-[9px] font-bold leading-none px-1 py-[1px] rounded-sm flex-shrink-0 border';
   if (status === 'ADDED') {
     return (
       <span
@@ -1978,8 +1976,7 @@ function IDEFileViewer({
   // 2026-05-02 — view-mode toggle. Default is 'diff' for ADDED/MODIFIED files (the user's
   // ask: "I can see which file changed in Code section, but I can't see what changed"). Falls
   // back to 'full' for UNCHANGED files (no diff to show) or when the run id isn't wired through.
-  const canShowDiff =
-    !!runId && (fileStatus === 'ADDED' || fileStatus === 'MODIFIED');
+  const canShowDiff = !!runId && (fileStatus === 'ADDED' || fileStatus === 'MODIFIED');
   const [viewMode, setViewMode] = useState<'full' | 'diff'>(canShowDiff ? 'diff' : 'full');
   const [diff, setDiff] = useState<FileDiffPayload | null>(null);
   const [diffLoading, setDiffLoading] = useState(false);
