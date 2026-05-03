@@ -301,9 +301,9 @@ public class ProjectChatService {
   private static final int MAX_TOOL_ROUNDS = 6;
 
   /**
-   * V169 (2026-05-02) — chat with project-action tools enabled. The caller's GitHub PAT is
-   * threaded into tools that hit private repos (regenerate_architecture). When {@code callerPat}
-   * is null, those tools still bind but return a clear error if the project's repos are private.
+   * V169 (2026-05-02) — chat with project-action tools enabled. The caller's GitHub PAT is threaded
+   * into tools that hit private repos (regenerate_architecture). When {@code callerPat} is null,
+   * those tools still bind but return a clear error if the project's repos are private.
    *
    * <p>2026-05-02 fix — runs a manual tool-execution loop because {@code LlmRouterV2} hardcodes
    * {@code internalToolExecutionEnabled(false)} (the V2 worker pattern handles its own loop).
@@ -416,9 +416,7 @@ public class ProjectChatService {
                 "{\"ok\":false,\"message\":\"unknown tool '"
                     + tc.name()
                     + "' — chat tools bound: "
-                    + tools.stream()
-                        .map(t -> t.getToolDefinition().name())
-                        .toList()
+                    + tools.stream().map(t -> t.getToolDefinition().name()).toList()
                     + "\"}";
             log.warn("Project chat: model called unknown tool '{}'", tc.name());
           } else {
@@ -492,7 +490,9 @@ public class ProjectChatService {
     return assistantMsg;
   }
 
-  /** Lookup a {@link ToolCallback} by tool name. Returns null when the model calls an unknown tool. */
+  /**
+   * Lookup a {@link ToolCallback} by tool name. Returns null when the model calls an unknown tool.
+   */
   private static ToolCallback findCallback(List<ToolCallback> tools, String name) {
     if (name == null) return null;
     for (ToolCallback t : tools) {
@@ -518,20 +518,29 @@ public class ProjectChatService {
     sys.append("## TOOLS\n")
         .append("You can call project-action tools when the user asks you to DO something on the ")
         .append("project. Examples that should trigger a tool call rather than a text answer:\n")
-        .append("- \"regenerate / refresh / update the architecture\" → call regenerate_architecture\n")
-        .append("- \"generate / update the explanation doc\" → call generate_project_doc with docType=EXPLANATION\n")
-        .append("- \"generate / update the setup doc\" → call generate_project_doc with docType=SETUP\n")
+        .append(
+            "- \"regenerate / refresh / update the architecture\" → call regenerate_architecture\n")
+        .append(
+            "- \"generate / update the explanation doc\" → call generate_project_doc with"
+                + " docType=EXPLANATION\n")
+        .append(
+            "- \"generate / update the setup doc\" → call generate_project_doc with"
+                + " docType=SETUP\n")
         .append("- \"what repos are linked / show me the repos\" → call list_repos\n")
         .append("- \"recent runs / what has shipped lately\" → call list_recent_runs\n")
         .append("- \"open PRs / merged PRs / pull requests\" → call list_pull_requests\n")
-        .append("- \"what does the project remember / project history\" → call get_project_memory\n")
-        .append("- \"explain the project's architecture / data flow / module boundaries\" → call get_latest_architecture\n")
+        .append(
+            "- \"what does the project remember / project history\" → call get_project_memory\n")
+        .append(
+            "- \"explain the project's architecture / data flow / module boundaries\" → call"
+                + " get_latest_architecture\n")
         .append("After a write tool returns, briefly narrate what changed (1-2 sentences) so the ")
         .append("user knows where to look in the dashboard. After a read tool, summarise the ")
         .append("relevant rows — don't dump the JSON envelope verbatim. If a tool returns ")
         .append("ok=false, surface the message field and suggest the next step.\n\n")
         .append("Settings (GitHub PAT, AI provider keys, billing) are deliberately NOT exposed ")
-        .append("as tools. If the user asks you to update those, point them to /settings/manage.\n\n")
+        .append(
+            "as tools. If the user asks you to update those, point them to /settings/manage.\n\n")
         // Lifecycle FAQ — included so the assistant can answer common
         // questions without firing a tool call. Mirrors the merged-PR
         // explanation in the bootstrap + architecture PR bodies.

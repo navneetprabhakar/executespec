@@ -30,8 +30,8 @@ public class PullRequestRecord {
 
   /**
    * Origin of the PR. {@link #RUN} is the V82 default — every existing row has this. The remaining
-   * values were added in V169 (2026-05-02) so PRs opened by system flows are visible on the
-   * project dashboard alongside run/launch PRs.
+   * values were added in V169 (2026-05-02) so PRs opened by system flows are visible on the project
+   * dashboard alongside run/launch PRs.
    *
    * <ul>
    *   <li>{@link #RUN}: ExecutionRun + per-run worker pushes (ScmPushService /

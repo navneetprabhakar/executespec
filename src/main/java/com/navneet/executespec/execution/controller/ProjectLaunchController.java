@@ -107,9 +107,9 @@ public class ProjectLaunchController {
    * Wire format for the project PR rollup.
    *
    * @param launchId pipeline-run id when {@code kind=RUN}; null for system PRs (kind != RUN)
-   * @param kind PR origin classifier — {@code RUN}, {@code BOOTSTRAP}, {@code ARCHITECTURE},
-   *     {@code CONTRACT}, {@code CHAT_TOOL}. Frontend filters / groups by this. Added in V169
-   *     (2026-05-02) so system PRs are visible alongside run/launch PRs.
+   * @param kind PR origin classifier — {@code RUN}, {@code BOOTSTRAP}, {@code ARCHITECTURE}, {@code
+   *     CONTRACT}, {@code CHAT_TOOL}. Frontend filters / groups by this. Added in V169 (2026-05-02)
+   *     so system PRs are visible alongside run/launch PRs.
    */
   public record PrRollupEntry(
       String prUrl,

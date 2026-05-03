@@ -315,11 +315,11 @@ public class SmartClassifierAgent {
     String prompt;
     try {
       // PromptAssembler.loadFile already prepends "classpath:prompts/", so paths here must be
-       // relative to prompts/. Was previously "prompts/v2/classifier.md" which produced a double
-       // path like "classpath:prompts/prompts/v2/classifier.md" → IOException → silent SKIPPED
-       // and the LLM verifier never ran (run b171fa52 only had the heuristic verdict; the
-       // upgrade-to-LEGACY check was missed). Audited via classifierReasoning persisted on the
-       // run. 2026-05-02.
+      // relative to prompts/. Was previously "prompts/v2/classifier.md" which produced a double
+      // path like "classpath:prompts/prompts/v2/classifier.md" → IOException → silent SKIPPED
+      // and the LLM verifier never ran (run b171fa52 only had the heuristic verdict; the
+      // upgrade-to-LEGACY check was missed). Audited via classifierReasoning persisted on the
+      // run. 2026-05-02.
       prompt =
           promptAssembler.assemble(
               "v2/classifier.md",

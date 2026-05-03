@@ -66,6 +66,7 @@ public class ShellSandboxPolicy {
   private static final Set<String> HIGH_STRICT_EAS_VERBS = Set.of("build", "submit");
 
   private final GuardrailLevelResolver guardrailLevelResolver;
+
   /**
    * 2026-05-02 — dependency-install enforcement at MEDIUM+. ObjectProvider so unit tests that
    * construct {@code ShellSandboxPolicy} directly without booting the full Spring context still
@@ -87,28 +88,32 @@ public class ShellSandboxPolicy {
 
   /** Test-friendly constructor — no dep-security enforcement. */
   public ShellSandboxPolicy(GuardrailLevelResolver guardrailLevelResolver) {
-    this(guardrailLevelResolver, new org.springframework.beans.factory.ObjectProvider<>() {
-      @Override
-      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject() {
-        return null;
-      }
+    this(
+        guardrailLevelResolver,
+        new org.springframework.beans.factory.ObjectProvider<>() {
+          @Override
+          public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject() {
+            return null;
+          }
 
-      @Override
-      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject(
-          Object... args) {
-        return null;
-      }
+          @Override
+          public com.navneet.executespec.security.dependency.DependencySecurityPolicy getObject(
+              Object... args) {
+            return null;
+          }
 
-      @Override
-      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getIfAvailable() {
-        return null;
-      }
+          @Override
+          public com.navneet.executespec.security.dependency.DependencySecurityPolicy
+              getIfAvailable() {
+            return null;
+          }
 
-      @Override
-      public com.navneet.executespec.security.dependency.DependencySecurityPolicy getIfUnique() {
-        return null;
-      }
-    });
+          @Override
+          public com.navneet.executespec.security.dependency.DependencySecurityPolicy
+              getIfUnique() {
+            return null;
+          }
+        });
   }
 
   /** Back-compat constructor — assumes LOW + no dep-security enforcement. */
