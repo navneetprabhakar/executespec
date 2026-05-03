@@ -41,13 +41,12 @@ public class PrRefreshService {
    * 2026-05-02 — Two changes vs the V82 implementation:
    *
    * <ol>
-   *   <li>Threads the caller's GitHub PAT through to {@code getPullRequestSnapshot} so
-   *       private-repo PRs actually return a snapshot (used to silently 401 + no-op).
-   *   <li>Iterates BOTH run-scoped PRs (V82 path: keyed on run_id) AND system PRs (V169
-   *       path: keyed on project_id, kind != RUN). System PRs from the bootstrap /
-   *       architecture / contract / chat-tool flows had run_id=null, so the V82 loop
-   *       missed them entirely — user saw the Refresh button do nothing for merged
-   *       BOOTSTRAP / ARCHITECTURE PRs.
+   *   <li>Threads the caller's GitHub PAT through to {@code getPullRequestSnapshot} so private-repo
+   *       PRs actually return a snapshot (used to silently 401 + no-op).
+   *   <li>Iterates BOTH run-scoped PRs (V82 path: keyed on run_id) AND system PRs (V169 path: keyed
+   *       on project_id, kind != RUN). System PRs from the bootstrap / architecture / contract /
+   *       chat-tool flows had run_id=null, so the V82 loop missed them entirely — user saw the
+   *       Refresh button do nothing for merged BOOTSTRAP / ARCHITECTURE PRs.
    * </ol>
    */
   @Transactional

@@ -167,7 +167,8 @@ public class V2RunOrchestrator {
    * transactional boundary stays a single repository call instead of bouncing through the report
    * service's read/write/index-rebuild path.
    */
-  private final com.navneet.executespec.report.ValidationReportRepository validationReportRepository;
+  private final com.navneet.executespec.report.ValidationReportRepository
+      validationReportRepository;
 
   /**
    * V165 BYOK fix — resolves customer-configured keys at run-start; LlmRouterV2 reads back per
@@ -1793,7 +1794,8 @@ public class V2RunOrchestrator {
         .ifPresent(
             existing -> {
               log.info(
-                  "V2RunOrchestrator reReview: deleting existing validation_report id={} for run={}",
+                  "V2RunOrchestrator reReview: deleting existing validation_report id={} for"
+                      + " run={}",
                   existing.getId(),
                   runId);
               validationReportRepository.delete(existing);
@@ -1819,8 +1821,7 @@ public class V2RunOrchestrator {
                 stuck.setStatusReason("RE_REVIEW_FAILED");
                 stuck.setCompletedAt(Instant.now());
                 runRepo.save(stuck);
-                broadcaster.emit(
-                    runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
+                broadcaster.emit(runId, RunEvent.complete(runId, "PARTIAL", "RE_REVIEW_FAILED"));
               }
             } catch (Exception ignored) {
               // give up — operator can hit the endpoint again
@@ -1855,7 +1856,9 @@ public class V2RunOrchestrator {
     Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
     if (!Files.isDirectory(workspace)) {
       log.warn(
-          "V2RunOrchestrator reReview: workspace {} missing for run {}, marking PARTIAL", workspace, runId);
+          "V2RunOrchestrator reReview: workspace {} missing for run {}, marking PARTIAL",
+          workspace,
+          runId);
       run.setStatus("PARTIAL");
       run.setStatusReason("RE_REVIEW_NO_WORKSPACE");
       run.setCompletedAt(Instant.now());
@@ -1899,8 +1902,7 @@ public class V2RunOrchestrator {
                   .build());
       persistReview(runId, reviewResult);
     } catch (Exception e) {
-      log.warn(
-          "V2RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
+      log.warn("V2RunOrchestrator reReview run={} reviewer failed: {}", runId, e.getMessage());
       persistReviewFailure(runId, e);
       // reviewResult stays null — generateValidationReport handles that branch (it sets
       // verdict=APPROVED with summary="Review did not run." which trips status to LEGACY_UNKNOWN
@@ -1916,7 +1918,8 @@ public class V2RunOrchestrator {
     try {
       generateValidationReport(runId, null, reviewResult, null);
     } catch (Exception e) {
-      log.warn("V2RunOrchestrator reReview run={} report generation failed: {}", runId, e.getMessage());
+      log.warn(
+          "V2RunOrchestrator reReview run={} report generation failed: {}", runId, e.getMessage());
     }
 
     StatusAndReason terminal = resolveTerminalStatus(execResult, reviewResult);
@@ -1935,12 +1938,12 @@ public class V2RunOrchestrator {
   }
 
   /**
-   * Build a minimal {@link ExecutionResult} from the persisted {@code agent_task} rows, just
-   * enough that {@link #resolveTerminalStatus} can read the four counters it cares about
-   * ({@code overall}, {@code tasksSuccessful}, {@code tasksFailed}, {@code anyIntermediateWarning}).
-   * {@code perTask} is intentionally empty — the only consumer that iterates it
-   * ({@code generateValidationReport}) is invoked with {@code execResult=null} on the re-review
-   * path so it falls through to its own task-row reconstruction branch.
+   * Build a minimal {@link ExecutionResult} from the persisted {@code agent_task} rows, just enough
+   * that {@link #resolveTerminalStatus} can read the four counters it cares about ({@code overall},
+   * {@code tasksSuccessful}, {@code tasksFailed}, {@code anyIntermediateWarning}). {@code perTask}
+   * is intentionally empty — the only consumer that iterates it ({@code generateValidationReport})
+   * is invoked with {@code execResult=null} on the re-review path so it falls through to its own
+   * task-row reconstruction branch.
    */
   private ExecutionResult reconstructExecResultFromTasks(String runId) {
     var tasks = taskRepo.findByRunId(runId);

@@ -1,6 +1,5 @@
 package com.navneet.executespec.memory.chattools;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -13,10 +12,10 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.ProjectDocGeneratorService;
+import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
-import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
@@ -47,10 +46,10 @@ import lombok.extern.slf4j.Slf4j;
  * gates and approval flows. Settings (PAT, AI keys, billing) likewise stay out per the user's
  * direction (2026-05-02): "all project-related actions, apart from settings".
  *
- * <p><b>Latency.</b> Some tools (notably {@code regenerate_architecture} and
- * {@code generate_project_doc}) trigger the same long-running LLM pipelines the dashboard buttons
- * call — typically 30-90s. The chat call holds the HTTP request open for the full duration; the
- * frontend pairs that with the existing {@code spring.mvc.async.request-timeout: 900000}.
+ * <p><b>Latency.</b> Some tools (notably {@code regenerate_architecture} and {@code
+ * generate_project_doc}) trigger the same long-running LLM pipelines the dashboard buttons call —
+ * typically 30-90s. The chat call holds the HTTP request open for the full duration; the frontend
+ * pairs that with the existing {@code spring.mvc.async.request-timeout: 900000}.
  *
  * <p><b>Errors.</b> Every tool returns a JSON envelope ({@code {"ok": true|false, ...}}). The LLM
  * sees the envelope as the tool result and narrates accordingly. We never throw out of {@code
@@ -103,16 +102,16 @@ public class ProjectChatTools {
                     + "update / re-analyse the project's architecture.")
             .inputSchema(
                 """
-                {
-                  "type": "object",
-                  "properties": {
-                    "branchOverride": {
-                      "type": "string",
-                      "description": "Optional branch to read source from. Defaults to each repo's default branch."
-                    }
-                  }
-                }
-                """)
+{
+  "type": "object",
+  "properties": {
+    "branchOverride": {
+      "type": "string",
+      "description": "Optional branch to read source from. Defaults to each repo's default branch."
+    }
+  }
+}
+""")
             .build();
     return new SimpleToolCallback(
         def,
@@ -151,18 +150,18 @@ public class ProjectChatTools {
                     + "calling again creates v+1.")
             .inputSchema(
                 """
-                {
-                  "type": "object",
-                  "properties": {
-                    "docType": {
-                      "type": "string",
-                      "enum": ["EXPLANATION", "SETUP"],
-                      "description": "EXPLANATION for narrative onboarding doc; SETUP for runnable instructions."
-                    }
-                  },
-                  "required": ["docType"]
-                }
-                """)
+{
+  "type": "object",
+  "properties": {
+    "docType": {
+      "type": "string",
+      "enum": ["EXPLANATION", "SETUP"],
+      "description": "EXPLANATION for narrative onboarding doc; SETUP for runnable instructions."
+    }
+  },
+  "required": ["docType"]
+}
+""")
             .build();
     return new SimpleToolCallback(
         def,
@@ -341,8 +340,7 @@ public class ProjectChatTools {
                     ctx.projectId(), PageRequest.of(0, 50));
             for (PipelineRun run : runs) {
               if (arr.size() >= limit) break;
-              for (PullRequestRecord pr :
-                  prRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
+              for (PullRequestRecord pr : prRepo.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
                 if (arr.size() >= limit) break;
                 arr.add(prRowJson(pr));
               }
@@ -409,8 +407,7 @@ public class ProjectChatTools {
     return new SimpleToolCallback(
         def,
         args -> {
-          Optional<ProjectArchitectureDoc> latest =
-              architectureService.latest(ctx.projectId());
+          Optional<ProjectArchitectureDoc> latest = architectureService.latest(ctx.projectId());
           ObjectNode out = json.createObjectNode();
           if (latest.isEmpty()) {
             out.put("ok", true);
@@ -424,8 +421,7 @@ public class ProjectChatTools {
           out.put("ok", true);
           out.put("version", doc.getVersion());
           out.put("content", doc.getContent());
-          if (doc.getGeneratedAt() != null)
-            out.put("generatedAt", doc.getGeneratedAt().toString());
+          if (doc.getGeneratedAt() != null) out.put("generatedAt", doc.getGeneratedAt().toString());
 
           // Per-repo summaries — best-effort; we hit the per-repo arch repo via service helper.
           ArrayNode repoArchs = out.putArray("repos");
@@ -476,9 +472,9 @@ public class ProjectChatTools {
   }
 
   /**
-   * Adapter that turns a lambda into a Spring AI {@link ToolCallback}. Centralises JSON parsing
-   * + error handling so each tool body only needs the happy path. Mirrors the V2
-   * {@code ContextBoundToolCallback} pattern but without the per-run execution context.
+   * Adapter that turns a lambda into a Spring AI {@link ToolCallback}. Centralises JSON parsing +
+   * error handling so each tool body only needs the happy path. Mirrors the V2 {@code
+   * ContextBoundToolCallback} pattern but without the per-run execution context.
    */
   private final class SimpleToolCallback implements ToolCallback {
     private final ToolDefinition def;

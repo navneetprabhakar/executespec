@@ -12,9 +12,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /**
- * Locks in the contract for {@link VendoredPathGuard} — the regex must match every entry in
- * {@link VendoredPathGuard#VENDORED_DIRS} when present as a path segment, and must NOT trigger on
- * customer files that happen to have those words as substrings (e.g. {@code build.gradle.kts}).
+ * Locks in the contract for {@link VendoredPathGuard} — the regex must match every entry in {@link
+ * VendoredPathGuard#VENDORED_DIRS} when present as a path segment, and must NOT trigger on customer
+ * files that happen to have those words as substrings (e.g. {@code build.gradle.kts}).
  *
  * <p>Augmentation is also tested end-to-end against a real {@code .gitignore} on a temp dir so the
  * idempotency + comment-marker contract stays solid.
@@ -27,8 +27,7 @@ class VendoredPathGuardTest {
   void isVendored_matchesEveryDeclaredDir_atRoot() {
     for (String dir : VendoredPathGuard.VENDORED_DIRS) {
       assertTrue(
-          VendoredPathGuard.isVendored(dir + "/foo.js"),
-          "expected match for root segment " + dir);
+          VendoredPathGuard.isVendored(dir + "/foo.js"), "expected match for root segment " + dir);
     }
   }
 
@@ -72,9 +71,7 @@ class VendoredPathGuardTest {
     Path repoDir = tmp.resolve("repo");
     initBareRepo(repoDir);
     // Python-only ignore — exactly the pplai-api shape from b171fa52.
-    Files.writeString(
-        repoDir.resolve(".gitignore"),
-        "__pycache__/\nvenv/\n*.pyc\n.env\n");
+    Files.writeString(repoDir.resolve(".gitignore"), "__pycache__/\nvenv/\n*.pyc\n.env\n");
 
     VendoredPathGuard guard = new VendoredPathGuard();
     guard.augmentGitignore(repoDir);
