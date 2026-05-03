@@ -9,6 +9,7 @@ import {
   FileCode2,
   Download,
   RefreshCw,
+  Play,
 } from 'lucide-react';
 import {
   getValidationReport,
@@ -47,6 +48,14 @@ interface ValidationReportPanelProps {
     tasksComplete?: number | null;
     provider?: string | null;
   };
+  /** R-11 (UX audit, 2026-05-03) — retry-failed-tasks affordance promoted
+   *  into the report header. Pre-fix this button lived on the run-level
+   *  toolbar, far from the failure signal. Now the parent passes a callback
+   *  + count and the report header renders the button next to Regenerate
+   *  when there's something to retry. Renders nothing when count <= 0. */
+  retryFailed?: () => void | Promise<void>;
+  retryFailedCount?: number;
+  retryFailedBusy?: boolean;
 }
 
 /**
@@ -146,6 +155,9 @@ export default function ValidationReportPanel({
   status,
   statusReason,
   stampMeta,
+  retryFailed,
+  retryFailedCount = 0,
+  retryFailedBusy = false,
 }: ValidationReportPanelProps) {
   const [report, setReport] = useState<ValidationReportData | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -335,6 +347,22 @@ export default function ValidationReportPanel({
           {summaryParts.join(' · ')}
         </span>
         <div className='ml-auto flex items-center gap-2' onClick={(e) => e.stopPropagation()}>
+          {/* R-11 — retry-failed-tasks button. Shows up only when the parent
+              has both a callback and a non-zero count (i.e. RunDetail derived
+              the failedTasks list). Sits left of Regenerate so the failure
+              signal (verdict pill / signal breakdown chip) and the retry
+              action are in the same horizontal scan. */}
+          {retryFailed && retryFailedCount > 0 && (
+            <button
+              onClick={() => void retryFailed()}
+              disabled={retryFailedBusy}
+              title={`Retry ${retryFailedCount} failed task${retryFailedCount === 1 ? '' : 's'} in this run`}
+              className='flex items-center gap-1 text-[11px] font-medium text-status-partial hover:text-status-partial transition-colors px-2 py-0.5 rounded-sm border border-status-partial/40 bg-status-partial/10 hover:bg-status-partial/20 disabled:opacity-60 disabled:cursor-not-allowed'
+            >
+              <Play className={cn('h-3 w-3', retryFailedBusy && 'animate-pulse')} />
+              {retryFailedBusy ? 'Retrying…' : `Retry failed (${retryFailedCount})`}
+            </button>
+          )}
           <button
             onClick={handleRetry}
             disabled={retrying}

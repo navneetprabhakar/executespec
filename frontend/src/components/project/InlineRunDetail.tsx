@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useMemo, useState} from 'react';
 import {
   ChevronDown,
   ChevronRight,
@@ -9,10 +9,21 @@ import {
   Loader2,
   GitBranch,
 } from 'lucide-react';
-import {getFiles, pushToGitHub, syncRun, syncRunToOriginal, type RunDetail} from '@/lib/api';
+import {
+  getFiles,
+  pushToGitHub,
+  pushToScm,
+  retryTask,
+  syncRun,
+  syncRunToOriginal,
+  type RunDetail,
+} from '@/lib/api';
 import ValidationReportPanel from '@/components/runs/ValidationReportPanel';
 import {CodeTab} from '@/components/runs/RunDetailTabs';
 import VerdictPill, {deriveVerdict} from '@/components/runs/VerdictPill';
+import {AddGitHubPatDrawer} from '@/components/runs/InlineCredentialDrawers';
+import {useAuthStore} from '@/stores/useAuthStore';
+import {useUiStore} from '@/stores/useUiStore';
 import {cn} from '@/lib/utils';
 
 const STATUS_COLOR: Record<string, string> = {
@@ -46,10 +57,25 @@ export default function InlineRunDetail({
   const [refreshing, setRefreshing] = useState(false);
   const [pushing, setPushing] = useState(false);
   const [pushStatus, setPushStatus] = useState<string | null>(null);
+  const [patDrawerOpen, setPatDrawerOpen] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [syncBranch, setSyncBranch] = useState('');
   const [syncStatus, setSyncStatus] = useState<string | null>(null);
   const [resettingOriginal, setResettingOriginal] = useState(false);
+  const [retryingFailed, setRetryingFailed] = useState(false);
+  const addToast = useUiStore((s) => s.addToast);
+
+  // R-10 (UX audit, 2026-05-03) — bring inline run detail to parity with
+  // RunDetail's push helper. Pre-fix the inline button only knew GitHub +
+  // failed silently when the user had no PAT (Bitbucket users + brand-new
+  // accounts both hit this). Now: Bitbucket users → SCM-agnostic push;
+  // GitHub-without-PAT → inline drawer that captures the PAT in-line so the
+  // user doesn't bounce to /settings and lose their place.
+  const user = useAuthStore((s) => s.user);
+  const loadMe = useAuthStore((s) => s.loadMe);
+  const hasBitbucket = !!user?.hasBitbucketAppPassword;
+  const hasGitHub = !!user?.hasGithubPat;
+  const scmLabel = hasBitbucket && !hasGitHub ? 'Bitbucket' : 'GitHub';
 
   const doRefresh = async () => {
     if (!onRefresh || refreshing) return;
@@ -98,6 +124,29 @@ export default function InlineRunDetail({
 
   const doPush = async () => {
     if (pushing || alreadyPushed) return;
+    // R-10 (UX audit) — Bitbucket fallback (matches RunDetail.handleScmPush).
+    if (hasBitbucket && !hasGitHub) {
+      setPushing(true);
+      setPushStatus(null);
+      try {
+        await pushToScm(run.runId);
+        setPushStatus('Pushed — PR opening on Bitbucket');
+        if (onRefresh) await onRefresh();
+      } catch (e) {
+        setPushStatus(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        setPushing(false);
+      }
+      return;
+    }
+    // R-10 — GitHub path. If user has no PAT, surface the inline drawer
+    // instead of letting the request fail with a server-side credential
+    // error. Drawer onClose triggers loadMe() so the user state has the new
+    // PAT before they retry.
+    if (!hasGitHub) {
+      setPatDrawerOpen(true);
+      return;
+    }
     setPushing(true);
     setPushStatus(null);
     try {
@@ -109,6 +158,47 @@ export default function InlineRunDetail({
       setPushStatus(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
     } finally {
       setPushing(false);
+    }
+  };
+
+  const closePatDrawer = async () => {
+    setPatDrawerOpen(false);
+    // After the drawer saves, refresh user state so hasGithubPat flips before
+    // the user clicks Push again. AddGitHubPatDrawer already called setUser()
+    // synchronously, but loadMe() is the canonical refresh path.
+    await loadMe();
+  };
+
+  // R-11 (UX audit, 2026-05-03) — derive the retryable failed-task list
+  // (mirrors RunDetail.failedTasks). Includes parents whose subtasks failed
+  // even when the parent's own status was incorrectly persisted as COMPLETE.
+  const failedTasks = useMemo(() => {
+    if (!run.tasks) return [] as any[];
+    const all = run.tasks as any[];
+    const parentIdsWithFailedSubtasks = new Set(
+      all
+        .filter((t) => t.parentTaskId && ['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status))
+        .map((t) => t.parentTaskId),
+    );
+    return all.filter(
+      (t) =>
+        !t.parentTaskId &&
+        (['FAILED', 'PARTIAL', 'BLOCKED'].includes(t.status) ||
+          parentIdsWithFailedSubtasks.has(t.taskId)),
+    );
+  }, [run.tasks]);
+
+  const handleRetryFailed = async () => {
+    if (failedTasks.length === 0) return;
+    setRetryingFailed(true);
+    try {
+      await Promise.all(failedTasks.map((t: any) => retryTask(run.runId, t.taskId)));
+      addToast({type: 'success', message: `Retrying ${failedTasks.length} failed task(s)`});
+      if (onRefresh) await onRefresh();
+    } catch (e: any) {
+      addToast({type: 'error', message: e?.message ?? 'Retry failed'});
+    } finally {
+      setRetryingFailed(false);
     }
   };
 
@@ -126,7 +216,7 @@ export default function InlineRunDetail({
               <button
                 onClick={doPush}
                 disabled={pushing}
-                title="Push this run's workspace to GitHub and open a PR"
+                title={`Push this run's workspace to ${scmLabel} and open a PR`}
                 className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50'
               >
                 {pushing ? (
@@ -134,7 +224,7 @@ export default function InlineRunDetail({
                 ) : (
                   <Upload className='h-3 w-3' />
                 )}
-                {pushing ? 'Pushing…' : 'Push & open PR'}
+                {pushing ? 'Pushing…' : `Push & open PR`}
               </button>
             )}
             {terminal && (
@@ -286,7 +376,19 @@ export default function InlineRunDetail({
           tasksComplete: run.tasks?.filter((t: any) => t.status === 'COMPLETE').length ?? null,
           provider: (run as any).aiProvider ?? null,
         }}
+        retryFailed={
+          ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status)
+            ? handleRetryFailed
+            : undefined
+        }
+        retryFailedCount={failedTasks.length}
+        retryFailedBusy={retryingFailed}
       />
+
+      {/* R-10 — inline PAT capture for GitHub-without-token users. Same
+          drawer used by AddRepoModal (P-03) so the user gets identical UX
+          across the surfaces that need a PAT. */}
+      <AddGitHubPatDrawer open={patDrawerOpen} onClose={closePatDrawer} />
     </div>
   );
 }

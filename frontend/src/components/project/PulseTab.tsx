@@ -20,7 +20,7 @@
  * tokens. No new colors, no new fonts, no new component primitives.
  */
 import {Link} from 'react-router-dom';
-import {ArrowRight, Activity, Heart, DollarSign} from 'lucide-react';
+import {ArrowRight, Activity, Heart, DollarSign, BookOpen, Sparkles} from 'lucide-react';
 import ScoreRing from '@/components/runs/ScoreRing';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
@@ -37,7 +37,19 @@ interface PulseTabProps {
   recentTasks: TaskSummary[];
   recentPrs: PrSummary[];
   onOpenRun: (runId: string) => void;
-  onSwitchTab: (tab: 'runs' | 'code') => void;
+  onSwitchTab: (
+    tab: 'pulse' | 'repos' | 'runs' | 'code' | 'chat',
+    opts?: {
+      codeSub?:
+        | 'architecture'
+        | 'tech-debt'
+        | 'standards'
+        | 'contracts'
+        | 'health'
+        | 'adrs'
+        | 'invariants';
+    },
+  ) => void;
   /**
    * v2.7.2 — present only when the project has 0 linked repos. When set,
    * Pulse renders an inline "Add repository" banner above the hero row
@@ -155,9 +167,15 @@ export default function PulseTab({
           doesn't get cluttered. */}
       <ProjectSpendBar />
 
-      {/* Health & activity row — full-width 2-col split on md+ */}
-      <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
+      {/* Health · Knowledge · Activity row — 3-col on md+, stacked on mobile.
+          P-10 (UX audit, 2026-05-03) — Generated Docs were buried in the
+          More drawer with no surface affordance, so users frequently
+          regenerated them by accident or didn't realise they existed. The
+          Knowledge tile here surfaces presence + a one-click jump into the
+          drawer panel that owns the full Generate / View / Download UX. */}
+      <div className='grid grid-cols-1 md:grid-cols-3 gap-3'>
         <HealthCard projectId={projectId} onOpenCode={() => onSwitchTab('code')} />
+        <KnowledgeCard projectId={projectId} />
         <ActivityCard
           entries={activity}
           loading={activityLoading}
@@ -432,6 +450,93 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
         className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
       >
         Drill into Code <ArrowRight className='h-3 w-3' />
+      </button>
+    </div>
+  );
+}
+
+/**
+ * P-10 (UX audit, 2026-05-03) — Knowledge tile on Pulse. Pre-fix the
+ * Generated Docs surface only existed inside the More drawer and was
+ * functionally invisible: users with arch generated never realised they
+ * could one-click the per-project EXPLANATION/SETUP write-ups (Plan v2.5.12
+ * shipping). The tile shows presence per doc-type, a one-click View action
+ * (deep-links to the More → Generated Docs panel), and Generate when
+ * neither doc has been produced yet. Architecture-not-yet-generated state
+ * mirrors the HealthCard "Architecture not generated" row so the tile stays
+ * informative on cold projects instead of becoming dead space.
+ */
+function KnowledgeCard({projectId}: {projectId: string}) {
+  const dashboard = useProjectStore((s) => s.dashboard);
+  const archStatus = dashboard?.architectureDocStatus ?? null;
+  const archReady = archStatus === 'GENERATED' || archStatus === 'STALE';
+  const [explanationReady, setExplanationReady] = useState<boolean | null>(null);
+  const [setupReady, setSetupReady] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!archReady) {
+      setExplanationReady(null);
+      setSetupReady(null);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([
+      api.getProjectDoc(projectId, 'EXPLANATION').catch(() => null),
+      api.getProjectDoc(projectId, 'SETUP').catch(() => null),
+    ]).then(([e, s]) => {
+      if (cancelled) return;
+      setExplanationReady(e !== null);
+      setSetupReady(s !== null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, archReady]);
+
+  // Open the More drawer's Generated Docs panel via the same URL convention
+  // ProjectDashboardPage.useDrawerState listens for. Falls back to a no-op
+  // event for older deep-link consumers.
+  const openDocsDrawer = () => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('drawer', 'docs');
+    window.history.replaceState(null, '', url.toString());
+    window.dispatchEvent(new Event('drawer-state'));
+  };
+
+  return (
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
+      <div className='flex items-center gap-2'>
+        <BookOpen className='h-3.5 w-3.5 text-accent-blue' />
+        <h3 className='text-xs font-medium text-secondary'>Knowledge</h3>
+      </div>
+      {!archReady ? (
+        <div className='text-[11px] text-muted'>
+          Generate the architecture doc to unlock the human-readable explanation + setup write-ups.
+        </div>
+      ) : (
+        <ul className='text-[11px] space-y-1'>
+          <li className={cn(explanationReady ? 'text-status-success' : 'text-muted')}>
+            Explanation{' '}
+            {explanationReady === null ? '…' : explanationReady ? 'ready' : 'not generated'}
+          </li>
+          <li className={cn(setupReady ? 'text-status-success' : 'text-muted')}>
+            Setup guide {setupReady === null ? '…' : setupReady ? 'ready' : 'not generated'}
+          </li>
+        </ul>
+      )}
+      <button
+        onClick={openDocsDrawer}
+        className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
+      >
+        {archReady && (explanationReady || setupReady) ? (
+          <>
+            Open in More <ArrowRight className='h-3 w-3' />
+          </>
+        ) : (
+          <>
+            <Sparkles className='h-3 w-3' /> Generate write-ups
+          </>
+        )}
       </button>
     </div>
   );

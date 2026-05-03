@@ -19,7 +19,14 @@ export interface NewRunConfig {
 // R-190 (post-cutover) — Vibe view-mode removed. 'pro' is default; 'project'
 // is session-local opt-in for multi-repo project mode.
 type ViewMode = 'pro' | 'project';
-type Theme = 'dark' | 'light';
+/**
+ * Theme preference. X-07 (UX audit, 2026-05-03) introduces a 'system' option
+ * which defers to `prefers-color-scheme` and re-resolves whenever the OS
+ * value changes. Internally we still write `dark` or `light` to the
+ * `<html data-theme>` attribute so downstream CSS is unchanged; the store
+ * just remembers which mode the user picked.
+ */
+type Theme = 'dark' | 'light' | 'system';
 
 interface UiStore {
   sidebarExpanded: boolean;
@@ -70,11 +77,19 @@ let toastSeq = 0;
 
 // v2.5.14 Phase 2 — apply saved theme to <html> before React paints so there's
 // no flash of unstyled content. Called synchronously at module import time.
+// X-07 — saved value can now be 'system'; in that case we resolve via
+// matchMedia and apply the resolved value to the DOM. Subscriber lives on the
+// store consumer (Header's ThemeToggle) so the listener can be cleaned up.
+function resolveSystemTheme(): 'dark' | 'light' {
+  if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return 'dark';
+  return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
 function initTheme(): Theme {
   const saved = localStorage.getItem('es:theme') as Theme | null;
-  const theme: Theme = saved === 'light' ? 'light' : 'dark';
+  const theme: Theme = saved === 'light' || saved === 'system' ? saved : 'dark';
   if (typeof document !== 'undefined') {
-    document.documentElement.dataset.theme = theme;
+    document.documentElement.dataset.theme = theme === 'system' ? resolveSystemTheme() : theme;
   }
   return theme;
 }
@@ -139,13 +154,22 @@ export const useUiStore = create<UiStore>((set, get) => ({
   },
   setTheme: (t) => {
     localStorage.setItem('es:theme', t);
-    if (typeof document !== 'undefined') document.documentElement.dataset.theme = t;
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.theme = t === 'system' ? resolveSystemTheme() : t;
+    }
     set({theme: t});
   },
   toggleTheme: () => {
-    const next: Theme = get().theme === 'dark' ? 'light' : 'dark';
+    // X-07 — toggle now cycles dark → light → system → dark. Keeps the
+    // 1-click behaviour of the old Sun/Moon button while exposing the new
+    // System option. The Header renders a Sun / Moon / Monitor icon based
+    // on the current resolved value.
+    const cur = get().theme;
+    const next: Theme = cur === 'dark' ? 'light' : cur === 'light' ? 'system' : 'dark';
     localStorage.setItem('es:theme', next);
-    if (typeof document !== 'undefined') document.documentElement.dataset.theme = next;
+    if (typeof document !== 'undefined') {
+      document.documentElement.dataset.theme = next === 'system' ? resolveSystemTheme() : next;
+    }
     set({theme: next});
   },
   setCurrentProjectName: (name) => set({currentProjectName: name}),

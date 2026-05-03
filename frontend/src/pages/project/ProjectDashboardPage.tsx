@@ -103,6 +103,26 @@ export default function ProjectDashboardPage() {
   const navigate = useNavigate();
   const drawer = useDrawerState();
 
+  // P-06 (UX audit, 2026-05-03) — when OrgProjectsPage routes here with
+  // ?firstRun=1 (the immediate post-create redirect), fire a one-time toast
+  // pointing the user at the FirstRunChecklist that EmptyProjectLanding will
+  // render naturally (since the new project has no repos + no runs). Strip
+  // the param so a refresh doesn't keep retoasting.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('firstRun') === '1') {
+      useUiStore.getState().addToast({
+        type: 'info',
+        message: 'Project created · Link your first repo to begin.',
+      });
+      sp.delete('firstRun');
+      const next = `${window.location.pathname}${sp.toString() ? '?' + sp.toString() : ''}`;
+      window.history.replaceState(null, '', next);
+    }
+    // run-once on mount; the rest of the URL handling is in `initial`/setTab
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Read deep-link tab from query string on mount. P-23 (UX audit, 2026-05-03):
   // we now ALSO accept the canonical `sub` + `codeSub` query params alongside
   // the legacy `tab` key so a URL like ?tab=code&codeSub=repos lands directly
@@ -272,8 +292,16 @@ export default function ProjectDashboardPage() {
     setRunsSub('detail');
   };
 
-  const onSwitchTab = (t: 'runs' | 'code') => {
+  const onSwitchTab = (t: TabKey, opts?: {codeSub?: CodeSubTab}) => {
     setTab(t);
+    // P-05 (UX audit, 2026-05-03) — when the caller specifies the code
+    // sub-pane (e.g. PulseTab's HealthCard "Drill into Code" → Architecture),
+    // apply it in the same call so the URL and tab strip line up on first
+    // render. Without this, switching to Code would land on whatever sub-tab
+    // was last selected — surprising for the user who clicked "Architecture".
+    if (t === 'code' && opts?.codeSub) {
+      setCodeSub(opts.codeSub);
+    }
   };
 
   /**
@@ -368,33 +396,47 @@ export default function ProjectDashboardPage() {
             {/* v2.7.2 — first-class Repos chip. Always visible; amber-tinted
                 when zero repos so users see the linkage gap before they
                 discover it via a failed Launch. Click opens AddRepoModal
-                directly via the shared openAddRepoFlow. */}
-            <button
-              onClick={openAddRepoFlow}
-              aria-label={
-                repoCount === 0
-                  ? 'Link your first repository'
-                  : `Manage ${repoCount} linked repository${repoCount === 1 ? '' : 'ies'}`
-              }
-              title={
-                repoCount === 0
-                  ? 'No repos linked — click to add one'
-                  : `${repoCount} linked. Click to add another.`
-              }
-              className={cn(
-                'inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border transition-colors',
-                repoCount === 0
-                  ? 'border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
-                  : 'border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40',
-              )}
-            >
-              {repoCount === 0 ? (
+                directly via the shared openAddRepoFlow.
+                P-05 (UX audit, 2026-05-03): pre-fix the chip ALWAYS opened
+                the Add modal — including for users who already had repos
+                and just wanted to inspect them, which broke their muscle
+                memory ("show me what's there" vs. "add a new one"). Now
+                the chip splits behaviour: zero repos still opens the modal
+                (nothing to manage); ≥1 repo switches to Code → Repos tab,
+                with a separate small "+" button immediately to its right
+                for the add-another flow. */}
+            {repoCount === 0 ? (
+              <button
+                onClick={openAddRepoFlow}
+                aria-label='Link your first repository'
+                title='No repos linked — click to add one'
+                className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border transition-colors border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
+              >
                 <Plus className='h-3.5 w-3.5' />
-              ) : (
-                <FolderGit2 className='h-3.5 w-3.5' />
-              )}
-              <span>Repos · {repoCount}</span>
-            </button>
+                <span>Repos · 0</span>
+              </button>
+            ) : (
+              <div className='inline-flex items-center rounded-sm border border-[var(--border-default)] overflow-hidden'>
+                <button
+                  onClick={() => onSwitchTab('repos')}
+                  aria-label={`View ${repoCount} linked repositor${repoCount === 1 ? 'y' : 'ies'}`}
+                  title={`View ${repoCount} linked repo${repoCount === 1 ? '' : 's'}`}
+                  className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
+                >
+                  <FolderGit2 className='h-3.5 w-3.5' />
+                  <span>Repos · {repoCount}</span>
+                </button>
+                <span className='w-px h-4 bg-[var(--border-default)]' aria-hidden='true' />
+                <button
+                  onClick={openAddRepoFlow}
+                  aria-label='Add another repository'
+                  title='Add another repository'
+                  className='inline-flex items-center justify-center px-1.5 py-1 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
+                >
+                  <Plus className='h-3.5 w-3.5' />
+                </button>
+              </div>
+            )}
             <NewExecutionButton projectId={projectId} repoCount={repoCount} />
             <button
               onClick={() => openDrawer('settings')}
