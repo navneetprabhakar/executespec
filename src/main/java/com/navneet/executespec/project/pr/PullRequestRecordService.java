@@ -180,13 +180,13 @@ public class PullRequestRecordService {
   }
 
   /**
-   * V169-companion (2026-05-02) — flips a repo's {@code executespec_folder_status} from
-   * {@code BOOTSTRAP_PR_OPEN} to {@code BOOTSTRAPPED} when its bootstrap PR merges. Looked up
-   * by {@link PullRequestRecord#getRepoId()} (set by BootstrapService when the PR was opened).
+   * V169-companion (2026-05-02) — flips a repo's {@code executespec_folder_status} from {@code
+   * BOOTSTRAP_PR_OPEN} to {@code BOOTSTRAPPED} when its bootstrap PR merges. Looked up by {@link
+   * PullRequestRecord#getRepoId()} (set by BootstrapService when the PR was opened).
    *
-   * <p>Idempotent — only writes when the status actually changes. Doesn't downgrade
-   * {@code BOOTSTRAP_FAILED} (operator may need to investigate) or overwrite a status that's
-   * already {@code BOOTSTRAPPED} (race-safe).
+   * <p>Idempotent — only writes when the status actually changes. Doesn't downgrade {@code
+   * BOOTSTRAP_FAILED} (operator may need to investigate) or overwrite a status that's already
+   * {@code BOOTSTRAPPED} (race-safe).
    */
   private void flipFolderStatusToBootstrapped(PullRequestRecord r) {
     if (r.getRepoId() == null) return;

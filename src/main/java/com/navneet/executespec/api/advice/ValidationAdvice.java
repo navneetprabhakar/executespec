@@ -107,7 +107,8 @@ public class ValidationAdvice {
   public ResponseEntity<Map<String, Object>> onBadJson(HttpMessageNotReadableException ex) {
     return jsonError(
         HttpStatus.BAD_REQUEST,
-        baseBody(HttpStatus.BAD_REQUEST, "bad_request", "Request body is missing or not valid JSON"));
+        baseBody(
+            HttpStatus.BAD_REQUEST, "bad_request", "Request body is missing or not valid JSON"));
   }
 
   @ExceptionHandler(MethodArgumentTypeMismatchException.class)
@@ -125,13 +126,13 @@ public class ValidationAdvice {
 
   /**
    * 2026-05-02 — every error response is forced to {@code application/json} regardless of the
-   * incoming request's {@code Accept} header. Without the explicit content type, Spring tries
-   * to negotiate against the request's accepted types — which fails with
-   * {@link org.springframework.web.HttpMediaTypeNotAcceptableException} on endpoints that
-   * declared a non-JSON producer (e.g. {@code GET /runs/&#123;id&#125;/report/pdf} sends
-   * {@code Accept: application/pdf}). The fallback was an opaque 500 instead of the intended
-   * 4xx body. Setting the content type bypasses the negotiation since the JSON body is what we
-   * always serve from this advice.
+   * incoming request's {@code Accept} header. Without the explicit content type, Spring tries to
+   * negotiate against the request's accepted types — which fails with {@link
+   * org.springframework.web.HttpMediaTypeNotAcceptableException} on endpoints that declared a
+   * non-JSON producer (e.g. {@code GET /runs/&#123;id&#125;/report/pdf} sends {@code Accept:
+   * application/pdf}). The fallback was an opaque 500 instead of the intended 4xx body. Setting the
+   * content type bypasses the negotiation since the JSON body is what we always serve from this
+   * advice.
    */
   private static <T> ResponseEntity<T> jsonError(HttpStatusCode code, T body) {
     return ResponseEntity.status(code).contentType(MediaType.APPLICATION_JSON).body(body);

@@ -979,11 +979,10 @@ public class RunController {
   }
 
   /**
-   * 2026-05-02 — same listing as {@link #listWorkspaceFiles} but each entry carries a
-   * git-derived {@code status} (ADDED / MODIFIED / UNCHANGED) so the run-detail file tree can
-   * decorate paths with badges. User report: "no way to know which classes have been
-   * added/updated in code." Multi-repo aware — runs {@code git status --porcelain} per
-   * {@code repos/<name>/} subdir.
+   * 2026-05-02 — same listing as {@link #listWorkspaceFiles} but each entry carries a git-derived
+   * {@code status} (ADDED / MODIFIED / UNCHANGED) so the run-detail file tree can decorate paths
+   * with badges. User report: "no way to know which classes have been added/updated in code."
+   * Multi-repo aware — runs {@code git status --porcelain} per {@code repos/<name>/} subdir.
    */
   @GetMapping("/{id}/files/status")
   public ResponseEntity<List<com.navneet.executespec.deployment.WorkspaceFileService.FileEntry>>
@@ -1045,8 +1044,8 @@ public class RunController {
   }
 
   /**
-   * 2026-05-02 — base + head content for a single workspace file so the run-detail UI can render
-   * a Monaco {@code DiffEditor} (only the diff is visible, not the whole file). The base is the
+   * 2026-05-02 — base + head content for a single workspace file so the run-detail UI can render a
+   * Monaco {@code DiffEditor} (only the diff is visible, not the whole file). The base is the
    * snapshot the run was cloned against ({@code RunRepoSnapshot.commitSha}); head is the current
    * filesystem state. ADDED files have empty {@code base}; deleted files have empty {@code head}.
    * Outside any {@code repos/<name>/} subdir there is no base — the worker is the only writer for

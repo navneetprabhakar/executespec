@@ -59,8 +59,7 @@ class BootstrapServiceTest {
     // (PullRequestRecordService, prior to V169 PR-record dispatch) but this test wasn't
     // updated, so the file no longer compiled and blocked the entire test build. Now passes
     // both prRecordService and the canned HttpClient to the package-private test seam.
-    bootstrap =
-        new BootstrapService(writer, readme, repoRepo, emitter, prRecordService, http);
+    bootstrap = new BootstrapService(writer, readme, repoRepo, emitter, prRecordService, http);
 
     repoId = UUID.randomUUID();
     projectId = UUID.randomUUID();
