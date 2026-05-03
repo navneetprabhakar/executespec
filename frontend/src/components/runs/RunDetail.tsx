@@ -566,49 +566,17 @@ export default function RunDetail() {
               )}
 
               {/* Review summary shown on COMPLETE runs.
-              v2.5.12 — prefer verifiedScore (deterministic, V106) over
-              accuracyScore (LLM-inferred, known to hallucinate on
-              intentionally-broken specs). Matches ValidationReportPanel's
-              v2.5.10 primary-badge rule so the banner and the panel agree. */}
-              {activeRun.status === 'COMPLETE' && review && (
+                  P-19 / R-03 (UX audit, 2026-05-03): pre-fix this banner
+                  showed both a score chip ("92/100 verified · Est. 88") AND
+                  the review summary text. The score chip duplicated what
+                  VerdictPill + ScoreCard already render below, contributing
+                  to the "6 competing scoring narratives" the audit flagged.
+                  Dropped the score chip; kept the textual summary because
+                  it's the LLM-written review prose nobody else surfaces.
+                  VerdictPill below this banner is now the single primary
+                  score signal. */}
+              {activeRun.status === 'COMPLETE' && review && review.summary && (
                 <div className='mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs flex-shrink-0'>
-                  <div className='flex items-center gap-2 mb-1'>
-                    {typeof reviewReport?.verifiedScore === 'number' ? (
-                      <span
-                        className={cn(
-                          'font-semibold font-mono tabular-nums',
-                          reviewReport.verifiedScore >= 90
-                            ? 'text-accent-green'
-                            : reviewReport.verifiedScore >= 75
-                              ? 'text-accent-amber'
-                              : 'text-accent-red',
-                        )}
-                      >
-                        {reviewReport.verifiedScore}/100 verified
-                        {typeof reviewReport.accuracyScore === 'number' && (
-                          <span className='text-muted font-normal ml-1.5'>
-                            · Est. {reviewReport.accuracyScore}
-                          </span>
-                        )}
-                      </span>
-                    ) : typeof reviewReport?.accuracyScore === 'number' ? (
-                      <span
-                        className={cn(
-                          'font-semibold font-mono tabular-nums',
-                          reviewReport.accuracyScore >= 90
-                            ? 'text-accent-green'
-                            : reviewReport.accuracyScore >= 75
-                              ? 'text-accent-amber'
-                              : 'text-accent-red',
-                        )}
-                      >
-                        Est. {reviewReport.accuracyScore}/100
-                        {reviewReport.accuracyGrade ? ` · ${reviewReport.accuracyGrade}` : ''}
-                      </span>
-                    ) : (
-                      <span className='text-muted text-[11px]'>Score pending…</span>
-                    )}
-                  </div>
                   <p className='text-secondary leading-relaxed'>{review.summary}</p>
                 </div>
               )}
