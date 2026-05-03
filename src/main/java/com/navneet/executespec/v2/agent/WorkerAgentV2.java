@@ -85,6 +85,31 @@ public class WorkerAgentV2 {
   /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
 
+  /**
+   * Stagnation guard threshold — after this many consecutive iterations without a write-class tool
+   * call (writeFile / editFile), inject a one-shot "PROGRESS CHECK" system message. Calibrated from
+   * run a076c876 task T2 (2026-05-03): the worker had finished writing files at iter ~16 and
+   * burned the next 44 iters on read+verify+git loops. Eight iterations is enough headroom for
+   * legitimate "read several files, then write one big edit" patterns without rewarding loops.
+   */
+  public static final int STAGNATION_WARN_AFTER_N = 8;
+
+  /**
+   * Stagnation force-terminate threshold — after this many consecutive non-write iterations, force
+   * the worker to a {@link WorkerResult.Outcome#COMPLETED_BY_STAGNATION} outcome regardless of
+   * whether {@code completeTask} was called. The downstream smoke gate decides whether the change
+   * set actually compiles. Calibrated as STAGNATION_WARN_AFTER_N + 4 — that gives the worker four
+   * post-warning iterations to either call completeTask cleanly or write the missing piece.
+   */
+  public static final int STAGNATION_FORCE_AFTER_N = 12;
+
+  /**
+   * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
+   * shell don't reset the counter — only file mutations.
+   */
+  private static final java.util.Set<String> WRITE_CLASS_TOOLS =
+      java.util.Set.of("writeFile", "editFile");
+
   public WorkerResult run(WorkerTaskRequest req) {
     long start = System.currentTimeMillis();
     int maxIter =
@@ -100,6 +125,11 @@ public class WorkerAgentV2 {
     List<String> toolLog = new ArrayList<>();
     int toolsDispatched = 0;
     String lastText = "";
+
+    // Stagnation guard state — counts consecutive iterations without a
+    // write-class tool call. Reset to 0 on any writeFile / editFile.
+    int stagnantIters = 0;
+    boolean stagnationWarned = false;
 
     log.info(
         "WorkerAgentV2 START run={} task={} provider={} model={} maxIter={}",
@@ -243,6 +273,54 @@ public class WorkerAgentV2 {
         toolLog.add(tc.name() + "(" + previewArgs(tc.arguments()) + ")");
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
+
+      // ─── Stagnation guard ─────────────────────────────────────────────
+      // Reset the stagnation counter on any write-class tool call this iter
+      // (writeFile / editFile); otherwise increment. A run of 8 stagnant
+      // iters injects a one-shot PROGRESS CHECK system message; another 4
+      // stagnant iters force-terminates the worker with
+      // COMPLETED_BY_STAGNATION so the smoke gate downstream can decide
+      // final task status.
+      boolean wroteThisIter = calls.stream().anyMatch(tc -> WRITE_CLASS_TOOLS.contains(tc.name()));
+      if (wroteThisIter) {
+        stagnantIters = 0;
+      } else {
+        stagnantIters++;
+      }
+      if (!stagnationWarned && stagnantIters >= STAGNATION_WARN_AFTER_N) {
+        log.info(
+            "WorkerAgentV2 STAGNATION_WARN run={} task={} iter={} stagnantIters={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            stagnantIters);
+        history.add(
+            new SystemMessage(
+                "PROGRESS CHECK: "
+                    + STAGNATION_WARN_AFTER_N
+                    + " consecutive iterations with no new file writes. If your task is done,"
+                    + " call completeTask now. If a build error blocks you, fix the file. Do"
+                    + " NOT re-read files you have already verified, do NOT re-inspect git"
+                    + " state, do NOT add 'one more verification' round-trips."));
+        stagnationWarned = true;
+      }
+      if (stagnantIters >= STAGNATION_FORCE_AFTER_N) {
+        log.warn(
+            "WorkerAgentV2 STAGNATION_FORCE run={} task={} iter={} stagnantIters={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            stagnantIters);
+        recordTerminal(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, req, iter);
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.COMPLETED_BY_STAGNATION)
+            .iterations(iter)
+            .toolCallsDispatched(toolsDispatched)
+            .finalAssistantText(lastText)
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
 
       // Periodic context persistence for crash recovery / retry-with-context. Best-effort;
       // failures inside ContextStoreV2 don't propagate. Save on the iteration boundary
