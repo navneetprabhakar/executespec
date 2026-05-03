@@ -22,10 +22,12 @@
  */
 import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
-import {Rocket, FileText, ArrowRight, Sparkles} from 'lucide-react';
+import {FileText, ArrowRight, Sparkles} from 'lucide-react';
 import * as api from '@/lib/api';
+import {useProjectStore} from '@/stores/useProjectStore';
 import {cn} from '@/lib/utils';
 import TemplateGrid from '@/components/execution/TemplateGrid';
+import FirstRunChecklist from './FirstRunChecklist';
 
 interface EmptyProjectLandingProps {
   projectId: string;
@@ -51,6 +53,12 @@ export default function EmptyProjectLanding({
   const navigate = useNavigate();
   const [samples, setSamples] = useState<api.SampleSpecDto[]>([]);
   const [loading, setLoading] = useState(true);
+  // P-02 (UX audit, 2026-05-03) — pull dashboard so the FirstRunChecklist can
+  // tell which steps are already done. Project store is shared with PulseTab
+  // so the data is already fetched by the time we render here; if it's not
+  // (e.g., direct deep-link), the checklist falls back to "all pending"
+  // gracefully because every step's done-flag is null-safe.
+  const dashboard = useProjectStore((s) => s.dashboard);
 
   useEffect(() => {
     api
@@ -61,6 +69,8 @@ export default function EmptyProjectLanding({
   }, []);
 
   const canLaunch = repoCount > 0;
+  const runCount =
+    (dashboard?.activeRuns ?? 0) + (dashboard?.completedRuns ?? 0) + (dashboard?.failedRuns ?? 0);
 
   return (
     <div className='max-w-2xl mx-auto py-8 space-y-6'>
@@ -69,50 +79,32 @@ export default function EmptyProjectLanding({
           Ship verified code from a spec.
         </h2>
         <p className='text-sm text-secondary max-w-md mx-auto'>
-          {canLaunch
-            ? 'Pick a starter spec to scaffold your first run, or jump straight to Launch.'
-            : 'Link a repo first, then pick a starter or paste your own spec.'}
+          Four quick steps to your first run. Everything below it works the same once you're set up.
         </p>
       </div>
 
-      {/* Primary CTAs */}
-      <div className='flex justify-center gap-2'>
-        <button
-          onClick={() => navigate(`/projects/${projectId}/executions/new`)}
-          disabled={!canLaunch}
-          className={cn(
-            'inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-sm border transition-colors',
-            canLaunch
-              ? 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20'
-              : 'border-[var(--border-default)] bg-[var(--gray-100)] text-muted cursor-not-allowed opacity-60',
-          )}
-          title={canLaunch ? 'Open the Launch modal' : 'Link a repo first'}
-        >
-          <Rocket className='h-4 w-4' />
-          Start a run
-        </button>
-        {!canLaunch && (
-          <button
-            onClick={() => {
-              if (onLinkRepo) {
-                onLinkRepo();
-                return;
-              }
-              // Legacy fallback (pre-v2.7.1) — kept only so this component
-              // still has *some* behavior when rendered without the parent
-              // callback. The drawer-settings target is wrong (settings has
-              // no repo manager) but at least the URL changes.
-              const url = new URL(window.location.href);
-              url.searchParams.set('drawer', 'settings');
-              window.history.replaceState(null, '', url.toString());
-              window.dispatchEvent(new Event('drawer-state'));
-            }}
-            className='inline-flex items-center gap-1.5 text-sm font-medium px-3 py-2 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary'
-          >
-            Link a repo
-          </button>
-        )}
-      </div>
+      {/* P-02 — 4-step progress checklist replaces the legacy two-CTA hero.
+          Always renders here because EmptyProjectLanding only mounts when
+          noRuns && repoCount === 0 (= step 1 is the user's current job).
+          If they somehow land here with repoCount > 0 (race after linking),
+          the checklist auto-advances the active step to whatever's next. */}
+      <FirstRunChecklist
+        projectId={projectId}
+        repoCount={repoCount}
+        archStatus={dashboard?.architectureDocStatus ?? null}
+        runCount={runCount}
+        onLinkRepo={onLinkRepo}
+        onGenerateArch={() => {
+          // No direct hook here — switch to Code → Architecture sub-tab where
+          // the existing Generate button lives. The dashboard's tab/sub URL
+          // sync (P-23) makes this a clean back-button restore point.
+          const url = new URL(window.location.href);
+          url.searchParams.set('tab', 'code');
+          url.searchParams.set('codeSub', 'architecture');
+          window.history.pushState(null, '', url.toString());
+          window.dispatchEvent(new PopStateEvent('popstate'));
+        }}
+      />
 
       {/* Sample gallery */}
       {!loading && samples.length > 0 && (
