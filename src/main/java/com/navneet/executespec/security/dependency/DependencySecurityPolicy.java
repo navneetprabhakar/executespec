@@ -17,40 +17,39 @@ import lombok.extern.slf4j.Slf4j;
  * 2026-05-02 — guardrail-tiered enforcement of dependency-install commands across the four JS
  * package managers we allow ({@code npm}, {@code bun}, {@code pnpm}, {@code yarn}). Sits behind
  * {@link com.navneet.executespec.tool.ShellSandboxPolicy} — when a chained command segment is
- * detected as an install invocation and the active {@link GuardrailLevel} is at least
- * {@link GuardrailLevel#MEDIUM}, this class enforces the missing security flags the worker
- * forgot.
+ * detected as an install invocation and the active {@link GuardrailLevel} is at least {@link
+ * GuardrailLevel#MEDIUM}, this class enforces the missing security flags the worker forgot.
  *
  * <p><b>Threat model addressed.</b>
  *
  * <ul>
  *   <li><b>Lifecycle-script RCE</b> — every manager runs {@code postinstall} / {@code prepare}
- *       hooks on every dep at install time. {@code --ignore-scripts} (npm/bun/pnpm) /
- *       {@code --immutable} (yarn 2+) disables this. Mandatory at MEDIUM+. Planner can opt
- *       out per-task by declaring {@code requires_postinstall: true} in the plan; absent
- *       that declaration, scripts are blocked.
+ *       hooks on every dep at install time. {@code --ignore-scripts} (npm/bun/pnpm) / {@code
+ *       --immutable} (yarn 2+) disables this. Mandatory at MEDIUM+. Planner can opt out per-task by
+ *       declaring {@code requires_postinstall: true} in the plan; absent that declaration, scripts
+ *       are blocked.
  *   <li><b>Lockfile drift</b> — {@code npm install} without a lockfile (or with mismatched
- *       lockfile) silently floats versions. {@code npm ci} / {@code bun install
- *       --frozen-lockfile} / {@code pnpm install --frozen-lockfile} reject install when the
- *       lockfile diverges. Mandatory at MEDIUM+.
+ *       lockfile) silently floats versions. {@code npm ci} / {@code bun install --frozen-lockfile}
+ *       / {@code pnpm install --frozen-lockfile} reject install when the lockfile diverges.
+ *       Mandatory at MEDIUM+.
  *   <li><b>Off-registry installs</b> — git+ssh, github tarball, file://, http://. Skips every
  *       registry-side scan. Blocked at MEDIUM+.
  *   <li><b>Pre-release / 0.0.0-beta versions</b> — supply-chain attackers commonly publish
- *       compromised versions as alpha/beta/rc/next/canary. Blocked at HIGH (configurable via
- *       {@code agent.security.deps.allow-prerelease}).
- *   <li><b>Known-CVE deps</b> — managers' built-in {@code audit} subcommand checks installed
- *       deps against the public CVE DB. {@code --audit-level=high} on npm + {@code &&
- *       <manager> audit} chained for bun/pnpm/yarn is mandatory at HIGH.
+ *       compromised versions as alpha/beta/rc/next/canary. Blocked at HIGH (configurable via {@code
+ *       agent.security.deps.allow-prerelease}).
+ *   <li><b>Known-CVE deps</b> — managers' built-in {@code audit} subcommand checks installed deps
+ *       against the public CVE DB. {@code --audit-level=high} on npm + {@code && <manager> audit}
+ *       chained for bun/pnpm/yarn is mandatory at HIGH.
  *   <li><b>Registry hijack</b> — adversary points {@code .npmrc} at an attacker-controlled
- *       registry. {@code --registry=<allowed>} pin enforced at HIGH against
- *       {@code agent.security.deps.allowed-registries}.
+ *       registry. {@code --registry=<allowed>} pin enforced at HIGH against {@code
+ *       agent.security.deps.allowed-registries}.
  * </ul>
  *
  * <p><b>Outside this policy's scope.</b> True network egress blocking (a malicious dep doing
- * outbound HTTP <em>after</em> install) needs container-level isolation — the worker today runs
- * in the same JVM context as the orchestrator. {@link
- * com.navneet.executespec.security.dependency.SocketDevAdapter} stub is the placeholder for
- * a deeper supply-chain scanner integration when an org's ready to wire one in.
+ * outbound HTTP <em>after</em> install) needs container-level isolation — the worker today runs in
+ * the same JVM context as the orchestrator. {@link
+ * com.navneet.executespec.security.dependency.SocketDevAdapter} stub is the placeholder for a
+ * deeper supply-chain scanner integration when an org's ready to wire one in.
  */
 @Component
 @RequiredArgsConstructor
@@ -76,9 +75,9 @@ public class DependencySecurityPolicy {
   private boolean allowPrerelease;
 
   /**
-   * Comma-separated list of registry origins allowed at HIGH. Empty = no registry pin
-   * enforcement (worker may use any registry). Defaults to the official npm + bun + pnpm
-   * registries. Override per-org via env / yaml.
+   * Comma-separated list of registry origins allowed at HIGH. Empty = no registry pin enforcement
+   * (worker may use any registry). Defaults to the official npm + bun + pnpm registries. Override
+   * per-org via env / yaml.
    */
   @Value(
       "${agent.security.deps.allowed-registries:https://registry.npmjs.org,"
@@ -90,8 +89,7 @@ public class DependencySecurityPolicy {
   /** Pre-release version like {@code 1.2.3-beta.4}, {@code 0.0.0-canary}, {@code 2.0.0-rc.1}. */
   private static final Pattern PRERELEASE =
       Pattern.compile(
-          "\\b\\d+\\.\\d+\\.\\d+-"
-              + "(?:alpha|beta|rc|next|canary|nightly|insiders|dev|pre)\\b",
+          "\\b\\d+\\.\\d+\\.\\d+-" + "(?:alpha|beta|rc|next|canary|nightly|insiders|dev|pre)\\b",
           Pattern.CASE_INSENSITIVE);
 
   /** Off-registry source — git+ssh, github tarball, http url, file path. */
@@ -109,13 +107,13 @@ public class DependencySecurityPolicy {
   // ── Public API ──────────────────────────────────────────────────────────
 
   /**
-   * Validate a single chained-command segment that has already passed allowlist + pattern
-   * checks. Returns {@link ValidationResult#allow()} when the segment isn't an install command
-   * or when the active guardrail level is LOW; otherwise enforces the rules above.
+   * Validate a single chained-command segment that has already passed allowlist + pattern checks.
+   * Returns {@link ValidationResult#allow()} when the segment isn't an install command or when the
+   * active guardrail level is LOW; otherwise enforces the rules above.
    *
-   * <p>The full chained command is also passed in so the audit-step check can verify
-   * {@code bun install ... && bun audit ...} is present (audit lives on a separate segment for
-   * bun/pnpm/yarn since they don't have an inline {@code --audit} flag).
+   * <p>The full chained command is also passed in so the audit-step check can verify {@code bun
+   * install ... && bun audit ...} is present (audit lives on a separate segment for bun/pnpm/yarn
+   * since they don't have an inline {@code --audit} flag).
    */
   public ValidationResult validateSegment(String segment, String fullCommand) {
     GuardrailLevel level =
@@ -123,7 +121,8 @@ public class DependencySecurityPolicy {
     return validateSegment(segment, fullCommand, level);
   }
 
-  public ValidationResult validateSegment(String segment, String fullCommand, GuardrailLevel level) {
+  public ValidationResult validateSegment(
+      String segment, String fullCommand, GuardrailLevel level) {
     GuardrailLevel effective = level == null ? GuardrailLevel.LOW : level;
     if (effective == GuardrailLevel.LOW) {
       return ValidationResult.allow(); // legacy behaviour, no enforcement

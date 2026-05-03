@@ -153,7 +153,8 @@ class AccuracyAssessmentInferKeyFilePathsTest {
     // Post-fix: each repo gets PER_REPO_BUDGET (6) picks, capped at MULTI_REPO_TOTAL_CAP (18).
     StringBuilder tree = new StringBuilder();
     // pplai-api (Python/Node) — 8 candidates, only 6 should make it past the budget
-    for (int i = 0; i < 4; i++) tree.append(String.format("repos/pplai-api/src/routes/r%d.ts%n", i));
+    for (int i = 0; i < 4; i++)
+      tree.append(String.format("repos/pplai-api/src/routes/r%d.ts%n", i));
     for (int i = 0; i < 4; i++)
       tree.append(String.format("repos/pplai-api/app/services/s%d.py%n", i));
     // pplai-frontend-mobile (RN) — 5 candidates
@@ -194,8 +195,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
 
     assertThat(picked).hasSizeLessThanOrEqualTo(18);
     // First 3 repos should each get the full 6 (3 × 6 = 18 = cap), repos 4 + 5 get 0.
-    assertThat(picked.stream().filter(p -> p.startsWith("repos/repo0/")).count())
-        .isEqualTo(6);
+    assertThat(picked.stream().filter(p -> p.startsWith("repos/repo0/")).count()).isEqualTo(6);
   }
 
   @Test

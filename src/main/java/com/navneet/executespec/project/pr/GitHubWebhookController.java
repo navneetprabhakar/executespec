@@ -108,8 +108,8 @@ public class GitHubWebhookController {
    * check_run.check_suite.head_branch}; failure summary from {@code check_run.output.summary} or
    * {@code check_run.output.text}; deep-link from {@code check_run.html_url}.
    *
-   * <p>The actual same-branch resubmit logic lives in {@link CiFailureAutoFixService}; the
-   * webhook only filters and unpacks.
+   * <p>The actual same-branch resubmit logic lives in {@link CiFailureAutoFixService}; the webhook
+   * only filters and unpacks.
    */
   private void handleCheckRun(JsonNode root) {
     String action = textOrNull(root, "action");

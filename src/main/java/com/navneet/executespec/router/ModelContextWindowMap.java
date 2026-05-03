@@ -13,9 +13,9 @@ import org.springframework.stereotype.Component;
  * Anthropic 1M-context Opus variant; gemini-pro = 32k vs the flash family at 1M).
  *
  * <p>Numbers reflect the input context window each model is documented to support today
- * (2026-05-02). When a new model lands in the matrix, add it here. The prefix-based fallback
- * keeps the chip from going blank for forward-compat models — graceful degradation, not a
- * substitute for a real entry.
+ * (2026-05-02). When a new model lands in the matrix, add it here. The prefix-based fallback keeps
+ * the chip from going blank for forward-compat models — graceful degradation, not a substitute for
+ * a real entry.
  */
 @Component
 public class ModelContextWindowMap {
@@ -51,10 +51,10 @@ public class ModelContextWindowMap {
           Map.entry("gpt-4o-mini", 128_000));
 
   /**
-   * Return the input context window for {@code model}, or a sensible default. The prefix
-   * heuristic is intentionally optimistic for unknowns ("the new model is at least as big as the
-   * family's previous frontier") so the chip degrades to a guess instead of a "?" — but every
-   * shipping model should have an explicit entry above.
+   * Return the input context window for {@code model}, or a sensible default. The prefix heuristic
+   * is intentionally optimistic for unknowns ("the new model is at least as big as the family's
+   * previous frontier") so the chip degrades to a guess instead of a "?" — but every shipping model
+   * should have an explicit entry above.
    */
   public int forModel(String model) {
     if (model == null || model.isBlank()) return FALLBACK_WINDOW;

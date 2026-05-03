@@ -28,14 +28,14 @@ import lombok.extern.slf4j.Slf4j;
  *       conclusion=failure}.
  *   <li>Calls {@link #onCheckRunFailed} with repo full name + head branch + failure summary +
  *       check-run details URL.
- *   <li>Service looks up the {@link PullRequestRecord} by (repo, branch) and the originating
- *       {@link PipelineRun} by {@code runId}.
- *   <li>Bails if {@link #MAX_AUTO_FIX_ATTEMPTS} reached, the originating run is missing the
- *       project / org context (so we can't re-submit cleanly), or the PR is no longer OPEN.
+ *   <li>Service looks up the {@link PullRequestRecord} by (repo, branch) and the originating {@link
+ *       PipelineRun} by {@code runId}.
+ *   <li>Bails if {@link #MAX_AUTO_FIX_ATTEMPTS} reached, the originating run is missing the project
+ *       / org context (so we can't re-submit cleanly), or the PR is no longer OPEN.
  *   <li>Builds a seeded user request: original spec + failure tail + same-branch instruction.
  *   <li>Submits via {@link V2RunOrchestrator#submitRun} with {@code branchOverride=headBranch} so
- *       {@code WorkspaceInitService.cloneMultipleRepos} clones from the PR branch's tip and
- *       {@code ScmPushService} pushes incrementally onto the same branch.
+ *       {@code WorkspaceInitService.cloneMultipleRepos} clones from the PR branch's tip and {@code
+ *       ScmPushService} pushes incrementally onto the same branch.
  *   <li>Increments {@code ciAutoFixAttempts} on the PR record.
  * </ol>
  *
@@ -57,8 +57,8 @@ public class CiFailureAutoFixService {
 
   /**
    * Result of an auto-fix dispatch attempt. The {@code newRunId} is set when a fresh run was
-   * actually submitted; {@code reason} carries the rationale for skip/decline so the webhook
-   * caller can log it for ops.
+   * actually submitted; {@code reason} carries the rationale for skip/decline so the webhook caller
+   * can log it for ops.
    */
   public record AutoFixResult(boolean dispatched, String newRunId, String reason) {
     public static AutoFixResult skipped(String reason) {
@@ -85,7 +85,10 @@ public class CiFailureAutoFixService {
   @Transactional
   public AutoFixResult onCheckRunFailed(
       String repoFullName, String headBranch, String checkRunSummary, String checkRunUrl) {
-    if (repoFullName == null || repoFullName.isBlank() || headBranch == null || headBranch.isBlank()) {
+    if (repoFullName == null
+        || repoFullName.isBlank()
+        || headBranch == null
+        || headBranch.isBlank()) {
       return AutoFixResult.skipped("missing repo or branch");
     }
 
@@ -93,7 +96,8 @@ public class CiFailureAutoFixService {
         prRepo.findFirstByRepoFullNameAndHeadBranchOrderByCreatedAtDesc(repoFullName, headBranch);
     if (prOpt.isEmpty()) {
       log.debug(
-          "CiFailureAutoFixService: no PR record for {} / {} — branch was not opened by ExecuteSpec, ignoring",
+          "CiFailureAutoFixService: no PR record for {} / {} — branch was not opened by"
+              + " ExecuteSpec, ignoring",
           repoFullName,
           headBranch);
       return AutoFixResult.skipped("no PR record for branch");
@@ -111,7 +115,8 @@ public class CiFailureAutoFixService {
           pr.getPrNumber(),
           attempts,
           MAX_AUTO_FIX_ATTEMPTS);
-      return AutoFixResult.skipped("auto-fix cap reached (" + attempts + "/" + MAX_AUTO_FIX_ATTEMPTS + ")");
+      return AutoFixResult.skipped(
+          "auto-fix cap reached (" + attempts + "/" + MAX_AUTO_FIX_ATTEMPTS + ")");
     }
 
     if (pr.getRunId() == null || pr.getRunId().isBlank()) {
@@ -134,7 +139,9 @@ public class CiFailureAutoFixService {
     // bounded so the planner's context budget isn't wrecked by a 10MB CI log.
     String tail = truncate(checkRunSummary == null ? "" : checkRunSummary, 4_000);
     String seeded =
-        "## Auto-fix re-run (CI failure on PR branch `" + headBranch + "`)\n\n"
+        "## Auto-fix re-run (CI failure on PR branch `"
+            + headBranch
+            + "`)\n\n"
             + "Original spec:\n\n"
             + (original.getUserRequest() == null ? "(missing)" : original.getUserRequest())
             + "\n\n---\n\n"
@@ -148,7 +155,11 @@ public class CiFailureAutoFixService {
             + (checkRunUrl != null && !checkRunUrl.isBlank()
                 ? "Check run details: " + checkRunUrl + "\n\n"
                 : "")
-            + "Auto-fix attempt " + (attempts + 1) + " of " + MAX_AUTO_FIX_ATTEMPTS + ".\n";
+            + "Auto-fix attempt "
+            + (attempts + 1)
+            + " of "
+            + MAX_AUTO_FIX_ATTEMPTS
+            + ".\n";
 
     String pat = resolveCallerPat(original.getCreatedByUserId());
 
@@ -188,7 +199,8 @@ public class CiFailureAutoFixService {
     prRepo.save(pr);
 
     log.info(
-        "CiFailureAutoFixService: auto-fix run {} dispatched for {} #{} (attempt {}/{}), branchOverride={}",
+        "CiFailureAutoFixService: auto-fix run {} dispatched for {} #{} (attempt {}/{}),"
+            + " branchOverride={}",
         newRun.getRunId(),
         repoFullName,
         pr.getPrNumber(),
