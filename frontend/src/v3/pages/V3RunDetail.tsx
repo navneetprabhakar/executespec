@@ -139,7 +139,9 @@ export default function V3RunDetail() {
   // Auto-pick the first changed file (skip lockfiles when we have a non-lockfile alternative).
   useEffect(() => {
     if (changedFiles.length === 0 || active) return;
-    const nonLock = changedFiles.find((f) => !f.path.endsWith('.lock') && !f.path.endsWith('-lock.json'));
+    const nonLock = changedFiles.find(
+      (f) => !f.path.endsWith('.lock') && !f.path.endsWith('-lock.json'),
+    );
     setActive((nonLock ?? changedFiles[0]).path);
   }, [changedFiles, active]);
 
@@ -317,8 +319,7 @@ export default function V3RunDetail() {
               const legacyUrl = detail.githubPrUrl;
               if (prs.length === 0 && !legacyUrl) return null;
               if (prs.length <= 1) {
-                const single =
-                  prs[0]?.prUrl ?? legacyUrl!;
+                const single = prs[0]?.prUrl ?? legacyUrl!;
                 return (
                   <a
                     href={single}
@@ -356,18 +357,9 @@ export default function V3RunDetail() {
                       padding: '5px 10px',
                       fontSize: 12,
                       fontWeight: 600,
-                      background:
-                        pr.status === 'MERGED'
-                          ? 'var(--v3-brand)'
-                          : 'transparent',
-                      color:
-                        pr.status === 'MERGED'
-                          ? 'var(--v3-text-on-brand)'
-                          : 'var(--v3-text)',
-                      border:
-                        pr.status === 'MERGED'
-                          ? 'none'
-                          : '1px solid var(--v3-brand)',
+                      background: pr.status === 'MERGED' ? 'var(--v3-brand)' : 'transparent',
+                      color: pr.status === 'MERGED' ? 'var(--v3-text-on-brand)' : 'var(--v3-text)',
+                      border: pr.status === 'MERGED' ? 'none' : '1px solid var(--v3-brand)',
                       borderRadius: 6,
                       cursor: 'pointer',
                       textDecoration: 'none',
@@ -479,8 +471,7 @@ export default function V3RunDetail() {
                         textAlign: 'center',
                         fontSize: 10,
                         fontWeight: 700,
-                        color:
-                          f.status === 'ADDED' ? 'var(--v3-success)' : 'var(--v3-warning)',
+                        color: f.status === 'ADDED' ? 'var(--v3-success)' : 'var(--v3-warning)',
                       }}
                       aria-label={f.status === 'ADDED' ? 'Added' : 'Modified'}
                     >
