@@ -10,6 +10,7 @@ import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.pr.PullRequestRecord;
+import com.navneet.executespec.project.pr.PullRequestRecordRepository;
 import com.navneet.executespec.project.pr.PullRequestRecordService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.BitbucketRepoService;
@@ -51,6 +52,7 @@ public class ScmPushService {
   private final AppUserRepository appUserRepository;
   private final ProjectRepository projectRepository;
   private final PullRequestRecordService pullRequestRecordService;
+  private final PullRequestRecordRepository pullRequestRecordRepository;
   private final ProjectRepoRepository projectRepoRepository;
   private final ObjectMapper objectMapper;
 
@@ -523,5 +525,143 @@ public class ScmPushService {
       log.debug("listPerRepoChangedFiles failed run={} sub={}: {}", runId, subPath, e.getMessage());
       return List.of();
     }
+  }
+
+  // ─── Apply-suggestion push (Fix L, 2026-05-03) ──────────────────────────
+
+  /**
+   * Per-repo outcome for an apply-time push. Mirrors the shape of {@link ToolResult}'s ok/err
+   * envelope but flattens it to JSON-friendly fields so the UI can render the per-repo list.
+   */
+  public record ApplyRepoOutcome(
+      String repoFullName, String branch, boolean ok, boolean clean, String message) {}
+
+  /**
+   * Aggregate outcome for an apply-suggestion push across all linked repos.
+   *
+   * @param mode {@code MULTI_REPO} | {@code SINGLE_REPO} | {@code SKIPPED}
+   * @param skippedReason populated only when {@code mode == SKIPPED} (e.g. "no PAT", "no repo")
+   * @param perRepo per-repo outcomes when {@code mode == MULTI_REPO} or single-element list when
+   *     {@code SINGLE_REPO}
+   */
+  public record ApplyPushResult(String mode, String skippedReason, List<ApplyRepoOutcome> perRepo) {
+
+    public static ApplyPushResult skipped(String reason) {
+      return new ApplyPushResult("SKIPPED", reason, List.of());
+    }
+
+    public static ApplyPushResult multiRepo(List<ApplyRepoOutcome> outcomes) {
+      return new ApplyPushResult("MULTI_REPO", null, outcomes);
+    }
+
+    public static ApplyPushResult singleRepo(ApplyRepoOutcome outcome) {
+      return new ApplyPushResult("SINGLE_REPO", null, List.of(outcome));
+    }
+  }
+
+  /**
+   * Push apply-suggestion changes to each repo's existing PR branch (or {@code
+   * executespec/<runIdShort>} when no PR is open). Uses {@link GitTool#pushToExistingBranch} —
+   * fast-forward only, no force-push, no PR creation. The existing PR (if any) picks up the new
+   * commit automatically; no new PR is opened.
+   *
+   * <p>Why this is a separate method from {@link #pushMultiRepo}: that path is the run-end push +
+   * PR-create flow (force-push to a fresh branch, open PR, cross-link bodies). Apply lives on top
+   * of an existing run + existing PR; force-push would obliterate intermediate review-driven
+   * commits and reopening a closed PR is a different decision the user might not want.
+   *
+   * <p>Diagnosed from run a076c876 apply attempt (2026-05-03): {@code V2ApplyService.tryGitCommit}
+   * shelled {@code git add} + {@code git commit} at the WORKSPACE root, but each {@code
+   * repos/<name>/} contains its OWN nested {@code .git} that the wrapping git treats as a submodule
+   * (gitlink). The outer commit recorded only the submodule SHAs; the inner repo working trees
+   * stayed dirty, were never pushed, and never reached GitHub. Apply was effectively a no-op for
+   * the user.
+   */
+  public ApplyPushResult pushApplyChanges(PipelineRun run, String commitMessage) {
+    if (run == null || run.getRunId() == null) {
+      return ApplyPushResult.skipped("missing run");
+    }
+
+    AppUser user =
+        run.getCreatedByUserId() != null
+            ? appUserRepository.findById(run.getCreatedByUserId()).orElse(null)
+            : null;
+    String pat = user != null ? user.getGithubPat() : null;
+    if (!StringUtils.hasText(pat)) {
+      return ApplyPushResult.skipped("no GitHub PAT on run owner");
+    }
+
+    List<java.util.UUID> repoIds = parseRepoIds(run.getSelectedRepoIds());
+
+    // Multi-repo path — each linked repo has its own clone under repos/<name>/.
+    if (!repoIds.isEmpty()) {
+      Project project =
+          run.getProjectId() != null
+              ? projectRepository.findById(run.getProjectId()).orElse(null)
+              : null;
+      String fallbackBranch = resolveBranchName(project, run);
+
+      // Index existing PR records for this run so we can prefer their headBranch.
+      java.util.Map<String, String> repoToBranch = new java.util.HashMap<>();
+      for (PullRequestRecord rec :
+          pullRequestRecordRepository.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
+        if (rec.getStatus() == PullRequestRecord.Status.MERGED
+            || rec.getStatus() == PullRequestRecord.Status.CLOSED) continue;
+        if (rec.getRepoFullName() != null && rec.getHeadBranch() != null) {
+          repoToBranch.put(rec.getRepoFullName(), rec.getHeadBranch());
+        }
+      }
+
+      List<ApplyRepoOutcome> outcomes = new java.util.ArrayList<>();
+      for (java.util.UUID id : repoIds) {
+        ProjectRepo repo = projectRepoRepository.findById(id).orElse(null);
+        if (repo == null) continue;
+        String repoFullName = repo.getGithubRepoFullName();
+        String subPath = "repos/" + lastPathSegment(repoFullName);
+        String remote = "https://github.com/" + repoFullName;
+        String branchName = repoToBranch.getOrDefault(repoFullName, fallbackBranch);
+
+        ToolResult res =
+            gitTool.pushToExistingBranch(
+                run.getRunId(), subPath, remote, pat, branchName, commitMessage);
+        boolean ok = res.isOk();
+        boolean clean = ok && "CLEAN".equals(res.value());
+        outcomes.add(new ApplyRepoOutcome(repoFullName, branchName, ok, clean, res.value()));
+        if (!ok) {
+          log.warn(
+              "[{}] apply push failed for {} on branch {}: {}",
+              run.getRunId(),
+              repoFullName,
+              branchName,
+              res.value());
+        }
+      }
+      return ApplyPushResult.multiRepo(outcomes);
+    }
+
+    // Single-repo path — workspace root IS the repo (cloned from run.repoUrl).
+    if (StringUtils.hasText(run.getRepoUrl())) {
+      String branch = "executespec/" + run.getRunId().substring(0, 8);
+      // Prefer existing PR branch when available.
+      for (PullRequestRecord rec :
+          pullRequestRecordRepository.findByRunIdOrderByCreatedAtAsc(run.getRunId())) {
+        if (rec.getStatus() == PullRequestRecord.Status.MERGED
+            || rec.getStatus() == PullRequestRecord.Status.CLOSED) continue;
+        if (StringUtils.hasText(rec.getHeadBranch())) {
+          branch = rec.getHeadBranch();
+          break;
+        }
+      }
+      ToolResult res =
+          gitTool.pushToExistingBranch(
+              run.getRunId(), ".", run.getRepoUrl(), pat, branch, commitMessage);
+      String repoName = repoFullNameFromUrl(run.getRepoUrl());
+      ApplyRepoOutcome outcome =
+          new ApplyRepoOutcome(
+              repoName, branch, res.isOk(), res.isOk() && "CLEAN".equals(res.value()), res.value());
+      return ApplyPushResult.singleRepo(outcome);
+    }
+
+    return ApplyPushResult.skipped("no repo configured (scratch workspace)");
   }
 }

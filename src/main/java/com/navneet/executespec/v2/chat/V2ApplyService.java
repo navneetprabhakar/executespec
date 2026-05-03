@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.concurrent.TimeUnit;
 
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.integration.scm.ScmPushService;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -74,6 +75,7 @@ public class V2ApplyService {
   private final ModelResolver modelResolver;
   private final AgentProperties agentProps;
   private final ApplyResultStore resultStore;
+  private final ScmPushService scmPushService;
 
   public record ApplyResult(
       int taskCount, List<TaskSummary> tasks, String workerOutcome, String summary) {}
@@ -191,9 +193,25 @@ public class V2ApplyService {
       throw new RuntimeException("Apply worker failed: " + e.getMessage(), e);
     }
 
-    // Worker's file edits are direct writes — the commit isn't automatic.
-    // Git-add + commit in the workspace so the apply is captured in history.
-    String gitOut = tryGitCommit(workspace, commitPrefix, title);
+    // Fix L (2026-05-03) — push apply changes to each linked repo's existing PR
+    // branch (or executespec/<runIdShort> when no PR is open). The previous
+    // `tryGitCommit` shelled `git add` + `git commit` at the WORKSPACE root, but
+    // each `repos/<name>/` is its OWN nested git that the wrapping git treats as
+    // a submodule (gitlink). The outer commit recorded only submodule SHAs; the
+    // inner repo working trees stayed dirty + were never pushed, so the apply
+    // never reached GitHub. With pushApplyChanges → per-repo
+    // GitTool.pushToExistingBranch (fast-forward only, no PR create), the
+    // existing PR picks up the new commit naturally.
+    String commitMsg = commitPrefix + ": " + (title.isBlank() ? "apply user suggestion" : title);
+    ScmPushService.ApplyPushResult pushResult;
+    try {
+      pushResult = scmPushService.pushApplyChanges(run, commitMsg);
+    } catch (Exception e) {
+      log.warn("V2ApplyService push failed for run={}: {}", runId, e.getMessage());
+      pushResult =
+          ScmPushService.ApplyPushResult.skipped(
+              "push exception: " + e.getClass().getSimpleName() + ": " + e.getMessage());
+    }
 
     String summary =
         "Worker outcome: "
@@ -202,7 +220,8 @@ public class V2ApplyService {
             + result.iterations()
             + " · tool calls: "
             + result.toolCallsDispatched()
-            + (gitOut == null ? "" : " · git: " + gitOut);
+            + " · "
+            + summarizePushResult(pushResult);
 
     if (result.outcome() != WorkerResult.Outcome.COMPLETED) {
       log.warn(
@@ -248,9 +267,47 @@ public class V2ApplyService {
   }
 
   /**
-   * Shell out to git so the apply lands as a proper commit on the existing branch. Non-fatal — if
-   * git fails the worker's edits stay on disk.
+   * Render an {@link ScmPushService.ApplyPushResult} into a one-line summary suitable for the apply
+   * summary surface. Multi-repo runs collapse to a count of OK/CLEAN/FAIL repos so the line stays
+   * bounded; per-repo detail goes into structured logs upstream.
    */
+  static String summarizePushResult(ScmPushService.ApplyPushResult r) {
+    if (r == null) return "push: (unknown)";
+    if ("SKIPPED".equals(r.mode())) {
+      return "push: skipped (" + (r.skippedReason() == null ? "unknown" : r.skippedReason()) + ")";
+    }
+    int ok = 0;
+    int clean = 0;
+    int fail = 0;
+    for (ScmPushService.ApplyRepoOutcome o : r.perRepo()) {
+      if (o.clean()) clean++;
+      else if (o.ok()) ok++;
+      else fail++;
+    }
+    if (r.perRepo().size() == 1) {
+      var only = r.perRepo().get(0);
+      if (only.clean()) return "push: clean (no diff to push)";
+      if (only.ok()) return "push: pushed → " + only.branch();
+      return "push: failed (" + only.message() + ")";
+    }
+    return "push: "
+        + ok
+        + " pushed, "
+        + clean
+        + " clean, "
+        + fail
+        + " failed across "
+        + r.perRepo().size()
+        + " repos";
+  }
+
+  /**
+   * Legacy workspace-root commit helper. Retained as an internal escape hatch (currently unused
+   * after Fix L) — every apply now goes through {@link ScmPushService#pushApplyChanges} which
+   * commits + pushes per-repo. If a future code path needs to capture changes in the wrapping
+   * workspace git without pushing, restore the call site here.
+   */
+  @SuppressWarnings("unused")
   private static String tryGitCommit(Path workspace, String prefix, String title) {
     try {
       runCmd(workspace, "git", "add", "-A");
@@ -274,6 +331,7 @@ public class V2ApplyService {
     }
   }
 
+  @SuppressWarnings("unused")
   private static String runCmd(Path cwd, String... cmd) throws IOException, InterruptedException {
     ProcessBuilder pb = new ProcessBuilder(cmd).directory(cwd.toFile()).redirectErrorStream(true);
     Process p = pb.start();
