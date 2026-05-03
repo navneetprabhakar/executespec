@@ -74,8 +74,7 @@ public class VendoredPathGuard {
       java.util.regex.Pattern.compile(
           "(?i)(^|/)("
               + String.join(
-                  "|",
-                  VENDORED_DIRS.stream().map(java.util.regex.Pattern::quote).toList())
+                  "|", VENDORED_DIRS.stream().map(java.util.regex.Pattern::quote).toList())
               + ")(/|$)");
 
   /** Returns {@code true} when {@code workspaceRelativePath} sits inside a vendored directory. */
@@ -151,9 +150,7 @@ public class VendoredPathGuard {
     } catch (Exception e) {
       // Non-fatal — we tried to be helpful, but don't fail the run because we couldn't.
       log.warn(
-          "VendoredPathGuard: failed to augment .gitignore in {}: {}",
-          repoDir,
-          e.getMessage());
+          "VendoredPathGuard: failed to augment .gitignore in {}: {}", repoDir, e.getMessage());
     }
   }
 
@@ -213,7 +210,10 @@ public class VendoredPathGuard {
           runGit(repoDir, List.of("rm", "--cached", "-r", "--ignore-unmatch", segment), 60);
         } catch (Exception inner) {
           log.warn(
-              "git rm --cached failed for {}/{}: {}", repoDir.getFileName(), segment, inner.getMessage());
+              "git rm --cached failed for {}/{}: {}",
+              repoDir.getFileName(),
+              segment,
+              inner.getMessage());
         }
       }
       // Re-stage .gitignore in case augmentGitignore's auto-commit captured it before the rm.
@@ -246,8 +246,7 @@ public class VendoredPathGuard {
       }
       return new ScrubResult(vendoredFileCount, tracked.size(), vendoredRoots);
     } catch (Exception e) {
-      log.warn(
-          "VendoredPathGuard.scrub failed for {}: {}", repoDir.getFileName(), e.getMessage());
+      log.warn("VendoredPathGuard.scrub failed for {}: {}", repoDir.getFileName(), e.getMessage());
       return new ScrubResult(0, 0, java.util.Set.of());
     }
   }
@@ -391,7 +390,8 @@ public class VendoredPathGuard {
     List<String> cmd = new ArrayList<>(args.size() + 1);
     cmd.add("git");
     cmd.addAll(args);
-    ProcessBuilder pb = new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
+    ProcessBuilder pb =
+        new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
     pb.environment().keySet().retainAll(List.of("PATH", "HOME"));
     Process p = pb.start();
     List<String> lines = new ArrayList<>();

@@ -224,8 +224,8 @@ public class WorkspaceFileService {
 
   /**
    * Per-file change status surfaced on the run-detail file tree so the user can see at a glance
-   * what the worker has added vs modified vs left untouched. {@link Status#UNCHANGED} files
-   * already existed on the cloned source and the run hasn't touched them; the rest are deltas.
+   * what the worker has added vs modified vs left untouched. {@link Status#UNCHANGED} files already
+   * existed on the cloned source and the run hasn't touched them; the rest are deltas.
    */
   public enum Status {
     /** New file the worker created (untracked + staged-add both surface as ADDED). */
@@ -239,21 +239,21 @@ public class WorkspaceFileService {
   public record FileEntry(String path, Status status) {}
 
   /**
-   * 2026-05-02 — base + head content for a single workspace file, so the run-detail UI can render
-   * a Monaco {@code DiffEditor} (only the diff is visible, not the full file). {@code base} is the
+   * 2026-05-02 — base + head content for a single workspace file, so the run-detail UI can render a
+   * Monaco {@code DiffEditor} (only the diff is visible, not the full file). {@code base} is the
    * snapshot the run was cloned against ({@link RunRepoSnapshot#commitSha}); {@code head} is the
    * current FS content. ADDED files have empty {@code base}; deleted files have empty {@code head}
-   * (rare on this pipeline). Outside any {@code repos/<name>/} subdir there is no base — the
-   * worker is the only writer for those (e.g. {@code .agent-context/project.json}).
+   * (rare on this pipeline). Outside any {@code repos/<name>/} subdir there is no base — the worker
+   * is the only writer for those (e.g. {@code .agent-context/project.json}).
    */
   public record FileDiff(String path, String base, String head, Status status) {}
 
   /**
-   * Read base + head content for a single file. Pulls the cloned base SHA from
-   * {@link RunRepoSnapshot} (V100), then runs {@code git show <sha>:<rel>} per repo subdir. Falls
-   * back to {@code git merge-base HEAD origin/HEAD} when no snapshot row exists (older runs
-   * pre-V100). Best-effort: every git failure degrades to {@code base=""} so the UI still gets a
-   * one-sided "added" diff instead of an opaque error.
+   * Read base + head content for a single file. Pulls the cloned base SHA from {@link
+   * RunRepoSnapshot} (V100), then runs {@code git show <sha>:<rel>} per repo subdir. Falls back to
+   * {@code git merge-base HEAD origin/HEAD} when no snapshot row exists (older runs pre-V100).
+   * Best-effort: every git failure degrades to {@code base=""} so the UI still gets a one-sided
+   * "added" diff instead of an opaque error.
    */
   public FileDiff readFileDiff(String runId, String relativePath) throws IOException {
     if (relativePath.contains("..")) {
@@ -314,7 +314,12 @@ public class WorkspaceFileService {
         baseExists = base != null;
         if (!baseExists) base = "";
       } catch (Exception e) {
-        log.debug("git show failed for {}#{} @ {}: {}", repoName, repoRelativePath, baseSha, e.getMessage());
+        log.debug(
+            "git show failed for {}#{} @ {}: {}",
+            repoName,
+            repoRelativePath,
+            baseSha,
+            e.getMessage());
       }
     }
 
@@ -328,10 +333,10 @@ public class WorkspaceFileService {
   }
 
   /**
-   * Look up the cloned base SHA for one repo subdir of a run. Tries the persisted
-   * {@link RunRepoSnapshot} first (V100, set by {@code WorkspaceInitService.cloneMultipleRepos}).
-   * Falls back to {@code git merge-base HEAD origin/HEAD} for runs that pre-date V100 or where
-   * the snapshot row is missing for any reason. Returns {@code null} when neither path resolves.
+   * Look up the cloned base SHA for one repo subdir of a run. Tries the persisted {@link
+   * RunRepoSnapshot} first (V100, set by {@code WorkspaceInitService.cloneMultipleRepos}). Falls
+   * back to {@code git merge-base HEAD origin/HEAD} for runs that pre-date V100 or where the
+   * snapshot row is missing for any reason. Returns {@code null} when neither path resolves.
    */
   private String lookupBaseSha(String runId, String repoName, Path repoDir) {
     try {
@@ -362,7 +367,8 @@ public class WorkspaceFileService {
    * {@code git show <sha>:<path>} — returns the file content at that commit, or {@code null} when
    * the file did not exist there (so the caller can classify ADDED). Output is captured as UTF-8.
    */
-  private String runGitShow(Path repoDir, String sha, String path) throws IOException, InterruptedException {
+  private String runGitShow(Path repoDir, String sha, String path)
+      throws IOException, InterruptedException {
     ProcessBuilder pb =
         new ProcessBuilder("git", "show", sha + ":" + path)
             .directory(repoDir.toFile())
@@ -371,7 +377,8 @@ public class WorkspaceFileService {
     StringBuilder sb = new StringBuilder();
     try (var br =
         new java.io.BufferedReader(
-            new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+            new java.io.InputStreamReader(
+                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
       char[] buf = new char[4096];
       int n;
       while ((n = br.read(buf)) > 0) sb.append(buf, 0, n);
@@ -393,12 +400,14 @@ public class WorkspaceFileService {
     List<String> cmd = new ArrayList<>(args.size() + 1);
     cmd.add("git");
     cmd.addAll(args);
-    ProcessBuilder pb = new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
+    ProcessBuilder pb =
+        new ProcessBuilder(cmd).directory(repoDir.toFile()).redirectErrorStream(true);
     Process p = pb.start();
     List<String> lines = new ArrayList<>();
     try (var br =
         new java.io.BufferedReader(
-            new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+            new java.io.InputStreamReader(
+                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
       String line;
       while ((line = br.readLine()) != null) lines.add(line);
     }
@@ -414,15 +423,14 @@ public class WorkspaceFileService {
   }
 
   /**
-   * Same listing as {@link #listFiles(String)} but each entry also carries a git-derived
-   * {@link Status}. Multi-repo aware: each {@code repos/<name>/} subdir is its own git checkout
-   * so we run {@code git status --porcelain} per repo and union the results, prefixing every
-   * relative path with {@code repos/<name>/} so they line up with what the file tree
-   * already shows.
+   * Same listing as {@link #listFiles(String)} but each entry also carries a git-derived {@link
+   * Status}. Multi-repo aware: each {@code repos/<name>/} subdir is its own git checkout so we run
+   * {@code git status --porcelain} per repo and union the results, prefixing every relative path
+   * with {@code repos/<name>/} so they line up with what the file tree already shows.
    *
-   * <p>Files outside any {@code repos/<name>/} subdir (e.g. workspace-root scaffolding,
-   * {@code .agent-context/}) are reported as {@link Status#ADDED} when present, since the worker
-   * is the only writer for those paths.
+   * <p>Files outside any {@code repos/<name>/} subdir (e.g. workspace-root scaffolding, {@code
+   * .agent-context/}) are reported as {@link Status#ADDED} when present, since the worker is the
+   * only writer for those paths.
    */
   public List<FileEntry> listFilesWithStatus(String runId) throws IOException {
     Path root = workspaceRoot(runId);
@@ -462,7 +470,8 @@ public class WorkspaceFileService {
    * modified <i>and committed</i>, which {@code git status --porcelain} alone misses. Falls back
    * silently per repo when the base SHA can't be resolved.
    */
-  private java.util.Map<String, Status> collectCommittedDeltasForAllRepos(String runId, Path workspaceRoot) {
+  private java.util.Map<String, Status> collectCommittedDeltasForAllRepos(
+      String runId, Path workspaceRoot) {
     java.util.Map<String, Status> merged = new java.util.HashMap<>();
     Path reposDir = workspaceRoot.resolve("repos");
     if (!Files.isDirectory(reposDir)) return merged;
@@ -512,9 +521,9 @@ public class WorkspaceFileService {
 
   /**
    * Walk every {@code repos/<name>/} subdir, run {@code git status --porcelain}, and merge the
-   * results into a path → status map keyed on the workspace-relative path (so the keys line up
-   * with what {@link #listLocalFiles} produces). Best-effort — git failures log + the repo's
-   * files fall through to UNCHANGED.
+   * results into a path → status map keyed on the workspace-relative path (so the keys line up with
+   * what {@link #listLocalFiles} produces). Best-effort — git failures log + the repo's files fall
+   * through to UNCHANGED.
    */
   private java.util.Map<String, Status> collectGitStatusForAllRepos(Path workspaceRoot) {
     java.util.Map<String, Status> merged = new java.util.HashMap<>();
@@ -535,7 +544,8 @@ public class WorkspaceFileService {
                     if (line.length() < 3) continue;
                     String code = line.substring(0, 2);
                     String rest = line.substring(3).trim();
-                    String path = rest.contains(" -> ") ? rest.substring(rest.indexOf(" -> ") + 4) : rest;
+                    String path =
+                        rest.contains(" -> ") ? rest.substring(rest.indexOf(" -> ") + 4) : rest;
                     // Quoted paths (when special chars present) — strip surrounding quotes.
                     if (path.startsWith("\"") && path.endsWith("\"")) {
                       path = path.substring(1, path.length() - 1);
@@ -559,7 +569,8 @@ public class WorkspaceFileService {
     return merged;
   }
 
-  private List<String> runGitStatusPorcelain(Path repoDir) throws IOException, InterruptedException {
+  private List<String> runGitStatusPorcelain(Path repoDir)
+      throws IOException, InterruptedException {
     ProcessBuilder pb =
         new ProcessBuilder("git", "status", "--porcelain", "--untracked-files=all")
             .directory(repoDir.toFile())
@@ -568,7 +579,8 @@ public class WorkspaceFileService {
     List<String> lines = new ArrayList<>();
     try (var br =
         new java.io.BufferedReader(
-            new java.io.InputStreamReader(p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
+            new java.io.InputStreamReader(
+                p.getInputStream(), java.nio.charset.StandardCharsets.UTF_8))) {
       String line;
       while ((line = br.readLine()) != null) lines.add(line);
     }

@@ -360,8 +360,8 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   /**
    * Reads key source files (routes, controllers, models, entry points) and returns their content as
    * annotated snippets for the accuracy scorer. Cap is whatever {@link #inferKeyFilePaths} hands
-   * back — single-repo runs stay at 6, multi-repo runs scale up to {@code MULTI_REPO_TOTAL_CAP}
-   * (18 by default = 6 per repo × 3 repos). Per-file char cap stays at 2,500 so token cost grows
+   * back — single-repo runs stay at 6, multi-repo runs scale up to {@code MULTI_REPO_TOTAL_CAP} (18
+   * by default = 6 per repo × 3 repos). Per-file char cap stays at 2,500 so token cost grows
    * linearly with repo count rather than file count.
    */
   private String buildKeyFileSnippets(String runId, String fileTree) {
@@ -416,8 +416,8 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * vendored content (full list aligned with {@code VendoredPathGuard.VENDORED_DIRS}).
    *
    * <p>V162 (R-343 hotfix) added top-up: structural matches that don't fill the budget get padded
-   * with the smallest non-structural source files so small projects (one structurally-named file
-   * + the real logic in a sibling) don't see "file exists but content not readable" false-positives
+   * with the smallest non-structural source files so small projects (one structurally-named file +
+   * the real logic in a sibling) don't see "file exists but content not readable" false-positives
    * across every spec requirement.
    *
    * <p>2026-05-02 multi-repo expansion: when the file tree contains paths under {@code
@@ -492,23 +492,23 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
   }
 
   /**
-   * Prefer structurally-named files (route, controller, service, …); cap structural picks at 10
-   * so a Spring Boot project with 30 controllers doesn't crowd out non-structural fallbacks.
-   * Top up with the smallest non-structural source files until {@code budget} is reached so a
-   * project with only one structurally-named file doesn't leave 5 slots empty (R-343 fix).
+   * Prefer structurally-named files (route, controller, service, …); cap structural picks at 10 so
+   * a Spring Boot project with 30 controllers doesn't crowd out non-structural fallbacks. Top up
+   * with the smallest non-structural source files until {@code budget} is reached so a project with
+   * only one structurally-named file doesn't leave 5 slots empty (R-343 fix).
    *
    * <p>2026-05-02 — match the structural regex against the path with the {@code repos/<name>/}
-   * prefix stripped, so the repo name itself doesn't trigger keywords. b171fa52 had a repo
-   * called {@code pplai-api}; the original regex matched "api" inside the repo name and treated
-   * EVERY file in pplai-api as structural — sorted by length, that meant {@code start.sh} +
-   * {@code fix_files.py} won over {@code app/routers/ai.py}, which is exactly the file the
-   * accuracy assessor needed to read. Stripping the prefix and re-matching against the
-   * repo-internal path (e.g. {@code app/routers/ai.py}) makes the regex actually discriminate.
+   * prefix stripped, so the repo name itself doesn't trigger keywords. b171fa52 had a repo called
+   * {@code pplai-api}; the original regex matched "api" inside the repo name and treated EVERY file
+   * in pplai-api as structural — sorted by length, that meant {@code start.sh} + {@code
+   * fix_files.py} won over {@code app/routers/ai.py}, which is exactly the file the accuracy
+   * assessor needed to read. Stripping the prefix and re-matching against the repo-internal path
+   * (e.g. {@code app/routers/ai.py}) makes the regex actually discriminate.
    *
-   * <p>Boilerplate filenames ({@code index|main|app|server}.<ext>) are also DE-PRIORITISED by
-   * being treated as non-structural for the structural-tier sort — they almost always exist
-   * (entry points / Express server bootstrap / Next.js app shell) but rarely contain the
-   * business logic the assessor needs to verify.
+   * <p>Boilerplate filenames ({@code index|main|app|server}.<ext>) are also DE-PRIORITISED by being
+   * treated as non-structural for the structural-tier sort — they almost always exist (entry points
+   * / Express server bootstrap / Next.js app shell) but rarely contain the business logic the
+   * assessor needs to verify.
    */
   private static final java.util.regex.Pattern REPO_PREFIX_PATTERN =
       java.util.regex.Pattern.compile("^repos/[^/]+/");
@@ -518,9 +518,9 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
 
   /**
    * TIER A — files inside a structural directory ({@code routers/}, {@code services/}, …). These
-   * are nearly always the deliverable: the worker added a route to {@code app/routers/ai.py},
-   * not to a top-level {@code auth.py}. Anchored on the directory segment so a filename like
-   * {@code Service.java} doesn't match (it would, in TIER B).
+   * are nearly always the deliverable: the worker added a route to {@code app/routers/ai.py}, not
+   * to a top-level {@code auth.py}. Anchored on the directory segment so a filename like {@code
+   * Service.java} doesn't match (it would, in TIER B).
    */
   private static final java.util.regex.Pattern STRUCTURAL_DIR_PATTERN =
       java.util.regex.Pattern.compile(
@@ -538,8 +538,8 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
 
   /**
    * Pick {@code budget} files from {@code source}, preferring structural directories over
-   * structural filenames over non-structural fallbacks. Within a tier, shortest path wins as
-   * a tiebreaker (smallest-first ordering preserved from caller via {@code source} sort).
+   * structural filenames over non-structural fallbacks. Within a tier, shortest path wins as a
+   * tiebreaker (smallest-first ordering preserved from caller via {@code source} sort).
    *
    * <p>2026-05-02 cap-at-10 from R-343 retained per tier to keep the read budget honest when a
    * Spring Boot project has 30 files in {@code controllers/}.

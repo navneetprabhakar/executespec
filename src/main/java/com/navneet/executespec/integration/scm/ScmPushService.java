@@ -426,9 +426,9 @@ public class ScmPushService {
 
   /**
    * Co-author trailer added to every per-repo commit so the agent's authorship is credited and
-   * GitHub's avatar / search surfaces both the human owner and the bot. Address chosen to match
-   * the SUPER_ADMIN account that drives most ExecuteSpec test runs; can be made org-configurable
-   * later if customers want a different handle.
+   * GitHub's avatar / search surfaces both the human owner and the bot. Address chosen to match the
+   * SUPER_ADMIN account that drives most ExecuteSpec test runs; can be made org-configurable later
+   * if customers want a different handle.
    */
   private static final String CO_AUTHOR_TRAILER =
       "Co-Authored-By: ExecuteSpec Agent <admin@executespec.ai>";
@@ -452,8 +452,8 @@ public class ScmPushService {
    *
    * <p>The file list is enumerated via {@code git status --porcelain} on the per-repo subdir
    * (everything is staged just before this; {@code commitAndPushSubdir} does {@code add -A} after
-   * we return). Capped at 30 lines so a 9605-file leak (b171fa52 class) doesn't blow the
-   * commit message past GitHub's 100KB body limit.
+   * we return). Capped at 30 lines so a 9605-file leak (b171fa52 class) doesn't blow the commit
+   * message past GitHub's 100KB body limit.
    */
   private String buildPerRepoCommitMessage(
       PipelineRun run, String runTitle, ProjectRepo repo, String subPath) {
