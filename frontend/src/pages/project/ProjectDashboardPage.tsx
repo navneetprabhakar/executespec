@@ -101,18 +101,69 @@ export default function ProjectDashboardPage() {
   const navigate = useNavigate();
   const drawer = useDrawerState();
 
-  // Read deep-link tab from query string once on mount; URL updates as user
-  // navigates, but we don't try to keep query in sync with state on every
-  // click — the tab strip is cheap to navigate and the URL stays clean.
+  // Read deep-link tab from query string on mount. P-23 (UX audit, 2026-05-03):
+  // we now ALSO accept the canonical `sub` + `codeSub` query params alongside
+  // the legacy `tab` key so a URL like ?tab=code&codeSub=repos lands directly
+  // on the Code → Repos sub-pane. The legacy single-`tab` keys (`overview`,
+  // `architecture`, etc.) still map via legacyTabToNew for back-compat with
+  // bookmarked / shared links from before the IA cleanup.
   const initial = useMemo(() => {
     const sp = new URLSearchParams(window.location.search);
     const legacy = sp.get('tab');
-    return legacyTabToNew(legacy);
+    const mapped = legacyTabToNew(legacy);
+    const subParam = sp.get('sub') as RunsSubTab | null;
+    const codeSubParam = sp.get('codeSub') as CodeSubTab | null;
+    return {
+      ...mapped,
+      sub: subParam ?? mapped.sub,
+      codeSub: codeSubParam ?? mapped.codeSub,
+    };
   }, []);
 
-  const [tab, setTab] = useState<TabKey>(initial.tab);
-  const [runsSub, setRunsSub] = useState<RunsSubTab>(initial.sub ?? 'launches');
-  const [codeSub, setCodeSub] = useState<CodeSubTab>(initial.codeSub ?? 'architecture');
+  const [tab, setTabRaw] = useState<TabKey>(initial.tab);
+  const [runsSub, setRunsSubRaw] = useState<RunsSubTab>(initial.sub ?? 'launches');
+  const [codeSub, setCodeSubRaw] = useState<CodeSubTab>(initial.codeSub ?? 'architecture');
+
+  // P-23 (UX audit, 2026-05-03) — URL deep-linking. Pre-fix: setTab/setRunsSub/
+  // setCodeSub updated state without touching the URL, so ?tab=foo was read once
+  // on mount and never written back. Result: bookmarks didn't work, refresh dropped
+  // back to default tab, and copy-paste-share-with-teammate sent them to the
+  // wrong tab. The drawer state already had two-way URL sync (line ~280); this
+  // mirrors that pattern for the three primary view-state slices so every URL
+  // is faithful + bookmarkable + back-button-friendly.
+  //
+  // Implementation: wrap the raw setState in setTab/setRunsSub/setCodeSub that
+  // also write the new tuple to window.location via history.replaceState. We
+  // use replaceState (not pushState) because tab toggles aren't navigation
+  // events that deserve a back-button hop — but the URL still updates so
+  // refresh / share / bookmark all work.
+  const writeViewToUrl = (next: {tab: TabKey; runsSub: RunsSubTab; codeSub: CodeSubTab}) => {
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', next.tab);
+    if (next.tab === 'runs') {
+      url.searchParams.set('sub', next.runsSub);
+      url.searchParams.delete('codeSub');
+    } else if (next.tab === 'code') {
+      url.searchParams.set('codeSub', next.codeSub);
+      url.searchParams.delete('sub');
+    } else {
+      url.searchParams.delete('sub');
+      url.searchParams.delete('codeSub');
+    }
+    window.history.replaceState(null, '', url.toString());
+  };
+  const setTab = (t: TabKey) => {
+    setTabRaw(t);
+    writeViewToUrl({tab: t, runsSub, codeSub});
+  };
+  const setRunsSub = (s: RunsSubTab) => {
+    setRunsSubRaw(s);
+    writeViewToUrl({tab, runsSub: s, codeSub});
+  };
+  const setCodeSub = (s: CodeSubTab) => {
+    setCodeSubRaw(s);
+    writeViewToUrl({tab, runsSub, codeSub: s});
+  };
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [projectLookup, setProjectLookup] = useState<'pending' | 'found' | 'missing'>('pending');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
@@ -156,6 +207,27 @@ export default function ProjectDashboardPage() {
       window.history.replaceState(null, '', url.toString());
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // P-23 (UX audit, 2026-05-03) — popstate listener. When the user hits the
+  // browser back/forward button, restore tab/sub/codeSub from the URL. Without
+  // this, history nav would visit URLs whose state we'd ignore on re-render —
+  // breaking the back-button contract that "URL → screen" must hold both ways.
+  useEffect(() => {
+    const onPopState = () => {
+      const sp = new URLSearchParams(window.location.search);
+      const legacy = sp.get('tab');
+      const mapped = legacyTabToNew(legacy);
+      // Read the canonical sub/codeSub keys we now also write — fall back to
+      // legacy mapping for old links that only carried `tab=`.
+      const subParam = sp.get('sub') as RunsSubTab | null;
+      const codeSubParam = sp.get('codeSub') as CodeSubTab | null;
+      setTabRaw(mapped.tab);
+      setRunsSubRaw(subParam ?? mapped.sub ?? 'launches');
+      setCodeSubRaw(codeSubParam ?? mapped.codeSub ?? 'architecture');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
   const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
