@@ -483,12 +483,13 @@ export default function OrgProjectsPage() {
   // v2.5.14 — aggregate KPIs for the hero tiles, matching ProjectDashboardPage.
   const activeCount = projects.filter((p) => p.status === 'ACTIVE').length;
   const archivedCount = projects.filter((p) => p.status === 'ARCHIVED').length;
-  const providerCounts: Record<string, number> = {};
-  projects.forEach((p) => {
-    const k = (p.aiProvider || 'ANTHROPIC').toUpperCase();
-    providerCounts[k] = (providerCounts[k] || 0) + 1;
-  });
-  const topProvider = Object.entries(providerCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+  // P-11 (UX audit, 2026-05-03) — "Top provider" KPI tile retired. It was
+  // decorative — operators don't make decisions on "which provider has
+  // most projects assigned." The audit recommended replacing with "Spend
+  // MTD" but that requires totalCostUsd on the project list DTO which
+  // isn't in scope here; for now we drop the tile entirely (4 tiles fit
+  // grid-cols-4 cleanly). When the project list DTO grows totalCostUsd,
+  // restore here as a Spend tile.
 
   return (
     <div className='h-full flex flex-col'>
@@ -544,25 +545,13 @@ export default function OrgProjectsPage() {
           </div>
         </header>
 
-        {/* v2.5.14 — KPI tiles (2 / 3 / 5 cols) matching ProjectDashboardPage. */}
-        <section className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2'>
+        {/* P-11 (UX audit, 2026-05-03) — KPI tiles trimmed 5 → 4 (Top
+            provider retired). 2 / 2 / 4 cols. */}
+        <section className='grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2'>
           <OrgMetricTile label='Total' value={projects.length} accent='text-primary' />
           <OrgMetricTile label='Active' value={activeCount} accent='text-accent-blue' />
           <OrgMetricTile label='Archived' value={archivedCount} accent='text-muted' />
           <OrgMetricTile label='Members' value={orgMembers.length || '—'} accent='text-primary' />
-          <OrgMetricTile
-            label='Top provider'
-            value={
-              topProvider.toLowerCase() === 'anthropic'
-                ? 'Anthropic'
-                : topProvider.toLowerCase() === 'openai'
-                  ? 'OpenAI'
-                  : topProvider.toLowerCase() === 'gemini'
-                    ? 'Gemini'
-                    : topProvider
-            }
-            accent='text-accent-planner'
-          />
         </section>
       </div>
 

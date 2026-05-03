@@ -345,6 +345,13 @@ function ScoreCardCompact({
 
 function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () => void}) {
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null>(null);
+  // P-04 (UX audit, 2026-05-03): also pull dashboard so HealthCard can surface
+  // architectureDocStatus alongside the existing repo / codemap / PR rows.
+  // Pre-fix: arch generation had no kickoff CTA from PulseTab — users had to
+  // navigate to Code → Architecture, then click Generate. Now if the project
+  // has no architecture doc yet (status NONE) the row is a click-through to
+  // exactly that screen.
+  const dashboard = useProjectStore((s) => s.dashboard);
   useEffect(() => {
     api
       .getWorkspaceHealth(projectId)
@@ -356,6 +363,17 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
   const totalRepos = health?.repos.length ?? 0;
   const openPrs = health?.repos.reduce((sum, r) => sum + (r.openPrCount ?? 0), 0) ?? 0;
   const lastAnalysed = health?.lastRefreshedAt ?? null;
+  const archStatus = dashboard?.architectureDocStatus ?? null;
+
+  const openArchTab = () => {
+    // Switch to Code tab + architecture sub-tab via the URL convention so the
+    // P-23 popstate / mount-time reader picks the right pane on landing.
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', 'code');
+    url.searchParams.set('codeSub', 'architecture');
+    window.history.pushState(null, '', url.toString());
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
 
   return (
     <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
@@ -375,6 +393,30 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
           <li className={cn(stale > 0 ? 'text-status-waiting' : 'text-status-success')}>
             {stale === 0 ? 'codemaps current' : `${stale} stale codemap${stale === 1 ? '' : 's'}`}
           </li>
+          {/* P-04 architecture row */}
+          {archStatus === 'NONE' ? (
+            <li className='text-status-waiting'>
+              Architecture not generated —{' '}
+              <button
+                onClick={openArchTab}
+                className='text-accent-blue hover:underline inline-flex items-center gap-0.5'
+              >
+                Generate now <ArrowRight className='h-2.5 w-2.5' />
+              </button>
+            </li>
+          ) : archStatus === 'STALE' ? (
+            <li className='text-status-waiting'>
+              Architecture stale —{' '}
+              <button
+                onClick={openArchTab}
+                className='text-accent-blue hover:underline inline-flex items-center gap-0.5'
+              >
+                Regenerate <ArrowRight className='h-2.5 w-2.5' />
+              </button>
+            </li>
+          ) : archStatus === 'GENERATED' ? (
+            <li className='text-status-success'>Architecture current</li>
+          ) : null}
           <li className='text-secondary'>
             {openPrs} open PR{openPrs === 1 ? '' : 's'}
           </li>

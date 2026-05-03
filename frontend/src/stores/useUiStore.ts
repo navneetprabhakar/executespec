@@ -41,6 +41,14 @@ interface UiStore {
   viewMode: ViewMode;
   /** Theme preference — v2.5.14 Phase 2. Persists to localStorage. */
   theme: Theme;
+  /**
+   * P-08 (UX audit, 2026-05-03) — name of the project the user is currently
+   * viewing on a /projects/:id/dashboard route. ProjectDashboardPage sets
+   * this on mount + clears on unmount so the Header breadcrumb can render
+   * "ExecuteSpec / Projects / {projectName}" instead of the legacy literal
+   * "Projects / Dashboard". Null when the user isn't on a project surface.
+   */
+  currentProjectName: string | null;
 
   setSidebarExpanded: (v: boolean) => void;
   setMobileSidebarOpen: (v: boolean) => void;
@@ -55,6 +63,7 @@ interface UiStore {
   setViewMode: (mode: ViewMode) => void;
   setTheme: (t: Theme) => void;
   toggleTheme: () => void;
+  setCurrentProjectName: (name: string | null) => void;
 }
 
 let toastSeq = 0;
@@ -95,6 +104,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
   runListWidth: Number(localStorage.getItem('es:runListWidth')) || 420,
   copilotMaximized: false,
   theme: initTheme(),
+  currentProjectName: null,
   viewMode: ((): ViewMode => {
     const saved = localStorage.getItem('es:viewMode');
     // 'project' is a deliberate opt-in — never persist as the default session mode.
@@ -138,6 +148,7 @@ export const useUiStore = create<UiStore>((set, get) => ({
     if (typeof document !== 'undefined') document.documentElement.dataset.theme = next;
     set({theme: next});
   },
+  setCurrentProjectName: (name) => set({currentProjectName: name}),
 
   addToast: (t) => {
     const id = String(++toastSeq);
