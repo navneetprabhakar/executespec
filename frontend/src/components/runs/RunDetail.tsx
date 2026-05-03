@@ -39,6 +39,7 @@ import {
   getValidationReport,
   type ReviewReport,
   type ValidationReportData,
+  type TaskSummary,
 } from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {cn, describeRunStatus} from '@/lib/utils';
@@ -422,6 +423,23 @@ export default function RunDetail() {
               {/* Gate banner */}
               {activeRun.status === 'AWAITING_APPROVAL' && (
                 <div className='flex-shrink-0'>
+                  {/* P-15 / R-02 (UX audit, 2026-05-03) — surface the plan
+                      INLINE above Approve/Reject so the user reads what
+                      they're approving. Pre-fix, the banner just said
+                      "Review the plan and approve to continue" with no
+                      plan in sight — users had to switch to the Tasks tab
+                      to see what they'd be charged for. The 5-task preview
+                      below is bounded so it never crowds the action bar.
+                      Click "Show all N tasks" to expand inline (no tab
+                      switch needed). */}
+                  {Array.isArray(activeRun.tasks) && activeRun.tasks.length > 0 && (
+                    <PlanGatePreview
+                      tasks={activeRun.tasks.filter(
+                        (t) => !t.parentTaskId && !t.taskId?.includes('_gap_'),
+                      )}
+                    />
+                  )}
+
                   {/* [F-12] (audit Sprint 1 PR-4) — Batch dual-option cards
                   hidden. V2 backend has not implemented batch dispatch
                   (V1 batch was deleted 2026-04-13; the V2 re-impl is
@@ -566,49 +584,17 @@ export default function RunDetail() {
               )}
 
               {/* Review summary shown on COMPLETE runs.
-              v2.5.12 — prefer verifiedScore (deterministic, V106) over
-              accuracyScore (LLM-inferred, known to hallucinate on
-              intentionally-broken specs). Matches ValidationReportPanel's
-              v2.5.10 primary-badge rule so the banner and the panel agree. */}
-              {activeRun.status === 'COMPLETE' && review && (
+                  P-19 / R-03 (UX audit, 2026-05-03): pre-fix this banner
+                  showed both a score chip ("92/100 verified · Est. 88") AND
+                  the review summary text. The score chip duplicated what
+                  VerdictPill + ScoreCard already render below, contributing
+                  to the "6 competing scoring narratives" the audit flagged.
+                  Dropped the score chip; kept the textual summary because
+                  it's the LLM-written review prose nobody else surfaces.
+                  VerdictPill below this banner is now the single primary
+                  score signal. */}
+              {activeRun.status === 'COMPLETE' && review && review.summary && (
                 <div className='mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs flex-shrink-0'>
-                  <div className='flex items-center gap-2 mb-1'>
-                    {typeof reviewReport?.verifiedScore === 'number' ? (
-                      <span
-                        className={cn(
-                          'font-semibold font-mono tabular-nums',
-                          reviewReport.verifiedScore >= 90
-                            ? 'text-accent-green'
-                            : reviewReport.verifiedScore >= 75
-                              ? 'text-accent-amber'
-                              : 'text-accent-red',
-                        )}
-                      >
-                        {reviewReport.verifiedScore}/100 verified
-                        {typeof reviewReport.accuracyScore === 'number' && (
-                          <span className='text-muted font-normal ml-1.5'>
-                            · Est. {reviewReport.accuracyScore}
-                          </span>
-                        )}
-                      </span>
-                    ) : typeof reviewReport?.accuracyScore === 'number' ? (
-                      <span
-                        className={cn(
-                          'font-semibold font-mono tabular-nums',
-                          reviewReport.accuracyScore >= 90
-                            ? 'text-accent-green'
-                            : reviewReport.accuracyScore >= 75
-                              ? 'text-accent-amber'
-                              : 'text-accent-red',
-                        )}
-                      >
-                        Est. {reviewReport.accuracyScore}/100
-                        {reviewReport.accuracyGrade ? ` · ${reviewReport.accuracyGrade}` : ''}
-                      </span>
-                    ) : (
-                      <span className='text-muted text-[11px]'>Score pending…</span>
-                    )}
-                  </div>
                   <p className='text-secondary leading-relaxed'>{review.summary}</p>
                 </div>
               )}
@@ -1050,6 +1036,61 @@ function GateBanner({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * P-15 / R-02 (UX audit, 2026-05-03) — collapsible plan preview rendered above
+ * the AWAITING_APPROVAL gate banner. Five tasks shown by default; the rest
+ * collapse behind "Show all N tasks" so the action bar never gets crowded.
+ *
+ * Rendering rule: top-level tasks only (excludes subtasks via parentTaskId
+ * filter and gap tasks via taskId._gap_ check — same filter the run-detail
+ * Tasks tab uses). Each row shows the task title only — no model / complexity
+ * because the user's job here is "is this the work I want to pay for?", not
+ * "what tier did the planner pick?".
+ */
+function PlanGatePreview({tasks}: {tasks: TaskSummary[]}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!tasks.length) return null;
+  const PREVIEW = 5;
+  const shown = expanded ? tasks : tasks.slice(0, PREVIEW);
+  const hasMore = tasks.length > PREVIEW;
+  return (
+    <div className='mx-4 mt-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] text-xs'>
+      <div className='px-3 py-2 border-b border-[var(--border-default)] flex items-center justify-between'>
+        <span className='font-medium text-secondary'>
+          Plan — {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+        </span>
+        {hasMore && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className='text-[11px] text-accent-blue hover:underline'
+            aria-expanded={expanded}
+          >
+            {expanded ? 'Show less' : `Show all ${tasks.length}`}
+          </button>
+        )}
+      </div>
+      <ol className='divide-y divide-[var(--border-default)]'>
+        {shown.map((t, i) => (
+          <li key={t.taskId} className='px-3 py-1.5 flex items-start gap-2'>
+            <span
+              className='font-mono text-[10px] text-muted tabular-nums w-5 flex-shrink-0 pt-px'
+              aria-hidden='true'
+            >
+              {i + 1}.
+            </span>
+            <span className='text-primary leading-tight'>{t.title}</span>
+          </li>
+        ))}
+      </ol>
+      {!expanded && hasMore && (
+        <div className='px-3 py-1.5 text-[11px] text-muted italic border-t border-[var(--border-default)]'>
+          + {tasks.length - PREVIEW} more task{tasks.length - PREVIEW !== 1 ? 's' : ''}
+        </div>
+      )}
     </div>
   );
 }

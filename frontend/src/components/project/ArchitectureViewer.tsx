@@ -4,6 +4,7 @@ import * as api from '@/lib/api';
 import type {StalenessReport} from '@/lib/api';
 import type {ArchitectureDoc} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
+import {useIsProjectAdmin} from '@/hooks/useIsProjectAdmin';
 import {cn} from '@/lib/utils';
 
 export default function ArchitectureViewer({
@@ -17,6 +18,11 @@ export default function ArchitectureViewer({
   // so we can disable it with an inline reason instead of letting it fail in
   // the backend and bubble up a useless "Generation failed" error.
   const noRepos = repoCount === 0;
+  // P-25 (UX audit, 2026-05-03) — Generate is admin-only on the backend.
+  // Pre-fix, DEVELOPER / VIEWER roles saw the button live, clicked it, and
+  // got a 403. Now we disable + tooltip the cause — non-admins see the same
+  // "this is admin-only" treatment as everywhere else (Launch, Add Repo).
+  const isAdmin = useIsProjectAdmin();
   const [doc, setDoc] = useState<ArchitectureDoc | null>(null);
   const [versions, setVersions] = useState<ArchitectureDoc[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -128,31 +134,57 @@ export default function ArchitectureViewer({
           title="Optional branch override (applies to all linked repos). Leave empty for each repo's default."
         />
         <div className='flex flex-col items-end gap-0.5'>
-          <button
-            onClick={generate}
-            disabled={busy || noRepos}
-            title={noRepos ? 'Link at least one repository under the Repos tab first.' : undefined}
-            aria-label={
-              noRepos ? 'Generate architecture (link a repo first)' : 'Generate architecture'
-            }
-            className={cn(
-              'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border transition-colors',
-              busy || noRepos
-                ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
-                : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
-            )}
-          >
-            {busy ? (
+          {(() => {
+            // Combine the two disable reasons into one tooltip — admin-gate
+            // takes priority because non-admins can't fix the repo gap themselves.
+            const adminGated = !isAdmin;
+            const disabled = busy || noRepos || adminGated;
+            const title = adminGated
+              ? 'Only org admins can regenerate the architecture. Ask an admin.'
+              : noRepos
+                ? 'Link at least one repository under the Repos tab first.'
+                : undefined;
+            const inlineReason = adminGated
+              ? 'Admin only'
+              : noRepos
+                ? 'Link a repo to enable'
+                : null;
+            return (
               <>
-                <Loader2 className='h-3 w-3 animate-spin' /> Generating…
+                <button
+                  onClick={generate}
+                  disabled={disabled}
+                  title={title}
+                  aria-label={
+                    adminGated
+                      ? 'Generate architecture (admin only)'
+                      : noRepos
+                        ? 'Generate architecture (link a repo first)'
+                        : 'Generate architecture'
+                  }
+                  className={cn(
+                    'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border transition-colors',
+                    disabled
+                      ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
+                      : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
+                  )}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 className='h-3 w-3 animate-spin' /> Generating…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className='h-3 w-3' /> {doc ? 'Regenerate' : 'Generate'}
+                    </>
+                  )}
+                </button>
+                {inlineReason && (
+                  <span className='text-[10px] text-muted italic'>{inlineReason}</span>
+                )}
               </>
-            ) : (
-              <>
-                <Sparkles className='h-3 w-3' /> {doc ? 'Regenerate' : 'Generate'}
-              </>
-            )}
-          </button>
-          {noRepos && <span className='text-[10px] text-muted italic'>Link a repo to enable</span>}
+            );
+          })()}
         </div>
       </div>
 
