@@ -14,6 +14,7 @@ import CodeTab, {type CodeSubTab} from '@/components/project/CodeTab';
 import EmptyProjectLanding from '@/components/project/EmptyProjectLanding';
 import ProjectRepoManager from '@/components/project/ProjectRepoManager';
 import MoreDrawer, {useDrawerState, type DrawerPanel} from '@/components/project/MoreDrawer';
+import {useIsProjectAdmin} from '@/hooks/useIsProjectAdmin';
 import {cn} from '@/lib/utils';
 import type {TaskSummary} from '@/types/project';
 import type {RunDetail} from '@/lib/api';
@@ -684,8 +685,16 @@ function scoreColor(score: number | null | undefined): string {
 
 function NewExecutionButton({projectId, repoCount}: {projectId: string; repoCount: number}) {
   const navigate = useNavigate();
-  const disabled = repoCount === 0;
-  const title = disabled ? 'Link at least one repository to launch.' : 'Start a cross-repo Launch';
+  const isAdmin = useIsProjectAdmin();
+  // Two independent disable reasons. Order matters for the title — show the
+  // permission gate first because non-admins can't fix the repo gap themselves.
+  const disabledReason: string | null = !isAdmin
+    ? 'Only org admins can start a Launch. Ask an admin to run this for you.'
+    : repoCount === 0
+      ? 'Link at least one repository to launch.'
+      : null;
+  const disabled = disabledReason !== null;
+  const title = disabled ? disabledReason! : 'Start a cross-repo Launch';
   return (
     <div className='flex flex-col items-end gap-1'>
       <button
@@ -705,7 +714,7 @@ function NewExecutionButton({projectId, repoCount}: {projectId: string; repoCoun
       </button>
       {disabled && (
         <span className='text-[10px] text-muted italic whitespace-nowrap'>
-          Link a repo to enable
+          {!isAdmin ? 'Admin only' : 'Link a repo to enable'}
         </span>
       )}
     </div>
