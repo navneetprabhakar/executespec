@@ -132,3 +132,29 @@ export const selectIsOrgAdmin = (s: AuthStore) =>
 
 export const selectIsOrgMember = (s: AuthStore) =>
   s.user?.orgId !== null && s.user?.orgId !== undefined;
+
+/**
+ * X-06 (UX audit, 2026-05-03) — single source of truth for "what tier should
+ * the UI treat the user as". Centralises the legacy MAX → TEAM rename
+ * coercion that was duplicated across Sidebar.tsx and other tier-aware
+ * surfaces.
+ *
+ * The V141 backend migration renamed the MAX tier to TEAM; some grandfathered
+ * users still have 'MAX' on their token from before the rename. Sidebar was
+ * doing `tier.replace(/^MAX$/, 'TEAM')` inline — fragile and would need a
+ * matching `replace` call every time a future tier renames. Putting the
+ * normalisation here means new tier renames touch ONE place.
+ *
+ * Falls back to FREE when nothing is set so consumers don't have to handle
+ * undefined.
+ */
+export const selectNormalizedTier = (s: AuthStore): 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE' => {
+  const raw = (s.user?.tier ?? '').toString().toUpperCase();
+  // Legacy MAX rows still in flight from grandfathered users — coerce.
+  if (raw === 'MAX') return 'TEAM';
+  if (raw === 'PRO') return 'PRO';
+  if (raw === 'TEAM') return 'TEAM';
+  if (raw === 'ENTERPRISE') return 'ENTERPRISE';
+  // Anything else (blank, FREE, unknown new tier) → FREE.
+  return 'FREE';
+};
