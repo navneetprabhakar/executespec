@@ -346,10 +346,16 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
 
   private String getFileTree(String runId) {
     try {
-      // Recursive walk — the old top-level-only listing made the assessor blind to
-      // anything in src/main/java/... so Spring Boot / nested projects always scored
-      // F. Cap at 400 entries to keep tokens bounded.
-      return fileSystemTool.listFilesRecursive(runId, 400);
+      // Fix E (run a076c876, 2026-05-03): multi-repo workspaces have repos/<a>/,
+      // repos/<b>/, repos/<c>/ subtrees. The flat listFilesRecursive sorts
+      // alphabetically and truncates at 400 — for a 3-repo project with hundreds
+      // of files per repo, the alphabetically-first repo fills the budget before
+      // the third is reached. The accuracy LLM then "concludes" the missing repos
+      // are absent and emits MISSING_FEATURE issues that tank architectureScore.
+      // The per-repo helper allocates a separate budget per repos/<name>/ subdir
+      // so every repo gets representation in the listing. Single-repo workspaces
+      // fall through to the legacy flat listing inside the helper.
+      return fileSystemTool.listFilesRecursivePerRepo(runId, 250, 800);
     } catch (Exception e) {
       log.warn(
           "[AccuracyAssessment] Could not get file tree for run {}: {}", runId, e.getMessage());
