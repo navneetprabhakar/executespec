@@ -13,6 +13,7 @@ import jakarta.annotation.PreDestroy;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.v2.chat.ApplyResultStore;
 import com.navneet.executespec.v2.chat.V2ApplyService;
 import com.navneet.executespec.v2.chat.V2ChatService;
 
@@ -40,6 +41,7 @@ public class RunConversationController {
   private final RunAccessGuard guard;
   private final V2ChatService chatService;
   private final V2ApplyService applyService;
+  private final ApplyResultStore applyResultStore;
 
   /**
    * Apply-suggestion runs a 25-iteration WorkerAgentV2 loop with Sonnet-grade calls (~10–20 s each
@@ -161,6 +163,35 @@ public class RunConversationController {
           }
         },
         applyExecutor);
+  }
+
+  /**
+   * Polling endpoint for apply-suggestion lifecycle state. Companion to {@code POST /apply} — lets
+   * the UI re-attach to the apply outcome after the original POST response stream is severed
+   * (broken pipe, browser navigation, Monaco crash, etc.). Returns the latest snapshot from {@link
+   * ApplyResultStore} (Redis, 1h TTL); 404 when nothing has been recorded for this run in the last
+   * hour.
+   *
+   * <p>Status values: {@code RUNNING} (worker in flight) · {@code COMPLETED} (worker terminated;
+   * see {@code outcome} for details) · {@code FAILED} (dispatch threw before the worker even
+   * started, see {@code error}).
+   */
+  @GetMapping("/{runId}/apply/status")
+  public ResponseEntity<ApplyResultStore.ApplyState> applyStatus(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(runId, userDetails);
+    return applyResultStore
+        .get(runId)
+        .map(ResponseEntity::ok)
+        .orElseThrow(
+            () ->
+                new ResponseStatusException(
+                    HttpStatus.NOT_FOUND,
+                    "No apply result recorded for run="
+                        + runId
+                        + " in the last "
+                        + ApplyResultStore.RESULT_TTL.toHours()
+                        + "h"));
   }
 
   @PostMapping("/{runId}/iterate")
