@@ -233,14 +233,9 @@ export default function ValidationReportPanel({
   const accuracyScore = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
   const grade = report.accuracyGrade || null;
 
-  const primaryScoreCls =
-    primaryScore == null
-      ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
-      : primaryScore >= 90
-        ? 'text-status-success border-status-success/30 bg-status-success/10'
-        : primaryScore >= 75
-          ? 'text-status-waiting border-status-waiting/30 bg-status-waiting/10'
-          : 'text-status-error border-status-error/30 bg-status-error/10';
+  // primaryScoreCls retired with the header score-chip drop in P-19/R-03.
+  // The expanded ScoreCard hero still uses its own colouring (ScoreRing),
+  // so no fallback class needed here.
 
   const summaryParts: string[] = [];
   summaryParts.push(`${report.filesGenerated} file${report.filesGenerated !== 1 ? 's' : ''}`);
@@ -321,31 +316,16 @@ export default function ValidationReportPanel({
           verifiedScore={report.verifiedScore}
           statusReason={statusReason}
         />
-        <span
-          className={cn(
-            'text-[10px] px-1.5 py-0.5 rounded-sm border font-medium opacity-70',
-            resultCfg.cls,
-          )}
-        >
-          {resultCfg.label}
-        </span>
-        {primaryScore != null && (
-          <span
-            className={cn(
-              'text-[10px] font-mono px-1.5 py-0.5 rounded-sm border tabular-nums opacity-70',
-              primaryScoreCls,
-            )}
-            title={
-              primaryLabel === 'Verified'
-                ? 'Deterministic score: build + tests + reviewer verdict (v2.5.10)'
-                : 'LLM-estimated spec coverage (legacy pre-V106)'
-            }
-          >
-            <span className='opacity-70 mr-0.5'>{primaryLabel === 'Verified' ? 'Ver' : 'Acc'}</span>
-            {primaryScore}
-            <span className='opacity-60'>/100</span>
-          </span>
-        )}
+        {/* P-19 / R-03 (UX audit, 2026-05-03): pre-fix this header carried
+            FOUR overlapping status signals — VerdictPill, the {resultCfg.label}
+            chip ("Has issues" / "Passed with fixes" / etc.), the
+            primary-score chip (Ver 92/100), and the textual summaryParts.
+            VerdictPill already encodes the verdict lineage (Shippable /
+            Needs review / Blocked) with the score it's derived from in its
+            tooltip; the additional chips were each saying the same thing
+            with different vocabulary. Dropped both the resultCfg.label chip
+            and the primary-score chip. The numeric score still lives in the
+            expanded ScoreCard hero (ScoreRing) for users who want it. */}
         {report.generatedAfterImprovements && (
           <span className='text-[10px] px-1.5 py-0.5 rounded-sm border bg-accent-blue/10 text-accent-blue border-accent-blue/30'>
             Re-validated
