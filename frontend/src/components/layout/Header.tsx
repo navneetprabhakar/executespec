@@ -1,5 +1,6 @@
 import {Link, useLocation} from 'react-router-dom';
-import {Menu, Search, ArrowUpRight, Plus, Sun, Moon} from 'lucide-react';
+import {Menu, Search, ArrowUpRight, Plus, Sun, Moon, Monitor} from 'lucide-react';
+import {useEffect} from 'react';
 import {useUiStore} from '@/stores/useUiStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {useAuthStore} from '@/stores/useAuthStore';
@@ -42,10 +43,48 @@ function breadcrumbFromPath(
   return {primary: 'Runs'};
 }
 
+/**
+ * X-07 (UX audit, 2026-05-03) — three-state theme toggle: Dark → Light →
+ * System → Dark. Pre-fix the toggle was a binary Sun/Moon swap and the
+ * audit found ~30% of users had OS-level dark/light schedules they wanted
+ * the app to follow. The icon shows the *current preference* (Sun for
+ * dark, Moon for light, Monitor for system) — clicking advances by one
+ * step in the cycle. When `theme === 'system'`, we subscribe to
+ * prefers-color-scheme so the active <html data-theme> value flips with
+ * the OS without the user re-clicking.
+ */
 function ThemeToggle() {
   const theme = useUiStore((s) => s.theme);
   const toggle = useUiStore((s) => s.toggleTheme);
-  const label = theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode';
+  const setTheme = useUiStore((s) => s.setTheme);
+
+  // Listen for OS-level scheme changes only while we're in system mode.
+  // Re-applying the resolved value triggers the same DOM dataset write
+  // setTheme would do — without persisting "system" → "dark"/"light" since
+  // setTheme(theme) is a no-op for the saved value.
+  useEffect(() => {
+    if (theme !== 'system' || typeof window === 'undefined' || !window.matchMedia) return;
+    const mql = window.matchMedia('(prefers-color-scheme: dark)');
+    const handler = () => setTheme('system');
+    if (typeof mql.addEventListener === 'function') {
+      mql.addEventListener('change', handler);
+      return () => mql.removeEventListener('change', handler);
+    }
+    // Safari ≤13 fallback — addListener was deprecated but still ships.
+    mql.addListener(handler);
+    return () => mql.removeListener(handler);
+  }, [theme, setTheme]);
+
+  const next = theme === 'dark' ? 'light' : theme === 'light' ? 'system' : 'dark';
+  const label = `Theme: ${theme} · click to switch to ${next}`;
+  const icon =
+    theme === 'dark' ? (
+      <Sun className='h-4 w-4' />
+    ) : theme === 'light' ? (
+      <Moon className='h-4 w-4' />
+    ) : (
+      <Monitor className='h-4 w-4' />
+    );
   return (
     <button
       onClick={toggle}
@@ -53,7 +92,7 @@ function ThemeToggle() {
       title={label}
       className='hidden sm:flex items-center justify-center h-8 w-8 rounded-md text-muted hover:text-primary hover:bg-[var(--gray-200)] transition-colors flex-shrink-0'
     >
-      {theme === 'dark' ? <Sun className='h-4 w-4' /> : <Moon className='h-4 w-4' />}
+      {icon}
     </button>
   );
 }

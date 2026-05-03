@@ -26,6 +26,7 @@ import type {OrgDto} from '@/lib/api';
 import * as api from '@/lib/api';
 import {fetchBillingStatus, type BillingStatus} from '@/lib/billing-api';
 import NotificationPreferences from '@/components/settings/NotificationPreferences';
+import {isAnalyticsOptedOut, setAnalyticsOptedOut} from '@/lib/analytics';
 
 // ── Generic expand/collapse card ──────────────────────────────────────────────
 
@@ -679,6 +680,9 @@ export default function SettingsPage() {
       {/* ── Notification preferences (M-003 Wave 2) ────────────────────────── */}
       <NotificationPreferences />
 
+      {/* ── Privacy (X-09, UX audit, 2026-05-03) ───────────────────────────── */}
+      <PrivacySettings />
+
       {/* ── System Health (requires canViewMetrics) ────────────────────────── */}
       {permissions?.canViewMetrics && (
         <div>
@@ -971,6 +975,61 @@ function OrgKeySourceCard({org, onSaved}: {org: OrgDto; onSaved: (o: OrgDto) => 
         </button>
       </div>
     </IntegrationCard>
+  );
+}
+
+/**
+ * X-09 (UX audit, 2026-05-03) — privacy section with anonymous-analytics
+ * opt-out. Pre-fix the audit found PostHog calls were gated only on
+ * VITE_POSTHOG_API_KEY, with no in-product affordance for users to opt
+ * out — a procurement-blocking gap for GDPR / enterprise privacy reviews.
+ * The toggle persists to localStorage; on flip we either disable
+ * subsequent calls (handled by isAnalyticsOptedOut() inside analytics.ts)
+ * or proactively call posthog.opt_out_capturing() if PostHog had already
+ * loaded for this session.
+ */
+function PrivacySettings() {
+  const [optedOut, setOptedOut] = useState<boolean>(() => isAnalyticsOptedOut());
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  const onToggle = (next: boolean) => {
+    setOptedOut(next);
+    setAnalyticsOptedOut(next);
+    setSavedAt(Date.now());
+  };
+
+  return (
+    <div>
+      <h3 className='text-xs font-medium text-muted uppercase tracking-wider mb-3'>Privacy</h3>
+      <GlassPanel className='p-4 space-y-3'>
+        <div className='flex items-start justify-between gap-4'>
+          <div className='min-w-0'>
+            <p className='text-sm font-medium text-primary'>Send anonymous usage analytics</p>
+            <p className='text-xs text-muted mt-1 leading-relaxed'>
+              We use PostHog to count pageviews, sample funnel events (project created, run
+              completed), and identify the tier you're on. No spec content, code, or repo names
+              leave your browser. Opt out at any time — we respect the choice immediately and drop
+              the local PostHog identifier.
+            </p>
+          </div>
+          <label className='inline-flex items-center gap-2 flex-shrink-0 cursor-pointer'>
+            <input
+              type='checkbox'
+              checked={!optedOut}
+              onChange={(e) => onToggle(!e.target.checked)}
+              className='h-4 w-4 rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] accent-accent-blue'
+              aria-label='Send anonymous usage analytics'
+            />
+            <span className='text-xs text-secondary'>{optedOut ? 'Off' : 'On'}</span>
+          </label>
+        </div>
+        {savedAt && (
+          <p className='text-[11px] text-status-success'>
+            {optedOut ? 'Analytics disabled.' : 'Analytics re-enabled.'} Saved.
+          </p>
+        )}
+      </GlassPanel>
+    </div>
   );
 }
 

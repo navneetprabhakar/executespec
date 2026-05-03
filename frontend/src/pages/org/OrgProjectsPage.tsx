@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {Link, useNavigate} from 'react-router-dom';
+import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {
   ChevronDown,
   ChevronUp,
@@ -415,6 +415,21 @@ export default function OrgProjectsPage() {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
+
+  // P-06 (UX audit, 2026-05-03) — when the sidebar (P-07) or another surface
+  // routes here with `?new=1`, auto-pop the create form so the user sees the
+  // intended affordance immediately. Strip the param after consumption so a
+  // refresh doesn't keep re-opening the form.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('new') === '1' && !showCreate) {
+      setShowCreate(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('new');
+      setSearchParams(next, {replace: true});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   // v2.5.14 Phase 3.5 — starter templates. Clicking a template pre-fills the
   // create form with a representative name + description and opens it.
   const applyTemplate = (t: {name: string; desc: string}) => {
@@ -458,7 +473,12 @@ export default function OrgProjectsPage() {
       // v2.5.7 UX-fix: jump straight into the new project's dashboard so the
       // next steps (link repos, analyse, launch) are obvious. Previously users
       // landed back on the list with no clear next action.
-      navigate(`/projects/${p.id}/dashboard`);
+      // P-06 (UX audit, 2026-05-03): tag the URL with ?firstRun=1 so the
+      // dashboard can auto-render the EmptyProjectLanding (FirstRunChecklist)
+      // even before the dashboard fetches the empty repos/runs/architecture
+      // payload — eliminates the "first paint shows the wrong thing" flash
+      // for newly-created projects.
+      navigate(`/projects/${p.id}/dashboard?firstRun=1`);
     } catch (err: any) {
       setCreateError(err.message ?? 'Failed to create project');
     } finally {
