@@ -74,9 +74,7 @@ function TreeNodeView({
   // see deltas without expanding).
   const leafBadge = !node.isDirectory ? renderStatusBadge(node.status) : null;
   const dirDot =
-    node.isDirectory && node.childChangedStatus
-      ? renderStatusDot(node.childChangedStatus)
-      : null;
+    node.isDirectory && node.childChangedStatus ? renderStatusDot(node.childChangedStatus) : null;
 
   return (
     <div>
@@ -165,8 +163,7 @@ function buildTree(files: FileEntry[]): TreeNode[] {
 /** Inline pill on leaf rows: green "A" for added, amber "M" for modified, nothing for unchanged. */
 function renderStatusBadge(status: FileChangeStatus | undefined) {
   if (!status || status === 'UNCHANGED') return null;
-  const base =
-    'text-[9px] font-bold leading-none px-1 py-[1px] rounded-sm flex-shrink-0 border';
+  const base = 'text-[9px] font-bold leading-none px-1 py-[1px] rounded-sm flex-shrink-0 border';
   if (status === 'ADDED') {
     return (
       <span
