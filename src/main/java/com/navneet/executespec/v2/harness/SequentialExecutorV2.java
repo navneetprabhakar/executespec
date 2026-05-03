@@ -69,8 +69,8 @@ public class SequentialExecutorV2 {
       """
       You are a code-execution agent operating in a sandboxed workspace. You have
       access to filesystem (readFile, writeFile, editFile, listFiles, searchFiles),
-      shell, git (status, diff, commit), and buildProject tools. Use the tools to
-      complete the task — do not explain or hedge.
+      shell, read-only git (status, diff), and buildProject tools. Use the tools
+      to complete the task — do not explain or hedge.
 
       Important rules:
       - The shell runs in the workspace root already. Do NOT `cd /workspace` or use
@@ -83,6 +83,12 @@ public class SequentialExecutorV2 {
         compiles.
       - When the task is fully complete, call completeTask with a brief summary.
         Do not output any text that is not needed to complete the task.
+
+      DO NOT commit, stage, or push. Workspace changes are committed and pushed
+      automatically at run-end by a downstream service. You have NO gitCommit
+      tool — attempts to call it return FORBIDDEN. Do not run shell commands that
+      mutate git state (`git add`, `git commit`, `git reset`, `git stash`,
+      `git push`). Edit files; call completeTask. That's it.
 
       Efficiency — BATCH AGGRESSIVELY. Every extra turn costs tokens and latency:
       - Emit ALL independent tool calls in ONE turn (reads, writes, edits, builds).
@@ -213,30 +219,37 @@ public class SequentialExecutorV2 {
     // written the schema / entities / controller and just failed to call
     // `completeTask`. Marking these FAILED made the run look broken even though
     // the code was fine, and tanked the accuracy score.
+    //
+    // Fix C (2026-05-03, run a076c876 T2 diagnosis): when the worker wrote
+    // files but didn't call completeTask, do NOT pre-mark PARTIAL. Fall
+    // through to the SAME gate the COMPLETED path uses (multi-task skip /
+    // smoke test) and let that decide between COMPLETE / COMPLETED_WITH_WARNING
+    // / PARTIAL. The worker's premature-exit reason is carried in
+    // softWarnReason and persisted on lastLlmFailure regardless of final
+    // status, so the UI still surfaces "worker hit iter cap" even when the
+    // task lands COMPLETE because the smoke passed. Without this an
+    // intermediate task in a multi-task plan that the worker exited early
+    // on would be marked PARTIAL even though the reviewer's final build is
+    // the authoritative gate — exactly what happened to T2.
+    final boolean softCompletion;
+    final String softWarnReason;
     if (primary.outcome() != WorkerResult.Outcome.COMPLETED) {
       int fileWrites = countFileWrites(primary.toolCallLog());
-      if (fileWrites > 0) {
+      if (fileWrites == 0) {
         log.warn(
-            "Executor task={} worker outcome={} but wrote {} files — promoting to PARTIAL",
+            "Executor task={} WORKER_FAILED outcome={} iters={} (no file writes)",
             task.id(),
             primary.outcome(),
-            fileWrites);
-        // 2026-05-02 — pass the structured failure reason so RunMapper#extractFailureReason
-        // surfaces it on the task card. Without this the per-task PARTIAL chip is silent and
-        // users have to dig through worker logs to see why.
-        String reason =
-            "Worker stopped without completion but wrote "
-                + fileWrites
-                + " file"
-                + (fileWrites == 1 ? "" : "s")
-                + " — "
-                + describeWorkerFailure(primary);
-        persistTaskStatus(runId, task.id(), "PARTIAL", reason);
-        broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+            primary.iterations());
+        // v2.5.12 — populate a concrete failureReason for every terminal
+        // worker outcome so RunMapper doesn't have to fall back to
+        // "unknown — see worker logs". This closes Bug D from the eval.
+        persistTaskStatus(runId, task.id(), "FAILED", describeWorkerFailure(primary));
+        broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
         return TaskOutcome.builder()
             .taskId(task.id())
             .taskTitle(task.title())
-            .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
+            .status(TaskOutcome.Status.WORKER_FAILED)
             .workerOutcome(primary)
             .totalLatencyMs(System.currentTimeMillis() - taskStart)
             .toolCallsDispatched(primary.toolCallsDispatched())
@@ -244,36 +257,41 @@ public class SequentialExecutorV2 {
             .dispatchedModel(cfg.model)
             .build();
       }
+      // Soft completion: worker wrote files; fall through to smoke gate.
       log.warn(
-          "Executor task={} WORKER_FAILED outcome={} iters={} (no file writes)",
+          "Executor task={} worker outcome={} but wrote {} files — falling through to"
+              + " smoke gate (soft completion)",
           task.id(),
           primary.outcome(),
-          primary.iterations());
-      // v2.5.12 — populate a concrete failureReason for every terminal
-      // worker outcome so RunMapper doesn't have to fall back to
-      // "unknown — see worker logs". This closes Bug D from the eval.
-      persistTaskStatus(runId, task.id(), "FAILED", describeWorkerFailure(primary));
-      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
-      return TaskOutcome.builder()
-          .taskId(task.id())
-          .taskTitle(task.title())
-          .status(TaskOutcome.Status.WORKER_FAILED)
-          .workerOutcome(primary)
-          .totalLatencyMs(System.currentTimeMillis() - taskStart)
-          .toolCallsDispatched(primary.toolCallsDispatched())
-          .dispatchedProvider(cfg.provider)
-          .dispatchedModel(cfg.model)
-          .build();
+          fileWrites);
+      softCompletion = true;
+      softWarnReason =
+          "Worker stopped without completion but wrote "
+              + fileWrites
+              + " file"
+              + (fileWrites == 1 ? "" : "s")
+              + " — "
+              + describeWorkerFailure(primary);
+    } else {
+      softCompletion = false;
+      softWarnReason = null;
     }
 
     if (!req.enableSmokeTests()) {
-      log.info("Executor task={} SUCCESS (smoke tests disabled)", task.id());
-      persistTaskStatus(runId, task.id(), "COMPLETE");
+      log.info(
+          "Executor task={} {}{}",
+          task.id(),
+          softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS",
+          " (smoke tests disabled)");
+      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(TaskOutcome.Status.SUCCESS)
+          .status(
+              softCompletion
+                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
+                  : TaskOutcome.Status.SUCCESS)
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
@@ -291,15 +309,19 @@ public class SequentialExecutorV2 {
     boolean multiTask = plan.tasks().size() > 1;
     if (multiTask && !isFinalTask) {
       log.info(
-          "Executor task={} SUCCESS (intermediate smoke skipped — multi-task plan, final task +"
+          "Executor task={} {} (intermediate smoke skipped — multi-task plan, final task +"
               + " reviewer are authoritative)",
-          task.id());
-      persistTaskStatus(runId, task.id(), "COMPLETE");
+          task.id(),
+          softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS");
+      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(TaskOutcome.Status.SUCCESS)
+          .status(
+              softCompletion
+                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
+                  : TaskOutcome.Status.SUCCESS)
           .workerOutcome(primary)
           .totalLatencyMs(System.currentTimeMillis() - taskStart)
           .toolCallsDispatched(primary.toolCallsDispatched())
@@ -311,18 +333,56 @@ public class SequentialExecutorV2 {
     SmokeTestResult smoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (smoke.passed()) {
       log.info(
-          "Executor task={} SUCCESS (smoke exit={}, took {}ms)",
+          "Executor task={} {} (smoke exit={}, took {}ms)",
           task.id(),
+          softCompletion ? "COMPLETED_WITH_WARNING" : "SUCCESS",
           smoke.exitCode(),
           smoke.latencyMs());
-      persistTaskStatus(runId, task.id(), "COMPLETE");
+      persistTaskStatus(runId, task.id(), "COMPLETE", softWarnReason);
       broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
       return TaskOutcome.builder()
           .taskId(task.id())
           .taskTitle(task.title())
-          .status(TaskOutcome.Status.SUCCESS)
+          .status(
+              softCompletion
+                  ? TaskOutcome.Status.COMPLETED_WITH_WARNING
+                  : TaskOutcome.Status.SUCCESS)
           .workerOutcome(primary)
           .smokeTestPassed(true)
+          .smokeTestExitCode(smoke.exitCode())
+          .smokeTestOutput(smoke.output())
+          .totalLatencyMs(System.currentTimeMillis() - taskStart)
+          .toolCallsDispatched(primary.toolCallsDispatched())
+          .dispatchedProvider(cfg.provider)
+          .dispatchedModel(cfg.model)
+          .build();
+    }
+
+    // Smoke FAILED on the primary attempt. The retry logic below was designed
+    // for the COMPLETED path. When we got here via a soft completion (worker
+    // didn't call completeTask), we don't retry — the worker already burned
+    // its budget. Mark the task PARTIAL with both the soft-completion warning
+    // and the smoke failure so the user sees the full picture.
+    if (softCompletion) {
+      String smokeTail = smoke.output() == null ? "" : smoke.output();
+      if (smokeTail.length() > 240) {
+        smokeTail = smokeTail.substring(smokeTail.length() - 240);
+      }
+      String reason =
+          softWarnReason
+              + ". Build smoke also failed (exit "
+              + smoke.exitCode()
+              + ")"
+              + (smokeTail.isBlank() ? "" : " — " + smokeTail.trim().replaceAll("\\s+", " "));
+      log.warn("Executor task={} soft-completion + smoke failed; marking PARTIAL", task.id());
+      persistTaskStatus(runId, task.id(), "PARTIAL", reason);
+      broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "PARTIAL"));
+      return TaskOutcome.builder()
+          .taskId(task.id())
+          .taskTitle(task.title())
+          .status(TaskOutcome.Status.COMPLETED_WITH_WARNING)
+          .workerOutcome(primary)
+          .smokeTestPassed(false)
           .smokeTestExitCode(smoke.exitCode())
           .smokeTestOutput(smoke.output())
           .totalLatencyMs(System.currentTimeMillis() - taskStart)

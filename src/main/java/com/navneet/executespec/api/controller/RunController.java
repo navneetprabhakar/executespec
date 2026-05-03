@@ -144,7 +144,9 @@ public class RunController {
             executionMode,
             req.selectedRepoIds(),
             req.figmaUrl(),
-            Boolean.TRUE.equals(req.tddMode()));
+            Boolean.TRUE.equals(req.tddMode()),
+            req.branch(),
+            req.prReviewComments());
 
     // Run count already incremented atomically in assertAndIncrementRunCount above
     usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
