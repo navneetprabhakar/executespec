@@ -110,8 +110,7 @@ public class ContractConsumerController {
     String yaml = composeConsumerYaml(contract, body.versionConstraint());
     String path = ".executespec/contracts/consumed/" + contract.getName() + ".consumer.yaml";
     try {
-      java.util.Optional<
-              com.navneet.executespec.folder.ExecutespecFolderWriter.PullRequestInfo>
+      java.util.Optional<com.navneet.executespec.folder.ExecutespecFolderWriter.PullRequestInfo>
           prInfo =
               folderWriter.writeFiles(
                   consumerRepo2,
@@ -137,9 +136,7 @@ public class ContractConsumerController {
       // V169 (2026-05-02) — surface the consumer-declaration PR in the
       // dashboard PR rollup. Best-effort; the DB row already persisted
       // above so the planner-injection path works regardless.
-      if (prInfo.isPresent()
-          && prInfo.get().openedNewPr()
-          && prInfo.get().prUrl() != null) {
+      if (prInfo.isPresent() && prInfo.get().openedNewPr() && prInfo.get().prUrl() != null) {
         try {
           prRecordService.recordCreated(
               null,

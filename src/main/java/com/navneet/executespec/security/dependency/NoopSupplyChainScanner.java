@@ -6,12 +6,12 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean
 import org.springframework.stereotype.Component;
 
 /**
- * Default scanner — does nothing, reports nothing. Drops out the moment any other
- * {@link SupplyChainScanner} bean is present (org wired in Socket.dev / Snyk / etc.).
+ * Default scanner — does nothing, reports nothing. Drops out the moment any other {@link
+ * SupplyChainScanner} bean is present (org wired in Socket.dev / Snyk / etc.).
  *
  * <p>Lets the rest of the dep-security stack ship today without forcing every operator into a
- * vendor decision. Once an org's procurement is sorted, swap in a real implementation and
- * restart — no other code path changes.
+ * vendor decision. Once an org's procurement is sorted, swap in a real implementation and restart —
+ * no other code path changes.
  */
 @Component
 @ConditionalOnMissingBean(value = SupplyChainScanner.class, ignored = NoopSupplyChainScanner.class)

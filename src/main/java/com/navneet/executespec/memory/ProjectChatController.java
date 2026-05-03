@@ -48,10 +48,10 @@ public class ProjectChatController {
   }
 
   /**
-   * 2026-05-02 — surface the resolved model + its context window so the chat header chip can
-   * render an accurate "Nk window" segment instead of a per-provider guess. Mirrors the
-   * resolution path used in {@link ProjectChatService#send} so the chip never drifts from the
-   * model that's actually answering the next turn.
+   * 2026-05-02 — surface the resolved model + its context window so the chat header chip can render
+   * an accurate "Nk window" segment instead of a per-provider guess. Mirrors the resolution path
+   * used in {@link ProjectChatService#send} so the chip never drifts from the model that's actually
+   * answering the next turn.
    */
   public record ChatInfo(String model, String provider, int contextWindow) {}
 

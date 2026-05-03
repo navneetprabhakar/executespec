@@ -120,8 +120,7 @@ public class RunTokenAttributor {
       // run-default for legacy outcomes (TaskOutcome from older serialised runs lacked the
       // dispatchedProvider/Model fields).
       String taskProvider =
-          outcome.dispatchedProvider() != null
-                  && !outcome.dispatchedProvider().isBlank()
+          outcome.dispatchedProvider() != null && !outcome.dispatchedProvider().isBlank()
               ? outcome.dispatchedProvider().toUpperCase()
               : providerUpper;
       String taskModel =

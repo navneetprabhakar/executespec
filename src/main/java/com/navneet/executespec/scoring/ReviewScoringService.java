@@ -21,12 +21,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Pilot R6 — produces review dimensions when there's real signal, suppresses them (returns
- * {@code null}) when the only signal would be the anchor passthrough. Closes the b171fa52 follow-up
- * where the dashboard showed Code quality = 0, Architecture = 0, Security = 40, Performance = 40
- * for a run where: (a) every issue double-counted into codeQuality + its category, (b) we have no
- * actual security or performance measurement so those bars showed the anchor unchanged and looked
- * like authoritative scores.
+ * Pilot R6 — produces review dimensions when there's real signal, suppresses them (returns {@code
+ * null}) when the only signal would be the anchor passthrough. Closes the b171fa52 follow-up where
+ * the dashboard showed Code quality = 0, Architecture = 0, Security = 40, Performance = 40 for a
+ * run where: (a) every issue double-counted into codeQuality + its category, (b) we have no actual
+ * security or performance measurement so those bars showed the anchor unchanged and looked like
+ * authoritative scores.
  *
  * <p>Honesty rules per dimension:
  *
@@ -37,9 +37,9 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>{@code testCoverage} — real measurement (workspace test/source file ratio cross-checked
  *       with the LLM's coverage level). Already returned {@code null} for doc-only runs.
  *   <li>{@code architecture} — anchor − arch-category issues, but only when there's at least one
- *       arch-category issue (CROSS_TASK_MISMATCH / LOGIC_ERROR / ERROR_HANDLING /
- *       SPEC_MISMATCH / MISSING_ENDPOINT / MISSING_FEATURE). When there are none, returns
- *       {@code null} instead of showing the anchor with no adjustment.
+ *       arch-category issue (CROSS_TASK_MISMATCH / LOGIC_ERROR / ERROR_HANDLING / SPEC_MISMATCH /
+ *       MISSING_ENDPOINT / MISSING_FEATURE). When there are none, returns {@code null} instead of
+ *       showing the anchor with no adjustment.
  *   <li>{@code security} — anchor − security issues, plus +5 when auth/validation patterns are
  *       detected in the workspace. Returns {@code null} when neither signal fires.
  *   <li>{@code performance} — always {@code null}. We never benchmark performance; deployability
@@ -160,7 +160,8 @@ public class ReviewScoringService {
     // useful for back-end scoring telemetry / future revival of those dimensions, but never
     // bound to a UI bar.
     log.info(
-        "Scored run={} anchor={} scores={} codePenalty={} perfPenalty={} srcChanged={} testChanged={}",
+        "Scored run={} anchor={} scores={} codePenalty={} perfPenalty={} srcChanged={}"
+            + " testChanged={}",
         run != null ? run.getRunId() : "?",
         anchor,
         scores,

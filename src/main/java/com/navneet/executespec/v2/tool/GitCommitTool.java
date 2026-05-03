@@ -86,7 +86,8 @@ public class GitCommitTool implements Tool {
       int purged = guardEveryGitCheckoutBelow(ctx.workspaceRoot());
       if (purged > 0) {
         log.warn(
-            "GitCommitTool: pre-commit guard purged {} vendored path(s) before commit (run={}, task={})",
+            "GitCommitTool: pre-commit guard purged {} vendored path(s) before commit (run={},"
+                + " task={})",
             purged,
             ctx.runId(),
             ctx.taskId());
@@ -111,9 +112,9 @@ public class GitCommitTool implements Tool {
   }
 
   /**
-   * Walk the workspace root + every {@code repos/<name>/} subdir and run the vendored-path purge
-   * on each git checkout we find. Returns the total number of purged paths across all repos.
-   * Skips when the {@link VendoredPathGuard} bean is unavailable (test seam).
+   * Walk the workspace root + every {@code repos/<name>/} subdir and run the vendored-path purge on
+   * each git checkout we find. Returns the total number of purged paths across all repos. Skips
+   * when the {@link VendoredPathGuard} bean is unavailable (test seam).
    */
   private int guardEveryGitCheckoutBelow(Path workspaceRoot) {
     if (vendoredPathGuardProvider == null) return 0;
