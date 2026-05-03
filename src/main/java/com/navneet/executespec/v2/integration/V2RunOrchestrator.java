@@ -401,8 +401,7 @@ public class V2RunOrchestrator {
   }
 
   /**
-   * v2.5.7 — full signature with {@code branchOverride}. When non-null, every selected repo is
-   * cloned with {@code git clone -b <branchOverride>} instead of the repo's default branch.
+   * v2.5.7 — 18-arg overload. Forwards to the 19-arg signature with {@code prReviewComments=null}.
    */
   public PipelineRun submitRun(
       String userRequest,
@@ -423,6 +422,55 @@ public class V2RunOrchestrator {
       String figmaUrl,
       boolean tddMode,
       String branchOverride) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        null);
+  }
+
+  /**
+   * Fix M (2026-05-03) — full signature with {@code branchOverride} + {@code prReviewComments}.
+   * When {@code branchOverride} is non-null, every selected repo is cloned with {@code git clone -b
+   * <branchOverride>} instead of the repo's default branch (and the post-run push lands commits on
+   * that branch — no new PR). When {@code prReviewComments} is non-null, the planner receives them
+   * as advisory context via the {@code {{PR_REVIEW_COMMENTS}}} prompt placeholder.
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments) {
     String runId = UUID.randomUUID().toString();
     String provider = normalizeProvider(aiProvider, projectId, runId);
     String model =
@@ -522,6 +570,8 @@ public class V2RunOrchestrator {
     final boolean tddModeFinal = tddMode;
     final String branchOverrideFinal =
         (branchOverride == null || branchOverride.isBlank()) ? null : branchOverride.trim();
+    final String prReviewCommentsFinal =
+        (prReviewComments == null || prReviewComments.isBlank()) ? null : prReviewComments.trim();
     Future<?> future =
         pool.submit(
             () -> {
@@ -537,7 +587,8 @@ public class V2RunOrchestrator {
                     selectedRepoIdsFinal,
                     githubPatFinal,
                     tddModeFinal,
-                    branchOverrideFinal);
+                    branchOverrideFinal,
+                    prReviewCommentsFinal);
               } finally {
                 activeRuns.remove(runIdFinal);
               }
@@ -628,6 +679,34 @@ public class V2RunOrchestrator {
       String githubPat,
       boolean tddMode,
       String branchOverride) {
+    runPipeline(
+        runId,
+        provider,
+        model,
+        userRequest,
+        skipApproval,
+        executionMode,
+        projectId,
+        selectedRepoIds,
+        githubPat,
+        tddMode,
+        branchOverride,
+        null);
+  }
+
+  private void runPipeline(
+      String runId,
+      String provider,
+      String model,
+      String userRequest,
+      boolean skipApproval,
+      String executionMode,
+      String projectId,
+      List<UUID> selectedRepoIds,
+      String githubPat,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments) {
     Instant startedAt = Instant.now();
     Path workspace = null;
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
@@ -828,7 +907,7 @@ public class V2RunOrchestrator {
                 .projectBrief(projectBrief)
                 .referenceDocs(referenceDocs)
                 .tddMode(tddMode)
-                .prReviewComments(null)
+                .prReviewComments(prReviewComments)
                 .build();
 
         // v2.6.2 slice 3 — strategy-driven routing with auto-degrade
