@@ -157,6 +157,19 @@ public class V2ApplyService {
            changed and which files you touched. Do not run the build yourself — the
            caller handles that.
 
+        DO NOT run linters, formatters, or test suites on the apply path. CI will
+        handle those after the push. Concretely: do NOT run `black`, `ruff`,
+        `prettier`, `eslint`, `gofmt`, `rustfmt`, `pytest`, `npm test`, `vitest`,
+        `mvn test`, `gradle test` — most of them are blocked by the shell sandbox
+        anyway, and the ones that aren't only burn iterations. Edit files; call
+        completeTask. The downstream push step pushes to the existing PR branch;
+        CI on that PR is the authoritative quality gate.
+
+        DO NOT call gitCommit or run git mutations (`git add`, `git commit`,
+        `git push`, `git reset`, `git stash`). The push happens automatically
+        after completeTask via ScmPushService — your changes go to the existing
+        PR branch on GitHub. Trying to commit yourself just confuses git state.
+
         Safety:
         - Never delete files outside what the suggestion calls for.
         - If the suggestion is ambiguous, make the narrowest reasonable interpretation
