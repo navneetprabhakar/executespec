@@ -11,6 +11,8 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.report.ValidationReportRepository;
+import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -58,6 +60,7 @@ public class V2ChatService {
   private final LlmRouterV2 router;
   private final ModelResolver modelResolver;
   private final AgentProperties agentProps;
+  private final ValidationReportRepository validationReportRepo;
   private final ObjectMapper mapper = new ObjectMapper();
 
   public record ChatMessage(String role, String content) {}
@@ -210,12 +213,87 @@ public class V2ChatService {
     sb.append("\n## Workspace file tree (top ").append(MAX_FILE_TREE_LINES).append(" entries)\n");
     sb.append(renderFileTree(workspace)).append('\n');
 
+    // Fix F (run a076c876, 2026-05-03): inject the validation report so the chat copilot
+    // can answer questions like "why is architecture 0?", "what tests failed?", "what are
+    // the open issues?". Without this, the LLM only saw the runId / status / spec / file
+    // tree — every score-related question was a hallucination from zero context.
+    String reportBlock = renderValidationReport(run.getRunId());
+    if (!reportBlock.isBlank()) {
+      sb.append("\n").append(reportBlock);
+    }
+
     sb.append("\n## Guardrails\n");
     sb.append("- Be concise. No emojis. No purple prose.\n");
     sb.append(
         "- When asked to 'fix' something, describe the fix and show the exact file + snippet.\n");
     sb.append("- If you're not sure, say so. Don't invent file paths or APIs.\n");
+    sb.append(
+        "- When asked about scores or issues, cite the Validation report block verbatim — do"
+            + " NOT invent numbers or issue descriptions.\n");
     return sb.toString();
+  }
+
+  /**
+   * Render the validation report as a concise markdown section for the chat system prompt. Returns
+   * the empty string when no report exists yet (run still in flight, or terminal but report not
+   * computed). All score fields handled defensively — null-safe so a partially-populated report
+   * still produces useful output.
+   */
+  String renderValidationReport(String runId) {
+    ValidationReport rpt;
+    try {
+      rpt = validationReportRepo.findByRunId(runId).orElse(null);
+    } catch (Exception e) {
+      log.debug(
+          "V2ChatService validation-report lookup failed for run={}: {}", runId, e.getMessage());
+      return "";
+    }
+    if (rpt == null) return "";
+
+    StringBuilder sb = new StringBuilder("## Validation report\n");
+    if (rpt.getVerifiedScore() != null) {
+      sb.append("- verifiedScore: ").append(rpt.getVerifiedScore()).append("/100");
+      sb.append(" (deterministic — build + tests + reviewer)");
+      sb.append('\n');
+    }
+    if (rpt.getAccuracyScore() != null) {
+      sb.append("- accuracyScore: ").append(rpt.getAccuracyScore()).append("/100");
+      if (rpt.getAccuracyGrade() != null)
+        sb.append(" (").append(rpt.getAccuracyGrade()).append(")");
+      sb.append(" — LLM-assessed, treat as estimate\n");
+    }
+    if (rpt.getReviewerVerdict() != null) {
+      sb.append("- reviewerVerdict: ").append(rpt.getReviewerVerdict()).append('\n');
+    }
+    sb.append("- finalBuildPassed: ").append(rpt.getFinalBuildPassed()).append('\n');
+    if (rpt.getTestsTotal() != null && rpt.getTestsTotal() > 0) {
+      sb.append("- tests: ").append(rpt.getTestsPassed()).append("/").append(rpt.getTestsTotal());
+      sb.append('\n');
+    }
+
+    // Per-dimension scores (skip nulls).
+    appendScoreLine(sb, "codeQuality", rpt.getCodeQualityScore());
+    appendScoreLine(sb, "testCoverage", rpt.getTestCoverageScore());
+    appendScoreLine(sb, "architecture", rpt.getArchitectureScore());
+    appendScoreLine(sb, "security", rpt.getSecurityScore());
+    appendScoreLine(sb, "performance", rpt.getPerformanceScore());
+    appendScoreLine(sb, "designCompliance", rpt.getDesignComplianceScore());
+
+    // Issues — capped at 8 most critical so the prompt stays bounded.
+    String issuesJson = rpt.getIssuesJson();
+    if (issuesJson != null && !issuesJson.isBlank() && !"[]".equals(issuesJson.trim())) {
+      sb.append("\n### Issues caught (raw JSON, up to 8)\n");
+      String capped = issuesJson;
+      if (capped.length() > 4_000) {
+        capped = capped.substring(0, 4_000) + "\n…(truncated)";
+      }
+      sb.append(capped).append('\n');
+    }
+    return sb.toString();
+  }
+
+  private static void appendScoreLine(StringBuilder sb, String label, Integer score) {
+    if (score != null) sb.append("- ").append(label).append(": ").append(score).append("/100\n");
   }
 
   /** Snapshot the top level of the workspace — files first, then directories. */

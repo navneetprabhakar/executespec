@@ -2,6 +2,9 @@ package com.navneet.executespec.router;
 
 import java.util.List;
 
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
+
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import io.micrometer.core.instrument.Counter;
@@ -23,10 +26,27 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ModelResolver {
 
+  /**
+   * Feature flag gating "adaptive routing" — the historical-success-rate-based provider override
+   * inside {@link #selectAdaptiveProvider}. Default OFF (Fix G, 2026-05-03). When OFF, the user's
+   * selected provider is always honoured (subject only to circuit-breaker failover when it's
+   * unhealthy). When ON, providers may be swapped under the user's feet based on observed success
+   * rates — useful for ops scenarios but surprising for a user who picked a specific provider
+   * deliberately.
+   */
+  public static final String FLAG_ADAPTIVE_ROUTING = "routing.adaptive-routing.enabled";
+
   private final ModelMatrixProperties matrixProps;
   private final ProviderHealthTracker healthTracker;
   private final ModelPerformanceTracker modelPerfTracker;
   private final MeterRegistry meterRegistry;
+
+  /**
+   * Optional — only used to gate {@link #FLAG_ADAPTIVE_ROUTING}. Tests use the no-arg constructor
+   * variant where this is null and adaptive routing is always disabled.
+   */
+  @Autowired(required = false)
+  private FeatureFlagService featureFlagService;
 
   /**
    * Resolves the model for a given agent within the user's selected provider. Falls back to next
@@ -48,18 +68,28 @@ public class ModelResolver {
     // materially better success rate (≥10 pp improvement with sufficient samples).
     if (healthTracker.isHealthy(userProvider)) {
       String primaryModel = lookupModel(userProvider, tier);
-      // v2.5.12 — strict-provider respect (Bug #1c fix). When
-      // `-Dexecutespec.strict-provider=true` (set globally for eval runs
-      // and by orgs that want predictable provider routing), skip
-      // adaptive routing entirely. Previously this flag only gated the
-      // V2RunOrchestrator fallback chain — adaptive routing inside
-      // ModelResolver was bypassing it, so a run submitted with
-      // aiProvider="OPENAI" could still land on Gemini if OpenAI had a
-      // lower historical success rate. Now honoured here.
+      // Fix G (2026-05-03) — adaptive routing is OPT-IN, not opt-out. Default behaviour:
+      // honour the user's selected provider. Diagnosed from run a076c876 where every
+      // MEDIUM (WORKHORSE-tier) task ran on claude-sonnet-4-6 instead of the configured
+      // claude-haiku-4-5-20251001 because adaptive routing kicked in silently — Sonnet
+      // is ~3× the cost and ~2× the latency of Haiku, so T7 (a 720-line test file)
+      // burned 17 minutes + ~$2.50 instead of the ~6 minutes + ~$0.80 it should have.
+      //
+      // Two gates layered for back-compat:
+      //   1. JVM strict-provider system property (existing) — set by eval scripts /
+      //      orgs that want hard-locked provider routing
+      //   2. Feature flag "routing.adaptive-routing.enabled" (new, default OFF) —
+      //      operator can flip on globally if they want adaptive behaviour back
+      // If neither says "let adaptive run", we always use the user's provider.
       boolean strict = Boolean.getBoolean("executespec.strict-provider");
-      // Adaptive: check if a failover provider has materially better performance
+      boolean adaptiveAllowed =
+          !strict
+              && featureFlagService != null
+              && featureFlagService.isEnabled(FLAG_ADAPTIVE_ROUTING);
       LlmProvider adaptiveProvider =
-          strict ? null : selectAdaptiveProvider(userProvider, primaryModel, tier, agentName);
+          adaptiveAllowed
+              ? selectAdaptiveProvider(userProvider, primaryModel, tier, agentName)
+              : null;
       if (adaptiveProvider != null && adaptiveProvider != userProvider) {
         String adaptiveModel = lookupModel(adaptiveProvider, tier);
         log.info(

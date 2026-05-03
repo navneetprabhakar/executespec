@@ -27,7 +27,13 @@ public class SecurityProperties {
             + "script-src 'self' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; "
             + "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
             + "img-src 'self' data:; "
-            + "connect-src 'self' wss:; "
+            // Fix K (2026-05-03): allow Monaco editor sourcemap + WASM fetches from
+            // jsdelivr CDN. Without this the browser console fills with "Connecting to
+            // 'https://cdn.jsdelivr.net/.../monaco-editor@0.52.2/min-maps/...' violates
+            // the following Content Security Policy directive: connect-src 'self' wss:"
+            // — cosmetic but noisy, and operators reading prod console logs were paging
+            // on harmless sourcemap blocks.
+            + "connect-src 'self' wss: https://cdn.jsdelivr.net; "
             + "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
             + "worker-src 'self' blob:; "
             + "frame-src 'self' https://*.run.app https://*.executespec.ai; "

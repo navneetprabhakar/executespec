@@ -71,6 +71,7 @@ import {
 } from 'lucide-react';
 import hljs from 'highlight.js';
 import Editor, {DiffEditor} from '@monaco-editor/react';
+import {MonacoSafeMount} from './MonacoSafeMount';
 import type {editor as monacoEditor} from 'monaco-editor';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
@@ -2155,40 +2156,49 @@ function IDEFileViewer({
           diffLoading || !diff ? (
             <div className='p-4 text-sm text-muted animate-pulse'>Loading diff…</div>
           ) : (
-            <DiffEditor
-              key={`${filePath}-diff`}
-              language={monacoLang}
-              original={diff.base}
-              modified={diff.head}
-              theme={GEIST_THEME_NAME}
-              options={{
-                readOnly: true,
-                renderSideBySide: false,
-                hideUnchangedRegions: {
-                  enabled: true,
-                  contextLineCount: 3,
-                  minimumLineCount: 3,
-                  revealLineCount: 20,
-                },
-                minimap: {enabled: false},
-                scrollBeyondLastLine: false,
-                fontSize: 12,
-                lineNumbers: 'on',
-                folding: true,
-                showFoldingControls: 'always',
-                wordWrap: 'off',
-                renderLineHighlight: 'line',
-                contextmenu: false,
-                domReadOnly: true,
-                cursorStyle: 'line-thin',
-                scrollbar: {verticalScrollbarSize: 6, horizontalScrollbarSize: 6},
-                overviewRulerLanes: 0,
-                hideCursorInOverviewRuler: true,
-                overviewRulerBorder: false,
-                guides: {indentation: true, bracketPairs: true},
-                padding: {top: 8},
-              }}
-            />
+            <MonacoSafeMount
+              resetKey={`${filePath}-diff`}
+              fallback={
+                <div className='p-4 text-sm text-muted'>
+                  Diff viewer hit a transient render error — pick another file or refresh to retry.
+                </div>
+              }
+            >
+              <DiffEditor
+                key={`${filePath}-diff`}
+                language={monacoLang}
+                original={diff.base}
+                modified={diff.head}
+                theme={GEIST_THEME_NAME}
+                options={{
+                  readOnly: true,
+                  renderSideBySide: false,
+                  hideUnchangedRegions: {
+                    enabled: true,
+                    contextLineCount: 3,
+                    minimumLineCount: 3,
+                    revealLineCount: 20,
+                  },
+                  minimap: {enabled: false},
+                  scrollBeyondLastLine: false,
+                  fontSize: 12,
+                  lineNumbers: 'on',
+                  folding: true,
+                  showFoldingControls: 'always',
+                  wordWrap: 'off',
+                  renderLineHighlight: 'line',
+                  contextmenu: false,
+                  domReadOnly: true,
+                  cursorStyle: 'line-thin',
+                  scrollbar: {verticalScrollbarSize: 6, horizontalScrollbarSize: 6},
+                  overviewRulerLanes: 0,
+                  hideCursorInOverviewRuler: true,
+                  overviewRulerBorder: false,
+                  guides: {indentation: true, bracketPairs: true},
+                  padding: {top: 8},
+                }}
+              />
+            </MonacoSafeMount>
           )
         ) : loading ? (
           <div className='p-4 text-sm text-muted animate-pulse'>Loading…</div>

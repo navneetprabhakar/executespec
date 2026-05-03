@@ -1,6 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useParams} from 'react-router-dom';
 import {DiffEditor} from '@monaco-editor/react';
+import {MonacoSafeMount} from '@/components/runs/MonacoSafeMount';
 import {
   getRun,
   getValidationReport,
@@ -533,49 +534,59 @@ export default function V3RunDetail() {
           )}
           {!diffLoading && diff && (
             <div style={{flex: 1, minHeight: 0, height: 'calc(100vh - 360px)'}}>
-              <DiffEditor
-                key={active ?? ''}
-                language={getMonacoLanguage(diff.path)}
-                original={diff.base}
-                modified={diff.head}
-                theme={GEIST_THEME_NAME}
-                options={{
-                  readOnly: true,
-                  // Only render lines that actually changed — this is the "only diff is
-                  // visible" contract. Monaco hides identical regions behind expandable
-                  // chevrons by default when this flag is on.
-                  hideUnchangedRegions: {
-                    enabled: true,
-                    contextLineCount: 3,
-                    minimumLineCount: 3,
-                    revealLineCount: 20,
-                  },
-                  renderSideBySide: false, // inline diff fits the narrow 1fr column better
-                  minimap: {enabled: false},
-                  scrollBeyondLastLine: false,
-                  fontSize: 12,
-                  lineNumbers: 'on',
-                  folding: true,
-                  showFoldingControls: 'always',
-                  wordWrap: 'off',
-                  renderLineHighlight: 'line',
-                  contextmenu: false,
-                  domReadOnly: true,
-                  cursorStyle: 'line-thin',
-                  scrollbar: {
-                    verticalScrollbarSize: 6,
-                    horizontalScrollbarSize: 6,
-                  },
-                  overviewRulerLanes: 0,
-                  hideCursorInOverviewRuler: true,
-                  overviewRulerBorder: false,
-                  guides: {
-                    indentation: true,
-                    bracketPairs: true,
-                  },
-                  padding: {top: 8},
-                }}
-              />
+              <MonacoSafeMount
+                resetKey={active ?? ''}
+                fallback={
+                  <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+                    Diff viewer hit a transient render error — pick another file or refresh to
+                    retry.
+                  </div>
+                }
+              >
+                <DiffEditor
+                  key={active ?? ''}
+                  language={getMonacoLanguage(diff.path)}
+                  original={diff.base}
+                  modified={diff.head}
+                  theme={GEIST_THEME_NAME}
+                  options={{
+                    readOnly: true,
+                    // Only render lines that actually changed — this is the "only diff is
+                    // visible" contract. Monaco hides identical regions behind expandable
+                    // chevrons by default when this flag is on.
+                    hideUnchangedRegions: {
+                      enabled: true,
+                      contextLineCount: 3,
+                      minimumLineCount: 3,
+                      revealLineCount: 20,
+                    },
+                    renderSideBySide: false, // inline diff fits the narrow 1fr column better
+                    minimap: {enabled: false},
+                    scrollBeyondLastLine: false,
+                    fontSize: 12,
+                    lineNumbers: 'on',
+                    folding: true,
+                    showFoldingControls: 'always',
+                    wordWrap: 'off',
+                    renderLineHighlight: 'line',
+                    contextmenu: false,
+                    domReadOnly: true,
+                    cursorStyle: 'line-thin',
+                    scrollbar: {
+                      verticalScrollbarSize: 6,
+                      horizontalScrollbarSize: 6,
+                    },
+                    overviewRulerLanes: 0,
+                    hideCursorInOverviewRuler: true,
+                    overviewRulerBorder: false,
+                    guides: {
+                      indentation: true,
+                      bracketPairs: true,
+                    },
+                    padding: {top: 8},
+                  }}
+                />
+              </MonacoSafeMount>
             </div>
           )}
           {!loading && !active && !diffLoading && (
