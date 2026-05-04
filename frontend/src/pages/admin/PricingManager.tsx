@@ -25,7 +25,7 @@ export default function PricingManager() {
 
   // R1 (2026-05-01 follow-up) — render AccessDenied in place instead of
   // redirecting to "/" (which bounces to /projects/empty for non-admins
-  // via V3HomeRedirect, leaving them confused). The userLoaded check
+  // via HomeRedirectPage, leaving them confused). The userLoaded check
   // prevents a flash of AccessDenied during auth hydration.
   if (userLoaded && !isSuperAdmin) {
     return <AccessDenied feature='Pricing manager' requiredRole='SUPER_ADMIN' />;

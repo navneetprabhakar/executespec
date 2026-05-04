@@ -25,7 +25,7 @@ const PWD_RULES: Array<{label: string; test: (p: string) => boolean}> = [
  * Pre-this-fix every persona was routed through the same single-dev
  * onboarding.  This adds a 3-radio-pill picker above the name fields;
  * the chosen persona is stashed in sessionStorage so the post-signup
- * dispatch (in V3HomeRedirect / V3Auth.claimAndForward) can fork on
+ * dispatch (in HomeRedirectPage / AuthPage.claimAndForward) can fork on
  * it without backend changes.
  */
 type SignupPersona = 'personal' | 'team' | 'enterprise';
@@ -88,7 +88,7 @@ export default function RegisterPage() {
       const attribution = readSignupAttribution();
       // R-343 — stash persona so the post-signup dispatch can fork by
       // intent (Personal → composer; Team → invite-teammates step;
-      // Enterprise → trust + book-a-call).  V3HomeRedirect reads this.
+      // Enterprise → trust + book-a-call).  HomeRedirectPage reads this.
       try {
         sessionStorage.setItem('v3-signup-persona', persona);
       } catch (_) {
@@ -144,7 +144,7 @@ export default function RegisterPage() {
       <form onSubmit={handleSubmit} className='space-y-3.5'>
         {/* R-343 — persona picker.  Drives post-signup onboarding
             without requiring a backend column today (sessionStorage
-            stash → V3HomeRedirect fork).  When this proves the
+            stash → HomeRedirectPage fork).  When this proves the
             persona-onboarding hypothesis, plumb it through
             `attribution.persona` so the backend records it on
             app_user for activation-funnel segmentation. */}

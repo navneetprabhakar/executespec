@@ -27,7 +27,7 @@ export default function VerifyEmailPage() {
       .then(async (resp: any) => {
         // [F-29] (audit Sprint 1 PR-2, 2026-04-30) — auto-session.
         // Backend now returns {accessToken, user} on verify; store the
-        // token + load /me, then redirect to /home. V3HomeRedirect picks
+        // token + load /me, then redirect to /home. HomeRedirectPage picks
         // the right destination based on project count, so the user
         // never has to retype their password after clicking the
         // verification link in their inbox.

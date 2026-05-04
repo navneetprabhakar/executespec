@@ -9,9 +9,9 @@ import java.util.Map;
 
 import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
-import com.navneet.executespec.v2.agent.PlanV2;
-import com.navneet.executespec.v2.agent.PlannedTaskV2;
-import com.navneet.executespec.v2.agent.PlannerRequestV2;
+import com.navneet.executespec.v2.agent.Plan;
+import com.navneet.executespec.v2.agent.PlannedTask;
+import com.navneet.executespec.v2.agent.PlannerRequest;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,10 +25,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 Phase 4 verification endpoint.
  *
- * <p>v2.6.2 slice 5b — was tied to {@code PlannerAgentV2}; now exercises {@link
- * OutlinePlannerAgent}. SINGLE_SHOT goes through {@link OutlinePlannerAgent#synthesizeSingleShot}
- * (no LLM call), MEDIUM / MULTI_TASK go through {@link OutlinePlannerAgent#plan} in {@code
- * FULL_PLAN} mode for parity with the legacy probe.
+ * <p>v2.6.2 slice 5b — was tied to {@code PlannerAgent}; now exercises {@link OutlinePlannerAgent}.
+ * SINGLE_SHOT goes through {@link OutlinePlannerAgent#synthesizeSingleShot} (no LLM call), MEDIUM /
+ * MULTI_TASK go through {@link OutlinePlannerAgent#plan} in {@code FULL_PLAN} mode for parity with
+ * the legacy probe.
  *
  * <p>Usage: {@code GET /api/v2/test/planner?provider=anthropic&model=claude-haiku-4-5-20251001} or
  * override spec via {@code &spec=...}.
@@ -115,8 +115,8 @@ public class PlannerTestController {
     r.put("spec", spec);
     long start = System.currentTimeMillis();
     try {
-      PlannerRequestV2 req =
-          PlannerRequestV2.builder()
+      PlannerRequest req =
+          PlannerRequest.builder()
               .spec(spec)
               .classification(cx)
               .provider(provider)
@@ -124,7 +124,7 @@ public class PlannerTestController {
               .context(ctx)
               .workspaceSummary("empty scratch workspace")
               .build();
-      PlanV2 plan =
+      Plan plan =
           (cx == Classification.SINGLE_SHOT)
               ? planner.synthesizeSingleShot(req)
               : planner.plan(req, OutlinePlannerAgent.Mode.FULL_PLAN);
@@ -150,7 +150,7 @@ public class PlannerTestController {
     return r;
   }
 
-  private static List<Map<String, Object>> summarizeTasks(List<PlannedTaskV2> tasks) {
+  private static List<Map<String, Object>> summarizeTasks(List<PlannedTask> tasks) {
     return tasks.stream()
         .map(
             t -> {

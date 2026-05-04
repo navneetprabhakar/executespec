@@ -4,7 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 
-import com.navneet.executespec.v2.agent.PlanV2;
+import com.navneet.executespec.v2.agent.Plan;
 import com.navneet.executespec.v2.harness.ExecutionResult;
 import com.navneet.executespec.v2.reviewer.ReviewerResult;
 
@@ -41,7 +41,7 @@ public class V2Run {
 
   private volatile Status status = Status.SUBMITTED;
   private volatile Instant statusUpdatedAt;
-  private volatile PlanV2 plan;
+  private volatile Plan plan;
   private volatile ExecutionResult executionResult;
   private volatile ReviewerResult reviewerResult;
   private volatile String failureMessage;
@@ -104,7 +104,7 @@ public class V2Run {
     return statusUpdatedAt;
   }
 
-  public PlanV2 plan() {
+  public Plan plan() {
     return plan;
   }
 
@@ -128,7 +128,7 @@ public class V2Run {
     return List.copyOf(statusLog);
   }
 
-  public void setPlan(PlanV2 plan) {
+  public void setPlan(Plan plan) {
     this.plan = plan;
   }
 

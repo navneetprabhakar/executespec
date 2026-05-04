@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
-import com.navneet.executespec.v2.context.ContextStoreV2;
+import com.navneet.executespec.v2.context.ContextStore;
 import com.navneet.executespec.v2.context.SavedContext;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 
@@ -28,8 +28,8 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 Phase 8 verification endpoint.
  *
- * <p>Exercises {@link ContextStoreV2} through a full round-trip with every message type we care
- * about (system / user / assistant+toolCalls / toolResponse):
+ * <p>Exercises {@link ContextStore} through a full round-trip with every message type we care about
+ * (system / user / assistant+toolCalls / toolResponse):
  *
  * <ol>
  *   <li>Build a fake history covering all 4 Spring AI message subclasses
@@ -52,7 +52,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ContextStoreTestController {
 
-  private final ContextStoreV2 store;
+  private final ContextStore store;
 
   @GetMapping("/context")
   public Map<String, Object> testContextStore() throws IOException {
@@ -66,7 +66,7 @@ public class ContextStoreTestController {
       Map<String, Object> out = new LinkedHashMap<>();
       out.put("runId", ctx.runId());
       out.put("taskId", ctx.taskId());
-      out.put("redisKey", ContextStoreV2.keyFor(ctx));
+      out.put("redisKey", ContextStore.keyFor(ctx));
 
       // Seed — one of every message type.
       List<Message> history = buildTestHistory();

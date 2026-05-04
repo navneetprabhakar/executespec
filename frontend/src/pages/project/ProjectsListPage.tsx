@@ -31,7 +31,7 @@ export default function ProjectsListPage() {
   }, [canUseProjectMode]);
 
   // R1 (2026-05-01 follow-up) — render AccessDenied in place instead of
-  // redirecting to "/" (which V3HomeRedirect bounces to /projects/empty,
+  // redirecting to "/" (which HomeRedirectPage bounces to /projects/empty,
   // confusing users about WHY they were sent there). canUseProjectMode
   // is a tier gate (TEAM / ENTERPRISE); the message names the required
   // tier so the user knows it's an upgrade path, not a permission gap.

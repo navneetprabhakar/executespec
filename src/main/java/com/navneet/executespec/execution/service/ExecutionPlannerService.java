@@ -123,7 +123,7 @@ public class ExecutionPlannerService {
             run.getAiProvider());
         requested = LlmProvider.ANTHROPIC;
       }
-      ResolvedModel resolved = modelResolver.resolve("PlannerAgentV2", requested);
+      ResolvedModel resolved = modelResolver.resolve("PlannerAgent", requested);
       log.info(
           "ExecutionPlannerService run={} provider={} model={}",
           executionRunId,

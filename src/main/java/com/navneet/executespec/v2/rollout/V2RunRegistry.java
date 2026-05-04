@@ -18,7 +18,7 @@ import org.springframework.stereotype.Component;
  * <p>Phase 9 baseline: this is deliberately not DB-backed. Persisting V2 runs to the {@code run}
  * table unlocks crash recovery (re-associating an in-progress run with a saved context snapshot)
  * but requires more plumbing than Phase 9 warrants. Defer until Phase 9.x when we integrate V2 with
- * V1's Run entity + StartupRunResumerV2.
+ * V1's Run entity + StartupRunResumer.
  */
 @Component
 public class V2RunRegistry {

@@ -17,8 +17,8 @@ import lombok.NoArgsConstructor;
  *
  * <p>Replaces the in-memory ConcurrentHashMap that Wave 2 shipped. Each row is created when a Free
  * user invites a friend (recordInvite), acceptedAt is stamped on the referee's signup binding
- * (bindReferral), grantedAt is stamped on the referee's first successful run via
- * V2RunOrchestrator's terminate hook (onRefereeFirstReadyRun).
+ * (bindReferral), grantedAt is stamped on the referee's first successful run via RunOrchestrator's
+ * terminate hook (onRefereeFirstReadyRun).
  *
  * <p>The granted_at column is the idempotency anchor: the credit grant only fires on rows where
  * accepted_at IS NOT NULL AND granted_at IS NULL.

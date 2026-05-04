@@ -18,12 +18,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.v2.context.ContextStoreV2;
-import com.navneet.executespec.v2.cost.V2RunCostTracker;
-import com.navneet.executespec.v2.observability.V2Metrics;
+import com.navneet.executespec.v2.context.ContextStore;
+import com.navneet.executespec.v2.cost.RunCostTracker;
+import com.navneet.executespec.v2.observability.Metrics;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import com.navneet.executespec.v2.tool.Tool;
-import com.navneet.executespec.v2.tool.ToolRegistryV2;
+import com.navneet.executespec.v2.tool.ToolRegistry;
 import com.navneet.executespec.v2.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
@@ -35,14 +35,14 @@ import org.springframework.ai.chat.model.Generation;
  * Pins the stagnation guard introduced for the run {@code a076c876} task T2 runaway (2026-05-03).
  * The worker burned 22 iterations re-reading + verifying its own writes after the change set was
  * already applied; the new guard injects a one-shot PROGRESS CHECK at {@link
- * WorkerAgentV2#STAGNATION_WARN_AFTER_N} consecutive non-write iterations and force-terminates with
+ * WorkerAgent#STAGNATION_WARN_AFTER_N} consecutive non-write iterations and force-terminates with
  * {@link WorkerResult.Outcome#COMPLETED_BY_STAGNATION} at {@link
- * WorkerAgentV2#STAGNATION_FORCE_AFTER_N}.
+ * WorkerAgent#STAGNATION_FORCE_AFTER_N}.
  *
  * <p>Tests stub the LLM router so each iteration returns a deterministic tool call. {@code
  * readFile} counts as a non-write iteration; {@code writeFile} resets the stagnation counter.
  *
- * <p>Tool dispatch is intercepted through a fake {@link ToolRegistryV2} so we don't need a real
+ * <p>Tool dispatch is intercepted through a fake {@link ToolRegistry} so we don't need a real
  * filesystem.
  */
 class WorkerAgentV2StagnationTest {
@@ -82,18 +82,18 @@ class WorkerAgentV2StagnationTest {
   }
 
   private record Fixture(
-      WorkerAgentV2 worker,
+      WorkerAgent worker,
       LlmRouterV2 router,
-      ToolRegistryV2 registry,
+      ToolRegistry registry,
       List<ChatResponse> responsesIssued) {}
 
   /** Build a worker pre-stubbed to issue the supplied response sequence on consecutive calls. */
   private Fixture newWorker(List<ChatResponse> responseSequence) {
     LlmRouterV2 router = mock(LlmRouterV2.class);
-    ToolRegistryV2 registry = mock(ToolRegistryV2.class);
-    ContextStoreV2 contextStore = mock(ContextStoreV2.class);
-    V2Metrics metrics = mock(V2Metrics.class);
-    V2RunCostTracker costTracker = mock(V2RunCostTracker.class);
+    ToolRegistry registry = mock(ToolRegistry.class);
+    ContextStore contextStore = mock(ContextStore.class);
+    Metrics metrics = mock(Metrics.class);
+    RunCostTracker costTracker = mock(RunCostTracker.class);
     PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
 
     PipelineRun runRow = new PipelineRun();
@@ -112,8 +112,8 @@ class WorkerAgentV2StagnationTest {
       lenient().when(router.call(any())).thenReturn(first, rest);
     }
 
-    WorkerAgentV2 worker =
-        new WorkerAgentV2(
+    WorkerAgent worker =
+        new WorkerAgent(
             router, registry, new ObjectMapper(), contextStore, metrics, costTracker, runRepo);
     return new Fixture(worker, router, registry, responseSequence);
   }
@@ -146,11 +146,11 @@ class WorkerAgentV2StagnationTest {
         WorkerResult.Outcome.COMPLETED_BY_STAGNATION,
         result.outcome(),
         "Worker should force-terminate with COMPLETED_BY_STAGNATION after "
-            + WorkerAgentV2.STAGNATION_FORCE_AFTER_N
+            + WorkerAgent.STAGNATION_FORCE_AFTER_N
             + " stagnant iters. Saw: "
             + result.outcome());
     assertEquals(
-        WorkerAgentV2.STAGNATION_FORCE_AFTER_N,
+        WorkerAgent.STAGNATION_FORCE_AFTER_N,
         result.iterations(),
         "Should terminate exactly at the force threshold, not later.");
   }
@@ -203,11 +203,11 @@ class WorkerAgentV2StagnationTest {
     // future tuning change moves both. STAGNATION_FORCE_AFTER_N must give the worker at least
     // one post-warning iter to self-correct.
     assertTrue(
-        WorkerAgentV2.STAGNATION_WARN_AFTER_N < WorkerAgentV2.STAGNATION_FORCE_AFTER_N,
+        WorkerAgent.STAGNATION_WARN_AFTER_N < WorkerAgent.STAGNATION_FORCE_AFTER_N,
         "WARN threshold must be strictly less than FORCE threshold so the worker has a"
             + " chance to call completeTask after the warning fires.");
     assertTrue(
-        WorkerAgentV2.STAGNATION_FORCE_AFTER_N - WorkerAgentV2.STAGNATION_WARN_AFTER_N >= 2,
+        WorkerAgent.STAGNATION_FORCE_AFTER_N - WorkerAgent.STAGNATION_WARN_AFTER_N >= 2,
         "There should be at least 2 post-warning iterations of grace so a slow model still"
             + " has a chance to react.");
   }

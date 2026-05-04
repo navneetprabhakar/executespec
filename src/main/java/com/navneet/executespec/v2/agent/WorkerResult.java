@@ -5,7 +5,7 @@ import java.util.List;
 import lombok.Builder;
 
 /**
- * Output of {@link WorkerAgentV2#run}.
+ * Output of {@link WorkerAgent#run}.
  *
  * @param outcome terminal state of the loop
  * @param iterations number of LLM calls made
@@ -40,10 +40,10 @@ public record WorkerResult(
     BUDGET_EXCEEDED,
     /**
      * Worker made no new file writes for {@link
-     * com.navneet.executespec.v2.agent.WorkerAgentV2#STAGNATION_FORCE_AFTER_N} consecutive
-     * iterations after a one-shot "PROGRESS CHECK" warning. The change set is presumably already in
-     * the workspace (otherwise we'd see writes); the worker is just being indecisive. The smoke
-     * gate downstream decides whether the change set actually compiles.
+     * com.navneet.executespec.v2.agent.WorkerAgent#STAGNATION_FORCE_AFTER_N} consecutive iterations
+     * after a one-shot "PROGRESS CHECK" warning. The change set is presumably already in the
+     * workspace (otherwise we'd see writes); the worker is just being indecisive. The smoke gate
+     * downstream decides whether the change set actually compiles.
      */
     COMPLETED_BY_STAGNATION
   }

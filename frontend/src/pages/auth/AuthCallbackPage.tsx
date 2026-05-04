@@ -46,7 +46,7 @@ export default function AuthCallbackPage() {
     // site spec stash across OAuth round-trip. The marketing site can
     // pre-fill `?spec=<truncated>` on the OAuth init link or stash the
     // full spec into `sessionStorage['v3-anon-spec']` (read by
-    // V3HomeRedirect / V3EmptyProject); both paths must survive the
+    // HomeRedirectPage / EmptyProjectPage); both paths must survive the
     // bounce through Google/GitHub OAuth without being clobbered by the
     // bare `/home` redirect.
     //

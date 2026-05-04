@@ -9,11 +9,11 @@ import java.util.Map;
 
 import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
-import com.navneet.executespec.v2.agent.PlanV2;
-import com.navneet.executespec.v2.agent.PlannerRequestV2;
+import com.navneet.executespec.v2.agent.Plan;
+import com.navneet.executespec.v2.agent.PlannerRequest;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
-import com.navneet.executespec.v2.harness.SequentialExecutorV2;
+import com.navneet.executespec.v2.harness.SequentialExecutor;
 import com.navneet.executespec.v2.harness.TaskOutcome;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 
@@ -36,8 +36,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Verifies:
  *
  * <ul>
- *   <li>OutlinePlannerAgent produces a valid multi-task plan (slice 5b — was PlannerAgentV2)
- *   <li>SequentialExecutorV2 iterates tasks in order, each reaching COMPLETED
+ *   <li>OutlinePlannerAgent produces a valid multi-task plan (slice 5b — was PlannerAgent)
+ *   <li>SequentialExecutor iterates tasks in order, each reaching COMPLETED
  *   <li>Smoke test runs after each task and the aggregate verdict is ALL_SUCCESS (or
  *       PARTIAL_WITH_WARNINGS if any task retried)
  *   <li>Produced artifacts exist on disk (module files, verification script)
@@ -79,7 +79,7 @@ public class ExecutorTestController {
       """;
 
   private final OutlinePlannerAgent planner;
-  private final SequentialExecutorV2 executor;
+  private final SequentialExecutor executor;
 
   @GetMapping("/executor")
   public Map<String, Object> testExecutor(
@@ -103,10 +103,10 @@ public class ExecutorTestController {
 
       // ── 1. Plan ─────────────────────────────────────────────────────
       long planStart = System.currentTimeMillis();
-      PlanV2 plan;
+      Plan plan;
       try {
-        PlannerRequestV2 req =
-            PlannerRequestV2.builder()
+        PlannerRequest req =
+            PlannerRequest.builder()
                 .spec(effectiveSpec)
                 .classification(cx)
                 .provider(provider)
@@ -134,13 +134,13 @@ public class ExecutorTestController {
 
       // Force our verification smoke command regardless of what the planner proposed —
       // ensures the test is deterministic and doesn't depend on planner ingenuity.
-      PlanV2 effectivePlan =
-          PlanV2.builder()
+      Plan effectivePlan =
+          Plan.builder()
               .planTitle(plan.planTitle())
               .planSummary(plan.planSummary())
               .projectType(plan.projectType())
               .buildCommand(SMOKE_COMMAND.trim())
-              .smokeTestStrategy(PlanV2.SmokeTestStrategy.BUILD)
+              .smokeTestStrategy(Plan.SmokeTestStrategy.BUILD)
               .classification(plan.classification())
               .tasks(plan.tasks())
               .build();

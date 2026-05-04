@@ -445,7 +445,7 @@ public class ValidationReportService {
     PipelineResult heuristic = computeResultHeuristic(issues, input);
     // R-09 (UX audit, 2026-05-04) — reconcile against the run's
     // authoritative status_reason. Pre-fix, the heuristic above could
-    // disagree with V2RunOrchestrator.resolveTerminalStatus() (e.g. heuristic
+    // disagree with RunOrchestrator.resolveTerminalStatus() (e.g. heuristic
     // returned FAILED because a CRITICAL issue stayed in the list, but the
     // reviewer's overall verdict + final build pass meant resolveTerminalStatus
     // already wrote CLEAN_COMPLETION). Historical runs ended up with
@@ -502,7 +502,7 @@ public class ValidationReportService {
    * R-09 — when the run's status_reason gives an authoritative verdict, override the heuristic.
    * Trust order: status_reason > heuristic > status fallback.
    *
-   * <p>Mapping (matches the state machine in {@code V2RunOrchestrator.resolveTerminalStatus}):
+   * <p>Mapping (matches the state machine in {@code RunOrchestrator.resolveTerminalStatus}):
    *
    * <ul>
    *   <li>{@code CLEAN_COMPLETION} / {@code CLEAN_WITH_INTERMEDIATE_WARNINGS} → {@code PASSED} (or

@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
  * R-09 (UX audit, 2026-05-04) regression guard for {@code reconcileWithRunStatus}.
  *
  * <p>Pre-fix the validation report's {@code pipelineResult} could disagree with the run's
- * authoritative {@code status_reason} (set by {@code V2RunOrchestrator.resolveTerminalStatus}). The
+ * authoritative {@code status_reason} (set by {@code RunOrchestrator.resolveTerminalStatus}). The
  * frontend papered over the drift via a {@code suppressReason} special case in {@code
  * ValidationReportPanel.tsx}. With the reconciliation in this test pinned, the two signals agree at
  * write time so the UI special case is gone.
