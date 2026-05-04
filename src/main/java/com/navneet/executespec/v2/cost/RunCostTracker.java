@@ -96,22 +96,44 @@ public class RunCostTracker {
     int inTok = usage == null ? 0 : safe(usage.getPromptTokens());
     int outTok = usage == null ? 0 : safe(usage.getCompletionTokens());
 
-    // Anthropic cache tokens. Spring AI 1.1.4 exposes these in two possible
-    // places depending on version: (a) as raw keys on the ChatResponse metadata
-    // map (older behavior, snake_case or camelCase), (b) as typed fields on the
-    // AnthropicApi.Usage record accessible only via reflection since the generic
-    // Spring AI `Usage` interface returned by getMetadata().getUsage() doesn't
-    // expose them. Try all three paths before giving up.
+    // 2026-05-04 — billing audit: Spring AI 1.1.4's AnthropicChatModel.getDefaultUsage
+    // (decompiled) only sets inputTokens + outputTokens on DefaultUsage; cache fields
+    // are NOT exposed via the generic Usage interface and NOT added to the metadata
+    // map. The fix is to reach into DefaultUsage's `nativeUsage` field (set by Spring
+    // AI's 4-arg constructor) which holds the original AnthropicApi$Usage record with
+    // cacheCreationInputTokens() + cacheReadInputTokens() accessors.
+    //
+    // OpenAI + Gemini use our own native tool clients (OpenAiNativeToolClient,
+    // GeminiNativeToolClient). Those now write their cache + thinking fields into the
+    // ChatResponse metadata map under stable keys (see "Cache field convention" below);
+    // we read them via readMetaInt.
+    //
+    // Cache field convention (used by all 3 providers):
+    //   cache_read_input_tokens  → tokens read from cache (billed at provider's cache rate)
+    //   cache_write_input_tokens → tokens written to cache (Anthropic 5-min: 125%; absent for
+    // OpenAI/Gemini)
+    //   thinking_tokens          → Gemini 2.5+ reasoning tokens (billed at output rate)
     int cacheWrite = readMetaInt(response, "cache_creation_input_tokens");
     int cacheRead = readMetaInt(response, "cache_read_input_tokens");
     if (cacheWrite == 0 && cacheRead == 0) {
-      cacheWrite = readMetaInt(response, "cacheCreationInputTokens");
-      cacheRead = readMetaInt(response, "cacheReadInputTokens");
+      // Spring AI 1.1.4 path — try the typed Anthropic Usage via DefaultUsage.nativeUsage().
+      Object nativeUsage = callUsageMethod0(usage, "getNativeUsage");
+      if (nativeUsage != null) {
+        cacheWrite = callUsageMethodInt(nativeUsage, "cacheCreationInputTokens");
+        cacheRead = callUsageMethodInt(nativeUsage, "cacheReadInputTokens");
+      }
     }
+    // Final fallback — older Spring AI 1.0 versions where the typed Usage WAS exposed
+    // directly without the nativeUsage indirection. Cheap; harmless if it returns 0.
     if ((cacheWrite == 0 && cacheRead == 0) && usage != null) {
-      cacheWrite = callUsageMethod(usage, "cacheCreationInputTokens");
-      cacheRead = callUsageMethod(usage, "cacheReadInputTokens");
+      cacheWrite = callUsageMethodInt(usage, "cacheCreationInputTokens");
+      cacheRead = callUsageMethodInt(usage, "cacheReadInputTokens");
     }
+    // Gemini 2.5+ thinking tokens — Gemini bills these at the OUTPUT rate, so we add
+    // them to outTok before pricing. Our native client surfaces them via this metadata
+    // key; Anthropic + OpenAI don't have an equivalent, so the read returns 0.
+    int thinkingTok = readMetaInt(response, "thinking_tokens");
+    if (thinkingTok > 0) outTok += thinkingTok;
 
     double callCost = priceCall(provider, model, inTok, outTok, cacheWrite, cacheRead);
 
@@ -412,6 +434,32 @@ public class RunCostTracker {
         .orElse(new double[] {0.0, 0.0});
   }
 
+  /**
+   * Provider-aware pricing. The "normal input" calculation differs by provider because each API
+   * reports {@code input_tokens} / {@code prompt_tokens} differently relative to the cache fields:
+   *
+   * <ul>
+   *   <li><b>Anthropic</b> — {@code input_tokens} EXCLUDES cache (verified via Spring AI 1.1.4's
+   *       {@code AnthropicChatModel.getDefaultUsage} decompilation 2026-05-04: only {@code
+   *       inputTokens()} flows into Spring AI's promptTokens). Cache fields are independent. So
+   *       {@code normalIn = inTok} — no subtraction.
+   *   <li><b>OpenAI</b> — {@code prompt_tokens} INCLUDES cached_tokens. The cached_tokens count is
+   *       a SUBSET. So {@code normalIn = inTok - cacheRead} to extract the uncached billable
+   *       portion. OpenAI has no cache_write concept (caching is automatic + free to populate).
+   *   <li><b>Gemini</b> — {@code promptTokenCount} INCLUDES {@code cachedContentTokenCount}. Same
+   *       shape as OpenAI: subtract. Gemini also bills thinking tokens at the OUTPUT rate; those
+   *       are folded into {@code outTok} by the caller (record method) so the math here stays
+   *       uniform.
+   * </ul>
+   *
+   * <p>Cache write multiplier is Anthropic-specific (5-min ephemeral cache: 125% of base input);
+   * OpenAI + Gemini have no cache write concept so callers pass {@code cacheWrite=0} for those
+   * providers and the term zeroes out. Cache read multiplier (10%) is roughly accurate for
+   * Anthropic (10%); OpenAI's actual cached rate is closer to 50% on most models and Gemini's is
+   * 25% on context-cached content — those would need per-provider rates if this code path actually
+   * fires for them, but as of 2026-05-04 OpenAI/Gemini cache reads are 0 in our flow (auto-caching
+   * for OpenAI is hit-or-miss + we don't enable Gemini context caching).
+   */
   private double priceCall(
       String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead) {
     Optional<ModelPricing> found =
@@ -425,11 +473,32 @@ public class RunCostTracker {
     double inRate = p.getInputCostPer1m() != null ? p.getInputCostPer1m() : 0;
     double outRate = p.getOutputCostPer1m() != null ? p.getOutputCostPer1m() : 0;
 
-    int normalIn = Math.max(0, inTok - cacheWrite - cacheRead);
+    final int normalIn;
+    final double cacheReadMultiplier;
+    if ("anthropic".equalsIgnoreCase(provider)) {
+      // Anthropic input_tokens is uncached only. Don't subtract.
+      normalIn = inTok;
+      cacheReadMultiplier = CACHE_READ_MULTIPLIER; // 10% — matches Anthropic's published rate
+    } else if ("openai".equalsIgnoreCase(provider)) {
+      // OpenAI prompt_tokens includes cached_tokens. Subtract to get uncached.
+      normalIn = Math.max(0, inTok - cacheRead);
+      // OpenAI caches at 50% on gpt-4o family (we use gpt-5.4 which is the same family);
+      // 25% on o1/o3 reasoning models. For now use 50% as the conservative billing rate.
+      cacheReadMultiplier = 0.50;
+    } else if ("gemini".equalsIgnoreCase(provider)) {
+      // Gemini promptTokenCount includes cachedContentTokenCount. Subtract.
+      normalIn = Math.max(0, inTok - cacheRead);
+      // Gemini context cached: 25% of input rate per Vertex AI pricing.
+      cacheReadMultiplier = 0.25;
+    } else {
+      normalIn = inTok;
+      cacheReadMultiplier = CACHE_READ_MULTIPLIER;
+    }
+
     double cost = 0.0;
     cost += (normalIn / 1_000_000.0) * inRate;
-    cost += (cacheWrite / 1_000_000.0) * inRate * CACHE_WRITE_MULTIPLIER;
-    cost += (cacheRead / 1_000_000.0) * inRate * CACHE_READ_MULTIPLIER;
+    cost += (cacheWrite / 1_000_000.0) * inRate * CACHE_WRITE_MULTIPLIER; // Anthropic-only
+    cost += (cacheRead / 1_000_000.0) * inRate * cacheReadMultiplier;
     cost += (outTok / 1_000_000.0) * outRate;
     return cost;
   }
@@ -449,20 +518,36 @@ public class RunCostTracker {
   }
 
   /**
-   * Reflectively invokes a no-arg accessor on whatever {@link Usage} implementation the provider
-   * used. Needed because Spring AI 1.1.4's generic {@code Usage} interface doesn't expose
-   * Anthropic's cache-token fields; the concrete {@code AnthropicApi.Usage} record does via {@code
-   * cacheCreationInputTokens()} and {@code cacheReadInputTokens()}. Returns 0 if the method doesn't
-   * exist or the provider doesn't emit cache data.
+   * Reflectively invokes a no-arg accessor on whatever object is passed and returns the result as
+   * an int. Used by the cache-token extraction path: Spring AI 1.1.4's generic {@link Usage}
+   * doesn't expose Anthropic's cache fields, but the underlying {@code AnthropicApi.Usage} record
+   * does via {@code cacheCreationInputTokens()} / {@code cacheReadInputTokens()}. Returns 0 on any
+   * reflection failure or non-numeric result — silent fallback rather than throwing.
    */
-  private static int callUsageMethod(Usage usage, String methodName) {
+  private static int callUsageMethodInt(Object target, String methodName) {
+    if (target == null) return 0;
     try {
-      var m = usage.getClass().getMethod(methodName);
-      Object v = m.invoke(usage);
+      var m = target.getClass().getMethod(methodName);
+      Object v = m.invoke(target);
       if (v instanceof Number n) return n.intValue();
     } catch (Exception ignored) {
     }
     return 0;
+  }
+
+  /**
+   * Reflectively invokes a no-arg accessor and returns the raw Object — used to walk one
+   * indirection (e.g. {@code DefaultUsage.getNativeUsage()} returns the original Anthropic Usage
+   * record, on which we then call {@link #callUsageMethodInt} to read the cache fields).
+   */
+  private static Object callUsageMethod0(Object target, String methodName) {
+    if (target == null) return null;
+    try {
+      var m = target.getClass().getMethod(methodName);
+      return m.invoke(target);
+    } catch (Exception ignored) {
+      return null;
+    }
   }
 
   private static int readMetaInt(ChatResponse response, String key) {

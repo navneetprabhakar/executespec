@@ -454,6 +454,31 @@ public class GeminiNativeToolClient {
       int promptTokens = usage.path("promptTokenCount").asInt(0);
       int completionTokens = usage.path("candidatesTokenCount").asInt(0);
       metaBuilder.usage(new DefaultUsage(promptTokens, completionTokens));
+
+      // 2026-05-04 — billing audit: Gemini's usageMetadata has two more fields the
+      // previous parser dropped on the floor:
+      //
+      //   cachedContentTokenCount — context-cached subset of promptTokenCount (subset, not
+      //                             addition). Today this is always 0 because we don't enable
+      //                             Gemini context caching (no /v1beta/cachedContents setup) —
+      //                             surfaced anyway as a safety net so the day caching IS
+      //                             enabled, billing follows automatically.
+      //   thoughtsTokenCount      — Gemini 2.5+ reasoning tokens (we use gemini-3-pro-preview
+      //                             and gemini-3-flash-preview). Gemini bills these at the
+      //                             OUTPUT rate. Previously dropped → under-billing whenever
+      //                             thinking was active, which on complex prompts can be 2-5x
+      //                             visible-output volume.
+      //
+      // RunCostTracker reads these via metadata keys `cache_read_input_tokens` (uniform across
+      // providers) and `thinking_tokens` (Gemini-only, summed into outTok before pricing).
+      int cachedContent = usage.path("cachedContentTokenCount").asInt(0);
+      if (cachedContent > 0) {
+        metaBuilder.keyValue("cache_read_input_tokens", cachedContent);
+      }
+      int thoughts = usage.path("thoughtsTokenCount").asInt(0);
+      if (thoughts > 0) {
+        metaBuilder.keyValue("thinking_tokens", thoughts);
+      }
     }
     return new ChatResponse(generations, metaBuilder.build());
   }

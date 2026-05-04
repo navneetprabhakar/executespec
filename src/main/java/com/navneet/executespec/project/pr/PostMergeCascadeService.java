@@ -12,6 +12,7 @@ import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -22,14 +23,24 @@ import lombok.extern.slf4j.Slf4j;
  * moves on so refresh callers always see a consistent status update even if a downstream step blows
  * up.
  *
- * <p>Cascade steps:
+ * <p>Two entry points, split by latency profile:
  *
- * <ol>
- *   <li>Invalidate the project's staleness cache (next dashboard fetch shows fresh STALE state).
- *   <li>Trigger a fresh {@code /analyse} for the project so codemaps + architecture pick up the
- *       merged code.
- *   <li>Notify the run's creator that the PR landed.
- * </ol>
+ * <ul>
+ *   <li>{@link #onMerged(PullRequestRecord)} — per-PR fast path (notify owner + write the
+ *       post-merge banner). Sync, ~ms, called once per merged PR. Safe to invoke inline from a
+ *       request thread.
+ *   <li>{@link #regenerateAfterMerge(String)} — per-project heavy path (staleness invalidation +
+ *       architecture regeneration via {@code ProjectArchitectureService.generate}). Annotated
+ *       {@code @Async}, fire-and-forget. Callers should DEDUPE by projectId — one merge batch
+ *       producing 3 PR-merge events into the same project should fire this method once, not three
+ *       times.
+ * </ul>
+ *
+ * <p>2026-05-04 P0 fix #3 — the original {@code onMerged} folded both phases into a single sync
+ * call. With 3 PRs all merging into one project, that produced 3 sequential {@code
+ * architectureService.generate(projectId)} invocations, each of which spans codemap regeneration +
+ * architecture-doc LLM call (~30-60s). Total wall-clock easily blew past the 100s Cloudflare edge
+ * timeout → HTTP 524. Splitting + async-firing the heavy path lets refresh return fast.
  */
 @Service
 @RequiredArgsConstructor
@@ -58,26 +69,18 @@ public class PostMergeCascadeService {
   /** Max banners kept in the Redis list before older entries are trimmed away. */
   static final int POST_MERGE_MAX_BANNERS = 3;
 
+  /**
+   * Per-PR fast path. Notifies the run's creator + writes the dashboard "Continue building" banner.
+   * Sync, ~ms. The heavy work (staleness invalidate + arch regen) lives in {@link
+   * #regenerateAfterMerge(String)} — caller is responsible for firing that ONCE per unique project
+   * after collecting every merge in the current batch.
+   */
   public void onMerged(PullRequestRecord record) {
     if (record == null) return;
     String projectId = resolveProjectId(record);
     if (projectId == null) {
       log.debug("PostMergeCascade: PR {} has no project — skipping cascade", record.getId());
       return;
-    }
-    try {
-      stalenessService.invalidate(projectId);
-    } catch (Exception e) {
-      log.warn("PostMergeCascade: invalidate failed for {}: {}", projectId, e.getMessage());
-    }
-    try {
-      architectureService.generate(projectId);
-      log.info(
-          "PostMergeCascade: regenerated arch for project {} after PR {} merged",
-          projectId,
-          record.getRepoFullName() + "#" + record.getPrNumber());
-    } catch (Exception e) {
-      log.warn("PostMergeCascade: regenerate failed for {}: {}", projectId, e.getMessage());
     }
     try {
       notifyOwner(record, projectId);
@@ -89,6 +92,40 @@ public class PostMergeCascadeService {
     } catch (Exception e) {
       log.warn("PostMergeCascade: bar write failed for {}: {}", projectId, e.getMessage());
     }
+  }
+
+  /**
+   * Per-project heavy path. Invalidates staleness cache + regenerates project architecture. Async
+   * fire-and-forget — callers must NOT await the future (none returned). Safe under the {@code
+   * AsyncAllowlistTest} guard: takes a primitive String, no JPA navigation in this method body, and
+   * {@code ProjectArchitectureService.generate} owns its own per-save txs (per the v2.5.2 design
+   * note in {@code project/CLAUDE.md}). Internal try/catch ensures async-thread crashes never go
+   * silent — every failure logs at WARN.
+   */
+  @Async
+  public void regenerateAfterMerge(String projectId) {
+    if (projectId == null || projectId.isBlank()) return;
+    try {
+      stalenessService.invalidate(projectId);
+    } catch (Exception e) {
+      log.warn("PostMergeCascade(async): invalidate failed for {}: {}", projectId, e.getMessage());
+    }
+    try {
+      architectureService.generate(projectId);
+      log.info("PostMergeCascade(async): regenerated arch for project {}", projectId);
+    } catch (Exception e) {
+      log.warn("PostMergeCascade(async): regenerate failed for {}: {}", projectId, e.getMessage());
+    }
+  }
+
+  /**
+   * Public so callers (currently {@link PrRefreshService}) can dedupe per-project before firing the
+   * async {@link #regenerateAfterMerge(String)}. Same logic as before — V169 system PRs use the
+   * {@code project_id} column directly; run-scoped PRs walk the {@code PipelineRun}; final fallback
+   * is the repo→project link table.
+   */
+  public String resolveProjectId(PullRequestRecord record) {
+    return resolveProjectIdInternal(record);
   }
 
   /**
@@ -139,10 +176,27 @@ public class PostMergeCascadeService {
     }
   }
 
-  private String resolveProjectId(PullRequestRecord record) {
-    // Prefer the run's own projectId.
-    PipelineRun run = pipelineRunRepo.findById(record.getRunId()).orElse(null);
-    if (run != null && run.getProjectId() != null) return run.getProjectId();
+  /**
+   * 2026-05-04 — V169 made {@code run_id} nullable so system PRs (BOOTSTRAP / ARCHITECTURE /
+   * CONTRACT / CHAT_TOOL) can persist on the project dashboard. Spring Data JPA's {@code
+   * findById(null)} throws {@code IllegalArgumentException("The given id must not be null")} which
+   * the caller's try/catch swallows — but Spring's transaction interception has already marked the
+   * outer {@code @Transactional} as rollback-only by then, so the eventual commit blows up with
+   * {@code UnexpectedRollbackException} → 500. Two fixes below: (1) prefer {@code
+   * record.getProjectId()} (V169 column) so we skip the run lookup entirely for system PRs, (2)
+   * null-guard the runId before calling {@code findById}.
+   */
+  private String resolveProjectIdInternal(PullRequestRecord record) {
+    // V169 system PRs set projectId directly — no run lookup needed.
+    if (record.getProjectId() != null && !record.getProjectId().isBlank()) {
+      return record.getProjectId();
+    }
+    // Run-scoped PRs: walk through the linked PipelineRun. Defensive null check so a stray
+    // record with runId=null and projectId=null can't crash with "id must not be null".
+    if (record.getRunId() != null && !record.getRunId().isBlank()) {
+      PipelineRun run = pipelineRunRepo.findById(record.getRunId()).orElse(null);
+      if (run != null && run.getProjectId() != null) return run.getProjectId();
+    }
     // Fall back: find any project that links the same repo.
     if (record.getRepoId() != null) {
       List<ProjectRepoLink> links = linkRepo.findByRepoId(record.getRepoId());
@@ -152,6 +206,9 @@ public class PostMergeCascadeService {
   }
 
   private void notifyOwner(PullRequestRecord record, String projectId) {
+    // System PRs (V169) have no originating run, so there's no per-run owner to notify here.
+    // The project's notification fan-out (NotificationPrefService → org admins) handles those.
+    if (record.getRunId() == null || record.getRunId().isBlank()) return;
     PipelineRun run = pipelineRunRepo.findById(record.getRunId()).orElse(null);
     String owner = run != null ? run.getCreatedByUserId() : null;
     if (owner == null || owner.isBlank()) return;

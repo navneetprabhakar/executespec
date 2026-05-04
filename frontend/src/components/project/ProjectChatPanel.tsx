@@ -442,11 +442,13 @@ export default function ProjectChatPanel({
           onClose={() => setLaunchOpen(false)}
           onLaunched={(runId) => {
             setLaunchOpen(false);
-            // Land on the project dashboard so the user sees the new run in
-            // context (recent submissions on the Overview tab) instead of
-            // bouncing to a standalone /runs/{id} route that doesn't exist
-            // in the current router and falls through to the landing page.
-            navigate(`/projects/${projectId}/dashboard`, {state: {launchedRunId: runId}});
+            // 2026-05-04 — land on the V3 RunDetailPage for the just-created run instead of
+            // bouncing back to the project dashboard. User feedback (P0): "new launch
+            // submitted, no loader screen in chat, no redirection, no intimation of any kind"
+            // — the dashboard redirect was effectively invisible because the user was already
+            // on the dashboard's chat tab; landing on the run detail puts them on the page that
+            // visualises the run's live progress (PLANNING → WORKING → REVIEWING → COMPLETE).
+            navigate(`/projects/${projectId}/runs/${runId}`, {state: {launchedRunId: runId}});
           }}
         />
       )}
@@ -613,6 +615,28 @@ function LaunchFromChatModal({
           <div className='flex items-center gap-2 text-xs text-muted'>
             <Loader2 className='h-3 w-3 animate-spin' />
             Compiling chat into a spec…
+          </div>
+        )}
+
+        {/*
+         * 2026-05-04 — overlay banner that fires the moment the user clicks Launch. The button
+         * already shows a small spinner, but submit can take 5-15s (POST /api/runs with
+         * skipApproval=true clones the workspace + classifies + persists before returning), and
+         * the user feedback was "no loader screen, no redirection, no intimation of any kind".
+         * This banner gives a clear in-flight signal AND pre-announces the redirect so the
+         * subsequent navigation doesn't feel like the page was lost.
+         */}
+        {submitting && (
+          <div
+            className='flex items-center gap-2 rounded-sm border border-accent-blue/40 bg-accent-blue/5 px-2.5 py-2 text-[11px] text-accent-blue'
+            role='status'
+            aria-live='polite'
+          >
+            <Loader2 className='h-3.5 w-3.5 animate-spin shrink-0' />
+            <span className='flex-1'>
+              Submitting your launch — cloning {selected.size} repo{selected.size === 1 ? '' : 's'}{' '}
+              + classifying. You'll land on the run page in a few seconds.
+            </span>
           </div>
         )}
 

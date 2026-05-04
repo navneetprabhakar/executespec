@@ -135,7 +135,18 @@ class AsyncAllowlistTest {
               // back primitive field updates. Outer try/catch wraps the whole
               // method so async-thread crashes never go silent. See
               // docs/plans/pending-enterprise-readiness-execution-eval.md §8 (E1.5).
-              "BootstrapService#bootstrapAsync"));
+              "BootstrapService#bootstrapAsync",
+
+              // 2026-05-04 P0 fix #3 — splits the post-merge cascade so the
+              // per-project heavy work (staleness invalidate + arch regen)
+              // runs off the request thread. Takes a primitive String
+              // projectId; no JPA navigation in this method body.
+              // ProjectArchitectureService.generate owns its own per-save txs
+              // (project/CLAUDE.md v2.5.2 note: "no longer @Transactional —
+              // long LLM calls inside a tx tripped Hikari's 60s leak
+              // detector"). Internal try/catch on every step ensures
+              // async-thread crashes never go silent.
+              "PostMergeCascadeService#regenerateAfterMerge"));
 
   @Test
   void asyncMethodAllowlistInSync() {

@@ -47,6 +47,15 @@ export default function ExecutionViewPage() {
   const location = useLocation();
   const {executionRun, fetchExecution, reset, triggerAnalysis} = useExecutionStore();
   const [project, setProject] = useState<ProjectDto | null>(null);
+  // 2026-05-04 — track the in-flight fetch + last error explicitly so we can render a loading
+  // state when executionId is in the URL but the data is still on the wire. Previously the page
+  // fell through to ExecutionSetup (the new-launch form) whenever executionRun was null, which
+  // meant a user clicking an existing PIPELINE_RUN entry in the launches list (whose id doesn't
+  // resolve via /api/projects/{id}/executions/{id}) saw the form and any submit created an
+  // ENTIRELY NEW launch. Defense-in-depth pair to the kind-discriminator routing fix in
+  // ProjectLaunchesList.
+  const [fetching, setFetching] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   // v2.5.7 — "Address review" flow passes continueOnPr via navigation state.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const continueOnPr = (location.state as any)?.continueOnPr ?? undefined;
@@ -61,8 +70,23 @@ export default function ExecutionViewPage() {
   }, [projectId]);
 
   useEffect(() => {
-    if (executionId) fetchExecution(executionId);
-    return () => reset();
+    if (!executionId) return;
+    let cancelled = false;
+    setFetching(true);
+    setFetchError(null);
+    Promise.resolve(fetchExecution(executionId))
+      .catch((e) => {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        setFetchError(msg || 'Failed to load launch');
+      })
+      .finally(() => {
+        if (!cancelled) setFetching(false);
+      });
+    return () => {
+      cancelled = true;
+      reset();
+    };
   }, [executionId, fetchExecution, reset]);
 
   if (!projectId)
@@ -70,7 +94,11 @@ export default function ExecutionViewPage() {
       <div className='mx-auto max-w-5xl p-4 text-[12px] text-accent-red'>Project required.</div>
     );
 
-  const inSetup = !executionId || !executionRun;
+  // Only fall into the new-launch flow when there's NO executionId in the URL. If executionId is
+  // present, render either a loading shim or an error block — never the setup form. This is the
+  // defensive layer; the launches-list routing fix in ProjectLaunchesList prevents PIPELINE_RUN
+  // ids from reaching this page in the first place.
+  const inSetup = !executionId;
   const status: ExecutionRunStatus = executionRun?.status ?? 'SETUP';
   const next = NEXT_ACTION[status];
 
@@ -137,6 +165,45 @@ export default function ExecutionViewPage() {
                 navigate(`/projects/${projectId}/executions/${id}`);
               }}
             />
+          ) : !executionRun && fetching ? (
+            // Loading shim while the initial fetch is in flight. Critical: never render
+            // ExecutionSetup here — see comment at the inSetup definition above.
+            <div
+              className='flex items-center gap-2 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-3 text-[12px] text-muted'
+              role='status'
+              aria-live='polite'
+            >
+              <span className='inline-block h-3 w-3 rounded-full border-2 border-accent-blue/40 border-t-accent-blue animate-spin' />
+              <span>Loading launch {executionId?.substring(0, 8)}…</span>
+            </div>
+          ) : !executionRun ? (
+            // Fetch settled but no data — most likely the id isn't an ExecutionRun (e.g. it's a
+            // V2 PIPELINE_RUN id that landed here by mistake). Help the user recover instead of
+            // leaving a blank page or an unrelated form.
+            <div className='space-y-2 rounded-sm border border-status-error/30 bg-status-error/5 px-3 py-3 text-[12px]'>
+              <div className='text-status-error'>
+                {fetchError
+                  ? `Couldn't load this launch: ${fetchError}`
+                  : "Couldn't load this launch."}
+              </div>
+              <div className='text-muted'>
+                If this is a chat-launched run, it lives at{' '}
+                <Link
+                  to={`/projects/${projectId}/runs/${executionId ?? ''}`}
+                  className='text-accent-blue underline'
+                >
+                  /runs/{executionId?.substring(0, 8)}
+                </Link>{' '}
+                instead. Otherwise, return to{' '}
+                <Link
+                  to={`/projects/${projectId}/dashboard`}
+                  className='text-accent-blue underline'
+                >
+                  the project dashboard
+                </Link>
+                .
+              </div>
+            </div>
           ) : (
             <>
               {status === 'SETUP' && (

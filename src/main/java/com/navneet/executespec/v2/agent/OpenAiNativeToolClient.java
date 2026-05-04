@@ -271,6 +271,18 @@ public class OpenAiNativeToolClient {
       int promptTokens = usage.path("prompt_tokens").asInt(0);
       int completionTokens = usage.path("completion_tokens").asInt(0);
       metaBuilder.usage(new DefaultUsage(promptTokens, completionTokens));
+
+      // 2026-05-04 — billing audit: OpenAI returns cached prompt token count nested at
+      // `usage.prompt_tokens_details.cached_tokens`. RunCostTracker reads this via metadata
+      // key `cache_read_input_tokens` (its provider-uniform convention). Without this surface,
+      // every OpenAI call's cached portion was billed at the full input rate even though
+      // OpenAI auto-discounts cached tokens (~50% on gpt-4o family). The cached_tokens count
+      // is INCLUDED in prompt_tokens (subset, not addition) — RunCostTracker.priceCall handles
+      // the subtraction in its OpenAI branch.
+      int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
+      if (cachedTokens > 0) {
+        metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
+      }
     }
     return new ChatResponse(generations, metaBuilder.build());
   }
