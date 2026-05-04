@@ -8,6 +8,7 @@ Persistence layer for pipeline runs, tasks, and all mutable state.
 - `entity/AgentTask.java` — JPA entity for individual tasks within a run. Includes subtask decomposition fields: `parentTaskId` (null for top-level), `subtaskIndex` (1-based), `subtaskTotal`. **v2.5.11 (V109): `meetsRequirementsJson` — JSON array of requirement IDs from `PipelineRun.planRequirementsJson` this task is expected to implement.** **v2.6.2-track (V130): `taskType` (LEAF \| EPIC), `expansionStatus` (PENDING \| EXPANDED \| FAILED \| null), `expandedAt` — populated by Phase 2 (TaskExpanderAgent) of the hierarchical planner.**
 - `entity/PlanVersion.java` — JPA entity for plan version history. Columns widened in V45 (id/run_id/created_by → VARCHAR(255), source → VARCHAR(64)).
 - `repository/PipelineRunRepository.java` — JPA repository for PipelineRun. Includes `addTokens()` atomic SQL update (no read-modify-write race).
+- `repository/AgentTaskRepository.java` — JPA repository for AgentTask. **2026-05-04**: gained `findByRunIdAndTaskId(runId, taskId)` returning `Optional<AgentTask>` — used by the V2 crash-recovery resume path (`SequentialExecutor.resolveResumeAction`) to inspect each task's persisted status before deciding SKIP_TERMINAL / RESUME_FROM_SNAPSHOT / RUN_FRESH on boot-time replay.
 - `InboxService.java` — User inbox/notification service.
 
 ## DB Migrations
