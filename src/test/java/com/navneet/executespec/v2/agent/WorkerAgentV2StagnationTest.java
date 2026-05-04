@@ -112,9 +112,19 @@ class WorkerAgentV2StagnationTest {
       lenient().when(router.call(any())).thenReturn(first, rest);
     }
 
+    // 2026-05-04 — WorkerAgent gained an SseBroadcaster dep on PR #71 (quirky LiveLog
+    // emitters). Tests use a Mockito mock so the SSE emit path is a no-op; the agent's logic
+    // (stagnation guard + iteration loop) is what's under test, not the live-log surface.
     WorkerAgent worker =
         new WorkerAgent(
-            router, registry, new ObjectMapper(), contextStore, metrics, costTracker, runRepo);
+            router,
+            registry,
+            new ObjectMapper(),
+            contextStore,
+            metrics,
+            costTracker,
+            runRepo,
+            org.mockito.Mockito.mock(com.navneet.executespec.sse.SseBroadcaster.class));
     return new Fixture(worker, router, registry, responseSequence);
   }
 

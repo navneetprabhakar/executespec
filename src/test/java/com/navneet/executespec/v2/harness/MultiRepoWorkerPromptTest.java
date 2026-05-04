@@ -37,6 +37,9 @@ class MultiRepoWorkerPromptTest {
    * SYSTEM_PROMPT_BASE} — so passing nulls / mocks is safe and keeps the fixture small.
    */
   private SequentialExecutor newExecutor() {
+    // 2026-05-04 — SequentialExecutor gained a ContextStore field on PR #71 for the resume path.
+    // composeSystemPrompt doesn't touch ContextStore (resume only fires from execute(req,
+    // ResumeRequest)), so a mock is safe.
     return new SequentialExecutor(
         mock(com.navneet.executespec.v2.agent.WorkerAgent.class),
         mock(com.navneet.executespec.v2.tool.BuildProjectTool.class),
@@ -46,6 +49,7 @@ class MultiRepoWorkerPromptTest {
         mock(com.navneet.executespec.state.repository.AgentTaskRepository.class),
         mock(com.navneet.executespec.router.ModelResolver.class),
         mock(com.navneet.executespec.project.rag.RetrievalService.class),
+        mock(com.navneet.executespec.v2.context.ContextStore.class),
         mock(com.navneet.executespec.v2.cost.RunCostTracker.class));
   }
 
