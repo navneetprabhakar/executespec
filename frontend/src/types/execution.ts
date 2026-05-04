@@ -73,6 +73,18 @@ export interface ExecutionRunDto {
   solutions: SolutionDto[];
   createdAt: string;
   updatedAt: string;
+  /**
+   * 2026-05-04 — discriminator for the merged Launches list.
+   * - `EXECUTION` — real `execution_run` row, viewable at `/projects/{id}/executions/{id}`.
+   * - `PIPELINE_RUN` — V2 `pipeline_run` synthesised into the same list (project chat / V3
+   *   composer launches), viewable at `/projects/{id}/runs/{id}` (the V3 RunDetailPage).
+   *
+   * Optional for back-compat with older API responses; treat missing as `EXECUTION` to preserve
+   * existing routing for ExecutionRun-only deployments. ProjectLaunchesList uses this to pick
+   * the right destination route — without it, every click landed on `/executions/{id}` which
+   * 404s for pipeline_run ids and falls through to the new-launch setup form.
+   */
+  kind?: 'EXECUTION' | 'PIPELINE_RUN';
 }
 
 export interface SolutionSpec {
