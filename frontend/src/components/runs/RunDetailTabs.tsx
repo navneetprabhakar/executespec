@@ -2195,15 +2195,30 @@ function IDEFileViewer({
             <div className='p-4 text-sm text-muted animate-pulse'>Loading diff…</div>
           ) : (
             <MonacoSafeMount
-              resetKey={`${filePath}-diff`}
               fallback={
                 <div className='p-4 text-sm text-muted'>
                   Diff viewer hit a transient render error — pick another file or refresh to retry.
                 </div>
               }
             >
+              {/*
+               * 2026-05-04 — NO `key` prop on DiffEditor (and no `resetKey` on
+               * MonacoSafeMount above). Why: @monaco-editor/react's unmount path disposes the
+               * original + modified TextModels BEFORE disposing the DiffEditor widget. Monaco's
+               * deferred event queue still has events for those models, which fire AFTER the
+               * dispose and crash with "TextModel got disposed before DiffEditorWidget model
+               * got reset". Using `key={filePath}` triggered this dispose-then-recreate cycle
+               * on EVERY file switch, leaving the new DiffEditor's render in a half-broken
+               * state (the global handler in lib/monacoSetup.ts swallowed the console error,
+               * but the diff itself wouldn't render — the Code-tab regression user reported).
+               *
+               * Without the key, prop changes (original/modified/language) flow through the
+               * library's update effects which call setValue / setModelLanguage on the EXISTING
+               * models — no dispose, no race, diff renders cleanly across rapid file switches.
+               * View state (scroll, folds) carries across files; that's intentional, the user
+               * can re-fold per file.
+               */}
               <DiffEditor
-                key={`${filePath}-diff`}
                 language={monacoLang}
                 original={diff.base}
                 modified={diff.head}
