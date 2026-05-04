@@ -1,10 +1,12 @@
 import {Component, type ErrorInfo, type ReactNode} from 'react';
 import {errMsg} from '@/lib/utils';
+import {isMonacoDisposeRace as matchDisposeRaceMessage} from '@/lib/monacoErrorPatterns';
 
 /**
  * Error boundary specifically for Monaco editor disposal races.
  *
- * Symptom (run a076c876 apply path, 2026-05-03 console):
+ * Symptom (run a076c876 apply path, 2026-05-03 console; reproduced again
+ * on dev 2026-05-04 with the V3 RunDetailPage diff viewer):
  *   "Uncaught Error: TextModel got disposed before DiffEditorWidget model got reset"
  *
  * Root cause: React 18 strict-mode double-cleanup can drive `@monaco-editor/react`'s
@@ -18,6 +20,13 @@ import {errMsg} from '@/lib/utils';
  *
  * The boundary catches the exception, classifies it by message, and ONLY swallows
  * the known-benign disposal race. Anything else re-throws so genuine bugs surface.
+ *
+ * NOTE: The setTimeout-deferred path (most common — Monaco's `onUnexpectedError`
+ * re-throws inside `setTimeout(..., 0)` so the error reaches the console past
+ * any sync handler) escapes the React render tree entirely and CANNOT be caught
+ * here. That path is handled by the window-level handler installed in
+ * `lib/monacoSetup.ts`. This boundary remains as the inner layer for the rarer
+ * in-render disposal path (e.g. model.getValue() called mid-render after dispose).
  *
  * Reset strategy: the boundary remounts a fresh subtree every time `resetKey`
  * changes (i.e., when the user picks a different file). This way the user can
@@ -34,19 +43,12 @@ type Props = {
 type State = {hasError: boolean; lastResetKey: string | undefined};
 
 /**
- * Patterns we know to be the benign Monaco disposal race. Match conservatively —
- * any new pattern should be added explicitly with a comment + the run id where it
- * was first observed.
+ * Pattern source of truth lives in `lib/monacoErrorPatterns.ts` so the boundary
+ * here and the window-level handler in `lib/monacoSetup.ts` share one list.
  */
-const SWALLOW_PATTERNS = [
-  /TextModel got disposed before DiffEditorWidget model got reset/i,
-  /Cannot read properties of (?:undefined|null) \(reading 'getValue'\)/i, // model accessed post-dispose
-];
-
 function isMonacoDisposeRace(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  const msg = errMsg(err) ?? '';
-  return SWALLOW_PATTERNS.some((p) => p.test(msg));
+  return matchDisposeRaceMessage(errMsg(err));
 }
 
 export class MonacoSafeMount extends Component<Props, State> {
