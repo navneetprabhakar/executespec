@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
-import {ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus} from 'lucide-react';
+import {ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus, Sparkles} from 'lucide-react';
 import {useProjectStore} from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
@@ -102,6 +102,26 @@ export default function ProjectDashboardPage() {
   const {projectId} = useParams<{projectId: string}>();
   const navigate = useNavigate();
   const drawer = useDrawerState();
+
+  // P-06 (UX audit, 2026-05-03) — when OrgProjectsPage routes here with
+  // ?firstRun=1 (the immediate post-create redirect), fire a one-time toast
+  // pointing the user at the FirstRunChecklist that EmptyProjectLanding will
+  // render naturally (since the new project has no repos + no runs). Strip
+  // the param so a refresh doesn't keep retoasting.
+  useEffect(() => {
+    const sp = new URLSearchParams(window.location.search);
+    if (sp.get('firstRun') === '1') {
+      useUiStore.getState().addToast({
+        type: 'info',
+        message: 'Project created · Link your first repo to begin.',
+      });
+      sp.delete('firstRun');
+      const next = `${window.location.pathname}${sp.toString() ? '?' + sp.toString() : ''}`;
+      window.history.replaceState(null, '', next);
+    }
+    // run-once on mount; the rest of the URL handling is in `initial`/setTab
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Read deep-link tab from query string on mount. P-23 (UX audit, 2026-05-03):
   // we now ALSO accept the canonical `sub` + `codeSub` query params alongside
@@ -272,8 +292,16 @@ export default function ProjectDashboardPage() {
     setRunsSub('detail');
   };
 
-  const onSwitchTab = (t: 'runs' | 'code') => {
+  const onSwitchTab = (t: TabKey, opts?: {codeSub?: CodeSubTab}) => {
     setTab(t);
+    // P-05 (UX audit, 2026-05-03) — when the caller specifies the code
+    // sub-pane (e.g. PulseTab's HealthCard "Drill into Code" → Architecture),
+    // apply it in the same call so the URL and tab strip line up on first
+    // render. Without this, switching to Code would land on whatever sub-tab
+    // was last selected — surprising for the user who clicked "Architecture".
+    if (t === 'code' && opts?.codeSub) {
+      setCodeSub(opts.codeSub);
+    }
   };
 
   /**
@@ -350,7 +378,12 @@ export default function ProjectDashboardPage() {
 
         {projectId && <PostMergeBar projectId={projectId} />}
 
-        <header className='flex items-start justify-between gap-3'>
+        {/* X-10 (UX audit, 2026-05-03) — header now wraps on narrow screens
+            so the action cluster (Repos chip / New / More) drops below the
+            project name + icon instead of overflowing or truncating. The
+            stacked layout on <sm: keeps every affordance reachable without
+            horizontal scroll. */}
+        <header className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
           <div className='min-w-0 flex items-start gap-3'>
             <span className='inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0'>
               <FolderGit2 className='h-5 w-5' />
@@ -364,38 +397,70 @@ export default function ProjectDashboardPage() {
               </h1>
             </div>
           </div>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-2 flex-wrap'>
             {/* v2.7.2 — first-class Repos chip. Always visible; amber-tinted
                 when zero repos so users see the linkage gap before they
                 discover it via a failed Launch. Click opens AddRepoModal
-                directly via the shared openAddRepoFlow. */}
-            <button
-              onClick={openAddRepoFlow}
-              aria-label={
-                repoCount === 0
-                  ? 'Link your first repository'
-                  : `Manage ${repoCount} linked repository${repoCount === 1 ? '' : 'ies'}`
-              }
-              title={
-                repoCount === 0
-                  ? 'No repos linked — click to add one'
-                  : `${repoCount} linked. Click to add another.`
-              }
-              className={cn(
-                'inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border transition-colors',
-                repoCount === 0
-                  ? 'border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
-                  : 'border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40',
-              )}
-            >
-              {repoCount === 0 ? (
+                directly via the shared openAddRepoFlow.
+                P-05 (UX audit, 2026-05-03): pre-fix the chip ALWAYS opened
+                the Add modal — including for users who already had repos
+                and just wanted to inspect them, which broke their muscle
+                memory ("show me what's there" vs. "add a new one"). Now
+                the chip splits behaviour: zero repos still opens the modal
+                (nothing to manage); ≥1 repo switches to Code → Repos tab,
+                with a separate small "+" button immediately to its right
+                for the add-another flow. */}
+            {repoCount === 0 ? (
+              <button
+                onClick={openAddRepoFlow}
+                aria-label='Link your first repository'
+                title='No repos linked — click to add one'
+                className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border transition-colors border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
+              >
                 <Plus className='h-3.5 w-3.5' />
-              ) : (
-                <FolderGit2 className='h-3.5 w-3.5' />
-              )}
-              <span>Repos · {repoCount}</span>
-            </button>
+                <span>Repos · 0</span>
+              </button>
+            ) : (
+              <div className='inline-flex items-center rounded-sm border border-[var(--border-default)] overflow-hidden'>
+                <button
+                  onClick={() => onSwitchTab('repos')}
+                  aria-label={`View ${repoCount} linked repositor${repoCount === 1 ? 'y' : 'ies'}`}
+                  title={`View ${repoCount} linked repo${repoCount === 1 ? '' : 's'}`}
+                  className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
+                >
+                  <FolderGit2 className='h-3.5 w-3.5' />
+                  <span>Repos · {repoCount}</span>
+                </button>
+                <span className='w-px h-4 bg-[var(--border-default)]' aria-hidden='true' />
+                <button
+                  onClick={openAddRepoFlow}
+                  aria-label='Add another repository'
+                  title='Add another repository'
+                  className='inline-flex items-center justify-center px-1.5 py-1 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
+                >
+                  <Plus className='h-3.5 w-3.5' />
+                </button>
+              </div>
+            )}
             <NewExecutionButton projectId={projectId} repoCount={repoCount} />
+            {/* P-01 (UX audit, 2026-05-04) — reverse cross-link to the
+                V3ProjectHome composer surface ("What do you want to
+                build?" with one-shot spec textbox + iteration thread).
+                Pre-fix users on the dashboard had no path back to the
+                composer surface short of typing /projects/{id} into the
+                URL bar. This button closes that loop; V3ProjectHome's
+                "Dashboard →" button is the matching forward link. The
+                two surfaces stay distinct (per the Option C decision)
+                but each one knows about the other. */}
+            <Link
+              to={`/projects/${projectId}`}
+              aria-label='Open the quick-spec composer view'
+              title='Quick-spec composer — write a one-line goal, ship a draft PR.'
+              className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
+            >
+              <Sparkles className='h-3.5 w-3.5' />
+              <span className='hidden sm:inline'>Quick spec</span>
+            </Link>
             <button
               onClick={() => openDrawer('settings')}
               aria-label='Open more'
@@ -614,9 +679,13 @@ function SummaryBar({
   }
 
   return (
-    <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
+    // X-10 (UX audit, 2026-05-03) — on <sm screens this collapses to a
+    // horizontally-scrollable row so it stays one line even with 9 segments
+    // (was wrapping to 5 rows on phones). Desktop keeps the wrap behaviour
+    // so power users can still see everything at once.
+    <div className='flex sm:flex-wrap items-center gap-x-3 gap-y-1 text-[11px] overflow-x-auto sm:overflow-visible whitespace-nowrap sm:whitespace-normal -mx-3 px-3 sm:mx-0 sm:px-0'>
       {segments.map((s, i) => (
-        <span key={i} className='inline-flex items-center gap-1'>
+        <span key={i} className='inline-flex items-center gap-1 flex-shrink-0'>
           {s.label && (
             <span className='text-muted font-mono uppercase tracking-wider'>{s.label}</span>
           )}

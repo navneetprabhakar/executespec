@@ -388,12 +388,14 @@ function ThemeChooser({
   current,
   onPick,
 }: {
-  current: 'dark' | 'light';
-  onPick: (t: 'dark' | 'light') => void;
+  // X-07 (UX audit, 2026-05-03) — accept 'system' alongside dark/light so
+  // V3 settings stays in lockstep with useUiStore's three-state theme.
+  current: 'dark' | 'light' | 'system';
+  onPick: (t: 'dark' | 'light' | 'system') => void;
 }) {
   return (
     <div style={{display: 'inline-flex', gap: 4}}>
-      {(['dark', 'light'] as const).map((t) => (
+      {(['dark', 'light', 'system'] as const).map((t) => (
         <button
           key={t}
           type='button'

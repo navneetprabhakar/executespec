@@ -707,17 +707,15 @@ export default function RunDetail() {
                       <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
                       {reRunning ? 'Launching…' : 'Re-run'}
                     </button>
-                    {failedTasks.length > 0 && (
-                      <button
-                        onClick={handleRetryFailed}
-                        disabled={retryingFailed}
-                        className='flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-amber transition-colors disabled:opacity-50 whitespace-nowrap'
-                        title={`Retry ${failedTasks.length} failed task(s)`}
-                      >
-                        <Play className={cn('h-3.5 w-3.5', retryingFailed && 'animate-pulse')} />
-                        {retryingFailed ? 'Retrying…' : `Retry Failed (${failedTasks.length})`}
-                      </button>
-                    )}
+                    {/* R-11 (UX audit, 2026-05-03) — Retry-failed button
+                        promoted into the ValidationReportPanel header so it
+                        sits next to the failure signal (verdict pill / signal
+                        breakdown chip) instead of being buried in the
+                        run-level toolbar. The plumbing flows through
+                        MobileCollapsibleReports → ValidationReportPanel via
+                        the retryFailed/retryFailedCount/retryFailedBusy
+                        props. Toolbar duplicate removed to avoid two buttons
+                        doing the same thing. */}
                   </>
                 )}
                 <div className='flex items-center gap-2 ml-auto'>
@@ -780,6 +778,17 @@ export default function RunDetail() {
                       activeRun.tasks?.filter((t: any) => t.status === 'COMPLETE').length ?? null,
                     provider: (activeRun as any).aiProvider ?? null,
                   }}
+                  // R-11 — only attach the retry-failed callback for terminal
+                  // statuses where the parent toolbar previously showed the
+                  // button. Mirrors the gating from the (now-deleted) toolbar
+                  // button so we don't surface the action mid-run.
+                  retryFailed={
+                    ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(activeRun.status)
+                      ? handleRetryFailed
+                      : undefined
+                  }
+                  retryFailedCount={failedTasks.length}
+                  retryFailedBusy={retryingFailed}
                 />
                 <RunDetailTabs />
               </div>
@@ -932,6 +941,11 @@ interface MobileCollapsibleReportsProps {
     tasksComplete?: number | null;
     provider?: string | null;
   };
+  // R-11 — plumbed from RunDetail so the report header can show "Retry
+  // failed (N)" right next to the failure signal. Optional + safe to omit.
+  retryFailed?: () => void | Promise<void>;
+  retryFailedCount?: number;
+  retryFailedBusy?: boolean;
 }
 
 function MobileCollapsibleReports({
@@ -939,6 +953,9 @@ function MobileCollapsibleReports({
   status,
   statusReason,
   stampMeta,
+  retryFailed,
+  retryFailedCount,
+  retryFailedBusy,
 }: MobileCollapsibleReportsProps) {
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(true);
@@ -953,6 +970,9 @@ function MobileCollapsibleReports({
           status={status}
           statusReason={statusReason}
           stampMeta={stampMeta}
+          retryFailed={retryFailed}
+          retryFailedCount={retryFailedCount}
+          retryFailedBusy={retryFailedBusy}
         />
         <TestReportPanel runId={runId} status={status} />
       </>
@@ -976,6 +996,9 @@ function MobileCollapsibleReports({
             status={status}
             statusReason={statusReason}
             stampMeta={stampMeta}
+            retryFailed={retryFailed}
+            retryFailedCount={retryFailedCount}
+            retryFailedBusy={retryFailedBusy}
           />
           <TestReportPanel runId={runId} status={status} />
         </div>
