@@ -4,6 +4,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
@@ -1080,6 +1081,14 @@ public class GitHubRepoService {
   /**
    * Fetches a PR + its diff (truncated) for inline dashboard rendering. Returns {@code null} on any
    * failure — caller should degrade to link-only.
+   *
+   * <p>2026-05-04 — P0 hotfix: previously {@link HttpClient#newHttpClient()} ran with no timeouts,
+   * so a slow GitHub or DNS hang would block the thread until Cloudflare's 100s edge timeout fired
+   * (HTTP 524). Now uses a 5s connect + 15s per-request timeout. Also: when {@code diffMaxChars ==
+   * 0} (the {@link com.navneet.executespec.project.pr.PrRefreshService} path which only needs state
+   * + merged), we skip the diff GET entirely — the refresh button only cares whether the PR is
+   * OPEN/CLOSED/MERGED, so pulling the entire diff body is wasted IO and adds the same hang risk
+   * for a value the caller throws away.
    */
   public PullRequestSnapshot getPullRequestSnapshot(
       String repoFullName, int prNumber, String overridePat, int diffMaxChars) {
@@ -1087,13 +1096,14 @@ public class GitHubRepoService {
     if (effectivePat == null || effectivePat.isBlank()) return null;
     if (repoFullName == null || repoFullName.isBlank()) return null;
     try {
-      HttpClient client = HttpClient.newHttpClient();
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
 
       // PR metadata (JSON)
       HttpRequest metaReq =
           HttpRequest.newBuilder()
               .uri(
                   URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+              .timeout(Duration.ofSeconds(15))
               .header("Authorization", "Bearer " + effectivePat)
               .header("Accept", "application/vnd.github+json")
               .GET()
@@ -1111,24 +1121,29 @@ public class GitHubRepoService {
           new com.fasterxml.jackson.databind.ObjectMapper();
       com.fasterxml.jackson.databind.JsonNode meta = mapper.readTree(metaResp.body());
 
-      // PR diff (text)
-      HttpRequest diffReq =
-          HttpRequest.newBuilder()
-              .uri(
-                  URI.create("https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
-              .header("Authorization", "Bearer " + effectivePat)
-              .header("Accept", "application/vnd.github.v3.diff")
-              .GET()
-              .build();
-      HttpResponse<String> diffResp = client.send(diffReq, HttpResponse.BodyHandlers.ofString());
-      String diff = diffResp.statusCode() == 200 ? diffResp.body() : "";
-      String truncated = diff;
-      if (diffMaxChars > 0 && diff.length() > diffMaxChars) {
-        truncated =
-            diff.substring(0, diffMaxChars)
-                + "\n\n… (truncated, "
-                + (diff.length() - diffMaxChars)
-                + " more chars)";
+      String truncated = "";
+      // PR diff (text) — skipped when caller passes diffMaxChars=0 (refresh path).
+      if (diffMaxChars > 0) {
+        HttpRequest diffReq =
+            HttpRequest.newBuilder()
+                .uri(
+                    URI.create(
+                        "https://api.github.com/repos/" + repoFullName + "/pulls/" + prNumber))
+                .timeout(Duration.ofSeconds(15))
+                .header("Authorization", "Bearer " + effectivePat)
+                .header("Accept", "application/vnd.github.v3.diff")
+                .GET()
+                .build();
+        HttpResponse<String> diffResp = client.send(diffReq, HttpResponse.BodyHandlers.ofString());
+        String diff = diffResp.statusCode() == 200 ? diffResp.body() : "";
+        truncated = diff;
+        if (diff.length() > diffMaxChars) {
+          truncated =
+              diff.substring(0, diffMaxChars)
+                  + "\n\n… (truncated, "
+                  + (diff.length() - diffMaxChars)
+                  + " more chars)";
+        }
       }
 
       return new PullRequestSnapshot(
