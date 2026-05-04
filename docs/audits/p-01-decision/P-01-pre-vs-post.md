@@ -2,8 +2,16 @@
 
 > **Date:** 2026-05-04
 > **Audit ref:** `docs/audits/enterprise-ux-2026-05-03.md` (P-01 [P0])
-> **Status:** Awaiting your call between Option A vs Option B
+> **Status:** ✅ **Resolved — Option C (cross-link) shipped 2026-05-04**
 > **Stakeholders:** navneet.prabhakar007@gmail.com
+
+> **Decision:** the user picked Option C — keep both surfaces, but make the
+> bridge between them obvious. Implementation: V3ProjectHome gains a
+> "Dashboard →" button in its header strip; ProjectDashboardPage gains a
+> "Quick spec" button (Sparkles icon) in the action cluster that links
+> back to V3ProjectHome. Either surface is one click from the other.
+> Sections below are kept for posterity; the table at the bottom now
+> includes Option C with the actually-shipped costs.
 
 ## TL;DR
 
@@ -214,56 +222,54 @@ md+, scrollable on mobile).
 
 ## Decision matrix
 
-| Criterion | Option A — redirect | Option B — fold composer |
-|---|---|---|
-| Implementation cost | ~1 hour | ~6-8 hours |
-| Visual consistency win | High (one surface, one chrome) | Highest (one surface, one chrome, primary action up-top) |
-| Risk of regression | Near-zero | Low-medium (composer integration testing) |
-| Lines deletable | -290 V3ProjectHome (next sweep) | -390 net |
-| User friction loss | Returning users on `/projects/{id}` get redirected — no friction | Same + new users see the Composer prominently |
-| Marketing-front-end impact | None (V3 marketing routes untouched) | None |
-| Deep-link breakage | None (redirect is permanent) | None |
+| Criterion | Option A — redirect | Option B — fold composer | Option C — cross-link (✅ shipped) |
+|---|---|---|---|
+| Implementation cost | ~1 hour | ~6-8 hours | ~30 minutes |
+| Visual consistency win | High (one surface, one chrome) | Highest | Lowest — both surfaces remain |
+| Risk of regression | Near-zero | Low-medium | Near-zero |
+| Lines deletable | -290 V3ProjectHome (next sweep) | -390 net | 0 (additive only) |
+| User friction loss | Returning users on `/projects/{id}` get redirected — no friction | Same + new users see Composer prominently | Two surfaces stay live, but each is one click from the other |
+| Marketing-front-end impact | None | None | None |
+| Deep-link breakage | None | None | None — both URLs continue to resolve |
+| Reversibility | Hard (V3ProjectHome deleted in next sweep) | Hard | Trivial — flip a render gate to revisit later |
+
+### Why Option C is the right call right now
+
+Options A and B both bet on retiring V3ProjectHome. Option C buys time:
+the cross-link closes the discoverability gap *today* without committing
+to which surface wins. If usage data later shows V3ProjectHome is barely
+visited, fall back to Option A (cheap). If users use V3ProjectHome more
+than the dashboard, the data drives Option B. Either way, Option C's
+work isn't wasted — the cross-link buttons stay useful as long as both
+surfaces exist.
 
 ---
 
-## Recommendation
+## What shipped (Option C)
 
-**Option A first**, ship it inside a week. It buys you the surface consolidation
-without any layout decisions to make. Then schedule Option B as a follow-up
-sprint when there's a designer cycle to do the Composer placement properly.
-Splitting the work this way means:
+**Files changed:**
+- `frontend/src/v3/pages/V3ProjectHome.tsx` — added a primary "Dashboard →"
+  button in the project-name header strip, immediately to the left of the
+  existing "Chat with project →" button. Both buttons share the same
+  visual treatment so the cluster reads as a coherent navigation set.
+- `frontend/src/pages/project/ProjectDashboardPage.tsx` — added a "Quick
+  spec" button (Sparkles icon, label hidden on <sm) in the project-header
+  action cluster between "Repos · N", "+ New Run", and "More". Routes to
+  `/projects/{id}` (V3ProjectHome). The label uses "Quick spec" rather
+  than "Chat" or "V3" to describe the *what* (one-line spec composer)
+  rather than the *which surface*.
 
-- Returning enterprise users get one consistent project surface tomorrow.
-- The Composer-on-PulseTab decision can absorb a real design review (font sizes,
-  empty-state copy, mobile layout) without blocking the consolidation.
+**Bridge UX:**
+- A user landing on either surface can reach the other in one click.
+- Neither surface is hidden, redirected, or feature-gated.
+- The forward direction (V3ProjectHome → Dashboard) is brand-coloured,
+  emphasising the canonical 4-tab dashboard. The reverse direction
+  (Dashboard → V3ProjectHome) uses neutral chrome since it's secondary
+  flow.
 
-The audit doc explicitly calls this out: "the cheapest" path. Fastest customer-
-visible improvement, smallest scope of regression.
-
----
-
-## What I need from you
-
-1. **Pick A or B** (or "neither — leave the split").
-2. **Email yourself screenshots if you want them.** The dev environment runs at
-   https://dev.executespec.ai. You can:
-   - Open https://dev.executespec.ai/projects/{id} → screenshot the V3ProjectHome
-     page (= Pre #1).
-   - Open https://dev.executespec.ai/projects/{id}/dashboard → screenshot the
-     PulseTab (= Pre #2 = Post-Option-A).
-   - For Post-Option-B you'd need a build with the change applied; happy to
-     spin one up on a branch and share a preview URL once you've picked an
-     option.
-
-> I don't have native email capability in this Claude session, so I can't auto-send
-> the screenshots to your inbox. Two ways forward:
->
-> - **Easy:** Take the screenshots yourself with the URLs above and the ASCII
->   wireframes here as context.
-> - **I drive:** Grant me computer-use access to your browser (request_access on
->   Chrome) and I'll take the two pre-state screenshots, save them to disk,
->   then trigger Mail.app to compose an email pre-attached for you to send.
->   You'd still hit Send manually — no auto-send of credentials.
->
-> Either way, this doc is the substantive comparison; the screenshots are
-> confirmation rather than primary evidence.
+**Future work (optional — track separately):**
+- Telemetry to compare /projects/{id} vs /projects/{id}/dashboard usage.
+  Once the data is in, decide whether to fall back to Option A
+  (retire V3ProjectHome) or Option B (fold its composer into PulseTab).
+- The cross-link cost is sunk; either future move is additive on top of
+  it, not a re-implementation.

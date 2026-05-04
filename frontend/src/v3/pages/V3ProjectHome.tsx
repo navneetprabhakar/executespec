@@ -122,6 +122,33 @@ export default function V3ProjectHome() {
               than spawning a new one. */}
           {slug && (
             <div style={{marginLeft: 'auto', display: 'flex', gap: 8}}>
+              {/* P-01 (UX audit, 2026-05-04) — primary cross-link to the
+                  4-tab dashboard surface. Pre-fix users on this page had
+                  no way to reach Pulse / Repos / Runs / Code / Settings
+                  short of typing the URL by hand. The audit's preferred
+                  fix was to retire this surface entirely; the user
+                  picked Option C — keep both, but make the bridge
+                  obvious. The "Dashboard →" button is the one-click hop
+                  to the canonical project surface. ProjectDashboardPage
+                  has the matching reverse link back to /projects/{id}. */}
+              <button
+                type='button'
+                onClick={() => navigate(`/projects/${slug}/dashboard`)}
+                style={{
+                  padding: '4px 10px',
+                  background: 'transparent',
+                  color: 'var(--v3-brand)',
+                  border: '1px solid var(--v3-brand)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 11.5,
+                  fontFamily: 'inherit',
+                  fontWeight: 500,
+                }}
+                title='Open the full project dashboard — Pulse, Repos, Runs, Code, Chat'
+              >
+                Dashboard →
+              </button>
               {/* 2026-05-02 — V3ProjectHome is iteration-only (Re-launch
                   with a follow-up change). The actual chat surface, with
                   the new project-action tools (regenerate_architecture,
@@ -135,13 +162,12 @@ export default function V3ProjectHome() {
                 style={{
                   padding: '4px 10px',
                   background: 'transparent',
-                  color: 'var(--v3-brand)',
-                  border: '1px solid var(--v3-brand)',
+                  color: 'var(--v3-text-subtle)',
+                  border: '1px solid var(--v3-border)',
                   borderRadius: 4,
                   cursor: 'pointer',
                   fontSize: 11.5,
                   fontFamily: 'inherit',
-                  fontWeight: 500,
                 }}
                 title='Open project chat — regenerate architecture, generate docs, list runs / PRs / repos, and more'
               >
