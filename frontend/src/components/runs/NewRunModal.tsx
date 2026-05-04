@@ -44,8 +44,15 @@ type Mode = 'compose' | 'chat';
 export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) {
   // ── compose mode state ────────────────────────────────────────────────────
   const [goal, setGoal] = useState(initialConfig?.goal ?? '');
+  // R-04 (UX audit, 2026-05-03): default flips for paid tiers. FREE / PRO get
+  // the old "PROTOTYPE" default (fast first-run experience for evaluators);
+  // TEAM / ENTERPRISE default to PRODUCTION because they're past the
+  // exploration phase and want plan review on every run by default. Users
+  // can toggle for any individual run regardless of tier.
+  const tierForDefault = useAuthStore((s) => s.user?.tier);
+  const wantsReviewedDefault = tierForDefault === 'TEAM' || tierForDefault === 'ENTERPRISE';
   const [executionMode, setExecutionMode] = useState<'PROTOTYPE' | 'PRODUCTION'>(
-    initialConfig?.executionMode ?? 'PROTOTYPE',
+    initialConfig?.executionMode ?? (wantsReviewedDefault ? 'PRODUCTION' : 'PROTOTYPE'),
   );
   const [showGitHub, setShowGitHub] = useState(
     initialConfig?.repoMode && initialConfig.repoMode !== 'NONE' ? true : false,
@@ -453,10 +460,18 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                 }
               />
 
-              {/* Build My Spec button */}
+              {/* R-05 (UX audit, 2026-05-03): button copy renamed from
+                  the terse "Build My Spec" → "Refine spec with AI assistant"
+                  and given an explanatory tooltip. Pre-fix users clicked
+                  expecting to launch a run; instead they got dropped into a
+                  side-conversation chat that won't dispatch — surprise +
+                  abandonment. New copy makes the side-conversation purpose
+                  explicit, and the tooltip spells out what the AI does +
+                  the message cap so users know what they're entering. */}
               <button
                 onClick={enterChat}
                 disabled={!goal.trim()}
+                title='Open a side-conversation with an AI assistant to flesh out your spec. The assistant asks clarifying questions, you answer, and it emits a polished requirement summary you can use as the run goal. This does NOT submit a run — you confirm the final goal and click Launch separately. Capped at 50 messages per conversation.'
                 className={cn(
                   'w-full py-2 rounded-sm text-sm font-medium transition-all flex items-center justify-center gap-2',
                   'border border-accent-blue/30 text-accent-blue/80',
@@ -465,7 +480,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                 )}
               >
                 <Sparkles className='h-3.5 w-3.5' />
-                Build My Spec
+                Refine spec with AI assistant
               </button>
 
               {/* ── Run options ─────────────────────────────────────────────────
@@ -499,12 +514,28 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                       executionMode === 'PROTOTYPE' ? 'text-accent-blue' : 'text-muted',
                     )}
                   />
-                  <span className='text-sm text-secondary group-hover:text-secondary transition-colors'>
-                    Prototype Mode
+                  <span
+                    className='text-sm text-secondary group-hover:text-secondary transition-colors'
+                    title={
+                      executionMode === 'PROTOTYPE'
+                        ? 'Quick mode skips plan-approval, picks fast models, and auto-starts a preview. Best for spikes, demos, throwaway changes.'
+                        : 'Reviewed mode pauses for plan approval, runs the full validation pipeline, and gives you a verified score. Best for any code you intend to ship.'
+                    }
+                  >
+                    {/* R-04 (UX audit, 2026-05-03): renamed "Prototype Mode"
+                        → "Quick (skip review)" / "Reviewed (full pipeline)".
+                        The old label fought users' mental model — "Prototype"
+                        sounds throwaway to enterprise buyers who want real
+                        code, but Prototype Mode WAS the default. New labels
+                        explain the actual trade-off (skip review vs. full
+                        pipeline) so the toggle is choosable on-purpose. */}
+                    {executionMode === 'PROTOTYPE'
+                      ? 'Quick mode (skip review)'
+                      : 'Reviewed mode (full pipeline)'}
                     <span className='block sm:inline text-xs text-muted sm:ml-1.5'>
                       {executionMode === 'PROTOTYPE'
-                        ? '(Auto-approved, fast models, auto-preview)'
-                        : '(Plan review, full validation, code review)'}
+                        ? 'Auto-approved · fast models · auto-preview'
+                        : 'Plan review · full validation · code review'}
                     </span>
                   </span>
                 </div>

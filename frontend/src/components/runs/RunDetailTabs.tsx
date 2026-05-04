@@ -97,6 +97,24 @@ export default function RunDetailTabs() {
   const fetchRuns = useRunStore((s) => s.fetchRuns);
   const [refreshing, setRefreshing] = useState(false);
 
+  // R-06 (UX audit, 2026-05-03): on non-terminal runs (PLANNING / WORKING /
+  // REVIEWING / AWAITING_APPROVAL), default the active tab to "Live Log" so
+  // the user immediately sees what the agent is doing instead of a static
+  // Overview page. Skip when the user has explicitly picked another tab in
+  // this session (activeTab !== default) — only steer the FIRST view per run.
+  const seededRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeRun) return;
+    if (seededRunIdRef.current === activeRun.runId) return;
+    seededRunIdRef.current = activeRun.runId;
+    const TERMINAL = new Set(['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL']);
+    const isInFlight = !TERMINAL.has(activeRun.status);
+    if (isInFlight && activeTab === 'overview') {
+      setActiveTab('log');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRun?.runId, activeRun?.status]);
+
   // Hoist files so both Code and Preview tabs share them
   const [files, setFiles] = useState<string[]>([]);
   // 2026-05-02 — git-derived per-path change status. Map keyed on workspace-relative path

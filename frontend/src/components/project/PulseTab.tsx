@@ -20,7 +20,7 @@
  * tokens. No new colors, no new fonts, no new component primitives.
  */
 import {Link} from 'react-router-dom';
-import {ArrowRight, Activity, Heart} from 'lucide-react';
+import {ArrowRight, Activity, Heart, DollarSign} from 'lucide-react';
 import ScoreRing from '@/components/runs/ScoreRing';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
@@ -28,6 +28,7 @@ import {Rocket, FolderGit2, Plus} from 'lucide-react';
 import {cn} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
+import {useProjectStore} from '@/stores/useProjectStore';
 import type {TaskSummary, PrSummary} from '@/types/project';
 import type {ActivityEntry} from '@/lib/api';
 
@@ -143,6 +144,17 @@ export default function PulseTab({
         </div>
       </div>
 
+      {/* X-04 (UX audit, 2026-05-03) — project-scope spend chip. Pre-fix
+          enterprise admins asking "how much has this project cost?" had
+          to leave the project: SummaryBar only showed totalCost when > 0,
+          per-run cost was buried under RunDetailTabs Overview, and org-
+          wide spend at /exec is gated behind canViewCostBreakdown. The
+          data is already on the dashboard endpoint; surfacing it here
+          puts the answer one row from the score ring. Hides on cold
+          projects (totalCostUsd null/0) so the empty-project hero
+          doesn't get cluttered. */}
+      <ProjectSpendBar />
+
       {/* Health & activity row — full-width 2-col split on md+ */}
       <div className='grid grid-cols-1 md:grid-cols-2 gap-3'>
         <HealthCard projectId={projectId} onOpenCode={() => onSwitchTab('code')} />
@@ -192,6 +204,40 @@ export default function PulseTab({
             ))}
           </ul>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * X-04 (UX audit, 2026-05-03) — project-scope spend chip rendered between the
+ * hero row and the health/activity row. Reads totalCostUsd + totalTokens off
+ * useProjectStore.dashboard. Hides on cold projects (totalCostUsd null/0)
+ * so empty-project Pulse stays uncluttered. Tokens formatted compactly
+ * (M / k suffix) so the line stays one row at any project size.
+ */
+function ProjectSpendBar() {
+  const dashboard = useProjectStore((s) => s.dashboard);
+  const total = dashboard?.totalCostUsd ?? 0;
+  if (total <= 0) return null;
+  const tokens = dashboard?.totalTokens ?? 0;
+  const formatTokens = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k`;
+    return String(n);
+  };
+  return (
+    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 flex items-center gap-3'>
+      <DollarSign className='h-3.5 w-3.5 text-accent-blue flex-shrink-0' />
+      <span className='text-xs text-secondary'>Project spend so far</span>
+      <span className='text-xs font-mono font-medium text-primary tabular-nums'>
+        ${total.toFixed(2)}
+      </span>
+      {tokens > 0 && (
+        <>
+          <span className='text-muted'>·</span>
+          <span className='text-[11px] text-muted tabular-nums'>{formatTokens(tokens)} tokens</span>
+        </>
       )}
     </div>
   );
@@ -299,6 +345,13 @@ function ScoreCardCompact({
 
 function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () => void}) {
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null>(null);
+  // P-04 (UX audit, 2026-05-03): also pull dashboard so HealthCard can surface
+  // architectureDocStatus alongside the existing repo / codemap / PR rows.
+  // Pre-fix: arch generation had no kickoff CTA from PulseTab — users had to
+  // navigate to Code → Architecture, then click Generate. Now if the project
+  // has no architecture doc yet (status NONE) the row is a click-through to
+  // exactly that screen.
+  const dashboard = useProjectStore((s) => s.dashboard);
   useEffect(() => {
     api
       .getWorkspaceHealth(projectId)
@@ -310,6 +363,17 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
   const totalRepos = health?.repos.length ?? 0;
   const openPrs = health?.repos.reduce((sum, r) => sum + (r.openPrCount ?? 0), 0) ?? 0;
   const lastAnalysed = health?.lastRefreshedAt ?? null;
+  const archStatus = dashboard?.architectureDocStatus ?? null;
+
+  const openArchTab = () => {
+    // Switch to Code tab + architecture sub-tab via the URL convention so the
+    // P-23 popstate / mount-time reader picks the right pane on landing.
+    const url = new URL(window.location.href);
+    url.searchParams.set('tab', 'code');
+    url.searchParams.set('codeSub', 'architecture');
+    window.history.pushState(null, '', url.toString());
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
 
   return (
     <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
@@ -329,6 +393,30 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
           <li className={cn(stale > 0 ? 'text-status-waiting' : 'text-status-success')}>
             {stale === 0 ? 'codemaps current' : `${stale} stale codemap${stale === 1 ? '' : 's'}`}
           </li>
+          {/* P-04 architecture row */}
+          {archStatus === 'NONE' ? (
+            <li className='text-status-waiting'>
+              Architecture not generated —{' '}
+              <button
+                onClick={openArchTab}
+                className='text-accent-blue hover:underline inline-flex items-center gap-0.5'
+              >
+                Generate now <ArrowRight className='h-2.5 w-2.5' />
+              </button>
+            </li>
+          ) : archStatus === 'STALE' ? (
+            <li className='text-status-waiting'>
+              Architecture stale —{' '}
+              <button
+                onClick={openArchTab}
+                className='text-accent-blue hover:underline inline-flex items-center gap-0.5'
+              >
+                Regenerate <ArrowRight className='h-2.5 w-2.5' />
+              </button>
+            </li>
+          ) : archStatus === 'GENERATED' ? (
+            <li className='text-status-success'>Architecture current</li>
+          ) : null}
           <li className='text-secondary'>
             {openPrs} open PR{openPrs === 1 ? '' : 's'}
           </li>
