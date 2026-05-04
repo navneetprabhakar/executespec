@@ -16,7 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Feasibility estimation endpoint — pre-run cost preview driven by V1 PlannerAgent.
  *
- * <p>Retired with deprecation P3. V2 uses {@code V2RunCostTracker.estimateRunTierAware} at plan
+ * <p>Retired with deprecation P3. V2 uses {@code RunCostTracker.estimateRunTierAware} at plan
  * approval time to populate {@code cost_estimate_low/high} + {@code creditsCharged} on the run row
  * itself, which is what the UI now reads. Kept as a 410 Gone so the frontend's feasibility
  * estimator card can render a clear "no longer supported" state until it is removed.

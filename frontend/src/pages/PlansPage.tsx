@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useState, useEffect} from 'react';
 import {useNavigate, useSearchParams} from 'react-router-dom';
 import {
@@ -14,7 +15,7 @@ import {useAuthStore} from '@/stores/useAuthStore';
 import PageShell from '@/components/shared/PageShell';
 
 export default function PlansPage() {
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
   const {user} = useAuthStore();
   const [searchParams] = useSearchParams();
   // M-009 (Wave 1) — when arriving from /legacy/billing the redirect carries
@@ -128,14 +129,15 @@ export default function PlansPage() {
 
       // Razorpay flow
       setCheckoutData(result);
-    } catch (err: any) {
-      setCheckoutError(err?.message || 'Failed to create subscription');
+    } catch (err) {
+      setCheckoutError(errMsg(err) || 'Failed to create subscription');
       setSelectedPlanId(null);
     } finally {
       setSubscribing(false);
     }
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleCheckoutSuccess = async (response: any) => {
     try {
       await verifyPayment(

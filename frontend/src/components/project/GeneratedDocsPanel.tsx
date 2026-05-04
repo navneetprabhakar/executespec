@@ -10,7 +10,7 @@ import {
   type GeneratedDocType,
 } from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
-import {relativeTime} from '@/lib/utils';
+import {relativeTime, errMsg} from '@/lib/utils';
 
 interface Props {
   projectId: string;
@@ -51,8 +51,8 @@ export default function GeneratedDocsPanel({projectId}: Props) {
     try {
       const row = await getProjectDoc(projectId, docType);
       setter({loading: false, generating: false, doc: row, error: null});
-    } catch (e: any) {
-      setter({loading: false, generating: false, doc: null, error: e.message ?? String(e)});
+    } catch (e) {
+      setter({loading: false, generating: false, doc: null, error: errMsg(e) ?? String(e)});
     }
   };
 
@@ -67,8 +67,8 @@ export default function GeneratedDocsPanel({projectId}: Props) {
         message: `${docType === 'EXPLANATION' ? 'Explanation' : 'Setup'} doc generated (v${row.version})`,
       });
       setExpanded(docType);
-    } catch (e: any) {
-      const msg = e.message ?? String(e);
+    } catch (e) {
+      const msg = errMsg(e) ?? String(e);
       setter((s) => ({...s, generating: false, error: msg}));
       addToast({type: 'error', message: msg});
     }
@@ -77,8 +77,8 @@ export default function GeneratedDocsPanel({projectId}: Props) {
   const download = async (docType: GeneratedDocType) => {
     try {
       await downloadProjectDoc(projectId, docType);
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message ?? String(e)});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) ?? String(e)});
     }
   };
 

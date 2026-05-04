@@ -7,7 +7,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import com.navneet.executespec.v2.reviewer.ReviewerAgentV3;
-import com.navneet.executespec.v2.reviewer.ReviewerRequestV2;
+import com.navneet.executespec.v2.reviewer.ReviewerRequest;
 import com.navneet.executespec.v2.reviewer.ReviewerResult;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 
@@ -115,7 +115,7 @@ console.log('smoke ok');"
       long start = System.currentTimeMillis();
       ReviewerResult result =
           reviewer.review(
-              ReviewerRequestV2.builder()
+              ReviewerRequest.builder()
                   .provider(provider)
                   .model(model)
                   .context(ctx)

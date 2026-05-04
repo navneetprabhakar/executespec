@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {Link, useNavigate, useLocation, useSearchParams} from 'react-router-dom';
-import {Eye, EyeOff, ShieldCheck, Zap, GitBranch, CheckCircle2} from 'lucide-react';
+import {Eye, EyeOff, ShieldCheck, Zap, GitBranch} from 'lucide-react';
 import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
@@ -52,18 +53,19 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   // R-342 (2026-04-29) — default post-login destination is /home (the
-  // V3HomeRedirect dispatcher).  Authed user without a `from` location
+  // HomeRedirectPage dispatcher).  Authed user without a `from` location
   // (e.g. typed /login directly, or arrived from the marketing site)
   // lands on their first project's chat thread, not the v2 RunsPage.
   // Users bounced from a deep link (e.g. /audit → /login) still come
   // back to the original `from` path after sign-in.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const from = (location.state as any)?.from?.pathname ?? '/home';
 
   // R-341 (2026-04-29) — marketing-site handoff.  When the user types
   // a spec on executespec.ai's hero composer and submits, they're
   // redirected here as `/login?spec=<encoded>`.  Stash the spec to
   // sessionStorage as `v3-anon-spec` so the existing post-auth claim
-  // flow (V3Auth.claimAndForward) hydrates the in-app composer with
+  // flow (AuthPage.claimAndForward) hydrates the in-app composer with
   // it after the user signs in / signs up.  Length-capped at 4 KB to
   // match the website's submit-handler cap.
   useEffect(() => {
@@ -84,11 +86,11 @@ export default function LoginPage() {
     try {
       await login(email, password);
       navigate(from, {replace: true});
-    } catch (err: any) {
+    } catch (err) {
       setError(
-        err.message?.includes('403')
+        errMsg(err)?.includes('403')
           ? 'Please verify your email before logging in.'
-          : err.message?.includes('401')
+          : errMsg(err)?.includes('401')
             ? 'Invalid email or password.'
             : 'Login failed. Please try again.',
       );

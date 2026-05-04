@@ -61,6 +61,7 @@ export function useSse(runId: string | null) {
       // Fetch a short-lived scoped SSE token (avoids exposing full JWT in URL)
       let sseUrl = `/api/runs/${runId}/events`;
       try {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const {token: sseToken} = await getSseToken(runId!);
         sseUrl = `/api/runs/${runId}/events?token=${encodeURIComponent(sseToken)}`;
       } catch {
@@ -74,6 +75,7 @@ export function useSse(runId: string | null) {
         const wasReconnect = attemptRef.current > 0;
         attemptRef.current = 0;
         // On reconnect, do a full fetch to catch any events missed during the gap.
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         if (wasReconnect) fetchRun(runId!);
       };
 
@@ -88,6 +90,7 @@ export function useSse(runId: string | null) {
               useRunStore.setState({activeRun: detail});
             } catch {
               // Malformed payload — fall back to refetch
+              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
               fetchRun(runId!);
             }
             return; // Don't add RUN_DETAIL to the log buffer
@@ -103,6 +106,7 @@ export function useSse(runId: string | null) {
 
           // Backend emits type as SCREAMING_SNAKE_CASE; payload carries the status string.
           if (data.type === 'RUN_STATUS' && data.payload) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             patchRunStatus(runId!, data.payload);
             // RUN_DETAIL push handles the full refetch — only fetch here as fallback
             // for terminal states where the SSE stream may close before RUN_DETAIL arrives.
@@ -117,6 +121,7 @@ export function useSse(runId: string | null) {
                 'IN_PROGRESS_BATCH',
               ].includes(data.payload)
             ) {
+              // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
               fetchRun(runId!);
             }
             // Credits charged when run transitions to WORKING — refresh sidebar usage
@@ -127,9 +132,11 @@ export function useSse(runId: string | null) {
           // Gate opened = plan tasks are now saved; RUN_DETAIL push covers this
           // but keep as fallback for reliable gate display
           if (data.type === 'GATE_OPENED') {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             fetchRun(runId!);
           }
           if (data.type === 'RUN_RESTARTED' || data.type === 'BUDGET_EXCEEDED') {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             fetchRun(runId!);
           }
           // Batch progress/completion triggers refetch
@@ -138,6 +145,7 @@ export function useSse(runId: string | null) {
             data.type === 'BATCH_COMPLETE' ||
             data.type === 'BATCH_FAILED'
           ) {
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             fetchRun(runId!);
           }
         } catch {}
@@ -160,5 +168,6 @@ export function useSse(runId: string | null) {
       clearTimeout(timeoutRef.current);
       setStatus('DISCONNECTED');
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runId]);
 }

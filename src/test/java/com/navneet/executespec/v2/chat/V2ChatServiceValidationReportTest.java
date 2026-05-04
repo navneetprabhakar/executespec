@@ -19,13 +19,13 @@ import com.navneet.executespec.v2.agent.LlmRouterV2;
 import org.junit.jupiter.api.Test;
 
 /**
- * Pins the validation-report block injected into V2ChatService's system prompt by Fix F (run
- * a076c876 diagnosis 2026-05-03).
+ * Pins the validation-report block injected into ChatService's system prompt by Fix F (run a076c876
+ * diagnosis 2026-05-03).
  *
  * <p>Diagnosis: pre-Fix-F the system prompt had no validation context at all — so when the user
  * asked the run-chat "why is architecture 0?", the LLM had no anchor and either hallucinated or
- * apologised. The new {@link V2ChatService#renderValidationReport} block surfaces the verifiedScore
- * / accuracyScore / reviewer verdict / per-dimension scores / capped raw issue JSON so the LLM can
+ * apologised. The new {@link ChatService#renderValidationReport} block surfaces the verifiedScore /
+ * accuracyScore / reviewer verdict / per-dimension scores / capped raw issue JSON so the LLM can
  * quote them verbatim.
  */
 class V2ChatServiceValidationReportTest {
@@ -36,8 +36,8 @@ class V2ChatServiceValidationReportTest {
   private final AgentProperties agentProps = mock(AgentProperties.class);
   private final ValidationReportRepository reportRepo = mock(ValidationReportRepository.class);
 
-  private V2ChatService newService() {
-    return new V2ChatService(runRepo, router, modelResolver, agentProps, reportRepo);
+  private ChatService newService() {
+    return new ChatService(runRepo, router, modelResolver, agentProps, reportRepo);
   }
 
   @Test

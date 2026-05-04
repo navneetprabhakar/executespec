@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {Loader2, CheckCircle2, XCircle} from 'lucide-react';
 import * as api from '@/lib/api';
@@ -24,10 +25,11 @@ export default function VerifyEmailPage() {
     calledRef.current = true;
     api
       .authVerifyEmail(token)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .then(async (resp: any) => {
         // [F-29] (audit Sprint 1 PR-2, 2026-04-30) — auto-session.
         // Backend now returns {accessToken, user} on verify; store the
-        // token + load /me, then redirect to /home. V3HomeRedirect picks
+        // token + load /me, then redirect to /home. HomeRedirectPage picks
         // the right destination based on project count, so the user
         // never has to retype their password after clicking the
         // verification link in their inbox.
@@ -43,9 +45,9 @@ export default function VerifyEmailPage() {
         // before the dispatcher takes them to their home; then redirect.
         setTimeout(() => navigate('/home', {replace: true}), 1200);
       })
-      .catch((err: any) => {
+      .catch((err: unknown) => {
         setStatus('error');
-        setError(err.message ?? 'Verification failed.');
+        setError(errMsg(err) ?? 'Verification failed.');
       });
   }, [token, navigate, loadMe]);
 

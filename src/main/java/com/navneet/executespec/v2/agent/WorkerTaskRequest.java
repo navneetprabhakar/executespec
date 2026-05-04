@@ -5,7 +5,7 @@ import com.navneet.executespec.v2.tool.ExecutionContext;
 import lombok.Builder;
 
 /**
- * Input to {@link WorkerAgentV2#run(WorkerTaskRequest)}.
+ * Input to {@link WorkerAgent#run(WorkerTaskRequest)}.
  *
  * <p>The worker is provider-agnostic: it threads the supplied prompts through {@link LlmRouterV2}
  * which dispatches based on {@link #provider()}.
@@ -17,7 +17,7 @@ import lombok.Builder;
  *     injected
  * @param userPrompt user message — typically the task description
  * @param context per-task execution context (workspace + ids)
- * @param maxIterations max LLM calls; 0/null defaults to {@link WorkerAgentV2#DEFAULT_MAX_ITER}
+ * @param maxIterations max LLM calls; 0/null defaults to {@link WorkerAgent#DEFAULT_MAX_ITER}
  * @param temperature sampling temperature; null defaults to 0.0
  * @param maxTokensPerCall max output tokens per LLM call; null defaults per-provider
  */

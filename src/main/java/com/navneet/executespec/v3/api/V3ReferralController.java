@@ -18,7 +18,7 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>Wave 2 shipped the recordInvite + getInviteState + lookup-by-token (R-162 follow-up) surface.
  * The "credit grant on referee's first ready run" hook is owned by {@code
- * V2RunOrchestrator.terminate()}, which delegates the conditional + idempotency contract to {@code
+ * RunOrchestrator.terminate()}, which delegates the conditional + idempotency contract to {@code
  * ReferralCompletionHook} so the wire-point is unit-testable without exercising the orchestrator
  * end-to-end.
  */

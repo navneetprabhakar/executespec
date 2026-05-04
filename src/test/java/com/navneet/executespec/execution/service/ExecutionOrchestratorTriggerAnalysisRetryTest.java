@@ -14,7 +14,7 @@ import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.v2.integration.V2RunOrchestrator;
+import com.navneet.executespec.v2.integration.RunOrchestrator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -48,7 +48,7 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
   @Mock ExecutionBranchService branchService;
   @Mock SseBroadcaster broadcaster;
   @Mock GitHubRepoService gitHub;
-  @Mock V2RunOrchestrator v2Orchestrator;
+  @Mock RunOrchestrator v2Orchestrator;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock ObjectProvider<com.navneet.executespec.folder.BootstrapService> bootstrapServiceProvider;
   // Use a real ExecutionRunCasUpdater wired to the runRepo mock so CAS

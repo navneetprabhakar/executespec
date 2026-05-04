@@ -64,7 +64,7 @@ public class SmartClassifierAgent {
   private final StringRedisTemplate redis;
   private final PromptAssembler promptAssembler;
   private final ObjectMapper objectMapper;
-  private final com.navneet.executespec.v2.observability.V2Metrics metrics;
+  private final com.navneet.executespec.v2.observability.Metrics metrics;
 
   /** Char cap for the heuristic fast path. Longer specs always hit the LLM verifier. */
   private static final int HEURISTIC_FAST_PATH_CHAR_CAP = 150;
@@ -366,7 +366,7 @@ public class SmartClassifierAgent {
     try {
       ChatResponse resp =
           router.call(
-              LlmRequestV2.builder()
+              LlmRequest.builder()
                   .provider(resolved.getActualProvider().name().toLowerCase(Locale.ROOT))
                   .model(resolved.getModel())
                   .messages(messages)
@@ -442,7 +442,7 @@ public class SmartClassifierAgent {
         if (usage.getPromptTokens() != null) inputTokens = usage.getPromptTokens();
         if (usage.getCompletionTokens() != null) outputTokens = usage.getCompletionTokens();
       }
-      // Cost is recorded by V2RunCostTracker via LlmRouterV2 — we don't
+      // Cost is recorded by RunCostTracker via LlmRouterV2 — we don't
       // re-compute it here (the tracker is the source of truth). For the
       // ClassificationResult shape we report 0 and let the orchestrator
       // diff the run accumulator before/after to attribute the phase cost.

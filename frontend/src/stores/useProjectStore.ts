@@ -1,4 +1,5 @@
 import {create} from 'zustand';
+import {errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
 import type {
   ProjectDashboardDTO,
@@ -40,7 +41,7 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       const dashboard = await api.getProjectDashboard(projectId);
       set({dashboard, loading: false});
     } catch (e: unknown) {
-      set({error: e instanceof Error ? e.message : 'Failed to load dashboard', loading: false});
+      set({error: e instanceof Error ? errMsg(e) : 'Failed to load dashboard', loading: false});
     }
   },
 
@@ -49,7 +50,7 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       const repos = await api.getProjectRepos(projectId);
       set({repos});
     } catch (e: unknown) {
-      set({error: e instanceof Error ? e.message : 'Failed to load repos'});
+      set({error: e instanceof Error ? errMsg(e) : 'Failed to load repos'});
     }
   },
 
@@ -58,7 +59,7 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       const availableRepos = await api.listRepos(scope);
       set({availableRepos});
     } catch (e: unknown) {
-      set({error: e instanceof Error ? e.message : 'Failed to load available repos'});
+      set({error: e instanceof Error ? errMsg(e) : 'Failed to load available repos'});
     }
   },
 
@@ -67,7 +68,7 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       const architectureDoc = await api.getArchitectureDoc(projectId);
       set({architectureDoc});
     } catch (e: unknown) {
-      set({error: e instanceof Error ? e.message : 'Failed to load architecture doc'});
+      set({error: e instanceof Error ? errMsg(e) : 'Failed to load architecture doc'});
     }
   },
 
@@ -76,7 +77,7 @@ export const useProjectStore = create<ProjectStore>((set) => ({
       const scoreTrend = await api.getProjectScores(projectId);
       set({scoreTrend});
     } catch (e: unknown) {
-      set({error: e instanceof Error ? e.message : 'Failed to load scores'});
+      set({error: e instanceof Error ? errMsg(e) : 'Failed to load scores'});
     }
   },
 

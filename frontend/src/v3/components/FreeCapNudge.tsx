@@ -19,7 +19,7 @@ import {trackV3, V3_EVENTS} from '../lib/events';
  * Conversion event: V3_TIER_UPGRADED fires on Get-Pro click.
  */
 
-interface CapState {
+interface _CapState {
   balance: number;
   cap: number;
   tierKey: string;
@@ -154,6 +154,12 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
     }
   }, [open]);
 
+  // R-09 lint cleanup — useState must be called unconditionally before the
+  // early return below. Pre-fix this hook sat after `if (!open || !cap)
+  // return null` which violated rules-of-hooks (the hook order changed
+  // once cap loaded).
+  const [inviteError, setInviteError] = useState<string | null>(null);
+
   if (!open || !cap) return null;
 
   function onUpgrade() {
@@ -161,8 +167,6 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
     navigate('/billing');
     onClose();
   }
-
-  const [inviteError, setInviteError] = useState<string | null>(null);
 
   async function onInvite(e: React.FormEvent) {
     e.preventDefault();

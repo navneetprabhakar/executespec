@@ -12,6 +12,7 @@ export function useKeyboardScroll() {
     // Skip on desktop or if VisualViewport API is not available
     if (!('ontouchstart' in window) || !window.visualViewport) return;
 
+    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const vv = window.visualViewport!;
 
     let lastHeight = vv.height;

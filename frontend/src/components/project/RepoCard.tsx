@@ -1,4 +1,5 @@
 import {useMemo, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import type {ProjectRepoLink, StackInfo} from '@/types/project';
 import StackBadge from './StackBadge';
 import RepoRelationshipEditor from './RepoRelationshipEditor';
@@ -31,7 +32,7 @@ export default function RepoCard({
       if (!r.installed && r.reason) alert(r.reason);
       if (onRefresh) await onRefresh();
     } catch (e) {
-      alert(`Webhook install failed: ${e instanceof Error ? e.message : String(e)}`);
+      alert(`Webhook install failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
     } finally {
       setInstallingHook(false);
     }
