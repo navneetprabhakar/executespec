@@ -55,11 +55,12 @@ export function RunTimeline({events, status, taskCount, completedTaskCount}: Run
       {
         name: `Tasks (${completedTaskCount}/${taskCount})`,
         status: phaseStatus('working', currentPhase, isTerminal),
-        startedAt: events.find((e) => e.type === 'TASK_STATUS' && e.payload === 'WORKING')
-          ? new Date(
-              events.find((e) => e.type === 'TASK_STATUS' && e.payload === 'WORKING')!.timestamp,
-            )
-          : undefined,
+        startedAt: (() => {
+          const ts = events.find(
+            (e) => e.type === 'TASK_STATUS' && e.payload === 'WORKING',
+          )?.timestamp;
+          return ts ? new Date(ts) : undefined;
+        })(),
         detail: `${completedTaskCount} of ${taskCount} tasks complete`,
       },
       {

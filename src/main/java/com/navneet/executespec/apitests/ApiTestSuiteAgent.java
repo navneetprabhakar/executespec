@@ -69,7 +69,7 @@ public class ApiTestSuiteAgent {
 
   // ── Public API ────────────────────────────────────────────────────────────
 
-  /** Called post-merge via virtual thread from V2RunOrchestrator. Non-fatal. */
+  /** Called post-merge via virtual thread from RunOrchestrator. Non-fatal. */
   public void generateAsync(PipelineRun run) {
     var snapshot = ContextSnapshotFactory.builder().build().captureAll();
     Thread.ofVirtual()

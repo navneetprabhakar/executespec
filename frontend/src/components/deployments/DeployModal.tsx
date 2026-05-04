@@ -3,7 +3,7 @@ import {motion} from 'framer-motion';
 import {X, Rocket} from 'lucide-react';
 import {createDeployment} from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 interface DeployModalProps {
   onClose: () => void;
@@ -24,8 +24,8 @@ export default function DeployModal({onClose, onRefresh}: DeployModalProps) {
       addToast({type: 'success', message: 'Deployment started'});
       onRefresh();
       onClose();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
       setLoading(false);
     }
   };

@@ -79,7 +79,7 @@ export const NAV_ITEMS: {
   // RunsPage moved to /runs so the sidebar entry now points there.
   {path: '/runs', label: 'Runs', icon: 'LayoutDashboard', adminOnly: false},
   // R-330 / R-340 — first-class catalog surfaces.  Routes hop into the
-  // V3 chrome (V3TopBar) when clicked from the v2 sidebar — chrome
+  // V3 chrome (TopBar) when clicked from the v2 sidebar — chrome
   // flip is intentional until the v2 sidebar shell is fully retired.
   // Visible to every tier — FREE sees locked rows with upgrade CTAs.
   {path: '/library', label: 'Library', icon: 'Library', adminOnly: false},

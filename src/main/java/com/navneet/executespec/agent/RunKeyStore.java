@@ -29,9 +29,9 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Lifecycle:
  *
  * <pre>
- *   V2RunOrchestrator.executeRunAsync()           → runKeyStore.put(runId, keys)
+ *   RunOrchestrator.executeRunAsync()           → runKeyStore.put(runId, keys)
  *   [agents run normally — L1 hit for every call]
- *   V2RunOrchestrator.runBackgroundValidation finally → runKeyStore.remove(runId)
+ *   RunOrchestrator.runBackgroundValidation finally → runKeyStore.remove(runId)
  * </pre>
  */
 @Service

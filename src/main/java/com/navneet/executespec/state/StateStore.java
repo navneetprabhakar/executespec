@@ -206,7 +206,7 @@ public class StateStore {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     run.setReviewJson(toJson(review));
     // Status stays REVIEWING — merge is automatic (no gate).
-    // V2RunOrchestrator.markComplete() advances the status after report generation.
+    // RunOrchestrator.markComplete() advances the status after report generation.
     runRepo.save(run);
   }
 
@@ -215,7 +215,7 @@ public class StateStore {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     run.setReviewJson(toJson(review));
     // Status stays REVIEWING — merge is automatic (no gate).
-    // V2RunOrchestrator.markComplete() advances the status after report generation.
+    // RunOrchestrator.markComplete() advances the status after report generation.
     runRepo.save(run);
   }
 
@@ -1410,7 +1410,7 @@ public class StateStore {
   }
 
   /**
-   * Marks a single task as FAILED with a descriptive reason. Used by V2RunOrchestrator when a task
+   * Marks a single task as FAILED with a descriptive reason. Used by RunOrchestrator when a task
    * branch has a merge conflict so the user can retry the task via the TaskCard retry button.
    */
   public void failTask(String taskId, String reason) {
@@ -2028,7 +2028,7 @@ public class StateStore {
   }
 
   /**
-   * Updates the instance heartbeat for a run. Called every 30s by V2RunOrchestrator. Uses a
+   * Updates the instance heartbeat for a run. Called every 30s by RunOrchestrator. Uses a
    * lightweight JPA update to avoid loading the full entity.
    */
   public void updateHeartbeat(String runId, String instanceId, java.time.Instant heartbeat) {

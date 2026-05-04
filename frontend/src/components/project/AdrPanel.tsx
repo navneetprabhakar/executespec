@@ -1,7 +1,7 @@
 import {useEffect, useState} from 'react';
 import {listProjectAdrs, getProjectAdr, type AdrSummary, type AdrDetail} from '@/lib/api';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 /**
  * M-014 (Wave 2) — Project → Code → ADRs panel.
@@ -27,7 +27,7 @@ export default function AdrPanel({projectId}: {projectId: string}) {
         if (alive) setList(rows);
       })
       .catch((e) => {
-        if (alive) setError(e?.message ?? 'Failed to load ADRs');
+        if (alive) setError(errMsg(e) ?? 'Failed to load ADRs');
       });
     return () => {
       alive = false;
@@ -42,7 +42,7 @@ export default function AdrPanel({projectId}: {projectId: string}) {
     setDetailLoading(true);
     getProjectAdr(projectId, selectedId)
       .then(setSelected)
-      .catch((e) => setError(e?.message ?? 'Failed to load ADR'))
+      .catch((e) => setError(errMsg(e) ?? 'Failed to load ADR'))
       .finally(() => setDetailLoading(false));
   }, [projectId, selectedId]);
 

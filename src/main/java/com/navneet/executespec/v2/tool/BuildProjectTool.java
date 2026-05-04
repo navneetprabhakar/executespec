@@ -30,6 +30,7 @@ import lombok.extern.slf4j.Slf4j;
 public class BuildProjectTool implements Tool {
 
   private final BuildCommandResolver resolver;
+  private final MavenDependencyValidator mavenDependencyValidator;
 
   @Override
   public String name() {
@@ -64,6 +65,31 @@ public class BuildProjectTool implements Tool {
     String plannerCmd =
         args.hasNonNull("plannerCommand") ? args.get("plannerCommand").asText() : null;
     BuildCommand bc = resolver.resolve(ctx.workspaceRoot(), plannerCmd);
+
+    // 2026-05-04 — preflight Maven dep version check. The 9-cell eval matrix
+    // showed Sonnet 4.6 hallucinating a non-existent flyway-database-h2:10.10.0
+    // version on the HIGH-band library spec, then the worker + reviewer burned
+    // 79k tokens on the JUnit-tests task chasing downstream symptoms before
+    // realising the actual error was outside the code (in the pom). Failing
+    // fast with a precise "this dep doesn't exist on Maven Central" message
+    // lets the worker fix the pom in 1-2 iterations instead of hunting for
+    // ghost compile errors. No-op on non-Maven projects.
+    MavenDependencyValidator.ValidationResult depCheck =
+        mavenDependencyValidator.validate(ctx.workspaceRoot());
+    if (!depCheck.isPassed()) {
+      log.warn(
+          "buildProject preflight: {} hallucinated/missing dep(s) in pom.xml — failing fast"
+              + " before mvn invocation",
+          depCheck.getMissingDeps().size());
+      String msg = mavenDependencyValidator.formatError(depCheck);
+      return ToolResult.ok(
+          "command="
+              + bc.command()
+              + "\nsource=preflight (skipped mvn invocation — pom is broken)"
+              + "\nexit=1\noutput:\n"
+              + msg);
+    }
+
     try {
       ProcessBuilder pb = new ProcessBuilder(List.of("/bin/sh", "-c", bc.command()));
       pb.directory(ctx.workspaceRoot().toFile());

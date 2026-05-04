@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {motion} from 'framer-motion';
+import {} from 'framer-motion';
 import {
   Plus,
   FolderOpen,
@@ -84,6 +84,7 @@ export default function RunList() {
       if (!document.hidden) fetchRuns();
     }, 15000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter, projectFilter, scopeFilter, archivedFilter]);
 
   return (

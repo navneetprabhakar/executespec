@@ -170,7 +170,7 @@ public class ReferralService {
    * run. Grants +5 lifetime credits to the referrer and stamps {@code granted_at} so the grant only
    * fires once.
    *
-   * <p>Wired into V2RunOrchestrator.terminate().
+   * <p>Wired into RunOrchestrator.terminate().
    */
   @Transactional
   public boolean onRefereeFirstReadyRun(String refereeUserId) {

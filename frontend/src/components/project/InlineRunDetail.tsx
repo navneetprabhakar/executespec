@@ -37,7 +37,7 @@ import {
 import {useAuthStore} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {useUiStore} from '@/stores/useUiStore';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 /**
  * Read-only inline run viewer. Shows the full run experience — request, stats,
@@ -106,8 +106,8 @@ export default function InlineRunDetail({
       await pauseRunApi(run.runId);
       addToast({type: 'success', message: 'Run paused'});
       if (onRefresh) await onRefresh();
-    } catch (e: any) {
-      addToast({type: 'error', message: e?.message ?? 'Pause failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) ?? 'Pause failed'});
     } finally {
       setPausing(false);
     }
@@ -126,8 +126,8 @@ export default function InlineRunDetail({
       await cancelRunApi(run.runId);
       addToast({type: 'success', message: 'Cancellation requested'});
       if (onRefresh) await onRefresh();
-    } catch (e: any) {
-      addToast({type: 'error', message: e?.message ?? 'Cancel failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) ?? 'Cancel failed'});
     } finally {
       setCancelling(false);
     }
@@ -175,7 +175,7 @@ export default function InlineRunDetail({
       );
       if (onRefresh) await onRefresh();
     } catch (e) {
-      setSyncStatus(`Sync failed: ${e instanceof Error ? e.message : String(e)}`);
+      setSyncStatus(`Sync failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
     } finally {
       setSyncing(false);
     }
@@ -190,7 +190,7 @@ export default function InlineRunDetail({
       setSyncStatus(`Reset to run state: ${r.details.join(', ')}`);
       if (onRefresh) await onRefresh();
     } catch (e) {
-      setSyncStatus(`Reset failed: ${e instanceof Error ? e.message : String(e)}`);
+      setSyncStatus(`Reset failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
     } finally {
       setResettingOriginal(false);
     }
@@ -207,7 +207,7 @@ export default function InlineRunDetail({
         setPushStatus('Pushed — PR opening on Bitbucket');
         if (onRefresh) await onRefresh();
       } catch (e) {
-        setPushStatus(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
+        setPushStatus(`Push failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
       } finally {
         setPushing(false);
       }
@@ -229,7 +229,7 @@ export default function InlineRunDetail({
       setPushStatus('Pushed — PR opening on GitHub');
       if (onRefresh) await onRefresh();
     } catch (e) {
-      setPushStatus(`Push failed: ${e instanceof Error ? e.message : String(e)}`);
+      setPushStatus(`Push failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
     } finally {
       setPushing(false);
     }
@@ -247,7 +247,9 @@ export default function InlineRunDetail({
   // (mirrors RunDetail.failedTasks). Includes parents whose subtasks failed
   // even when the parent's own status was incorrectly persisted as COMPLETE.
   const failedTasks = useMemo(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (!run.tasks) return [] as any[];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const all = run.tasks as any[];
     const parentIdsWithFailedSubtasks = new Set(
       all
@@ -266,11 +268,12 @@ export default function InlineRunDetail({
     if (failedTasks.length === 0) return;
     setRetryingFailed(true);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await Promise.all(failedTasks.map((t: any) => retryTask(run.runId, t.taskId)));
       addToast({type: 'success', message: `Retrying ${failedTasks.length} failed task(s)`});
       if (onRefresh) await onRefresh();
-    } catch (e: any) {
-      addToast({type: 'error', message: e?.message ?? 'Retry failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) ?? 'Retry failed'});
     } finally {
       setRetryingFailed(false);
     }
@@ -442,6 +445,7 @@ export default function InlineRunDetail({
         )}
         {(run.scmPrUrl || run.githubPrUrl) && (
           <a
+            // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             href={run.scmPrUrl ?? run.githubPrUrl!}
             target='_blank'
             rel='noreferrer'
@@ -500,7 +504,9 @@ export default function InlineRunDetail({
           runStartedAt: run.startedAt,
           runCompletedAt: run.completedAt,
           tasksTotal: run.tasks?.length ?? null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           tasksComplete: run.tasks?.filter((t: any) => t.status === 'COMPLETE').length ?? null,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           provider: (run as any).aiProvider ?? null,
         }}
         retryFailed={
@@ -534,7 +540,7 @@ function CodePanel({run}: {run: RunDetail}) {
     setError(null);
     getFiles(run.runId)
       .then(setFiles)
-      .catch((e) => setError(e instanceof Error ? e.message : 'Failed to list files'))
+      .catch((e) => setError(e instanceof Error ? errMsg(e) : 'Failed to list files'))
       .finally(() => setLoading(false));
   }, [open, run.runId, files]);
 

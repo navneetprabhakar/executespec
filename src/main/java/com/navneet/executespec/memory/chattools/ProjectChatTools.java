@@ -74,7 +74,7 @@ public class ProjectChatTools {
   public record ToolContext(String projectId, String userId, String callerPat) {}
 
   /**
-   * Build the per-turn tool list. Pass the result to {@code LlmRequestV2.toolsOverride(...)} so
+   * Build the per-turn tool list. Pass the result to {@code LlmRequest.toolsOverride(...)} so
    * Spring AI exposes the tools to the model and dispatches calls back into this class.
    */
   public List<ToolCallback> bind(ToolContext ctx) {

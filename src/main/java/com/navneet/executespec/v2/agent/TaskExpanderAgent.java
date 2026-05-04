@@ -44,7 +44,7 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>One LLM call per task. No retry — failure surfaces back to the orchestrator which marks
  *       {@code agent_task.expansion_status = FAILED} and lets the coherence pass decide whether to
  *       recover.
- *   <li>Tool: {@code submitTaskDetail}. Output is a single {@link PlannedTaskV2} with the original
+ *   <li>Tool: {@code submitTaskDetail}. Output is a single {@link PlannedTask} with the original
  *       skeleton fields preserved.
  * </ul>
  *
@@ -66,17 +66,17 @@ public class TaskExpanderAgent {
   private static final int EXPAND_MAX_TOKENS = 3_000;
 
   /**
-   * Expand one skeleton task into a fully-bodied {@link PlannedTaskV2}. Returns the original
-   * skeleton with description/touchesFiles/hardConstraints/ meetsRequirements filled in. The id,
-   * title, complexity, type, and dependsOn fields are preserved verbatim from the input.
+   * Expand one skeleton task into a fully-bodied {@link PlannedTask}. Returns the original skeleton
+   * with description/touchesFiles/hardConstraints/ meetsRequirements filled in. The id, title,
+   * complexity, type, and dependsOn fields are preserved verbatim from the input.
    *
    * @param skeleton the outline-emitted skeleton (id + title + complexity at minimum)
    * @param plan the full plan for cross-task context (sibling skeletons + requirements)
    * @param req planner-request providing provider, workspace summary, etc.
    * @param context per-task execution context for the LLM router
    */
-  public PlannedTaskV2 expand(
-      PlannedTaskV2 skeleton, PlanV2 plan, PlannerRequestV2 req, ExecutionContext context) {
+  public PlannedTask expand(
+      PlannedTask skeleton, Plan plan, PlannerRequest req, ExecutionContext context) {
     if (skeleton == null) throw new IllegalArgumentException("skeleton required");
 
     String systemPrompt =
@@ -127,7 +127,7 @@ public class TaskExpanderAgent {
 
     ChatResponse resp =
         router.call(
-            LlmRequestV2.builder()
+            LlmRequest.builder()
                 .provider(resolved.providerName())
                 .model(resolved.getModel())
                 .messages(messages)
@@ -162,7 +162,7 @@ public class TaskExpanderAgent {
     return mergeExpansion(skeleton, expandCall.arguments());
   }
 
-  private PlannedTaskV2 mergeExpansion(PlannedTaskV2 skeleton, String argsJson) {
+  private PlannedTask mergeExpansion(PlannedTask skeleton, String argsJson) {
     JsonNode root;
     try {
       root = objectMapper.readTree(argsJson);
@@ -198,7 +198,7 @@ public class TaskExpanderAgent {
     List<String> hardConstraints = stringList(root.path("hardConstraints"));
     List<String> meetsRequirements = stringList(root.path("meetsRequirements"));
 
-    return PlannedTaskV2.builder()
+    return PlannedTask.builder()
         .id(skeleton.id())
         .title(skeleton.title())
         .description(description)
@@ -267,7 +267,7 @@ public class TaskExpanderAgent {
     }
   }
 
-  private static String renderRequirements(PlanV2 plan) {
+  private static String renderRequirements(Plan plan) {
     if (plan.requirements() == null || plan.requirements().isEmpty()) {
       return "(no requirements list — outline planner skipped requirement enumeration)";
     }
@@ -284,10 +284,10 @@ public class TaskExpanderAgent {
     return sb.toString();
   }
 
-  private static String renderSkeletons(PlanV2 plan, String currentId) {
+  private static String renderSkeletons(Plan plan, String currentId) {
     if (plan.tasks() == null || plan.tasks().isEmpty()) return "(no sibling tasks)";
     StringBuilder sb = new StringBuilder();
-    for (PlannedTaskV2 t : plan.tasks()) {
+    for (PlannedTask t : plan.tasks()) {
       if (t.id().equals(currentId)) continue; // skip self
       sb.append("- ")
           .append(t.id())

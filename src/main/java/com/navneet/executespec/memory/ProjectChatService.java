@@ -14,7 +14,7 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.v2.agent.LlmRequestV2;
+import com.navneet.executespec.v2.agent.LlmRequest;
 import com.navneet.executespec.v2.agent.LlmRouterV2;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 
@@ -151,7 +151,7 @@ public class ProjectChatService {
               Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
       ChatResponse resp =
           router.call(
-              LlmRequestV2.builder()
+              LlmRequest.builder()
                   .provider(resolved.getActualProvider().name().toLowerCase())
                   .model(resolved.getModel())
                   .messages(
@@ -259,7 +259,7 @@ public class ProjectChatService {
               java.nio.file.Paths.get(System.getProperty("java.io.tmpdir")).toAbsolutePath());
       ChatResponse resp =
           router.call(
-              LlmRequestV2.builder()
+              LlmRequest.builder()
                   .provider(resolved.getActualProvider().name().toLowerCase())
                   .model(resolved.getModel())
                   .messages(
@@ -309,7 +309,7 @@ public class ProjectChatService {
    * {@code internalToolExecutionEnabled(false)} (the V2 worker pattern handles its own loop).
    * Without this loop, the model emits a {@code tool_use} block and we'd save just the
    * pre-tool-call text ("Let me pull the latest architecture...") and stop, never getting the
-   * follow-through. We mirror the loop in {@code WorkerAgentV2}: dispatch each {@code ToolCall}
+   * follow-through. We mirror the loop in {@code WorkerAgent}: dispatch each {@code ToolCall}
    * through the matching {@link ToolCallback}, append a {@link ToolResponseMessage}, and re-call
    * the LLM until the model stops emitting tool calls (or we hit {@link #MAX_TOOL_ROUNDS}).
    */
@@ -360,7 +360,7 @@ public class ProjectChatService {
       for (int round = 0; round < MAX_TOOL_ROUNDS; round++) {
         ChatResponse resp =
             router.call(
-                LlmRequestV2.builder()
+                LlmRequest.builder()
                     .provider(resolved.getActualProvider().name().toLowerCase())
                     .model(resolved.getModel())
                     .messages(conversation)

@@ -5,7 +5,7 @@ import {
   type InvariantSummary,
   type InvariantViolation,
 } from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 /**
  * M-015 (Wave 2) — Project → Code → Invariants panel.
@@ -31,7 +31,7 @@ export default function InvariantPanel({projectId}: {projectId: string}) {
         setViolations(vios);
       })
       .catch((e) => {
-        if (alive) setError(e?.message ?? 'Failed to load invariants');
+        if (alive) setError(errMsg(e) ?? 'Failed to load invariants');
       });
     return () => {
       alive = false;

@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
  * execute when BOTH the preview is running AND tests are compiled.
  *
  * <p>Uses Spring events + in-memory coordination state per run. No internal timeout — the
- * report-generation safety cap in V2RunOrchestrator (10 min on the CompletableFuture) is the single
+ * report-generation safety cap in RunOrchestrator (10 min on the CompletableFuture) is the single
  * timeout authority. Call {@link #cancelIfPending(String)} before report generation to release runs
  * whose preview never started.
  */
@@ -116,7 +116,7 @@ public class TestPreviewCoordinator {
     }
 
     // Start preview now that tests are ready — ensures full TTL for test execution.
-    // The 10-minute CompletableFuture timeout in V2RunOrchestrator.generateValidationReport()
+    // The 10-minute CompletableFuture timeout in RunOrchestrator.generateValidationReport()
     // is the safety net if preview startup takes too long.
     startPreviewForTests(event.runId());
     // Don't call tryExecute() here — onPreviewReady() will trigger it when preview is live
@@ -128,7 +128,7 @@ public class TestPreviewCoordinator {
    * finish.
    */
   private void startPreviewForTests(String runId) {
-    // Check if a preview is already running (auto-started by V2RunOrchestrator after COMPLETE).
+    // Check if a preview is already running (auto-started by RunOrchestrator after COMPLETE).
     // If so, reuse it instead of starting a duplicate.
     var existingSession = previewService().getStatus(runId);
     if (existingSession != null && existingSession.status() == PreviewStatus.RUNNING) {
@@ -269,7 +269,7 @@ public class TestPreviewCoordinator {
   }
 
   /**
-   * Cancel pending test execution for a run if preview never started. Called by V2RunOrchestrator
+   * Cancel pending test execution for a run if preview never started. Called by RunOrchestrator
    * before report generation so the CompletableFuture is completed immediately (with an empty
    * summary) instead of blocking for the 10-minute safety timeout.
    *

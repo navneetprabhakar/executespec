@@ -54,7 +54,7 @@ public class ExecutionOrchestrator {
   private final ExecutionBranchService branchService;
   private final SseBroadcaster broadcaster;
   private final com.navneet.executespec.repo.GitHubRepoService gitHub;
-  private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
+  private final com.navneet.executespec.v2.integration.RunOrchestrator v2Orchestrator;
   private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   private final ExecutionRunCasUpdater runCas;
 

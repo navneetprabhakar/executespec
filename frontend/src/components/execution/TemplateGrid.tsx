@@ -10,6 +10,7 @@
  * remains for tight surfaces (ExecutionSetup inline header).
  */
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {FileText, Plus} from 'lucide-react';
 import {listSpecTemplates, type SpecTemplate} from '@/lib/api';
 
@@ -44,7 +45,7 @@ export default function TemplateGrid({
     setLoading(true);
     listSpecTemplates(projectId)
       .then(setItems)
-      .catch((e) => setError(e instanceof Error ? e.message : String(e)))
+      .catch((e) => setError(e instanceof Error ? errMsg(e) : String(e)))
       .finally(() => setLoading(false));
   }, [projectId]);
 

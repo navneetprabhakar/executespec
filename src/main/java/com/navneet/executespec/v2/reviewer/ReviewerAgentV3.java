@@ -13,10 +13,10 @@ import jakarta.annotation.PreDestroy;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.navneet.executespec.v2.agent.WorkerAgentV2;
+import com.navneet.executespec.v2.agent.WorkerAgent;
 import com.navneet.executespec.v2.agent.WorkerResult;
 import com.navneet.executespec.v2.agent.WorkerTaskRequest;
-import com.navneet.executespec.v2.observability.V2Metrics;
+import com.navneet.executespec.v2.observability.Metrics;
 import com.navneet.executespec.v2.tool.BuildProjectTool;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import com.navneet.executespec.v2.tool.ToolResult;
@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 post-execution code reviewer.
  *
- * <p>Runs after {@link com.navneet.executespec.v2.harness.SequentialExecutorV2} completes. Executes
+ * <p>Runs after {@link com.navneet.executespec.v2.harness.SequentialExecutor} completes. Executes
  * two review passes as narrowly-scoped worker invocations:
  *
  * <ol>
@@ -46,7 +46,7 @@ import lombok.extern.slf4j.Slf4j;
  * (nothing fixed) / FIXED_ISSUES (fixes applied + build passes) / UNRESOLVED_ISSUES (build still
  * fails) / REVIEW_FAILED (a pass didn't reach COMPLETED).
  *
- * <p>Implementation strategy: the reviewer is a thin composition over {@link WorkerAgentV2} — it
+ * <p>Implementation strategy: the reviewer is a thin composition over {@link WorkerAgent} — it
  * sends review-focused prompts through the same agent loop rather than reinventing it. This gives
  * reviewer the same native tool calling, context handling, and completeTask signaling for free.
  */
@@ -83,10 +83,10 @@ public class ReviewerAgentV3 {
   // chopped mid-stream, returning ERROR → REVIEW_FAILED → skipping the final
   // build entirely → FINAL_BUILD_FAILED reason cascading to PARTIAL.
 
-  private final WorkerAgentV2 worker;
+  private final WorkerAgent worker;
   private final BuildProjectTool buildProjectTool;
   private final ObjectMapper objectMapper;
-  private final V2Metrics metrics;
+  private final Metrics metrics;
   // v2.5.12 — resolve PLANNING-tier model from the matrix (same tier as
   // planner). Was req.model() (run-level worker default), so YAML matrix
   // changes for the reviewer had no effect.
@@ -116,13 +116,13 @@ public class ReviewerAgentV3 {
     }
   }
 
-  public ReviewerResult review(ReviewerRequestV2 req) {
+  public ReviewerResult review(ReviewerRequest req) {
     ReviewerResult result = reviewImpl(req);
     metrics.recordReviewerVerdict(result.overall().name());
     return result;
   }
 
-  private ReviewerResult reviewImpl(ReviewerRequestV2 req) {
+  private ReviewerResult reviewImpl(ReviewerRequest req) {
     long start = System.currentTimeMillis();
     int maxIter =
         (req.maxIterationsPerPass() == null || req.maxIterationsPerPass() <= 0)
@@ -235,7 +235,7 @@ public class ReviewerAgentV3 {
   // ─── helpers ─────────────────────────────────────────────────────────────
 
   private WorkerResult runPass(
-      ReviewerRequestV2 req, int maxIter, String taskIdSuffix, String systemPrompt) {
+      ReviewerRequest req, int maxIter, String taskIdSuffix, String systemPrompt) {
     ExecutionContext passCtx =
         new ExecutionContext(
             req.context().runId(),
@@ -274,11 +274,11 @@ public class ReviewerAgentV3 {
    * future is cancelled (interrupting the worker thread); we return a synthetic {@link
    * WorkerResult} with outcome {@code ERROR} so {@link #determineOverall} treats it as
    * REVIEW_FAILED and {@link
-   * com.navneet.executespec.v2.integration.V2RunOrchestrator#resolveTerminalStatus} falls through
-   * to the build + execution signals.
+   * com.navneet.executespec.v2.integration.RunOrchestrator#resolveTerminalStatus} falls through to
+   * the build + execution signals.
    */
   private WorkerResult runPassWithTimeout(
-      ReviewerRequestV2 req,
+      ReviewerRequest req,
       int maxIter,
       String taskIdSuffix,
       String systemPrompt,

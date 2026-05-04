@@ -42,10 +42,12 @@ export default function TokenBubbleChart({metrics}: {metrics: MetricsResponse | 
 
     const data = runsByStatus.map(([status, count]) => ({status, count: count as number}));
     const pack = d3.pack<(typeof data)[0]>().size([W, H]).padding(8);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const root = d3.hierarchy({children: data} as any).sum((d: any) => d.count ?? 0);
     const nodes = pack(root).leaves();
 
     const defs = svg.append('defs');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     nodes.forEach((node: any) => {
       const g = defs.append('radialGradient').attr('id', `bubble-${node.data.status}`);
       g.append('stop')
@@ -62,10 +64,14 @@ export default function TokenBubbleChart({metrics}: {metrics: MetricsResponse | 
       .selectAll('g')
       .data(nodes)
       .join('g')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
     g.append('circle')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('r', (d: any) => d.r)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('fill', (d: any) => `url(#bubble-${d.data.status})`)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('stroke', (d: any) => STATUS_HEX[d.data.status] ?? '#8B5CF6')
       .attr('stroke-width', 1)
       .attr('stroke-opacity', 0.4);
@@ -74,16 +80,21 @@ export default function TokenBubbleChart({metrics}: {metrics: MetricsResponse | 
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
       .attr('fill', 'rgba(255,255,255,0.9)')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('font-size', (d: any) => Math.max(10, d.r / 2.5))
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .text((d: any) => d.data.count);
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     g.filter((d: any) => d.r > 24)
       .append('text')
       .attr('text-anchor', 'middle')
       .attr('dominant-baseline', 'middle')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('y', (d: any) => d.r / 3)
       .attr('fill', 'rgba(255,255,255,0.5)')
       .attr('font-size', 9)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .text((d: any) => d.data.status.replace('_', ' '));
   }, [metrics]);
 
