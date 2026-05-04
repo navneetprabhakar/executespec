@@ -31,6 +31,15 @@ export default function ProjectPrRollup({
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
+  // Elapsed seconds since the current refresh started; ticks at 1Hz while
+  // refreshing so the user sees the operation is alive instead of a static
+  // spinner. Resets to 0 on each refresh kick-off.
+  const [elapsedSec, setElapsedSec] = useState(0);
+  // Set when a refresh failed but the backend may still finish in the
+  // background (524/500 are both compatible with eventual completion). We
+  // schedule a follow-up re-fetch so the UI reflects the eventual DB write
+  // without forcing the user to click Refresh a second time.
+  const [refetchPending, setRefetchPending] = useState(false);
 
   const load = () =>
     executionApi
@@ -43,9 +52,37 @@ export default function ProjectPrRollup({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
+  // 1Hz tick while refreshing so the elapsed counter updates live.
+  useEffect(() => {
+    if (!refreshing) return;
+    const t = window.setInterval(() => setElapsedSec((s) => s + 1), 1000);
+    return () => window.clearInterval(t);
+  }, [refreshing]);
+
+  // Eventual-consistency fallback: after a refresh error, the backend may
+  // still complete the GitHub poll + DB write in the background (the user
+  // observed exactly this after the 2026-05-04 hotfix — a CF 524 came back
+  // but the PRs were updated when they came back to the page). Quietly
+  // re-fetch the rollup at +15s and +45s so the UI catches up without
+  // requiring a manual retry.
+  useEffect(() => {
+    if (!refetchPending) return;
+    const t1 = window.setTimeout(() => load(), 15_000);
+    const t2 = window.setTimeout(() => {
+      load();
+      setRefetchPending(false);
+    }, 45_000);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [refetchPending, projectId]);
+
   const onRefresh = async () => {
     setRefreshing(true);
     setError(null);
+    setElapsedSec(0);
     try {
       const r = await refreshProjectPrs(projectId);
       setLastRefresh(
@@ -55,34 +92,109 @@ export default function ProjectPrRollup({
       );
       await load();
     } catch (e) {
-      setError(errMsg(e) ?? 'Refresh failed');
+      // Soft-fail: the backend's GitHub poll + DB write often completes
+      // even when the foreground request errored or timed out at the edge.
+      // Schedule the eventual-consistency re-fetch + give the user honest
+      // copy that explains what's happening rather than a hard "failed".
+      setError(`${errMsg(e) ?? 'Refresh failed'} — re-fetching statuses in the background.`);
+      setRefetchPending(true);
+      // Best-effort immediate re-fetch in case the DB already has the
+      // updated rows by the time the foreground call errored.
+      try {
+        await load();
+      } catch {
+        /* ignore — handled by load's own catch */
+      }
     } finally {
       setRefreshing(false);
     }
   };
 
-  if (error) return <div className='text-xs text-accent-red'>{error}</div>;
-  if (prs == null) return <div className='text-xs text-muted'>Loading PRs…</div>;
+  if (prs == null && !error) return <div className='text-xs text-muted'>Loading PRs…</div>;
+  if (prs == null) {
+    // Initial load itself failed (couldn't even fetch the rollup). Surface
+    // the error and a retry; this branch fires before any refresh happened.
+    return (
+      <div className='text-xs text-accent-red'>
+        {error}{' '}
+        <button
+          type='button'
+          onClick={() => {
+            setError(null);
+            load();
+          }}
+          className='underline ml-1'
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
+
+  const prCount = prs.length;
+
+  // Banner shown WHILE a refresh is in flight. Communicates the operation,
+  // shows elapsed time so the spinner isn't the only signal of progress, and
+  // shifts copy past the 5s mark so the user knows the "slow" path is normal
+  // (private-repo polls + GitHub rate limits routinely take >10s).
+  const refreshingBanner = refreshing && (
+    <div
+      className='flex items-center gap-2 mb-2 px-2 py-1.5 text-[11px] rounded-sm border border-accent-blue/40 bg-accent-blue/5 text-accent-blue'
+      role='status'
+      aria-live='polite'
+    >
+      <Loader2 className='h-3.5 w-3.5 animate-spin shrink-0' />
+      <span className='flex-1'>
+        {elapsedSec < 5
+          ? `Polling GitHub for ${prCount} pull request${prCount === 1 ? '' : 's'}…`
+          : elapsedSec < 20
+            ? `Still polling GitHub… ${elapsedSec}s elapsed (private repos can take a moment).`
+            : `Taking longer than usual — ${elapsedSec}s elapsed. The backend will keep going; you don't need to retry.`}
+      </span>
+    </div>
+  );
 
   const header = (
     <div className='flex items-center justify-between mb-2'>
       <h3 className='text-xs font-medium text-secondary'>Pull requests</h3>
       <div className='flex items-center gap-2'>
-        {lastRefresh && <span className='text-[11px] text-muted'>{lastRefresh}</span>}
+        {lastRefresh && !refreshing && (
+          <span className='text-[11px] text-muted'>{lastRefresh}</span>
+        )}
         <button
           onClick={onRefresh}
           disabled={refreshing}
-          className='inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50'
-          title='Poll GitHub for latest PR status; auto-analyse on any new merge'
+          aria-busy={refreshing}
+          className='inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 disabled:cursor-progress'
+          title={
+            refreshing
+              ? 'Polling GitHub — this can take up to ~30s for private repos'
+              : 'Poll GitHub for latest PR status; auto-analyse on any new merge'
+          }
         >
           {refreshing ? (
             <Loader2 className='h-3 w-3 animate-spin' />
           ) : (
             <RefreshCw className='h-3 w-3' />
           )}
-          Refresh
+          {refreshing ? `Refreshing… ${elapsedSec}s` : 'Refresh'}
         </button>
       </div>
+    </div>
+  );
+
+  // Soft error: refresh foreground errored but the backend may still complete
+  // (the schedule-a-refetch pattern in `onRefresh` is already handling that).
+  // Render the banner ABOVE the content so the existing PR list stays visible
+  // — never blank-screen the user on a refresh hiccup.
+  const errorBanner = error && (
+    <div
+      className='mb-2 px-2 py-1.5 text-[11px] rounded-sm border border-accent-amber/40 bg-accent-amber/10 text-accent-amber'
+      role='status'
+      aria-live='polite'
+    >
+      {error}
+      {refetchPending && ' (re-checking in 15s · 45s)'}
     </div>
   );
 
@@ -90,6 +202,8 @@ export default function ProjectPrRollup({
     return (
       <div>
         {header}
+        {refreshingBanner}
+        {errorBanner}
         <div className='text-xs text-muted'>No pull requests yet.</div>
       </div>
     );
@@ -122,6 +236,8 @@ export default function ProjectPrRollup({
   return (
     <div className='space-y-4'>
       {header}
+      {refreshingBanner}
+      {errorBanner}
       {Object.entries(byLaunch).map(([launchId, group]) => (
         <PrGroup
           key={`launch-${launchId}`}
