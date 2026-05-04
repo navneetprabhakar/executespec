@@ -153,6 +153,8 @@ Find the **type of change** you are making in the table below. Update every docu
 | `sse/` | JAVADOC §SSE channel (RunEvent, ExecutionEventTypes) |
 | `state/` | JAVADOC §7 State Management |
 | `tenant/` | JAVADOC §tenant isolation |
+| `prreview/` | CLAUDE.md v2.6.4 entry — PR Review Agent (single-call PLANNING-tier review of one PR's diff). |
+| `codereview/` | CLAUDE.md v2.6.4 entry — whole-repo Code Review Agent (semgrep + LLM augmentation, markdown report). |
 | `testgen/` | JAVADOC §5.10 Test Generation Agents; WORKFLOWS §2 |
 | `tool/` (V1 GitTool, etc.) | JAVADOC §tool (legacy V1 surface) |
 | `validator/` (CodeValidator + execution/gate/language/prompt subpackages) | JAVADOC §validator |

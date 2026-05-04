@@ -8,7 +8,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.ProjectDocGeneratorService;
@@ -16,6 +18,9 @@ import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc;
 import com.navneet.executespec.codeintel.entity.ProjectGeneratedDoc.DocType;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
+import com.navneet.executespec.codereview.CodeReviewService;
+import com.navneet.executespec.codereview.entity.CodeReviewIssue;
+import com.navneet.executespec.codereview.entity.CodeReviewScan;
 import com.navneet.executespec.memory.ProjectMemoryProvider;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
@@ -68,6 +73,8 @@ public class ProjectChatTools {
   private final PipelineRunRepository pipelineRunRepo;
   private final PullRequestRecordRepository prRepo;
   private final ProjectMemoryProvider memoryProvider;
+  private final CodeReviewService codeReviewService;
+  private final AppUserRepository appUserRepository;
   private final ObjectMapper json;
 
   /** Caller-scoped state every tool needs. {@code callerPat} may be null for public-repo orgs. */
@@ -85,7 +92,9 @@ public class ProjectChatTools {
         listRecentRuns(ctx),
         listPullRequests(ctx),
         getProjectMemory(ctx),
-        getLatestArchitecture(ctx));
+        getLatestArchitecture(ctx),
+        runCodeReview(ctx),
+        getLatestCodeReview(ctx));
   }
 
   // ── Tool 1: regenerate architecture ───────────────────────────────────────
@@ -526,5 +535,150 @@ public class ProjectChatTools {
     return projectRepo
         .findById(ctx.projectId())
         .orElseThrow(() -> new IllegalArgumentException("project not found: " + ctx.projectId()));
+  }
+
+  // ── Tool 8: run code review (whole-repo Code Review Agent) ───────────────
+
+  private ToolCallback runCodeReview(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("run_code_review")
+            .description(
+                "Run a whole-repo code review on the named repo: clone HEAD → semgrep static "
+                    + "scan → LLM augmentation pass → persist findings + markdown report. PAID "
+                    + "tier only (PRO/TEAM/MAX/ENTERPRISE; FREE returns an error envelope). "
+                    + "Returns the new scan id and a short summary; the full markdown report is "
+                    + "available via get_latest_code_review or the /api/code-reviews/{id}/report "
+                    + "download endpoint. Slow — typically 30-180 seconds depending on repo "
+                    + "size.")
+            .inputSchema(
+                """
+{
+  "type": "object",
+  "properties": {
+    "repoFullName": {
+      "type": "string",
+      "description": "owner/repo identifier of a repo linked to this project, e.g. 'navneetprabhakar/executespec'"
+    }
+  },
+  "required": ["repoFullName"]
+}
+""")
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          String repoFullName =
+              args.has("repoFullName") && !args.get("repoFullName").isNull()
+                  ? args.get("repoFullName").asText(null)
+                  : null;
+          if (repoFullName == null || repoFullName.isBlank()) {
+            return errorEnvelope("repoFullName is required");
+          }
+          // Resolve the repoId from the link table so we don't kick off a clone for a repo
+          // that isn't actually linked to the project.
+          UUID repoId = null;
+          for (ProjectRepoLink link : linkRepo.findByProjectId(ctx.projectId())) {
+            Optional<ProjectRepo> repo = repoRepo.findById(link.getRepoId());
+            if (repo.isPresent()
+                && repoFullName.equalsIgnoreCase(repo.get().getGithubRepoFullName())) {
+              repoId = repo.get().getId();
+              break;
+            }
+          }
+          if (repoId == null) {
+            return errorEnvelope(
+                "Repo " + repoFullName + " is not linked to this project. Use list_repos.");
+          }
+          AppUser caller =
+              ctx.userId() == null ? null : appUserRepository.findById(ctx.userId()).orElse(null);
+          try {
+            codeReviewService.assertTierAndQuota(caller);
+          } catch (CodeReviewService.TierBlockedException tbe) {
+            return errorEnvelope("tier_blocked: " + tbe.getMessage());
+          } catch (CodeReviewService.QuotaExhaustedException qee) {
+            return errorEnvelope("quota_exhausted: " + qee.getMessage());
+          }
+          CodeReviewScan scan =
+              codeReviewService.submitScan(ctx.projectId(), repoId, repoFullName, caller);
+          ObjectNode out = json.createObjectNode();
+          out.put("ok", true);
+          out.put("scanId", scan.getId().toString());
+          out.put("status", scan.getStatus());
+          out.put(
+              "summary",
+              "Code review scan queued for "
+                  + repoFullName
+                  + ". Status will progress through CLOSING → STATIC_RUNNING → LLM_RUNNING → "
+                  + "COMPLETE. Run get_latest_code_review once it's done to read the report.");
+          return out;
+        });
+  }
+
+  // ── Tool 9: get latest code review ──────────────────────────────────────
+
+  private ToolCallback getLatestCodeReview(ToolContext ctx) {
+    ToolDefinition def =
+        DefaultToolDefinition.builder()
+            .name("get_latest_code_review")
+            .description(
+                "Read the latest COMPLETE whole-repo code review for the named repo on this "
+                    + "project. Returns the markdown report verbatim plus structured issue counts. "
+                    + "Use to surface the report to the user without forcing a re-scan; combine "
+                    + "with run_code_review when the SHA has moved or the user explicitly asks "
+                    + "for a refresh. Read-only.")
+            .inputSchema(
+                """
+                {
+                  "type": "object",
+                  "properties": {
+                    "repoFullName": {
+                      "type": "string",
+                      "description": "owner/repo identifier of a linked repo"
+                    }
+                  },
+                  "required": ["repoFullName"]
+                }
+                """)
+            .build();
+    return new SimpleToolCallback(
+        def,
+        args -> {
+          String repoFullName =
+              args.has("repoFullName") && !args.get("repoFullName").isNull()
+                  ? args.get("repoFullName").asText(null)
+                  : null;
+          if (repoFullName == null || repoFullName.isBlank()) {
+            return errorEnvelope("repoFullName is required");
+          }
+          Optional<CodeReviewScan> latest =
+              codeReviewService.latestForProjectRepo(ctx.projectId(), repoFullName);
+          ObjectNode out = json.createObjectNode();
+          if (latest.isEmpty()) {
+            out.put("ok", true);
+            out.put(
+                "summary",
+                "No completed code review for "
+                    + repoFullName
+                    + " yet. Call run_code_review to start one.");
+            return out;
+          }
+          CodeReviewScan scan = latest.get();
+          List<CodeReviewIssue> issues = codeReviewService.openIssuesFor(scan.getId());
+          long critical = issues.stream().filter(i -> "CRITICAL".equals(i.getSeverity())).count();
+          long major = issues.stream().filter(i -> "MAJOR".equals(i.getSeverity())).count();
+          out.put("ok", true);
+          out.put("scanId", scan.getId().toString());
+          out.put("repoFullName", scan.getRepoFullName());
+          out.put("scannedSha", scan.getScannedSha());
+          out.put("status", scan.getStatus());
+          out.put("totalOpenIssues", issues.size());
+          out.put("criticalOpen", critical);
+          out.put("majorOpen", major);
+          out.put(
+              "reportMarkdown", scan.getReportMarkdown() == null ? "" : scan.getReportMarkdown());
+          if (scan.getFinishedAt() != null) out.put("finishedAt", scan.getFinishedAt().toString());
+          return out;
+        });
   }
 }

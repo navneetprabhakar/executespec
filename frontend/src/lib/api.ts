@@ -3156,3 +3156,114 @@ export function requiresCostCap(user: AuthUser | null | undefined): boolean {
   if (tier === 'PRO') return !hasByok;
   return true; // FREE
 }
+
+// ── v2.6.4 — PR Review + Code Review agents (paid tier only) ─────────────────
+//
+// Both agents are gated on backend at PRO/TEAM/MAX/ENTERPRISE; FREE → 403, quota
+// exhausted → 429. The frontend treats both shapes identically — an error-shaped
+// response (toast / disabled button) — and surfaces the message verbatim.
+
+export interface PrReviewDto {
+  id: string;
+  projectId: string;
+  repoFullName: string;
+  prNumber: number;
+  headSha: string;
+  status: 'QUEUED' | 'RUNNING' | 'COMPLETE' | 'FAILED';
+  verdict: 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT' | null;
+  summary: string | null;
+  costUsd: number | null;
+  durationMs: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+  failureReason: string | null;
+}
+
+export interface PrReviewCommentDto {
+  id: string;
+  filePath: string;
+  lineNumber: number;
+  side: 'LEFT' | 'RIGHT';
+  category: string | null;
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO' | null;
+  body: string;
+}
+
+export interface PrReviewWithComments {
+  review: PrReviewDto;
+  comments: PrReviewCommentDto[];
+}
+
+export const submitPrReview = (body: {projectId: string; repoFullName: string; prNumber: number}) =>
+  req<PrReviewDto>('/pr-reviews', {method: 'POST', body: JSON.stringify(body)});
+
+export const getPrReview = (id: string) => req<PrReviewWithComments>(`/pr-reviews/${id}`);
+
+export const listPrReviewsForPr = (repoFullName: string, prNumber: number) =>
+  req<PrReviewDto[]>(`/pr-reviews?repo=${encodeURIComponent(repoFullName)}&number=${prNumber}`);
+
+export const listPrReviewsForProject = (projectId: string) =>
+  req<PrReviewDto[]>(`/projects/${projectId}/pr-reviews`);
+
+export interface CodeReviewScanDto {
+  id: string;
+  projectId: string;
+  repoId: string | null;
+  repoFullName: string;
+  scannedSha: string;
+  status: 'QUEUED' | 'CLONING' | 'STATIC_RUNNING' | 'LLM_RUNNING' | 'COMPLETE' | 'FAILED';
+  triggerSource: 'MANUAL' | 'SCHEDULED' | 'POST_MERGE';
+  totalFilesScanned: number | null;
+  totalLoc: number | null;
+  staticFindingsCount: number | null;
+  llmFindingsCount: number | null;
+  llmFilteredOutCount: number | null;
+  costUsd: number | null;
+  durationMs: number | null;
+  startedAt: string;
+  finishedAt: string | null;
+  failureReason: string | null;
+}
+
+export interface CodeReviewIssueDto {
+  id: string;
+  fingerprint: string;
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO';
+  category: string;
+  source: 'STATIC' | 'LLM' | 'HYBRID';
+  ruleId: string | null;
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  message: string;
+  suggestedFix: string | null;
+  status: 'OPEN' | 'RESOLVED' | 'DISMISSED' | 'FALSE_POSITIVE';
+}
+
+export interface CodeReviewScanWithIssues {
+  scan: CodeReviewScanDto;
+  reportMarkdown: string | null;
+  issues: CodeReviewIssueDto[];
+}
+
+export const submitCodeReview = (body: {
+  projectId: string;
+  repoId?: string;
+  repoFullName: string;
+}) => req<CodeReviewScanDto>('/code-reviews', {method: 'POST', body: JSON.stringify(body)});
+
+export const getCodeReview = (id: string) => req<CodeReviewScanWithIssues>(`/code-reviews/${id}`);
+
+export const listCodeReviewsForProject = (projectId: string) =>
+  req<CodeReviewScanDto[]>(`/projects/${projectId}/code-reviews`);
+
+export const getLatestCodeReviewForRepo = (projectId: string, repoFullName: string) =>
+  req<CodeReviewScanWithIssues | null>(
+    `/projects/${projectId}/code-reviews/latest?repo=${encodeURIComponent(repoFullName)}`,
+  );
+
+/**
+ * Direct-link to the markdown download — handy for the chat surface to embed an
+ * "Open report" link and for the Code Quality tab's Download button.
+ */
+export const codeReviewReportDownloadUrl = (id: string) => `${BASE}/code-reviews/${id}/report`;
