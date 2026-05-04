@@ -35,18 +35,32 @@ export default function ProjectLaunchesList({projectId}: {projectId: string}) {
     <div className='space-y-1.5'>
       {launches.map((l) => {
         const doneCount = l.solutions.filter((s) => s.status === 'DONE').length;
+        // 2026-05-04 — route based on the V169-companion `kind` discriminator. Without it,
+        // PIPELINE_RUN entries (V2 runs from the project chat / V3 composer) routed to
+        // /executions/{id} which doesn't recognise pipeline_run ids → ExecutionViewPage fell
+        // through to the setup form → user clicking an existing run got the new-launch form
+        // and any submit there created an ENTIRELY NEW launch. Missing kind is treated as
+        // EXECUTION for back-compat with pre-V169 API responses.
+        const isPipelineRun = l.kind === 'PIPELINE_RUN';
+        const target = isPipelineRun
+          ? `/projects/${projectId}/runs/${l.id}`
+          : `/projects/${projectId}/executions/${l.id}`;
+        // PipelineRun entries don't have solutions (they're a single V2 run, not a multi-repo
+        // launch with per-solution rows), so the "repos × N · M/N done" right-rail line is
+        // misleading. Show the V2 token count instead.
         return (
           <Link
             key={l.id}
-            to={`/projects/${projectId}/executions/${l.id}`}
+            to={target}
             className='flex items-center gap-2 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 text-xs hover:bg-[var(--gray-200)]'
           >
             <StatusBadge status={l.status} className='text-[11px]' />
             <span className='font-mono text-[11px] text-muted'>{l.id.substring(0, 8)}</span>
             <span className='truncate flex-1'>{l.requirement.split('\n')[0]}</span>
             <span className='text-[11px] text-muted'>
-              repos × {l.solutions.length} · {doneCount}/{l.solutions.length} done ·{' '}
-              {l.totalActualTokens ?? 0} tok
+              {isPipelineRun
+                ? `${l.totalActualTokens ?? 0} tok`
+                : `repos × ${l.solutions.length} · ${doneCount}/${l.solutions.length} done · ${l.totalActualTokens ?? 0} tok`}
             </span>
             {l.jiraEnabled && <span className='text-[11px] text-accent-blue'>JIRA</span>}
           </Link>
