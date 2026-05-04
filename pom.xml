@@ -263,6 +263,14 @@
       <artifactId>spring-boot-starter-aop</artifactId>
     </dependency>
 
+    <!-- Spring Retry — used by @Retryable on SequentialExecutor.persistTaskStatus
+         to recover transient DataAccessException blips that previously left tasks
+         stuck in WORKING (dev run 3b739e94 task T1, 2026-05-04). -->
+    <dependency>
+      <groupId>org.springframework.retry</groupId>
+      <artifactId>spring-retry</artifactId>
+    </dependency>
+
     <!-- Spring Validation -->
     <dependency>
       <groupId>org.springframework.boot</groupId>
