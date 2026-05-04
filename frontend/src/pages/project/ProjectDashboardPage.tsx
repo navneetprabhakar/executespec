@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
-import {ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus} from 'lucide-react';
+import {ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus, Sparkles} from 'lucide-react';
 import {useProjectStore} from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
 import ProjectPrRollup from '@/components/project/ProjectPrRollup';
@@ -443,6 +443,24 @@ export default function ProjectDashboardPage() {
               </div>
             )}
             <NewExecutionButton projectId={projectId} repoCount={repoCount} />
+            {/* P-01 (UX audit, 2026-05-04) — reverse cross-link to the
+                V3ProjectHome composer surface ("What do you want to
+                build?" with one-shot spec textbox + iteration thread).
+                Pre-fix users on the dashboard had no path back to the
+                composer surface short of typing /projects/{id} into the
+                URL bar. This button closes that loop; V3ProjectHome's
+                "Dashboard →" button is the matching forward link. The
+                two surfaces stay distinct (per the Option C decision)
+                but each one knows about the other. */}
+            <Link
+              to={`/projects/${projectId}`}
+              aria-label='Open the quick-spec composer view'
+              title='Quick-spec composer — write a one-line goal, ship a draft PR.'
+              className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
+            >
+              <Sparkles className='h-3.5 w-3.5' />
+              <span className='hidden sm:inline'>Quick spec</span>
+            </Link>
             <button
               onClick={() => openDrawer('settings')}
               aria-label='Open more'
