@@ -81,6 +81,11 @@ public class PrRefreshService {
     if (toCheck.isEmpty()) return new RefreshResult(0, 0, 0);
 
     int checked = 0, updated = 0, newlyMerged = 0;
+    // Track unique projectIds that had at least one OPEN→MERGED transition in this batch.
+    // After the loop we fire ONE async architecture regen per project — without dedup, 3 PRs
+    // landing into one project would fire 3 sequential ~30-60s LLM calls and blow the
+    // Cloudflare 100s edge timeout. (P0 hotfix #3, 2026-05-04.)
+    Set<String> projectsToRegen = new HashSet<>();
     for (PullRequestRecord rec : toCheck.values()) {
       if (rec.getStatus() == PullRequestRecord.Status.MERGED
           || rec.getStatus() == PullRequestRecord.Status.CLOSED) continue;
@@ -107,11 +112,15 @@ public class PrRefreshService {
           updated++;
           if (wasOpen && next == PullRequestRecord.Status.MERGED) {
             newlyMerged++;
+            // Per-PR fast steps (notify owner, write banner) — sync, ~ms.
             try {
               cascade.onMerged(rec);
             } catch (Exception cex) {
-              log.warn("cascade failed: {}", cex.getMessage());
+              log.warn("cascade.onMerged failed: {}", cex.getMessage());
             }
+            // Capture project for the async per-project heavy regen below.
+            String pid = cascade.resolveProjectId(rec);
+            if (pid != null && !pid.isBlank()) projectsToRegen.add(pid);
           }
         }
       } catch (Exception e) {
@@ -120,6 +129,16 @@ public class PrRefreshService {
             rec.getRepoFullName(),
             rec.getPrNumber(),
             e.getMessage());
+      }
+    }
+    // Fire ONE async architecture regen per unique project. Fire-and-forget: the async method
+    // owns its own try/catch so a regen failure can't propagate back to this thread (and even if
+    // it did, the @Async proxy isolates it). Refresh returns to the caller in seconds.
+    for (String pid : projectsToRegen) {
+      try {
+        cascade.regenerateAfterMerge(pid);
+      } catch (Exception e) {
+        log.warn("PrRefresh: failed to dispatch async regen for {}: {}", pid, e.getMessage());
       }
     }
     return new RefreshResult(checked, updated, newlyMerged);
