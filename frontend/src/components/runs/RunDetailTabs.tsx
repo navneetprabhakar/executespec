@@ -94,21 +94,21 @@ export default function RunDetailTabs() {
   const fetchRuns = useRunStore((s) => s.fetchRuns);
   const [refreshing, setRefreshing] = useState(false);
 
-  // R-06 (UX audit, 2026-05-03): on non-terminal runs (PLANNING / WORKING /
-  // REVIEWING / AWAITING_APPROVAL), default the active tab to "Live Log" so
-  // the user immediately sees what the agent is doing instead of a static
-  // Overview page. Skip when the user has explicitly picked another tab in
-  // this session (activeTab !== default) — only steer the FIRST view per run.
+  // 2026-05-04 — reverted R-06's auto-flip-to-Live-Log behavior. Per user feedback,
+  // landing on Overview is the right default for ALL run states: it surfaces the
+  // run's spec, plan summary, status badge, and links to drill into the live log
+  // when the user wants it. Auto-flipping to Live Log on every fresh-run click made
+  // the Overview tab feel hidden + made it impossible to see the spec at a glance
+  // mid-flight.
+  //
+  // Users who want auto-tail behavior on in-flight runs can still explicitly click
+  // the "Live Log" tab — it remembers per-session via useUiStore.activeTab.
   const seededRunIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeRun) return;
     if (seededRunIdRef.current === activeRun.runId) return;
     seededRunIdRef.current = activeRun.runId;
-    const TERMINAL = new Set(['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL']);
-    const isInFlight = !TERMINAL.has(activeRun.status);
-    if (isInFlight && activeTab === 'overview') {
-      setActiveTab('log');
-    }
+    // No-op: previous behavior auto-flipped to 'log' for in-flight runs. Removed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun?.runId, activeRun?.status]);
 

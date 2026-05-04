@@ -366,6 +366,36 @@ public class SequentialExecutor {
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), "Starting task: " + task.title()));
     TierConfig cfg =
         tierConfigFor(task.complexity(), req.provider(), req.model(), req.projectId() != null);
+    // 2026-05-04 — quirky pre-dispatch log so the Live Log tab has more than just
+    // token counters during long worker loops. Format mirrors the "Starting task:" line so
+    // the rendering stays uniform; copy varies by complexity to surface what the user is
+    // actually waiting for (HIGH = LLM-heavy reasoning, LOW = quick code edits).
+    String complexityHint = task.complexity() == null ? "MEDIUM" : task.complexity().name();
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            task.id(),
+            switch (complexityHint) {
+              case "LOW" ->
+                  "🛠️  Worker spinning up (LOW · "
+                      + cfg.model
+                      + ", up to "
+                      + cfg.maxIter
+                      + " iters)";
+              case "HIGH" ->
+                  "🧠 Worker spinning up (HIGH · "
+                      + cfg.model
+                      + ", up to "
+                      + cfg.maxIter
+                      + " iters — heavy reasoning ahead)";
+              default ->
+                  "⚙️  Worker spinning up (MEDIUM · "
+                      + cfg.model
+                      + ", up to "
+                      + cfg.maxIter
+                      + " iters)";
+            }));
     WorkerTaskRequest workerReq =
         WorkerTaskRequest.builder()
             .provider(cfg.provider)
@@ -382,6 +412,37 @@ public class SequentialExecutor {
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
     // ride a 24h Redis TTL and are written every 5 worker iters.
     WorkerResult primary = worker.run(workerReq, resumeFrom);
+
+    // 2026-05-04 — emit a worker-summary log line right after the worker returns so the user
+    // sees outcome + iters without waiting for the smoke test to finish or scrolling back to
+    // the task badge. Format mirrors the "Starting task:" line.
+    String workerEmoji =
+        switch (primary.outcome()) {
+          case COMPLETED -> "✅";
+          case COMPLETED_BY_STAGNATION -> "⏱️ ";
+          case ITERATION_LIMIT_EXCEEDED -> "⚠️ ";
+          case STOPPED_WITHOUT_COMPLETE -> "⚠️ ";
+          case BUDGET_EXCEEDED -> "💸";
+          case ERROR -> "❌";
+        };
+    int writes = countFileWrites(primary.toolCallLog());
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            task.id(),
+            workerEmoji
+                + " Worker "
+                + primary.outcome().name()
+                + " in "
+                + primary.iterations()
+                + " iters · "
+                + primary.toolCallsDispatched()
+                + " tool calls"
+                + (writes > 0 ? " · " + writes + " file write" + (writes == 1 ? "" : "s") : "")
+                + (primary.totalLatencyMs() > 0
+                    ? " · " + (primary.totalLatencyMs() / 1000) + "s"
+                    : "")));
 
     log.info(
         "Executor task={} toolCallStats provider={} model={} complexity={} outcome={} iters={}"
@@ -797,6 +858,10 @@ public class SequentialExecutor {
   }
 
   @org.springframework.transaction.annotation.Transactional
+  @org.springframework.retry.annotation.Retryable(
+      retryFor = {org.springframework.dao.DataAccessException.class},
+      maxAttempts = 3,
+      backoff = @org.springframework.retry.annotation.Backoff(delay = 100, multiplier = 2.0))
   public void persistTaskStatus(String runId, String taskIdShort, String status) {
     persistTaskStatus(runId, taskIdShort, status, null);
   }
@@ -805,8 +870,20 @@ public class SequentialExecutor {
    * v2.5.12 — overload that stores an optional failure reason on the task row. The reason lands in
    * {@code lastLlmFailure} (already read as a fallback by {@code RunMapper.extractFailureReason})
    * so the UI shows a concrete message instead of "unknown — see worker logs".
+   *
+   * <p>2026-05-04 — {@code @Retryable} added after dev run {@code 3b739e94...} task T1 got stuck in
+   * WORKING for 90+ minutes because a single transient {@code DataAccessException} on the WORKING→
+   * COMPLETE update was silently swallowed and the executor moved on to T2. With 3 attempts + 100ms
+   * backoff (×2 multiplier = 100ms / 200ms / 400ms), transient blips no longer leave stale WORKING
+   * rows. {@code DataAccessException} is the right level — it covers Hikari connection timeouts,
+   * optimistic lock failures, and Postgres deadlocks while still letting genuine programmer errors
+   * (NullPointerException etc) propagate immediately.
    */
   @org.springframework.transaction.annotation.Transactional
+  @org.springframework.retry.annotation.Retryable(
+      retryFor = {org.springframework.dao.DataAccessException.class},
+      maxAttempts = 3,
+      backoff = @org.springframework.retry.annotation.Backoff(delay = 100, multiplier = 2.0))
   public void persistTaskStatus(
       String runId, String taskIdShort, String status, String failureReason) {
     String key = runId.substring(0, 8) + "_" + taskIdShort;
