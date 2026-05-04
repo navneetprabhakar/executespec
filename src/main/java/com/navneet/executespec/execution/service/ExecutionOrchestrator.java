@@ -23,6 +23,8 @@ import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 
+import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.context.event.EventListener;
 import org.springframework.orm.ObjectOptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
@@ -57,6 +59,64 @@ public class ExecutionOrchestrator {
   private final com.navneet.executespec.v2.integration.RunOrchestrator v2Orchestrator;
   private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   private final ExecutionRunCasUpdater runCas;
+
+  // ── Boot-time crash resume ─────────────────────────────────────────────
+
+  /**
+   * 2026-05-04 — boot-time recovery for ExecutionRuns interrupted mid-EXECUTING. Pairs with the V2
+   * PipelineRun resume in {@code StartupRunResumer}: if a Launch's solutions had spawned V2
+   * sub-runs that were in flight at the previous JVM's death, those V2 runs are resumed by V2's
+   * boot listener. This listener handles the Launch-level orchestration on top:
+   *
+   * <ul>
+   *   <li>Find every {@link ExecutionRun} in {@code EXECUTING} status (the only resumable
+   *       intermediate state at the Launch level — earlier phases like SETUP / ANALYSING /
+   *       ARCH_REVIEW / PLANNING are non-resumable today and are left to {@code
+   *       AdminReconciliationService.onApplicationReady} to fail-clean).
+   *   <li>For each: re-call {@link #executeApprovedPlan(String)} which is itself idempotent — it
+   *       skips solutions that aren't {@code QUEUED} (so {@code DONE} / {@code FAILED} / {@code
+   *       RUNNING} solutions are left alone) and re-dispatches the rest. {@code RUNNING} solutions
+   *       whose underlying V2 PipelineRun was killed pre-crash will be picked up via V2 resume;
+   *       their completion event flows back through {@code SolutionExecutionService} and advances
+   *       the Launch.
+   * </ul>
+   *
+   * <p>{@code @Async} so the boot path isn't blocked. Exceptions never propagate to startup.
+   */
+  @Async
+  @EventListener(ApplicationReadyEvent.class)
+  public void onApplicationReady() {
+    try {
+      List<ExecutionRun> resumable =
+          runRepo.findStaleNonTerminal(java.time.Instant.now()).stream()
+              .filter(r -> "EXECUTING".equals(r.getStatus()))
+              .toList();
+      if (resumable.isEmpty()) {
+        log.info("ExecutionOrchestrator boot-resume: no EXECUTING ExecutionRuns to resume");
+        return;
+      }
+      log.warn(
+          "ExecutionOrchestrator boot-resume: re-dispatching {} EXECUTING ExecutionRun(s)",
+          resumable.size());
+      for (ExecutionRun r : resumable) {
+        try {
+          log.info(
+              "ExecutionOrchestrator boot-resume: re-dispatching exec={} (status was EXECUTING"
+                  + " at boot)",
+              r.getId());
+          executeApprovedPlan(r.getId());
+        } catch (Exception e) {
+          // Per-row safety net — one bad row never blocks the rest.
+          log.error(
+              "ExecutionOrchestrator boot-resume: failed to re-dispatch exec={}: {}",
+              r.getId(),
+              e.getMessage());
+        }
+      }
+    } catch (Exception outer) {
+      log.error("ExecutionOrchestrator boot-resume: scan failed", outer);
+    }
+  }
 
   // ── Creation ───────────────────────────────────────────────────────────
 

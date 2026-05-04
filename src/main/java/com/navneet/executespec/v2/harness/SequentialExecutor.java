@@ -113,6 +113,13 @@ public class SequentialExecutor {
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
 
   /**
+   * 2026-05-04 — used by the resume path to load saved worker conversation snapshots. The
+   * non-resume execute path doesn't touch this field; ContextStore writes happen inside {@link
+   * WorkerAgent} itself.
+   */
+  private final com.navneet.executespec.v2.context.ContextStore contextStore;
+
+  /**
    * Live per-task token attribution — read the accumulator on every terminal transition so the UI's
    * "Token Usage by Model" shows mid-run numbers instead of waiting for the end-of-run batch flush.
    */
@@ -127,23 +134,78 @@ public class SequentialExecutor {
   private static final int WORKER_RAG_TOKEN_CAP = 800;
 
   public ExecutionResult execute(ExecutionRequest req) {
+    return execute(req, null);
+  }
+
+  /**
+   * Resume-aware execute. When {@code resume} is non-null, every PlannedTask is checked against its
+   * persisted {@link com.navneet.executespec.state.entity.AgentTask} status:
+   *
+   * <ul>
+   *   <li>{@code COMPLETE} / {@code COMPLETED_WITH_WARNING} / {@code PARTIAL} / {@code FAILED} —
+   *       already terminal. Skip; build a synthetic {@link TaskOutcome} from the persisted row so
+   *       the run-level summary is consistent with what landed before the crash.
+   *   <li>{@code WORKING} — the in-flight task at the time of the crash. If a Redis snapshot
+   *       exists, hand it to the worker via the resume-aware {@code worker.run(req, snapshot)}
+   *       overload so the conversation continues from the saved iteration. If the snapshot is gone
+   *       (TTL expired, no save fired yet), the task runs fresh from iter=1.
+   *   <li>{@code PENDING} / null / unknown — never started. Run fresh.
+   * </ul>
+   *
+   * <p>The resume target is identified by either the explicit {@code resume.targetTaskId()} or —
+   * when null — the first task whose persisted status is non-terminal (typically WORKING). All
+   * tasks before the resume target are treated as terminal-skip; all tasks after are run fresh.
+   */
+  public ExecutionResult execute(ExecutionRequest req, ResumeRequest resume) {
     long runStart = System.currentTimeMillis();
     List<TaskOutcome> outcomes = new ArrayList<>();
     Plan plan = req.plan();
+    String runId = req.runContext().runId();
 
     log.info(
-        "SequentialExecutor START run={} tasks={} provider={} model={} smokeTests={}",
-        req.runContext().runId(),
+        "SequentialExecutor {} run={} tasks={} provider={} model={} smokeTests={} resumeTarget={}",
+        resume == null ? "START" : "RESUME",
+        runId,
         plan.tasks().size(),
         req.provider(),
         req.model(),
-        req.enableSmokeTests());
+        req.enableSmokeTests(),
+        resume == null ? null : resume.targetTaskId());
 
     int taskCount = plan.tasks().size();
     for (int i = 0; i < taskCount; i++) {
       PlannedTask task = plan.tasks().get(i);
       boolean isFinalTask = (i == taskCount - 1);
-      TaskOutcome outcome = executeOne(task, plan, req, isFinalTask);
+
+      // Resume bookkeeping: figure out what to do with this task BEFORE running anything.
+      //   - skip it (already terminal in DB) → emit synthetic outcome
+      //   - resume it (snapshot present) → executeOne with snapshot
+      //   - run fresh
+      TaskOutcome outcome;
+      if (resume != null) {
+        ResumeAction action = resolveResumeAction(runId, task.id(), resume);
+        switch (action.kind()) {
+          case SKIP_TERMINAL -> {
+            log.info(
+                "Executor RESUME skip task={} status={} (already terminal pre-resume)",
+                task.id(),
+                action.persistedStatus());
+            outcome = synthesizeSkippedOutcome(task, action.persistedStatus());
+          }
+          case RESUME_FROM_SNAPSHOT -> {
+            log.info(
+                "Executor RESUME task={} from snapshot iter={}",
+                task.id(),
+                action.snapshot() == null ? "n/a" : action.snapshot().iteration());
+            outcome = executeOne(task, plan, req, isFinalTask, action.snapshot());
+          }
+          case RUN_FRESH -> outcome = executeOne(task, plan, req, isFinalTask, null);
+          default -> outcome = executeOne(task, plan, req, isFinalTask, null);
+        }
+      } else {
+        outcome = executeOne(task, plan, req, isFinalTask, null);
+      }
+
       outcomes.add(outcome);
       metrics.recordTaskStatus(outcome.status().name());
       metrics.recordTaskLatency(
@@ -154,7 +216,7 @@ public class SequentialExecutor {
     log.info(
         "SequentialExecutor DONE run={} overall={} success={}/{} warnings={} failed={}"
             + " latency={}ms",
-        req.runContext().runId(),
+        runId,
         result.overall(),
         result.tasksSuccessful(),
         result.tasksExecuted(),
@@ -164,8 +226,125 @@ public class SequentialExecutor {
     return result;
   }
 
+  /**
+   * Encapsulates the resume target — passed to {@link #execute(ExecutionRequest, ResumeRequest)}.
+   */
+  public record ResumeRequest(
+      /**
+       * Task id to resume from. Tasks before this id are treated as terminal (assumed already
+       * finished pre-crash); tasks at this id are resumed (with snapshot if available); tasks after
+       * are run fresh. May be null — in which case the executor walks the plan and resumes the
+       * first task whose persisted DB status is non-terminal.
+       */
+      String targetTaskId) {}
+
+  /** Result of the per-task resume decision in the loop above. */
+  private record ResumeAction(
+      ResumeKind kind,
+      String persistedStatus,
+      com.navneet.executespec.v2.context.SavedContext snapshot) {}
+
+  private enum ResumeKind {
+    SKIP_TERMINAL,
+    RESUME_FROM_SNAPSHOT,
+    RUN_FRESH
+  }
+
+  /**
+   * Decide what the executor should do with a given task on a resume pass. Reads the persisted
+   * {@link com.navneet.executespec.state.entity.AgentTask} status; loads a Redis snapshot iff the
+   * task is the resume target.
+   */
+  private ResumeAction resolveResumeAction(String runId, String taskId, ResumeRequest resume) {
+    String persisted = readPersistedTaskStatus(runId, taskId);
+    boolean isTerminal =
+        persisted != null
+            && (persisted.equals("COMPLETE")
+                || persisted.equals("COMPLETED_WITH_WARNING")
+                || persisted.equals("PARTIAL")
+                || persisted.equals("FAILED"));
+
+    String target = resume.targetTaskId();
+    boolean isResumeTarget = target != null && target.equals(taskId);
+
+    // If a target wasn't given explicitly, treat the FIRST non-terminal task we encounter as
+    // the resume target (auto-detect path). Once we've passed the target, everything else runs
+    // fresh.
+    if (target == null) {
+      if (isTerminal) return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted, null);
+      // First non-terminal: this is our resume target. Below logic loads the snapshot.
+      isResumeTarget = true;
+    }
+
+    if (isTerminal) {
+      return new ResumeAction(ResumeKind.SKIP_TERMINAL, persisted, null);
+    }
+    if (!isResumeTarget) {
+      return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
+    }
+
+    // Resume target — try to load the snapshot from Redis.
+    com.navneet.executespec.v2.tool.ExecutionContext ctx =
+        new com.navneet.executespec.v2.tool.ExecutionContext(
+            runId,
+            taskId,
+            // workspaceRoot isn't part of the Redis key — any value works for keyFor.
+            java.nio.file.Paths.get("/"));
+    com.navneet.executespec.v2.context.SavedContext snap = contextStore.load(ctx).orElse(null);
+    if (snap == null) {
+      log.info(
+          "Executor RESUME run={} task={} no snapshot — running fresh (likely <5 iters at crash)",
+          runId,
+          taskId);
+      return new ResumeAction(ResumeKind.RUN_FRESH, persisted, null);
+    }
+    return new ResumeAction(ResumeKind.RESUME_FROM_SNAPSHOT, persisted, snap);
+  }
+
+  private String readPersistedTaskStatus(String runId, String taskId) {
+    return taskRepo
+        .findByRunIdAndTaskId(runId, taskId)
+        .map(com.navneet.executespec.state.entity.AgentTask::getStatus)
+        .orElse(null);
+  }
+
+  /**
+   * Build a synthetic {@link TaskOutcome} for a task that was already terminal at resume time. The
+   * summary aggregator uses this to compute total latency / success counts; we zero out
+   * worker-specific fields since we don't have a worker result for it (the original work happened
+   * in a previous JVM).
+   */
+  private TaskOutcome synthesizeSkippedOutcome(PlannedTask task, String persistedStatus) {
+    // Map the persisted DB task status onto the in-memory TaskOutcome.Status enum. PARTIAL on
+    // disk maps to COMPLETED_WITH_WARNING here — both indicate "worker wrote files but smoke
+    // didn't pass cleanly", and the in-memory enum doesn't carry a separate PARTIAL value.
+    TaskOutcome.Status mapped =
+        switch (persistedStatus == null ? "" : persistedStatus) {
+          case "COMPLETE" -> TaskOutcome.Status.SUCCESS;
+          case "COMPLETED_WITH_WARNING", "PARTIAL" -> TaskOutcome.Status.COMPLETED_WITH_WARNING;
+          case "FAILED" -> TaskOutcome.Status.WORKER_FAILED;
+          default -> TaskOutcome.Status.SUCCESS;
+        };
+    return TaskOutcome.builder()
+        .taskId(task.id())
+        .taskTitle(task.title())
+        .status(mapped)
+        .totalLatencyMs(0L)
+        .toolCallsDispatched(0)
+        .build();
+  }
+
   private TaskOutcome executeOne(
       PlannedTask task, Plan plan, ExecutionRequest req, boolean isFinalTask) {
+    return executeOne(task, plan, req, isFinalTask, null);
+  }
+
+  private TaskOutcome executeOne(
+      PlannedTask task,
+      Plan plan,
+      ExecutionRequest req,
+      boolean isFinalTask,
+      com.navneet.executespec.v2.context.SavedContext resumeFrom) {
     long taskStart = System.currentTimeMillis();
     ExecutionContext taskCtx =
         new ExecutionContext(req.runContext().runId(), task.id(), req.runContext().workspaceRoot());
@@ -187,19 +366,22 @@ public class SequentialExecutor {
     broadcaster.emit(runId, RunEvent.log(runId, task.id(), "Starting task: " + task.title()));
     TierConfig cfg =
         tierConfigFor(task.complexity(), req.provider(), req.model(), req.projectId() != null);
-    WorkerResult primary =
-        worker.run(
-            WorkerTaskRequest.builder()
-                .provider(cfg.provider)
-                .model(cfg.model)
-                .systemPrompt(systemPrompt)
-                .userPrompt(userPrompt)
-                .context(taskCtx)
-                .maxIterations(
-                    req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
-                .temperature(0.0)
-                .maxTokensPerCall(cfg.maxTokens)
-                .build());
+    WorkerTaskRequest workerReq =
+        WorkerTaskRequest.builder()
+            .provider(cfg.provider)
+            .model(cfg.model)
+            .systemPrompt(systemPrompt)
+            .userPrompt(userPrompt)
+            .context(taskCtx)
+            .maxIterations(
+                req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
+            .temperature(0.0)
+            .maxTokensPerCall(cfg.maxTokens)
+            .build();
+    // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
+    // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
+    // ride a 24h Redis TTL and are written every 5 worker iters.
+    WorkerResult primary = worker.run(workerReq, resumeFrom);
 
     log.info(
         "Executor task={} toolCallStats provider={} model={} complexity={} outcome={} iters={}"

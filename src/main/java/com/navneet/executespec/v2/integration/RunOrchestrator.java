@@ -1641,6 +1641,301 @@ public class RunOrchestrator {
         req.branchOverride());
   }
 
+  /** Outcome of a {@link #resumeAfterCrash(String)} dispatch. */
+  public enum CrashResumeOutcome {
+    /** Resume queued — pipeline is now running on the worker pool. */
+    OK,
+    /** Run id not found in the DB. */
+    NOT_FOUND,
+    /** Run isn't in a status that this resume path handles (not PLANNING/WORKING/REVIEWING). */
+    NOT_APPLICABLE,
+    /** Hit the per-run resume-attempt cap; the run was failed instead of retried. */
+    EXHAUSTED,
+    /** Workspace gone from disk (deploy + scale-down on a different node). */
+    WORKSPACE_GONE,
+    /** Persisted plan missing or corrupted — can't reconstruct execution context. */
+    PLAN_MISSING,
+  }
+
+  /**
+   * Crash-recovery resume — runs interrupted by a JVM SIGTERM / OOM / crash mid-flight. Distinct
+   * from the user-driven {@link #resume(String)} which only covers PAUSED runs (those have a
+   * different state shape, e.g. {@code pause_requested=true} and a sibling Redis pause flag).
+   *
+   * <p>Called from {@link com.navneet.executespec.v2.recovery.StartupRunResumer} on {@code
+   * ApplicationReadyEvent}. Strategy by status:
+   *
+   * <ul>
+   *   <li>{@code PLANNING} — re-plan from scratch by calling {@code runPipeline(...)} with the
+   *       persisted spec. Planning is idempotent (classifier + outline are deterministic-ish); the
+   *       previous JVM's plan attempt is discarded.
+   *   <li>{@code WORKING} — load the persisted plan, reuse the existing workspace, call {@link
+   *       com.navneet.executespec.v2.harness.SequentialExecutor#execute} with a {@code
+   *       ResumeRequest} so terminal AgentTasks are skipped and the in-flight task picks up from
+   *       its Redis snapshot. Then runs reviewer + report.
+   *   <li>{@code REVIEWING} — execute already finished pre-crash, re-run reviewer (idempotent per
+   *       the workspace + plan it sees). Then report.
+   *   <li>{@code AWAITING_APPROVAL} — left as-is (caller checked); the gate's Redis state carries
+   *       through.
+   * </ul>
+   *
+   * <p>Per-run cap: {@link
+   * com.navneet.executespec.v2.recovery.StartupRunResumer#MAX_RESUME_ATTEMPTS} — same constant the
+   * resumer enforces. Each call increments {@code pipeline_run.resume_attempts} BEFORE submitting
+   * to the pool so a crash inside resume can't loop forever.
+   */
+  public CrashResumeOutcome resumeAfterCrash(String runId) {
+    var opt = runRepo.findById(runId);
+    if (opt.isEmpty()) return CrashResumeOutcome.NOT_FOUND;
+    var run = opt.get();
+    String status = run.getStatus();
+    if (!"PLANNING".equals(status) && !"WORKING".equals(status) && !"REVIEWING".equals(status)) {
+      return CrashResumeOutcome.NOT_APPLICABLE;
+    }
+
+    int attempts = run.getResumeAttempts() == null ? 0 : run.getResumeAttempts();
+    if (attempts >= com.navneet.executespec.v2.recovery.StartupRunResumer.MAX_RESUME_ATTEMPTS) {
+      log.warn(
+          "resumeAfterCrash run={} status={} attempts={} EXHAUSTED — failing run",
+          runId,
+          status,
+          attempts);
+      terminate(runId, "FAILED", "resume cap reached after " + attempts + " attempts", null);
+      return CrashResumeOutcome.EXHAUSTED;
+    }
+
+    // Workspace must be on this node. Cross-node resume needs GCS shipping (chunk #3 of the
+    // pause/resume design — same constraint as the existing PAUSED resume path).
+    java.nio.file.Path workspace =
+        java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!java.nio.file.Files.isDirectory(workspace)) {
+      log.warn("resumeAfterCrash run={} workspace not on this node — failing cleanly", runId);
+      terminate(runId, "FAILED", "workspace gone (" + workspace + ")", null);
+      return CrashResumeOutcome.WORKSPACE_GONE;
+    }
+
+    // PLANNING crash → just re-run the planner (cheap) by calling the standard runPipeline.
+    // The previous plan attempt is discarded; idempotent enough for the planner phase.
+    if ("PLANNING".equals(status)) {
+      run.setResumeAttempts(attempts + 1);
+      run.setResumedAt(java.time.Instant.now());
+      runRepo.save(run);
+      log.info(
+          "resumeAfterCrash run={} status=PLANNING attempt={} re-running planner",
+          runId,
+          attempts + 1);
+      broadcaster.emit(runId, RunEvent.runStatus(runId, "PLANNING"));
+      broadcaster.emit(
+          runId, RunEvent.log(runId, "resume", "Resuming after crash — re-running planner"));
+      RunPipelineRequest req = RunPipelineRequest.fromPausedRow(run);
+      Future<?> future =
+          pool.submit(
+              () -> {
+                try {
+                  runPipelineForResume(req);
+                } finally {
+                  activeRuns.remove(runId);
+                }
+              });
+      activeRuns.put(runId, future);
+      return CrashResumeOutcome.OK;
+    }
+
+    // WORKING / REVIEWING — load persisted plan and skip planning phase entirely.
+    String planJson = run.getPlanJson();
+    if (planJson == null || planJson.isBlank()) {
+      log.warn(
+          "resumeAfterCrash run={} status={} planJson missing — can't resume mid-execute, failing",
+          runId,
+          status);
+      terminate(runId, "FAILED", "plan missing on resume", null);
+      return CrashResumeOutcome.PLAN_MISSING;
+    }
+    final com.navneet.executespec.v2.agent.Plan plan;
+    try {
+      plan = objectMapper.readValue(planJson, com.navneet.executespec.v2.agent.Plan.class);
+    } catch (Exception e) {
+      log.warn(
+          "resumeAfterCrash run={} status={} planJson deserialize failed: {}",
+          runId,
+          status,
+          e.getMessage());
+      terminate(runId, "FAILED", "plan corrupted on resume: " + shortMsg(e), null);
+      return CrashResumeOutcome.PLAN_MISSING;
+    }
+
+    run.setResumeAttempts(attempts + 1);
+    run.setResumedAt(java.time.Instant.now());
+    runRepo.save(run);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, status));
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            "resume",
+            "Resuming after crash from " + status + " (attempt " + (attempts + 1) + ")"));
+
+    log.info(
+        "resumeAfterCrash run={} status={} attempt={} dispatching to pool",
+        runId,
+        status,
+        attempts + 1);
+
+    final Path resumeWorkspace = workspace;
+    final boolean resumeFromReviewing = "REVIEWING".equals(status);
+    Future<?> future =
+        pool.submit(
+            () -> {
+              try {
+                runPipelineFromExecuteCheckpoint(runId, plan, resumeWorkspace, resumeFromReviewing);
+              } finally {
+                activeRuns.remove(runId);
+              }
+            });
+    activeRuns.put(runId, future);
+    return CrashResumeOutcome.OK;
+  }
+
+  /**
+   * Inner crash-resume orchestration — assumes plan is loaded, workspace is present, and the
+   * current JVM owns the row's lifecycle from here on. Skips clone / planning phase entirely;
+   * dispatches straight to executor (with a {@link
+   * com.navneet.executespec.v2.harness.SequentialExecutor.ResumeRequest} so terminal AgentTasks are
+   * skipped) or — for {@code REVIEWING} — straight to the reviewer.
+   */
+  private void runPipelineFromExecuteCheckpoint(
+      String runId,
+      com.navneet.executespec.v2.agent.Plan plan,
+      Path workspace,
+      boolean fromReviewing) {
+    Instant startedAt = Instant.now();
+    try {
+      // Re-resolve BYOK keys for this resumed run — same pattern as runPipeline().
+      try {
+        PipelineRun pre = runRepo.findById(runId).orElse(null);
+        if (pre != null && pre.getCreatedByUserId() != null) {
+          keyContextStore.resolveAndPut(runId, pre.getCreatedByUserId());
+        }
+      } catch (Exception keyEx) {
+        log.warn("resume run={} BYOK resolution failed: {}", runId, keyEx.getMessage());
+      }
+
+      ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
+
+      PipelineRun row = runRepo.findById(runId).orElse(null);
+      if (row == null) {
+        log.warn("resume run={} row vanished mid-resume", runId);
+        return;
+      }
+      String provider = row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
+      String model = row.getWorkerModel();
+      String upperProvider = provider.toUpperCase();
+      String projectId = row.getProjectId();
+      List<UUID> selectedRepoIds = deserializeRepoIds(row.getSelectedRepoIds());
+
+      ExecutionResult execResult = null;
+      RunCostTracker.Snapshot afterExec = null;
+      if (!fromReviewing) {
+        // Status is WORKING — call executor with ResumeRequest so terminal AgentTasks are
+        // skipped and the in-flight task resumes from its Redis snapshot.
+        updateStatus(runId, "WORKING");
+        try {
+          execResult =
+              executor.execute(
+                  ExecutionRequest.builder()
+                      .plan(plan)
+                      .provider(provider)
+                      .model(model)
+                      .runContext(rootCtx)
+                      .maxIterationsPerTask(null)
+                      .enableSmokeTests(true)
+                      .designBlock(null) // not persisted on the row — runs without it on resume
+                      .projectId(projectId)
+                      .workspaceSummary(buildMultiRepoSummary(projectId, selectedRepoIds))
+                      .build(),
+                  // Auto-detect: ResumeRequest with null targetTaskId tells the executor to walk
+                  // the plan and resume at the FIRST non-terminal task in DB.
+                  new com.navneet.executespec.v2.harness.SequentialExecutor.ResumeRequest(null));
+        } catch (Exception e) {
+          log.error("resume run={} executor failed", runId, e);
+          terminate(runId, "FAILED", "executor on resume: " + shortMsg(e), startedAt);
+          return;
+        }
+        applyExecutionResultToTasks(runId, execResult);
+        afterExec = costTracker.snapshot(runId);
+      }
+
+      // Reviewer — runs for both WORKING-resume (after executor) and REVIEWING-resume (re-run
+      // the reviewer; idempotent against the same workspace + plan).
+      updateStatus(runId, "REVIEWING");
+      ReviewerResult reviewResult = null;
+      try {
+        reviewResult =
+            reviewer.review(
+                ReviewerRequest.builder()
+                    .provider(provider)
+                    .model(model)
+                    .context(rootCtx)
+                    .buildCommand(plan.buildCommand())
+                    .skipWiringPass(false)
+                    .build());
+        persistReview(runId, reviewResult);
+      } catch (Exception e) {
+        log.warn("resume run={} reviewer failed — recording partial review", runId, e);
+        persistReviewFailure(runId, e);
+      }
+
+      // README + validation report + test gen + preview — same as runPipeline's tail. We only
+      // need to re-run these if execution actually ran (fromReviewing=true means they may have
+      // already happened pre-crash, but they're idempotent so re-running is safe and cheap).
+      ensureReadme(
+          runId, workspace, row.getUserRequest(), plan, execResult, reviewResult, startedAt);
+      generateValidationReport(runId, execResult, reviewResult, plan);
+
+      // Terminal status — same decision tree as runPipeline.resolveTerminalStatus.
+      String userRequest = row.getUserRequest();
+      String prReviewComments = null; // not threaded for resumed runs
+      finalizeRunAfterResume(
+          runId, plan, execResult, reviewResult, startedAt, upperProvider, model);
+    } catch (Exception e) {
+      log.error("resume run={} pipeline failed unexpectedly", runId, e);
+      terminate(runId, "FAILED", "resume failure: " + shortMsg(e), startedAt);
+    }
+  }
+
+  /**
+   * Compact terminal-status decision for crash-resumed runs. Mirrors the logic at the tail of
+   * {@link #runPipeline} but works against the already-persisted execResult / reviewerResult
+   * (callers compute terminal status from those plus persisted task outcomes). Reviewer-failure
+   * with no fixable issues → COMPLETE_WITH_CONCERNS; everything else uses the existing helper.
+   */
+  private void finalizeRunAfterResume(
+      String runId,
+      com.navneet.executespec.v2.agent.Plan plan,
+      ExecutionResult execResult,
+      ReviewerResult reviewResult,
+      Instant startedAt,
+      String upperProvider,
+      String model) {
+    // Mark the run terminal. resolveTerminalStatus already exists for the regular path; the
+    // crash-resume path reuses it so the (status, statusReason) tuple matches what users see on
+    // a normal run completion. If execResult is null (pure REVIEWING-resume), pass an empty
+    // result so the helper falls through cleanly.
+    ExecutionResult effectiveExec =
+        execResult == null
+            ? ExecutionResult.builder()
+                .overall(ExecutionResult.Overall.ALL_SUCCESS)
+                .tasksExecuted(0)
+                .tasksSuccessful(0)
+                .tasksWithWarning(0)
+                .tasksFailed(0)
+                .totalLatencyMs(0L)
+                .build()
+            : execResult;
+    var terminal = resolveTerminalStatus(effectiveExec, reviewResult);
+    terminate(runId, terminal.status(), terminal.reason(), startedAt);
+  }
+
   /**
    * Snapshot of the inputs needed to resume a paused run. Built from the persisted {@code
    * pipeline_run} row by {@link #fromPausedRow}. Carries enough to recompose the original

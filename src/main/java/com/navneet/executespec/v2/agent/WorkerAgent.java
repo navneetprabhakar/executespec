@@ -111,16 +111,71 @@ public class WorkerAgent {
       java.util.Set.of("writeFile", "editFile");
 
   public WorkerResult run(WorkerTaskRequest req) {
+    return run(req, null);
+  }
+
+  /**
+   * Resume-aware overload. When {@code resumeFrom} is non-null, the worker:
+   *
+   * <ul>
+   *   <li>Skips the fresh {@code SystemMessage + UserMessage} bootstrap and uses the saved {@link
+   *       com.navneet.executespec.v2.context.SavedContext#history()} as starting history.
+   *   <li>Starts the iteration loop at {@code resumeFrom.iteration() + 1}, capped at the same
+   *       {@code maxIter}. The remaining iteration budget is therefore proportionally smaller.
+   *   <li>Snapshots are written every {@value #CONTEXT_PERSIST_EVERY_N_ITERATIONS} iters as always,
+   *       so a second crash mid-resume is also recoverable.
+   * </ul>
+   *
+   * <p>Idempotency contract — the worker tools the resume path relies on:
+   *
+   * <ul>
+   *   <li>{@code writeFile} — overwrites whole-file content. Re-issuing the same call is a no-op.
+   *   <li>{@code editFile} — fails with a clear error envelope if the {@code old_string} is no
+   *       longer present (because it was already replaced by the previous, possibly lost, run).
+   *       Worker self-corrects by reading the file and trying again or moving on.
+   *   <li>{@code gitCommit} — denied for the worker entirely (see {@link
+   *       ToolRegistry#WORKER_DENY_TOOLS}). Run-end commit is in {@code ScmPushService}.
+   *   <li>{@code shell} — best-effort idempotent for build / test commands; mutating shell commands
+   *       are sandbox-rejected at policy level.
+   *   <li>{@code completeTask} — if the worker called it BEFORE the crash, the snapshot was already
+   *       deleted (see line in dispatch loop), so resume can't fire on a completed task.
+   * </ul>
+   *
+   * <p>Stagnation counter resets to 0 on resume — the worker gets a fresh {@code
+   * STAGNATION_WARN_AFTER_N} of headroom to recover from the interruption.
+   */
+  public WorkerResult run(
+      WorkerTaskRequest req, com.navneet.executespec.v2.context.SavedContext resumeFrom) {
     long start = System.currentTimeMillis();
     int maxIter =
         (req.maxIterations() == null || req.maxIterations() <= 0)
             ? DEFAULT_MAX_ITER
             : req.maxIterations();
-    List<Message> history = new ArrayList<>();
-    if (req.systemPrompt() != null && !req.systemPrompt().isBlank()) {
-      history.add(new SystemMessage(req.systemPrompt()));
+
+    final boolean isResume = resumeFrom != null && !resumeFrom.history().isEmpty();
+    int startIter = 1;
+    List<Message> history;
+    if (isResume) {
+      // Snapshot history was written on a clean iteration boundary (after a tool-response turn),
+      // so it's well-formed to send straight to the LLM. Defensive copy: ContextStore returns a
+      // List<Message> that callers shouldn't share with us.
+      history = new ArrayList<>(resumeFrom.history());
+      startIter = resumeFrom.iteration() + 1;
+      log.info(
+          "WorkerAgent RESUME run={} task={} provider={} model={} from iter={} historyLen={}",
+          req.context().runId(),
+          req.context().taskId(),
+          req.provider(),
+          req.model(),
+          startIter,
+          history.size());
+    } else {
+      history = new ArrayList<>();
+      if (req.systemPrompt() != null && !req.systemPrompt().isBlank()) {
+        history.add(new SystemMessage(req.systemPrompt()));
+      }
+      history.add(new UserMessage(req.userPrompt()));
     }
-    history.add(new UserMessage(req.userPrompt()));
 
     List<String> toolLog = new ArrayList<>();
     int toolsDispatched = 0;
@@ -131,13 +186,15 @@ public class WorkerAgent {
     int stagnantIters = 0;
     boolean stagnationWarned = false;
 
-    log.info(
-        "WorkerAgent START run={} task={} provider={} model={} maxIter={}",
-        req.context().runId(),
-        req.context().taskId(),
-        req.provider(),
-        req.model(),
-        maxIter);
+    if (!isResume) {
+      log.info(
+          "WorkerAgent START run={} task={} provider={} model={} maxIter={}",
+          req.context().runId(),
+          req.context().taskId(),
+          req.provider(),
+          req.model(),
+          maxIter);
+    }
 
     // Bug #2 fix — load the run's hard cap once so the loop can stop
     // itself if cost blows past it mid-task. Null cap = no enforcement.
@@ -145,7 +202,7 @@ public class WorkerAgent {
     final Double hardCapUsd =
         pipelineRunRepository.findById(runId).map(r -> r.getHardCapUsd()).orElse(null);
 
-    for (int iter = 1; iter <= maxIter; iter++) {
+    for (int iter = startIter; iter <= maxIter; iter++) {
       if (hardCapUsd != null
           && hardCapUsd > 0
           && (iter == 1 || iter % BUDGET_CHECK_EVERY_N_ITERATIONS == 0)) {
