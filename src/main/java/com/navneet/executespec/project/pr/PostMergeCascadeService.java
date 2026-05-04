@@ -139,10 +139,27 @@ public class PostMergeCascadeService {
     }
   }
 
+  /**
+   * 2026-05-04 — V169 made {@code run_id} nullable so system PRs (BOOTSTRAP / ARCHITECTURE /
+   * CONTRACT / CHAT_TOOL) can persist on the project dashboard. Spring Data JPA's {@code
+   * findById(null)} throws {@code IllegalArgumentException("The given id must not be null")} which
+   * the caller's try/catch swallows — but Spring's transaction interception has already marked the
+   * outer {@code @Transactional} as rollback-only by then, so the eventual commit blows up with
+   * {@code UnexpectedRollbackException} → 500. Two fixes below: (1) prefer {@code
+   * record.getProjectId()} (V169 column) so we skip the run lookup entirely for system PRs, (2)
+   * null-guard the runId before calling {@code findById}.
+   */
   private String resolveProjectId(PullRequestRecord record) {
-    // Prefer the run's own projectId.
-    PipelineRun run = pipelineRunRepo.findById(record.getRunId()).orElse(null);
-    if (run != null && run.getProjectId() != null) return run.getProjectId();
+    // V169 system PRs set projectId directly — no run lookup needed.
+    if (record.getProjectId() != null && !record.getProjectId().isBlank()) {
+      return record.getProjectId();
+    }
+    // Run-scoped PRs: walk through the linked PipelineRun. Defensive null check so a stray
+    // record with runId=null and projectId=null can't crash with "id must not be null".
+    if (record.getRunId() != null && !record.getRunId().isBlank()) {
+      PipelineRun run = pipelineRunRepo.findById(record.getRunId()).orElse(null);
+      if (run != null && run.getProjectId() != null) return run.getProjectId();
+    }
     // Fall back: find any project that links the same repo.
     if (record.getRepoId() != null) {
       List<ProjectRepoLink> links = linkRepo.findByRepoId(record.getRepoId());
@@ -152,6 +169,9 @@ public class PostMergeCascadeService {
   }
 
   private void notifyOwner(PullRequestRecord record, String projectId) {
+    // System PRs (V169) have no originating run, so there's no per-run owner to notify here.
+    // The project's notification fan-out (NotificationPrefService → org admins) handles those.
+    if (record.getRunId() == null || record.getRunId().isBlank()) return;
     PipelineRun run = pipelineRunRepo.findById(record.getRunId()).orElse(null);
     String owner = run != null ? run.getCreatedByUserId() : null;
     if (owner == null || owner.isBlank()) return;
