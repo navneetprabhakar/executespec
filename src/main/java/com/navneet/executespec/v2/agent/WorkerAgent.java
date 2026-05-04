@@ -82,6 +82,15 @@ public class WorkerAgent {
   private final com.navneet.executespec.state.repository.PipelineRunRepository
       pipelineRunRepository;
 
+  /**
+   * 2026-05-04 — user feedback: "in live log we are only showing tokens, we should show some quirky
+   * log lines formatted in same format as Task start and end". Wire SseBroadcaster + RunEvent so
+   * the worker can emit per-tool-call + per-iteration progress events that show up in the LiveLog
+   * tab alongside the existing Task start/end markers. Same format ({@code RunEvent.log(runId,
+   * taskId, msg)}) so the renderer doesn't need changes.
+   */
+  private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
+
   /** Bug #2 fix — check budget every N iterations, not just at task boundaries. */
   static final int BUDGET_CHECK_EVERY_N_ITERATIONS = 3;
 
@@ -278,6 +287,22 @@ public class WorkerAgent {
           assistantText.length(),
           calls.size());
 
+      // 2026-05-04 — quirky per-iteration log line. Visible in the LiveLog tab in the same
+      // banner format as the surrounding "Starting task:" / "Worker COMPLETED ..." lines.
+      // Filter to interesting iterations only (tool-call iters and the first text-only one)
+      // so we don't spam — the existing log file at JVM stdout still has every iter for ops.
+      if (!calls.isEmpty()) {
+        emitWorkerLog(
+            req,
+            "💭 Iter "
+                + iter
+                + " · "
+                + calls.size()
+                + " tool call"
+                + (calls.size() == 1 ? "" : "s")
+                + (assistantText.length() > 0 ? " · " + previewThought(assistantText) : ""));
+      }
+
       // No tool calls → model is done (either text-only stop or stopped early).
       if (calls.isEmpty()) {
         history.add(new AssistantMessage(assistantText));
@@ -328,6 +353,11 @@ public class WorkerAgent {
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
         toolLog.add(tc.name() + "(" + previewArgs(tc.arguments()) + ")");
+        // 2026-05-04 — emit a per-mutation log line so the LiveLog shows real activity, not
+        // just the token counter. Filtered to mutating + heavy tools (writes, edits, shell,
+        // build) — read/list/search/git noise stays out of the user-facing log so the screen
+        // doesn't drown.
+        emitToolCallLog(req, tc);
       }
       history.add(ToolResponseMessage.builder().responses(toolResponses).build());
 
@@ -490,5 +520,83 @@ public class WorkerAgent {
         .toolCallLog(toolLog)
         .totalLatencyMs(System.currentTimeMillis() - start)
         .build();
+  }
+
+  // ── 2026-05-04 — quirky LiveLog emitters ─────────────────────────────────────
+
+  /** Emit a worker log line on the run's SSE channel, scoped to the current task. */
+  private void emitWorkerLog(WorkerTaskRequest req, String message) {
+    try {
+      broadcaster.emit(
+          req.context().runId(),
+          com.navneet.executespec.sse.RunEvent.log(
+              req.context().runId(), req.context().taskId(), message));
+    } catch (Exception ignore) {
+      // SSE failure must never crash the worker loop.
+    }
+  }
+
+  /**
+   * Per-tool-call log line. Filters out the high-volume read-only tools (readFile / listFiles /
+   * searchFiles / gitStatus / gitDiff) so the LiveLog shows REAL progress (mutations + builds +
+   * shell) instead of the worker's introspective reads. Tool-arg preview kept short (~60 chars
+   * after a per-tool prefix) so each line fits one banner row.
+   */
+  private void emitToolCallLog(WorkerTaskRequest req, AssistantMessage.ToolCall tc) {
+    String name = tc.name() == null ? "" : tc.name();
+    // Skip read/list/search/git noise — they fire dozens of times per task and would drown the
+    // user-facing log. Per-tool emoji + concise preview otherwise.
+    String emoji;
+    switch (name) {
+      case "writeFile" -> emoji = "📝";
+      case "editFile" -> emoji = "✏️ ";
+      case "shell" -> emoji = "💻";
+      case "buildProject" -> emoji = "🔨";
+      case "gitCommit" -> emoji = "📦"; // denied for worker, but if it leaks through, show it
+      default -> {
+        return; // read-only tools — skip
+      }
+    }
+    String preview = extractPathOrCommand(tc.arguments());
+    emitWorkerLog(req, emoji + " " + name + (preview.isEmpty() ? "" : " · " + preview));
+  }
+
+  /**
+   * Pull a short, human-friendly preview from a tool-call's JSON args. Looks for {@code path},
+   * {@code filePath}, {@code command}, then falls back to the {@link #previewArgs} truncation.
+   */
+  private String extractPathOrCommand(String argsJson) {
+    if (argsJson == null || argsJson.isEmpty()) return "";
+    try {
+      JsonNode node = objectMapper.readTree(argsJson);
+      if (node.hasNonNull("path")) return truncate(node.get("path").asText(), 80);
+      if (node.hasNonNull("filePath")) return truncate(node.get("filePath").asText(), 80);
+      if (node.hasNonNull("command")) return truncate(node.get("command").asText(), 80);
+      // editFile uses an array of {oldStr, newStr} — show the path + edit count.
+      if (node.hasNonNull("file")) {
+        String file = truncate(node.get("file").asText(), 60);
+        int n = node.path("edits").isArray() ? node.path("edits").size() : 0;
+        return file + (n > 0 ? " (" + n + " edit" + (n == 1 ? "" : "s") + ")" : "");
+      }
+    } catch (Exception ignore) {
+      /* fallthrough */
+    }
+    return previewArgs(argsJson);
+  }
+
+  /**
+   * Trim a free-text snippet for inclusion in the LiveLog banner. First-line only (so newlines
+   * never split the banner into multiple lines), max 120 chars with an ellipsis.
+   */
+  private static String previewThought(String text) {
+    if (text == null || text.isEmpty()) return "";
+    int nl = text.indexOf('\n');
+    String firstLine = nl > 0 ? text.substring(0, nl) : text;
+    return truncate(firstLine.strip(), 120);
+  }
+
+  private static String truncate(String s, int max) {
+    if (s == null) return "";
+    return s.length() <= max ? s : s.substring(0, max - 1) + "…";
   }
 }

@@ -2040,9 +2040,72 @@ public class RunOrchestrator {
   }
 
   /**
-   * Retry a single task within a terminal V2 run. Currently scoped to re-invoking the worker loop
-   * against the saved task definition via {@link SequentialExecutor}. Full replay (resume from
-   * saved iteration) depends on {@code StartupRunResumer} Phase 2 and lands later.
+   * 2026-05-04 — admin escape hatch for stuck tasks (companion to the @Retryable persist that
+   * prevents the bug class going forward). Flips {@code agent_task.status} from {@code WORKING} or
+   * {@code PENDING} to {@code FAILED}, stamps {@code last_llm_failure} with the supplied reason for
+   * the audit trail, and emits the SSE event so the dashboard updates immediately. Refuses to touch
+   * tasks already in a terminal status — those finished legitimately and force- failing them would
+   * lose information. Returns a small report for the admin endpoint.
+   *
+   * @throws IllegalArgumentException if the run/task isn't found
+   * @throws IllegalStateException if the task is already in a terminal status
+   */
+  public java.util.Map<String, Object> forceFailTask(String runId, String taskId, String reason) {
+    if (runRepo.findById(runId).isEmpty()) {
+      throw new IllegalArgumentException("Run not found: " + runId);
+    }
+    String key = runId.substring(0, 8) + "_" + taskId;
+    var task =
+        taskRepo
+            .findById(key)
+            .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+    String current = task.getStatus();
+    if ("COMPLETE".equals(current)
+        || "FAILED".equals(current)
+        || "PARTIAL".equals(current)
+        || "BLOCKED".equals(current)
+        || "COMPLETED_WITH_WARNING".equals(current)) {
+      throw new IllegalStateException(
+          "Task already terminal (status=" + current + "). Won't overwrite legitimate completion.");
+    }
+    task.setStatus("FAILED");
+    task.setLastLlmFailure("FORCE_FAILED_BY_ADMIN: " + reason);
+    if (task.getCompletedAt() == null) task.setCompletedAt(java.time.Instant.now());
+    taskRepo.save(task);
+    broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "FAILED"));
+    log.warn(
+        "RunOrchestrator forceFailTask: run={} task={} prevStatus={} -> FAILED reason={}",
+        runId,
+        taskId,
+        current,
+        reason);
+    return java.util.Map.of(
+        "runId", runId,
+        "taskId", taskId,
+        "previousStatus", current,
+        "newStatus", "FAILED",
+        "reason", reason);
+  }
+
+  /**
+   * Retry a single task within a terminal V2 run. 2026-05-04 rewrite: actually re-executes the task
+   * instead of just flipping its status flag (the previous baseline was a documented stub).
+   *
+   * <p>Strategy:
+   *
+   * <ol>
+   *   <li>Reset the target task's persisted status to {@code PENDING} so {@link
+   *       SequentialExecutor#execute(ExecutionRequest, SequentialExecutor.ResumeRequest)} treats it
+   *       as eligible to run.
+   *   <li>Reuse the persisted plan from {@code pipeline_run.plan_json} so we don't re-plan.
+   *   <li>Call {@code executor.execute(req, ResumeRequest(targetTaskId))} — that path skips every
+   *       OTHER task that's already terminal (so completed tasks aren't redone) and runs the target
+   *       task either fresh OR from its Redis snapshot if one is available (the latter only
+   *       meaningful when retry is invoked while the task was mid-execution; for terminal retries
+   *       the snapshot is typically gone).
+   *   <li>After execute, the run's terminal status may have flipped — e.g. PARTIAL → COMPLETE if
+   *       the retry succeeded. Re-resolve via the standard helper.
+   * </ol>
    *
    * @throws IllegalArgumentException if the run/task is not found
    * @throws IllegalStateException if the run is not in a retryable state
@@ -2062,37 +2125,104 @@ public class RunOrchestrator {
         taskRepo
             .findById(key)
             .orElseThrow(() -> new IllegalArgumentException("Task not found: " + taskId));
+
+    // Workspace + plan must still be on disk; retry is same-JVM only (cross-JVM resume needs
+    // GCS shipping — same constraint as resumeAfterCrash).
+    java.nio.file.Path workspace =
+        java.nio.file.Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
+    if (!java.nio.file.Files.isDirectory(workspace)) {
+      throw new IllegalStateException(
+          "Workspace gone — retry is same-JVM only. Submit a fresh run instead.");
+    }
+    String planJson = run.getPlanJson();
+    if (planJson == null || planJson.isBlank()) {
+      throw new IllegalStateException(
+          "Plan JSON missing on the run row — can't retry a single task without it.");
+    }
+    final com.navneet.executespec.v2.agent.Plan plan;
+    try {
+      plan = objectMapper.readValue(planJson, com.navneet.executespec.v2.agent.Plan.class);
+    } catch (Exception e) {
+      throw new IllegalStateException("Plan JSON corrupted: " + e.getMessage());
+    }
+
     log.info(
-        "RunOrchestrator retryTask: run={} task={} (single-task retry — "
-            + "full conversation replay not yet implemented)",
+        "RunOrchestrator retryTask: run={} task={} dispatching real re-execution via"
+            + " SequentialExecutor.execute(req, ResumeRequest)",
         runId,
         taskId);
-    // Re-run the single task's worker on a background thread. Note: this is a
-    // best-effort re-run, not a checkpointed replay — file state is whatever
-    // the workspace looks like now; worker starts a fresh conversation.
-    pool.submit(
-        () -> {
-          try {
-            task.setStatus("WORKING");
-            taskRepo.save(task);
-            broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "WORKING"));
-            // For now: surface a clear log line and bump the task row back to its
-            // prior completion status — a real single-task re-execution requires
-            // reconstructing PlannedTask from persisted task JSON, which is
-            // follow-up work (see docs/plans/harness-v2-remaining-work.md).
-            Thread.sleep(100);
-            task.setStatus("COMPLETE");
-            taskRepo.save(task);
-            broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "COMPLETE"));
-            log.warn(
-                "RunOrchestrator retryTask: run={} task={} — baseline implementation marked"
-                    + " COMPLETE without re-executing. Full retry arrives with Gap 2 Phase 2.",
-                runId,
-                taskId);
-          } catch (Exception e) {
-            log.error("RunOrchestrator retryTask failed run={} task={}", runId, taskId, e);
-          }
-        });
+
+    // Reset the task to PENDING so the executor's resume logic runs it fresh. PENDING is the
+    // "never started" state; the executor's resolveResumeAction will return RUN_FRESH for it.
+    task.setStatus("PENDING");
+    task.setStartedAt(null);
+    task.setCompletedAt(null);
+    taskRepo.save(task);
+    broadcaster.emit(runId, RunEvent.taskStatus(runId, taskId, "PENDING"));
+
+    // Flip the run row back to WORKING so SSE listeners + the dashboard show progress.
+    String prevRunStatus = run.getStatus();
+    run.setStatus("WORKING");
+    run.setCompletedAt(null);
+    runRepo.save(run);
+    broadcaster.emit(runId, RunEvent.runStatus(runId, "WORKING"));
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            "retry",
+            "Retrying task " + taskId + " (run was " + prevRunStatus + " → now WORKING)"));
+
+    final java.nio.file.Path retryWorkspace = workspace;
+    final String fullTargetTaskId = task.getTaskId(); // already prefixed with runId-short
+    Future<?> future =
+        pool.submit(
+            () -> {
+              try {
+                // Resolve the existing run row's provider/model so we use the same dispatch
+                // tier mapping as the original execution.
+                PipelineRun row = runRepo.findById(runId).orElse(null);
+                String provider =
+                    row == null || row.getAiProvider() == null ? "anthropic" : row.getAiProvider();
+                String model = row == null ? null : row.getWorkerModel();
+
+                ExecutionContext rootCtx =
+                    new ExecutionContext(runId, "__root__", retryWorkspace.toRealPath());
+                List<UUID> selectedRepoIds =
+                    row == null ? List.of() : deserializeRepoIds(row.getSelectedRepoIds());
+
+                ExecutionResult result =
+                    executor.execute(
+                        ExecutionRequest.builder()
+                            .plan(plan)
+                            .provider(provider)
+                            .model(model)
+                            .runContext(rootCtx)
+                            .maxIterationsPerTask(null)
+                            .enableSmokeTests(true)
+                            .designBlock(null)
+                            .projectId(row == null ? null : row.getProjectId())
+                            .workspaceSummary(
+                                buildMultiRepoSummary(
+                                    row == null ? null : row.getProjectId(), selectedRepoIds))
+                            .build(),
+                        new com.navneet.executespec.v2.harness.SequentialExecutor.ResumeRequest(
+                            fullTargetTaskId));
+                applyExecutionResultToTasks(runId, result);
+
+                // Re-resolve terminal status now that the retry has finished. Reviewer is NOT
+                // re-run on a single-task retry — that's a different operation (retryValidation).
+                var terminal = resolveTerminalStatus(result, null);
+                terminate(runId, terminal.status(), terminal.reason(), null);
+              } catch (Exception e) {
+                log.error(
+                    "RunOrchestrator retryTask dispatch failed run={} task={}", runId, taskId, e);
+                terminate(runId, "FAILED", "retryTask dispatch: " + shortMsg(e), null);
+              } finally {
+                activeRuns.remove(runId);
+              }
+            });
+    activeRuns.put(runId, future);
   }
 
   /**
