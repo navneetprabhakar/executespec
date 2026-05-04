@@ -442,6 +442,25 @@ public class ValidationReportService {
   }
 
   private PipelineResult computeResult(List<ReportIssueDTO> issues, ReportInput input) {
+    PipelineResult heuristic = computeResultHeuristic(issues, input);
+    // R-09 (UX audit, 2026-05-04) — reconcile against the run's
+    // authoritative status_reason. Pre-fix, the heuristic above could
+    // disagree with V2RunOrchestrator.resolveTerminalStatus() (e.g. heuristic
+    // returned FAILED because a CRITICAL issue stayed in the list, but the
+    // reviewer's overall verdict + final build pass meant resolveTerminalStatus
+    // already wrote CLEAN_COMPLETION). Historical runs ended up with
+    // status_reason=CLEAN_COMPLETION + pipelineResult=FAILED, which the
+    // frontend papered over via a UI special case (`suppressReason` in
+    // ValidationReportPanel.tsx). With the reconciliation below, the two
+    // signals agree at write time so the UI special case can go.
+    return reconcileWithRunStatus(heuristic, input);
+  }
+
+  /**
+   * Original heuristic from before R-09. Kept as a private fallback so the existing test surface
+   * remains valid for inputs where the run state is absent or LEGACY_UNKNOWN.
+   */
+  private PipelineResult computeResultHeuristic(List<ReportIssueDTO> issues, ReportInput input) {
     // Compilation failure is always FAILED
     if (input.compileResult() != null
         && !input.compileResult().passed()
@@ -468,6 +487,77 @@ public class ValidationReportService {
 
     // Issues exist but not all resolved (e.g. MINOR unresolved, or test failures)
     return PipelineResult.NEEDS_ATTENTION;
+  }
+
+  /**
+   * Package-private for {@link com.navneet.executespec.report.ValidationReportServiceR09Test}.
+   * Direct test access without spinning up a real {@link ValidationReport} write because
+   * computeResult is invoked via the persistence path which needs a live DB.
+   */
+  PipelineResult reconcileForTest(PipelineResult heuristic, ReportInput input) {
+    return reconcileWithRunStatus(heuristic, input);
+  }
+
+  /**
+   * R-09 — when the run's status_reason gives an authoritative verdict, override the heuristic.
+   * Trust order: status_reason > heuristic > status fallback.
+   *
+   * <p>Mapping (matches the state machine in {@code V2RunOrchestrator.resolveTerminalStatus}):
+   *
+   * <ul>
+   *   <li>{@code CLEAN_COMPLETION} / {@code CLEAN_WITH_INTERMEDIATE_WARNINGS} → {@code PASSED} (or
+   *       {@code PASSED_WITH_FIXES} when the heuristic spotted successfully auto-fixed review
+   *       issues)
+   *   <li>{@code FINAL_BUILD_FAILED} / {@code ALL_TASKS_FAILED} / {@code EXECUTION_ABORTED} →
+   *       {@code FAILED}
+   *   <li>{@code REVIEWER_UNRESOLVED} / {@code REVIEWER_FAILED} / {@code TESTS_FAILED:N_OF_M} →
+   *       {@code NEEDS_ATTENTION} (or {@code FAILED} when the heuristic already caught a CRITICAL —
+   *       keep the stricter)
+   *   <li>{@code LEGACY_UNKNOWN} / null → fall through to the heuristic (back-compat for
+   *       pre-v2.5.10 runs and edge cases where the orchestrator didn't set a reason)
+   * </ul>
+   *
+   * <p>When the heuristic is FAILED and the run says CLEAN_*, the run wins — the orchestrator
+   * considers the reviewer's overall verdict + final build, which is a tighter signal than
+   * per-issue severity. A logged warning records the drift for debugging.
+   */
+  private PipelineResult reconcileWithRunStatus(PipelineResult heuristic, ReportInput input) {
+    if (input.run() == null) return heuristic;
+    String reason = input.run().getStatusReason();
+    if (reason == null) return heuristic;
+
+    // Tests failures encode the count: TESTS_FAILED:N_OF_M
+    boolean isTestsFailed = reason.startsWith("TESTS_FAILED:");
+
+    PipelineResult fromReason =
+        switch (reason) {
+          case "CLEAN_COMPLETION", "CLEAN_WITH_INTERMEDIATE_WARNINGS" ->
+              heuristic == PipelineResult.PASSED_WITH_FIXES
+                  ? PipelineResult.PASSED_WITH_FIXES
+                  : PipelineResult.PASSED;
+          case "FINAL_BUILD_FAILED", "ALL_TASKS_FAILED", "EXECUTION_ABORTED" ->
+              PipelineResult.FAILED;
+          case "REVIEWER_UNRESOLVED",
+                  "REVIEWER_FAILED",
+                  "REVIEWER_INTERRUPTED_CODE_PRESERVED",
+                  "RE_REVIEW_FAILED",
+                  "RE_REVIEW_NO_WORKSPACE" ->
+              heuristic == PipelineResult.FAILED
+                  ? PipelineResult.FAILED
+                  : PipelineResult.NEEDS_ATTENTION;
+          case "LEGACY_UNKNOWN" -> heuristic;
+          default -> isTestsFailed ? PipelineResult.NEEDS_ATTENTION : heuristic;
+        };
+
+    if (fromReason != heuristic) {
+      log.warn(
+          "R-09 reconcile: heuristic={} but status_reason={} on run {} — using {}",
+          heuristic,
+          reason,
+          input.run().getRunId(),
+          fromReason);
+    }
+    return fromReason;
   }
 
   private ValidationReportDTO toDTO(ValidationReport entity) {

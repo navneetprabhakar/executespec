@@ -260,15 +260,12 @@ export default function ValidationReportPanel({
     summaryParts.push('Clean run');
   }
 
-  // v2.5.14 (Phase 1.2) — suppress "Clean completion" narrative when the
-  // pipeline result itself disagrees. The two signals come from different
-  // sources (status_reason from V2RunOrchestrator, pipelineResult from the
-  // validation report) and historical runs could end up with
-  // CLEAN_COMPLETION + pipelineResult=FAILED. Trust the stricter signal.
-  const suppressReason =
-    (statusReason === 'CLEAN_COMPLETION' || statusReason === 'CLEAN_WITH_INTERMEDIATE_WARNINGS') &&
-    (report.pipelineResult === 'FAILED' || report.pipelineResult === 'NEEDS_ATTENTION');
-  const reasonCopy = suppressReason ? null : statusReasonCopy(statusReason);
+  // R-09 (UX audit, 2026-05-04) — the v2.5.14 `suppressReason` special case
+  // is gone now that ValidationReportService.reconcileWithRunStatus
+  // (backend) ensures pipelineResult agrees with status_reason at write
+  // time, and V171 backfilled historical drift. The two signals are now
+  // consistent so the narrative line can render unconditionally.
+  const reasonCopy = statusReasonCopy(statusReason);
 
   const handleShare = async () => {
     setSharing(true);
