@@ -94,21 +94,21 @@ export default function RunDetailTabs() {
   const fetchRuns = useRunStore((s) => s.fetchRuns);
   const [refreshing, setRefreshing] = useState(false);
 
-  // R-06 (UX audit, 2026-05-03): on non-terminal runs (PLANNING / WORKING /
-  // REVIEWING / AWAITING_APPROVAL), default the active tab to "Live Log" so
-  // the user immediately sees what the agent is doing instead of a static
-  // Overview page. Skip when the user has explicitly picked another tab in
-  // this session (activeTab !== default) — only steer the FIRST view per run.
+  // 2026-05-04 — reverted R-06's auto-flip-to-Live-Log behavior. Per user feedback,
+  // landing on Overview is the right default for ALL run states: it surfaces the
+  // run's spec, plan summary, status badge, and links to drill into the live log
+  // when the user wants it. Auto-flipping to Live Log on every fresh-run click made
+  // the Overview tab feel hidden + made it impossible to see the spec at a glance
+  // mid-flight.
+  //
+  // Users who want auto-tail behavior on in-flight runs can still explicitly click
+  // the "Live Log" tab — it remembers per-session via useUiStore.activeTab.
   const seededRunIdRef = useRef<string | null>(null);
   useEffect(() => {
     if (!activeRun) return;
     if (seededRunIdRef.current === activeRun.runId) return;
     seededRunIdRef.current = activeRun.runId;
-    const TERMINAL = new Set(['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL']);
-    const isInFlight = !TERMINAL.has(activeRun.status);
-    if (isInFlight && activeTab === 'overview') {
-      setActiveTab('log');
-    }
+    // No-op: previous behavior auto-flipped to 'log' for in-flight runs. Removed.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun?.runId, activeRun?.status]);
 
@@ -2195,15 +2195,30 @@ function IDEFileViewer({
             <div className='p-4 text-sm text-muted animate-pulse'>Loading diff…</div>
           ) : (
             <MonacoSafeMount
-              resetKey={`${filePath}-diff`}
               fallback={
                 <div className='p-4 text-sm text-muted'>
                   Diff viewer hit a transient render error — pick another file or refresh to retry.
                 </div>
               }
             >
+              {/*
+               * 2026-05-04 — NO `key` prop on DiffEditor (and no `resetKey` on
+               * MonacoSafeMount above). Why: @monaco-editor/react's unmount path disposes the
+               * original + modified TextModels BEFORE disposing the DiffEditor widget. Monaco's
+               * deferred event queue still has events for those models, which fire AFTER the
+               * dispose and crash with "TextModel got disposed before DiffEditorWidget model
+               * got reset". Using `key={filePath}` triggered this dispose-then-recreate cycle
+               * on EVERY file switch, leaving the new DiffEditor's render in a half-broken
+               * state (the global handler in lib/monacoSetup.ts swallowed the console error,
+               * but the diff itself wouldn't render — the Code-tab regression user reported).
+               *
+               * Without the key, prop changes (original/modified/language) flow through the
+               * library's update effects which call setValue / setModelLanguage on the EXISTING
+               * models — no dispose, no race, diff renders cleanly across rapid file switches.
+               * View state (scroll, folds) carries across files; that's intentional, the user
+               * can re-fold per file.
+               */}
               <DiffEditor
-                key={`${filePath}-diff`}
                 language={monacoLang}
                 original={diff.base}
                 modified={diff.head}

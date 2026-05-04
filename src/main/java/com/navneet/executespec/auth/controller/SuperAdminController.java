@@ -118,6 +118,52 @@ public class SuperAdminController {
    * <p>409 if the run is still in a non-terminal state (PLANNING / WORKING / REVIEWING /
    * AWAITING_APPROVAL); 404 if the run id is unknown.
    */
+  /**
+   * 2026-05-04 — operational escape hatch for tasks that are wedged in {@code WORKING} due to a
+   * missed status update (e.g. dev run {@code 3b739e94...} task T1 — silent {@code
+   * persistTaskStatus} failure left the row in WORKING for 90+ minutes while the executor moved
+   * on). The {@code @Retryable} on {@code persistTaskStatus} prevents the original cause, but rows
+   * that landed in this state pre-retry need a manual flip so the run can finalize cleanly.
+   *
+   * <p>Body: {@code {"reason": "..."}} (required, ≥10 chars) — lands in {@code
+   * agent_task.last_llm_failure} so the audit trail shows who flipped it manually and why. Activity
+   * audit row written so the action is traceable.
+   *
+   * <p>Status flip is one-way: WORKING/PENDING → FAILED. Refuses to touch tasks already in a
+   * terminal status (404-style 409 to prevent accidental data loss on a task that completed
+   * legitimately).
+   */
+  @PostMapping("/runs/{runId}/tasks/{taskId}/force-fail")
+  public ResponseEntity<Map<String, Object>> forceFailTask(
+      @PathVariable String runId,
+      @PathVariable String taskId,
+      @RequestBody Map<String, String> body,
+      @AuthenticationPrincipal AppUserDetails admin) {
+    String reason = body == null ? null : body.get("reason");
+    if (reason == null || reason.trim().length() < 10) {
+      throw new ResponseStatusException(
+          HttpStatus.BAD_REQUEST,
+          "Reason is required (>=10 chars) — used for audit + the task's lastLlmFailure field.");
+    }
+    Map<String, Object> result;
+    try {
+      result = v2RunOrchestrator.forceFailTask(runId, taskId, reason.trim());
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (IllegalStateException e) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    }
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("TASK_FORCE_FAILED")
+            .entityType("TASK")
+            .entityId(runId + "/" + taskId)
+            .actorId(admin == null ? null : admin.getUser().getId())
+            .metadata("{\"reason\":\"" + reason.trim().replace("\"", "\\\"") + "\"}")
+            .build());
+    return ResponseEntity.ok(result);
+  }
+
   @PostMapping("/runs/{runId}/re-review")
   public ResponseEntity<Map<String, Object>> reReviewRun(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails admin) {

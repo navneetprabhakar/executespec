@@ -27,7 +27,17 @@ public record ExecutionRunDto(
     String figmaUrl,
     List<SolutionDto> solutions,
     Instant createdAt,
-    Instant updatedAt) {
+    Instant updatedAt,
+    /**
+     * 2026-05-04 — discriminator for the merged Launches list. {@code EXECUTION} = real
+     * ExecutionRun (the ProjectLaunch flow with its own setup → arch_review → planning → executing
+     * lifecycle, viewable at {@code /projects/{id}/executions/{id}}). {@code PIPELINE_RUN} = V2
+     * pipeline_run synthesised into the same list (project chat / V3 composer launches; viewable at
+     * {@code /projects/{id}/runs/{id}}). Without this, the frontend could only route every "launch"
+     * to {@code /executions/{id}} which 404s for pipeline_run ids → ExecutionViewPage fell through
+     * to the setup form → user clicking an existing run got the new-launch form instead.
+     */
+    String kind) {
 
   public static ExecutionRunDto from(ExecutionRun r, List<ExecutionSolution> solutions) {
     List<SolutionDto> mapped =
@@ -49,7 +59,8 @@ public record ExecutionRunDto(
         r.getFigmaUrl(),
         mapped,
         r.getCreatedAt(),
-        r.getUpdatedAt());
+        r.getUpdatedAt(),
+        "EXECUTION");
   }
 
   /**
@@ -83,7 +94,8 @@ public record ExecutionRunDto(
         r.getFigmaUrl(),
         List.of(), // solutions — pipeline_run has no per-solution rows
         r.getStartedAt(),
-        r.getCompletedAt() == null ? r.getStartedAt() : r.getCompletedAt());
+        r.getCompletedAt() == null ? r.getStartedAt() : r.getCompletedAt(),
+        "PIPELINE_RUN");
   }
 
   public record SolutionDto(

@@ -59,9 +59,11 @@ public class StartupRunResumer {
 
   /**
    * Hard cap on resume attempts per run. Once exceeded the run is permanently FAILED; the user can
-   * submit a fresh run instead.
+   * submit a fresh run instead. Made public 2026-05-04 so {@code RunOrchestrator.resumeAfterCrash}
+   * can reuse the same constant — both paths must enforce the same cap or a run that bounces
+   * between the two could exceed it.
    */
-  private static final int MAX_RESUME_ATTEMPTS = 3;
+  public static final int MAX_RESUME_ATTEMPTS = 3;
 
   /**
    * Runs older than this at boot time are considered abandoned rather than interrupted — we fail
@@ -72,6 +74,16 @@ public class StartupRunResumer {
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
   private final SseBroadcaster broadcaster;
+
+  /**
+   * 2026-05-04 — lazy {@link RunOrchestrator} reference. Direct constructor injection would create
+   * a bean-init cycle (RunOrchestrator already depends on many beans that could transitively reach
+   * back here). {@link ObjectProvider} defers the lookup until {@link #scanAndRecover} actually
+   * calls into the orchestrator, by which point the bean graph is fully wired.
+   */
+  private final org.springframework.beans.factory.ObjectProvider<
+          com.navneet.executespec.v2.integration.RunOrchestrator>
+      runOrchestratorProvider;
 
   @Async
   @EventListener(ApplicationReadyEvent.class)
@@ -155,76 +167,45 @@ public class StartupRunResumer {
         continue;
       }
 
-      // Count this as a resume attempt even in Phase 1 (fail-cleanly) so
-      // repeated deploy-interrupt cycles trip the cap and don't thrash.
-      run.setResumeAttempts(attempts + 1);
-
-      // v2.6.2 slice 4 + 5d — outline-checkpoint awareness. When the
-      // hierarchical planner has already written `plan_outline_json`
-      // before the JVM died, surface what was preserved so the user
-      // knows what work would replay vs needs redoing. Slice 5d adds
-      // per-task expansion-status reporting so the picture is precise:
-      // we count agent_task rows by expansion_status to show how much
-      // of phase 2 had completed.
-      String checkpointHint;
-      if (run.getPlanStrategy() != null
-          && run.getPlanOutlineJson() != null
-          && !run.getPlanOutlineJson().isBlank()) {
-        String taskBreakdown = "";
-        try {
-          List<AgentTask> tasks = taskRepo.findByRunId(run.getRunId());
-          int total = tasks.size();
-          int expanded =
-              (int) tasks.stream().filter(t -> "EXPANDED".equals(t.getExpansionStatus())).count();
-          int pending =
-              (int) tasks.stream().filter(t -> "PENDING".equals(t.getExpansionStatus())).count();
-          int failed =
-              (int) tasks.stream().filter(t -> "FAILED".equals(t.getExpansionStatus())).count();
-          if (total > 0) {
-            taskBreakdown =
-                ", tasks="
-                    + total
-                    + " (expanded="
-                    + expanded
-                    + ", pending="
-                    + pending
-                    + ", failed="
-                    + failed
-                    + ")";
-          }
-        } catch (Exception breakdownEx) {
-          log.debug(
-              "StartupRunResumer: task-breakdown lookup failed for run={}: {}",
-              run.getRunId(),
-              breakdownEx.getMessage());
+      // 2026-05-04 — Phase 2: actual replay instead of fail-cleanly.
+      // Delegates to RunOrchestrator.resumeAfterCrash which:
+      //   - Reads the persisted plan from pipeline_run.plan_json
+      //   - Reuses the existing workspace at <agent.workspace>/<runId>/
+      //   - Calls SequentialExecutor.execute(req, ResumeRequest) so terminal AgentTasks are
+      //     skipped and the in-flight task picks up from its Redis snapshot
+      //   - Then runs reviewer + report (REVIEWING-resume re-runs the reviewer; idempotent)
+      // resume_attempts is incremented INSIDE resumeAfterCrash so the increment is tied to the
+      // actual dispatch, not just our fall-through.
+      try {
+        var orchestrator = runOrchestratorProvider.getObject();
+        var outcome = orchestrator.resumeAfterCrash(run.getRunId());
+        log.info(
+            "StartupRunResumer: run={} status={} resumeAfterCrash → {}",
+            run.getRunId(),
+            status,
+            outcome);
+        if (outcome
+            == com.navneet.executespec.v2.integration.RunOrchestrator.CrashResumeOutcome.OK) {
+          failedInterrupted++; // counted under "interrupted-then-resumed" in the summary log
+          continue;
         }
-        checkpointHint =
-            " Outline-checkpoint preserved (strategy="
-                + run.getPlanStrategy()
-                + ", outline_json size="
-                + run.getPlanOutlineJson().length()
-                + " bytes"
-                + taskBreakdown
-                + ") — a resubmission with the same "
-                + "spec will reuse the classifier verdict via the 1h "
-                + "Redis cache. Auto-replay of the outline + per-task "
-                + "expansion is a slice-5 follow-up; for now please "
-                + "resubmit.";
-      } else {
-        checkpointHint = "";
+        // Any non-OK outcome (NOT_FOUND / WORKSPACE_GONE / PLAN_MISSING / EXHAUSTED /
+        // NOT_APPLICABLE) was already terminate()'d inside resumeAfterCrash. Move on.
+        failedInterrupted++;
+      } catch (Exception e) {
+        // If the resume entry-point itself blew up, fall back to the old fail-cleanly path so
+        // the run doesn't sit forever in WORKING.
+        log.error(
+            "StartupRunResumer: resumeAfterCrash threw for run={}; falling back to fail-cleanly",
+            run.getRunId(),
+            e);
+        run.setResumeAttempts(attempts + 1);
+        markFailed(
+            run,
+            status,
+            "Interrupted during " + status + "; resume dispatch failed: " + e.getMessage());
+        failedInterrupted++;
       }
-      markFailed(
-          run,
-          status,
-          "Interrupted during "
-              + status
-              + " (JVM restart / deploy). Please retry the run. "
-              + "Resume attempts used: "
-              + (attempts + 1)
-              + "/"
-              + MAX_RESUME_ATTEMPTS
-              + checkpointHint);
-      failedInterrupted++;
     }
     log.warn(
         "StartupRunResumer: recovery complete — awaiting-approval={} "

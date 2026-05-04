@@ -2,6 +2,7 @@ package com.navneet.executespec.state.repository;
 
 import java.time.Instant;
 import java.util.List;
+import java.util.Optional;
 
 import com.navneet.executespec.state.entity.AgentTask;
 
@@ -19,6 +20,15 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
   List<AgentTask> findByRunIdOrderByStartedAtAsc(String runId);
 
   List<AgentTask> findByStatus(String status);
+
+  /**
+   * 2026-05-04 — used by {@link
+   * com.navneet.executespec.v2.harness.SequentialExecutor#resolveResumeAction} to inspect a
+   * specific task's persisted status during boot-time replay. Returns Optional because resume may
+   * run for tasks that were never persisted (worker died before the first {@code persistTaskStatus}
+   * call).
+   */
+  Optional<AgentTask> findByRunIdAndTaskId(String runId, String taskId);
 
   @Modifying(clearAutomatically = true)
   @Query(
