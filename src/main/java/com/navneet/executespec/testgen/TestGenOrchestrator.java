@@ -85,7 +85,7 @@ public class TestGenOrchestrator {
           "TEST_PLANNING_COMPLETED",
           "Test plan created with " + tasks.size() + " test classes");
 
-      // 5. Probe preview if already running (auto-started by V2RunOrchestrator after COMPLETE)
+      // 5. Probe preview if already running (auto-started by RunOrchestrator after COMPLETE)
       String apiProbeResults = "";
       try {
         var existingPreview = previewService.getStatus(runId);

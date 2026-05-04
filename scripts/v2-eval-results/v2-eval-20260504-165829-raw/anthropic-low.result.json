@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "low",
+  "run_id": "4470d62a-82c0-4655-96ff-462846df8d52",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-05-04T11:28:30.028358Z",
+  "completedAt": "2026-05-04T11:29:59.487489Z",
+  "tasks_total": 1,
+  "tasks_done": 1,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildExitCode\":0,\"finalBuildPassed\":true,\"totalLatencyMs\":34578,\"wiringPassSummary\":\"Wiring review complete — no issues found. Project is a flat Python module (fib.py + test_fib.py). The single public symbol `fibonacci` defined in fib.py is correctly imported by test_fib.py via `from fib import fibonacci`. No packages, barrel files, route registrations, or framework component scans are present, so no additional wiring is needed. Build (python3 -m compileall) passes cleanly.\",\"generalPassSummary\":\"Found 0 issues, fixed 0. The fibonacci implementation in fib.py is correct: base cases (F(0)=0, F(1)=1) are handled properly, the iterative loop logic is sound, and the ValueError is raised for negative inputs as documented. All 4 tests pass.\",\"overall\":\"CLEAN\"}",
+  "actual_cost": 0.053649,
+  "est_low": 0.05,
+  "est_high": 0.08750000000000001,
+  "credits": 1,
+  "total_input": 14425,
+  "total_output": 3266,
+  "accuracy": 100,
+  "report_ok": true
+}

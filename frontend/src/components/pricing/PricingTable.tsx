@@ -3,7 +3,7 @@ import {updatePricing} from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
 import {useIsMobile} from '@/hooks/useIsMobile';
 import type {PricingRow} from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 const ROLE_BADGES: Record<string, string> = {
   anthropic: 'text-accent-blue bg-accent-blue/10',
@@ -52,8 +52,8 @@ export default function PricingTable({rows, onRefresh}: PricingTableProps) {
       });
       addToast({type: 'success', message: 'Pricing updated'});
       onRefresh();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
     setEditing(null);
   };

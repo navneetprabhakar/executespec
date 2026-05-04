@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {getWorkspaceHealth, analyseProject, type WorkspaceHealthReport} from '@/lib/api';
 
 /**
@@ -21,7 +22,7 @@ export default function WorkspaceHealthPanel({projectId}: {projectId: string}) {
     try {
       setReport(await getWorkspaceHealth(projectId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setLoading(false);
     }
@@ -38,7 +39,7 @@ export default function WorkspaceHealthPanel({projectId}: {projectId: string}) {
       await analyseProject(projectId);
       await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setAnalysing(false);
     }

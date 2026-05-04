@@ -14,8 +14,8 @@ import jakarta.annotation.PreDestroy;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.v2.chat.ApplyResultStore;
-import com.navneet.executespec.v2.chat.V2ApplyService;
-import com.navneet.executespec.v2.chat.V2ChatService;
+import com.navneet.executespec.v2.chat.ApplyService;
+import com.navneet.executespec.v2.chat.ChatService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -28,7 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Post-run conversation endpoints. V2-native: {@code POST/GET /runs/{id}/chat} are wired to {@link
- * V2ChatService}. {@code /apply} and {@code /iterate} are still 410 Gone pending a V2
+ * ChatService}. {@code /apply} and {@code /iterate} are still 410 Gone pending a V2
  * re-implementation (they need to spin up a new run from the current workspace, which is more
  * plumbing than chat itself).
  */
@@ -39,12 +39,12 @@ import lombok.extern.slf4j.Slf4j;
 public class RunConversationController {
 
   private final RunAccessGuard guard;
-  private final V2ChatService chatService;
-  private final V2ApplyService applyService;
+  private final ChatService chatService;
+  private final ApplyService applyService;
   private final ApplyResultStore applyResultStore;
 
   /**
-   * Apply-suggestion runs a 25-iteration WorkerAgentV2 loop with Sonnet-grade calls (~10–20 s each
+   * Apply-suggestion runs a 25-iteration WorkerAgent loop with Sonnet-grade calls (~10–20 s each
    * after the v2.6.1 tier bump). Holding that on a Tomcat handler thread trips Hikari's
    * connection-leak detector via OSIV (the EM stays bound to the request thread for the request's
    * lifetime).
@@ -117,7 +117,7 @@ public class RunConversationController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "message is required");
     }
     try {
-      V2ChatService.SendResult r = chatService.send(runId, body.message());
+      ChatService.SendResult r = chatService.send(runId, body.message());
       return ResponseEntity.ok(new ChatResponseBody(r.reply(), r.messageCount(), r.maxMessages()));
     } catch (IllegalArgumentException e) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
@@ -145,7 +145,7 @@ public class RunConversationController {
     return CompletableFuture.supplyAsync(
         () -> {
           try {
-            V2ApplyService.ApplyResult r = applyService.apply(runId, suggestion, source);
+            ApplyService.ApplyResult r = applyService.apply(runId, suggestion, source);
             return ResponseEntity.ok(
                 new ApplyResponseBody(
                     r.taskCount(),

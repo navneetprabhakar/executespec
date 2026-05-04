@@ -4,7 +4,9 @@ import * as api from '@/lib/api';
 import type {StalenessReport} from '@/lib/api';
 import type {ArchitectureDoc} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
-import {cn} from '@/lib/utils';
+import {useIsProjectAdmin} from '@/hooks/useIsProjectAdmin';
+import {Glossary} from '@/components/shared/Glossary';
+import {cn, errMsg} from '@/lib/utils';
 
 export default function ArchitectureViewer({
   projectId,
@@ -17,6 +19,11 @@ export default function ArchitectureViewer({
   // so we can disable it with an inline reason instead of letting it fail in
   // the backend and bubble up a useless "Generation failed" error.
   const noRepos = repoCount === 0;
+  // P-25 (UX audit, 2026-05-03) — Generate is admin-only on the backend.
+  // Pre-fix, DEVELOPER / VIEWER roles saw the button live, clicked it, and
+  // got a 403. Now we disable + tooltip the cause — non-admins see the same
+  // "this is admin-only" treatment as everywhere else (Launch, Add Repo).
+  const isAdmin = useIsProjectAdmin();
   const [doc, setDoc] = useState<ArchitectureDoc | null>(null);
   const [versions, setVersions] = useState<ArchitectureDoc[]>([]);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
@@ -48,6 +55,7 @@ export default function ArchitectureViewer({
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const generate = async () => {
@@ -57,7 +65,7 @@ export default function ArchitectureViewer({
       await api.analyseProject(projectId, branchOverride.trim() || undefined);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Generation failed');
+      setError(e instanceof Error ? errMsg(e) : 'Generation failed');
     } finally {
       setBusy(false);
     }
@@ -81,10 +89,27 @@ export default function ArchitectureViewer({
 
   return (
     <div className='space-y-3 text-xs'>
+      {/* Header + clarifying subtitle.
+          P-09 (UX audit, 2026-05-03): pre-fix this section opened with just
+          "Architecture document" and a Generate button — users new to the
+          product had no idea what it was for or why they'd want one. The
+          subtitle now spells out the value (planner's input on every run)
+          plus a glossary tooltip on "codemap" so the jargon is self-
+          explaining without bloating the surface. */}
+      <div className='space-y-1'>
+        <h2 className='text-[13px] font-medium text-primary'>Architecture document</h2>
+        <p className='text-[11px] text-muted leading-relaxed max-w-2xl'>
+          A concise overview of every linked repo —{' '}
+          <Glossary term='codemap'>file tree, key types, public APIs</Glossary> — that the planner
+          reads before each run. Regenerate after big merges so new runs start from current
+          structure.
+        </p>
+      </div>
+
       {/* Toolbar */}
       <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3'>
         <div className='flex items-center gap-2 flex-wrap min-w-0'>
-          <h2 className='text-[13px] font-medium text-primary'>Architecture document</h2>
+          <span className='sr-only'>Architecture document toolbar</span>
           {staleness?.stale && (
             <span
               className='text-[11px] uppercase tracking-wide bg-accent-amber/10 text-accent-amber px-1.5 py-0.5 rounded-sm'
@@ -128,31 +153,57 @@ export default function ArchitectureViewer({
           title="Optional branch override (applies to all linked repos). Leave empty for each repo's default."
         />
         <div className='flex flex-col items-end gap-0.5'>
-          <button
-            onClick={generate}
-            disabled={busy || noRepos}
-            title={noRepos ? 'Link at least one repository under the Repos tab first.' : undefined}
-            aria-label={
-              noRepos ? 'Generate architecture (link a repo first)' : 'Generate architecture'
-            }
-            className={cn(
-              'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border transition-colors',
-              busy || noRepos
-                ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
-                : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
-            )}
-          >
-            {busy ? (
+          {(() => {
+            // Combine the two disable reasons into one tooltip — admin-gate
+            // takes priority because non-admins can't fix the repo gap themselves.
+            const adminGated = !isAdmin;
+            const disabled = busy || noRepos || adminGated;
+            const title = adminGated
+              ? 'Only org admins can regenerate the architecture. Ask an admin.'
+              : noRepos
+                ? 'Link at least one repository under the Repos tab first.'
+                : undefined;
+            const inlineReason = adminGated
+              ? 'Admin only'
+              : noRepos
+                ? 'Link a repo to enable'
+                : null;
+            return (
               <>
-                <Loader2 className='h-3 w-3 animate-spin' /> Generating…
+                <button
+                  onClick={generate}
+                  disabled={disabled}
+                  title={title}
+                  aria-label={
+                    adminGated
+                      ? 'Generate architecture (admin only)'
+                      : noRepos
+                        ? 'Generate architecture (link a repo first)'
+                        : 'Generate architecture'
+                  }
+                  className={cn(
+                    'inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1 rounded-sm border transition-colors',
+                    disabled
+                      ? 'border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
+                      : 'border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20',
+                  )}
+                >
+                  {busy ? (
+                    <>
+                      <Loader2 className='h-3 w-3 animate-spin' /> Generating…
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className='h-3 w-3' /> {doc ? 'Regenerate' : 'Generate'}
+                    </>
+                  )}
+                </button>
+                {inlineReason && (
+                  <span className='text-[10px] text-muted italic'>{inlineReason}</span>
+                )}
               </>
-            ) : (
-              <>
-                <Sparkles className='h-3 w-3' /> {doc ? 'Regenerate' : 'Generate'}
-              </>
-            )}
-          </button>
-          {noRepos && <span className='text-[10px] text-muted italic'>Link a repo to enable</span>}
+            );
+          })()}
         </div>
       </div>
 
@@ -160,8 +211,13 @@ export default function ArchitectureViewer({
       {loading && <div className='text-xs text-muted'>Loading…</div>}
 
       {!loading && !shown && (
-        <div className='text-xs text-muted border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)]'>
-          No architecture document yet. Link some repos under the Repos tab and click Generate.
+        <div className='text-xs border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)] space-y-1'>
+          <div className='text-secondary font-medium'>No architecture document yet</div>
+          <div className='text-muted'>
+            {noRepos
+              ? 'Link a repository under the Repos tab to get started.'
+              : 'Click Generate above. The first run takes ~1–2 min — every subsequent run uses this snapshot for free.'}
+          </div>
         </div>
       )}
 
@@ -360,7 +416,7 @@ function ArchSourceChanges({
         if (alive) setReport(r);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(e instanceof Error ? errMsg(e) : String(e));
       })
       .finally(() => {
         if (alive) setLoading(false);

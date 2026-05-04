@@ -61,6 +61,50 @@ export const GLOSSARY: Record<string, GlossaryEntry> = {
     definition:
       'The unit of work ExecuteSpec ships against your codebase. One run = plan → execute → review → preview → PR.',
   },
+  // X-12 (UX audit, 2026-05-03) — second batch of definitions for
+  // jargon that surfaces in StatusBadge tooltips, ScoreCard rows, and
+  // RunDetailTabs. Covers the operational vocabulary an enterprise
+  // user encounters within their first 2-3 runs.
+  'smoke test': {
+    display: 'smoke test',
+    definition:
+      "A quick build/compile check after each task to catch broken code early. Doesn't run your full test suite — just confirms the change didn't syntax-error or break the project structure.",
+  },
+  'plan strategy': {
+    display: 'plan strategy',
+    definition:
+      'How the planner staged your run: SINGLE_SHOT (1 task, no LLM call), SMALL (≤4 tasks, full plan), MEDIUM (≤15 tasks), LARGE (parallel skeleton + expansion), LEGACY (recursive depth-2 expansion for huge specs).',
+  },
+  'reviewer verdict': {
+    display: 'reviewer verdict',
+    definition:
+      "The post-build review pass's opinion: CLEAN (nothing to fix), FIXED_ISSUES (auto-fixed warnings), UNRESOLVED_ISSUES (warnings escaped), REVIEW_FAILED (reviewer hit an error).",
+  },
+  'post-merge cascade': {
+    display: 'post-merge cascade',
+    definition:
+      'When a PR opened by a run gets merged on GitHub, ExecuteSpec auto-regenerates the codemap + architecture for the affected repo so the next run starts from current state — not the pre-merge snapshot.',
+  },
+  'stale codemap': {
+    display: 'stale codemap',
+    definition:
+      'The repo on GitHub has commits past the SHA the codemap was generated against. The planner is reading slightly out-of-date structure. Click "Analyse" to refresh.',
+  },
+  'final build': {
+    display: 'final build',
+    definition:
+      "The build/compile check run AFTER the last task plus the reviewer's wiring pass complete. The authoritative gate that flips a run from PARTIAL → COMPLETE.",
+  },
+  'plan approval gate': {
+    display: 'plan approval gate',
+    definition:
+      'The pause between planning and execution where you review the task list, see the credit cost, and approve or reject. Skipped in Quick mode (no review) — used in Reviewed mode.',
+  },
+  'verdict pill': {
+    display: 'verdict pill',
+    definition:
+      'The Shippable / Needs review / Blocked badge on a finished run. Derived from final build + tests + reviewer verdict + verified score together — one signal you can trust at a glance.',
+  },
 };
 
 /** Look up a glossary entry, case-insensitive. */

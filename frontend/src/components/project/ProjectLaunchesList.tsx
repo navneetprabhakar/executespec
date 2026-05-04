@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {Link} from 'react-router-dom';
 import {Rocket} from 'lucide-react';
@@ -14,7 +15,7 @@ export default function ProjectLaunchesList({projectId}: {projectId: string}) {
     executionApi
       .listProjectLaunches(projectId)
       .then((page) => setLaunches(page.content))
-      .catch((e: any) => setError(e?.message ?? 'Failed to load launches'));
+      .catch((e: unknown) => setError(errMsg(e) ?? 'Failed to load launches'));
   }, [projectId]);
 
   if (error) return <div className='text-xs text-status-error'>{error}</div>;

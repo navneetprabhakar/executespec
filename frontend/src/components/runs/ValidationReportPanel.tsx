@@ -9,6 +9,7 @@ import {
   FileCode2,
   Download,
   RefreshCw,
+  Play,
 } from 'lucide-react';
 import {
   getValidationReport,
@@ -27,7 +28,7 @@ import RunStamp from '@/components/project/RunStamp';
 import {Glossary} from '@/components/shared/Glossary';
 import {useUiStore} from '@/stores/useUiStore';
 import {useSseStore} from '@/stores/useSseStore';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 interface ValidationReportPanelProps {
   runId: string;
@@ -47,6 +48,14 @@ interface ValidationReportPanelProps {
     tasksComplete?: number | null;
     provider?: string | null;
   };
+  /** R-11 (UX audit, 2026-05-03) — retry-failed-tasks affordance promoted
+   *  into the report header. Pre-fix this button lived on the run-level
+   *  toolbar, far from the failure signal. Now the parent passes a callback
+   *  + count and the report header renders the button next to Regenerate
+   *  when there's something to retry. Renders nothing when count <= 0. */
+  retryFailed?: () => void | Promise<void>;
+  retryFailedCount?: number;
+  retryFailedBusy?: boolean;
 }
 
 /**
@@ -146,6 +155,9 @@ export default function ValidationReportPanel({
   status,
   statusReason,
   stampMeta,
+  retryFailed,
+  retryFailedCount = 0,
+  retryFailedBusy = false,
 }: ValidationReportPanelProps) {
   const [report, setReport] = useState<ValidationReportData | null>(null);
   const [expanded, setExpanded] = useState(false);
@@ -184,8 +196,8 @@ export default function ValidationReportPanel({
           break;
         }
       }
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Retry failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Retry failed'});
     } finally {
       setRetrying(false);
     }
@@ -233,14 +245,9 @@ export default function ValidationReportPanel({
   const accuracyScore = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
   const grade = report.accuracyGrade || null;
 
-  const primaryScoreCls =
-    primaryScore == null
-      ? 'text-muted border-[var(--border-default)] bg-[var(--gray-200)]'
-      : primaryScore >= 90
-        ? 'text-status-success border-status-success/30 bg-status-success/10'
-        : primaryScore >= 75
-          ? 'text-status-waiting border-status-waiting/30 bg-status-waiting/10'
-          : 'text-status-error border-status-error/30 bg-status-error/10';
+  // primaryScoreCls retired with the header score-chip drop in P-19/R-03.
+  // The expanded ScoreCard hero still uses its own colouring (ScoreRing),
+  // so no fallback class needed here.
 
   const summaryParts: string[] = [];
   summaryParts.push(`${report.filesGenerated} file${report.filesGenerated !== 1 ? 's' : ''}`);
@@ -253,15 +260,12 @@ export default function ValidationReportPanel({
     summaryParts.push('Clean run');
   }
 
-  // v2.5.14 (Phase 1.2) — suppress "Clean completion" narrative when the
-  // pipeline result itself disagrees. The two signals come from different
-  // sources (status_reason from V2RunOrchestrator, pipelineResult from the
-  // validation report) and historical runs could end up with
-  // CLEAN_COMPLETION + pipelineResult=FAILED. Trust the stricter signal.
-  const suppressReason =
-    (statusReason === 'CLEAN_COMPLETION' || statusReason === 'CLEAN_WITH_INTERMEDIATE_WARNINGS') &&
-    (report.pipelineResult === 'FAILED' || report.pipelineResult === 'NEEDS_ATTENTION');
-  const reasonCopy = suppressReason ? null : statusReasonCopy(statusReason);
+  // R-09 (UX audit, 2026-05-04) — the v2.5.14 `suppressReason` special case
+  // is gone now that ValidationReportService.reconcileWithRunStatus
+  // (backend) ensures pipelineResult agrees with status_reason at write
+  // time, and V171 backfilled historical drift. The two signals are now
+  // consistent so the narrative line can render unconditionally.
+  const reasonCopy = statusReasonCopy(statusReason);
 
   const handleShare = async () => {
     setSharing(true);
@@ -271,8 +275,8 @@ export default function ValidationReportPanel({
       setCopied(true);
       addToast({type: 'success', message: 'Report link copied to clipboard'});
       setTimeout(() => setCopied(false), 2000);
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Failed to share report'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Failed to share report'});
     } finally {
       setSharing(false);
     }
@@ -283,8 +287,8 @@ export default function ValidationReportPanel({
     try {
       await downloadValidationReportPdf(runId);
       addToast({type: 'success', message: 'PDF downloaded'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Failed to download PDF'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Failed to download PDF'});
     } finally {
       setDownloading(false);
     }
@@ -321,31 +325,16 @@ export default function ValidationReportPanel({
           verifiedScore={report.verifiedScore}
           statusReason={statusReason}
         />
-        <span
-          className={cn(
-            'text-[10px] px-1.5 py-0.5 rounded-sm border font-medium opacity-70',
-            resultCfg.cls,
-          )}
-        >
-          {resultCfg.label}
-        </span>
-        {primaryScore != null && (
-          <span
-            className={cn(
-              'text-[10px] font-mono px-1.5 py-0.5 rounded-sm border tabular-nums opacity-70',
-              primaryScoreCls,
-            )}
-            title={
-              primaryLabel === 'Verified'
-                ? 'Deterministic score: build + tests + reviewer verdict (v2.5.10)'
-                : 'LLM-estimated spec coverage (legacy pre-V106)'
-            }
-          >
-            <span className='opacity-70 mr-0.5'>{primaryLabel === 'Verified' ? 'Ver' : 'Acc'}</span>
-            {primaryScore}
-            <span className='opacity-60'>/100</span>
-          </span>
-        )}
+        {/* P-19 / R-03 (UX audit, 2026-05-03): pre-fix this header carried
+            FOUR overlapping status signals — VerdictPill, the {resultCfg.label}
+            chip ("Has issues" / "Passed with fixes" / etc.), the
+            primary-score chip (Ver 92/100), and the textual summaryParts.
+            VerdictPill already encodes the verdict lineage (Shippable /
+            Needs review / Blocked) with the score it's derived from in its
+            tooltip; the additional chips were each saying the same thing
+            with different vocabulary. Dropped both the resultCfg.label chip
+            and the primary-score chip. The numeric score still lives in the
+            expanded ScoreCard hero (ScoreRing) for users who want it. */}
         {report.generatedAfterImprovements && (
           <span className='text-[10px] px-1.5 py-0.5 rounded-sm border bg-accent-blue/10 text-accent-blue border-accent-blue/30'>
             Re-validated
@@ -355,6 +344,22 @@ export default function ValidationReportPanel({
           {summaryParts.join(' · ')}
         </span>
         <div className='ml-auto flex items-center gap-2' onClick={(e) => e.stopPropagation()}>
+          {/* R-11 — retry-failed-tasks button. Shows up only when the parent
+              has both a callback and a non-zero count (i.e. RunDetail derived
+              the failedTasks list). Sits left of Regenerate so the failure
+              signal (verdict pill / signal breakdown chip) and the retry
+              action are in the same horizontal scan. */}
+          {retryFailed && retryFailedCount > 0 && (
+            <button
+              onClick={() => void retryFailed()}
+              disabled={retryFailedBusy}
+              title={`Retry ${retryFailedCount} failed task${retryFailedCount === 1 ? '' : 's'} in this run`}
+              className='flex items-center gap-1 text-[11px] font-medium text-status-partial hover:text-status-partial transition-colors px-2 py-0.5 rounded-sm border border-status-partial/40 bg-status-partial/10 hover:bg-status-partial/20 disabled:opacity-60 disabled:cursor-not-allowed'
+            >
+              <Play className={cn('h-3 w-3', retryFailedBusy && 'animate-pulse')} />
+              {retryFailedBusy ? 'Retrying…' : `Retry failed (${retryFailedCount})`}
+            </button>
+          )}
           <button
             onClick={handleRetry}
             disabled={retrying}

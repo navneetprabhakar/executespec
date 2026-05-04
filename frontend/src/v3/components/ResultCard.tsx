@@ -67,7 +67,7 @@ function verdictTone(v: V3Verdict | null): 'ok' | 'warn' | 'err' | 'neutral' {
 export default function ResultCard({runId, initialStatus}: ResultCardProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [report, setReport] = useState<ValidationReportData | null>(null);
-  // Multi-repo PR list — same fallback as V3RunDetail. detail.githubPrUrl is null on multi-repo
+  // Multi-repo PR list — same fallback as RunDetailPage. detail.githubPrUrl is null on multi-repo
   // runs, so we have to consult the registry to know if there are any PRs at all.
   const [prs, setPrs] = useState<PrSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -218,13 +218,14 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
             >
               Open run
             </button>
-            {/* Multi-repo aware: same logic as V3RunDetail. 0 → none, 1 → "Open PR", N>1 →
+            {/* Multi-repo aware: same logic as RunDetailPage. 0 → none, 1 → "Open PR", N>1 →
                  one button per repo labeled "<short>#<num>". Falls back to detail.githubPrUrl
                  for legacy runs without registry rows. */}
             {(() => {
               const legacyUrl = detail.githubPrUrl;
               if (prs.length === 0 && !legacyUrl) return null;
               if (prs.length <= 1) {
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                 const single = prs[0]?.prUrl ?? legacyUrl!;
                 return (
                   <a

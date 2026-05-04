@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {
   listSpecTemplates,
   createProjectSpecTemplate,
@@ -36,7 +37,7 @@ export default function TemplatePicker({projectId, currentRequirement, onPick}: 
     listSpecTemplates(projectId)
       .then(setItems)
       .catch((e) => {
-        setError(e instanceof Error ? e.message : String(e));
+        setError(e instanceof Error ? errMsg(e) : String(e));
       });
   };
 
@@ -61,7 +62,7 @@ export default function TemplatePicker({projectId, currentRequirement, onPick}: 
       setCreating(false);
       load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     }
   };
 
@@ -70,7 +71,7 @@ export default function TemplatePicker({projectId, currentRequirement, onPick}: 
       await deleteSpecTemplate(projectId, id);
       load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     }
   };
 

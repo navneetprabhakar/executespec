@@ -27,7 +27,10 @@ interface Props {
 
 export default function ProviderModelSelector({
   provider,
-  model,
+  // model is part of the Props contract but unused inside this component;
+  // rename-destructure satisfies @typescript-eslint/no-unused-vars without
+  // breaking the prop type. The caller still passes it for API symmetry.
+  model: _model,
   onProviderChange,
   onModelChange,
 }: Props) {
@@ -43,7 +46,7 @@ export default function ProviderModelSelector({
   }, []);
 
   const selectedProvider = providers.find((p) => p.id === provider);
-  const models = selectedProvider?.models ?? [];
+  const _models = selectedProvider?.models ?? [];
 
   const hasKeyForProvider = (providerId: string): boolean => {
     if (!isByokTier) return true; // Managed tiers use system keys — all available
@@ -60,7 +63,7 @@ export default function ProviderModelSelector({
     localStorage.removeItem(LS_MODEL);
   };
 
-  const handleModelChange = (id: string) => {
+  const _handleModelChange = (id: string) => {
     onModelChange(id);
     if (id) {
       localStorage.setItem(LS_MODEL, id);

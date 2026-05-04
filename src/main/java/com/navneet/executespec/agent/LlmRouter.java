@@ -83,7 +83,7 @@ public class LlmRouter {
       Caffeine.newBuilder().expireAfterWrite(Duration.ofHours(6)).maximumSize(1000).build();
 
   /**
-   * Per-run user tier cache — populated by V2RunOrchestrator at run start. FREE tier forces
+   * Per-run user tier cache — populated by RunOrchestrator at run start. FREE tier forces
    * gpt-5.4-mini. TTL 6h, max 1000.
    */
   private final Cache<String, String> runUserTierCache =
@@ -1009,7 +1009,7 @@ public class LlmRouter {
 
   // ── FREE tier model lock ──────────────────────────────────────────────────
 
-  /** Register the user's subscription tier for a run. Called by V2RunOrchestrator at run start. */
+  /** Register the user's subscription tier for a run. Called by RunOrchestrator at run start. */
   public void setRunUserTier(String runId, String userTier) {
     if (runId != null && userTier != null) {
       runUserTierCache.put(runId, userTier.toUpperCase());

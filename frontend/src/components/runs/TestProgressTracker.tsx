@@ -45,7 +45,7 @@ const STEPS: Step[] = [
   },
 ];
 
-export default function TestProgressTracker({runId, status}: Props) {
+export default function TestProgressTracker({runId: _runId, status: _status}: Props) {
   const entries = useSseStore((s) => s.entries);
 
   const eventTypes = useMemo(() => {

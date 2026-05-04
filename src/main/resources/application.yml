@@ -159,8 +159,23 @@ model-matrix:
       # v2.5.9 Bug #3 — gemini-2.5-flash emits Python-style tool calls
       # ("print(default_api.submitPlan(...))") causing MALFORMED_FUNCTION_CALL.
       # gemini-3-flash-preview is the newer tool-call-reliable model.
-      planning: gemini-3-flash-preview
-      workhorse: gemini-3-flash-preview
+      #
+      # 2026-05-04 — eval-matrix data showed Gemini was 3.5-4× slower than
+      # Anthropic/OpenAI on the medium band (1049s vs 295s/225s) when ALL
+      # tiers were on flash. Bumping PLANNING + WORKHORSE to gemini-3-pro-
+      # preview to match the strength of Anthropic Sonnet / OpenAI gpt-5.4
+      # in those tiers; LIGHTWEIGHT stays on flash since LOW-band scaffolds
+      # don't benefit from Pro and the cost/speed trade-off favours flash
+      # for plumbing tasks. Pro is ~6-8× per-token vs flash; medium-band
+      # runs jump from ~$0.10 to ~$0.70 — still cheaper than equivalent
+      # Anthropic Sonnet runs.
+      #
+      # NOTE: gemini-3-pro is preview-only as of 2026-05-04. Codebase was
+      # already on gemini-3-flash-preview so the preview-tier risk envelope
+      # is unchanged. Stable fallback would be gemini-2.5-pro (older
+      # generation but no preview suffix).
+      planning: gemini-3-pro-preview
+      workhorse: gemini-3-pro-preview
       lightweight: gemini-3-flash-preview
     openai:
       planning: gpt-5.4
@@ -218,7 +233,19 @@ model-matrix:
         input-per-1m: 0.50
         cached-input-per-1m: 0.05
         output-per-1m: 3.00
-      notes: "Gemini 3 Flash Preview — all tiers for Google (PLANNING + WORKHORSE + LIGHTWEIGHT)."
+      notes: "Gemini 3 Flash Preview — LIGHTWEIGHT tier for Google (LOW-band scaffolds)."
+    "[gemini-3-pro-preview]":
+      provider: gemini
+      chain-tier: ARCHITECT
+      context-limit: 1048576
+      max-output-tokens: 65536
+      pricing:
+        # 2026-05-04 — Pro pricing per Google AI list (~6-8× flash). Verified
+        # on https://ai.google.dev/gemini-api/docs/pricing (preview tier).
+        input-per-1m: 3.50
+        cached-input-per-1m: 0.35
+        output-per-1m: 21.00
+      notes: "Gemini 3 Pro Preview — PLANNING + WORKHORSE tier for Google (medium/high band)."
     "[gpt-5.4]":
       provider: openai
       chain-tier: CAPABLE
@@ -255,11 +282,11 @@ model-matrix:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-pro-preview }
     CAPABLE:
       - { provider: anthropic, model: claude-sonnet-4-6 }
       - { provider: openai, model: gpt-5.4 }
-      - { provider: gemini, model: gemini-3-flash-preview }
+      - { provider: gemini, model: gemini-3-pro-preview }
     UTILITY:
       - { provider: anthropic, model: claude-haiku-4-5-20251001 }
       - { provider: gemini, model: gemini-3-flash-preview }
@@ -277,7 +304,7 @@ model-matrix:
     CoherencePlannerAgent: LIGHTWEIGHT      # v2.6.2 hierarchical-planner phase 3
     ReviewerAgentV3: PLANNING
     SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
-    WorkerAgentV2: WORKHORSE
+    WorkerAgent: WORKHORSE
     # Shared non-tool-calling agents (use LlmRouter)
     TestPlannerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE

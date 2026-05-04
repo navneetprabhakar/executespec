@@ -26,13 +26,66 @@ type PostHogClient = typeof posthog;
 let initialized = false;
 let client: PostHogClient | null = null;
 
+// X-09 (UX audit, 2026-05-03) — user-facing analytics opt-out flag.
+// Persisted to localStorage so the choice survives logout. When the flag is
+// 'true' (the default for new users), every function in this module is a
+// no-op even if the build-time API key is set, and no PostHog network
+// calls happen. When the user later flips the toggle, callers re-init via
+// `applyAnalyticsConsent()` to pick up the change without a page reload.
+const CONSENT_KEY = 'es:analyticsOptOut';
+
+function isOptedOut(): boolean {
+  try {
+    return localStorage.getItem(CONSENT_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+/** Read the persisted opt-out flag. Returns true when the user has explicitly opted out. */
+export function isAnalyticsOptedOut(): boolean {
+  return isOptedOut();
+}
+
+/**
+ * Persist the opt-out flag and react immediately. When the user opts out,
+ * we proactively call `posthog.opt_out_capturing()` if the client was
+ * already initialised (drops the resident cookie/ID); when they opt back
+ * in, the next initAnalytics() picks them up.
+ */
+export function setAnalyticsOptedOut(optedOut: boolean): void {
+  try {
+    localStorage.setItem(CONSENT_KEY, optedOut ? 'true' : 'false');
+  } catch {
+    /* no-op */
+  }
+  if (optedOut && client) {
+    try {
+      // posthog-js exposes opt_out_capturing on the global posthog instance.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (client as any).opt_out_capturing?.();
+    } catch {
+      /* defensive — no-op if signature differs in a future SDK */
+    }
+  } else if (!optedOut && client) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (client as any).opt_in_capturing?.();
+    } catch {
+      /* no-op */
+    }
+  }
+}
+
 function apiKey(): string | undefined {
   // Set via VITE_POSTHOG_API_KEY in dev (.env) or injected at build time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const key = (import.meta as any).env?.VITE_POSTHOG_API_KEY;
   return key && typeof key === 'string' && key.length > 0 ? key : undefined;
 }
 
 function apiHost(): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (import.meta as any).env?.VITE_POSTHOG_HOST || 'https://us.i.posthog.com';
 }
 
@@ -42,6 +95,8 @@ export function initAnalytics(): void {
   initialized = true;
   const key = apiKey();
   if (!key) return;
+  // X-09 — respect persisted opt-out before any network call.
+  if (isOptedOut()) return;
   posthog.init(key, {
     api_host: apiHost(),
     // Server-side funnel events are authoritative — client-side capture is

@@ -6,27 +6,27 @@ import static org.mockito.Mockito.mock;
 
 import java.util.List;
 
-import com.navneet.executespec.v2.agent.PlannedTaskV2;
-import com.navneet.executespec.v2.agent.PlannedTaskV2.Complexity;
+import com.navneet.executespec.v2.agent.PlannedTask;
+import com.navneet.executespec.v2.agent.PlannedTask.Complexity;
 
 import org.junit.jupiter.api.Test;
 
 /**
- * Regression test for the 2026-05-02 multi-repo bug: {@code
- * SequentialExecutorV2.composeSystemPrompt} was not receiving the workspace summary built by {@code
- * V2RunOrchestrator.buildMultiRepoSummary}. The planner saw the "MULTI-REPO PROJECT WORKSPACE /
- * repos/&lt;name&gt;/" block and routed every task's {@code touchesFiles} under the right subdir;
- * the worker had no such context, so writes landed at workspace root and the per-repo push step
- * found no diff to ship — runs finished COMPLETE with empty PRs.
+ * Regression test for the 2026-05-02 multi-repo bug: {@code SequentialExecutor.composeSystemPrompt}
+ * was not receiving the workspace summary built by {@code RunOrchestrator.buildMultiRepoSummary}.
+ * The planner saw the "MULTI-REPO PROJECT WORKSPACE / repos/&lt;name&gt;/" block and routed every
+ * task's {@code touchesFiles} under the right subdir; the worker had no such context, so writes
+ * landed at workspace root and the per-repo push step found no diff to ship — runs finished
+ * COMPLETE with empty PRs.
  *
  * <p>The fix threaded {@code workspaceSummary} through {@link ExecutionRequest} and into {@link
- * SequentialExecutorV2#composeSystemPrompt}. This test pins the contract: when the executor
- * receives a multi-repo workspace summary, the worker's system prompt MUST include the block
- * verbatim. Without this assertion the wire could silently get unplugged again — exactly how it
- * shipped broken in the first place.
+ * SequentialExecutor#composeSystemPrompt}. This test pins the contract: when the executor receives
+ * a multi-repo workspace summary, the worker's system prompt MUST include the block verbatim.
+ * Without this assertion the wire could silently get unplugged again — exactly how it shipped
+ * broken in the first place.
  *
  * <p>Tests {@code composeSystemPrompt} directly (package-private) rather than going through {@link
- * SequentialExecutorV2#execute(ExecutionRequest)} so we don't need to mock the full LLM pipeline +
+ * SequentialExecutor#execute(ExecutionRequest)} so we don't need to mock the full LLM pipeline +
  * workspace + Spring context — this is a prompt-shaping invariant, not an end-to-end test.
  */
 class MultiRepoWorkerPromptTest {
@@ -36,21 +36,21 @@ class MultiRepoWorkerPromptTest {
    * composeSystemPrompt} doesn't touch any of them — it only reads from its arguments and {@code
    * SYSTEM_PROMPT_BASE} — so passing nulls / mocks is safe and keeps the fixture small.
    */
-  private SequentialExecutorV2 newExecutor() {
-    return new SequentialExecutorV2(
-        mock(com.navneet.executespec.v2.agent.WorkerAgentV2.class),
+  private SequentialExecutor newExecutor() {
+    return new SequentialExecutor(
+        mock(com.navneet.executespec.v2.agent.WorkerAgent.class),
         mock(com.navneet.executespec.v2.tool.BuildProjectTool.class),
         new com.fasterxml.jackson.databind.ObjectMapper(),
-        mock(com.navneet.executespec.v2.observability.V2Metrics.class),
+        mock(com.navneet.executespec.v2.observability.Metrics.class),
         mock(com.navneet.executespec.sse.SseBroadcaster.class),
         mock(com.navneet.executespec.state.repository.AgentTaskRepository.class),
         mock(com.navneet.executespec.router.ModelResolver.class),
         mock(com.navneet.executespec.project.rag.RetrievalService.class),
-        mock(com.navneet.executespec.v2.cost.V2RunCostTracker.class));
+        mock(com.navneet.executespec.v2.cost.RunCostTracker.class));
   }
 
-  private PlannedTaskV2 task() {
-    return PlannedTaskV2.builder()
+  private PlannedTask task() {
+    return PlannedTask.builder()
         .id("T1")
         .title("Add OAuth login")
         .description("Wire Google OAuth into the existing auth service.")
@@ -89,7 +89,7 @@ class MultiRepoWorkerPromptTest {
 
   @Test
   void single_repo_run_does_not_receive_multi_repo_block() {
-    // V2RunOrchestrator passes null when buildMultiRepoSummary returns null (single-repo
+    // RunOrchestrator passes null when buildMultiRepoSummary returns null (single-repo
     // / scratch workspace). The executor must not invent a header in that case.
     String prompt = newExecutor().composeSystemPrompt(task(), null, null, null, null);
 
@@ -100,7 +100,7 @@ class MultiRepoWorkerPromptTest {
 
   @Test
   void unrelated_workspace_summary_is_not_treated_as_multi_repo() {
-    // The codemap-fallback branch in V2RunOrchestrator emits a different summary
+    // The codemap-fallback branch in RunOrchestrator emits a different summary
     // ("Existing repository — codebase map below..."). The executor's contains-check
     // must not false-trigger on that and dump a stale codemap into the worker prompt.
     String codemapSummary = "Existing repository — codebase map below.\n\n(... codemap ...)";
@@ -120,8 +120,8 @@ class MultiRepoWorkerPromptTest {
   void hard_constraints_and_touches_files_still_render_alongside_multi_repo_block() {
     // The pre-fix worker prompt assembled hard constraints + touchesFiles via existing branches.
     // The new multi-repo block must not displace either.
-    PlannedTaskV2 t =
-        PlannedTaskV2.builder()
+    PlannedTask t =
+        PlannedTask.builder()
             .id("T1")
             .title("Wire Stripe")
             .description("Add /checkout endpoint.")

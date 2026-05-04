@@ -2,7 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {Upload, FileText, Trash2, Loader2, CheckCircle2, AlertCircle} from 'lucide-react';
 import * as api from '@/lib/api';
 import type {ProjectDocumentRow} from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 const STATUS_PILL: Record<ProjectDocumentRow['status'], string> = {
   UPLOADED: 'text-muted',
@@ -24,7 +24,7 @@ export default function ProjectDocumentsPanel({projectId}: {projectId: string}) 
     api
       .listProjectDocuments(projectId)
       .then(setDocs)
-      .catch((e: Error) => setError(e.message))
+      .catch((e: Error) => setError(errMsg(e)))
       .finally(() => setLoading(false));
   };
 
@@ -48,7 +48,7 @@ export default function ProjectDocumentsPanel({projectId}: {projectId: string}) 
       await api.uploadProjectDocument(projectId, file);
       refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Upload failed');
+      setError(e instanceof Error ? errMsg(e) : 'Upload failed');
     } finally {
       setBusy(false);
       if (fileInput.current) fileInput.current.value = '';

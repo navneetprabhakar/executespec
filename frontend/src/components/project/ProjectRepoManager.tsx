@@ -72,18 +72,42 @@ export default function ProjectRepoManager({projectId}: {projectId: string}) {
       <div className='flex items-center justify-between'>
         <h2 className='text-lg font-medium'>Linked repositories</h2>
         <div className='flex items-center gap-2'>
+          {/* P-25 (UX audit, 2026-05-03) — Reset + Add are admin-only on the
+              backend. Pre-fix the buttons rendered live for everyone, clicked
+              by DEVELOPER/VIEWER, returned 403. Now disable + tooltip the
+              cause so non-admins see a consistent "this is admin only"
+              treatment instead of a backend error. */}
           {repos.length > 0 && (
             <button
-              onClick={() => setShowResetSheet(true)}
-              title='Preview SHA movement per repo, then pull origin HEAD + regenerate codemaps/architecture'
-              className='text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted hover:text-primary'
+              onClick={() => isOrgAdmin && setShowResetSheet(true)}
+              disabled={!isOrgAdmin}
+              title={
+                !isOrgAdmin
+                  ? 'Only org admins can reset the workspace. Ask an admin.'
+                  : 'Preview SHA movement per repo, then pull origin HEAD + regenerate codemaps/architecture'
+              }
+              className={
+                !isOrgAdmin
+                  ? 'text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
+                  : 'text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted hover:text-primary'
+              }
             >
               Reset workspace…
             </button>
           )}
           <button
-            onClick={() => setShowAdd(true)}
-            className='text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700'
+            onClick={() => isOrgAdmin && setShowAdd(true)}
+            disabled={!isOrgAdmin}
+            title={
+              !isOrgAdmin
+                ? 'Only org admins can add repositories. Ask an admin to link this repo for you.'
+                : 'Link an existing GitHub repo or create a new one'
+            }
+            className={
+              !isOrgAdmin
+                ? 'text-sm px-3 py-1.5 bg-blue-600 text-white rounded opacity-50 cursor-not-allowed'
+                : 'text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700'
+            }
           >
             + Add repository
           </button>

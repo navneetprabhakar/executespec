@@ -54,7 +54,7 @@ public class SuperAdminController {
       adminReconciliationService;
   private final com.navneet.executespec.security.guardrail.GuardrailLevelResolver
       guardrailLevelResolver;
-  private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2RunOrchestrator;
+  private final com.navneet.executespec.v2.integration.RunOrchestrator v2RunOrchestrator;
 
   // ── Guardrail level diagnostic (Plan 1 P1) ────────────────────────────────
 

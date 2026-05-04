@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {useNavigate} from 'react-router-dom';
 import {
   Eye,
@@ -26,6 +27,7 @@ import type {OrgDto} from '@/lib/api';
 import * as api from '@/lib/api';
 import {fetchBillingStatus, type BillingStatus} from '@/lib/billing-api';
 import NotificationPreferences from '@/components/settings/NotificationPreferences';
+import {isAnalyticsOptedOut, setAnalyticsOptedOut} from '@/lib/analytics';
 
 // ── Generic expand/collapse card ──────────────────────────────────────────────
 
@@ -38,7 +40,7 @@ interface IntegrationCardProps {
   /**
    * Optional anchor id for deep-linking. When the URL hash matches this id (e.g.
    * `/settings/manage#github`), the card auto-opens and scrolls into view —
-   * V3Settings and V3Integrations rely on this to land users straight on the
+   * SettingsPage and IntegrationsPage rely on this to land users straight on the
    * relevant form. Plain DOM id, not a React key.
    */
   id?: string;
@@ -289,8 +291,8 @@ export default function SettingsPage() {
     try {
       const result = await api.validateGitHub(githubPat);
       setGithubMsg({ok: result.valid, text: result.message});
-    } catch (err: any) {
-      setGithubMsg({ok: false, text: err.message ?? 'Validation failed.'});
+    } catch (err) {
+      setGithubMsg({ok: false, text: errMsg(err) ?? 'Validation failed.'});
     } finally {
       setGithubTesting(false);
     }
@@ -305,8 +307,8 @@ export default function SettingsPage() {
       setUser(updated);
       setGithubPat('');
       setGithubMsg({ok: true, text: 'GitHub settings saved.'});
-    } catch (err: any) {
-      setGithubMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setGithubMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setGithubSaving(false);
     }
@@ -322,8 +324,8 @@ export default function SettingsPage() {
       setGithubPat('');
       setGithubOwner('');
       setGithubMsg({ok: true, text: 'GitHub credentials cleared.'});
-    } catch (err: any) {
-      setGithubMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setGithubMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setGithubSaving(false);
     }
@@ -364,7 +366,7 @@ export default function SettingsPage() {
         [provider]: {busy: false, result: {ok: r.valid, text: r.message}},
       }));
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Test failed';
+      const msg = e instanceof Error ? errMsg(e) : 'Test failed';
       setAiTestState((s) => ({...s, [provider]: {busy: false, result: {ok: false, text: msg}}}));
     }
   };
@@ -380,8 +382,8 @@ export default function SettingsPage() {
       setAnthropicKey('');
       setGeminiKey('');
       setAiMsg({ok: true, text: 'AI provider keys saved.'});
-    } catch (err: any) {
-      setAiMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setAiMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setAiSaving(false);
     }
@@ -395,8 +397,8 @@ export default function SettingsPage() {
       const updated = await api.updateAiKeySettings('', '', '');
       setUser(updated);
       setAiMsg({ok: true, text: 'AI provider keys cleared.'});
-    } catch (err: any) {
-      setAiMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setAiMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setAiSaving(false);
     }
@@ -679,6 +681,9 @@ export default function SettingsPage() {
       {/* ── Notification preferences (M-003 Wave 2) ────────────────────────── */}
       <NotificationPreferences />
 
+      {/* ── Privacy (X-09, UX audit, 2026-05-03) ───────────────────────────── */}
+      <PrivacySettings />
+
       {/* ── System Health (requires canViewMetrics) ────────────────────────── */}
       {permissions?.canViewMetrics && (
         <div>
@@ -739,8 +744,8 @@ function OrgAiKeyCard({org, onSaved}: {org: OrgDto | null; onSaved: (o: OrgDto) 
       setOrgOpenAiKey('');
       setOrgGeminiKey('');
       setMsg({ok: true, text: 'Organisation AI keys saved.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setSaving(false);
     }
@@ -759,8 +764,8 @@ function OrgAiKeyCard({org, onSaved}: {org: OrgDto | null; onSaved: (o: OrgDto) 
       const updated = await api.updateOrgAiKeySettings('', '', '');
       onSaved(updated);
       setMsg({ok: true, text: 'Organisation AI keys cleared.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setSaving(false);
     }
@@ -882,8 +887,8 @@ function OrgKeySourceCard({org, onSaved}: {org: OrgDto; onSaved: (o: OrgDto) => 
       const updated = await api.updateOrgKeySourceSettings(mode, enabledList);
       onSaved(updated);
       setMsg({ok: true, text: 'Key source settings saved.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setSaving(false);
     }
@@ -971,6 +976,61 @@ function OrgKeySourceCard({org, onSaved}: {org: OrgDto; onSaved: (o: OrgDto) => 
         </button>
       </div>
     </IntegrationCard>
+  );
+}
+
+/**
+ * X-09 (UX audit, 2026-05-03) — privacy section with anonymous-analytics
+ * opt-out. Pre-fix the audit found PostHog calls were gated only on
+ * VITE_POSTHOG_API_KEY, with no in-product affordance for users to opt
+ * out — a procurement-blocking gap for GDPR / enterprise privacy reviews.
+ * The toggle persists to localStorage; on flip we either disable
+ * subsequent calls (handled by isAnalyticsOptedOut() inside analytics.ts)
+ * or proactively call posthog.opt_out_capturing() if PostHog had already
+ * loaded for this session.
+ */
+function PrivacySettings() {
+  const [optedOut, setOptedOut] = useState<boolean>(() => isAnalyticsOptedOut());
+  const [savedAt, setSavedAt] = useState<number | null>(null);
+
+  const onToggle = (next: boolean) => {
+    setOptedOut(next);
+    setAnalyticsOptedOut(next);
+    setSavedAt(Date.now());
+  };
+
+  return (
+    <div>
+      <h3 className='text-xs font-medium text-muted uppercase tracking-wider mb-3'>Privacy</h3>
+      <GlassPanel className='p-4 space-y-3'>
+        <div className='flex items-start justify-between gap-4'>
+          <div className='min-w-0'>
+            <p className='text-sm font-medium text-primary'>Send anonymous usage analytics</p>
+            <p className='text-xs text-muted mt-1 leading-relaxed'>
+              We use PostHog to count pageviews, sample funnel events (project created, run
+              completed), and identify the tier you're on. No spec content, code, or repo names
+              leave your browser. Opt out at any time — we respect the choice immediately and drop
+              the local PostHog identifier.
+            </p>
+          </div>
+          <label className='inline-flex items-center gap-2 flex-shrink-0 cursor-pointer'>
+            <input
+              type='checkbox'
+              checked={!optedOut}
+              onChange={(e) => onToggle(!e.target.checked)}
+              className='h-4 w-4 rounded-sm border border-[var(--border-default)] bg-[var(--gray-300)] accent-accent-blue'
+              aria-label='Send anonymous usage analytics'
+            />
+            <span className='text-xs text-secondary'>{optedOut ? 'Off' : 'On'}</span>
+          </label>
+        </div>
+        {savedAt && (
+          <p className='text-[11px] text-status-success'>
+            {optedOut ? 'Analytics disabled.' : 'Analytics re-enabled.'} Saved.
+          </p>
+        )}
+      </GlassPanel>
+    </div>
   );
 }
 

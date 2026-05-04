@@ -18,7 +18,6 @@ import {
   type FileDiffPayload,
   getFile,
   getFileDiff,
-  getOpenApiSpec,
   getProjects,
   createProject,
   updateRunProject,
@@ -30,7 +29,6 @@ import {
 } from '@/lib/api';
 import type {PrSummary} from '@/types/project';
 import type {RunDetail, AgentTokenEntry, ProjectDto, TestTaskDto} from '@/lib/api';
-import GlowDot from '@/components/shared/GlowDot';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import TaskCard from './TaskCard';
 import LiveLog from './LiveLog';
@@ -39,7 +37,7 @@ import TaskTimeline from './TaskTimeline';
 import PreviewTab from './PreviewTab';
 import {PIPELINE_STEPS, V2_LEGACY_UI} from '@/lib/constants';
 import {useSseStore} from '@/stores/useSseStore';
-import {fmtTokens, fmtMs, relativeTime, cn} from '@/lib/utils';
+import {fmtTokens, fmtMs, relativeTime, cn, errMsg} from '@/lib/utils';
 import {
   ChevronDown,
   ChevronRight,
@@ -66,7 +64,6 @@ import {
   TestTube2,
   Maximize2,
   Minimize2,
-  PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
@@ -96,6 +93,24 @@ export default function RunDetailTabs() {
   const fetchRun = useRunStore((s) => s.fetchRun);
   const fetchRuns = useRunStore((s) => s.fetchRuns);
   const [refreshing, setRefreshing] = useState(false);
+
+  // R-06 (UX audit, 2026-05-03): on non-terminal runs (PLANNING / WORKING /
+  // REVIEWING / AWAITING_APPROVAL), default the active tab to "Live Log" so
+  // the user immediately sees what the agent is doing instead of a static
+  // Overview page. Skip when the user has explicitly picked another tab in
+  // this session (activeTab !== default) — only steer the FIRST view per run.
+  const seededRunIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeRun) return;
+    if (seededRunIdRef.current === activeRun.runId) return;
+    seededRunIdRef.current = activeRun.runId;
+    const TERMINAL = new Set(['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL']);
+    const isInFlight = !TERMINAL.has(activeRun.status);
+    if (isInFlight && activeTab === 'overview') {
+      setActiveTab('log');
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeRun?.runId, activeRun?.status]);
 
   // Hoist files so both Code and Preview tabs share them
   const [files, setFiles] = useState<string[]>([]);
@@ -128,6 +143,7 @@ export default function RunDetailTabs() {
   useEffect(() => {
     if (!activeRun) return;
     loadFiles(activeRun.runId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun?.runId, filesTick, loadFiles]);
   // Test generation tasks — only fetch after test gen has started (avoids 404 noise)
   const [testTasks, setTestTasks] = useState<TestTaskDto[]>([]);
@@ -143,6 +159,7 @@ export default function RunDetailTabs() {
         if (plan) setTestTasks(plan.tasks);
       })
       .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun?.runId, filesTick, testGenStarted]);
 
   // Note: live task updates are driven entirely by SSE (taskStatus events → fetchRun).
@@ -166,6 +183,12 @@ export default function RunDetailTabs() {
   // list always renders the full Pro set (with the Code+Preview-only Vibe
   // subset deleted with the surface).
 
+  // R-09 lint cleanup — hook calls MUST run before any early return so
+  // they're invoked in the same order on every render. Moving
+  // useTierPermissions above the !activeRun guard eliminated the
+  // rules-of-hooks warning.
+  const topLevelPermissions = useTierPermissions();
+
   if (!activeRun) return null;
 
   const isTerminal =
@@ -182,7 +205,6 @@ export default function RunDetailTabs() {
   const previewReady = isTerminal || isActive;
   /** Chat is only functional after the run finishes (success or failed). */
   const chatReady = isTerminal;
-  const topLevelPermissions = useTierPermissions();
 
   // harness-v2-remaining-work Gap 3: Chat tab is hidden while the V2 chat/apply
   // endpoints return 410 Gone. Re-enable via V2_LEGACY_UI.runConversation once
@@ -472,7 +494,7 @@ function OverviewTab({
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
   const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
   const isOrgMember = useAuthStore(selectIsOrgMember);
-  const permissions = useTierPermissions();
+  const _permissions = useTierPermissions();
 
   // ── Live cost + tokens ─────────────────────────────────────────────
   // During V2 runs the stored `total_input_tokens` / `total_output_tokens`
@@ -1056,6 +1078,7 @@ function PlanTab({run}: {run: RunDetail}) {
     return <p className='text-sm text-muted'>Plan not available yet.</p>;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let plan: any = null;
   try {
     plan = JSON.parse(run.planJson);
@@ -1091,6 +1114,7 @@ function PlanTab({run}: {run: RunDetail}) {
   // Roll-up across plan tasks: total tokens consumed + per-task progress.
   let totalTokens = 0;
   let completed = 0;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const planTasks: any[] = Array.isArray(plan.tasks) ? plan.tasks : [];
   for (const pt of planTasks) {
     const live = matchLive(pt.id ?? pt.task_id);
@@ -1127,6 +1151,7 @@ function PlanTab({run}: {run: RunDetail}) {
               )}
             </div>
           </div>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
           {planTasks.map((t: any, i: number) => (
             <PlanTaskCard
               key={t.id ?? t.task_id ?? i}
@@ -1152,6 +1177,7 @@ function PlanTaskCard({
   canEdit,
   live,
 }: {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   task: any;
   index: number;
   runId: string;
@@ -1350,8 +1376,8 @@ function PlanTaskCard({
                     setEditing(false);
                     addToast({type: 'success', message: 'Plan updated with task feedback'});
                     await useRunStore.getState().fetchRun(runId);
-                  } catch (e: any) {
-                    addToast({type: 'error', message: e.message});
+                  } catch (e) {
+                    addToast({type: 'error', message: errMsg(e)});
                   } finally {
                     setSubmitting(false);
                   }
@@ -1397,6 +1423,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   COMPLETENESS: 'Completeness',
 };
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function ReviewTab({run}: {run: RunDetail}) {
   const permissions = useTierPermissions();
   const {addToast} = useUiStore();
@@ -1407,6 +1434,7 @@ function ReviewTab({run}: {run: RunDetail}) {
     return <p className='text-sm text-muted'>Review not available yet.</p>;
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let review: any = null;
   try {
     review = JSON.parse(run.reviewJson);
@@ -1434,8 +1462,8 @@ function ReviewTab({run}: {run: RunDetail}) {
       });
       // Refresh the run to show new tasks
       useRunStore.getState().fetchRun(run.runId);
-    } catch (e: any) {
-      const msg = e.message ?? '';
+    } catch (e) {
+      const msg = errMsg(e) ?? '';
       if (msg.includes('429')) {
         setApplyError('Apply limit reached. Create a fresh run instead.');
       } else if (msg.includes('422')) {
@@ -1484,6 +1512,7 @@ function ReviewTab({run}: {run: RunDetail}) {
           <h4 className='text-xs font-medium text-muted uppercase tracking-wider'>
             Issues ({review.issues.length})
           </h4>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
           {review.issues.map((issue: any, i: number) => (
             <div
               key={i}
@@ -1577,6 +1606,7 @@ interface FileTreeNode {
 }
 
 function buildFileTree(files: string[]): FileTreeNode[] {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const root: Record<string, any> = {};
 
   for (const filePath of files) {
@@ -1596,6 +1626,7 @@ function buildFileTree(files: string[]): FileTreeNode[] {
     }
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   function mapToNodes(obj: Record<string, any>, prefix = ''): FileTreeNode[] {
     return Object.entries(obj)
       .sort(([aName, aNode], [bName, bNode]) => {
@@ -1620,6 +1651,7 @@ function buildFileTree(files: string[]): FileTreeNode[] {
 
 function FileTypeIcon({name}: {name: string}) {
   const lower = name.toLowerCase();
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const ext = lower.includes('.') ? lower.split('.').pop()! : '';
 
   const codeExts = new Set([
@@ -1898,10 +1930,13 @@ const EXT_TO_LANG: Record<string, string> = {
 function getLanguage(filePath: string): string {
   const name = filePath.split('/').pop()?.toLowerCase() ?? '';
   if (name === 'dockerfile') return 'dockerfile';
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const ext = name.includes('.') ? name.split('.').pop()! : '';
   return EXT_TO_LANG[ext] ?? 'plaintext';
 }
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function highlightCode(code: string, language: string): string {
   try {
     if (language === 'plaintext') return escapeHtml(code);
@@ -1951,6 +1986,7 @@ const MONACO_LANG_MAP: Record<string, string> = {
 function getMonacoLanguage(filePath: string): string {
   const name = filePath.split('/').pop()?.toLowerCase() ?? '';
   if (name === 'dockerfile') return 'dockerfile';
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const ext = name.includes('.') ? name.split('.').pop()! : '';
   return MONACO_LANG_MAP[ext] ?? 'plaintext';
 }
@@ -2069,6 +2105,7 @@ function IDEFileViewer({
         }
       }, 300);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [content],
   );
 
@@ -2081,6 +2118,7 @@ function IDEFileViewer({
     );
   }
 
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const fileName = filePath.split('/').pop()!;
   const monacoLang = getMonacoLanguage(filePath);
   const hljsLang = getLanguage(filePath);
@@ -2282,8 +2320,8 @@ export function CodeTab({
     try {
       const text = await getFile(runId, path);
       setContent(typeof text === 'string' ? text : JSON.stringify(text, null, 2));
-    } catch (e: any) {
-      setContent(`// Error loading file: ${e.message}`);
+    } catch (e) {
+      setContent(`// Error loading file: ${errMsg(e)}`);
     }
     setLoadingContent(false);
   };

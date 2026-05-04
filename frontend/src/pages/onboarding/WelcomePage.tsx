@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {Rocket, Code, Terminal, Layout, ArrowRight, Loader2} from 'lucide-react';
@@ -26,7 +27,7 @@ export default function WelcomePage() {
   useEffect(() => {
     listOnboardingSamples()
       .then(setSamples)
-      .catch((e) => setError(e?.message ?? 'Failed to load samples'))
+      .catch((e) => setError(errMsg(e) ?? 'Failed to load samples'))
       .finally(() => setLoading(false));
   }, []);
 
@@ -48,8 +49,8 @@ export default function WelcomePage() {
         }),
       );
       navigate('/runs/new?onboarding=1');
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to pick sample');
+    } catch (e) {
+      setError(errMsg(e) ?? 'Failed to pick sample');
     } finally {
       setPicking(null);
     }

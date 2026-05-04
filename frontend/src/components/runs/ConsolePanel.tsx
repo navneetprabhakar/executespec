@@ -1,4 +1,5 @@
 import {useRef, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {execPreviewCommand} from '@/lib/api';
 import type {ExecResult} from '@/lib/api';
 import {Terminal, Play, Loader2} from 'lucide-react';
@@ -50,7 +51,7 @@ export default function ConsolePanel({runId}: {runId: string}) {
         50,
       );
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Command failed');
+      setError(e instanceof Error ? errMsg(e) : 'Command failed');
     } finally {
       setRunning(false);
     }

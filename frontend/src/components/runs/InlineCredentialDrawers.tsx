@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 /**
  * M-008 (Wave 2) — inline drawers for the two NewRunModal bounces:
  * "Add GitHub PAT" and "Add API keys". Drawer pattern keeps the
@@ -37,8 +38,8 @@ export function AddGitHubPatDrawer({open, onClose}: {open: boolean; onClose: () 
     try {
       const result = await api.validateGitHub(pat);
       setMsg({ok: result.valid, text: result.message});
-    } catch (e: any) {
-      setMsg({ok: false, text: e?.message ?? 'Validation failed'});
+    } catch (e) {
+      setMsg({ok: false, text: errMsg(e) ?? 'Validation failed'});
     } finally {
       setTesting(false);
     }
@@ -53,8 +54,8 @@ export function AddGitHubPatDrawer({open, onClose}: {open: boolean; onClose: () 
       setUser(updated);
       reset();
       onClose();
-    } catch (e: any) {
-      setMsg({ok: false, text: e?.message ?? 'Save failed'});
+    } catch (e) {
+      setMsg({ok: false, text: errMsg(e) ?? 'Save failed'});
     } finally {
       setBusy(false);
     }
@@ -167,8 +168,8 @@ export function AddApiKeysDrawer({open, onClose}: {open: boolean; onClose: () =>
       setUser(updated);
       reset();
       onClose();
-    } catch (e: any) {
-      setMsg({ok: false, text: e?.message ?? 'Save failed'});
+    } catch (e) {
+      setMsg({ok: false, text: errMsg(e) ?? 'Save failed'});
     } finally {
       setBusy(false);
     }

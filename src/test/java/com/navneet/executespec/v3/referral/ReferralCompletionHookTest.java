@@ -8,7 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 /**
- * R-162 — wiring test for the V2RunOrchestrator → ReferralService stitch.
+ * R-162 — wiring test for the RunOrchestrator → ReferralService stitch.
  *
  * <p>The hook itself is 4 lines of conditional logic, but it sits at the exact intersection of "run
  * lifecycle" and "growth loop", so it gets a dedicated test that:
@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  * </ul>
  *
  * <p>This is the integration-shaped test the user explicitly asked for in the burn-down — extracted
- * to a helper so it can be exercised without standing up V2RunOrchestrator's 43 collaborators.
+ * to a helper so it can be exercised without standing up RunOrchestrator's 43 collaborators.
  */
 class ReferralCompletionHookTest {
 

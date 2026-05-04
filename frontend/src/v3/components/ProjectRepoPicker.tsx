@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {
   createProject,
@@ -107,7 +108,7 @@ export default function ProjectRepoPicker({
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        if (!cached) setProjectsErr(e?.message ?? 'Failed to load projects');
+        if (!cached) setProjectsErr(errMsg(e) ?? 'Failed to load projects');
       });
     return () => {
       cancelled = true;
@@ -135,7 +136,7 @@ export default function ProjectRepoPicker({
       .catch((e: Error) => {
         if (cancelled) return;
         if (!cached) {
-          setReposErr(e?.message ?? 'Failed to load repos');
+          setReposErr(errMsg(e) ?? 'Failed to load repos');
           setRepos([]);
         }
       });
@@ -402,7 +403,7 @@ function NewRepoInline({
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setGhLoadErr(e?.message ?? 'Could not list GitHub repos');
+        setGhLoadErr(errMsg(e) ?? 'Could not list GitHub repos');
         setGithubRepos(null);
       })
       .finally(() => {

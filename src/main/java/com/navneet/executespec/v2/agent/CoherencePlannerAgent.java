@@ -54,14 +54,14 @@ public class CoherencePlannerAgent {
   private static final String PROMPT_PATH = "prompts/v2/coherence-planner.md";
   private static final int COHERENCE_MAX_TOKENS = 1_500;
 
-  public record PatchResult(PlanV2 patchedPlan, int patchesApplied, List<String> patchSummaries) {}
+  public record PatchResult(Plan patchedPlan, int patchesApplied, List<String> patchSummaries) {}
 
   /**
    * Run the coherence pass over an assembled plan. Returns a possibly-patched plan along with
    * summary strings for each applied patch. On LLM failure the input plan is returned unchanged
    * with {@code patchesApplied=0}.
    */
-  public PatchResult patchIfNeeded(PlanV2 plan, PlannerRequestV2 req, ExecutionContext context) {
+  public PatchResult patchIfNeeded(Plan plan, PlannerRequest req, ExecutionContext context) {
     if (plan == null || plan.tasks() == null || plan.tasks().isEmpty()) {
       return new PatchResult(plan, 0, List.of());
     }
@@ -112,7 +112,7 @@ public class CoherencePlannerAgent {
     try {
       resp =
           router.call(
-              LlmRequestV2.builder()
+              LlmRequest.builder()
                   .provider(resolved.providerName())
                   .model(resolved.getModel())
                   .messages(messages)
@@ -146,7 +146,7 @@ public class CoherencePlannerAgent {
     return applyPatches(plan, patchCall.arguments());
   }
 
-  private PatchResult applyPatches(PlanV2 plan, String argsJson) {
+  private PatchResult applyPatches(Plan plan, String argsJson) {
     JsonNode root;
     try {
       root = objectMapper.readTree(argsJson);
@@ -162,7 +162,7 @@ public class CoherencePlannerAgent {
 
     // Mutable working copy so we can apply patches one at a time.
     Map<String, MutableTask> byId = new LinkedHashMap<>();
-    for (PlannedTaskV2 t : plan.tasks()) {
+    for (PlannedTask t : plan.tasks()) {
       byId.put(t.id(), MutableTask.from(t));
     }
 
@@ -248,12 +248,12 @@ public class CoherencePlannerAgent {
       return new PatchResult(plan, 0, List.of());
     }
 
-    List<PlannedTaskV2> patchedTasks = new ArrayList<>(byId.size());
-    for (PlannedTaskV2 original : plan.tasks()) {
+    List<PlannedTask> patchedTasks = new ArrayList<>(byId.size());
+    for (PlannedTask original : plan.tasks()) {
       patchedTasks.add(byId.get(original.id()).toImmutable(original));
     }
-    PlanV2 patchedPlan =
-        PlanV2.builder()
+    Plan patchedPlan =
+        Plan.builder()
             .planTitle(plan.planTitle())
             .planSummary(plan.planSummary())
             .projectType(plan.projectType())
@@ -334,7 +334,7 @@ public class CoherencePlannerAgent {
     }
   }
 
-  private static String renderRequirements(PlanV2 plan) {
+  private static String renderRequirements(Plan plan) {
     if (plan.requirements() == null || plan.requirements().isEmpty()) {
       return "(no requirements declared)";
     }
@@ -351,9 +351,9 @@ public class CoherencePlannerAgent {
     return sb.toString();
   }
 
-  private static String renderTasks(PlanV2 plan) {
+  private static String renderTasks(Plan plan) {
     StringBuilder sb = new StringBuilder();
-    for (PlannedTaskV2 t : plan.tasks()) {
+    for (PlannedTask t : plan.tasks()) {
       sb.append("Task ")
           .append(t.id())
           .append(" [")
@@ -421,7 +421,7 @@ public class CoherencePlannerAgent {
       this.touchesFiles = touchesFiles;
     }
 
-    static MutableTask from(PlannedTaskV2 t) {
+    static MutableTask from(PlannedTask t) {
       return new MutableTask(
           new ArrayList<>(t.dependsOn() == null ? List.of() : t.dependsOn()),
           new ArrayList<>(t.hardConstraints() == null ? List.of() : t.hardConstraints()),
@@ -429,8 +429,8 @@ public class CoherencePlannerAgent {
           new ArrayList<>(t.touchesFiles() == null ? List.of() : t.touchesFiles()));
     }
 
-    PlannedTaskV2 toImmutable(PlannedTaskV2 base) {
-      return PlannedTaskV2.builder()
+    PlannedTask toImmutable(PlannedTask base) {
+      return PlannedTask.builder()
           .id(base.id())
           .title(base.title())
           .description(base.description())

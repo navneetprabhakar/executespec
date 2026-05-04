@@ -28,6 +28,7 @@ export default function DashboardPage() {
       fetchAll();
     }, 30000);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, days]);
 
   // Redirect non-admin users to the Runs page

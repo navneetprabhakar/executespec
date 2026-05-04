@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {Link, useNavigate} from 'react-router-dom';
+import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {
   ChevronDown,
   ChevronUp,
@@ -17,7 +17,7 @@ import {
 import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
 import * as api from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 // ── Sub-component: member row ──────────────────────────────────────────────────
 function MemberRow({
@@ -88,8 +88,8 @@ function AddMemberForm({
       await api.addProjectMember(projectId, userId, role);
       setUserId('');
       onAdded();
-    } catch (ex: any) {
-      setErr(ex.message ?? 'Failed to add member');
+    } catch (ex) {
+      setErr(errMsg(ex) ?? 'Failed to add member');
     } finally {
       setAdding(false);
     }
@@ -415,6 +415,21 @@ export default function OrgProjectsPage() {
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [provider, setProvider] = useState('ANTHROPIC');
+
+  // P-06 (UX audit, 2026-05-03) — when the sidebar (P-07) or another surface
+  // routes here with `?new=1`, auto-pop the create form so the user sees the
+  // intended affordance immediately. Strip the param after consumption so a
+  // refresh doesn't keep re-opening the form.
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    if (searchParams.get('new') === '1' && !showCreate) {
+      setShowCreate(true);
+      const next = new URLSearchParams(searchParams);
+      next.delete('new');
+      setSearchParams(next, {replace: true});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
   // v2.5.14 Phase 3.5 — starter templates. Clicking a template pre-fills the
   // create form with a representative name + description and opens it.
   const applyTemplate = (t: {name: string; desc: string}) => {
@@ -458,9 +473,14 @@ export default function OrgProjectsPage() {
       // v2.5.7 UX-fix: jump straight into the new project's dashboard so the
       // next steps (link repos, analyse, launch) are obvious. Previously users
       // landed back on the list with no clear next action.
-      navigate(`/projects/${p.id}/dashboard`);
-    } catch (err: any) {
-      setCreateError(err.message ?? 'Failed to create project');
+      // P-06 (UX audit, 2026-05-03): tag the URL with ?firstRun=1 so the
+      // dashboard can auto-render the EmptyProjectLanding (FirstRunChecklist)
+      // even before the dashboard fetches the empty repos/runs/architecture
+      // payload — eliminates the "first paint shows the wrong thing" flash
+      // for newly-created projects.
+      navigate(`/projects/${p.id}/dashboard?firstRun=1`);
+    } catch (err) {
+      setCreateError(errMsg(err) ?? 'Failed to create project');
     } finally {
       setCreating(false);
     }
@@ -483,12 +503,13 @@ export default function OrgProjectsPage() {
   // v2.5.14 — aggregate KPIs for the hero tiles, matching ProjectDashboardPage.
   const activeCount = projects.filter((p) => p.status === 'ACTIVE').length;
   const archivedCount = projects.filter((p) => p.status === 'ARCHIVED').length;
-  const providerCounts: Record<string, number> = {};
-  projects.forEach((p) => {
-    const k = (p.aiProvider || 'ANTHROPIC').toUpperCase();
-    providerCounts[k] = (providerCounts[k] || 0) + 1;
-  });
-  const topProvider = Object.entries(providerCounts).sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+  // P-11 (UX audit, 2026-05-03) — "Top provider" KPI tile retired. It was
+  // decorative — operators don't make decisions on "which provider has
+  // most projects assigned." The audit recommended replacing with "Spend
+  // MTD" but that requires totalCostUsd on the project list DTO which
+  // isn't in scope here; for now we drop the tile entirely (4 tiles fit
+  // grid-cols-4 cleanly). When the project list DTO grows totalCostUsd,
+  // restore here as a Spend tile.
 
   return (
     <div className='h-full flex flex-col'>
@@ -544,25 +565,13 @@ export default function OrgProjectsPage() {
           </div>
         </header>
 
-        {/* v2.5.14 — KPI tiles (2 / 3 / 5 cols) matching ProjectDashboardPage. */}
-        <section className='grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2'>
+        {/* P-11 (UX audit, 2026-05-03) — KPI tiles trimmed 5 → 4 (Top
+            provider retired). 2 / 2 / 4 cols. */}
+        <section className='grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-2'>
           <OrgMetricTile label='Total' value={projects.length} accent='text-primary' />
           <OrgMetricTile label='Active' value={activeCount} accent='text-accent-blue' />
           <OrgMetricTile label='Archived' value={archivedCount} accent='text-muted' />
           <OrgMetricTile label='Members' value={orgMembers.length || '—'} accent='text-primary' />
-          <OrgMetricTile
-            label='Top provider'
-            value={
-              topProvider.toLowerCase() === 'anthropic'
-                ? 'Anthropic'
-                : topProvider.toLowerCase() === 'openai'
-                  ? 'OpenAI'
-                  : topProvider.toLowerCase() === 'gemini'
-                    ? 'Gemini'
-                    : topProvider
-            }
-            accent='text-accent-planner'
-          />
         </section>
       </div>
 
