@@ -65,29 +65,78 @@ export default function ProjectHomePage() {
       >
         <h1>Couldn't load project</h1>
         <p>{error}</p>
-        <button
-          type='button'
-          onClick={() => slug && load(slug)}
-          style={{
-            marginTop: 16,
-            padding: '6px 14px',
-            background: 'var(--v3-brand)',
-            color: 'var(--v3-text-on-brand)',
-            border: 'none',
-            borderRadius: 6,
-            cursor: 'pointer',
-            fontSize: 12.5,
-            fontWeight: 600,
-          }}
-        >
-          Retry
-        </button>
+        <div style={{display: 'flex', gap: 8, marginTop: 16}}>
+          <button
+            type='button'
+            onClick={() => slug && load(slug)}
+            style={{
+              padding: '6px 14px',
+              background: 'var(--v3-brand)',
+              color: 'var(--v3-text-on-brand)',
+              border: 'none',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 12.5,
+              fontWeight: 600,
+            }}
+          >
+            Retry
+          </button>
+          {/* X-08 — give the user an escape from the error path. Without
+              this they could only sit on the broken page or hit Retry. */}
+          <button
+            type='button'
+            onClick={() => navigate('/org/projects')}
+            style={{
+              padding: '6px 14px',
+              background: 'transparent',
+              color: 'var(--v3-text-subtle)',
+              border: '1px solid var(--v3-border)',
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 12.5,
+            }}
+          >
+            ← Projects
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
     <div style={{display: 'flex', flexDirection: 'column', minHeight: 'calc(100vh - 56px - 48px)'}}>
+      {/* X-08 (UX audit, 2026-05-03) — back-arrow to /org/projects.
+          Pre-fix V3ProjectHome had no exit path beyond the V3TopBar
+          (which only had Runs / Library / Migrations links). Users
+          who landed here directly couldn't get back to the project
+          list short of typing the URL. P-01 Option C kept this
+          surface live, so the back-arrow is the proper fix rather
+          than retiring the page. Renders before the project loads
+          too, so error states still have an escape. */}
+      <button
+        type='button'
+        onClick={() => navigate('/org/projects')}
+        title='Back to project list'
+        aria-label='Back to project list'
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          padding: '4px 8px',
+          marginBottom: 8,
+          alignSelf: 'flex-start',
+          background: 'transparent',
+          color: 'var(--v3-text-subtle)',
+          border: 'none',
+          borderRadius: 4,
+          cursor: 'pointer',
+          fontSize: 11.5,
+          fontFamily: 'inherit',
+        }}
+      >
+        ← Projects
+      </button>
       {/* Pulse summary — single row */}
       {project && (
         <div
