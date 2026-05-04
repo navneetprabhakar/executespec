@@ -16,10 +16,10 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
-import com.navneet.executespec.v2.agent.PlanV2;
-import com.navneet.executespec.v2.agent.PlannedTaskV2;
-import com.navneet.executespec.v2.agent.PlannedTaskV2.Complexity;
-import com.navneet.executespec.v2.agent.WorkerAgentV2;
+import com.navneet.executespec.v2.agent.Plan;
+import com.navneet.executespec.v2.agent.PlannedTask;
+import com.navneet.executespec.v2.agent.PlannedTask.Complexity;
+import com.navneet.executespec.v2.agent.WorkerAgent;
 import com.navneet.executespec.v2.agent.WorkerResult;
 import com.navneet.executespec.v2.agent.WorkerTaskRequest;
 import com.navneet.executespec.v2.tool.BuildProjectTool;
@@ -53,11 +53,11 @@ import org.junit.jupiter.api.Test;
  */
 class SequentialExecutorV2SoftCompletionTest {
 
-  private final WorkerAgentV2 worker = mock(WorkerAgentV2.class);
+  private final WorkerAgent worker = mock(WorkerAgent.class);
   private final BuildProjectTool buildProjectTool = mock(BuildProjectTool.class);
   private final ObjectMapper objectMapper = new ObjectMapper();
-  private final com.navneet.executespec.v2.observability.V2Metrics metrics =
-      mock(com.navneet.executespec.v2.observability.V2Metrics.class);
+  private final com.navneet.executespec.v2.observability.Metrics metrics =
+      mock(com.navneet.executespec.v2.observability.Metrics.class);
   private final com.navneet.executespec.sse.SseBroadcaster broadcaster =
       mock(com.navneet.executespec.sse.SseBroadcaster.class);
   private final AgentTaskRepository taskRepo = mock(AgentTaskRepository.class);
@@ -65,17 +65,17 @@ class SequentialExecutorV2SoftCompletionTest {
       mock(com.navneet.executespec.router.ModelResolver.class);
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService =
       mock(com.navneet.executespec.project.rag.RetrievalService.class);
-  private final com.navneet.executespec.v2.cost.V2RunCostTracker costTracker =
-      mock(com.navneet.executespec.v2.cost.V2RunCostTracker.class);
+  private final com.navneet.executespec.v2.cost.RunCostTracker costTracker =
+      mock(com.navneet.executespec.v2.cost.RunCostTracker.class);
 
-  private SequentialExecutorV2 newExecutor() {
+  private SequentialExecutor newExecutor() {
     // ModelResolver is called from tierConfigFor — stub it to throw so we fall back to the
     // run-level provider+model. That avoids needing real Spring config wiring in this unit
     // test.
     lenient()
         .when(modelResolver.resolve(anyString(), any()))
         .thenThrow(new RuntimeException("not wired in unit test"));
-    return new SequentialExecutorV2(
+    return new SequentialExecutor(
         worker,
         buildProjectTool,
         objectMapper,
@@ -125,17 +125,17 @@ class SequentialExecutorV2SoftCompletionTest {
             });
   }
 
-  private static PlanV2 multiTaskPlan() {
-    return PlanV2.builder()
+  private static Plan multiTaskPlan() {
+    return Plan.builder()
         .planTitle("Test plan")
         .tasks(
             List.of(
-                PlannedTaskV2.builder()
+                PlannedTask.builder()
                     .id("T1")
                     .title("write five files")
                     .complexity(Complexity.LOW)
                     .build(),
-                PlannedTaskV2.builder()
+                PlannedTask.builder()
                     .id("T2")
                     .title("write more files")
                     .complexity(Complexity.LOW)
@@ -144,12 +144,12 @@ class SequentialExecutorV2SoftCompletionTest {
         .build();
   }
 
-  private static PlanV2 singleTaskPlan() {
-    return PlanV2.builder()
+  private static Plan singleTaskPlan() {
+    return Plan.builder()
         .planTitle("Single")
         .tasks(
             List.of(
-                PlannedTaskV2.builder()
+                PlannedTask.builder()
                     .id("T1")
                     .title("write three files")
                     .complexity(Complexity.LOW)
@@ -158,7 +158,7 @@ class SequentialExecutorV2SoftCompletionTest {
         .build();
   }
 
-  private static ExecutionRequest req(PlanV2 plan, boolean enableSmoke) {
+  private static ExecutionRequest req(Plan plan, boolean enableSmoke) {
     return ExecutionRequest.builder()
         .plan(plan)
         .provider("anthropic")
@@ -191,7 +191,7 @@ class SequentialExecutorV2SoftCompletionTest {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerHitIterLimit(5));
 
-    SequentialExecutorV2 executor = newExecutor();
+    SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(multiTaskPlan(), true));
 
     assertNotNull(result);
@@ -227,7 +227,7 @@ class SequentialExecutorV2SoftCompletionTest {
     // Smoke pass — exit code 0.
     when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
 
-    SequentialExecutorV2 executor = newExecutor();
+    SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
     TaskOutcome t1 = result.perTask().get(0);
@@ -247,7 +247,7 @@ class SequentialExecutorV2SoftCompletionTest {
     when(buildProjectTool.execute(any(), any()))
         .thenReturn(new ToolResult.Ok("exit=1\nSyntaxError: unexpected token"));
 
-    SequentialExecutorV2 executor = newExecutor();
+    SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
     TaskOutcome t1 = result.perTask().get(0);
@@ -275,7 +275,7 @@ class SequentialExecutorV2SoftCompletionTest {
     stubTaskRow();
     when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerHitIterLimit(0));
 
-    SequentialExecutorV2 executor = newExecutor();
+    SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
 
     TaskOutcome t1 = result.perTask().get(0);
@@ -310,7 +310,7 @@ class SequentialExecutorV2SoftCompletionTest {
             .build();
     when(worker.run(any(WorkerTaskRequest.class))).thenReturn(stagnant);
 
-    SequentialExecutorV2 executor = newExecutor();
+    SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(multiTaskPlan(), true));
 
     TaskOutcome t1 = result.perTask().get(0);

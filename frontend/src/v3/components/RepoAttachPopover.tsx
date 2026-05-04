@@ -1,4 +1,5 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {errMsg} from '@/lib/utils';
+import {useEffect, useMemo, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {
   listGitHubRepos,
@@ -146,7 +147,7 @@ export default function RepoAttachPopover({
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        const msg = e?.message ?? '';
+        const msg = errMsg(e) ?? '';
         // The backend returns 400/404 with a "no GitHub PAT configured"
         // message when the user hasn't set up a token. Surface the
         // dedicated no-PAT phase rather than a generic error.
@@ -277,6 +278,7 @@ export default function RepoAttachPopover({
         projectId = project.id;
       }
 
+      // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
       await linkProjectRepo(projectId!, created.id);
       onClose();
       // R-324 Checkpoint 2 — when the popover was opened from an
@@ -286,6 +288,7 @@ export default function RepoAttachPopover({
       // for React Router and wouldn't re-fire the project's load
       // effect). The new-project flow keeps the legacy navigate.
       if (targetProjectId && onAttached) {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         onAttached(created.id, projectId!);
       } else {
         navigate(`/projects/${projectId}`);
@@ -803,7 +806,7 @@ export default function RepoAttachPopover({
                         setError(null);
                       })
                       .catch((e: Error) => {
-                        setError(e?.message ?? 'Failed');
+                        setError(errMsg(e) ?? 'Failed');
                         setPhase('error');
                       });
                   }}

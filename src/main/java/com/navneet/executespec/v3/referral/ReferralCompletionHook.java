@@ -6,8 +6,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * R-162 — terminal-status referral hook. Extracted from {@code V2RunOrchestrator.terminate()} so
- * the wire-point logic is unit- testable without spinning up the orchestrator's 43 collaborators.
+ * R-162 — terminal-status referral hook. Extracted from {@code RunOrchestrator.terminate()} so the
+ * wire-point logic is unit- testable without spinning up the orchestrator's 43 collaborators.
  *
  * <p>Fires {@link ReferralService#onRefereeFirstReadyRun(String)} only when:
  *

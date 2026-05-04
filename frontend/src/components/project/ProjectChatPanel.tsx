@@ -25,7 +25,7 @@ import {
 } from '@/lib/api';
 import type {ProjectRepoLink} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 interface ChatMessage {
   id: string;
@@ -151,7 +151,7 @@ export default function ProjectChatPanel({
       await clearProjectChat(projectId);
       setMessages([]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Reset failed');
+      setError(e instanceof Error ? errMsg(e) : 'Reset failed');
     } finally {
       setResetting(false);
     }
@@ -177,7 +177,7 @@ export default function ProjectChatPanel({
         setError((curr) => (curr && curr.startsWith('Compacted') ? null : curr));
       }, 4000);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Compact failed');
+      setError(e instanceof Error ? errMsg(e) : 'Compact failed');
     } finally {
       setCompacting(false);
     }
@@ -187,7 +187,7 @@ export default function ProjectChatPanel({
     setLoading(true);
     req<ChatMessage[]>(`/projects/${projectId}/chat`)
       .then(setMessages)
-      .catch((e: Error) => setError(e.message))
+      .catch((e: Error) => setError(errMsg(e)))
       .finally(() => setLoading(false));
   }, [projectId]);
 
@@ -218,7 +218,7 @@ export default function ProjectChatPanel({
       });
       setMessages((m) => [...m, reply]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Chat failed');
+      setError(e instanceof Error ? errMsg(e) : 'Chat failed');
     } finally {
       setSending(false);
     }
@@ -531,7 +531,7 @@ function LaunchFromChatModal({
         setSelected(new Set(linkedRepos.map((l) => l.repo.id)));
       })
       .catch((e: Error) => {
-        if (!cancelled) setErr(e.message);
+        if (!cancelled) setErr(errMsg(e));
       })
       .finally(() => {
         if (!cancelled) setCompiling(false);
@@ -584,7 +584,7 @@ function LaunchFromChatModal({
       if (!rid) throw new Error('No runId in response');
       onLaunched(rid);
     } catch (e) {
-      setErr(e instanceof Error ? e.message : 'Launch failed');
+      setErr(e instanceof Error ? errMsg(e) : 'Launch failed');
     } finally {
       setSubmitting(false);
     }

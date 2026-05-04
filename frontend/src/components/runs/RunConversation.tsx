@@ -17,7 +17,7 @@ import {
 } from 'lucide-react';
 import {getRunChat, sendRunChatMessage, applyToRun, getValidationReport} from '@/lib/api';
 import type {RunChatMessage, ChatResponse, ValidationReportData, ReportIssue} from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import {useRunStore} from '@/stores/useRunStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {useSseStore} from '@/stores/useSseStore';
@@ -81,7 +81,7 @@ export default function RunConversation({runId}: Props) {
   const [userCount, setUserCount] = useState(0);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
-  const [iterating, setIterating] = useState(false);
+  const [iterating, _setIterating] = useState(false);
   const [iterateInput, setIterateInput] = useState('');
   const [showIterateBox, setShowIterateBox] = useState(false);
   const [applying, setApplying] = useState(false);
@@ -91,12 +91,12 @@ export default function RunConversation({runId}: Props) {
   const [loading, setLoading] = useState(true);
   const [compiledSpec, setCompiledSpec] = useState<string | null>(null);
   const [showCompiledSpec, setShowCompiledSpec] = useState(false);
-  const [validationReport, setValidationReport] = useState<ValidationReportData | null>(null);
+  const [_validationReport, setValidationReport] = useState<ValidationReportData | null>(null);
   const [unresolvedIssues, setUnresolvedIssues] = useState<ReportIssue[]>([]);
   const [applyingFixes, setApplyingFixes] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const {setActiveRunId, fetchRuns} = useRunStore();
+  const {setActiveRunId: _setActiveRunId, fetchRuns: _fetchRuns} = useRunStore();
   const activeRun = useRunStore((s) => s.activeRun);
   const {addToast, setPendingNewRunConfig} = useUiStore();
   const copilotMaximized = useUiStore((s) => s.copilotMaximized);
@@ -141,6 +141,7 @@ export default function RunConversation({runId}: Props) {
         setUnresolvedIssues(report.issues.filter((issue) => !!issue.fix));
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun?.runId, activeRun?.status, reportReady]);
 
   const limitReached = userCount >= MAX_MESSAGES;
@@ -168,13 +169,13 @@ export default function RunConversation({runId}: Props) {
       const assistantMsg: RunChatMessage = {role: 'assistant', content: resp.reply};
       setMessages((prev) => [...prev.slice(0, -1), optimisticMsg, assistantMsg]);
       setUserCount(resp.messageCount);
-    } catch (e: any) {
+    } catch (e) {
       // Remove the optimistic message on failure
       setMessages((prev) => prev.slice(0, -1));
-      if (e.message?.includes('429')) {
+      if (errMsg(e)?.includes('429')) {
         setError('Conversation limit reached. Click "Iterate as New Run" to continue.');
       } else {
-        setError(e.message ?? 'Failed to send message. Please try again.');
+        setError(errMsg(e) ?? 'Failed to send message. Please try again.');
       }
     } finally {
       setSending(false);
@@ -198,6 +199,7 @@ export default function RunConversation({runId}: Props) {
     setShowIterateBox(false);
   };
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const handleApply = async (eOrText?: any) => {
     const suggestionOverride = typeof eOrText === 'string' ? eOrText : undefined;
     const suggestion = (suggestionOverride ?? applyInput).trim() || buildSuggestedRequest();
@@ -215,8 +217,8 @@ export default function RunConversation({runId}: Props) {
       });
       // Refresh the run to show new tasks
       useRunStore.getState().fetchRun(runId);
-    } catch (e: any) {
-      const msg = e.message ?? '';
+    } catch (e) {
+      const msg = errMsg(e) ?? '';
       if (msg.includes('422')) {
         // Too many tasks — extract compiled goal from error response
         try {
@@ -381,8 +383,8 @@ export default function RunConversation({runId}: Props) {
                       message: `Applied ${result.taskCount} fix${result.taskCount !== 1 ? 'es' : ''} for unresolved issues`,
                     });
                     useRunStore.getState().fetchRun(runId);
-                  } catch (e: any) {
-                    const msg = e.message ?? '';
+                  } catch (e) {
+                    const msg = errMsg(e) ?? '';
                     if (msg.includes('422')) {
                       // Too large — fall back to iterate as new run
                       setPendingNewRunConfig({goal: buildIssuesPrompt(unresolvedIssues)});

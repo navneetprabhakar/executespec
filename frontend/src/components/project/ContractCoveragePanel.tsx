@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {
   getContractCoverage,
   rescanContractCoverage,
@@ -40,7 +41,7 @@ export default function ContractCoveragePanel({
     try {
       setCoverage(await getContractCoverage(projectId, repoId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setLoading(false);
     }
@@ -58,7 +59,7 @@ export default function ContractCoveragePanel({
     try {
       setCoverage(await rescanContractCoverage(projectId, repoId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setRescanning(false);
     }

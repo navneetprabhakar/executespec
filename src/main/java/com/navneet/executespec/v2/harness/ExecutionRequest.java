@@ -1,14 +1,14 @@
 package com.navneet.executespec.v2.harness;
 
-import com.navneet.executespec.v2.agent.PlanV2;
+import com.navneet.executespec.v2.agent.Plan;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 
 import lombok.Builder;
 
 /**
- * Input to {@link SequentialExecutorV2#execute(ExecutionRequest)}.
+ * Input to {@link SequentialExecutor#execute(ExecutionRequest)}.
  *
- * @param plan the plan to execute (typically from PlannerAgentV2)
+ * @param plan the plan to execute (typically from PlannerAgent)
  * @param provider LLM provider for worker calls
  * @param model LLM model for worker calls
  * @param runContext execution context (workspace + ids). A per-task context is derived from this by
@@ -19,7 +19,7 @@ import lombok.Builder;
  */
 @Builder
 public record ExecutionRequest(
-    PlanV2 plan,
+    Plan plan,
     String provider,
     String model,
     ExecutionContext runContext,
@@ -35,14 +35,14 @@ public record ExecutionRequest(
     String projectId,
 
     /**
-     * Workspace summary built by the orchestrator (V2RunOrchestrator.buildMultiRepoSummary or the
+     * Workspace summary built by the orchestrator (RunOrchestrator.buildMultiRepoSummary or the
      * codemap fallback). When the run targets a multi-repo project the summary contains the
      * "MULTI-REPO PROJECT WORKSPACE" header + the {@code repos/<name>/} subdir list. The worker's
      * system prompt receives this block verbatim so generated files land inside the right subdir;
      * without it the worker treats the workspace as an empty scratch dir, writes to root, and the
-     * per-repo push step finds no diff to ship. See {@code
-     * SequentialExecutorV2.composeSystemPrompt} + the regression test in {@code
-     * MultiRepoWorkerPromptTest}. Null is allowed (single-repo / scratch-workspace runs).
+     * per-repo push step finds no diff to ship. See {@code SequentialExecutor.composeSystemPrompt}
+     * + the regression test in {@code MultiRepoWorkerPromptTest}. Null is allowed (single-repo /
+     * scratch-workspace runs).
      */
     String workspaceSummary) {
 

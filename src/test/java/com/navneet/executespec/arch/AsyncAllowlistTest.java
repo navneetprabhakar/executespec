@@ -113,7 +113,7 @@ class AsyncAllowlistTest {
 
               // v2 post-merge orchestrator + recovery
               "PostMergeOrchestrator#onMergeCompleted",
-              "StartupRunResumerV2#onApplicationReady",
+              "StartupRunResumer#onApplicationReady",
 
               // Wave 2.1 — activation instrumentation. Tracks events to PostHog +
               // user_activation_event row. Takes primitive args (userId, enum, map);

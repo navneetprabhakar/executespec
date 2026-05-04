@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {Gift} from 'lucide-react';
 import * as api from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
@@ -44,8 +45,8 @@ export default function GrantRunsModal({
       addToast({type: 'success', message: `Granted ${quantity} bonus runs to ${targetName}`});
       onSuccess();
       onClose();
-    } catch (err: any) {
-      addToast({type: 'error', message: err.message});
+    } catch (err) {
+      addToast({type: 'error', message: errMsg(err)});
     } finally {
       setSubmitting(false);
     }

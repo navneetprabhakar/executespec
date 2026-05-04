@@ -4,7 +4,7 @@ import * as api from '@/lib/api';
 import type {ProjectRepo, RepoScope} from '@/types/project';
 import type {GitHubRemoteRepo} from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import ResponsiveModal from '@/components/shared/ResponsiveModal';
 import Button from '@/components/shared/Button';
 import {AddGitHubPatDrawer} from '@/components/runs/InlineCredentialDrawers';
@@ -59,7 +59,7 @@ export default function AddRepoModal({
       const [registered, fromGitHub] = await Promise.all([
         api.listRepos('ALL'),
         api.listGitHubRepos(owner).catch((e) => {
-          setError(`GitHub: ${e instanceof Error ? e.message : String(e)}`);
+          setError(`GitHub: ${e instanceof Error ? errMsg(e) : String(e)}`);
           return [] as GitHubRemoteRepo[];
         }),
       ]);
@@ -82,7 +82,7 @@ export default function AddRepoModal({
       const fromGitHub = await api.listGitHubRepos(ownerOverride.trim() || undefined);
       setRemote(fromGitHub);
     } catch (e) {
-      setError(`GitHub: ${e instanceof Error ? e.message : String(e)}`);
+      setError(`GitHub: ${e instanceof Error ? errMsg(e) : String(e)}`);
     } finally {
       setRefreshingRemote(false);
     }
@@ -94,7 +94,7 @@ export default function AddRepoModal({
       onLinked();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to link repo');
+      setError(e instanceof Error ? errMsg(e) : 'Failed to link repo');
     }
   };
 
@@ -110,7 +110,7 @@ export default function AddRepoModal({
       onLinked();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to create repo');
+      setError(e instanceof Error ? errMsg(e) : 'Failed to create repo');
     }
   };
 
@@ -134,7 +134,7 @@ export default function AddRepoModal({
       onLinked();
       onClose();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to link repo');
+      setError(e instanceof Error ? errMsg(e) : 'Failed to link repo');
     } finally {
       setLinkingFullName(null);
     }

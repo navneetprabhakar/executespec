@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {Activity, ArrowLeft, Clock, DollarSign, TrendingUp} from 'lucide-react';
@@ -72,7 +73,7 @@ function TeamMemberDashboardInner() {
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(e?.message ?? 'Failed to load member dashboard');
+          setError(errMsg(e) ?? 'Failed to load member dashboard');
           setLoading(false);
         }
       });

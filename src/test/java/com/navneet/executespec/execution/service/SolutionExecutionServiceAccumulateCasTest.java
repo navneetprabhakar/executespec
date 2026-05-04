@@ -28,7 +28,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 @ExtendWith(MockitoExtension.class)
 class SolutionExecutionServiceAccumulateCasTest {
 
-  @Mock com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
+  @Mock com.navneet.executespec.v2.integration.RunOrchestrator v2Orchestrator;
   @Mock CrossRepoContextService contextService;
   @Mock ExecutionBranchService branchService;
   @Mock ExecutionJiraSync jiraSync;

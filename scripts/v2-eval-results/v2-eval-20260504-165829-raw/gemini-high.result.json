@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "high",
+  "run_id": "d21cfb01-d418-459c-992d-466dbd447efe",
+  "status": "TIMEOUT",
+  "harness": "v2",
+  "startedAt": "2026-05-04T12:27:17.885563Z",
+  "completedAt": null,
+  "tasks_total": 4,
+  "tasks_done": 2,
+  "tasks_failed": 0,
+  "review": null,
+  "actual_cost": 0,
+  "est_low": 0.7603500000000001,
+  "est_high": 1.3306125000000002,
+  "credits": 1,
+  "total_input": 3884,
+  "total_output": 1967,
+  "accuracy": null,
+  "report_ok": false
+}

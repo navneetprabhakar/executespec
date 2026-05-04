@@ -9,11 +9,11 @@ import java.util.List;
 import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.v2.agent.LlmRequestV2;
+import com.navneet.executespec.v2.agent.LlmRequest;
 import com.navneet.executespec.v2.agent.LlmRouterV2;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import com.navneet.executespec.v2.tool.Tool;
-import com.navneet.executespec.v2.tool.ToolRegistryV2;
+import com.navneet.executespec.v2.tool.ToolRegistry;
 import com.navneet.executespec.v2.tool.ToolResult;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -43,7 +43,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>This proves Phase 0 (native tool calling) + Phase 1 (tool registry) + Phase 2 (router) all
  * compose correctly. It does NOT exercise the multi-turn agent loop (tool result → next call) —
- * that's Phase 3 (WorkerAgentV2).
+ * that's Phase 3 (WorkerAgent).
  */
 @RestController
 @RequestMapping("/api/v2/test")
@@ -52,7 +52,7 @@ import lombok.extern.slf4j.Slf4j;
 public class RouterTestController {
 
   private final LlmRouterV2 router;
-  private final ToolRegistryV2 registry;
+  private final ToolRegistry registry;
   private final ObjectMapper objectMapper;
 
   @GetMapping("/router")
@@ -110,7 +110,7 @@ public class RouterTestController {
     try {
       ChatResponse resp =
           router.call(
-              LlmRequestV2.builder()
+              LlmRequest.builder()
                   .provider(provider)
                   .model(model)
                   .messages(messages)

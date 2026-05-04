@@ -31,7 +31,7 @@ const STATUS_MESSAGES: Record<number, string> = {
  * the HTTP status. AuditPage / AccessDenied both need to render a
  * specific "requires admin role" component on 403 instead of the
  * generic toast. This subclass preserves the status while keeping the
- * existing `e.message` shape for every existing call site.
+ * existing `errMsg(e)` shape for every existing call site.
  */
 export class ApiError extends Error {
   status: number;
@@ -1623,6 +1623,7 @@ export const adminGrantUserRuns = (
   expiryDays?: number | null,
   reason?: string,
 ) =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   req<any>(`/admin/users/${userId}/grant-runs`, {
     method: 'POST',
     body: JSON.stringify({quantity, expiryDays, reason}),
@@ -1634,6 +1635,7 @@ export const adminGrantOrgRuns = (
   expiryDays?: number | null,
   reason?: string,
 ) =>
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   req<any>(`/admin/orgs/${orgId}/grant-runs`, {
     method: 'POST',
     body: JSON.stringify({quantity, expiryDays, reason}),
@@ -1705,6 +1707,7 @@ export const editRunPlan = (runId: string, feedback: string) =>
     body: JSON.stringify({feedback}),
   });
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const getPlanVersions = (runId: string) => req<any[]>(`/runs/${runId}/plan-versions`);
 
 // Task execution graph
@@ -2208,6 +2211,7 @@ export const clearSsoConfig = () => req<void>('/auth/sso/config', {method: 'DELE
 export const getSseToken = (runId: string) => req<{token: string}>(`/runs/${runId}/sse-token`);
 
 // ── Pilot v3.0: Project workspace, repos, architecture, scoring ───────────
+import {} from '@/lib/utils';
 import type {
   ProjectDashboardDTO,
   ProjectRepo,

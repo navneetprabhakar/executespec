@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {getWorkspaceHealth, analyseProject, type RepoHealth} from '@/lib/api';
 import {Glossary} from '@/components/shared/Glossary';
 
@@ -33,7 +34,7 @@ export default function ResetWorkspaceSheet({projectId, onClose, onDone}: Props)
         if (alive) setRepos(r.repos);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(e instanceof Error ? errMsg(e) : String(e));
       });
     return () => {
       alive = false;
@@ -52,7 +53,7 @@ export default function ResetWorkspaceSheet({projectId, onClose, onDone}: Props)
       setDone(true);
       if (onDone) await onDone();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setBusy(false);
     }

@@ -32,7 +32,7 @@ public class PipelineRun {
   /**
    * v2.5.10 (V107) — explicit reason for the terminal status so the UI can show "PARTIAL because
    * tests failed" vs "PARTIAL because final build failed" instead of the silent badge today.
-   * Populated by {@code V2RunOrchestrator} when the {@code scoring.v2-verified} flag is on; V108
+   * Populated by {@code RunOrchestrator} when the {@code scoring.v2-verified} flag is on; V108
    * backfills historical rows. Values: CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS |
    * FINAL_BUILD_FAILED | TESTS_FAILED:&lt;n&gt;_OF_&lt;m&gt; | REVIEWER_UNRESOLVED |
    * REVIEWER_FAILED | ALL_TASKS_FAILED | LEGACY_UNKNOWN.
@@ -41,7 +41,7 @@ public class PipelineRun {
   private String statusReason;
 
   /**
-   * Which pipeline produced this run. "v1" = V1 PipelineHarness; "v2" = V2RunOrchestrator. Default
+   * Which pipeline produced this run. "v1" = V1 PipelineHarness; "v2" = RunOrchestrator. Default
    * "v1" (see V76 migration) so legacy rows and any row written without the field set are treated
    * as V1. HarnessVersionResolver reads this for per-run action routing so actions dispatched on a
    * running V2 run always land in V2 code paths.
@@ -51,7 +51,7 @@ public class PipelineRun {
   private String harnessVersion = "v1";
 
   /**
-   * Count of boot-time resume attempts for this run (incremented by {@code StartupRunResumerV2}).
+   * Count of boot-time resume attempts for this run (incremented by {@code StartupRunResumer}).
    * Capped at 3 in code — past the cap a run is permanently FAILED with reason "resume limit
    * reached". Prevents infinite resume loops across repeated deploys.
    */
@@ -545,7 +545,7 @@ public class PipelineRun {
 
   /**
    * Worker iteration count within the paused task (0-based). {@code null} when pause was observed
-   * between tasks. Combined with {@link #pausedTaskId} and {@code ContextStoreV2}'s per-(runId,
+   * between tasks. Combined with {@link #pausedTaskId} and {@code ContextStore}'s per-(runId,
    * taskId) snapshot to resume mid-task from the exact iteration the worker was on.
    */
   @Column(name = "paused_at_iteration")

@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Test;
 class V2RunKeyContextStoreTest {
 
   private final ApiKeyResolver resolver = mock(ApiKeyResolver.class);
-  private final V2RunKeyContextStore store = new V2RunKeyContextStore(resolver);
+  private final RunKeyContextStore store = new RunKeyContextStore(resolver);
 
   @Test
   void resolveAndPut_userWithAnthropicKey_returnsKeyAndUserSource() {

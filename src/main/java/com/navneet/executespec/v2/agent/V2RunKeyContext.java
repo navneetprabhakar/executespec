@@ -3,9 +3,9 @@ package com.navneet.executespec.v2.agent;
 /**
  * Resolved API keys for a V2 run, scoped per provider.
  *
- * <p>Built once by {@code V2RunOrchestrator.runPipeline} from {@link
+ * <p>Built once by {@code RunOrchestrator.runPipeline} from {@link
  * com.navneet.executespec.agent.ApiKeyResolver#resolve(String)} and stashed in {@link
- * V2RunKeyContextStore} for the run's lifetime. {@link LlmRouterV2#call} reads it back via {@code
+ * RunKeyContextStore} for the run's lifetime. {@link LlmRouterV2#call} reads it back via {@code
  * request.context().runId()} and threads the appropriate provider key into the dispatch path so the
  * V2 pipeline actually uses customer-configured BYOK keys instead of platform singletons.
  *
@@ -15,7 +15,7 @@ package com.navneet.executespec.v2.agent;
  * dispatch to its origin.
  *
  * <p>Audit context (Sprint 4 BYOK deep-dive, 2026-05-01): without this record + the
- * V2RunKeyContextStore, the V2 router silently dispatched every paying customer's run against the
+ * RunKeyContextStore, the V2 router silently dispatched every paying customer's run against the
  * platform's {@code spring.ai.*.api-key} env vars — see {@code audit-output/BYOK_DEEPDIVE.md} for
  * the full chain-of-evidence.
  */

@@ -22,14 +22,8 @@ import PageShell from '@/components/shared/PageShell';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {useTierPermissions} from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
-import {relativeTime} from '@/lib/utils';
-import type {
-  RunSummary,
-  OrgDto,
-  SlackStatus,
-  SlackChannel,
-  ProjectSlackChannelDto,
-} from '@/lib/api';
+import {relativeTime, errMsg} from '@/lib/utils';
+import type {RunSummary, OrgDto, SlackStatus, SlackChannel} from '@/lib/api';
 
 // ── Integration metadata ──────────────────────────────────────────────────
 
@@ -258,8 +252,8 @@ function JiraCredentialForm({org, onSaved}: {org: OrgDto; onSaved: (o: OrgDto) =
     try {
       const result = await api.validateOrgJira(baseUrl, email, token);
       setMsg({ok: result.valid, text: result.message});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Validation failed.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Validation failed.'});
     } finally {
       setTesting(false);
     }
@@ -274,8 +268,8 @@ function JiraCredentialForm({org, onSaved}: {org: OrgDto; onSaved: (o: OrgDto) =
       onSaved(updated);
       setToken('');
       setMsg({ok: true, text: 'JIRA credentials saved.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setSaving(false);
     }
@@ -295,8 +289,8 @@ function JiraCredentialForm({org, onSaved}: {org: OrgDto; onSaved: (o: OrgDto) =
       setEmail('');
       setToken('');
       setMsg({ok: true, text: 'JIRA credentials removed.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setSaving(false);
     }
@@ -380,8 +374,8 @@ function ConfluenceCredentialForm({org, onSaved}: {org: OrgDto; onSaved: (o: Org
     try {
       const result = await api.validateOrgConfluence(baseUrl, email, token);
       setMsg({ok: result.valid, text: result.message});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Validation failed.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Validation failed.'});
     } finally {
       setTesting(false);
     }
@@ -396,8 +390,8 @@ function ConfluenceCredentialForm({org, onSaved}: {org: OrgDto; onSaved: (o: Org
       onSaved(updated);
       setToken('');
       setMsg({ok: true, text: 'Confluence credentials saved.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setSaving(false);
     }
@@ -419,8 +413,8 @@ function ConfluenceCredentialForm({org, onSaved}: {org: OrgDto; onSaved: (o: Org
       setEmail('');
       setToken('');
       setMsg({ok: true, text: 'Confluence credentials removed.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setSaving(false);
     }
@@ -509,8 +503,8 @@ function BitbucketCredentialForm({onSaved}: {onSaved: () => void}) {
     try {
       const result = await api.validateBitbucket(username, appPassword, workspace, repoSlug);
       setMsg({ok: result.valid, text: result.message});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Validation failed.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Validation failed.'});
     } finally {
       setTesting(false);
     }
@@ -526,8 +520,8 @@ function BitbucketCredentialForm({onSaved}: {onSaved: () => void}) {
       setAppPassword('');
       setMsg({ok: true, text: 'Bitbucket credentials saved.'});
       onSaved();
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setSaving(false);
     }
@@ -546,8 +540,8 @@ function BitbucketCredentialForm({onSaved}: {onSaved: () => void}) {
       setRepoSlug('');
       setMsg({ok: true, text: 'Bitbucket credentials removed.'});
       onSaved();
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setSaving(false);
     }
@@ -644,8 +638,8 @@ function SlackConfigForm({
     try {
       const {installUrl} = await api.getSlackInstallUrl();
       window.location.href = installUrl;
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to start OAuth flow.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to start OAuth flow.'});
       setConnecting(false);
     }
   };
@@ -661,8 +655,8 @@ function SlackConfigForm({
       await api.disconnectSlack();
       setMsg({ok: true, text: 'Slack disconnected.'});
       onRefresh();
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to disconnect.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to disconnect.'});
     } finally {
       setDisconnecting(false);
     }
@@ -677,8 +671,8 @@ function SlackConfigForm({
         ok: result.ok,
         text: result.ok ? 'Test message sent!' : result.message || 'Test failed.',
       });
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to send test.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to send test.'});
     } finally {
       setTestingChannel(null);
     }
@@ -887,7 +881,7 @@ export default function IntegrationsPage() {
       window.open(r.installUrl, '_blank', 'noopener,noreferrer');
       setGhAppMsg('Install opened in new tab. Click "Refresh status" after completing.');
     } catch (e: unknown) {
-      setGhAppMsg(e instanceof Error ? e.message : 'Failed to fetch install URL');
+      setGhAppMsg(e instanceof Error ? errMsg(e) : 'Failed to fetch install URL');
     } finally {
       setGhAppBusy(false);
     }
@@ -906,7 +900,7 @@ export default function IntegrationsPage() {
       setGhAppMsg('Uninstalled locally. Remember to revoke on github.com/settings/installations.');
       refreshGhApp();
     } catch (e: unknown) {
-      setGhAppMsg(e instanceof Error ? e.message : 'Failed to uninstall');
+      setGhAppMsg(e instanceof Error ? errMsg(e) : 'Failed to uninstall');
     } finally {
       setGhAppBusy(false);
     }
@@ -931,26 +925,10 @@ export default function IntegrationsPage() {
     return publicFlags[flagKey] !== false;
   };
 
-  // Tier gate — show locked message if user doesn't have integration permissions
-  if (permissions && !permissions.canManageIntegrations) {
-    return (
-      <div className='h-full overflow-y-auto p-4 flex items-center justify-center'>
-        <div className='text-center space-y-3 max-w-md'>
-          <div className='h-12 w-12 rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] flex items-center justify-center mx-auto'>
-            <Unplug className='h-6 w-6 text-muted' />
-          </div>
-          <h2 className='text-lg font-semibold text-primary'>Integrations Unavailable</h2>
-          <p className='text-sm text-muted leading-relaxed'>
-            Managing integrations requires a{' '}
-            <span className='text-accent-blue font-medium'>PRO</span> or{' '}
-            <span className='text-accent-blue font-medium'>ENTERPRISE</span> plan with org admin
-            access. Contact your organization admin to upgrade.
-          </p>
-        </div>
-      </div>
-    );
-  }
-
+  // R-09 lint cleanup — react-hooks/rules-of-hooks: hooks must be called
+  // unconditionally before any early return. Pre-fix the tier-gate early
+  // return below sat above these hooks, so the hook order changed once
+  // permissions resolved. Moving them above the gate fixed it.
   const fetchSlackStatus = useCallback(() => {
     if (!user?.orgId) return;
     api
@@ -976,6 +954,7 @@ export default function IntegrationsPage() {
         .catch(() => {});
       fetchSlackStatus();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.orgId, fetchSlackStatus]);
 
   // Handle OAuth redirect — detect ?slack=success or ?slack=error in URL
@@ -992,6 +971,27 @@ export default function IntegrationsPage() {
       window.history.replaceState({}, '', window.location.pathname);
     }
   }, [fetchSlackStatus]);
+
+  // Tier gate — show locked message if user doesn't have integration permissions.
+  // (Stays AFTER all hooks, per the rule.)
+  if (permissions && !permissions.canManageIntegrations) {
+    return (
+      <div className='h-full overflow-y-auto p-4 flex items-center justify-center'>
+        <div className='text-center space-y-3 max-w-md'>
+          <div className='h-12 w-12 rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] flex items-center justify-center mx-auto'>
+            <Unplug className='h-6 w-6 text-muted' />
+          </div>
+          <h2 className='text-lg font-semibold text-primary'>Integrations Unavailable</h2>
+          <p className='text-sm text-muted leading-relaxed'>
+            Managing integrations requires a{' '}
+            <span className='text-accent-blue font-medium'>PRO</span> or{' '}
+            <span className='text-accent-blue font-medium'>ENTERPRISE</span> plan with org admin
+            access. Contact your organization admin to upgrade.
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   const handleOrgUpdated = (updatedOrg: OrgDto) => {
     setOrg(updatedOrg);
@@ -1177,6 +1177,7 @@ export default function IntegrationsPage() {
                             );
                           })()}
                           {int.configurable &&
+                            // eslint-disable-next-line @typescript-eslint/no-explicit-any
                             ((int as any).userLevel || (isAdmin && user?.orgId)) &&
                             integrationFlagEnabled(int.key) && (
                               <button
@@ -1216,6 +1217,7 @@ export default function IntegrationsPage() {
 
                     {/* Expanded credential form */}
                     {isExpanded &&
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       ((int as any).userLevel || (int.key === 'SLACK' ? user?.orgId : org)) && (
                         <div className='px-4 pb-4 pt-1 border-t border-[var(--border-default)]'>
                           {int.key === 'JIRA' && org && (

@@ -17,7 +17,7 @@ import {
 import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
 import * as api from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 // ── Sub-component: member row ──────────────────────────────────────────────────
 function MemberRow({
@@ -88,8 +88,8 @@ function AddMemberForm({
       await api.addProjectMember(projectId, userId, role);
       setUserId('');
       onAdded();
-    } catch (ex: any) {
-      setErr(ex.message ?? 'Failed to add member');
+    } catch (ex) {
+      setErr(errMsg(ex) ?? 'Failed to add member');
     } finally {
       setAdding(false);
     }
@@ -479,8 +479,8 @@ export default function OrgProjectsPage() {
       // payload — eliminates the "first paint shows the wrong thing" flash
       // for newly-created projects.
       navigate(`/projects/${p.id}/dashboard?firstRun=1`);
-    } catch (err: any) {
-      setCreateError(err.message ?? 'Failed to create project');
+    } catch (err) {
+      setCreateError(errMsg(err) ?? 'Failed to create project');
     } finally {
       setCreating(false);
     }

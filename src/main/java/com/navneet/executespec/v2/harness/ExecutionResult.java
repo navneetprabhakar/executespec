@@ -5,7 +5,7 @@ import java.util.List;
 import lombok.Builder;
 
 /**
- * Aggregate output of {@link SequentialExecutorV2#execute(ExecutionRequest)}.
+ * Aggregate output of {@link SequentialExecutor#execute(ExecutionRequest)}.
  *
  * @param overall run-level terminal state
  * @param tasksExecuted count of tasks that actually ran (COMPLETED or COMPLETED_WITH_WARNING or
@@ -28,14 +28,14 @@ public record ExecutionResult(
     List<TaskOutcome> perTask,
     long totalLatencyMs,
     /**
-     * v2.5.10 — status of the last non-skipped task. Used by V2RunOrchestrator to separate "final
+     * v2.5.10 — status of the last non-skipped task. Used by RunOrchestrator to separate "final
      * task was clean" from "final task warned" when deriving the run-level status_reason. Nullable
      * for empty plans.
      */
     TaskOutcome.Status finalTaskStatus,
     /**
      * v2.5.10 — true when ANY task *other than the last non-skipped one* had
-     * COMPLETED_WITH_WARNING. Lets V2RunOrchestrator tag a clean final as
+     * COMPLETED_WITH_WARNING. Lets RunOrchestrator tag a clean final as
      * CLEAN_WITH_INTERMEDIATE_WARNINGS vs CLEAN_COMPLETION.
      */
     boolean anyIntermediateWarning) {

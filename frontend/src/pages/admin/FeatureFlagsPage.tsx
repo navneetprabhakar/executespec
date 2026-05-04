@@ -2,7 +2,7 @@ import {useEffect, useState, useCallback} from 'react';
 import {Flag, RefreshCw, Save, ArrowLeft} from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
 
@@ -90,10 +90,11 @@ function FeatureFlagsPageInner() {
     api
       .adminListFeatureFlags()
       .then(setFlags)
-      .catch((e: any) =>
-        addToast({type: 'error', message: e.message || 'Failed to load feature flags'}),
+      .catch((e: unknown) =>
+        addToast({type: 'error', message: errMsg(e) || 'Failed to load feature flags'}),
       )
       .finally(() => setLoading(false));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -106,8 +107,8 @@ function FeatureFlagsPageInner() {
       const updated = await api.adminUpdateFeatureFlag(flag.flagKey, String(newVal));
       setFlags((prev) => prev.map((f) => (f.flagKey === flag.flagKey ? updated : f)));
       addToast({type: 'success', message: `${flag.flagKey} = ${newVal}`});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Update failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Update failed'});
     } finally {
       setSaving((p) => ({...p, [flag.flagKey]: false}));
     }
@@ -126,8 +127,8 @@ function FeatureFlagsPageInner() {
         return n;
       });
       addToast({type: 'success', message: `${flag.flagKey} updated`});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Update failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Update failed'});
     } finally {
       setSaving((p) => ({...p, [flag.flagKey]: false}));
     }

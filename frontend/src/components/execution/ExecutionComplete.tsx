@@ -19,6 +19,7 @@ export default function ExecutionComplete() {
             {prs.map((s) => (
               <li key={s.id}>
                 <a
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                   href={s.prUrl!}
                   target='_blank'
                   rel='noreferrer'

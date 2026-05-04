@@ -8,7 +8,7 @@ import java.util.UUID;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.v2.integration.V2RunOrchestrator;
+import com.navneet.executespec.v2.integration.RunOrchestrator;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +33,7 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Bails if {@link #MAX_AUTO_FIX_ATTEMPTS} reached, the originating run is missing the project
  *       / org context (so we can't re-submit cleanly), or the PR is no longer OPEN.
  *   <li>Builds a seeded user request: original spec + failure tail + same-branch instruction.
- *   <li>Submits via {@link V2RunOrchestrator#submitRun} with {@code branchOverride=headBranch} so
+ *   <li>Submits via {@link RunOrchestrator#submitRun} with {@code branchOverride=headBranch} so
  *       {@code WorkspaceInitService.cloneMultipleRepos} clones from the PR branch's tip and {@code
  *       ScmPushService} pushes incrementally onto the same branch.
  *   <li>Increments {@code ciAutoFixAttempts} on the PR record.
@@ -52,7 +52,7 @@ public class CiFailureAutoFixService {
 
   private final PullRequestRecordRepository prRepo;
   private final PipelineRunRepository pipelineRunRepo;
-  private final V2RunOrchestrator v2RunOrchestrator;
+  private final RunOrchestrator v2RunOrchestrator;
   private final AppUserRepository userRepository;
 
   /**

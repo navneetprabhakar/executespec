@@ -55,7 +55,7 @@ public class ReadymadeVariant {
 
   /**
    * Optional reference into {@code prompts/scaffolds/<key>.md}. When set, the V2 worker also loads
-   * that scaffold during execution (existing behaviour from {@code SequentialExecutorV2}).
+   * that scaffold during execution (existing behaviour from {@code SequentialExecutor}).
    */
   @Column(name = "scaffold_key", length = 64)
   private String scaffoldKey;

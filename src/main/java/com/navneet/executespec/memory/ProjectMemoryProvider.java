@@ -14,8 +14,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Builds the project memory block injected into {@code PlannerAgentV2}'s system prompt. Returns
- * empty string for projects with no history (first run).
+ * Builds the project memory block injected into {@code PlannerAgent}'s system prompt. Returns empty
+ * string for projects with no history (first run).
  */
 @Service
 @RequiredArgsConstructor
