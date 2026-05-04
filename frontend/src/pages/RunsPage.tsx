@@ -36,13 +36,14 @@ export default function RunsPage() {
 
     const interval = setInterval(() => fetchRun(activeRunId), POLL_INTERVAL_MS);
     return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRunId, activeRun?.status, fetchRun]);
   const isMobile = useIsMobile();
 
   // Reset tab when run changes
-  const setActiveTab = useUiStore((s) => s.setActiveTab);
+  const _setActiveTab = useUiStore((s) => s.setActiveTab);
   const runListCollapsed = useUiStore((s) => s.runListCollapsed);
-  const setRunListCollapsed = useUiStore((s) => s.setRunListCollapsed);
+  const _setRunListCollapsed = useUiStore((s) => s.setRunListCollapsed);
   const runListWidth = useUiStore((s) => s.runListWidth);
   const setRunListWidth = useUiStore((s) => s.setRunListWidth);
 

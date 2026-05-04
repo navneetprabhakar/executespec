@@ -44,6 +44,7 @@ const SUB_TABS: {key: CodeSubTab; label: string}[] = [
 interface CodeTabProps {
   projectId: string;
   orgId: string | null | undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   repos: any[];
   initialSub?: CodeSubTab;
   /**
@@ -113,6 +114,7 @@ export default function CodeTab({
         {sub === 'contracts' &&
           (repos.length > 0 ? (
             <div className='space-y-2'>
+              {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
               {repos.map((r: any) => (
                 <ContractCoveragePanel
                   key={r.id ?? r.repoId}

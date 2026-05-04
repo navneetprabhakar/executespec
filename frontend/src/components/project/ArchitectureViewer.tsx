@@ -6,7 +6,7 @@ import type {ArchitectureDoc} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {useIsProjectAdmin} from '@/hooks/useIsProjectAdmin';
 import {Glossary} from '@/components/shared/Glossary';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 export default function ArchitectureViewer({
   projectId,
@@ -55,6 +55,7 @@ export default function ArchitectureViewer({
 
   useEffect(() => {
     refresh();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const generate = async () => {
@@ -64,7 +65,7 @@ export default function ArchitectureViewer({
       await api.analyseProject(projectId, branchOverride.trim() || undefined);
       await refresh();
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Generation failed');
+      setError(e instanceof Error ? errMsg(e) : 'Generation failed');
     } finally {
       setBusy(false);
     }
@@ -415,7 +416,7 @@ function ArchSourceChanges({
         if (alive) setReport(r);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(e instanceof Error ? errMsg(e) : String(e));
       })
       .finally(() => {
         if (alive) setLoading(false);

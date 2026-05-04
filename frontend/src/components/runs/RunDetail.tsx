@@ -43,7 +43,7 @@ import {
   type TaskSummary,
 } from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
-import {cn, describeRunStatus} from '@/lib/utils';
+import {cn, describeRunStatus, errMsg} from '@/lib/utils';
 import {V2_LEGACY_UI} from '@/lib/constants';
 // R-190 (post-cutover) — VibeProgressNarrative deleted with the Vibe surface.
 // useViewMode no longer exposes isVibe; Pro layout is the only path now.
@@ -55,15 +55,15 @@ export default function RunDetail() {
     setActiveRunId,
     approveRun,
     cancelRun,
-    createRun,
+    createRun: _createRun,
     pauseRun,
     resumeRun,
   } = useRunStore();
-  const {addToast, setActiveTab} = useUiStore();
+  const {addToast, setActiveTab: _setActiveTab} = useUiStore();
   const navigate = useNavigate();
-  const isMobile = useIsMobile();
+  const _isMobile = useIsMobile();
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [reRunning, setReRunning] = useState(false);
+  const [reRunning, _setReRunning] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -104,6 +104,7 @@ export default function RunDetail() {
         addToast({type: parseInt(percent) >= 90 ? 'error' : 'info', message});
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sseEntries]);
 
   // Close download dropdown on outside click
@@ -128,7 +129,7 @@ export default function RunDetail() {
   }, [activeRun?.reviewJson]);
 
   // Validation report — used to surface accuracy score in the review summary banner
-  const [reviewReport, setReviewReport] = useState<ValidationReportData | null>(null);
+  const [_reviewReport, setReviewReport] = useState<ValidationReportData | null>(null);
   const reportReadyEvt = useSseStore((s) => s.entries).some(
     (e) => e.type === 'VALIDATION_REPORT_READY',
   );
@@ -145,9 +146,9 @@ export default function RunDetail() {
       await action();
       addToast({type: 'success', message: successMsg});
       setConfirming(null);
-    } catch (e: any) {
+    } catch (e) {
       // 409 = gate was lost after a server restart; the run has been auto-cancelled
-      if (e.message?.startsWith('409')) {
+      if (errMsg(e)?.startsWith('409')) {
         addToast({
           type: 'error',
           message: 'Gate expired (server was restarted). Run has been cancelled — please resubmit.',
@@ -157,7 +158,7 @@ export default function RunDetail() {
         if (activeRunId) await useRunStore.getState().fetchRun(activeRunId);
         await useRunStore.getState().fetchRuns();
       } else {
-        addToast({type: 'error', message: e.message});
+        addToast({type: 'error', message: errMsg(e)});
       }
     }
   };
@@ -174,8 +175,8 @@ export default function RunDetail() {
       try {
         await pushToScm(activeRun.runId);
         addToast({type: 'success', message: 'Publishing to Bitbucket...'});
-      } catch (e: any) {
-        addToast({type: 'error', message: e.message || 'Bitbucket push failed'});
+      } catch (e) {
+        addToast({type: 'error', message: errMsg(e) || 'Bitbucket push failed'});
       } finally {
         setGhPushing(false);
       }
@@ -192,8 +193,8 @@ export default function RunDetail() {
     try {
       await pushToGitHub(activeRun.runId);
       addToast({type: 'success', message: 'Publishing to GitHub...'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'GitHub push failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'GitHub push failed'});
     } finally {
       setGhPushing(false);
     }
@@ -210,8 +211,8 @@ export default function RunDetail() {
       setShowGitHubModal(false);
       setGhPat('');
       addToast({type: 'success', message: 'Publishing to GitHub…'});
-    } catch (e: any) {
-      setGhError(e.message || 'Failed to save credentials or push');
+    } catch (e) {
+      setGhError(errMsg(e) || 'Failed to save credentials or push');
     } finally {
       setGhPushing(false);
     }
@@ -256,8 +257,8 @@ export default function RunDetail() {
     try {
       await pauseRun(activeRun.runId);
       addToast({type: 'success', message: 'Run paused'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     } finally {
       setPausing(false);
     }
@@ -266,6 +267,7 @@ export default function RunDetail() {
   // Retry all FAILED/PARTIAL tasks within this run
   const failedTasks = useMemo(() => {
     if (!activeRun?.tasks) return [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tasks = activeRun.tasks as any[];
     // Parent IDs that have at least one FAILED/PARTIAL/BLOCKED subtask —
     // catches the case where a subtask returned PARTIAL but the parent was
@@ -287,10 +289,11 @@ export default function RunDetail() {
     if (!activeRun || failedTasks.length === 0) return;
     setRetryingFailed(true);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await Promise.all(failedTasks.map((t: any) => retryTask(activeRun.runId, t.taskId)));
       addToast({type: 'success', message: `Retrying ${failedTasks.length} failed task(s)`});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Retry failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Retry failed'});
     } finally {
       setRetryingFailed(false);
     }
@@ -306,8 +309,8 @@ export default function RunDetail() {
     try {
       await resumeRun(activeRun.runId);
       addToast({type: 'success', message: 'Run resumed — re-running incomplete tasks'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     } finally {
       setResuming(false);
     }
@@ -538,8 +541,8 @@ export default function RunDetail() {
                                   });
                                   if (activeRunId)
                                     await useRunStore.getState().fetchRun(activeRunId);
-                                } catch (e: any) {
-                                  addToast({type: 'error', message: e.message});
+                                } catch (e) {
+                                  addToast({type: 'error', message: errMsg(e)});
                                 } finally {
                                   setSubmittingPlanEdit(false);
                                 }
@@ -775,7 +778,9 @@ export default function RunDetail() {
                     runCompletedAt: activeRun.completedAt,
                     tasksTotal: activeRun.tasks?.length ?? null,
                     tasksComplete:
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       activeRun.tasks?.filter((t: any) => t.status === 'COMPLETE').length ?? null,
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     provider: (activeRun as any).aiProvider ?? null,
                   }}
                   // R-11 — only attach the retry-failed callback for terminal
@@ -888,14 +893,15 @@ export default function RunDetail() {
               </button>
               <button
                 onClick={async () => {
+                  if (!activeRun?.runId) return;
                   setArchiving(true);
                   try {
-                    await archiveRun(activeRun!.runId);
+                    await archiveRun(activeRun.runId);
                     addToast({type: 'success', message: 'Run archived'});
                     setShowArchiveConfirm(false);
                     setActiveRunId(null);
-                  } catch (e: any) {
-                    addToast({type: 'error', message: e?.message || 'Failed to archive'});
+                  } catch (e) {
+                    addToast({type: 'error', message: errMsg(e) || 'Failed to archive'});
                   } finally {
                     setArchiving(false);
                   }

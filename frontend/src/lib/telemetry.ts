@@ -16,6 +16,7 @@ import {ATTR_SERVICE_NAME, ATTR_SERVICE_VERSION} from '@opentelemetry/semantic-c
  */
 export function initTelemetry() {
   // Only enable telemetry when an absolute OTLP endpoint is configured
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const otlpEndpoint = (import.meta as any).env?.VITE_OTEL_ENDPOINT as string | undefined;
   if (!otlpEndpoint) {
     console.debug('[OTel] Telemetry disabled (set VITE_OTEL_ENDPOINT to enable)');

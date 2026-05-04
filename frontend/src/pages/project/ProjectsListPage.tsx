@@ -5,7 +5,7 @@ import PageShell from '@/components/shared/PageShell';
 import AccessDenied from '@/components/shared/AccessDenied';
 import {getProjects, type ProjectDto} from '@/lib/api';
 import {useViewMode} from '@/hooks/useViewMode';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 const STATUS_COLOR: Record<string, string> = {
   ACTIVE: 'text-status-success border-status-success/40 bg-status-success/10',
@@ -27,7 +27,7 @@ export default function ProjectsListPage() {
     if (!canUseProjectMode) return;
     getProjects()
       .then(setProjects)
-      .catch((e: any) => setError(e?.message ?? 'Failed to load projects'));
+      .catch((e: unknown) => setError(errMsg(e) ?? 'Failed to load projects'));
   }, [canUseProjectMode]);
 
   // R1 (2026-05-01 follow-up) — render AccessDenied in place instead of

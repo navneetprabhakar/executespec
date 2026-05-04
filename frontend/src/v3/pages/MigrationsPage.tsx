@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useMemo, useState} from 'react';
 import {Link} from 'react-router-dom';
 import {listMigrations, type MigrationListItem} from '@/lib/api';
@@ -31,7 +32,7 @@ export default function MigrationsPage() {
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setError(e?.message ?? 'Failed to load migrations');
+        setError(errMsg(e) ?? 'Failed to load migrations');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

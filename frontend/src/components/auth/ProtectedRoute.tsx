@@ -29,6 +29,7 @@ export default function ProtectedRoute() {
     if (!user && !isLoading) {
       loadMe();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (isLoading) {

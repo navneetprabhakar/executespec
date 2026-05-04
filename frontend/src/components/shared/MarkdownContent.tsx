@@ -54,7 +54,8 @@ export function MarkdownContent({content, className, compact = false}: MarkdownC
           del: ({children}) => <del className='line-through text-muted'>{children}</del>,
 
           // ── Code ─────────────────────────────────────────────────────────
-          code: ({inline, children, ...props}: any) =>
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          code: ({inline, children, ..._props}: any) =>
             inline ? (
               <code className='font-mono text-[11px] bg-[var(--gray-200)] text-[var(--text-primary)] px-1.5 py-0.5 rounded border border-[var(--border-default)] not-italic'>
                 {children}
@@ -73,6 +74,7 @@ export function MarkdownContent({content, className, compact = false}: MarkdownC
           ol: ({children}) => (
             <ol className='mb-2 last:mb-0 space-y-0.5 pl-0 list-none'>{children}</ol>
           ),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           li: ({children, ordered, index}: any) => (
             <li className={cn('flex items-start gap-2', prose, 'text-secondary leading-relaxed')}>
               <span className='flex-shrink-0 select-none'>
@@ -135,6 +137,7 @@ export function MarkdownContent({content, className, compact = false}: MarkdownC
           td: ({children}) => <td className='py-2 px-3 text-secondary text-xs'>{children}</td>,
 
           // ── Task list checkboxes (GFM) ────────────────────────────────────
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           input: ({checked, ...props}: any) => (
             <input
               type='checkbox'

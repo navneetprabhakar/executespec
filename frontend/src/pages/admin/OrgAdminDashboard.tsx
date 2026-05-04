@@ -14,12 +14,11 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
-import {Activity, TrendingUp, Clock, DollarSign, Users, UserCheck} from 'lucide-react';
+import {Activity, DollarSign, Users, UserCheck} from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import MetricCard from '@/components/dashboard/MetricCard';
-import {useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
 import {
   getAnalyticsUsage,
   getAnalyticsMembers,
@@ -31,7 +30,7 @@ import {
   type BillingOverviewData,
   type OrgDto,
 } from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 const PERIODS = [
   {label: '7d', value: 7},
@@ -54,7 +53,6 @@ export default function OrgAdminDashboard() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore(selectIsOrgAdmin);
-  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
 
   const [period, setPeriod] = useState(30);
   const [usage, setUsage] = useState<UsageMetrics | null>(null);
@@ -112,8 +110,8 @@ export default function OrgAdminDashboard() {
       const result = await adjustOrgSeats(seatsDraft);
       setSeatsMsg(result.message);
       setOrgDto((prev) => (prev ? {...prev, seatCount: result.newSeats} : prev));
-    } catch (e: any) {
-      setSeatsError(e?.message ?? 'Seat adjustment failed');
+    } catch (e) {
+      setSeatsError(errMsg(e) ?? 'Seat adjustment failed');
       // reset draft to server value on error
       setSeatsDraft(orgDto?.seatCount ?? 1);
     } finally {

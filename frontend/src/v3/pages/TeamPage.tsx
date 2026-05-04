@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {Link, useNavigate} from 'react-router-dom';
 import {getMyOrg, getOrgMembers, inviteMember, type OrgDto, type OrgMemberDto} from '@/lib/api';
@@ -77,7 +78,7 @@ export default function TeamPage() {
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setError(e?.message ?? 'Failed to load team');
+        setError(errMsg(e) ?? 'Failed to load team');
         setLoading(false);
       });
     return () => {

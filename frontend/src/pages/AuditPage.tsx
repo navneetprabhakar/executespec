@@ -7,7 +7,7 @@ import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
 import {useTierPermissions} from '@/hooks/useTierPermissions';
 import * as api from '@/lib/api';
 import {ApiError} from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import PageShell from '@/components/shared/PageShell';
 import AccessDenied from '@/components/shared/AccessDenied';
 
@@ -145,7 +145,7 @@ export default function AuditPage() {
   // canViewAudit=false (FREE / PRO / TEAM / ENTERPRISE all qualify).
   const permissions = useTierPermissions();
   const isSuperAdmin = useAuthStore((s) => s.user?.globalRole === 'SUPER_ADMIN');
-  const isOrgAdmin = useAuthStore(selectIsOrgAdmin);
+  const _isOrgAdmin = useAuthStore(selectIsOrgAdmin);
 
   // Filter state
   const [entityFilter, setEntityFilter] = useState('ALL');
@@ -185,11 +185,11 @@ export default function AuditPage() {
         size: 50,
       });
       setData(result);
-    } catch (e: any) {
+    } catch (e) {
       if (e instanceof ApiError && e.status === 403) {
         setAccessDenied(true);
       } else {
-        setError(e.message);
+        setError(errMsg(e));
       }
     } finally {
       setLoading(false);
@@ -486,7 +486,10 @@ export default function AuditPage() {
                       <div className='text-accent-green'>{renderJsonValue(entry.newValue)}</div>
                     ) : (
                       <div className='text-accent-red line-through'>
-                        {renderJsonValue(entry.oldValue!)}
+                        {
+                          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+                          renderJsonValue(entry.oldValue!)
+                        }
                       </div>
                     )}
                   </div>
@@ -552,8 +555,8 @@ function ProjectActivityPanel() {
         limit: 100,
       });
       setPage(result);
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to load activity');
+    } catch (e) {
+      setError(errMsg(e) ?? 'Failed to load activity');
       setPage(null);
     } finally {
       setLoading(false);

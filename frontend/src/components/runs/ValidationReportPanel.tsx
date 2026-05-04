@@ -28,7 +28,7 @@ import RunStamp from '@/components/project/RunStamp';
 import {Glossary} from '@/components/shared/Glossary';
 import {useUiStore} from '@/stores/useUiStore';
 import {useSseStore} from '@/stores/useSseStore';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 interface ValidationReportPanelProps {
   runId: string;
@@ -196,8 +196,8 @@ export default function ValidationReportPanel({
           break;
         }
       }
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Retry failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Retry failed'});
     } finally {
       setRetrying(false);
     }
@@ -275,8 +275,8 @@ export default function ValidationReportPanel({
       setCopied(true);
       addToast({type: 'success', message: 'Report link copied to clipboard'});
       setTimeout(() => setCopied(false), 2000);
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Failed to share report'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Failed to share report'});
     } finally {
       setSharing(false);
     }
@@ -287,8 +287,8 @@ export default function ValidationReportPanel({
     try {
       await downloadValidationReportPdf(runId);
       addToast({type: 'success', message: 'PDF downloaded'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Failed to download PDF'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Failed to download PDF'});
     } finally {
       setDownloading(false);
     }

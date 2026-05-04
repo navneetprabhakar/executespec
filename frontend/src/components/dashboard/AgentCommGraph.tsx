@@ -40,11 +40,13 @@ export default function AgentCommGraph() {
       .attr('stop-opacity', 0.6);
 
     const sim = d3
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .forceSimulation(nodes as any)
       .force(
         'link',
         d3
           .forceLink(links)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .id((d: any) => d.id)
           .distance(70),
       )
@@ -58,9 +60,13 @@ export default function AgentCommGraph() {
       .selectAll('line')
       .data(links)
       .join('line')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('x1', (d: any) => d.source.x)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('y1', (d: any) => d.source.y)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('x2', (d: any) => d.target.x)
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('y2', (d: any) => d.target.y)
       .attr('stroke', 'url(#edge-grad)')
       .attr('stroke-width', 1.5)
@@ -70,6 +76,7 @@ export default function AgentCommGraph() {
       .selectAll('g')
       .data(nodes)
       .join('g')
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       .attr('transform', (d: any) => `translate(${d.x},${d.y})`);
 
     g.append('circle')

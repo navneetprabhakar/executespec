@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell} from 'recharts';
 import {getTechDebt, type TechDebtReport} from '@/lib/api';
 
@@ -53,7 +54,7 @@ export default function TechDebtPanel({projectId}: {projectId: string}) {
         if (alive) setReport(r);
       })
       .catch((e) => {
-        if (alive) setError(e instanceof Error ? e.message : String(e));
+        if (alive) setError(e instanceof Error ? errMsg(e) : String(e));
       });
     return () => {
       alive = false;

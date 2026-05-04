@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useState, useEffect, useCallback} from 'react';
 import {AlertTriangle, Layers} from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
@@ -92,8 +93,8 @@ function TierLifecyclePageInner() {
       });
       closeModal();
       setReload((r) => r + 1);
-    } catch (e: any) {
-      setModalError(e?.message ?? 'Transition failed');
+    } catch (e) {
+      setModalError(errMsg(e) ?? 'Transition failed');
     } finally {
       setModalBusy(false);
     }

@@ -14,7 +14,7 @@ import type {LocalPreviewStatus, PreviewAnalysis, ApiDocsProbeResult} from '@/li
 import ConsolePanel from './ConsolePanel';
 import MobilePreviewPanel from './MobilePreviewPanel';
 import {useSseStore} from '@/stores/useSseStore';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import {
   Play,
   Square,
@@ -162,6 +162,7 @@ export default function PreviewTab({runId}: {runId: string}) {
       const updateCountdown = () => {
         const remaining = Math.max(
           0,
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           Math.floor((new Date(status.expiresAt!).getTime() - Date.now()) / 1000),
         );
         setCountdown(remaining);
@@ -249,8 +250,8 @@ export default function PreviewTab({runId}: {runId: string}) {
       setLoading(true);
       const s = await startPreview(runId);
       setStatus(s);
-    } catch (e: any) {
-      setStatus((prev) => (prev ? {...prev, status: 'FAILED', errorMessage: e.message} : null));
+    } catch (e) {
+      setStatus((prev) => (prev ? {...prev, status: 'FAILED', errorMessage: errMsg(e)} : null));
     } finally {
       setLoading(false);
       setAnalyzing(false);
@@ -264,8 +265,8 @@ export default function PreviewTab({runId}: {runId: string}) {
       try {
         const s = await startPreview(runId, envVars);
         setStatus(s);
-      } catch (e: any) {
-        setStatus((prev) => (prev ? {...prev, status: 'FAILED', errorMessage: e.message} : null));
+      } catch (e) {
+        setStatus((prev) => (prev ? {...prev, status: 'FAILED', errorMessage: errMsg(e)} : null));
       } finally {
         setLoading(false);
       }
@@ -297,8 +298,8 @@ export default function PreviewTab({runId}: {runId: string}) {
     try {
       const s = await rebuildPreview(runId);
       setStatus(s);
-    } catch (e: any) {
-      setStatus((prev) => (prev ? {...prev, status: 'FAILED', errorMessage: e.message} : null));
+    } catch (e) {
+      setStatus((prev) => (prev ? {...prev, status: 'FAILED', errorMessage: errMsg(e)} : null));
     } finally {
       setLoading(false);
     }
@@ -343,6 +344,7 @@ export default function PreviewTab({runId}: {runId: string}) {
       while (!cancelled && attempt < maxAttempts) {
         attempt++;
         try {
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           await fetch(status.url!, {mode: 'no-cors'});
           successCount++;
           if (successCount >= 2) {
@@ -410,7 +412,7 @@ export default function PreviewTab({runId}: {runId: string}) {
             {isStartingPhase && (
               <span className='flex items-center gap-1.5 text-xs text-accent-amber animate-pulse'>
                 <span className='h-3.5 w-3.5 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin' />
-                {STATUS_MESSAGES[status!.status] ?? 'Starting...'}
+                {(status?.status && STATUS_MESSAGES[status.status]) || 'Starting...'}
               </span>
             )}
             {isFailed && <span className='text-xs text-accent-red'>Failed</span>}
@@ -579,7 +581,7 @@ export default function PreviewTab({runId}: {runId: string}) {
             <div className='text-center space-y-2'>
               <span className='inline-block h-6 w-6 rounded-full border-2 border-accent-amber/30 border-t-accent-amber animate-spin' />
               <p className='text-sm text-secondary'>
-                {STATUS_MESSAGES[status!.status] ?? 'Starting...'}
+                {(status?.status && STATUS_MESSAGES[status.status]) || 'Starting...'}
               </p>
               {dbInfo && (
                 <p className='text-xs text-secondary'>

@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {Check} from 'lucide-react';
 import * as api from '@/lib/api';
@@ -40,8 +41,8 @@ export default function ResetPasswordPage() {
     try {
       await api.authResetPassword(token, pwd);
       navigate('/login', {state: {message: 'Password reset successfully. Please log in.'}});
-    } catch (err: any) {
-      setError(err.message ?? 'Reset failed. Link may have expired.');
+    } catch (err) {
+      setError(errMsg(err) ?? 'Reset failed. Link may have expired.');
     } finally {
       setLoading(false);
     }
