@@ -5,6 +5,7 @@ import type {StalenessReport} from '@/lib/api';
 import type {ArchitectureDoc} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {useIsProjectAdmin} from '@/hooks/useIsProjectAdmin';
+import {Glossary} from '@/components/shared/Glossary';
 import {cn} from '@/lib/utils';
 
 export default function ArchitectureViewer({
@@ -87,10 +88,27 @@ export default function ArchitectureViewer({
 
   return (
     <div className='space-y-3 text-xs'>
+      {/* Header + clarifying subtitle.
+          P-09 (UX audit, 2026-05-03): pre-fix this section opened with just
+          "Architecture document" and a Generate button — users new to the
+          product had no idea what it was for or why they'd want one. The
+          subtitle now spells out the value (planner's input on every run)
+          plus a glossary tooltip on "codemap" so the jargon is self-
+          explaining without bloating the surface. */}
+      <div className='space-y-1'>
+        <h2 className='text-[13px] font-medium text-primary'>Architecture document</h2>
+        <p className='text-[11px] text-muted leading-relaxed max-w-2xl'>
+          A concise overview of every linked repo —{' '}
+          <Glossary term='codemap'>file tree, key types, public APIs</Glossary> — that the planner
+          reads before each run. Regenerate after big merges so new runs start from current
+          structure.
+        </p>
+      </div>
+
       {/* Toolbar */}
       <div className='flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3'>
         <div className='flex items-center gap-2 flex-wrap min-w-0'>
-          <h2 className='text-[13px] font-medium text-primary'>Architecture document</h2>
+          <span className='sr-only'>Architecture document toolbar</span>
           {staleness?.stale && (
             <span
               className='text-[11px] uppercase tracking-wide bg-accent-amber/10 text-accent-amber px-1.5 py-0.5 rounded-sm'
@@ -192,8 +210,13 @@ export default function ArchitectureViewer({
       {loading && <div className='text-xs text-muted'>Loading…</div>}
 
       {!loading && !shown && (
-        <div className='text-xs text-muted border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)]'>
-          No architecture document yet. Link some repos under the Repos tab and click Generate.
+        <div className='text-xs border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)] space-y-1'>
+          <div className='text-secondary font-medium'>No architecture document yet</div>
+          <div className='text-muted'>
+            {noRepos
+              ? 'Link a repository under the Repos tab to get started.'
+              : 'Click Generate above. The first run takes ~1–2 min — every subsequent run uses this snapshot for free.'}
+          </div>
         </div>
       )}
 

@@ -94,6 +94,7 @@ import DeploymentsPage from '@/pages/DeploymentsPage';
 
 // Public pages
 import SharedReportPage from '@/pages/SharedReportPage';
+import SharedProjectPage from '@/pages/SharedProjectPage';
 import TermsPage from '@/pages/TermsPage';
 import PrivacyPage from '@/pages/PrivacyPage';
 import DpaPage from '@/pages/DpaPage';
@@ -234,6 +235,13 @@ export default function App() {
 
         {/* ── Public shared pages ── */}
         <Route path='/reports/shared/:shareToken' element={<SharedReportPage />} />
+        {/* X-13 (UX audit, 2026-05-03) — read-only project snapshot share.
+            Frontend-only stub; the backend endpoint
+            GET /api/projects/snapshot/{token} is not yet implemented. The
+            page renders a "coming soon" notice until it lands, so the URL
+            pattern is reserved + bookmarkable from day one. See
+            docs/audits/enterprise-ux-2026-05-03.md (X-13). */}
+        <Route path='/projects/snapshot/:token' element={<SharedProjectPage />} />
 
         {/* ── Public legal pages ── */}
         <Route path='/terms' element={<TermsPage />} />
