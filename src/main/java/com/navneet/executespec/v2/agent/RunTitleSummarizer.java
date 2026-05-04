@@ -18,7 +18,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Distils a free-form user request into a concise 5-9 word imperative title. Used by the {@link
- * PlannerAgentV2} SINGLE_SHOT path so run titles shown in project views read naturally instead of
+ * PlannerAgent} SINGLE_SHOT path so run titles shown in project views read naturally instead of
  * echoing the raw request. Uses the LIGHTWEIGHT tier via the V1 {@link LlmRouter} (same pattern as
  * {@code RunLedgerAgent}) — cheap + fast + no ExecutionContext plumbing needed.
  *

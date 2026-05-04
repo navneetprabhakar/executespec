@@ -18,6 +18,7 @@ initTelemetry();
 if (
   typeof window !== 'undefined' &&
   'serviceWorker' in navigator &&
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (import.meta as any).env?.PROD
 ) {
   window.addEventListener('load', () => {
@@ -25,6 +26,7 @@ if (
   });
 }
 
+// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <BrowserRouter future={{v7_startTransition: true, v7_relativeSplatPath: true}}>

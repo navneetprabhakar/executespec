@@ -183,6 +183,7 @@ export default function ExecutionSetup({projectId, onSubmitted, continueOnPr}: P
           </Link>
         </div>
         <div className='space-y-1.5'>
+          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
           {(repos ?? []).map((r: any) => {
             // Store returns ProjectRepoLink ({repo: {...}, repoId, projectId}); fall back to
             // flat shapes for robustness.

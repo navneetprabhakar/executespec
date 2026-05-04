@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import {getActivityFeed, type ActivityEntry, type ActivityPage} from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 /**
  * E4.2 — top-level Activity tab content for the Project dashboard.
@@ -86,7 +86,7 @@ export default function ActivityTab({projectId}: {projectId: string}) {
         }),
       );
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setLoading(false);
     }

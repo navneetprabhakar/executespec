@@ -5,11 +5,9 @@ import {
   Building2,
   Settings2,
   GitMerge,
-  ChevronDown,
   Check,
   X,
   RefreshCw,
-  Infinity,
   Gift,
   Package,
   Plus,
@@ -28,7 +26,7 @@ import {
 } from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import RoleGuard from '@/components/auth/RoleGuard';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
 import AdminInviteModal from './AdminInviteModal';
@@ -98,8 +96,8 @@ function AdminPageInner() {
           message: `Audit chain BREAK at seq ${r.firstBreak?.chainSeq}: ${r.firstBreak?.reason}`,
         });
       }
-    } catch (e: any) {
-      addToast({type: 'error', message: e?.message ?? 'Verify failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) ?? 'Verify failed'});
     } finally {
       setVerifyBusy(false);
     }
@@ -118,8 +116,8 @@ function AdminPageInner() {
         message: `${result.haltedCount} active run${result.haltedCount === 1 ? '' : 's'} cancelled.`,
       });
       setHaltModalOpen(false);
-    } catch (e: any) {
-      addToast({type: 'error', message: e?.message ?? 'Halt-all failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) ?? 'Halt-all failed'});
     } finally {
       setHaltBusy(false);
     }
@@ -185,8 +183,8 @@ function AdminPageInner() {
       const result = await api.adminTriggerUsageReport(period);
       setReportResult(result);
       addToast({type: 'success', message: `Queued ${result.emailsSent} usage report emails`});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Failed to trigger reports'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Failed to trigger reports'});
     } finally {
       setReportSending(null);
     }
@@ -267,8 +265,8 @@ function AdminPageInner() {
     try {
       await api.adminUpdateUserStatus(u.id, next);
       await loadUsers();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -276,8 +274,8 @@ function AdminPageInner() {
     try {
       await api.adminUpdateUserTier(id, tier);
       await loadUsers();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -285,8 +283,8 @@ function AdminPageInner() {
     try {
       await api.adminUpdateUserRole(id, role);
       await loadUsers();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -296,8 +294,8 @@ function AdminPageInner() {
     try {
       await api.adminUpdateOrgStatus(o.id, next);
       await loadOrgs();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -305,8 +303,8 @@ function AdminPageInner() {
     try {
       await api.adminUpdateOrgTier(id, tier);
       await loadOrgs();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -323,8 +321,8 @@ function AdminPageInner() {
       });
       await loadOrgs();
       addToast({type: 'success', message: 'Run limit updated'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -332,8 +330,8 @@ function AdminPageInner() {
     try {
       await api.adminUpdateOrgApiKeys(o.id, !o.apiKeysProvided);
       await loadOrgs();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -351,8 +349,8 @@ function AdminPageInner() {
       });
       await loadTierConfigs();
       addToast({type: 'success', message: `${tierLabel(tier)} limit updated`});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -362,8 +360,8 @@ function AdminPageInner() {
       await api.adminApproveInvite(id);
       await loadEscalations();
       addToast({type: 'success', message: 'Approved'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
   const rejectEsc = async (id: string) => {
@@ -371,8 +369,8 @@ function AdminPageInner() {
       await api.adminRejectInvite(id);
       await loadEscalations();
       addToast({type: 'success', message: 'Rejected'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -417,8 +415,8 @@ function AdminPageInner() {
       }
       resetPkgForm();
       await loadPackages();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -427,8 +425,8 @@ function AdminPageInner() {
       await api.adminDeleteTopupPackage(id);
       addToast({type: 'success', message: 'Package deactivated'});
       await loadPackages();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     }
   };
 
@@ -755,7 +753,6 @@ function AdminPageInner() {
                   <tbody className='divide-y divide-[var(--border-default)]'>
                     {orgs.map((o) => {
                       const limitEditing = editingLimits[o.id];
-                      const displayLimit = o.monthlyRunLimitOverride ?? '(default)';
                       return (
                         <tr key={o.id} className='hover:bg-[var(--gray-100)] transition-colors'>
                           <td className='px-4 py-3'>
@@ -1305,7 +1302,7 @@ function AdminPageInner() {
                 onClick={() =>
                   api
                     .adminExportPaymentAuditCsv()
-                    .catch((e: any) => addToast({type: 'error', message: e.message}))
+                    .catch((e: unknown) => addToast({type: 'error', message: errMsg(e)}))
                 }
                 className='w-full sm:w-auto flex items-center justify-center gap-1.5 px-3 py-2 text-muted hover:text-secondary border border-[var(--border-default)] rounded-sm text-sm transition-colors'
               >
@@ -1582,7 +1579,7 @@ function ActivationFunnelPanel() {
     api
       .getActivationFunnel(days)
       .then(setData)
-      .catch((e) => setError(e?.message ?? 'Failed to load funnel'))
+      .catch((e) => setError(errMsg(e) ?? 'Failed to load funnel'))
       .finally(() => setLoading(false));
   };
   useEffect(() => {

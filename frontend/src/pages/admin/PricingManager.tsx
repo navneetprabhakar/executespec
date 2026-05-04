@@ -5,7 +5,7 @@ import PageShell from '@/components/shared/PageShell';
 import AccessDenied from '@/components/shared/AccessDenied';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {getAllPricing, updateModelPricing, type PricingRow} from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {} from '@/lib/utils';
 
 export default function PricingManager() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
@@ -25,7 +25,7 @@ export default function PricingManager() {
 
   // R1 (2026-05-01 follow-up) — render AccessDenied in place instead of
   // redirecting to "/" (which bounces to /projects/empty for non-admins
-  // via V3HomeRedirect, leaving them confused). The userLoaded check
+  // via HomeRedirectPage, leaving them confused). The userLoaded check
   // prevents a flash of AccessDenied during auth hydration.
   if (userLoaded && !isSuperAdmin) {
     return <AccessDenied feature='Pricing manager' requiredRole='SUPER_ADMIN' />;

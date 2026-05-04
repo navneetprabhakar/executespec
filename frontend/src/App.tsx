@@ -21,7 +21,7 @@ import ProtectedRoute from '@/components/auth/ProtectedRoute';
  *   /home              → /home
  *   /v3/X                 → /X
  */
-function V3LegacyRedirect() {
+function LegacyUrlRedirect() {
   const location = useLocation();
   let path = location.pathname.replace(/^\/v3/, '');
   // /projects/empty → /projects/empty (must come before the catch-all
@@ -73,7 +73,7 @@ import ExecutionViewPage from '@/pages/execution/ExecutionViewPage';
 // Admin pages
 import AdminPage from '@/pages/admin/AdminPage';
 import FeatureFlagsPage from '@/pages/admin/FeatureFlagsPage';
-// [F-14] (audit Sprint 1 PR-1) — V3Placeholder pattern retired.
+// [F-14] (audit Sprint 1 PR-1) — Placeholder pattern retired.
 // Admin sub-pages now mount their actual components directly under v3 URLs;
 // the AppLayout sidebar wrapper from ProtectedRoute keeps the chrome
 // consistent with /admin and /admin/feature-flags which always rendered live.
@@ -105,46 +105,43 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 
 // v3 (R-101+) — greenfield UX redesign, mounted under /v3/* without
 // touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
-import V3Shell from '@/v3/components/V3Shell';
-import V3HomeRedirect from '@/v3/pages/V3HomeRedirect';
-// R-341 (2026-04-29): V3Landing route converted to a Navigate redirect
+import Shell from '@/v3/components/Shell';
+import HomeRedirectPage from '@/v3/pages/HomeRedirectPage';
+// R-341 (2026-04-29): LandingPage route converted to a Navigate redirect
 // to root (the static marketing site at executespec.ai is now the
 // canonical public landing surface).  The component file stays in the
 // codebase so direct deep-links + e2e tests keep their reference, but
 // it no longer mounts as a user-facing page.
-// import V3Landing from '@/v3/pages/V3Landing';
-import V3Auth from '@/v3/pages/V3Auth';
-import V3ProjectHome from '@/v3/pages/V3ProjectHome';
-import V3RunDetail from '@/v3/pages/V3RunDetail';
-import V3Settings from '@/v3/pages/V3Settings';
-import V3Billing from '@/v3/pages/V3Billing';
-import V3Pricing from '@/v3/pages/V3Pricing';
-import V3Integrations from '@/v3/pages/V3Integrations';
-import V3Team from '@/v3/pages/V3Team';
-import V3Trust from '@/v3/pages/V3Trust';
-import V3Insights from '@/v3/pages/V3Insights';
+// import LandingPage from '@/v3/pages/LandingPage';
+import AuthPage from '@/v3/pages/AuthPage';
+import ProjectHomePage from '@/v3/pages/ProjectHomePage';
+import RunDetailPage from '@/v3/pages/RunDetailPage';
+import BillingPage from '@/v3/pages/BillingPage';
+import TeamPage from '@/v3/pages/TeamPage';
+import TrustPage from '@/v3/pages/TrustPage';
+import InsightsPage from '@/v3/pages/InsightsPage';
 // R-340 — Migrations product W5 frontend (gallery + detail).
-import V3Migrations from '@/v3/pages/V3Migrations';
-import V3MigrationDetail from '@/v3/pages/V3MigrationDetail';
+import MigrationsPage from '@/v3/pages/MigrationsPage';
+import MigrationDetailPage from '@/v3/pages/MigrationDetailPage';
 // R-330 — Readymade Solutions library W4 frontend (gallery + detail).
-import V3Library from '@/v3/pages/V3Library';
-import V3LibraryDetail from '@/v3/pages/V3LibraryDetail';
-// R-342 (2026-04-29): V2OptInGate removed — unification of v2/v3 URLs
+import LibraryPage from '@/v3/pages/LibraryPage';
+import LibraryDetailPage from '@/v3/pages/LibraryDetailPage';
+// R-342 (2026-04-29): OptInGate removed — unification of v2/v3 URLs
 // supersedes the opt-in dance.  The component file is kept as a stub so
 // the import path doesn't break for any external test harnesses, but
 // no route uses it anymore.
-// import V2OptInGate from '@/v3/components/V2OptInGate';
+// import OptInGate from '@/v3/components/OptInGate';
 // Selling-point #6 — public anonymized /exec snapshot for the
 // PgM/CFO conversion path. Public, no auth, share-link-able.
-import V3ExecDemo from '@/v3/pages/V3ExecDemo';
-import V3EmptyProject from '@/v3/pages/V3EmptyProject';
+import ExecDemoPage from '@/v3/pages/ExecDemoPage';
+import EmptyProjectPage from '@/v3/pages/EmptyProjectPage';
 // R-201 — Wave 4. "Coming to v3" placeholder for v2 admin routes whose
 // v3 equivalent hasn't shipped yet (per cohabitation invariant in
 // docs/strict-ux-thread-handoff.md §8 — surface-not-allowed renders
 // an evaluate-then-commit panel, not 404).
-// [F-14] V3Placeholder import removed; component file kept as a stub
+// [F-14] Placeholder import removed; component file kept as a stub
 // in case external test harnesses still reference it (parallel to the
-// V2OptInGate pattern from R-342).
+// OptInGate pattern from R-342).
 
 import {useAuthStore} from '@/stores/useAuthStore';
 import {useKeyboardScroll} from '@/hooks/useKeyboardScroll';
@@ -162,6 +159,7 @@ export default function App() {
     initAnalytics();
     // Try to restore session from access_token or refresh cookie on mount
     loadMe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Wave 2.1 — identify once the user record resolves; reset on logout.
@@ -176,6 +174,7 @@ export default function App() {
     } else {
       resetAnalytics();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.tier, user?.orgId]);
 
   // Wave 2.1 — lightweight pageview tracking. Routes are controlled by
@@ -193,7 +192,7 @@ export default function App() {
           WCAG 2.4.1 (Bypass Blocks, Level A). Renders as the first
           focusable element on every page; visually hidden until focused
           (Tab from the URL bar) so it doesn't disturb the visual design.
-          Both V3Shell <main> and AppLayout <main> use #main as the
+          Both Shell <main> and AppLayout <main> use #main as the
           jump target. */}
       <a
         href='#main'
@@ -249,7 +248,7 @@ export default function App() {
         <Route path='/dpa' element={<DpaPage />} />
 
         {/* ── Greenfield surfaces — clean URLs without the /v3/ prefix ──
-          R-342 (2026-04-29): unified the URL surface.  The V3Shell-wrapped
+          R-342 (2026-04-29): unified the URL surface.  The Shell-wrapped
           routes (top-bar layout) used to live under `/v3/*`; now they
           live at root paths.  Where v2 had a competing route on the same
           URL (settings, billing, integrations, pricing), the v3
@@ -258,49 +257,49 @@ export default function App() {
           accounting, deployments, invoices, exec, admin/*) keep their
           AppLayout sidebar and stay reachable.
 
-          Every `/v3/*` URL still routes via the `<V3LegacyRedirect>`
+          Every `/v3/*` URL still routes via the `<LegacyUrlRedirect>`
           catch-all below so existing bookmarks, marketing copy, email
           deep-links, and shared run URLs keep working. */}
-        <Route element={<V3Shell />}>
+        <Route element={<Shell />}>
           {/* R-310 (Wave 7) — explicit empty-state route MUST come before
-            the catch-all `projects/:slug` so V3ProjectHome doesn't fire
+            the catch-all `projects/:slug` so ProjectHomePage doesn't fire
             a 404 GET on /api/projects/empty. */}
-          <Route path='/projects/empty' element={<V3EmptyProject />} />
-          <Route path='/projects/:slug' element={<V3ProjectHome />} />
-          <Route path='/projects/:slug/runs/:runShort' element={<V3RunDetail />} />
-          <Route path='/settings' element={<V3Settings />} />
+          <Route path='/projects/empty' element={<EmptyProjectPage />} />
+          <Route path='/projects/:slug' element={<ProjectHomePage />} />
+          <Route path='/projects/:slug/runs/:runShort' element={<RunDetailPage />} />
+          <Route path='/settings' element={<SettingsPage />} />
           {/* R-141 (deferred Wave-1 follow-up, shipped 2026-05-02) — full
               key-management surface (GitHub PAT, AI provider keys, Bitbucket,
-              JIRA, Confluence). V3Settings is a read-only summary; this is
+              JIRA, Confluence). SettingsPage is a read-only summary; this is
               the actual form page. Deep-linkable via `#github`, `#api-keys`,
               `#bitbucket`, `#jira`, `#confluence`. */}
           <Route path='/settings/manage' element={<SettingsPage />} />
-          <Route path='/billing' element={<V3Billing />} />
-          <Route path='/pricing' element={<V3Pricing />} />
-          <Route path='/integrations' element={<V3Integrations />} />
-          <Route path='/team' element={<V3Team />} />
-          <Route path='/trust' element={<V3Trust />} />
-          <Route path='/insights' element={<V3Insights />} />
+          <Route path='/billing' element={<BillingPage />} />
+          <Route path='/pricing' element={<PricingPage />} />
+          <Route path='/integrations' element={<IntegrationsPage />} />
+          <Route path='/team' element={<TeamPage />} />
+          <Route path='/trust' element={<TrustPage />} />
+          <Route path='/insights' element={<InsightsPage />} />
           {/* R-340 — Migrations product gallery + detail. */}
-          <Route path='/migrations' element={<V3Migrations />} />
-          <Route path='/migrations/:slug' element={<V3MigrationDetail />} />
+          <Route path='/migrations' element={<MigrationsPage />} />
+          <Route path='/migrations/:slug' element={<MigrationDetailPage />} />
           {/* R-330 — Readymade Solutions library gallery + detail. */}
-          <Route path='/library' element={<V3Library />} />
-          <Route path='/library/:slug' element={<V3LibraryDetail />} />
+          <Route path='/library' element={<LibraryPage />} />
+          <Route path='/library/:slug' element={<LibraryDetailPage />} />
           {/* Selling-point #6 — public exec snapshot. No auth required. */}
-          <Route path='/exec-demo' element={<V3ExecDemo />} />
-          {/* V3HomeRedirect — the silent dispatcher.  /home for users
+          <Route path='/exec-demo' element={<ExecDemoPage />} />
+          {/* HomeRedirectPage — the silent dispatcher.  /home for users
             who deep-link to it; the bare `/` is handled by ProtectedRoute
             (anon → /login) + the protected index Route below (authed →
-            V3HomeRedirect dispatches to /projects/{first} or /projects/empty). */}
-          <Route path='/home' element={<V3HomeRedirect />} />
+            HomeRedirectPage dispatches to /projects/{first} or /projects/empty). */}
+          <Route path='/home' element={<HomeRedirectPage />} />
           {/* Post-signup spec-claim screen (was /claim). */}
-          <Route path='/claim' element={<V3Auth />} />
+          <Route path='/claim' element={<AuthPage />} />
         </Route>
 
         {/* Legacy /v3/* paths — redirect to the unified URLs.  Single
           catch-all keeps existing bookmarks + marketing copy working. */}
-        <Route path='/v3/*' element={<V3LegacyRedirect />} />
+        <Route path='/v3/*' element={<LegacyUrlRedirect />} />
 
         {/* ── Protected app routes ── */}
         <Route element={<ProtectedRoute />}>
@@ -312,7 +311,7 @@ export default function App() {
             {/* R-201 (Wave 4) — /runs/new used to chain through /projects which
               then routed to v2 ProjectsListPage.
               R-341 (2026-04-29): the / redirect target was
-              retired (V3Landing is now a redirect to root since the
+              retired (LandingPage is now a redirect to root since the
               marketing site is the canonical landing).  This route is
               auth-gated (inside the ProtectedRoute block) so an authed
               user who hits /runs/new has just typed it into the URL bar
@@ -329,7 +328,7 @@ export default function App() {
             <Route path='legacy/billing' element={<Navigate to='/billing' replace />} />
             {/* R-342 — v2 RunsPage stays at /runs (the legacy admin/dev
               run-list view).  The bare `/` is now ALSO the home
-              dispatcher (V3HomeRedirect) so authed users with projects
+              dispatcher (HomeRedirectPage) so authed users with projects
               land on their first project, not the v2 runs list. */}
             <Route index element={<Navigate to='/home' replace />} />
             <Route path='runs' element={<RunsPage />} />
@@ -365,7 +364,7 @@ export default function App() {
             <Route path='projects' element={<Navigate to='/home' replace />} />
             {/* `/projects/:id/dashboard` — v2 multi-tab project dashboard.
               Kept at this URL so existing bookmarks survive; the unified
-              `/projects/:slug` URL now serves V3ProjectHome (top-bar
+              `/projects/:slug` URL now serves ProjectHomePage (top-bar
               chrome).  Long-term: port the dashboard's panels to the
               v3 project surface and retire this route. */}
             <Route path='projects/:projectId/dashboard' element={<ProjectDashboardPage />} />
@@ -385,7 +384,7 @@ export default function App() {
 
             {/* Admin */}
             <Route path='admin' element={<AdminPage />} />
-            {/* [F-14] (audit Sprint 1 PR-1) — V3Placeholder retired.
+            {/* [F-14] (audit Sprint 1 PR-1) — Placeholder retired.
               admin/analytics, admin/tiers, admin/pricing now mount their
               actual v2 components directly. The placeholder pattern was
               shipping a credibility tax (SUPER_ADMIN clicks "Tier Lifecycle"

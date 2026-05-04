@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {
   getSsoConfig,
@@ -46,7 +47,7 @@ export default function SsoConfigCard() {
         setEnforced(c.enforced);
         setError(null);
       })
-      .catch((e) => setError(e?.message ?? 'Failed to load SSO config'))
+      .catch((e) => setError(errMsg(e) ?? 'Failed to load SSO config'))
       .finally(() => setLoading(false));
   };
   useEffect(load, []);
@@ -64,8 +65,8 @@ export default function SsoConfigCard() {
       });
       setConfig(next);
       setMsg({ok: true, text: 'SSO configuration saved.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err?.message ?? 'Save failed'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Save failed'});
     } finally {
       setSaving(false);
     }
@@ -80,8 +81,8 @@ export default function SsoConfigCard() {
       await clearSsoConfig();
       load();
       setMsg({ok: true, text: 'SSO cleared.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err?.message ?? 'Clear failed'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Clear failed'});
     } finally {
       setSaving(false);
     }

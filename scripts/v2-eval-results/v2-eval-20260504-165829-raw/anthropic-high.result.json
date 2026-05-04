@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "high",
+  "run_id": "77a1bf15-cb9a-4c22-b5f2-d411bcace28a",
+  "status": "TIMEOUT",
+  "harness": "v2",
+  "startedAt": "2026-05-04T11:34:57.131280Z",
+  "completedAt": null,
+  "tasks_total": 7,
+  "tasks_done": 2,
+  "tasks_failed": 0,
+  "review": null,
+  "actual_cost": 0,
+  "est_low": 9.0665,
+  "est_high": 15.866375,
+  "credits": 3,
+  "total_input": 328,
+  "total_output": 6963,
+  "accuracy": null,
+  "report_ok": false
+}

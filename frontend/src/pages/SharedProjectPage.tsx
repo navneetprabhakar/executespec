@@ -30,7 +30,7 @@
 import {useEffect, useState} from 'react';
 import {useParams, Link} from 'react-router-dom';
 import {AlertTriangle, ExternalLink} from 'lucide-react';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 /**
  * Backend contract — what the snapshot endpoint should return.
@@ -105,7 +105,7 @@ export default function SharedProjectPage() {
         setLoading(false);
       })
       .catch((e: Error) => {
-        setError(e.message === 'not-implemented' ? 'not-implemented' : 'fetch-error');
+        setError(errMsg(e) === 'not-implemented' ? 'not-implemented' : 'fetch-error');
         setLoading(false);
       });
   }, [token]);

@@ -27,7 +27,7 @@ import java.util.List;
  *
  * <p>The scanner is invoked at install time — after {@link DependencySecurityPolicy} validates the
  * install command shape but before the install executes (so we can refuse-to-install when a
- * critical advisory hits). Wiring is in {@code SequentialExecutorV2} (TODO follow-up — gated on
+ * critical advisory hits). Wiring is in {@code SequentialExecutor} (TODO follow-up — gated on
  * {@link #isEnabled()}).
  */
 public interface SupplyChainScanner {

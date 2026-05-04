@@ -259,7 +259,14 @@ export default function ProjectDashboardPage() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
+  // R-09 lint cleanup — wrap `tasks` in useMemo so the auto-select useEffect
+  // below has a stable dependency. Without the memo the `?? []` literal
+  // produces a new array reference on every render which would re-fire the
+  // effect even when the actual dashboard state didn't change.
+  const tasks: TaskSummary[] = useMemo(
+    () => dashboard?.recentTasks ?? [],
+    [dashboard?.recentTasks],
+  );
   const recentPrs = dashboard?.recentPrs ?? [];
 
   // Auto-select first run so the right pane is never empty when runs exist
@@ -444,11 +451,11 @@ export default function ProjectDashboardPage() {
             )}
             <NewExecutionButton projectId={projectId} repoCount={repoCount} />
             {/* P-01 (UX audit, 2026-05-04) — reverse cross-link to the
-                V3ProjectHome composer surface ("What do you want to
+                ProjectHomePage composer surface ("What do you want to
                 build?" with one-shot spec textbox + iteration thread).
                 Pre-fix users on the dashboard had no path back to the
                 composer surface short of typing /projects/{id} into the
-                URL bar. This button closes that loop; V3ProjectHome's
+                URL bar. This button closes that loop; ProjectHomePage's
                 "Dashboard →" button is the matching forward link. The
                 two surfaces stay distinct (per the Option C decision)
                 but each one knows about the other. */}
@@ -771,6 +778,7 @@ function NewExecutionButton({projectId, repoCount}: {projectId: string; repoCoun
       ? 'Link at least one repository to launch.'
       : null;
   const disabled = disabledReason !== null;
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const title = disabled ? disabledReason! : 'Start a cross-repo Launch';
   return (
     <div className='flex flex-col items-end gap-1'>

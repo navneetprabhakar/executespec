@@ -14,12 +14,11 @@ import org.junit.jupiter.api.Test;
 import org.springframework.ai.tool.ToolCallback;
 
 /**
- * Pins the worker-tool deny list. {@link ToolRegistryV2#bindForWorker} must:
+ * Pins the worker-tool deny list. {@link ToolRegistry#bindForWorker} must:
  *
  * <ul>
- *   <li>Exclude every name in {@link ToolRegistryV2#WORKER_DENY_TOOLS} (currently {@code
- *       gitCommit}).
- *   <li>Otherwise return the same set as {@link ToolRegistryV2#bind}, in the same order.
+ *   <li>Exclude every name in {@link ToolRegistry#WORKER_DENY_TOOLS} (currently {@code gitCommit}).
+ *   <li>Otherwise return the same set as {@link ToolRegistry#bind}, in the same order.
  * </ul>
  *
  * <p>Diagnosed from run {@code a076c876} task T2 (2026-05-03): the worker burned 22 of its 60
@@ -63,8 +62,8 @@ class ToolRegistryV2WorkerBindTest {
 
   @Test
   void bindForWorker_excludes_gitCommit() {
-    ToolRegistryV2 registry =
-        new ToolRegistryV2(
+    ToolRegistry registry =
+        new ToolRegistry(
             List.of(
                 fakeTool("readFile"),
                 fakeTool("writeFile"),
@@ -80,7 +79,7 @@ class ToolRegistryV2WorkerBindTest {
 
     assertFalse(
         workerNames.contains("gitCommit"),
-        "Worker bind must exclude gitCommit (see ToolRegistryV2.WORKER_DENY_TOOLS).");
+        "Worker bind must exclude gitCommit (see ToolRegistry.WORKER_DENY_TOOLS).");
     // Read-only git tools should remain available — they're useful for inspecting state.
     assertTrue(workerNames.contains("gitStatus"), "gitStatus should stay in worker bind");
     assertTrue(workerNames.contains("gitDiff"), "gitDiff should stay in worker bind");
@@ -94,8 +93,8 @@ class ToolRegistryV2WorkerBindTest {
 
   @Test
   void bind_keeps_gitCommit_for_non_worker_callers() {
-    ToolRegistryV2 registry =
-        new ToolRegistryV2(
+    ToolRegistry registry =
+        new ToolRegistry(
             List.of(fakeTool("writeFile"), fakeTool("gitCommit"), fakeTool("completeTask")),
             new ObjectMapper());
 
@@ -112,9 +111,9 @@ class ToolRegistryV2WorkerBindTest {
   void deny_set_pins_gitCommit() {
     // Independent of any registry instance — guards against a future commit
     // accidentally emptying the deny set.
-    assertNotNull(ToolRegistryV2.WORKER_DENY_TOOLS);
+    assertNotNull(ToolRegistry.WORKER_DENY_TOOLS);
     assertTrue(
-        ToolRegistryV2.WORKER_DENY_TOOLS.contains("gitCommit"),
+        ToolRegistry.WORKER_DENY_TOOLS.contains("gitCommit"),
         "WORKER_DENY_TOOLS must keep gitCommit. If you're intentionally re-allowing"
             + " gitCommit for the worker, update this test with the rationale.");
   }

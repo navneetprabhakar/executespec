@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Link, useNavigate} from 'react-router-dom';
+import {Link} from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
@@ -18,7 +18,7 @@ import {
   type PullRequestSnapshot,
 } from '@/lib/api';
 import DiffView from '@/components/shared/DiffView';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 export default function ProjectPrRollup({
   projectId,
@@ -36,10 +36,11 @@ export default function ProjectPrRollup({
     executionApi
       .listProjectPrs(projectId)
       .then(setPrs)
-      .catch((e: any) => setError(e?.message ?? 'Failed to load PRs'));
+      .catch((e: unknown) => setError(errMsg(e) ?? 'Failed to load PRs'));
 
   useEffect(() => {
     load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
   const onRefresh = async () => {
@@ -53,8 +54,8 @@ export default function ProjectPrRollup({
           : `${r.updated}/${r.checked} updated`,
       );
       await load();
-    } catch (e: any) {
-      setError(e?.message ?? 'Refresh failed');
+    } catch (e) {
+      setError(errMsg(e) ?? 'Refresh failed');
     } finally {
       setRefreshing(false);
     }
@@ -240,7 +241,7 @@ function PrRow({
       const s = await getPullRequestSnapshot(pr.repoFullName, pr.prNumber);
       setSnap(s);
     } catch (e) {
-      setSnapError(e instanceof Error ? e.message : 'Failed to load PR');
+      setSnapError(e instanceof Error ? errMsg(e) : 'Failed to load PR');
     } finally {
       setLoading(false);
     }
@@ -271,19 +272,25 @@ function PrRow({
               try {
                 const {comments} = await fetchPrReviewComments(
                   projectId,
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                   pr.prNumber!,
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                   pr.repoFullName!,
                 );
                 const headBranch =
                   snap?.headBranch ??
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                   (await getPullRequestSnapshot(pr.repoFullName!, pr.prNumber!)).headBranch ??
                   '';
                 // Address-review only fires for run/launch PRs (filtered upstream by
                 // !!p.repoFullName + kind=RUN|undefined), so launchId is always set here.
                 // The non-null assertion mirrors prNumber/repoFullName above.
                 onAddressReview({
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                   sourceExecutionId: pr.launchId!,
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                   prNumber: pr.prNumber!,
+                  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                   repoFullName: pr.repoFullName!,
                   headBranch,
                   reviewComments: comments || '(no review comments found)',

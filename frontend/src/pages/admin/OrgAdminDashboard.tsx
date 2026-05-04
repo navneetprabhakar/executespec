@@ -14,12 +14,11 @@ import {
   PieChart,
   Pie,
   Cell,
-  Legend,
 } from 'recharts';
-import {Activity, TrendingUp, Clock, DollarSign, Users, UserCheck} from 'lucide-react';
+import {Activity, DollarSign, Users, UserCheck} from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import MetricCard from '@/components/dashboard/MetricCard';
-import {useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin} from '@/stores/useAuthStore';
+import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
 import {
   getAnalyticsUsage,
   getAnalyticsMembers,
@@ -31,7 +30,7 @@ import {
   type BillingOverviewData,
   type OrgDto,
 } from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 const PERIODS = [
   {label: '7d', value: 7},
@@ -54,7 +53,6 @@ export default function OrgAdminDashboard() {
   const navigate = useNavigate();
   const user = useAuthStore((s) => s.user);
   const isAdmin = useAuthStore(selectIsOrgAdmin);
-  const isSuperAdmin = useAuthStore(selectIsSuperAdmin);
 
   const [period, setPeriod] = useState(30);
   const [usage, setUsage] = useState<UsageMetrics | null>(null);
@@ -112,8 +110,8 @@ export default function OrgAdminDashboard() {
       const result = await adjustOrgSeats(seatsDraft);
       setSeatsMsg(result.message);
       setOrgDto((prev) => (prev ? {...prev, seatCount: result.newSeats} : prev));
-    } catch (e: any) {
-      setSeatsError(e?.message ?? 'Seat adjustment failed');
+    } catch (e) {
+      setSeatsError(errMsg(e) ?? 'Seat adjustment failed');
       // reset draft to server value on error
       setSeatsDraft(orgDto?.seatCount ?? 1);
     } finally {
@@ -128,7 +126,7 @@ export default function OrgAdminDashboard() {
   // Non-admin standalone users see their own analytics. R1 (2026-05-01
   // follow-up) — if the gate ever does fire (user not logged in / no
   // admin role), render AccessDenied in place rather than redirecting
-  // to "/" and chaining through V3HomeRedirect to /projects/empty.
+  // to "/" and chaining through HomeRedirectPage to /projects/empty.
   if (!isAdmin && !user?.id) {
     return <AccessDenied feature='Org analytics' requiredRole='ORG_ADMIN' />;
   }

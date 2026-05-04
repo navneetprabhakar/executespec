@@ -55,7 +55,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RunController {
 
-  private final com.navneet.executespec.v2.integration.V2RunOrchestrator v2Orchestrator;
+  private final com.navneet.executespec.v2.integration.RunOrchestrator v2Orchestrator;
   private final ScmPushService scmPushService;
   private final StateStore stateStore;
   private final RunMapper mapper;
@@ -78,7 +78,7 @@ public class RunController {
   private final com.navneet.executespec.auth.service.ActivityAuditService activityAuditService;
   private final com.navneet.executespec.sse.SseBroadcaster broadcaster;
   private final com.navneet.executespec.agent.CostEstimator costEstimator;
-  private final com.navneet.executespec.v2.cost.V2RunCostTracker v2CostTracker;
+  private final com.navneet.executespec.v2.cost.RunCostTracker v2CostTracker;
   private final com.navneet.executespec.harness.GateStore gateStore;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
@@ -237,7 +237,7 @@ public class RunController {
               "outputTokens", safeTok(run.getTotalOutputTokens())));
     }
 
-    // V2 in-progress: live cost AND live tokens come from V2RunCostTracker.
+    // V2 in-progress: live cost AND live tokens come from RunCostTracker.
     // V2 only flushes DB token columns at phase boundaries (planner done →
     // worker done → reviewer done), so `total_input_tokens` lags the real
     // usage mid-run. Reading the in-memory accumulator gives the UI an
@@ -565,7 +565,7 @@ public class RunController {
           HttpStatus.SERVICE_UNAVAILABLE,
           "Pause/resume is feature-flagged off (v2.pause.enabled). Ask an admin to enable it.");
     }
-    com.navneet.executespec.v2.integration.V2RunOrchestrator.ResumeOutcome outcome =
+    com.navneet.executespec.v2.integration.RunOrchestrator.ResumeOutcome outcome =
         v2Orchestrator.resume(runId);
     return switch (outcome) {
       case OK -> ResponseEntity.accepted().build();

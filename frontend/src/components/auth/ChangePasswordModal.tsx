@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 import ResponsiveModal from '@/components/shared/ResponsiveModal';
@@ -49,8 +50,8 @@ export default function ChangePasswordModal() {
     try {
       await api.authChangePassword(user.mustChangePassword ? null : current, newPwd);
       await loadMe();
-    } catch (err: any) {
-      setError(err.message ?? 'Failed to change password');
+    } catch (err) {
+      setError(errMsg(err) ?? 'Failed to change password');
     } finally {
       setLoading(false);
     }

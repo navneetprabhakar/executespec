@@ -47,7 +47,7 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
   // spec the user typed on executespec.ai's marketing-site hero.
   // The submit handler on the marketing site stashes the text under
   // `sessionStorage["v3-anon-spec"]`, the auth flow preserves it,
-  // and V3Auth.claimAndForward routes the user to /home → first
+  // and AuthPage.claimAndForward routes the user to /home → first
   // project (which mounts this Composer).  We read the key on mount
   // and clear it so a refresh doesn't re-hydrate.  Empty composer
   // only — never overwrite text the user has already typed.

@@ -5,7 +5,7 @@ import {useUiStore} from '@/stores/useUiStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {ACTIVE_STATUSES} from '@/lib/constants';
-import {cn} from '@/lib/utils';
+import {} from '@/lib/utils';
 import UserMenu from '@/components/auth/UserMenu';
 import NotificationBell from './NotificationBell';
 

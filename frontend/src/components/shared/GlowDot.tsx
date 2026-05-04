@@ -1,5 +1,5 @@
 import {cn} from '@/lib/utils';
-import {STATUS_COLORS, ACTIVE_STATUSES} from '@/lib/constants';
+import {STATUS_COLORS} from '@/lib/constants';
 
 interface GlowDotProps {
   status: string;

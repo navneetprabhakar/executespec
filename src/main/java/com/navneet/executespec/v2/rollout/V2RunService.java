@@ -9,14 +9,14 @@ import java.util.concurrent.ThreadFactory;
 
 import com.navneet.executespec.v2.agent.Classification;
 import com.navneet.executespec.v2.agent.OutlinePlannerAgent;
-import com.navneet.executespec.v2.agent.PlanV2;
-import com.navneet.executespec.v2.agent.PlannerRequestV2;
+import com.navneet.executespec.v2.agent.Plan;
+import com.navneet.executespec.v2.agent.PlannerRequest;
 import com.navneet.executespec.v2.harness.ExecutionRequest;
 import com.navneet.executespec.v2.harness.ExecutionResult;
-import com.navneet.executespec.v2.harness.SequentialExecutorV2;
-import com.navneet.executespec.v2.observability.V2Metrics;
+import com.navneet.executespec.v2.harness.SequentialExecutor;
+import com.navneet.executespec.v2.observability.Metrics;
 import com.navneet.executespec.v2.reviewer.ReviewerAgentV3;
-import com.navneet.executespec.v2.reviewer.ReviewerRequestV2;
+import com.navneet.executespec.v2.reviewer.ReviewerRequest;
 import com.navneet.executespec.v2.reviewer.ReviewerResult;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 
@@ -43,9 +43,9 @@ public class V2RunService {
 
   private final V2RunRegistry registry;
   private final OutlinePlannerAgent planner;
-  private final SequentialExecutorV2 executor;
+  private final SequentialExecutor executor;
   private final ReviewerAgentV3 reviewer;
-  private final V2Metrics metrics;
+  private final Metrics metrics;
 
   /** Dedicated thread pool for V2 pipeline execution — keeps runs off the request thread. */
   private final ExecutorService pool =
@@ -113,10 +113,10 @@ public class V2RunService {
 
       // ── 1. Plan ─────────────────────────────────────────────────────
       run.transition(V2Run.Status.PLANNING, "calling OutlinePlannerAgent");
-      PlanV2 plan;
+      Plan plan;
       try {
-        PlannerRequestV2 plannerReq =
-            PlannerRequestV2.builder()
+        PlannerRequest plannerReq =
+            PlannerRequest.builder()
                 .spec(req.spec())
                 .classification(req.classification())
                 .provider(req.provider())
@@ -172,7 +172,7 @@ public class V2RunService {
         try {
           review =
               reviewer.review(
-                  ReviewerRequestV2.builder()
+                  ReviewerRequest.builder()
                       .provider(req.provider())
                       .model(req.model())
                       .context(runCtx)

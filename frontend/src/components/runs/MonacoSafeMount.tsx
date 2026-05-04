@@ -1,4 +1,5 @@
 import {Component, type ErrorInfo, type ReactNode} from 'react';
+import {errMsg} from '@/lib/utils';
 
 /**
  * Error boundary specifically for Monaco editor disposal races.
@@ -44,7 +45,7 @@ const SWALLOW_PATTERNS = [
 
 function isMonacoDisposeRace(err: unknown): boolean {
   if (!(err instanceof Error)) return false;
-  const msg = err.message ?? '';
+  const msg = errMsg(err) ?? '';
   return SWALLOW_PATTERNS.some((p) => p.test(msg));
 }
 
@@ -65,7 +66,7 @@ export class MonacoSafeMount extends Component<Props, State> {
     if (!isMonacoDisposeRace(err)) return;
     // Quiet logging — these are noisy and we don't want to drown the console.
     // Two lines: one summary + the location so the user can grep if needed.
-    console.warn('[MonacoSafeMount] swallowed disposal race:', err.message);
+    console.warn('[MonacoSafeMount] swallowed disposal race:', errMsg(err));
     if (info?.componentStack) {
       console.warn('[MonacoSafeMount]', info.componentStack.trim().split('\n')[0]);
     }

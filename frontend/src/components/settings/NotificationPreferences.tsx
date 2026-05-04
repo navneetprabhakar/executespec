@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useMemo, useState} from 'react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import {
@@ -30,7 +31,7 @@ export default function NotificationPreferences() {
         if (alive) setRows(r);
       })
       .catch((e) => {
-        if (alive) setError(e?.message ?? 'Failed to load preferences');
+        if (alive) setError(errMsg(e) ?? 'Failed to load preferences');
       });
     return () => {
       alive = false;
@@ -75,8 +76,8 @@ export default function NotificationPreferences() {
             r.eventType === updated.eventType && r.channel === updated.channel ? updated : r,
           ) ?? null,
       );
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to save preference');
+    } catch (e) {
+      setError(errMsg(e) ?? 'Failed to save preference');
     } finally {
       setBusyKey(null);
     }

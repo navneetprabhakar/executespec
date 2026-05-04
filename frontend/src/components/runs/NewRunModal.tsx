@@ -18,7 +18,7 @@ import {useUiStore, type NewRunConfig} from '@/stores/useUiStore';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {conversationChat, ConversationMessage, getProjectRepos} from '@/lib/api';
 import type {ProjectRepoLink} from '@/types/project';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import ProjectSelector from '@/components/auth/ProjectSelector';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {UpgradeNudge} from '@/components/billing/UpgradeNudge';
@@ -145,8 +145,8 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
     try {
       const {reply} = await conversationChat([first]);
       setMessages([first, {role: 'assistant', content: reply}]);
-    } catch (e: any) {
-      addToast({type: 'error', message: `Chat error: ${e.message}`});
+    } catch (e) {
+      addToast({type: 'error', message: `Chat error: ${errMsg(e)}`});
       setMode('compose');
     } finally {
       setChatLoading(false);
@@ -166,8 +166,8 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
     try {
       const {reply} = await conversationChat(updated);
       setMessages([...updated, {role: 'assistant', content: reply}]);
-    } catch (e: any) {
-      addToast({type: 'error', message: `Chat error: ${e.message}`});
+    } catch (e) {
+      addToast({type: 'error', message: `Chat error: ${errMsg(e)}`});
     } finally {
       setChatLoading(false);
     }
@@ -192,7 +192,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
     return body;
   };
 
-  const useAsGoal = async (text: string, messageIndex: number) => {
+  const applyAsGoal = async (text: string, messageIndex: number) => {
     const hasSummary = /REQUIREMENT SUMMARY:/i.test(text);
 
     if (hasSummary) {
@@ -214,8 +214,8 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
       const {reply} = await conversationChat([...context, compilePrompt]);
       setGoal(extractSummary(reply));
       setMode('compose');
-    } catch (e: any) {
-      addToast({type: 'error', message: `Failed to compile goals: ${e.message}`});
+    } catch (e) {
+      addToast({type: 'error', message: `Failed to compile goals: ${errMsg(e)}`});
     } finally {
       setCompilingGoalIndex(null);
     }
@@ -247,8 +247,8 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
       navigate('/');
       setActiveRunId(runId);
       onClose();
-    } catch (e: any) {
-      const msg = e.message || '';
+    } catch (e) {
+      const msg = errMsg(e) || '';
       if (msg.startsWith('402')) {
         // Parse billing limit error: "402: RUNS limit reached (5/5). Upgrade..."
         const match = msg.match(/(\w+) limit reached \((\d+)\/(\d+)\)/);
@@ -725,7 +725,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                   key={i}
                   msg={msg}
                   onUseAsGoal={
-                    msg.role === 'assistant' ? () => useAsGoal(msg.content, i) : undefined
+                    msg.role === 'assistant' ? () => applyAsGoal(msg.content, i) : undefined
                   }
                   compiling={compilingGoalIndex === i}
                 />

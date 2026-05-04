@@ -37,7 +37,7 @@ public class TaskDefinition {
 
   // ── File ownership ──────────────────────────────────────────────────────────
   // Declared by the planner: list of file paths this task will create or modify.
-  // Used by V2RunOrchestrator to pre-claim file locks before worker execution.
+  // Used by RunOrchestrator to pre-claim file locks before worker execution.
   private List<String> ownedFiles;
 
   // Files this task shares with other tasks (both tasks may modify).
@@ -46,7 +46,7 @@ public class TaskDefinition {
   private List<String> sharedFiles;
 
   // ── Auto-remediation feedback ─────────────────────────────────────────────
-  // Injected by V2RunOrchestrator during REWORK remediation cycles so the worker
+  // Injected by RunOrchestrator during REWORK remediation cycles so the worker
   // knows exactly what the reviewer flagged. Null on first attempt.
   private String reworkFeedback;
 }
