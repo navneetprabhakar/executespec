@@ -20,7 +20,7 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.v2.integration.V2RunOrchestrator;
+import com.navneet.executespec.v2.integration.RunOrchestrator;
 
 import org.springframework.stereotype.Service;
 
@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Bridges a single {@link ExecutionSolution} into a V2 {@link PipelineRun}. Each solution is
- * dispatched via {@code V2RunOrchestrator.submitRun(...)} with {@code skipApproval=true}. The
+ * dispatched via {@code RunOrchestrator.submitRun(...)} with {@code skipApproval=true}. The
  * caller's virtual thread then polls the V2 run's status until it terminates and maps that back to
  * the solution's lifecycle:
  *
@@ -53,7 +53,7 @@ public class SolutionExecutionService {
   private static final long POLL_INTERVAL_MS = 10_000L;
   private static final long POLL_TIMEOUT_MS = 2L * 60L * 60L * 1000L; // 2h
 
-  private final V2RunOrchestrator v2Orchestrator;
+  private final RunOrchestrator v2Orchestrator;
   private final CrossRepoContextService contextService;
   private final ExecutionBranchService branchService;
   private final ExecutionJiraSync jiraSync;
@@ -203,7 +203,7 @@ public class SolutionExecutionService {
         return null;
       }
       // Bail out if the user hit Abort — the ExecutionRun status flips
-      // to ABORTED which V2RunOrchestrator.cancel already signalled, but
+      // to ABORTED which RunOrchestrator.cancel already signalled, but
       // we stop waiting here so the solution records CANCELLED promptly.
       if (executionRunId != null) {
         String execStatus =

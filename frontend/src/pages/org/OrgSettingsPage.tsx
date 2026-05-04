@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {useAuthStore} from '@/stores/useAuthStore';
 import RoleGuard from '@/components/auth/RoleGuard';
 import * as api from '@/lib/api';
@@ -36,8 +37,8 @@ function CreateOrgForm({onCreated}: {onCreated: () => void}) {
       // Refresh user state so orgId is populated
       await loadMe();
       onCreated();
-    } catch (err: any) {
-      setError(err.message ?? 'Failed to create organization');
+    } catch (err) {
+      setError(errMsg(err) ?? 'Failed to create organization');
     } finally {
       setSaving(false);
     }
@@ -161,8 +162,8 @@ export default function OrgSettingsPage() {
       setInviteEmail('');
       const updated = await api.getOrgInvitations().catch(() => []);
       setInvitations(updated);
-    } catch (err: any) {
-      setInviteMsg('Error: ' + (err.message ?? 'Failed to invite'));
+    } catch (err) {
+      setInviteMsg('Error: ' + (errMsg(err) ?? 'Failed to invite'));
     }
   };
 
@@ -179,8 +180,8 @@ export default function OrgSettingsPage() {
       await api.orgSuspendMember(userId, !currentlySuspended);
       const updated = await api.getOrgMembers().catch(() => members);
       setMembers(updated);
-    } catch (err: any) {
-      alert('Error: ' + err.message);
+    } catch (err) {
+      alert('Error: ' + errMsg(err));
     }
   };
 
@@ -190,8 +191,8 @@ export default function OrgSettingsPage() {
       setInviteMsg(resp.message);
       const updated = await api.getOrgInvitations().catch(() => invitations);
       setInvitations(updated);
-    } catch (err: any) {
-      setInviteMsg('Error: ' + (err.message ?? 'Failed to resend'));
+    } catch (err) {
+      setInviteMsg('Error: ' + (errMsg(err) ?? 'Failed to resend'));
     }
   };
 

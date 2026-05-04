@@ -127,8 +127,8 @@ public class FileLockTool {
   }
 
   /**
-   * Pre-claims a list of files for a task. Used by V2RunOrchestrator to enforce planner-declared
-   * file ownership before workers start.
+   * Pre-claims a list of files for a task. Used by RunOrchestrator to enforce planner-declared file
+   * ownership before workers start.
    */
   @Transactional
   public void preClaimAll(String runId, String taskId, List<String> files) {

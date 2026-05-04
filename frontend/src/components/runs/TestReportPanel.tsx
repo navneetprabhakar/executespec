@@ -15,7 +15,7 @@ import {
   Wrench,
   Target,
 } from 'lucide-react';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 interface Props {
   runId: string;
@@ -79,8 +79,8 @@ export default function TestReportPanel({runId, status}: Props) {
           ? `Fix applied for "${signature}" — re-running tests...`
           : 'All fixes applied — re-running tests...',
       });
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Failed to apply test fixes'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Failed to apply test fixes'});
     } finally {
       setApplyingFixes(false);
     }

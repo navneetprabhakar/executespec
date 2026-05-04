@@ -11,7 +11,7 @@ import java.util.Map;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.v2.tool.ExecutionContext;
 import com.navneet.executespec.v2.tool.Tool;
-import com.navneet.executespec.v2.tool.ToolRegistryV2;
+import com.navneet.executespec.v2.tool.ToolRegistry;
 import com.navneet.executespec.v2.tool.ToolResult;
 
 import org.springframework.web.bind.annotation.GetMapping;
@@ -25,7 +25,7 @@ import lombok.extern.slf4j.Slf4j;
  * V2 Phase 1 verification endpoint.
  *
  * <p>Creates a temporary workspace, exercises every {@link Tool} registered in {@link
- * ToolRegistryV2}, and reports per-tool pass/fail. This is the equivalent of Phase 0's {@code
+ * ToolRegistry}, and reports per-tool pass/fail. This is the equivalent of Phase 0's {@code
  * /native-tools/all} but for the tool layer instead of LLM native tool calling.
  *
  * <p>Removed once V2 has integration tests covering the same surface.
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ToolRegistryTestController {
 
-  private final ToolRegistryV2 registry;
+  private final ToolRegistry registry;
   private final ObjectMapper objectMapper;
 
   @GetMapping("/tool-registry")

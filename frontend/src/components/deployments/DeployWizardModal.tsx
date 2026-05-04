@@ -22,7 +22,7 @@ import {
   Plus,
   Trash2,
 } from 'lucide-react';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import {useUiStore} from '@/stores/useUiStore';
 import {useIsMobile} from '@/hooks/useIsMobile';
 import * as api from '@/lib/api';
@@ -137,8 +137,8 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
       setCredential(cred);
       setValidationResult(null);
       addToast({type: 'success', message: 'Credentials uploaded successfully'});
-    } catch (err: any) {
-      addToast({type: 'error', message: err.message});
+    } catch (err) {
+      addToast({type: 'error', message: errMsg(err)});
     } finally {
       setUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
@@ -153,8 +153,8 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
       if (result.valid) {
         addToast({type: 'success', message: 'All required permissions verified'});
       }
-    } catch (err: any) {
-      addToast({type: 'error', message: err.message});
+    } catch (err) {
+      addToast({type: 'error', message: errMsg(err)});
     } finally {
       setValidating(false);
     }
@@ -173,8 +173,8 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
       if (result.manifest.envVars?.length) {
         setEnvVars(result.manifest.envVars.map((key) => ({key, value: ''})));
       }
-    } catch (err: any) {
-      addToast({type: 'error', message: `Analysis failed: ${err.message}`});
+    } catch (err) {
+      addToast({type: 'error', message: `Analysis failed: ${errMsg(err)}`});
       setStep('credentials');
     } finally {
       setAnalyzing(false);
@@ -235,8 +235,8 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
           // Ignore polling errors
         }
       }, 5000);
-    } catch (err: any) {
-      setDeployError(err.message);
+    } catch (err) {
+      setDeployError(errMsg(err));
       setDeployStatus('Deployment failed');
       setDeploying(false);
     }

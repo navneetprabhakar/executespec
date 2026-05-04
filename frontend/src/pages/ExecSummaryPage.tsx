@@ -304,6 +304,7 @@ export default function ExecSummaryPage() {
               )}
             </div>
 
+            {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
             <div ref={attentionSectionRef as any}>
               <h2 className='text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5'>
                 <AlertTriangle className='h-3 w-3 text-status-error' /> Needs attention
@@ -363,6 +364,7 @@ function KpiCard({
   hint?: string;
 }) {
   const interactive = !!onClick;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const Tag: any = interactive ? 'button' : 'div';
   const interactiveCls = interactive
     ? 'cursor-pointer text-left hover:border-accent-blue/40 hover:bg-[var(--gray-200)] transition-colors focus:outline-none focus:ring-1 focus:ring-accent-blue'

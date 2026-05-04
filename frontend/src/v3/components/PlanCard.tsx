@@ -8,7 +8,6 @@ import {
   PLAN_GATE_CANCEL_CTA,
   PLAN_GATE_HEADER,
   COST_PREFIX,
-  TIME_PREFIX,
 } from '../lib/terminology';
 
 /**

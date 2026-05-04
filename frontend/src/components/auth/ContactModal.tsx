@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {submitContactForm} from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
 import ResponsiveModal from '@/components/shared/ResponsiveModal';
@@ -21,8 +22,8 @@ export default function ContactModal({onClose}: ContactModalProps) {
       await submitContactForm(subject, body);
       addToast({type: 'success', message: 'Feedback submitted successfully'});
       onClose();
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Failed to submit feedback'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Failed to submit feedback'});
       setLoading(false);
     }
   };

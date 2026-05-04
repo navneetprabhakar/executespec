@@ -10,7 +10,7 @@ import java.lang.reflect.Method;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.PromptAssembler;
 import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.v2.observability.V2Metrics;
+import com.navneet.executespec.v2.observability.Metrics;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -46,7 +46,7 @@ class SmartClassifierHeuristicTest {
         redis,
         mock(PromptAssembler.class),
         new ObjectMapper(),
-        mock(V2Metrics.class));
+        mock(Metrics.class));
   }
 
   private static Object runHeuristic(SmartClassifierAgent agent, String spec, int repoCount)

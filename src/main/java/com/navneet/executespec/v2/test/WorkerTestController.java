@@ -6,7 +6,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import com.navneet.executespec.v2.agent.WorkerAgentV2;
+import com.navneet.executespec.v2.agent.WorkerAgent;
 import com.navneet.executespec.v2.agent.WorkerResult;
 import com.navneet.executespec.v2.agent.WorkerTaskRequest;
 import com.navneet.executespec.v2.tool.ExecutionContext;
@@ -22,7 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 Phase 3 verification endpoint.
  *
- * <p>Runs a real micro-task end-to-end through {@link WorkerAgentV2}: the agent must read an input
+ * <p>Runs a real micro-task end-to-end through {@link WorkerAgent}: the agent must read an input
  * file, perform a small computation, write the result to a new file, and call {@code completeTask}.
  * Verifies:
  *
@@ -42,7 +42,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WorkerTestController {
 
-  private final WorkerAgentV2 worker;
+  private final WorkerAgent worker;
 
   @GetMapping("/worker")
   public Map<String, Object> testWorker(

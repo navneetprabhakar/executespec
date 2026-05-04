@@ -570,7 +570,7 @@ public class ScmPushService {
    * of an existing run + existing PR; force-push would obliterate intermediate review-driven
    * commits and reopening a closed PR is a different decision the user might not want.
    *
-   * <p>Diagnosed from run a076c876 apply attempt (2026-05-03): {@code V2ApplyService.tryGitCommit}
+   * <p>Diagnosed from run a076c876 apply attempt (2026-05-03): {@code ApplyService.tryGitCommit}
    * shelled {@code git add} + {@code git commit} at the WORKSPACE root, but each {@code
    * repos/<name>/} contains its OWN nested {@code .git} that the wrapping git treats as a submodule
    * (gitlink). The outer commit recorded only the submodule SHAs; the inner repo working trees

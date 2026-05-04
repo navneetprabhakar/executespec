@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {
   getStandardsReport,
   type ComplianceReport,
@@ -39,7 +40,7 @@ export default function StandardsCompliancePanel({
     try {
       setReport(await getStandardsReport(projectId, orgId, 30));
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setLoading(false);
     }

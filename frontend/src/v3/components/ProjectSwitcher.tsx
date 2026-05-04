@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useMemo, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {getProjects, type ProjectDto} from '@/lib/api';
@@ -49,7 +50,7 @@ export default function ProjectSwitcher() {
       })
       .catch((e) => {
         if (!cancelled) {
-          setError(e?.message ?? 'Failed to load projects');
+          setError(errMsg(e) ?? 'Failed to load projects');
           setProjects([]);
         }
       });

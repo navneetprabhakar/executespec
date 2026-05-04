@@ -1,9 +1,17 @@
-import {useEffect, useCallback, useRef} from 'react';
+import {useEffect, useRef} from 'react';
 
-// Declare Razorpay global type
+// Razorpay's checkout SDK is loaded as an external script and isn't shipped with
+// types. We declare a narrow surface for the bits we actually use to avoid the
+// blanket `any` escape hatch — anything else we'd need has to be added here.
+interface RazorpayInstance {
+  open: () => void;
+}
+interface RazorpayConstructor {
+  new (options: Record<string, unknown>): RazorpayInstance;
+}
 declare global {
   interface Window {
-    Razorpay: any;
+    Razorpay?: RazorpayConstructor;
   }
 }
 
@@ -95,7 +103,16 @@ export function RazorpayCheckout({
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [subscriptionId, razorpayKeyId, onSuccess, onFailure, userName, userEmail]);
+  }, [
+    subscriptionId,
+    razorpayKeyId,
+    onSuccess,
+    onFailure,
+    userName,
+    userEmail,
+    amountPaise,
+    planName,
+  ]);
 
   return null; // Checkout is a modal overlay, no visible component
 }

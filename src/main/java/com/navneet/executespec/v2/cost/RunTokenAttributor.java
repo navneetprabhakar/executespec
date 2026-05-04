@@ -12,11 +12,11 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Owns per-phase + per-task token attribution for V2 runs.
  *
- * <p>Extracted from {@link com.navneet.executespec.v2.integration.V2RunOrchestrator} as the first
+ * <p>Extracted from {@link com.navneet.executespec.v2.integration.RunOrchestrator} as the first
  * step of the strangler-pattern refactor documented in {@code
  * docs/plans/v2-orchestrator-refactor.md}. The orchestrator previously held this logic as private
  * methods ({@code persistPhaseTokens} + {@code distributeWorkerTokens}) alongside pipeline control
- * flow. Moving it here shrinks V2RunOrchestrator and establishes a bounded context for cost
+ * flow. Moving it here shrinks RunOrchestrator and establishes a bounded context for cost
  * accounting that future additions (test-gen tokens, validation-report tokens) can grow into.
  *
  * <p>Semantics are preserved bit-for-bit from the inlined versions — this is pure code movement,
@@ -29,7 +29,7 @@ public class RunTokenAttributor {
 
   private final PipelineRunRepository runRepo;
   private final AgentTaskRepository taskRepo;
-  private final V2RunCostTracker costTracker;
+  private final RunCostTracker costTracker;
 
   public enum Phase {
     PLANNER,
@@ -75,7 +75,7 @@ public class RunTokenAttributor {
   /**
    * Distribute worker-phase tokens (executor aggregate) across per-task rows so the task-level
    * token columns are populated. Real per-task snapshots come from {@link
-   * V2RunCostTracker#snapshotTask}; any residual (tool-only retries that never hit the LLM) is
+   * RunCostTracker#snapshotTask}; any residual (tool-only retries that never hit the LLM) is
    * divided equally so per-task columns still reconcile to the run total.
    */
   public void attributeWorker(
@@ -98,7 +98,7 @@ public class RunTokenAttributor {
     int sumIn = 0, sumOut = 0;
     java.util.Map<String, int[]> realPerTask = new java.util.HashMap<>();
     for (var outcome : execResult.perTask()) {
-      V2RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
+      RunCostTracker.Snapshot s = costTracker.snapshotTask(runId, outcome.taskId());
       realPerTask.put(outcome.taskId(), new int[] {s.inputTokens(), s.outputTokens()});
       sumIn += s.inputTokens();
       sumOut += s.outputTokens();
@@ -113,7 +113,7 @@ public class RunTokenAttributor {
       int finalIn = real[0] + residualPerTaskIn;
       int finalOut = real[1] + residualPerTaskOut;
       // 2026-05-02 — write the model the worker ACTUALLY ran on (tier-resolved from
-      // SequentialExecutorV2.tierConfigFor) instead of the run-level default. Previously every
+      // SequentialExecutor.tierConfigFor) instead of the run-level default. Previously every
       // task row got the run default (e.g. claude-haiku for anthropic), masking the workhorse/
       // planning escalation for MEDIUM/HIGH tasks. b171fa52 had 14 MEDIUM + 7 HIGH tasks all
       // showing Haiku in the DB even though they ran on Sonnet at runtime. Falls back to the

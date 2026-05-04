@@ -27,6 +27,7 @@ import {
   selectIsOrgAdmin,
   selectIsOrgMember,
   selectIsSuperAdmin,
+  selectNormalizedTier,
 } from '@/stores/useAuthStore';
 import {useTierPermissions} from '@/hooks/useTierPermissions';
 import {UsageBadge} from '@/components/billing/UsageBadge';
@@ -95,10 +96,23 @@ export default function Sidebar() {
       .catch(() => {});
   }, []);
 
-  // Prefer the canonical user tier; fall back to billing.plan.tier only
-  // when the auth store hasn't hydrated yet. Legacy "MAX" rows collapse
-  // to TEAM (V141 path).
-  const tier = ((userTier ?? billingTier ?? '') || '').toUpperCase().replace(/^MAX$/, 'TEAM');
+  // X-06 (UX audit, 2026-05-03): tier coercion now lives in
+  // useAuthStore.selectNormalizedTier — single source of truth for the
+  // legacy MAX → TEAM rename + future tier renames. Sidebar previously
+  // did the .replace(/^MAX$/, 'TEAM') inline; with the selector, every
+  // tier-aware surface (Header, NewRunModal, PlansPage, etc.) reads
+  // the same normalized value.
+  //
+  // Falls back to billing.plan.tier only when auth store hasn't
+  // hydrated — selector returns 'FREE' on missing user, but if that
+  // happens during the initial loadMe() race the user can briefly see
+  // the FREE-tier sidebar variant. The billing-fallback-or-FREE branch
+  // bridges that race.
+  const normalizedFromAuth = useAuthStore(selectNormalizedTier);
+  const tier =
+    userTier !== null && userTier !== undefined
+      ? normalizedFromAuth
+      : (billingTier ?? '').toUpperCase().replace(/^MAX$/, 'TEAM');
 
   useEffect(() => {
     if (isMobile && mobileSidebarOpen) {
@@ -235,49 +249,87 @@ export default function Sidebar() {
           );
         })}
 
-        {/* Projects section */}
-        {isOrgMember && projects.length > 0 && expanded && (
+        {/* Projects section.
+            P-07 (UX audit, 2026-05-03): pre-fix this section was hidden
+            entirely until the user had ≥1 project, so brand-new users had no
+            visible entry point to project creation from the sidebar (the
+            audit found people scrolled the sidebar repeatedly looking for
+            "Projects" before giving up and using the breadcrumb). Now the
+            header always renders for org members so the affordance is
+            discoverable; the empty state surfaces a "Create your first one"
+            shortcut, and the header itself gains a small "+" button for
+            quick creation regardless of whether projects exist. */}
+        {isOrgMember && expanded && (
           <>
-            <NavLink
-              to='/org/projects'
-              title='Manage projects'
-              className={({isActive}) =>
-                cn(
-                  'flex items-center justify-between px-2.5 pt-5 pb-1.5 hover:text-primary',
-                  isActive ? 'text-primary' : 'text-muted',
-                )
-              }
-            >
-              <span className='text-[10px] font-semibold uppercase tracking-widest whitespace-nowrap'>
-                Projects
-              </span>
-            </NavLink>
-            {projects.map((project) => {
-              // v2.7.3 — highlight by URL match (you're ON this project)
-              // OR by the runs-list filter (you last toggled this one).
-              const isActive =
-                activeProjectIdFromUrl === project.id || projectFilter === project.id;
-              return (
-                <button
-                  key={project.id}
-                  onClick={() => handleProjectClick(project.id)}
-                  title={`Open ${project.name} dashboard`}
-                  className={cn(
-                    'flex items-center h-8 w-full px-2.5 gap-2.5 rounded-md transition-colors text-left',
-                    'hover:bg-[var(--gray-200)] group',
-                    isActive ? 'bg-[var(--gray-200)] text-primary' : 'text-secondary',
-                  )}
-                >
-                  <FolderKanban
+            <div className='flex items-center justify-between px-2.5 pt-5 pb-1.5'>
+              <NavLink
+                to='/org/projects'
+                title='Manage projects'
+                className={({isActive}) =>
+                  cn(
+                    'flex items-center gap-1 hover:text-primary transition-colors',
+                    isActive ? 'text-primary' : 'text-muted',
+                  )
+                }
+              >
+                <span className='text-[10px] font-semibold uppercase tracking-widest whitespace-nowrap underline-offset-2 hover:underline'>
+                  Projects
+                </span>
+              </NavLink>
+              <button
+                onClick={() => {
+                  navigate('/org/projects?new=1');
+                  if (isMobile) closeMobileDrawer();
+                }}
+                title='Create a new project'
+                aria-label='Create a new project'
+                className='flex items-center justify-center h-5 w-5 rounded-sm text-muted hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
+              >
+                <Plus className='h-3 w-3' />
+              </button>
+            </div>
+            {projects.length === 0 ? (
+              <button
+                onClick={() => {
+                  navigate('/org/projects?new=1');
+                  if (isMobile) closeMobileDrawer();
+                }}
+                title='Create your first project'
+                className='flex items-center h-8 w-full px-2.5 gap-2.5 rounded-md text-left text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
+              >
+                <FolderKanban className='h-3.5 w-3.5 flex-shrink-0 text-muted' />
+                <span className='text-sm whitespace-nowrap'>Create your first one</span>
+              </button>
+            ) : (
+              projects.map((project) => {
+                // v2.7.3 — highlight by URL match (you're ON this project)
+                // OR by the runs-list filter (you last toggled this one).
+                const isActive =
+                  activeProjectIdFromUrl === project.id || projectFilter === project.id;
+                return (
+                  <button
+                    key={project.id}
+                    onClick={() => handleProjectClick(project.id)}
+                    title={`Open ${project.name} dashboard`}
                     className={cn(
-                      'h-3.5 w-3.5 flex-shrink-0 transition-colors',
-                      isActive ? 'text-primary' : 'text-muted group-hover:text-secondary',
+                      'flex items-center h-8 w-full px-2.5 gap-2.5 rounded-md transition-colors text-left',
+                      'hover:bg-[var(--gray-200)] group',
+                      isActive ? 'bg-[var(--gray-200)] text-primary' : 'text-secondary',
                     )}
-                  />
-                  <span className='text-sm whitespace-nowrap overflow-hidden'>{project.name}</span>
-                </button>
-              );
-            })}
+                  >
+                    <FolderKanban
+                      className={cn(
+                        'h-3.5 w-3.5 flex-shrink-0 transition-colors',
+                        isActive ? 'text-primary' : 'text-muted group-hover:text-secondary',
+                      )}
+                    />
+                    <span className='text-sm whitespace-nowrap overflow-hidden'>
+                      {project.name}
+                    </span>
+                  </button>
+                );
+              })
+            )}
           </>
         )}
       </nav>

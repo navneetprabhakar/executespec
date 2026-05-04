@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {Download, TrendingUp, IndianRupee} from 'lucide-react';
+import {Download, TrendingUp} from 'lucide-react';
 import PageShell from '@/components/shared/PageShell';
 import {useTierPermissions} from '@/hooks/useTierPermissions';
 import {

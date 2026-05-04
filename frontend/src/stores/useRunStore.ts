@@ -1,4 +1,5 @@
 import {create} from 'zustand';
+import {errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
 import {refreshUsageBadge} from '@/components/billing/UsageBadge';
@@ -124,8 +125,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
         hasPrevious: result.hasPrevious,
         loading: false,
       });
-    } catch (e: any) {
-      set({loading: false, error: e.message});
+    } catch (e) {
+      set({loading: false, error: errMsg(e)});
     }
   },
 
@@ -133,8 +134,8 @@ export const useRunStore = create<RunStore>((set, get) => ({
     try {
       const activeRun = await api.getRun(id);
       set({activeRun});
-    } catch (e: any) {
-      set({error: e.message});
+    } catch (e) {
+      set({error: errMsg(e)});
     }
   },
 
@@ -169,6 +170,7 @@ export const useRunStore = create<RunStore>((set, get) => ({
       activeRun: s.activeRun
         ? {
             ...s.activeRun,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             tasks: s.activeRun.tasks?.map((t: any) =>
               t.taskId === taskId ? {...t, status: 'PENDING'} : t,
             ),

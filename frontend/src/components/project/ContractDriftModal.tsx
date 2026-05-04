@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import ResponsiveModal from '@/components/shared/ResponsiveModal';
 import {refreshContractFromSource, dismissContractDrift, type DriftCheckResult} from '@/lib/api';
 
@@ -55,7 +56,7 @@ export default function ContractDriftModal({
       setPrUrl(res.prUrl);
       onResolved?.();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setBusy(false);
     }
@@ -74,7 +75,7 @@ export default function ContractDriftModal({
       onResolved?.();
       closeAndReset();
     } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
+      setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {
       setBusy(false);
     }

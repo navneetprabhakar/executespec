@@ -1,4 +1,5 @@
 import {useState, useMemo, useRef, useEffect} from 'react';
+import {useNavigate} from 'react-router-dom';
 import {motion, AnimatePresence} from 'framer-motion';
 import {
   ArrowLeft,
@@ -39,9 +40,10 @@ import {
   getValidationReport,
   type ReviewReport,
   type ValidationReportData,
+  type TaskSummary,
 } from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
-import {cn, describeRunStatus} from '@/lib/utils';
+import {cn, describeRunStatus, errMsg} from '@/lib/utils';
 import {V2_LEGACY_UI} from '@/lib/constants';
 // R-190 (post-cutover) — VibeProgressNarrative deleted with the Vibe surface.
 // useViewMode no longer exposes isVibe; Pro layout is the only path now.
@@ -53,14 +55,15 @@ export default function RunDetail() {
     setActiveRunId,
     approveRun,
     cancelRun,
-    createRun,
+    createRun: _createRun,
     pauseRun,
     resumeRun,
   } = useRunStore();
-  const {addToast, setActiveTab} = useUiStore();
-  const isMobile = useIsMobile();
+  const {addToast, setActiveTab: _setActiveTab} = useUiStore();
+  const navigate = useNavigate();
+  const _isMobile = useIsMobile();
   const [confirming, setConfirming] = useState<string | null>(null);
-  const [reRunning, setReRunning] = useState(false);
+  const [reRunning, _setReRunning] = useState(false);
   const [pausing, setPausing] = useState(false);
   const [resuming, setResuming] = useState(false);
   const [downloadOpen, setDownloadOpen] = useState(false);
@@ -101,6 +104,7 @@ export default function RunDetail() {
         addToast({type: parseInt(percent) >= 90 ? 'error' : 'info', message});
       }
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sseEntries]);
 
   // Close download dropdown on outside click
@@ -125,7 +129,7 @@ export default function RunDetail() {
   }, [activeRun?.reviewJson]);
 
   // Validation report — used to surface accuracy score in the review summary banner
-  const [reviewReport, setReviewReport] = useState<ValidationReportData | null>(null);
+  const [_reviewReport, setReviewReport] = useState<ValidationReportData | null>(null);
   const reportReadyEvt = useSseStore((s) => s.entries).some(
     (e) => e.type === 'VALIDATION_REPORT_READY',
   );
@@ -142,9 +146,9 @@ export default function RunDetail() {
       await action();
       addToast({type: 'success', message: successMsg});
       setConfirming(null);
-    } catch (e: any) {
+    } catch (e) {
       // 409 = gate was lost after a server restart; the run has been auto-cancelled
-      if (e.message?.startsWith('409')) {
+      if (errMsg(e)?.startsWith('409')) {
         addToast({
           type: 'error',
           message: 'Gate expired (server was restarted). Run has been cancelled — please resubmit.',
@@ -154,7 +158,7 @@ export default function RunDetail() {
         if (activeRunId) await useRunStore.getState().fetchRun(activeRunId);
         await useRunStore.getState().fetchRuns();
       } else {
-        addToast({type: 'error', message: e.message});
+        addToast({type: 'error', message: errMsg(e)});
       }
     }
   };
@@ -171,8 +175,8 @@ export default function RunDetail() {
       try {
         await pushToScm(activeRun.runId);
         addToast({type: 'success', message: 'Publishing to Bitbucket...'});
-      } catch (e: any) {
-        addToast({type: 'error', message: e.message || 'Bitbucket push failed'});
+      } catch (e) {
+        addToast({type: 'error', message: errMsg(e) || 'Bitbucket push failed'});
       } finally {
         setGhPushing(false);
       }
@@ -189,8 +193,8 @@ export default function RunDetail() {
     try {
       await pushToGitHub(activeRun.runId);
       addToast({type: 'success', message: 'Publishing to GitHub...'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'GitHub push failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'GitHub push failed'});
     } finally {
       setGhPushing(false);
     }
@@ -207,8 +211,8 @@ export default function RunDetail() {
       setShowGitHubModal(false);
       setGhPat('');
       addToast({type: 'success', message: 'Publishing to GitHub…'});
-    } catch (e: any) {
-      setGhError(e.message || 'Failed to save credentials or push');
+    } catch (e) {
+      setGhError(errMsg(e) || 'Failed to save credentials or push');
     } finally {
       setGhPushing(false);
     }
@@ -217,8 +221,13 @@ export default function RunDetail() {
   const handleReRun = async () => {
     if (!activeRun) return;
 
-    // Instead of launching directly, we open the NewRunModal with pre-filled config.
-    // This allows the user to toggle Prototype Mode or change models before launching.
+    // R-07 (UX audit, 2026-05-03): pre-fix this set pendingNewRunConfig and
+    // showed a toast "Re-run configuration loaded. Adjust and launch when
+    // ready." — but the user was still on RunDetail, where the modal doesn't
+    // mount. They had to manually navigate to /runs and open the modal,
+    // making the button appear broken. Now we set the config AND navigate
+    // to /runs so RunList's useEffect immediately opens NewRunModal with
+    // the prefilled config. Net: one click does what the label promises.
     const config = {
       goal: activeRun.userRequest ?? '',
       executionMode: (activeRun.executionMode as 'PROTOTYPE' | 'PRODUCTION') ?? 'PROTOTYPE',
@@ -230,7 +239,16 @@ export default function RunDetail() {
     };
 
     useUiStore.getState().setPendingNewRunConfig(config);
-    addToast({type: 'info', message: 'Re-run configuration loaded. Adjust and launch when ready.'});
+    // Navigate to /runs (where RunList is) with the pendingConfig already
+    // in the store. RunList's useEffect picks it up and opens NewRunModal
+    // automatically. If the user came from a project, prefer the project's
+    // own launch flow because that path threads the project's repo + arch
+    // selection through the launch wizard.
+    if (activeRun.projectId) {
+      navigate(`/projects/${activeRun.projectId}/dashboard?tab=runs`);
+    } else {
+      navigate('/runs');
+    }
   };
 
   const handlePause = async () => {
@@ -239,8 +257,8 @@ export default function RunDetail() {
     try {
       await pauseRun(activeRun.runId);
       addToast({type: 'success', message: 'Run paused'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     } finally {
       setPausing(false);
     }
@@ -249,6 +267,7 @@ export default function RunDetail() {
   // Retry all FAILED/PARTIAL tasks within this run
   const failedTasks = useMemo(() => {
     if (!activeRun?.tasks) return [];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const tasks = activeRun.tasks as any[];
     // Parent IDs that have at least one FAILED/PARTIAL/BLOCKED subtask —
     // catches the case where a subtask returned PARTIAL but the parent was
@@ -270,10 +289,11 @@ export default function RunDetail() {
     if (!activeRun || failedTasks.length === 0) return;
     setRetryingFailed(true);
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       await Promise.all(failedTasks.map((t: any) => retryTask(activeRun.runId, t.taskId)));
       addToast({type: 'success', message: `Retrying ${failedTasks.length} failed task(s)`});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message || 'Retry failed'});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e) || 'Retry failed'});
     } finally {
       setRetryingFailed(false);
     }
@@ -289,8 +309,8 @@ export default function RunDetail() {
     try {
       await resumeRun(activeRun.runId);
       addToast({type: 'success', message: 'Run resumed — re-running incomplete tasks'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     } finally {
       setResuming(false);
     }
@@ -422,6 +442,23 @@ export default function RunDetail() {
               {/* Gate banner */}
               {activeRun.status === 'AWAITING_APPROVAL' && (
                 <div className='flex-shrink-0'>
+                  {/* P-15 / R-02 (UX audit, 2026-05-03) — surface the plan
+                      INLINE above Approve/Reject so the user reads what
+                      they're approving. Pre-fix, the banner just said
+                      "Review the plan and approve to continue" with no
+                      plan in sight — users had to switch to the Tasks tab
+                      to see what they'd be charged for. The 5-task preview
+                      below is bounded so it never crowds the action bar.
+                      Click "Show all N tasks" to expand inline (no tab
+                      switch needed). */}
+                  {Array.isArray(activeRun.tasks) && activeRun.tasks.length > 0 && (
+                    <PlanGatePreview
+                      tasks={activeRun.tasks.filter(
+                        (t) => !t.parentTaskId && !t.taskId?.includes('_gap_'),
+                      )}
+                    />
+                  )}
+
                   {/* [F-12] (audit Sprint 1 PR-4) — Batch dual-option cards
                   hidden. V2 backend has not implemented batch dispatch
                   (V1 batch was deleted 2026-04-13; the V2 re-impl is
@@ -504,8 +541,8 @@ export default function RunDetail() {
                                   });
                                   if (activeRunId)
                                     await useRunStore.getState().fetchRun(activeRunId);
-                                } catch (e: any) {
-                                  addToast({type: 'error', message: e.message});
+                                } catch (e) {
+                                  addToast({type: 'error', message: errMsg(e)});
                                 } finally {
                                   setSubmittingPlanEdit(false);
                                 }
@@ -566,49 +603,17 @@ export default function RunDetail() {
               )}
 
               {/* Review summary shown on COMPLETE runs.
-              v2.5.12 — prefer verifiedScore (deterministic, V106) over
-              accuracyScore (LLM-inferred, known to hallucinate on
-              intentionally-broken specs). Matches ValidationReportPanel's
-              v2.5.10 primary-badge rule so the banner and the panel agree. */}
-              {activeRun.status === 'COMPLETE' && review && (
+                  P-19 / R-03 (UX audit, 2026-05-03): pre-fix this banner
+                  showed both a score chip ("92/100 verified · Est. 88") AND
+                  the review summary text. The score chip duplicated what
+                  VerdictPill + ScoreCard already render below, contributing
+                  to the "6 competing scoring narratives" the audit flagged.
+                  Dropped the score chip; kept the textual summary because
+                  it's the LLM-written review prose nobody else surfaces.
+                  VerdictPill below this banner is now the single primary
+                  score signal. */}
+              {activeRun.status === 'COMPLETE' && review && review.summary && (
                 <div className='mx-4 mt-3 p-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-xs flex-shrink-0'>
-                  <div className='flex items-center gap-2 mb-1'>
-                    {typeof reviewReport?.verifiedScore === 'number' ? (
-                      <span
-                        className={cn(
-                          'font-semibold font-mono tabular-nums',
-                          reviewReport.verifiedScore >= 90
-                            ? 'text-accent-green'
-                            : reviewReport.verifiedScore >= 75
-                              ? 'text-accent-amber'
-                              : 'text-accent-red',
-                        )}
-                      >
-                        {reviewReport.verifiedScore}/100 verified
-                        {typeof reviewReport.accuracyScore === 'number' && (
-                          <span className='text-muted font-normal ml-1.5'>
-                            · Est. {reviewReport.accuracyScore}
-                          </span>
-                        )}
-                      </span>
-                    ) : typeof reviewReport?.accuracyScore === 'number' ? (
-                      <span
-                        className={cn(
-                          'font-semibold font-mono tabular-nums',
-                          reviewReport.accuracyScore >= 90
-                            ? 'text-accent-green'
-                            : reviewReport.accuracyScore >= 75
-                              ? 'text-accent-amber'
-                              : 'text-accent-red',
-                        )}
-                      >
-                        Est. {reviewReport.accuracyScore}/100
-                        {reviewReport.accuracyGrade ? ` · ${reviewReport.accuracyGrade}` : ''}
-                      </span>
-                    ) : (
-                      <span className='text-muted text-[11px]'>Score pending…</span>
-                    )}
-                  </div>
                   <p className='text-secondary leading-relaxed'>{review.summary}</p>
                 </div>
               )}
@@ -705,17 +710,15 @@ export default function RunDetail() {
                       <RotateCcw className={cn('h-3.5 w-3.5', reRunning && 'animate-spin')} />
                       {reRunning ? 'Launching…' : 'Re-run'}
                     </button>
-                    {failedTasks.length > 0 && (
-                      <button
-                        onClick={handleRetryFailed}
-                        disabled={retryingFailed}
-                        className='flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-amber transition-colors disabled:opacity-50 whitespace-nowrap'
-                        title={`Retry ${failedTasks.length} failed task(s)`}
-                      >
-                        <Play className={cn('h-3.5 w-3.5', retryingFailed && 'animate-pulse')} />
-                        {retryingFailed ? 'Retrying…' : `Retry Failed (${failedTasks.length})`}
-                      </button>
-                    )}
+                    {/* R-11 (UX audit, 2026-05-03) — Retry-failed button
+                        promoted into the ValidationReportPanel header so it
+                        sits next to the failure signal (verdict pill / signal
+                        breakdown chip) instead of being buried in the
+                        run-level toolbar. The plumbing flows through
+                        MobileCollapsibleReports → ValidationReportPanel via
+                        the retryFailed/retryFailedCount/retryFailedBusy
+                        props. Toolbar duplicate removed to avoid two buttons
+                        doing the same thing. */}
                   </>
                 )}
                 <div className='flex items-center gap-2 ml-auto'>
@@ -775,9 +778,22 @@ export default function RunDetail() {
                     runCompletedAt: activeRun.completedAt,
                     tasksTotal: activeRun.tasks?.length ?? null,
                     tasksComplete:
+                      // eslint-disable-next-line @typescript-eslint/no-explicit-any
                       activeRun.tasks?.filter((t: any) => t.status === 'COMPLETE').length ?? null,
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     provider: (activeRun as any).aiProvider ?? null,
                   }}
+                  // R-11 — only attach the retry-failed callback for terminal
+                  // statuses where the parent toolbar previously showed the
+                  // button. Mirrors the gating from the (now-deleted) toolbar
+                  // button so we don't surface the action mid-run.
+                  retryFailed={
+                    ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(activeRun.status)
+                      ? handleRetryFailed
+                      : undefined
+                  }
+                  retryFailedCount={failedTasks.length}
+                  retryFailedBusy={retryingFailed}
                 />
                 <RunDetailTabs />
               </div>
@@ -853,17 +869,20 @@ export default function RunDetail() {
             className='bg-[var(--gray-100)] border border-[var(--border-default)] rounded-lg p-5 w-full max-w-sm shadow-xl'
             onClick={(e) => e.stopPropagation()}
           >
+            {/* R-13 (UX audit, 2026-05-03): pre-fix copy was "permanent and
+                cannot be undone" — read like a destructive deletion when
+                archive is really "remove from active list." Softened to
+                explain what archive actually does + the eventual purge. */}
             <div className='flex items-center gap-2 mb-3'>
-              <AlertTriangle className='h-5 w-5 text-accent-red' />
+              <AlertTriangle className='h-5 w-5 text-accent-amber' />
               <h3 className='text-sm font-semibold text-primary'>Archive this run?</h3>
             </div>
             <p className='text-xs text-secondary mb-1'>
-              This action is{' '}
-              <strong className='text-primary'>permanent and cannot be undone</strong>.
+              Archive removes this run from your active runs list. The run becomes read-only — you
+              can still open it by URL or share its report.
             </p>
             <p className='text-xs text-muted mb-4'>
-              Archived runs will be permanently deleted after{' '}
-              <strong className='text-secondary'>90 days</strong>.
+              Archived runs auto-purge after <strong className='text-secondary'>90 days</strong>.
             </p>
             <div className='flex justify-end gap-2'>
               <button
@@ -874,20 +893,21 @@ export default function RunDetail() {
               </button>
               <button
                 onClick={async () => {
+                  if (!activeRun?.runId) return;
                   setArchiving(true);
                   try {
-                    await archiveRun(activeRun!.runId);
+                    await archiveRun(activeRun.runId);
                     addToast({type: 'success', message: 'Run archived'});
                     setShowArchiveConfirm(false);
                     setActiveRunId(null);
-                  } catch (e: any) {
-                    addToast({type: 'error', message: e?.message || 'Failed to archive'});
+                  } catch (e) {
+                    addToast({type: 'error', message: errMsg(e) || 'Failed to archive'});
                   } finally {
                     setArchiving(false);
                   }
                 }}
                 disabled={archiving}
-                className='px-3 py-1.5 text-xs bg-accent-red text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50'
+                className='px-3 py-1.5 text-xs bg-accent-amber/90 text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50'
               >
                 {archiving ? 'Archiving…' : 'Archive'}
               </button>
@@ -927,6 +947,11 @@ interface MobileCollapsibleReportsProps {
     tasksComplete?: number | null;
     provider?: string | null;
   };
+  // R-11 — plumbed from RunDetail so the report header can show "Retry
+  // failed (N)" right next to the failure signal. Optional + safe to omit.
+  retryFailed?: () => void | Promise<void>;
+  retryFailedCount?: number;
+  retryFailedBusy?: boolean;
 }
 
 function MobileCollapsibleReports({
@@ -934,6 +959,9 @@ function MobileCollapsibleReports({
   status,
   statusReason,
   stampMeta,
+  retryFailed,
+  retryFailedCount,
+  retryFailedBusy,
 }: MobileCollapsibleReportsProps) {
   const isMobile = useIsMobile();
   const [collapsed, setCollapsed] = useState(true);
@@ -948,6 +976,9 @@ function MobileCollapsibleReports({
           status={status}
           statusReason={statusReason}
           stampMeta={stampMeta}
+          retryFailed={retryFailed}
+          retryFailedCount={retryFailedCount}
+          retryFailedBusy={retryFailedBusy}
         />
         <TestReportPanel runId={runId} status={status} />
       </>
@@ -971,6 +1002,9 @@ function MobileCollapsibleReports({
             status={status}
             statusReason={statusReason}
             stampMeta={stampMeta}
+            retryFailed={retryFailed}
+            retryFailedCount={retryFailedCount}
+            retryFailedBusy={retryFailedBusy}
           />
           <TestReportPanel runId={runId} status={status} />
         </div>
@@ -1050,6 +1084,61 @@ function GateBanner({
           </>
         )}
       </div>
+    </div>
+  );
+}
+
+/**
+ * P-15 / R-02 (UX audit, 2026-05-03) — collapsible plan preview rendered above
+ * the AWAITING_APPROVAL gate banner. Five tasks shown by default; the rest
+ * collapse behind "Show all N tasks" so the action bar never gets crowded.
+ *
+ * Rendering rule: top-level tasks only (excludes subtasks via parentTaskId
+ * filter and gap tasks via taskId._gap_ check — same filter the run-detail
+ * Tasks tab uses). Each row shows the task title only — no model / complexity
+ * because the user's job here is "is this the work I want to pay for?", not
+ * "what tier did the planner pick?".
+ */
+function PlanGatePreview({tasks}: {tasks: TaskSummary[]}) {
+  const [expanded, setExpanded] = useState(false);
+  if (!tasks.length) return null;
+  const PREVIEW = 5;
+  const shown = expanded ? tasks : tasks.slice(0, PREVIEW);
+  const hasMore = tasks.length > PREVIEW;
+  return (
+    <div className='mx-4 mt-3 rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] text-xs'>
+      <div className='px-3 py-2 border-b border-[var(--border-default)] flex items-center justify-between'>
+        <span className='font-medium text-secondary'>
+          Plan — {tasks.length} task{tasks.length !== 1 ? 's' : ''}
+        </span>
+        {hasMore && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className='text-[11px] text-accent-blue hover:underline'
+            aria-expanded={expanded}
+          >
+            {expanded ? 'Show less' : `Show all ${tasks.length}`}
+          </button>
+        )}
+      </div>
+      <ol className='divide-y divide-[var(--border-default)]'>
+        {shown.map((t, i) => (
+          <li key={t.taskId} className='px-3 py-1.5 flex items-start gap-2'>
+            <span
+              className='font-mono text-[10px] text-muted tabular-nums w-5 flex-shrink-0 pt-px'
+              aria-hidden='true'
+            >
+              {i + 1}.
+            </span>
+            <span className='text-primary leading-tight'>{t.title}</span>
+          </li>
+        ))}
+      </ol>
+      {!expanded && hasMore && (
+        <div className='px-3 py-1.5 text-[11px] text-muted italic border-t border-[var(--border-default)]'>
+          + {tasks.length - PREVIEW} more task{tasks.length - PREVIEW !== 1 ? 's' : ''}
+        </div>
+      )}
     </div>
   );
 }

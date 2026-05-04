@@ -22,8 +22,7 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Activates thread-local accessors for virtual thread context propagation
  *   <li>Registers {@link TenantContextThreadLocalAccessor} and {@link
  *       WorkspaceContextThreadLocalAccessor} so that tenant/workspace context auto-propagates
- *       across virtual threads spawned by {@code SequentialExecutorV2} and {@code
- *       V2RunOrchestrator}
+ *       across virtual threads spawned by {@code SequentialExecutor} and {@code RunOrchestrator}
  *   <li>Enables {@code @Observed} annotation support via {@link ObservedAspect}
  * </ul>
  */
