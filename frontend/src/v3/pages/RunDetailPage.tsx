@@ -538,7 +538,6 @@ export default function RunDetailPage() {
           {!diffLoading && diff && (
             <div style={{flex: 1, minHeight: 0, height: 'calc(100vh - 360px)'}}>
               <MonacoSafeMount
-                resetKey={active ?? ''}
                 fallback={
                   <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
                     Diff viewer hit a transient render error — pick another file or refresh to
@@ -546,8 +545,18 @@ export default function RunDetailPage() {
                   </div>
                 }
               >
+                {/*
+                 * 2026-05-04 — NO `key` on DiffEditor (and no `resetKey` on MonacoSafeMount).
+                 * @monaco-editor/react's unmount disposes original + modified TextModels BEFORE
+                 * disposing the DiffEditor widget; Monaco's deferred event queue still has
+                 * events for those models which fire AFTER dispose → "TextModel got disposed
+                 * before DiffEditorWidget model got reset". With key={active}, this fired on
+                 * EVERY file switch and left the new DiffEditor's render half-broken
+                 * (regression reported 2026-05-04: "full view is visible but diff is not").
+                 * Without the key, prop changes flow through setValue / setModelLanguage on the
+                 * existing models — no dispose, no race, diff renders.
+                 */}
                 <DiffEditor
-                  key={active ?? ''}
                   language={getMonacoLanguage(diff.path)}
                   original={diff.base}
                   modified={diff.head}
