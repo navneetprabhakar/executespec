@@ -2826,7 +2826,24 @@ export interface PullRequestSnapshot {
   diffPreview: string;
 }
 
-export const getPullRequestSnapshot = (repoFullName: string, prNumber: number, maxChars = 4000) =>
+/**
+ * 2026-05-04 — bumped default maxChars 4_000 → 200_000. The backend concatenates
+ * every file's patch into one diff blob and truncates at the byte limit BEFORE
+ * the frontend's `splitDiffByFile` parser sees it. With the previous 4 KB cap,
+ * a typical multi-file PR (e.g. one with a 2-3 KB README change near the top of
+ * the diff) had all subsequent file patches silently dropped — symptom on dev
+ * 2026-05-04 was "every PR only shows README.md". 200 KB covers virtually every
+ * realistic PR from V2 runs (the per-task scope is bounded), keeps responses
+ * gzip'd under 50 KB on the wire, and falls back to a "truncated, N chars
+ * omitted" footer when even that's exceeded so the user can click through to
+ * GitHub for the full diff. Caller can still pass a smaller value if they need
+ * a tight summary (no current call site does).
+ */
+export const getPullRequestSnapshot = (
+  repoFullName: string,
+  prNumber: number,
+  maxChars = 200_000,
+) =>
   req<PullRequestSnapshot>(
     `/prs/snapshot?repo=${encodeURIComponent(repoFullName)}&number=${prNumber}&maxChars=${maxChars}`,
   );
