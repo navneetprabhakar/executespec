@@ -378,7 +378,12 @@ export default function ProjectDashboardPage() {
 
         {projectId && <PostMergeBar projectId={projectId} />}
 
-        <header className='flex items-start justify-between gap-3'>
+        {/* X-10 (UX audit, 2026-05-03) — header now wraps on narrow screens
+            so the action cluster (Repos chip / New / More) drops below the
+            project name + icon instead of overflowing or truncating. The
+            stacked layout on <sm: keeps every affordance reachable without
+            horizontal scroll. */}
+        <header className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
           <div className='min-w-0 flex items-start gap-3'>
             <span className='inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0'>
               <FolderGit2 className='h-5 w-5' />
@@ -392,7 +397,7 @@ export default function ProjectDashboardPage() {
               </h1>
             </div>
           </div>
-          <div className='flex items-center gap-2'>
+          <div className='flex items-center gap-2 flex-wrap'>
             {/* v2.7.2 — first-class Repos chip. Always visible; amber-tinted
                 when zero repos so users see the linkage gap before they
                 discover it via a failed Launch. Click opens AddRepoModal
@@ -656,9 +661,13 @@ function SummaryBar({
   }
 
   return (
-    <div className='flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px]'>
+    // X-10 (UX audit, 2026-05-03) — on <sm screens this collapses to a
+    // horizontally-scrollable row so it stays one line even with 9 segments
+    // (was wrapping to 5 rows on phones). Desktop keeps the wrap behaviour
+    // so power users can still see everything at once.
+    <div className='flex sm:flex-wrap items-center gap-x-3 gap-y-1 text-[11px] overflow-x-auto sm:overflow-visible whitespace-nowrap sm:whitespace-normal -mx-3 px-3 sm:mx-0 sm:px-0'>
       {segments.map((s, i) => (
-        <span key={i} className='inline-flex items-center gap-1'>
+        <span key={i} className='inline-flex items-center gap-1 flex-shrink-0'>
           {s.label && (
             <span className='text-muted font-mono uppercase tracking-wider'>{s.label}</span>
           )}
