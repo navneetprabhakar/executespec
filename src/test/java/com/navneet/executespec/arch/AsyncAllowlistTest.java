@@ -146,7 +146,27 @@ class AsyncAllowlistTest {
               // long LLM calls inside a tx tripped Hikari's 60s leak
               // detector"). Internal try/catch on every step ensures
               // async-thread crashes never go silent.
-              "PostMergeCascadeService#regenerateAfterMerge"));
+              "PostMergeCascadeService#regenerateAfterMerge",
+
+              // 2026-05-04 — boot-time crash recovery for ExecutionRuns left
+              // in EXECUTING after a JVM restart. Reads ExecutionRun rows
+              // (no eager collection nav — `findStaleNonTerminal` doesn't
+              // join solutions/dependencies) and re-dispatches each via
+              // executeApprovedPlan. Outer try/catch wraps the whole sweep
+              // so an exception never propagates to startup. Pairs with
+              // AdminReconciliationService#onApplicationReady which handles
+              // the non-resumable upstream phases.
+              "ExecutionOrchestrator#onApplicationReady",
+
+              // 2026-05-04 — boot-time fail-clean for orphaned ExecutionRuns
+              // in non-resumable phases (SETUP / ANALYSING / ARCH_REVIEW /
+              // PLANNING / PAUSED). Coordinates with
+              // ExecutionOrchestrator#onApplicationReady — that resumes
+              // EXECUTING; this fails the rest with a tight 1-min cutoff.
+              // Reads ExecutionRun rows + saves status; no lazy collection
+              // navigation. Outer try/catch swallows recovery failures so
+              // they never block startup.
+              "AdminReconciliationService#onApplicationReady"));
 
   @Test
   void asyncMethodAllowlistInSync() {

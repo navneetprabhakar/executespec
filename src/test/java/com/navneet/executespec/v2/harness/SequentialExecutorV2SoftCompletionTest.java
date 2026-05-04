@@ -75,6 +75,9 @@ class SequentialExecutorV2SoftCompletionTest {
     lenient()
         .when(modelResolver.resolve(anyString(), any()))
         .thenThrow(new RuntimeException("not wired in unit test"));
+    // 2026-05-04 — ContextStore param added on PR #71 for the resume path. Soft-completion
+    // tests cover the non-resume execute branch where ContextStore is never touched, so a mock
+    // is fine.
     return new SequentialExecutor(
         worker,
         buildProjectTool,
@@ -84,6 +87,7 @@ class SequentialExecutorV2SoftCompletionTest {
         taskRepo,
         modelResolver,
         retrievalService,
+        org.mockito.Mockito.mock(com.navneet.executespec.v2.context.ContextStore.class),
         costTracker);
   }
 
@@ -189,7 +193,7 @@ class SequentialExecutorV2SoftCompletionTest {
     // Worker fails to call completeTask but wrote 5 files. Multi-task plan,
     // first task (intermediate). Pre-fix this would have been PARTIAL.
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerHitIterLimit(5));
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(5));
 
     SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(multiTaskPlan(), true));
@@ -223,7 +227,7 @@ class SequentialExecutorV2SoftCompletionTest {
   @Test
   void singletask_iter_limit_with_writes_smoke_pass_is_COMPLETE() {
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerHitIterLimit(3));
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(3));
     // Smoke pass — exit code 0.
     when(buildProjectTool.execute(any(), any())).thenReturn(new ToolResult.Ok("exit=0\nbuild ok"));
 
@@ -241,7 +245,7 @@ class SequentialExecutorV2SoftCompletionTest {
   @Test
   void singletask_iter_limit_with_writes_smoke_fail_is_PARTIAL_with_combined_reason() {
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerHitIterLimit(2));
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(2));
     // Smoke fail — non-zero exit. Worker is NOT retried in the soft-completion
     // path because it already burned its budget.
     when(buildProjectTool.execute(any(), any()))
@@ -273,7 +277,7 @@ class SequentialExecutorV2SoftCompletionTest {
   @Test
   void iter_limit_with_zero_writes_is_FAILED_regression_check() {
     stubTaskRow();
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(workerHitIterLimit(0));
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(workerHitIterLimit(0));
 
     SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(singleTaskPlan(), true));
@@ -308,7 +312,7 @@ class SequentialExecutorV2SoftCompletionTest {
             .toolCallLog(log)
             .totalLatencyMs(60_000L)
             .build();
-    when(worker.run(any(WorkerTaskRequest.class))).thenReturn(stagnant);
+    when(worker.run(any(WorkerTaskRequest.class), any())).thenReturn(stagnant);
 
     SequentialExecutor executor = newExecutor();
     ExecutionResult result = executor.execute(req(multiTaskPlan(), true));
