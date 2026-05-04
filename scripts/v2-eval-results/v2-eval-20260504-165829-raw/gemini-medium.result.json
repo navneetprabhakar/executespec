@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "medium",
+  "run_id": "d34a39e3-2f67-4eb2-919f-0698f778f413",
+  "status": "TIMEOUT",
+  "harness": "v2",
+  "startedAt": "2026-05-04T12:12:12.867465Z",
+  "completedAt": null,
+  "tasks_total": 4,
+  "tasks_done": 4,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildExitCode\":0,\"finalBuildPassed\":true,\"totalLatencyMs\":245050,\"wiringPassSummary\":\"\",\"generalPassSummary\":\"no in-scope issues found\",\"overall\":\"FIXED_ISSUES\"}",
+  "actual_cost": 0,
+  "est_low": 0.36735000000000007,
+  "est_high": 0.6428625000000001,
+  "credits": 1,
+  "total_input": 450407,
+  "total_output": 7739,
+  "accuracy": 100,
+  "report_ok": true
+}
