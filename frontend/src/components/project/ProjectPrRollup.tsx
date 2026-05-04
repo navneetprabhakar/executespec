@@ -17,6 +17,7 @@ import {
   refreshProjectPrs,
   type PullRequestSnapshot,
 } from '@/lib/api';
+import PrReviewButton from './PrReviewButton';
 import DiffView from '@/components/shared/DiffView';
 import {cn, errMsg} from '@/lib/utils';
 
@@ -425,6 +426,13 @@ function PrRow({
               <MessageSquareReply className='h-3 w-3' />
             )}
           </button>
+        )}
+        {pr.repoFullName && pr.prNumber && (
+          <PrReviewButton
+            projectId={projectId}
+            repoFullName={pr.repoFullName}
+            prNumber={pr.prNumber}
+          />
         )}
         <a
           href={pr.prUrl}

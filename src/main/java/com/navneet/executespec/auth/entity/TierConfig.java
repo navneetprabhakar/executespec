@@ -124,4 +124,34 @@ public class TierConfig {
 
   @Column(name = "lifecycle_reason", columnDefinition = "TEXT")
   private String lifecycleReason;
+
+  /**
+   * v2.6.4 (V172) — whether this tier may use the per-PR Review Agent. FREE=false; PRO/TEAM/MAX/
+   * ENTERPRISE=true. Enforced by {@link
+   * com.navneet.executespec.prreview.PrReviewService#assertTierAndQuota}.
+   */
+  @Column(name = "pr_review_enabled", nullable = false)
+  private Boolean prReviewEnabled = Boolean.FALSE;
+
+  /**
+   * v2.6.4 (V172) — whether this tier may use the whole-repo Code Review Agent. FREE=false; PRO/
+   * TEAM/MAX/ENTERPRISE=true. Enforced by {@link
+   * com.navneet.executespec.codereview.CodeReviewService#assertTierAndQuota}.
+   */
+  @Column(name = "code_review_enabled", nullable = false)
+  private Boolean codeReviewEnabled = Boolean.FALSE;
+
+  /**
+   * v2.6.4 (V172) — monthly cap for PR-review runs. -1 = unlimited (TEAM/MAX/ENTERPRISE), positive
+   * = capped (PRO=10), 0 = blocked (FREE).
+   */
+  @Column(name = "pr_review_monthly_quota", nullable = false)
+  private Integer prReviewMonthlyQuota = 0;
+
+  /**
+   * v2.6.4 (V172) — monthly cap for whole-repo code-review scans. -1 = unlimited, positive = capped
+   * (PRO=4), 0 = blocked (FREE).
+   */
+  @Column(name = "code_review_monthly_quota", nullable = false)
+  private Integer codeReviewMonthlyQuota = 0;
 }

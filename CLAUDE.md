@@ -2,6 +2,86 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
+> **2026-05-05 — PR Review + Code Review agents (`feature/code-review-agents`, NOT yet merged to dev/main):**
+> Two new paid-tier agents land alongside the existing run pipeline,
+> both gated to PRO/TEAM/MAX/ENTERPRISE on the `tier_config` table
+> (FREE → 403, quota exhausted → 429). Both agents emit their tokens +
+> cost into the existing `RunCostTracker` under per-row keys
+> (`pr-review-{id}`, `code-review-{scanId}`) so per-tier billing
+> reports can pivot on the new bucket without schema changes.
+>
+> - **PR Review Agent** (`com.navneet.executespec.prreview/`) — runs
+>   against a single PR's diff. Single-call agent: PLANNING-tier model
+>   (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview), emits a
+>   `submitReview` tool call with `verdict ∈ {APPROVE, COMMENT,
+>   REQUEST_CHANGES}` + an array of line-anchored comments. Persisted
+>   to `pr_review` + `pr_review_comment` (V172). Async-with-SSE: the
+>   service queues a row, kicks off on a 4-thread dispatch pool, and
+>   returns the row in QUEUED status immediately. Per-tier monthly
+>   quota: PRO=10, TEAM/MAX/ENTERPRISE=unlimited.
+> - **Code Review Agent** (`com.navneet.executespec.codereview/`) —
+>   whole-repo two-stage scan. (1) `SemgrepRunner` runs `semgrep
+>   --config p/ci` against the cloned workspace (graceful degradation
+>   if semgrep isn't on PATH — returns empty findings + the LLM pass
+>   alone). (2) `CodeReviewAgent` (PLANNING-tier, 16K cap) takes the
+>   static findings + a curated 20-file sample (controllers / auth /
+>   db / config first, capped at 12K chars each) and triages KEEP /
+>   REWRITE / DROP per finding + adds architectural / logic / security
+>   issues semgrep can't see. Status: QUEUED → CLONING →
+>   STATIC_RUNNING → LLM_RUNNING → COMPLETE / FAILED, with SSE on
+>   `code-review-{scanId}`. `CodeReviewMarkdownRenderer` builds a
+>   single markdown report (severity-grouped, file-anchored,
+>   suggested-fix blocks); persisted to
+>   `code_review_scan.report_markdown` and surfaced verbatim via
+>   the chat tool + `/api/code-reviews/{id}/report` download. Per-tier
+>   monthly quota: PRO=4, TEAM/MAX/ENTERPRISE=unlimited.
+> - **Schema (V172)** — new tables `pr_review`, `pr_review_comment`,
+>   `code_review_scan` (incl. `report_markdown TEXT`),
+>   `code_review_issue` with severity / category / source / fingerprint
+>   columns. New `tier_config` columns: `pr_review_enabled`,
+>   `code_review_enabled`, `pr_review_monthly_quota`,
+>   `code_review_monthly_quota` seeded per tier (FREE blocks both;
+>   PRO 10 + 4; TEAM/MAX/ENTERPRISE -1).
+> - **Chat tool surface** (`memory/chattools/ProjectChatTools.java`)
+>   gains two new tools: `run_code_review(repoFullName)` and
+>   `get_latest_code_review(repoFullName)`. The latter returns the
+>   markdown report verbatim for chat narration; the former queues a
+>   scan + returns its id for the user to poll.
+> - **Frontend** — new `CodeQualityPanel.tsx` mounts inside the
+>   project dashboard's Code tab as a "Code review" sub-tab. Shows per
+>   linked repo: latest scan card with severity counts, Run / View
+>   report / Download .md buttons; polls every 2.5s while a scan is
+>   in-flight. New `PrReviewButton.tsx` mounts inline in
+>   `ProjectPrRollup.tsx` PR rows: tiny eye icon → spinner → verdict
+>   pill (APPROVE/COMMENT/REQUEST_CHANGES); click expands a popover
+>   with summary + first 5 comments. Both gated client-side to
+>   PRO/TEAM/MAX/ENTERPRISE so FREE users see a tasteful upgrade card
+>   instead of a 403 toast.
+> - **Agent tier mapping** — `application.yml` registers
+>   `PrReviewAgent: PLANNING`, `CodeReviewAgent: PLANNING`. Both run
+>   on Sonnet 4.6 (Anthropic), GPT-5.4 (OpenAI), Gemini 3 Pro Preview
+>   (Gemini) per the existing model matrix. The model is whatever
+>   `ModelResolver.resolve` returns — full provider failover applies.
+> - **Tests** — `CodeReviewServiceTierGateTest` (7 cases pinning FREE
+>   blocked, PRO under/at/over quota, TEAM unlimited, ENTERPRISE with
+>   feature flag off, unknown tier closed-fail).
+>   `CodeReviewAgentParseTest` (4 cases — clean parse, malformed-issue
+>   drop, unknown enum normalisation, missing optional fields).
+>   `CodeReviewMarkdownRendererTest` (3 cases — severity ordering,
+>   clean-scan note, dropped-findings section). Total 14 new tests;
+>   `mvn verify` 953 / 0 / 0 / 4 (skipped).
+>
+> **Outstanding before PR ready for review:** GitHub mirroring of PR
+> review verdict + comments via the GitHub Reviews API (planned slice
+> 3); semgrep auto-installation in the prod GCE container (currently
+> only available where the operator has `pip install semgrep`'d the
+> host — graceful degradation today means LLM-only on those hosts);
+> CI-pipeline event listener so PR opens trigger an automatic review
+> (separate feature, deliberately not in this PR per user direction);
+> `MAX` tier currently maps the same as `TEAM` for these features —
+> feature/product-split-prep's `TierProductSurfaceMapper` will mediate
+> the surface split when that lands.
+>
 > **2026-05-01 — audit r3 fix batch + Google-style refactor + CI lint enforcement (shipped to main via PRs #55 + #56 + #57):**
 > Round-3 persona-test audit closed seven credibility-class bugs and
 > the Google Java + TypeScript style refactor landed on top, including
@@ -505,6 +585,19 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | DELETE | `/api/projects/{id}/standards/{standardId}/exception` | E3.6 — withdraw a standing exception |
 | GET | `/api/projects/{id}/standards/report?orgId={orgId}&sinceDays={n}` | E3.16 — read-only project standards compliance report (effective standards merged from org + project, recent violations, persistent overrides); default `sinceDays=30` |
 
+### PR Review + Code Review agents (v2.6.4, `feature/code-review-agents`)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/pr-reviews` | Submit a PR review (PRO+); body `{projectId, repoFullName, prNumber}`. 202 + QUEUED row; FREE → 403; quota exhausted → 429; GitHub fetch fail → 502. |
+| GET | `/api/pr-reviews/{id}` | Get a PR review with comments inlined. |
+| GET | `/api/pr-reviews?repo={repo}&number={n}` | List reviews for a single PR, newest first. |
+| GET | `/api/projects/{projectId}/pr-reviews` | Project-level rollup of every PR review. |
+| POST | `/api/code-reviews` | Submit a whole-repo code review scan (PRO+); body `{projectId, repoId?, repoFullName}`. 202 + QUEUED row; FREE → 403; quota exhausted → 429. |
+| GET | `/api/code-reviews/{id}` | Get a scan with issues inlined + the markdown report. |
+| GET | `/api/projects/{projectId}/code-reviews` | All scans for a project, newest first. |
+| GET | `/api/projects/{projectId}/code-reviews/latest?repo={repo}` | Latest COMPLETE scan for a (project, repo); 204 if none. |
+| GET | `/api/code-reviews/{id}/report` | Markdown report download (text/markdown attachment). |
+
 ## Key File Locations
 
 | Purpose | Path |
@@ -644,6 +737,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | v2.6.3-track enterprise readiness — architectural invariants (E3.14, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `arch/invariants/`: `ArchInvariant.java` + `ArchInvariantViolation.java` entities, `InvariantChecker.java` (runs per-codemap-version; definitions live in customer git as `.executespec/arch/invariants.yaml` per repo). Schema: V138 (`arch_invariant` + `arch_invariant_violation`). |
 | v2.6.3-track enterprise readiness — visibility + retention + export (E4, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `notification/pref/`: `UserNotificationPref.java` entity + `NotificationPrefService.java` (per-user × event-type × channel opt-in/out matrix + sensible defaults). New package `export/`: `ProjectExportController.java` (`POST /api/projects/{id}/export` returns zip of every `.executespec/` artefact + DB-only counterparts when `config_storage=DATABASE`). Schema: V139 (`user_notification_pref`). |
 | v2.6.3-track session boot fix (2026-04-25, on `feature/enterprise-readiness-eval`) | `folder/ExecutespecFolderWriter.java` + `folder/BootstrapService.java` — both had two constructors (prod + test seam) but neither annotated; Spring 6 fell back to no-arg (which doesn't exist). Added `@Autowired` on both prod constructors. Caught when local stack was brought up for the deferred server-up eval — would have crashed the first dev deploy attempt. |
+| v2.6.4 PR Review + Code Review agents (`feature/code-review-agents`, NOT yet merged) | Backend new packages: `prreview/` (`PrReviewAgent`, `PrReviewService`, `PrReviewController`, entity + repos for `pr_review` + `pr_review_comment`) and `codereview/` (`CodeReviewAgent`, `CodeReviewService`, `CodeReviewController`, `SemgrepRunner`, `CodeReviewMarkdownRenderer`, entity + repos for `code_review_scan` + `code_review_issue`). Both register PLANNING tier in `application.yml` agent-tier-map. Both gate on new `tier_config` columns (`pr_review_enabled` / `code_review_enabled` / `*_monthly_quota`). New chat tools wired via `memory/chattools/ProjectChatTools.java#runCodeReview` + `getLatestCodeReview`. Schema: V172. Frontend: new `components/project/CodeQualityPanel.tsx` (sub-tab inside Code) + `components/project/PrReviewButton.tsx` (inline icon-button on every PR row in `ProjectPrRollup`); api helpers + types in `lib/api.ts`. Tests: `CodeReviewServiceTierGateTest` (7) + `CodeReviewAgentParseTest` (4) + `CodeReviewMarkdownRendererTest` (3). PullRequestSnapshot record gained a `headSha` field — backward-compatible since all callers go through `GitHubRepoService.getPullRequestSnapshot`. |
 | LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
 | App config | `resources/application.yml` |
 | Frontend entry | `frontend/src/main.tsx` |
