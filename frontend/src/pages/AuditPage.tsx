@@ -202,7 +202,7 @@ export default function AuditPage() {
 
   // ── Permission-gate — runs AFTER all hooks above. R1 (2026-05-01
   // follow-up) — render AccessDenied in place instead of redirecting
-  // to "/", which V3HomeRedirect then bounced to /projects/empty
+  // to "/", which HomeRedirectPage then bounced to /projects/empty
   // ("Welcome, Reval, you don't have any projects yet"). Users clicked
   // an Audit link and ended up on an onboarding screen with no
   // explanation. Now they see a clear 403 frame that names the

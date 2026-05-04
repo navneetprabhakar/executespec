@@ -13,9 +13,9 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.v2.cost.V2RunCostTracker;
-import com.navneet.executespec.v2.observability.V2Metrics;
-import com.navneet.executespec.v2.tool.ToolRegistryV2;
+import com.navneet.executespec.v2.cost.RunCostTracker;
+import com.navneet.executespec.v2.observability.Metrics;
+import com.navneet.executespec.v2.tool.ToolRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
 import org.springframework.ai.anthropic.AnthropicChatOptions;
@@ -36,10 +36,10 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 LLM router — native-tool-only, provider-agnostic single-call dispatcher.
  *
- * <p>Phase 2 scope: routes one {@link LlmRequestV2} to the correct provider with native tool
- * calling, returns Spring AI's {@link ChatResponse} uniformly. Tool callbacks are always sourced
- * from {@link ToolRegistryV2#bind(com.navneet.executespec.v2.tool.ExecutionContext)} so concurrent
- * tasks never share state.
+ * <p>Phase 2 scope: routes one {@link LlmRequest} to the correct provider with native tool calling,
+ * returns Spring AI's {@link ChatResponse} uniformly. Tool callbacks are always sourced from {@link
+ * ToolRegistry#bind(com.navneet.executespec.v2.tool.ExecutionContext)} so concurrent tasks never
+ * share state.
  *
  * <p>Provider routing:
  *
@@ -54,7 +54,7 @@ import lombok.extern.slf4j.Slf4j;
  * </ul>
  *
  * <p><b>Per-run API-key resolution (V165+):</b> the router resolves customer-configured BYOK keys
- * via {@link V2RunKeyContextStore} keyed by {@code request.context().runId()} and threads them into
+ * via {@link RunKeyContextStore} keyed by {@code request.context().runId()} and threads them into
  * provider-side dispatch. When no customer key is present the call falls through to the platform
  * default (HYBRID semantics). For Anthropic the per-key model cache ({@link #anthropicByKey}) wraps
  * Spring AI's singleton bean — keyed by SHA-256(apiKey), Caffeine LRU 128 × 1h TTL — so customer
@@ -66,7 +66,7 @@ import lombok.extern.slf4j.Slf4j;
  * per-call status metrics today.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
- * WorkerAgentV2 loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
+ * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and
  * smoke-test integration. The OpenAI wrapper makes the same assumption (it never executes tools
  * internally).
  */
@@ -75,13 +75,13 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class LlmRouterV2 {
 
-  private final ToolRegistryV2 toolRegistry;
+  private final ToolRegistry toolRegistry;
   private final OpenAiNativeToolClient openAiNativeToolClient;
   private final GeminiNativeToolClient geminiNativeToolClient;
-  private final V2Metrics metrics;
-  private final V2RunCostTracker costTracker;
+  private final Metrics metrics;
+  private final RunCostTracker costTracker;
   private final SseBroadcaster broadcaster;
-  private final V2RunKeyContextStore keyContextStore;
+  private final RunKeyContextStore keyContextStore;
 
   /**
    * Per-customer-key Anthropic model cache. Spring AI's {@link AnthropicChatModel} is a singleton
@@ -104,7 +104,7 @@ public class LlmRouterV2 {
    *
    * @return Spring AI {@link ChatResponse} (uniform shape regardless of provider)
    */
-  public ChatResponse call(LlmRequestV2 request) {
+  public ChatResponse call(LlmRequest request) {
     // If the caller supplied an explicit tool list (e.g. the planner restricting
     // to just submitPlan), honor it; otherwise bind every registered V2 tool.
     List<ToolCallback> tools =
@@ -142,7 +142,7 @@ public class LlmRouterV2 {
       String runId = request.context().runId();
       String taskId = request.context().taskId();
       costTracker.record(runId, taskId, request.provider(), request.model(), resp);
-      V2RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
+      RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
       broadcaster.emit(runId, RunEvent.tokenUsage(runId, snap.inputTokens(), snap.outputTokens()));
       log.info("LlmRouterV2 <- {} {} ok in {}ms", request.provider(), request.model(), elapsed);
       return resp;
@@ -161,7 +161,7 @@ public class LlmRouterV2 {
     }
   }
 
-  private ChatResponse dispatch(LlmRequestV2 request, List<ToolCallback> tools, String apiKey) {
+  private ChatResponse dispatch(LlmRequest request, List<ToolCallback> tools, String apiKey) {
     return switch (request.provider().toLowerCase(Locale.ROOT)) {
       case "anthropic" -> callAnthropic(request, tools, apiKey);
       case "openai" -> callOpenAi(request, tools, apiKey);
@@ -172,7 +172,7 @@ public class LlmRouterV2 {
     };
   }
 
-  private ChatResponse callAnthropic(LlmRequestV2 r, List<ToolCallback> tools, String apiKey) {
+  private ChatResponse callAnthropic(LlmRequest r, List<ToolCallback> tools, String apiKey) {
     // Pick the per-customer-key model when BYOK is in play; fall back to
     // the platform singleton otherwise. The cache lookup is keyed by
     // SHA-256(apiKey) so the plaintext never sits in the cache key.
@@ -189,7 +189,7 @@ public class LlmRouterV2 {
     // function). Explicit min-content-length thresholds here ensure the resolver
     // actually attaches cache_control blocks to SYSTEM + TOOL + long USER/ASSISTANT
     // messages instead of silently skipping them. Verify activation via
-    // cacheWrite / cacheRead values > 0 on the V2RunCostTracker log lines.
+    // cacheWrite / cacheRead values > 0 on the RunCostTracker log lines.
     // Per-key models get their own per-key prompt cache on Anthropic's
     // side (cache scope = API account), which is the correct isolation
     // for BYOK — Customer A's cached prompts never leak to Customer B.
@@ -279,7 +279,7 @@ public class LlmRouterV2 {
     return false;
   }
 
-  private ChatResponse callGemini(LlmRequestV2 r, List<ToolCallback> tools, String apiKey) {
+  private ChatResponse callGemini(LlmRequest r, List<ToolCallback> tools, String apiKey) {
     // Routes through GeminiNativeToolClient — direct REST POST, bypasses Spring AI
     // 1.1.4's broken multi-turn response parsing (Optional.get() on empty Optional
     // inside GoogleGenAiChatModel.responseCandidateToGeneration).
@@ -301,7 +301,7 @@ public class LlmRouterV2 {
             .build());
   }
 
-  private ChatResponse callOpenAi(LlmRequestV2 r, List<ToolCallback> tools, String apiKey) {
+  private ChatResponse callOpenAi(LlmRequest r, List<ToolCallback> tools, String apiKey) {
     // Phase 3: pass the full Spring AI message list — wrapper serializes
     // SystemMessage / UserMessage / AssistantMessage(+toolCalls) / ToolResponseMessage
     // to OpenAI's chat-completions wire format, supporting multi-turn agent loops.

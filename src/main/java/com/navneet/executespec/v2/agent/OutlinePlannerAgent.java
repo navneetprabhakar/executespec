@@ -15,7 +15,7 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.v2.observability.V2Metrics;
+import com.navneet.executespec.v2.observability.Metrics;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -32,21 +32,21 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Phase 1 of the hierarchical planner — produces a {@link PlanV2} for runs the {@link
+ * Phase 1 of the hierarchical planner — produces a {@link Plan} for runs the {@link
  * SmartClassifierAgent} marked {@code SMALL} or {@code MEDIUM}. SINGLE_SHOT still bypasses the LLM
- * via {@link PlannerAgentV2#plan} (synthesised plan); {@code LARGE} and {@code LEGACY} fall back to
- * {@link PlannerAgentV2} until slices 3-4 wire up parallel expansion + recursive outlines.
+ * via {@link PlannerAgent#plan} (synthesised plan); {@code LARGE} and {@code LEGACY} fall back to
+ * {@link PlannerAgent} until slices 3-4 wire up parallel expansion + recursive outlines.
  *
  * <p>Slice 2 contract: emit the full plan in a single tool call (32k cap — the old planner used
- * 8192 and got truncated on RN+API multi-repo specs). The output shape is the same {@code PlanV2};
- * only the prompt + tool name differ from {@link PlannerAgentV2}. Slice 3 will evolve this into a
+ * 8192 and got truncated on RN+API multi-repo specs). The output shape is the same {@code Plan};
+ * only the prompt + tool name differ from {@link PlannerAgent}. Slice 3 will evolve this into a
  * "skeleton-only" mode for {@code LARGE}, with {@code TaskExpanderAgent} filling task bodies in
  * parallel.
  *
- * <p>Reuses {@link PlannerAgentV2#parsePlanFromArgs}, {@link PlannerAgentV2#validatePlan}, {@link
- * PlannerAgentV2#salvagePlanFromText}, and {@link PlannerAgentV2#warnIfConstraintsUnderpropagated}
- * so both agents produce structurally identical {@code PlanV2} instances. The four are
- * package-private specifically so we can share them without copy-paste.
+ * <p>Reuses {@link PlannerAgent#parsePlanFromArgs}, {@link PlannerAgent#validatePlan}, {@link
+ * PlannerAgent#salvagePlanFromText}, and {@link PlannerAgent#warnIfConstraintsUnderpropagated} so
+ * both agents produce structurally identical {@code Plan} instances. The four are package-private
+ * specifically so we can share them without copy-paste.
  */
 @Service
 @Slf4j
@@ -55,7 +55,7 @@ public class OutlinePlannerAgent {
 
   private final LlmRouterV2 router;
   private final ObjectMapper objectMapper;
-  private final V2Metrics metrics;
+  private final Metrics metrics;
   private final ModelResolver modelResolver;
   private final FeatureFlagService featureFlagService;
 
@@ -97,8 +97,8 @@ public class OutlinePlannerAgent {
    * for a "the planner has wedged" heuristic. The phase 2 expander pool already enforces a 20-min
    * wall timeout; this closes the matching gap on phase 1.
    *
-   * <p>Hits raise an IllegalStateException so callers (V2RunOrchestrator) can fall back to the
-   * legacy planner OR mark the run FAILED with a clear reason instead of hanging indefinitely.
+   * <p>Hits raise an IllegalStateException so callers (RunOrchestrator) can fall back to the legacy
+   * planner OR mark the run FAILED with a clear reason instead of hanging indefinitely.
    */
   private static final long PLANNER_LLM_WALL_TIMEOUT_SECONDS = 8 * 60;
 
@@ -117,17 +117,17 @@ public class OutlinePlannerAgent {
   }
 
   /** Convenience overload — defaults to {@link Mode#FULL_PLAN} (slice 2 contract). */
-  public PlanV2 plan(PlannerRequestV2 req) {
+  public Plan plan(PlannerRequest req) {
     return plan(req, Mode.FULL_PLAN);
   }
 
   /**
    * v2.6.2 slice 5b — synthesise a one-task plan for {@code SINGLE_SHOT} specs. No LLM planner call
    * (the title summarizer is LIGHTWEIGHT and only fires when the synthesised title would otherwise
-   * come from a regex fallback). Migrated from {@code PlannerAgentV2#synthesizeSingleShotPlan} so
-   * the legacy planner can be deleted.
+   * come from a regex fallback). Migrated from {@code PlannerAgent#synthesizeSingleShotPlan} so the
+   * legacy planner can be deleted.
    */
-  public PlanV2 synthesizeSingleShot(PlannerRequestV2 req) {
+  public Plan synthesizeSingleShot(PlannerRequest req) {
     log.info(
         "OutlinePlanner SINGLE_SHOT synthesise (LIGHTWEIGHT title call only): spec={}chars",
         req.spec() == null ? 0 : req.spec().length());
@@ -151,21 +151,21 @@ public class OutlinePlannerAgent {
     if (r1Text.length() > 120) r1Text = r1Text.substring(0, 120) + "...";
     RequirementSpec r1 =
         new RequirementSpec("R1", r1Text.trim(), RequirementSpec.RequirementKind.FUNCTIONAL);
-    PlannedTaskV2 task =
-        PlannedTaskV2.builder()
+    PlannedTask task =
+        PlannedTask.builder()
             .id("T1")
             .title(title)
             .description(description)
-            .complexity(PlannedTaskV2.Complexity.LOW)
-            .taskType(PlannedTaskV2.TaskType.LEAF)
+            .complexity(PlannedTask.Complexity.LOW)
+            .taskType(PlannedTask.TaskType.LEAF)
             .meetsRequirements(List.of("R1"))
             .build();
-    return PlanV2.builder()
+    return Plan.builder()
         .planTitle(title)
         .planSummary(req.spec())
         .projectType("unknown")
-        .smokeTestStrategy(PlanV2.SmokeTestStrategy.BUILD)
-        .runtimeSurface(PlanV2.RuntimeSurface.HTTP)
+        .smokeTestStrategy(Plan.SmokeTestStrategy.BUILD)
+        .runtimeSurface(Plan.RuntimeSurface.HTTP)
         .classification(Classification.SINGLE_SHOT)
         .tasks(List.of(task))
         .requirements(List.of(r1))
@@ -182,7 +182,7 @@ public class OutlinePlannerAgent {
 
   /**
    * Run the outline phase. Synchronous — cost flows through {@link LlmRouterV2} → {@link
-   * com.navneet.executespec.v2.cost.V2RunCostTracker} automatically; the orchestrator diffs the
+   * com.navneet.executespec.v2.cost.RunCostTracker} automatically; the orchestrator diffs the
    * per-run snapshot before/after to attribute the phase to {@code pipeline_run.outline_*} columns.
    *
    * <p>{@link Mode#FULL_PLAN} emits descriptions + hardConstraints + meetsRequirements per task.
@@ -191,10 +191,10 @@ public class OutlinePlannerAgent {
    * meetsRequirements which haven't been written yet); coverage is re-checked post-expansion in the
    * coherence pass.
    */
-  public PlanV2 plan(PlannerRequestV2 req, Mode mode) {
+  public Plan plan(PlannerRequest req, Mode mode) {
     long start = System.currentTimeMillis();
     try {
-      PlanV2 plan = planOnce(req, null, mode);
+      Plan plan = planOnce(req, null, mode);
 
       // v2.5.11 (Validation v3 / Pillar 1) — strict validation + one retry.
       // Gated by feature flag; off → log-only behaviour. SKELETON_ONLY mode
@@ -216,7 +216,7 @@ public class OutlinePlannerAgent {
                   + " violation: {}",
               violations.size(),
               violations.get(0));
-          PlanV2 retry = planOnce(req, feedback, mode);
+          Plan retry = planOnce(req, feedback, mode);
           List<String> retryViolations = PlannerOutputUtils.validatePlan(retry);
           if (!retryViolations.isEmpty()) {
             throw new IllegalStateException(
@@ -237,7 +237,7 @@ public class OutlinePlannerAgent {
     }
   }
 
-  private PlanV2 planOnce(PlannerRequestV2 req, String retryFeedback, Mode mode) {
+  private Plan planOnce(PlannerRequest req, String retryFeedback, Mode mode) {
     String promptPath = (mode == Mode.SKELETON_ONLY) ? PROMPT_PATH_SKELETON : PROMPT_PATH_FULL;
     int maxTokens =
         (mode == Mode.SKELETON_ONLY) ? OUTLINE_MAX_TOKENS_SKELETON : OUTLINE_MAX_TOKENS_FULL;
@@ -290,14 +290,14 @@ public class OutlinePlannerAgent {
     // because Spring AI's RestClient retry chain has no overall
     // ceiling. The 8-minute cap matches "Phase 2 expander 20-min /
     // 4 = per-call ceiling" rule of thumb already used in
-    // V2RunOrchestrator.runLargePipeline.
+    // RunOrchestrator.runLargePipeline.
     ChatResponse resp;
     try {
       CompletableFuture<ChatResponse> fut =
           CompletableFuture.supplyAsync(
               () ->
                   router.call(
-                      LlmRequestV2.builder()
+                      LlmRequest.builder()
                           .provider(plannerProviderName)
                           .model(plannerModel)
                           .messages(messages)
@@ -346,7 +346,7 @@ public class OutlinePlannerAgent {
     if (planCall == null) {
       String textPreview = resp.getResult().getOutput().getText();
       String finishReason = String.valueOf(resp.getResult().getMetadata().getFinishReason());
-      // Same Gemini pseudo-code salvage path as PlannerAgentV2 — text-form
+      // Same Gemini pseudo-code salvage path as PlannerAgent — text-form
       // tool-call recovery. The salvage helper is tool-name-agnostic; it
       // pulls a JSON-ish payload out of any "default_api.*(...)" call.
       String salvaged = PlannerOutputUtils.salvagePlanFromText(textPreview);
@@ -355,7 +355,7 @@ public class OutlinePlannerAgent {
             "OutlinePlanner did not emit a structured submitOutline call (finish={}); salvaged"
                 + " text-form args",
             finishReason);
-        PlanV2 plan =
+        Plan plan =
             PlannerOutputUtils.parsePlanFromArgs(salvaged, req.classification(), objectMapper);
         PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());
         return plan;
@@ -366,7 +366,7 @@ public class OutlinePlannerAgent {
               + "; text preview: "
               + (textPreview == null ? "" : PlannerOutputUtils.truncate(textPreview, 200)));
     }
-    PlanV2 plan =
+    Plan plan =
         PlannerOutputUtils.parsePlanFromArgs(
             planCall.arguments(), req.classification(), objectMapper);
     PlannerOutputUtils.warnIfConstraintsUnderpropagated(plan, req.spec());

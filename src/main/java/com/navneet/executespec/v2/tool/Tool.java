@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.JsonNode;
  *
  * <p>A {@code Tool} is a pure capability — it knows its name, schema, and how to execute given
  * parsed args + an execution context. It does NOT know about LLM providers, tool callbacks, or the
- * agent loop. The {@link ToolRegistryV2} adapts tools to provider-facing {@code ToolCallback}s by
+ * agent loop. The {@link ToolRegistry} adapts tools to provider-facing {@code ToolCallback}s by
  * binding them to a context.
  *
  * <p>All implementations:

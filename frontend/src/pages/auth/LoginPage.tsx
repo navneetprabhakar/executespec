@@ -52,7 +52,7 @@ export default function LoginPage() {
   const navigate = useNavigate();
   const location = useLocation();
   // R-342 (2026-04-29) — default post-login destination is /home (the
-  // V3HomeRedirect dispatcher).  Authed user without a `from` location
+  // HomeRedirectPage dispatcher).  Authed user without a `from` location
   // (e.g. typed /login directly, or arrived from the marketing site)
   // lands on their first project's chat thread, not the v2 RunsPage.
   // Users bounced from a deep link (e.g. /audit → /login) still come
@@ -63,7 +63,7 @@ export default function LoginPage() {
   // a spec on executespec.ai's hero composer and submits, they're
   // redirected here as `/login?spec=<encoded>`.  Stash the spec to
   // sessionStorage as `v3-anon-spec` so the existing post-auth claim
-  // flow (V3Auth.claimAndForward) hydrates the in-app composer with
+  // flow (AuthPage.claimAndForward) hydrates the in-app composer with
   // it after the user signs in / signs up.  Length-capped at 4 KB to
   // match the website's submit-handler cap.
   useEffect(() => {

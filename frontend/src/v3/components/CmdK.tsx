@@ -110,7 +110,7 @@ export default function CmdK() {
       // Admin-only — [S-01] (audit Sprint 4, 2026-05-01) wired to real
       // routes. Was: all 4 navigated to /home (false advertising in the
       // most visible power-user surface). Routes are real now post-F-14
-      // V3Placeholder retirement: /admin/tiers mounts TierLifecyclePage,
+      // Placeholder retirement: /admin/tiers mounts TierLifecyclePage,
       // /admin/feature-flags mounts FeatureFlagsPage, /audit mounts
       // AuditPage. The "halt all runs" entry is removed because no
       // backing endpoint exists (POST /api/admin/runs/halt unimplemented).

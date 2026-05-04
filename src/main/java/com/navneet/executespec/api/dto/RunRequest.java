@@ -92,8 +92,8 @@ public record RunRequest(
         String branch,
     /**
      * Fix M (2026-05-03) — feed prior PR review comments into the planner. {@link
-     * com.navneet.executespec.v2.agent.PlannerRequestV2#prReviewComments} already plumbed this
-     * field through to the {@code outline-planner.md} {@code {{PR_REVIEW_COMMENTS}}} placeholder;
+     * com.navneet.executespec.v2.agent.PlannerRequest#prReviewComments} already plumbed this field
+     * through to the {@code outline-planner.md} {@code {{PR_REVIEW_COMMENTS}}} placeholder;
      * exposing it via the public DTO lets external clients request a "address these review comments
      * on this PR" run without copy-pasting the comments into the spec body.
      *

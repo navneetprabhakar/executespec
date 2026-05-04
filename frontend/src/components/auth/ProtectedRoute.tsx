@@ -12,7 +12,7 @@ import {useAuthStore} from '@/stores/useAuthStore';
  * query string preserved.  The website's hero composer hands off via
  * `dev.executespec.ai/?spec=<encoded>`; LoginPage reads `?spec=` on
  * mount and stashes it to sessionStorage so the existing post-auth
- * claim flow (V3Auth.claimAndForward) hydrates the composer with the
+ * claim flow (AuthPage.claimAndForward) hydrates the composer with the
  * typed spec.
  *
  * Auth-walled routes like `/dashboard`, `/projects`, `/audit` still

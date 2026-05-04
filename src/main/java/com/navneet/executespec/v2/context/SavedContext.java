@@ -8,7 +8,7 @@ import org.springframework.ai.chat.messages.Message;
 import lombok.Builder;
 
 /**
- * Snapshot of a worker task's in-flight state, persisted by {@link ContextStoreV2}.
+ * Snapshot of a worker task's in-flight state, persisted by {@link ContextStore}.
  *
  * @param runId associated run
  * @param taskId associated task

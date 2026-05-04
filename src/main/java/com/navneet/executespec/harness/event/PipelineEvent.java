@@ -39,7 +39,7 @@ public sealed interface PipelineEvent {
   record RunFailed(String runId, String reason) implements PipelineEvent {}
 
   /**
-   * Recovery service requests a fresh restart of a run. V2RunOrchestrator handles this event by
+   * Recovery service requests a fresh restart of a run. RunOrchestrator handles this event by
    * calling {@code submitRun}.
    */
   record RestartRun(

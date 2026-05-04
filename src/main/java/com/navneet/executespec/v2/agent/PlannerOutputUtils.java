@@ -17,7 +17,7 @@ import org.slf4j.LoggerFactory;
 
 /**
  * v2.6.2 slice 5b — shared parsing + validation helpers for the V2 planner pipeline. Extracted from
- * {@code PlannerAgentV2} so {@link OutlinePlannerAgent} (and its validation test) can use them
+ * {@code PlannerAgent} so {@link OutlinePlannerAgent} (and its validation test) can use them
  * without depending on the legacy planner. The legacy class is now deleted; this is the single
  * source of truth for planner-output handling.
  *
@@ -31,16 +31,16 @@ public final class PlannerOutputUtils {
   private PlannerOutputUtils() {}
 
   // ──────────────────────────────────────────────────────────────────────
-  // PlanV2 parsing
+  // Plan parsing
   // ──────────────────────────────────────────────────────────────────────
 
   /**
    * Parse a {@code submitPlan}/{@code submitOutline} tool-call argument JSON string into a {@link
-   * PlanV2}. Robust to malformed Anthropic tool-call payloads (the {@code <parameter name="..."}
-   * XML salvage path) and to skeleton-mode plans where descriptions / hardConstraints /
+   * Plan}. Robust to malformed Anthropic tool-call payloads (the {@code <parameter name="..."} XML
+   * salvage path) and to skeleton-mode plans where descriptions / hardConstraints /
    * meetsRequirements are intentionally blank.
    */
-  public static PlanV2 parsePlanFromArgs(
+  public static Plan parsePlanFromArgs(
       String argsJson, Classification classification, ObjectMapper objectMapper) {
     JsonNode root;
     try {
@@ -54,7 +54,7 @@ public final class PlannerOutputUtils {
           e);
     }
 
-    List<PlannedTaskV2> tasks = new ArrayList<>();
+    List<PlannedTask> tasks = new ArrayList<>();
     JsonNode tasksNode = root.path("tasks");
 
     // Salvage path: Anthropic occasionally emits its internal
@@ -89,27 +89,26 @@ public final class PlannerOutputUtils {
     }
 
     String smokeStrategyStr = root.path("smokeTestStrategy").asText("BUILD");
-    PlanV2.SmokeTestStrategy smokeStrategy;
+    Plan.SmokeTestStrategy smokeStrategy;
     try {
-      smokeStrategy = PlanV2.SmokeTestStrategy.valueOf(smokeStrategyStr.toUpperCase(Locale.ROOT));
+      smokeStrategy = Plan.SmokeTestStrategy.valueOf(smokeStrategyStr.toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException iae) {
       log.warn("Unknown smokeTestStrategy '{}', falling back to BUILD", smokeStrategyStr);
-      smokeStrategy = PlanV2.SmokeTestStrategy.BUILD;
+      smokeStrategy = Plan.SmokeTestStrategy.BUILD;
     }
 
-    PlanV2.RuntimeSurface runtimeSurface = PlanV2.RuntimeSurface.HTTP;
+    Plan.RuntimeSurface runtimeSurface = Plan.RuntimeSurface.HTTP;
     String surfaceStr = root.path("runtimeSurface").asText("HTTP");
     try {
       runtimeSurface =
-          PlanV2.RuntimeSurface.valueOf(
-              surfaceStr.trim().toUpperCase(Locale.ROOT).replace('-', '_'));
+          Plan.RuntimeSurface.valueOf(surfaceStr.trim().toUpperCase(Locale.ROOT).replace('-', '_'));
     } catch (IllegalArgumentException ignored) {
       log.warn("Unknown runtimeSurface '{}', falling back to HTTP", surfaceStr);
     }
 
     List<RequirementSpec> requirements = parseRequirements(root.path("requirements"));
 
-    return PlanV2.builder()
+    return Plan.builder()
         .planTitle(root.path("planTitle").asText(null))
         .planSummary(root.path("planSummary").asText(null))
         .projectType(root.path("projectType").asText("unknown"))
@@ -172,29 +171,29 @@ public final class PlannerOutputUtils {
     }
   }
 
-  private static PlannedTaskV2 buildTask(JsonNode t, int seq) {
+  private static PlannedTask buildTask(JsonNode t, int seq) {
     String id = t.path("id").asText(null);
     if (id == null || id.isBlank()) id = "T" + seq;
-    PlannedTaskV2.Complexity cx;
+    PlannedTask.Complexity cx;
     try {
       cx =
-          PlannedTaskV2.Complexity.valueOf(
+          PlannedTask.Complexity.valueOf(
               t.path("complexity").asText("MEDIUM").toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException iae) {
-      cx = PlannedTaskV2.Complexity.MEDIUM;
+      cx = PlannedTask.Complexity.MEDIUM;
     }
-    PlannedTaskV2.TaskType taskType;
+    PlannedTask.TaskType taskType;
     try {
       taskType =
-          PlannedTaskV2.TaskType.valueOf(t.path("type").asText("LEAF").toUpperCase(Locale.ROOT));
+          PlannedTask.TaskType.valueOf(t.path("type").asText("LEAF").toUpperCase(Locale.ROOT));
     } catch (IllegalArgumentException iae) {
-      taskType = PlannedTaskV2.TaskType.LEAF;
+      taskType = PlannedTask.TaskType.LEAF;
     }
     String description = t.path("description").asText("");
-    if (description.isBlank() && taskType == PlannedTaskV2.TaskType.LEAF) {
+    if (description.isBlank() && taskType == PlannedTask.TaskType.LEAF) {
       description = "(no description)";
     }
-    return PlannedTaskV2.builder()
+    return PlannedTask.builder()
         .id(id)
         .title(t.path("title").asText("(untitled)"))
         .description(description)
@@ -227,7 +226,7 @@ public final class PlannerOutputUtils {
    * clean. Skips rules that don't apply (e.g. skeleton plans where meetsRequirements is
    * intentionally blank pre- expansion are checked at the post-coherence pass instead, not here).
    */
-  public static List<String> validatePlan(PlanV2 plan) {
+  public static List<String> validatePlan(Plan plan) {
     List<String> out = new ArrayList<>();
     List<RequirementSpec> reqs = plan.requirements();
     if (reqs == null || reqs.isEmpty()) {
@@ -250,7 +249,7 @@ public final class PlannerOutputUtils {
 
     Set<String> covered = new HashSet<>();
     Set<String> unknownRefs = new LinkedHashSet<>();
-    for (PlannedTaskV2 t : plan.tasks()) {
+    for (PlannedTask t : plan.tasks()) {
       if (t.meetsRequirements() == null) continue;
       for (String refId : t.meetsRequirements()) {
         if (!ids.contains(refId)) unknownRefs.add(refId);
@@ -266,12 +265,12 @@ public final class PlannerOutputUtils {
       out.add("Requirements not covered by any task: " + uncovered);
     }
 
-    PlanV2.RuntimeSurface surface = plan.runtimeSurface();
+    Plan.RuntimeSurface surface = plan.runtimeSurface();
     boolean testableSurface =
-        surface == PlanV2.RuntimeSurface.HTTP
-            || surface == PlanV2.RuntimeSurface.CLI
-            || surface == PlanV2.RuntimeSurface.LIBRARY
-            || surface == PlanV2.RuntimeSurface.MOBILE_APP;
+        surface == Plan.RuntimeSurface.HTTP
+            || surface == Plan.RuntimeSurface.CLI
+            || surface == Plan.RuntimeSurface.LIBRARY
+            || surface == Plan.RuntimeSurface.MOBILE_APP;
     boolean isSingleShot = plan.classification() == Classification.SINGLE_SHOT;
     if (testableSurface && !isSingleShot) {
       boolean hasTestRequirement =
@@ -298,7 +297,7 @@ public final class PlannerOutputUtils {
    * {@code throughout}, etc.) but a majority of tasks have empty {@code hardConstraints}. Non-fatal
    * observability — weaker models occasionally underpropagate intermittently.
    */
-  public static void warnIfConstraintsUnderpropagated(PlanV2 plan, String spec) {
+  public static void warnIfConstraintsUnderpropagated(Plan plan, String spec) {
     if (plan == null || plan.tasks() == null || plan.tasks().isEmpty() || spec == null) return;
     String specLower = spec.toLowerCase(Locale.ROOT);
     boolean specHasSignals =

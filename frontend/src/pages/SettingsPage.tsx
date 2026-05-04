@@ -39,7 +39,7 @@ interface IntegrationCardProps {
   /**
    * Optional anchor id for deep-linking. When the URL hash matches this id (e.g.
    * `/settings/manage#github`), the card auto-opens and scrolls into view —
-   * V3Settings and V3Integrations rely on this to land users straight on the
+   * SettingsPage and IntegrationsPage rely on this to land users straight on the
    * relevant form. Plain DOM id, not a React key.
    */
   id?: string;

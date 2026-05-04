@@ -128,7 +128,7 @@ export default function OrgAdminDashboard() {
   // Non-admin standalone users see their own analytics. R1 (2026-05-01
   // follow-up) — if the gate ever does fire (user not logged in / no
   // admin role), render AccessDenied in place rather than redirecting
-  // to "/" and chaining through V3HomeRedirect to /projects/empty.
+  // to "/" and chaining through HomeRedirectPage to /projects/empty.
   if (!isAdmin && !user?.id) {
     return <AccessDenied feature='Org analytics' requiredRole='ORG_ADMIN' />;
   }

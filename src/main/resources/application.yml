@@ -277,7 +277,7 @@ model-matrix:
     CoherencePlannerAgent: LIGHTWEIGHT      # v2.6.2 hierarchical-planner phase 3
     ReviewerAgentV3: PLANNING
     SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
-    WorkerAgentV2: WORKHORSE
+    WorkerAgent: WORKHORSE
     # Shared non-tool-calling agents (use LlmRouter)
     TestPlannerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE

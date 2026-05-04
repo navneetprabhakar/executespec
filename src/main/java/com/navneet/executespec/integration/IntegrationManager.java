@@ -13,7 +13,7 @@ import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationEventLogRepository;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
-import com.navneet.executespec.v2.integration.V2RunOrchestrator;
+import com.navneet.executespec.v2.integration.RunOrchestrator;
 
 import org.springframework.stereotype.Service;
 
@@ -36,14 +36,14 @@ public class IntegrationManager {
   private final IntegrationRunRepository integrationRunRepo;
   private final IntegrationEventLogRepository eventLogRepo;
   private final StateStore stateStore;
-  private final V2RunOrchestrator v2Orchestrator;
+  private final RunOrchestrator v2Orchestrator;
 
   public IntegrationManager(
       List<InboundAdapter> inbound,
       IntegrationRunRepository integrationRunRepo,
       IntegrationEventLogRepository eventLogRepo,
       StateStore stateStore,
-      V2RunOrchestrator v2Orchestrator) {
+      RunOrchestrator v2Orchestrator) {
     this.inboundAdapters = inbound.stream().collect(toMap(InboundAdapter::sourceType, a -> a));
     this.integrationRunRepo = integrationRunRepo;
     this.eventLogRepo = eventLogRepo;
