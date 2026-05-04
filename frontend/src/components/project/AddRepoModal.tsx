@@ -1,11 +1,13 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Lock, RefreshCw} from 'lucide-react';
+import {AlertCircle, Lock, RefreshCw} from 'lucide-react';
 import * as api from '@/lib/api';
 import type {ProjectRepo, RepoScope} from '@/types/project';
 import type {GitHubRemoteRepo} from '@/lib/api';
+import {useAuthStore} from '@/stores/useAuthStore';
 import {cn} from '@/lib/utils';
 import ResponsiveModal from '@/components/shared/ResponsiveModal';
 import Button from '@/components/shared/Button';
+import {AddGitHubPatDrawer} from '@/components/runs/InlineCredentialDrawers';
 
 interface Props {
   projectId: string;
@@ -35,6 +37,20 @@ export default function AddRepoModal({
   const [scope, setScope] = useState<RepoScope>('USER');
   const [fullName, setFullName] = useState('');
   const [defaultBranch, setDefaultBranch] = useState('main');
+
+  // P-03 (UX audit, 2026-05-03) — distinguish "PAT missing" from "0 repos
+  // returned" so the empty list copy can render the inline PAT drawer button
+  // (M-008 pattern from NewRunModal) rather than send the user out to
+  // Settings → GitHub and back.
+  const user = useAuthStore((s) => s.user);
+  const hasPat = Boolean(user?.hasGithubPat);
+  const [showPatDrawer, setShowPatDrawer] = useState(false);
+  const reloadAfterPat = async () => {
+    setShowPatDrawer(false);
+    // user.hasGithubPat is updated by the drawer through useAuthStore. Refresh
+    // the repo list now that the PAT is on file.
+    await loadAll();
+  };
 
   const loadAll = async (owner?: string) => {
     setLoading(true);
@@ -217,11 +233,34 @@ export default function AddRepoModal({
             </Button>
           </div>
           <div className='max-h-80 overflow-y-auto space-y-1.5'>
+            {/* P-03 — when the user has no GitHub PAT, render the inline
+                drawer button RIGHT HERE instead of telling them to go to
+                Settings. Same component NewRunModal uses for its own
+                missing-PAT path (M-008). */}
+            {!hasPat && (
+              <div className='flex items-center gap-2 flex-wrap text-xs text-accent-amber/80 bg-accent-amber/[0.07] border border-accent-amber/20 rounded-sm px-3 py-2'>
+                <AlertCircle className='h-3.5 w-3.5 flex-shrink-0' />
+                <span>No GitHub PAT configured — we can't read your repos without one.</span>
+                <button
+                  type='button'
+                  onClick={() => setShowPatDrawer(true)}
+                  className='ml-auto rounded-sm bg-accent-amber/20 text-accent-amber px-2 py-0.5 font-semibold hover:bg-accent-amber/30 transition-colors'
+                >
+                  Add it now
+                </button>
+              </div>
+            )}
             {loading && <div className='text-xs text-muted'>Loading…</div>}
-            {!loading && rows.length === 0 && (
+            {!loading && rows.length === 0 && hasPat && (
               <div className='text-xs text-muted'>
-                No repos visible. Set a GitHub PAT + owner under Settings → GitHub, then Refresh. Or
-                switch to "Create new" to register a repo by name.
+                No repos visible for this owner. Try a different owner above and Refresh, or switch
+                to "Create new" to register a repo by name.
+              </div>
+            )}
+            {!loading && rows.length === 0 && !hasPat && (
+              <div className='text-xs text-muted'>
+                Add your GitHub PAT above to see repos you can link, or switch to "Create new" to
+                register a repo by name.
               </div>
             )}
             {rows.map((row) => {
@@ -326,6 +365,9 @@ export default function AddRepoModal({
           </div>
         </div>
       )}
+      {/* P-03 inline PAT drawer — closes back into the modal which then
+          reloads the repo list from GitHub. */}
+      <AddGitHubPatDrawer open={showPatDrawer} onClose={reloadAfterPat} />
     </ResponsiveModal>
   );
 }

@@ -15,6 +15,7 @@ import EmptyProjectLanding from '@/components/project/EmptyProjectLanding';
 import ProjectRepoManager from '@/components/project/ProjectRepoManager';
 import MoreDrawer, {useDrawerState, type DrawerPanel} from '@/components/project/MoreDrawer';
 import {useIsProjectAdmin} from '@/hooks/useIsProjectAdmin';
+import {useUiStore} from '@/stores/useUiStore';
 import {cn} from '@/lib/utils';
 import type {TaskSummary} from '@/types/project';
 import type {RunDetail} from '@/lib/api';
@@ -181,6 +182,10 @@ export default function ProjectDashboardPage() {
       .then((p) => {
         setProject(p);
         setProjectLookup('found');
+        // P-08 — feed the project name into the UI store so Header's
+        // breadcrumb can render "Projects / <name>" instead of the legacy
+        // literal "Projects / Dashboard".
+        if (p?.name) useUiStore.getState().setCurrentProjectName(p.name);
       })
       .catch(() => {
         setProject(null);
@@ -195,6 +200,9 @@ export default function ProjectDashboardPage() {
       setProjectLookup('pending');
       setSelectedRunId(null);
       setRunCache({});
+      // Clear the breadcrumb name on unmount so Header doesn't keep
+      // showing the previous project's name when the user navigates away.
+      useUiStore.getState().setCurrentProjectName(null);
     };
   }, [projectId, fetchDashboard, fetchScoreTrend, fetchRepos, reset]);
 

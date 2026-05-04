@@ -11,8 +11,16 @@ import NotificationBell from './NotificationBell';
 // v2.5.14 (Phase 1.4) — dynamic breadcrumb. Previous header hard-coded
 // "ExecuteSpec / Runs" even on project + billing + settings pages, which
 // both looked broken and confused users about where they were.
-function breadcrumbFromPath(pathname: string): {primary: string; secondary?: string} {
-  if (pathname.startsWith('/projects/')) return {primary: 'Projects', secondary: 'Dashboard'};
+function breadcrumbFromPath(
+  pathname: string,
+  projectName: string | null,
+): {primary: string; secondary?: string} {
+  // P-08 (UX audit, 2026-05-03) — when on a project surface and we have the
+  // project's actual name in store, surface it as the secondary crumb instead
+  // of the literal "Dashboard". ProjectDashboardPage populates this on mount
+  // (see useUiStore.setCurrentProjectName).
+  if (pathname.startsWith('/projects/'))
+    return {primary: 'Projects', secondary: projectName ?? 'Dashboard'};
   if (pathname.startsWith('/org/projects')) return {primary: 'Projects'};
   if (pathname.startsWith('/billing')) return {primary: 'Billing'};
   if (pathname.startsWith('/plans') || pathname.startsWith('/pricing')) return {primary: 'Plans'};
@@ -56,7 +64,8 @@ export default function Header() {
   const user = useAuthStore((s) => s.user);
   const activeCount = runs.filter((r) => ACTIVE_STATUSES.has(r.status)).length;
   const location = useLocation();
-  const crumb = breadcrumbFromPath(location.pathname);
+  const projectName = useUiStore((s) => s.currentProjectName);
+  const crumb = breadcrumbFromPath(location.pathname, projectName);
 
   return (
     <header className='flex items-center h-14 px-3 sm:px-4 gap-2 sm:gap-3 bg-[var(--geist-bg)] border-b border-[var(--border-default)] flex-shrink-0 z-10'>

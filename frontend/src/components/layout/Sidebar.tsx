@@ -27,6 +27,7 @@ import {
   selectIsOrgAdmin,
   selectIsOrgMember,
   selectIsSuperAdmin,
+  selectNormalizedTier,
 } from '@/stores/useAuthStore';
 import {useTierPermissions} from '@/hooks/useTierPermissions';
 import {UsageBadge} from '@/components/billing/UsageBadge';
@@ -95,10 +96,23 @@ export default function Sidebar() {
       .catch(() => {});
   }, []);
 
-  // Prefer the canonical user tier; fall back to billing.plan.tier only
-  // when the auth store hasn't hydrated yet. Legacy "MAX" rows collapse
-  // to TEAM (V141 path).
-  const tier = ((userTier ?? billingTier ?? '') || '').toUpperCase().replace(/^MAX$/, 'TEAM');
+  // X-06 (UX audit, 2026-05-03): tier coercion now lives in
+  // useAuthStore.selectNormalizedTier — single source of truth for the
+  // legacy MAX → TEAM rename + future tier renames. Sidebar previously
+  // did the .replace(/^MAX$/, 'TEAM') inline; with the selector, every
+  // tier-aware surface (Header, NewRunModal, PlansPage, etc.) reads
+  // the same normalized value.
+  //
+  // Falls back to billing.plan.tier only when auth store hasn't
+  // hydrated — selector returns 'FREE' on missing user, but if that
+  // happens during the initial loadMe() race the user can briefly see
+  // the FREE-tier sidebar variant. The billing-fallback-or-FREE branch
+  // bridges that race.
+  const normalizedFromAuth = useAuthStore(selectNormalizedTier);
+  const tier =
+    userTier !== null && userTier !== undefined
+      ? normalizedFromAuth
+      : (billingTier ?? '').toUpperCase().replace(/^MAX$/, 'TEAM');
 
   useEffect(() => {
     if (isMobile && mobileSidebarOpen) {

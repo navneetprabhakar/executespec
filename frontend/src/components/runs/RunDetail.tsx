@@ -1,4 +1,5 @@
 import {useState, useMemo, useRef, useEffect} from 'react';
+import {useNavigate} from 'react-router-dom';
 import {motion, AnimatePresence} from 'framer-motion';
 import {
   ArrowLeft,
@@ -59,6 +60,7 @@ export default function RunDetail() {
     resumeRun,
   } = useRunStore();
   const {addToast, setActiveTab} = useUiStore();
+  const navigate = useNavigate();
   const isMobile = useIsMobile();
   const [confirming, setConfirming] = useState<string | null>(null);
   const [reRunning, setReRunning] = useState(false);
@@ -218,8 +220,13 @@ export default function RunDetail() {
   const handleReRun = async () => {
     if (!activeRun) return;
 
-    // Instead of launching directly, we open the NewRunModal with pre-filled config.
-    // This allows the user to toggle Prototype Mode or change models before launching.
+    // R-07 (UX audit, 2026-05-03): pre-fix this set pendingNewRunConfig and
+    // showed a toast "Re-run configuration loaded. Adjust and launch when
+    // ready." — but the user was still on RunDetail, where the modal doesn't
+    // mount. They had to manually navigate to /runs and open the modal,
+    // making the button appear broken. Now we set the config AND navigate
+    // to /runs so RunList's useEffect immediately opens NewRunModal with
+    // the prefilled config. Net: one click does what the label promises.
     const config = {
       goal: activeRun.userRequest ?? '',
       executionMode: (activeRun.executionMode as 'PROTOTYPE' | 'PRODUCTION') ?? 'PROTOTYPE',
@@ -231,7 +238,16 @@ export default function RunDetail() {
     };
 
     useUiStore.getState().setPendingNewRunConfig(config);
-    addToast({type: 'info', message: 'Re-run configuration loaded. Adjust and launch when ready.'});
+    // Navigate to /runs (where RunList is) with the pendingConfig already
+    // in the store. RunList's useEffect picks it up and opens NewRunModal
+    // automatically. If the user came from a project, prefer the project's
+    // own launch flow because that path threads the project's repo + arch
+    // selection through the launch wizard.
+    if (activeRun.projectId) {
+      navigate(`/projects/${activeRun.projectId}/dashboard?tab=runs`);
+    } else {
+      navigate('/runs');
+    }
   };
 
   const handlePause = async () => {
@@ -839,17 +855,20 @@ export default function RunDetail() {
             className='bg-[var(--gray-100)] border border-[var(--border-default)] rounded-lg p-5 w-full max-w-sm shadow-xl'
             onClick={(e) => e.stopPropagation()}
           >
+            {/* R-13 (UX audit, 2026-05-03): pre-fix copy was "permanent and
+                cannot be undone" — read like a destructive deletion when
+                archive is really "remove from active list." Softened to
+                explain what archive actually does + the eventual purge. */}
             <div className='flex items-center gap-2 mb-3'>
-              <AlertTriangle className='h-5 w-5 text-accent-red' />
+              <AlertTriangle className='h-5 w-5 text-accent-amber' />
               <h3 className='text-sm font-semibold text-primary'>Archive this run?</h3>
             </div>
             <p className='text-xs text-secondary mb-1'>
-              This action is{' '}
-              <strong className='text-primary'>permanent and cannot be undone</strong>.
+              Archive removes this run from your active runs list. The run becomes read-only — you
+              can still open it by URL or share its report.
             </p>
             <p className='text-xs text-muted mb-4'>
-              Archived runs will be permanently deleted after{' '}
-              <strong className='text-secondary'>90 days</strong>.
+              Archived runs auto-purge after <strong className='text-secondary'>90 days</strong>.
             </p>
             <div className='flex justify-end gap-2'>
               <button
@@ -873,7 +892,7 @@ export default function RunDetail() {
                   }
                 }}
                 disabled={archiving}
-                className='px-3 py-1.5 text-xs bg-accent-red text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50'
+                className='px-3 py-1.5 text-xs bg-accent-amber/90 text-white rounded hover:opacity-90 transition-opacity disabled:opacity-50'
               >
                 {archiving ? 'Archiving…' : 'Archive'}
               </button>
