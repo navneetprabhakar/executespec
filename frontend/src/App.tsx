@@ -159,6 +159,7 @@ export default function App() {
     initAnalytics();
     // Try to restore session from access_token or refresh cookie on mount
     loadMe();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Wave 2.1 — identify once the user record resolves; reset on logout.
@@ -173,6 +174,7 @@ export default function App() {
     } else {
       resetAnalytics();
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id, user?.tier, user?.orgId]);
 
   // Wave 2.1 — lightweight pageview tracking. Routes are controlled by

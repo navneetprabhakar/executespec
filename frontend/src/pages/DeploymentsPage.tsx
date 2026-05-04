@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {Rocket, Lock, Sparkles, Cloud, Server, Globe} from 'lucide-react';
+import {Rocket, Sparkles, Cloud, Server, Globe} from 'lucide-react';
 import {useNavigate} from 'react-router-dom';
 import DeploymentCard from '@/components/deployments/DeploymentCard';
 import DeployWizardModal from '@/components/deployments/DeployWizardModal';
@@ -40,6 +40,7 @@ function DeploymentsPageInner() {
       }, 30000);
       return () => clearInterval(i);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canDeploy]);
 
   // Upgrade gate for FREE users

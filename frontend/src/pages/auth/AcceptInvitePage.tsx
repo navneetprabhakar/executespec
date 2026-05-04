@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {Loader2, PartyPopper, ShieldAlert, XCircle} from 'lucide-react';
 import {useAuthStore} from '@/stores/useAuthStore';
@@ -30,14 +31,15 @@ export default function AcceptInvitePage() {
         setStatus('success');
         setTimeout(() => navigate('/'), 2000);
       })
-      .catch((err: any) => {
-        if (err.message?.includes('401') || err.message?.includes('403')) {
+      .catch((err: unknown) => {
+        if (errMsg(err)?.includes('401') || errMsg(err)?.includes('403')) {
           setStatus('needsAuth');
         } else {
           setStatus('error');
-          setError(err.message ?? 'Failed to accept invitation.');
+          setError(errMsg(err) ?? 'Failed to accept invitation.');
         }
       });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
   return (

@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {Link, useSearchParams} from 'react-router-dom';
 import {Eye, EyeOff, Mail, Check, AlertCircle} from 'lucide-react';
 import {useAuthStore} from '@/stores/useAuthStore';
@@ -96,11 +97,11 @@ export default function RegisterPage() {
       }
       await register(form.email, form.firstName, form.lastName, form.password, attribution);
       setSuccess(true);
-    } catch (err: any) {
+    } catch (err) {
       setError(
-        err.message?.includes('409')
+        errMsg(err)?.includes('409')
           ? 'This email is already registered.'
-          : (err.message ?? 'Registration failed'),
+          : (errMsg(err) ?? 'Registration failed'),
       );
     } finally {
       setLoading(false);

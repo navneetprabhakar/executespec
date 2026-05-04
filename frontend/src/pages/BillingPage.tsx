@@ -1,7 +1,7 @@
 import {useState, useEffect, useCallback} from 'react';
 import {useNavigate, useLocation} from 'react-router-dom';
-import {Gift, Package, ShoppingCart, Clock, Zap} from 'lucide-react';
-import {cn} from '@/lib/utils';
+import {Gift, Package, Clock, Zap} from 'lucide-react';
+import {cn, errMsg} from '@/lib/utils';
 import {useAuthStore, selectIsOrgAdmin, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import BillingProfileForm from '@/components/billing/BillingProfileForm';
 import PageShell from '@/components/shared/PageShell';
@@ -83,8 +83,8 @@ export default function BillingPage() {
     try {
       const result = await purchaseTopup(pkg.id);
       setOrderData(result);
-    } catch (err: any) {
-      addToast({type: 'error', message: err.message || 'Failed to initiate purchase'});
+    } catch (err) {
+      addToast({type: 'error', message: errMsg(err) || 'Failed to initiate purchase'});
       setPurchasing(null);
     }
   };
@@ -102,8 +102,8 @@ export default function BillingPage() {
       );
       addToast({type: 'success', message: 'Runs credited successfully!'});
       await loadStatus();
-    } catch (err: any) {
-      addToast({type: 'error', message: err.message || 'Payment verification failed'});
+    } catch (err) {
+      addToast({type: 'error', message: errMsg(err) || 'Payment verification failed'});
     } finally {
       setOrderData(null);
       setPurchasing(null);

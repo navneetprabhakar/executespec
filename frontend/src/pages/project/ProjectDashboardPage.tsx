@@ -259,7 +259,14 @@ export default function ProjectDashboardPage() {
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
 
-  const tasks: TaskSummary[] = dashboard?.recentTasks ?? [];
+  // R-09 lint cleanup — wrap `tasks` in useMemo so the auto-select useEffect
+  // below has a stable dependency. Without the memo the `?? []` literal
+  // produces a new array reference on every render which would re-fire the
+  // effect even when the actual dashboard state didn't change.
+  const tasks: TaskSummary[] = useMemo(
+    () => dashboard?.recentTasks ?? [],
+    [dashboard?.recentTasks],
+  );
   const recentPrs = dashboard?.recentPrs ?? [];
 
   // Auto-select first run so the right pane is never empty when runs exist
@@ -771,6 +778,7 @@ function NewExecutionButton({projectId, repoCount}: {projectId: string; repoCoun
       ? 'Link at least one repository to launch.'
       : null;
   const disabled = disabledReason !== null;
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const title = disabled ? disabledReason! : 'Start a cross-repo Launch';
   return (
     <div className='flex flex-col items-end gap-1'>

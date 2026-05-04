@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useMemo, useState} from 'react';
 import {Link} from 'react-router-dom';
 import {getLibraryFacets, listLibrary, type LibraryFacets, type ReadymadeListItem} from '@/lib/api';
@@ -38,7 +39,7 @@ export default function LibraryPage() {
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setError(e?.message ?? 'Failed to load library');
+        setError(errMsg(e) ?? 'Failed to load library');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

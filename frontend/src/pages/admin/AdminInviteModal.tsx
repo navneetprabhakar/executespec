@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {UserPlus} from 'lucide-react';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 import * as api from '@/lib/api';
 import {useUiStore} from '@/stores/useUiStore';
 import ResponsiveModal from '@/components/shared/ResponsiveModal';
@@ -67,8 +67,8 @@ export default function AdminInviteModal({onClose, onSuccess}: Props) {
       addToast({type: 'success', message: `Invite sent to ${email}`});
       onSuccess();
       onClose();
-    } catch (err: any) {
-      addToast({type: 'error', message: err.message});
+    } catch (err) {
+      addToast({type: 'error', message: errMsg(err)});
     } finally {
       setSubmitting(false);
     }

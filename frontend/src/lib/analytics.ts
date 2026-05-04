@@ -62,12 +62,14 @@ export function setAnalyticsOptedOut(optedOut: boolean): void {
   if (optedOut && client) {
     try {
       // posthog-js exposes opt_out_capturing on the global posthog instance.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (client as any).opt_out_capturing?.();
     } catch {
       /* defensive — no-op if signature differs in a future SDK */
     }
   } else if (!optedOut && client) {
     try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (client as any).opt_in_capturing?.();
     } catch {
       /* no-op */
@@ -77,11 +79,13 @@ export function setAnalyticsOptedOut(optedOut: boolean): void {
 
 function apiKey(): string | undefined {
   // Set via VITE_POSTHOG_API_KEY in dev (.env) or injected at build time.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const key = (import.meta as any).env?.VITE_POSTHOG_API_KEY;
   return key && typeof key === 'string' && key.length > 0 ? key : undefined;
 }
 
 function apiHost(): string {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (import.meta as any).env?.VITE_POSTHOG_HOST || 'https://us.i.posthog.com';
 }
 

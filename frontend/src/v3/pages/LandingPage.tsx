@@ -14,7 +14,7 @@ import {
   type V3ExecSnapshot,
 } from '../lib/api';
 import {trackV3, V3_EVENTS} from '../lib/events';
-import Pill from '../components/Pill';
+import _Pill from '../components/Pill';
 
 /**
  * R-110 — chat-first marketing landing for anonymous visitors.
@@ -753,11 +753,11 @@ function TrustedByStrip({snapshot}: {snapshot?: V3ExecSnapshot | null}) {
                 fontSize: 22,
               }}
             >
-              {snapshot!.totalRuns.toLocaleString()}
+              {snapshot?.totalRuns.toLocaleString()}
             </span>{' '}
-            PRs shipped in the last {snapshot!.windowDays} days
+            PRs shipped in the last {snapshot?.windowDays} days
           </div>
-          {snapshot!.activeProjects > 0 && (
+          {snapshot?.activeProjects > 0 && (
             <div
               style={{
                 fontSize: 11.5,
@@ -766,10 +766,10 @@ function TrustedByStrip({snapshot}: {snapshot?: V3ExecSnapshot | null}) {
                 letterSpacing: 0.2,
               }}
             >
-              across {snapshot!.activeProjects.toLocaleString()} active project
-              {snapshot!.activeProjects === 1 ? '' : 's'}
-              {snapshot!.successRatePercent !== null
-                ? ` · ${Math.round(snapshot!.successRatePercent)}% reviewer-CLEAN rate`
+              across {snapshot?.activeProjects.toLocaleString()} active project
+              {snapshot?.activeProjects === 1 ? '' : 's'}
+              {snapshot?.successRatePercent !== null
+                ? ` · ${Math.round(snapshot?.successRatePercent)}% reviewer-CLEAN rate`
                 : ''}
             </div>
           )}

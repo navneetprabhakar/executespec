@@ -1,4 +1,5 @@
 import {Component, type ErrorInfo, type ReactNode} from 'react';
+import {errMsg} from '@/lib/utils';
 
 /**
  * Page-level error boundary — Task 2 of the 2026-05-01 fix list.
@@ -45,7 +46,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
           new CustomEvent('executespec:error-boundary', {
             detail: {
               region: this.props.region ?? 'unknown',
-              message: error.message,
+              message: errMsg(error),
               stack: error.stack,
               componentStack: info.componentStack,
             },
@@ -109,7 +110,7 @@ function DefaultFallback({error, onReset}: {error: Error; onReset: () => void}) 
             textAlign: 'left',
           }}
         >
-          {error.message || 'Unknown error'}
+          {errMsg(error) || 'Unknown error'}
         </code>
       </div>
       <div style={{display: 'flex', gap: 8}}>

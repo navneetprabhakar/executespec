@@ -1,11 +1,8 @@
-import {useEffect, useCallback} from 'react';
+import {useCallback, useEffect} from 'react';
 
-// Razorpay global type (shared with RazorpayCheckout)
-declare global {
-  interface Window {
-    Razorpay: any;
-  }
-}
+// Razorpay global type is declared in RazorpayCheckout.tsx — re-importing it
+// here would create duplicate-modifier errors. Both files share the same
+// `window.Razorpay` runtime symbol from the Razorpay Checkout SDK.
 
 interface RazorpayOrderCheckoutProps {
   orderId: string;

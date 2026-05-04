@@ -5,6 +5,27 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+/**
+ * Pull a human-readable message out of an unknown thrown value. Used at every
+ * `catch` site in the app so we can keep `unknown` (TS 4.4+ default for catch
+ * params, strictest type) without sprinkling ad-hoc `e instanceof Error`
+ * narrowing. Falls through to `String(e)` for non-Error throwables (string
+ * throws, plain objects with a toJSON, etc.).
+ */
+export function errMsg(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === 'string') return e;
+  if (
+    e &&
+    typeof e === 'object' &&
+    'message' in e &&
+    typeof (e as {message: unknown}).message === 'string'
+  ) {
+    return (e as {message: string}).message;
+  }
+  return String(e);
+}
+
 export function fmtTokens(n: number): string {
   if (!n) return '0';
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;

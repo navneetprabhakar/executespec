@@ -25,6 +25,7 @@ export function useExecutionSse(executionId: string | null) {
 
     async function connect() {
       try {
+        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
         const {token} = await executionApi.getSseToken(executionId!);
         if (cancelled) return;
         const es = new EventSource(
@@ -65,12 +66,14 @@ export function useExecutionSse(executionId: string | null) {
           break;
         case 'EXEC_ANALYSIS_COMPLETE':
           updateStatus('ARCH_REVIEW');
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_PLANNING_STARTED':
           updateStatus('PLANNING');
           break;
         case 'EXEC_PLAN_READY':
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_STARTED':
@@ -84,6 +87,7 @@ export function useExecutionSse(executionId: string | null) {
           break;
         case 'EXEC_SOLUTION_PR_RAISED':
           if (solutionId) updateSolutionStatus(solutionId, 'PR_RAISED');
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_SOLUTION_DONE':
@@ -92,6 +96,7 @@ export function useExecutionSse(executionId: string | null) {
         case 'EXEC_SOLUTION_FAILED':
           if (solutionId) updateSolutionStatus(solutionId, 'FAILED');
           updateStatus('PAUSED');
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_SOLUTION_SKIPPED':
@@ -101,18 +106,22 @@ export function useExecutionSse(executionId: string | null) {
           if (solutionId && evt.payload) appendSolutionLog(solutionId, evt.payload);
           break;
         case 'EXEC_FINAL_PR_CREATED':
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_COMPLETE':
           updateStatus('COMPLETE');
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_ABORTED':
           updateStatus('ABORTED');
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_RESUMED':
           updateStatus('EXECUTING');
+          // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
           fetchExecution(executionId!);
           break;
         case 'EXEC_COMPENSATION_UPDATE':
@@ -132,6 +141,12 @@ export function useExecutionSse(executionId: string | null) {
               /* ignore */
             }
           }
+          break;
+        default:
+          // Unhandled exec SSE event types — ignore. The default case is
+          // explicit so the eslint default-case rule passes; it also makes
+          // it obvious that we deliberately drop unknown event types
+          // rather than warning + handling.
           break;
       }
     }

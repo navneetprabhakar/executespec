@@ -1,4 +1,5 @@
 import {useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {useExecutionStore} from '@/stores/useExecutionStore';
 import {executionApi} from '@/lib/execution-api';
 import SolutionSection from './SolutionSection';
@@ -44,7 +45,7 @@ export default function ExecutionMonitor({executionId}: {executionId: string}) {
               await executionApi.resume(executionId);
               setResumeStatus('Re-kicked execution');
             } catch (e) {
-              setResumeStatus(`Resume failed: ${e instanceof Error ? e.message : String(e)}`);
+              setResumeStatus(`Resume failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
             } finally {
               setResuming(false);
             }

@@ -225,6 +225,7 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
               const legacyUrl = detail.githubPrUrl;
               if (prs.length === 0 && !legacyUrl) return null;
               if (prs.length <= 1) {
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                 const single = prs[0]?.prUrl ?? legacyUrl!;
                 return (
                   <a

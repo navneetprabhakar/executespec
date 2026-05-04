@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {Link} from 'react-router-dom';
 import {getV3ExecSnapshot, type V3ExecSnapshot} from '../lib/api';
@@ -26,7 +27,7 @@ export default function ExecDemoPage() {
         if (!cancelled) setSnap(s);
       })
       .catch((e: Error) => {
-        if (!cancelled) setError(e?.message ?? 'Failed to load snapshot');
+        if (!cancelled) setError(errMsg(e) ?? 'Failed to load snapshot');
       });
     return () => {
       cancelled = true;

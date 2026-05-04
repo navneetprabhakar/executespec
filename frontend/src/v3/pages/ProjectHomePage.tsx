@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {useV3ProjectStore, type Bubble} from '../stores/useV3ProjectStore';
 import Composer from '../components/Composer';
@@ -6,7 +6,7 @@ import PlanCard from '../components/PlanCard';
 import ResultCard from '../components/ResultCard';
 import Pill from '../components/Pill';
 import RepoAttachPopover from '../components/RepoAttachPopover';
-import {PROJECT_PLURAL, PROVIDER_DISPLAY, STATUS_LABELS} from '../lib/terminology';
+import {PROVIDER_DISPLAY, STATUS_LABELS} from '../lib/terminology';
 
 /**
  * R-120 — the dominant screen.
@@ -30,7 +30,7 @@ import {PROJECT_PLURAL, PROVIDER_DISPLAY, STATUS_LABELS} from '../lib/terminolog
 export default function ProjectHomePage() {
   const {slug} = useParams<{slug: string}>();
   const navigate = useNavigate();
-  const {loaded, loading, project, bubbles, error, load, reset} = useV3ProjectStore();
+  const {loaded, loading, project, bubbles, error, load, reset: _reset} = useV3ProjectStore();
   const threadRef = useRef<HTMLDivElement>(null);
   // R-324 Checkpoint 2 — "Attach another repo" affordance state.
   // The popover handles the actual link call; we just rehydrate the

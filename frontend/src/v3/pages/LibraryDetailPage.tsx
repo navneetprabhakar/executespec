@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import {
@@ -88,7 +89,7 @@ export default function LibraryDetailPage() {
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setError(e?.message ?? 'Failed to load solution');
+        setError(errMsg(e) ?? 'Failed to load solution');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

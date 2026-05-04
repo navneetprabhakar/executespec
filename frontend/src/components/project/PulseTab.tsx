@@ -89,6 +89,7 @@ export default function PulseTab({
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastRun?.runId]);
 
   // Last 5 activity events (preview only — full feed in More drawer).

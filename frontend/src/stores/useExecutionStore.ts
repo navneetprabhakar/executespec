@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {create} from 'zustand';
 import {executionApi} from '@/lib/execution-api';
 import type {
@@ -78,8 +79,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
       const run = await executionApi.create(projectId, reqBody);
       set({executionRun: run, loading: false});
       return run.id;
-    } catch (e: any) {
-      set({error: e?.message ?? 'Failed to create execution', loading: false});
+    } catch (e) {
+      set({error: errMsg(e) ?? 'Failed to create execution', loading: false});
       throw e;
     }
   },
@@ -88,8 +89,8 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
     try {
       const run = await executionApi.get(id);
       set({executionRun: run});
-    } catch (e: any) {
-      set({error: e?.message ?? 'Failed to load execution'});
+    } catch (e) {
+      set({error: errMsg(e) ?? 'Failed to load execution'});
     }
   },
 
@@ -120,12 +121,14 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
 
   updateStatus: (status) => {
     const run = get().executionRun;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (run) set({executionRun: {...run, status: status as any}});
   },
   updateSolutionStatus: (solutionId, status) => {
     const run = get().executionRun;
     if (!run) return;
     const solutions = run.solutions.map((s) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       s.id === solutionId ? {...s, status: status as any} : s,
     );
     set({executionRun: {...run, solutions}});
@@ -133,6 +136,7 @@ export const useExecutionStore = create<ExecutionState>((set, get) => ({
   updateAnalysisProgress: (repoId, field, status) => {
     const progress = [...get().analysisProgress];
     const idx = progress.findIndex((p) => p.repoId === repoId);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     if (idx >= 0) progress[idx] = {...progress[idx], [field]: status as any};
     set({analysisProgress: progress});
   },

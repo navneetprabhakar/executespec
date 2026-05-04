@@ -1,7 +1,7 @@
 import {AreaChart, Area, ResponsiveContainer} from 'recharts';
 import GlassPanel from '@/components/shared/GlassPanel';
 import AnimatedCounter from '@/components/shared/AnimatedCounter';
-import {cn} from '@/lib/utils';
+import {} from '@/lib/utils';
 
 interface MetricCardProps {
   label: string;

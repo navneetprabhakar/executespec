@@ -5,7 +5,7 @@ import PageShell from '@/components/shared/PageShell';
 import AccessDenied from '@/components/shared/AccessDenied';
 import {useAuthStore, selectIsSuperAdmin} from '@/stores/useAuthStore';
 import {getAllPricing, updateModelPricing, type PricingRow} from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {} from '@/lib/utils';
 
 export default function PricingManager() {
   const isSuperAdmin = useAuthStore(selectIsSuperAdmin);

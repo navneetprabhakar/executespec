@@ -58,6 +58,7 @@ const MONACO_LANG_MAP: Record<string, string> = {
 function getMonacoLanguage(filePath: string): string {
   const name = filePath.split('/').pop()?.toLowerCase() ?? '';
   if (name === 'dockerfile') return 'dockerfile';
+  // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   const ext = name.includes('.') ? name.split('.').pop()! : '';
   return MONACO_LANG_MAP[ext] ?? 'plaintext';
 }
@@ -135,6 +136,7 @@ export default function RunDetailPage() {
     return filesWithStatus.filter(
       (f) => (f.status === 'ADDED' || f.status === 'MODIFIED') && !VENDORED_PATTERN.test(f.path),
     );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filesWithStatus]);
 
   // Auto-pick the first changed file (skip lockfiles when we have a non-lockfile alternative).
@@ -320,6 +322,7 @@ export default function RunDetailPage() {
               const legacyUrl = detail.githubPrUrl;
               if (prs.length === 0 && !legacyUrl) return null;
               if (prs.length <= 1) {
+                // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
                 const single = prs[0]?.prUrl ?? legacyUrl!;
                 return (
                   <a

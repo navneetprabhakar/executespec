@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {Link, useNavigate, useLocation, useSearchParams} from 'react-router-dom';
-import {Eye, EyeOff, ShieldCheck, Zap, GitBranch, CheckCircle2} from 'lucide-react';
+import {Eye, EyeOff, ShieldCheck, Zap, GitBranch} from 'lucide-react';
 import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
@@ -57,6 +58,7 @@ export default function LoginPage() {
   // lands on their first project's chat thread, not the v2 RunsPage.
   // Users bounced from a deep link (e.g. /audit → /login) still come
   // back to the original `from` path after sign-in.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const from = (location.state as any)?.from?.pathname ?? '/home';
 
   // R-341 (2026-04-29) — marketing-site handoff.  When the user types
@@ -84,11 +86,11 @@ export default function LoginPage() {
     try {
       await login(email, password);
       navigate(from, {replace: true});
-    } catch (err: any) {
+    } catch (err) {
       setError(
-        err.message?.includes('403')
+        errMsg(err)?.includes('403')
           ? 'Please verify your email before logging in.'
-          : err.message?.includes('401')
+          : errMsg(err)?.includes('401')
             ? 'Invalid email or password.'
             : 'Login failed. Please try again.',
       );

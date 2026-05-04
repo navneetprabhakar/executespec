@@ -1,3 +1,4 @@
+import {errMsg} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import {Link, useNavigate, useParams} from 'react-router-dom';
 import {
@@ -81,7 +82,7 @@ export default function MigrationDetailPage() {
       })
       .catch((e: Error) => {
         if (cancelled) return;
-        setError(e?.message ?? 'Failed to load recipe');
+        setError(errMsg(e) ?? 'Failed to load recipe');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);

@@ -6,7 +6,7 @@ import {
   deleteOrgStandard,
   type OrgStandardDto,
 } from '@/lib/api';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 /**
  * M-024 (Wave 2) — org-standards CRUD management panel.
@@ -26,7 +26,7 @@ export default function OrgStandardsManager({orgId}: {orgId: string}) {
         setItems(rows);
         setError(null);
       })
-      .catch((e) => setError(e?.message ?? 'Failed to load standards'));
+      .catch((e) => setError(errMsg(e) ?? 'Failed to load standards'));
   };
   useEffect(load, [orgId]);
 
@@ -35,8 +35,8 @@ export default function OrgStandardsManager({orgId}: {orgId: string}) {
     try {
       await deleteOrgStandard(orgId, s.standardId);
       load();
-    } catch (e: any) {
-      setError(e?.message ?? 'Delete failed');
+    } catch (e) {
+      setError(errMsg(e) ?? 'Delete failed');
     }
   };
 
@@ -168,8 +168,8 @@ function StandardEditor({
         });
       }
       onSaved();
-    } catch (e: any) {
-      setErr(e?.message ?? 'Save failed');
+    } catch (e) {
+      setErr(errMsg(e) ?? 'Save failed');
     } finally {
       setBusy(false);
     }

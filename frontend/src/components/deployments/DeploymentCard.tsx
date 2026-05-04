@@ -3,7 +3,7 @@ import {ExternalLink, RotateCcw, Trash2, Loader2, Globe} from 'lucide-react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import {useUiStore} from '@/stores/useUiStore';
 import {deleteDeployment, engineRollback, engineDestroy} from '@/lib/api';
-import {cn, relativeTime} from '@/lib/utils';
+import {cn, relativeTime, errMsg} from '@/lib/utils';
 import type {DeploymentSummary} from '@/lib/api';
 
 const STATUS_STYLES: Record<string, {border: string; badge: string; pulse: boolean}> = {
@@ -74,8 +74,8 @@ export default function DeploymentCard({deployment, onRefresh}: DeploymentCardPr
       }
       onRefresh();
       addToast({type: 'success', message: 'Deployment deleted'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     } finally {
       setLoading('');
     }
@@ -87,8 +87,8 @@ export default function DeploymentCard({deployment, onRefresh}: DeploymentCardPr
       await engineRollback(deployment.id);
       onRefresh();
       addToast({type: 'success', message: 'Rollback initiated'});
-    } catch (e: any) {
-      addToast({type: 'error', message: e.message});
+    } catch (e) {
+      addToast({type: 'error', message: errMsg(e)});
     } finally {
       setLoading('');
     }

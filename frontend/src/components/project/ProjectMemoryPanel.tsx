@@ -2,7 +2,7 @@ import {useEffect, useState} from 'react';
 import {Loader2, RefreshCw, Sparkles} from 'lucide-react';
 import {compactProjectMemory, getProjectMemory, type ProjectMemoryResponse} from '@/lib/api';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 interface Props {
   projectId: string;
@@ -21,7 +21,7 @@ export default function ProjectMemoryPanel({projectId}: Props) {
       setMemory(res);
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load memory');
+      setError(e instanceof Error ? errMsg(e) : 'Failed to load memory');
     }
   };
 
@@ -33,7 +33,7 @@ export default function ProjectMemoryPanel({projectId}: Props) {
         if (!cancelled) setMemory(res);
       })
       .catch((e) => {
-        if (!cancelled) setError(e?.message ?? 'Failed to load memory');
+        if (!cancelled) setError(errMsg(e) ?? 'Failed to load memory');
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -54,7 +54,7 @@ export default function ProjectMemoryPanel({projectId}: Props) {
       );
       await load();
     } catch (e) {
-      setCompactStatus(`Failed: ${e instanceof Error ? e.message : String(e)}`);
+      setCompactStatus(`Failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
     } finally {
       setCompacting(false);
     }

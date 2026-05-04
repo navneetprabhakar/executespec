@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {errMsg} from '@/lib/utils';
 import {useNavigate} from 'react-router-dom';
 import {
   Eye,
@@ -290,8 +291,8 @@ export default function SettingsPage() {
     try {
       const result = await api.validateGitHub(githubPat);
       setGithubMsg({ok: result.valid, text: result.message});
-    } catch (err: any) {
-      setGithubMsg({ok: false, text: err.message ?? 'Validation failed.'});
+    } catch (err) {
+      setGithubMsg({ok: false, text: errMsg(err) ?? 'Validation failed.'});
     } finally {
       setGithubTesting(false);
     }
@@ -306,8 +307,8 @@ export default function SettingsPage() {
       setUser(updated);
       setGithubPat('');
       setGithubMsg({ok: true, text: 'GitHub settings saved.'});
-    } catch (err: any) {
-      setGithubMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setGithubMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setGithubSaving(false);
     }
@@ -323,8 +324,8 @@ export default function SettingsPage() {
       setGithubPat('');
       setGithubOwner('');
       setGithubMsg({ok: true, text: 'GitHub credentials cleared.'});
-    } catch (err: any) {
-      setGithubMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setGithubMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setGithubSaving(false);
     }
@@ -365,7 +366,7 @@ export default function SettingsPage() {
         [provider]: {busy: false, result: {ok: r.valid, text: r.message}},
       }));
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'Test failed';
+      const msg = e instanceof Error ? errMsg(e) : 'Test failed';
       setAiTestState((s) => ({...s, [provider]: {busy: false, result: {ok: false, text: msg}}}));
     }
   };
@@ -381,8 +382,8 @@ export default function SettingsPage() {
       setAnthropicKey('');
       setGeminiKey('');
       setAiMsg({ok: true, text: 'AI provider keys saved.'});
-    } catch (err: any) {
-      setAiMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setAiMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setAiSaving(false);
     }
@@ -396,8 +397,8 @@ export default function SettingsPage() {
       const updated = await api.updateAiKeySettings('', '', '');
       setUser(updated);
       setAiMsg({ok: true, text: 'AI provider keys cleared.'});
-    } catch (err: any) {
-      setAiMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setAiMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setAiSaving(false);
     }
@@ -743,8 +744,8 @@ function OrgAiKeyCard({org, onSaved}: {org: OrgDto | null; onSaved: (o: OrgDto) 
       setOrgOpenAiKey('');
       setOrgGeminiKey('');
       setMsg({ok: true, text: 'Organisation AI keys saved.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setSaving(false);
     }
@@ -763,8 +764,8 @@ function OrgAiKeyCard({org, onSaved}: {org: OrgDto | null; onSaved: (o: OrgDto) 
       const updated = await api.updateOrgAiKeySettings('', '', '');
       onSaved(updated);
       setMsg({ok: true, text: 'Organisation AI keys cleared.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to clear.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to clear.'});
     } finally {
       setSaving(false);
     }
@@ -886,8 +887,8 @@ function OrgKeySourceCard({org, onSaved}: {org: OrgDto; onSaved: (o: OrgDto) => 
       const updated = await api.updateOrgKeySourceSettings(mode, enabledList);
       onSaved(updated);
       setMsg({ok: true, text: 'Key source settings saved.'});
-    } catch (err: any) {
-      setMsg({ok: false, text: err.message ?? 'Failed to save.'});
+    } catch (err) {
+      setMsg({ok: false, text: errMsg(err) ?? 'Failed to save.'});
     } finally {
       setSaving(false);
     }

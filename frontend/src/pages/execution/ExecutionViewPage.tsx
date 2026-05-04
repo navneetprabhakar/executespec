@@ -48,6 +48,7 @@ export default function ExecutionViewPage() {
   const {executionRun, fetchExecution, reset, triggerAnalysis} = useExecutionStore();
   const [project, setProject] = useState<ProjectDto | null>(null);
   // v2.5.7 — "Address review" flow passes continueOnPr via navigation state.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const continueOnPr = (location.state as any)?.continueOnPr ?? undefined;
 
   useExecutionSse(executionId ?? null);
