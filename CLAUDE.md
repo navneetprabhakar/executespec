@@ -2,6 +2,55 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
+> **2026-05-06 — GA-readiness Phase 1 (quality scoring fix) shipped on
+> `feature/project-cost-pool-tuning`, NOT yet merged.** Operationalises
+> §P1.1 + §P1.2 of `docs/plans/pending-ga-readiness-90-day-execution-plan.md`.
+> The audit on run `0444c95f` (project ppl-ai, dev) found `verifiedScore=50`
+> on a run with `finalBuildPassed=true` + `reviewerVerdict=FIXED_ISSUES` +
+> `endpointCoverage.coveragePercent=100`. The documented formula yields 75;
+> the persisted value was 50. Audit traced the −25 gap to two compounding
+> artefacts:
+>
+> 1. **AccuracyAssessmentService LLM read budget too small** (P1.1).
+>    Per-file content cap was 2,500 chars head-only — multi-endpoint
+>    routers (FastAPI / Express with 5+ handlers) showed only imports +
+>    first 2 endpoints, then the LLM emitted "controller exists but
+>    content not readable" for the others (14× on run 0444c95f). Fix:
+>    `buildKeyFileSnippets` now uses 10,000-char per-file cap with
+>    head-6K + tail-3K truncation when files exceed it, plus a 100K total
+>    snippet ceiling so token cost stays predictable. New marker text
+>    "... [truncated N chars in the middle; file is M chars total] ..."
+>    is recognised in the SYSTEM_PROMPT so the LLM treats it as PARTIAL,
+>    not MISSING. Read errors ("ACCESS DENIED:" / "Cannot read") are
+>    filtered before reaching the LLM. New `truncateForSnippet` static
+>    helper covered by 6 tests in
+>    `AccuracyAssessmentTruncateForSnippetTest`. The selection layer
+>    (`inferKeyFilePaths`) was already hardened by R-343 + b171fa52 and
+>    needed no change.
+> 2. **`countUnfixedCritical` penalised LLM read-budget bugs** (P1.2).
+>    `RunOrchestrator.synthesiseReviewIssues` translates AccuracyReport's
+>    `missingRequirements` and `endpointCoverage.missing` into CRITICAL
+>    `SYNTH-ACC-MISS-*` / `SYNTH-ACC-EP-*` ReviewIssues (capped at 5
+>    each). Those then fed the 5×N verifiedScore penalty — so the same
+>    read-budget bug that produced the false partials also dragged the
+>    headline number down by up to 25 points. Fix:
+>    `ValidationReportService.countUnfixedCritical` now filters out IDs
+>    starting with `SYNTH-ACC-` (LLM-derived). Real reviewer signals
+>    (`SYNTH-BUILD-*` for build failures, `SYNTH-REV-*` for unresolved
+>    verdicts, plus uncategorised LLM-flagged criticals) keep counting.
+>    `computeVerifiedScore` gains a 6-arg overload taking
+>    `endpointCoveragePercent` — bonus +10 when ≥95% so deterministic
+>    endpoint delivery credits the headline number. Old 5-arg overload
+>    delegates with `null`. 8 new tests in
+>    `ValidationReportServiceCountUnfixedCriticalTest` + 8 new tests in
+>    `ValidationReportServiceVerifiedScoreTest` (incl. `run_0444c95f_audit_regression_case`).
+>
+> Net effect on the 0444c95f shape: 40 base + 20 build + 0 tests + 15
+> FIXED_ISSUES + 10 endpoint-coverage − 0 unfixed-critical = **85**, up
+> from the persisted 50. Backfill of historical runs deferred to a P1.2
+> follow-up commit (idempotent; not blocking the read-budget fix).
+> Mvn 42/42 green on the new + existing scoring tests.
+>
 > **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
 >
 > Three packaged improvements:
