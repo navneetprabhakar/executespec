@@ -192,9 +192,6 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.prreview.PrReviewController#listForProject",
               // E3 — standards compliance report needs ProjectAccessGuard.assertCanRead
               "com.navneet.executespec.standards.report.StandardsComplianceController#report",
-              // Test endpoints — need RunAccessGuard.requireRunAccess
-              "com.navneet.executespec.testgen.TestResultController#applyTestFixes",
-              "com.navneet.executespec.testgen.TestResultController#runTests",
               // V2 polling — needs RunAccessGuard.requireRunAccess
               "com.navneet.executespec.v2.rollout.V2RunController#poll"));
 

@@ -149,6 +149,58 @@
 > Frontend build: ✓. Backend `mvn test` 97 tests across our touched
 > surfaces — all green (P1 + P3.1 + P4.1 + P2.4 service).
 >
+> **2026-05-06 — GA-readiness P3.2 (cost-cap progress bar) + P4.2 (SLO
+> doc) + P5.4 (GDPR data-export) + P4.1-followup partial (2 of 37
+> guards migrated) on `feature/project-cost-pool-tuning`.**
+>
+> **P3.2 — visible cost-cap progress bar.** New
+> `frontend/src/components/runs/CostProgressBar.tsx` renders inside the
+> `RunDetailTabs` Credits panel for ALL users (not gated on
+> SUPER_ADMIN). Three-threshold horizontal bar (green 0-80%, amber
+> 80-100%, red ≥100%) with aria-progressbar attributes for screen
+> readers. Falls through silently when `hardCapUsd` is null. The
+> "Stop at $X" customer override is deferred to a P3.2-followup that
+> needs RunRequest field + PipelineRun column.
+>
+> **P4.2 — SLO documentation.** New `docs/operations/slos.md` —
+> 5 SLOs with measurement queries, target / alert thresholds, and
+> ownership: (1) run terminal in 15min ≥95%, (2) verified-score
+> correctness ≥90% (weekly random-sample audit), (3) cost estimate
+> within ±30% on ≥80% of runs, (4) webhook in 60s ≥99%, (5) hot-path
+> GET 5xx <0.5%. GA cutover gate: all 5 GREEN over 30 consecutive
+> days. Alert YAML rules + Grafana dashboards land alongside
+> PagerDuty wiring in P4.2-followup.
+>
+> **P5.4 — GDPR data-export endpoint.** New
+> `auth/service/UserDataExportService.java` builds a ZIP bundle of
+> the requesting user's personal data: `manifest.json` (export
+> metadata + GDPR Article 15/20 attribution) + `payload.json` (user
+> + orgs + projects with sensitive fields redacted) + `README.md`
+> (export usage + erasure path at `admin@executespec.ai`). New
+> endpoint `GET /api/auth/me/data-export` returns
+> `application/zip` with `Content-Disposition` filename including
+> userId + date. Sensitive fields stripped: password hash, all 3 LLM
+> API keys (Anthropic/OpenAI/Gemini), GitHub PAT. Capability flags
+> (`hasAnthropicKey`, etc.) DO appear so the user can confirm
+> settings without re-exposing the secret. 8 unit tests in
+> `UserDataExportServiceTest` pin the contract: zip structure,
+> manifest content, payload structure, redaction, README usage,
+> empty-org path. Future schema additions (runs, validation reports,
+> notifications, billing, activity audit) bumping the
+> `schemaVersion` to 2.
+>
+> **P4.1-followup — migrated 2 of 37 legacy guard sites.**
+> `TestResultController.runTests` + `applyTestFixes` now call
+> `runAccessGuard.requireRunAccess` directly. Both removed from
+> `KNOWN_LEGACY_DRIFT`. Remaining 35 sites tracked under §P4.1-followup
+> in the plan doc; high-traffic + high-risk surfaces prioritised next
+> (PullRequestController, ProjectController.{addMember,removeMember},
+> ProjectExportController.export). The drift detector now allows
+> exactly 35 known-legacy entries; any new violator fails CI.
+>
+> Tests: 9/9 green on the touched surfaces (UserDataExportServiceTest 8 +
+> AccessGuardCoverageTest 1). Frontend build: clean.
+>
 > **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
 >
 > Three packaged improvements:
