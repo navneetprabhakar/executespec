@@ -1,6 +1,6 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link, useParams} from 'react-router-dom';
-import {DiffEditor} from '@monaco-editor/react';
+import SafeDiffEditor from '@/components/runs/SafeDiffEditor';
 import {MonacoSafeMount} from '@/components/runs/MonacoSafeMount';
 import {
   getRun,
@@ -403,13 +403,17 @@ export default function RunDetailPage() {
         <RunFailureSummary detail={detail} report={report} />
       )}
 
-      {/* File tree + content (two-pane on desktop, stacked on mobile) */}
+      {/* File tree + content (two-pane on desktop, stacked on mobile).
+          alignItems: stretch so the diff pane matches the sidebar height
+          — the sidebar grows to fit its file list, and the diff pane
+          stretches to the same height instead of being floored at its
+          280px min-height. */}
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(220px, 280px) 1fr',
           gap: 16,
-          alignItems: 'start',
+          alignItems: 'stretch',
         }}
         className='v3-rundetail-grid'
       >
@@ -536,7 +540,18 @@ export default function RunDetailPage() {
             </div>
           )}
           {!diffLoading && diff && (
-            <div style={{flex: 1, minHeight: 0, height: 'calc(100vh - 360px)'}}>
+            // 2026-05-05 — `position: relative` + child `position: absolute; inset: 0`
+            // so the diff editor fills this box without relying on a height-100%
+            // chain. flex: 1 here lets us take all remaining vertical space inside
+            // the right-pane <section>, which (thanks to the grid-level
+            // alignItems: stretch) is sized to match the sidebar.
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                position: 'relative',
+              }}
+            >
               <MonacoSafeMount
                 fallback={
                   <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
@@ -546,58 +561,62 @@ export default function RunDetailPage() {
                 }
               >
                 {/*
-                 * 2026-05-04 — NO `key` on DiffEditor (and no `resetKey` on MonacoSafeMount).
-                 * @monaco-editor/react's unmount disposes original + modified TextModels BEFORE
-                 * disposing the DiffEditor widget; Monaco's deferred event queue still has
-                 * events for those models which fire AFTER dispose → "TextModel got disposed
-                 * before DiffEditorWidget model got reset". With key={active}, this fired on
-                 * EVERY file switch and left the new DiffEditor's render half-broken
-                 * (regression reported 2026-05-04: "full view is visible but diff is not").
-                 * Without the key, prop changes flow through setValue / setModelLanguage on the
-                 * existing models — no dispose, no race, diff renders.
+                 * absolute-fill child of the relatively-positioned parent so
+                 * SafeDiffEditor's `height: 100%` resolves against a known box.
+                 *
+                 * 2026-05-05 — Use SafeDiffEditor instead of bare @monaco-editor/react
+                 * <DiffEditor>. SafeDiffEditor passes keepCurrent*Model and skips
+                 * model.dispose() to eliminate the "TextModel got disposed before
+                 * DiffEditorWidget model got reset" race at the source.
+                 *
+                 * Still NO `key` on the editor — prop changes (file switch) flow through
+                 * setValue / setModelLanguage on the existing widget; we only let it
+                 * unmount on full page unmount, not on prop change.
                  */}
-                <DiffEditor
-                  language={getMonacoLanguage(diff.path)}
-                  original={diff.base}
-                  modified={diff.head}
-                  theme={GEIST_THEME_NAME}
-                  options={{
-                    readOnly: true,
-                    // Only render lines that actually changed — this is the "only diff is
-                    // visible" contract. Monaco hides identical regions behind expandable
-                    // chevrons by default when this flag is on.
-                    hideUnchangedRegions: {
-                      enabled: true,
-                      contextLineCount: 3,
-                      minimumLineCount: 3,
-                      revealLineCount: 20,
-                    },
-                    renderSideBySide: false, // inline diff fits the narrow 1fr column better
-                    minimap: {enabled: false},
-                    scrollBeyondLastLine: false,
-                    fontSize: 12,
-                    lineNumbers: 'on',
-                    folding: true,
-                    showFoldingControls: 'always',
-                    wordWrap: 'off',
-                    renderLineHighlight: 'line',
-                    contextmenu: false,
-                    domReadOnly: true,
-                    cursorStyle: 'line-thin',
-                    scrollbar: {
-                      verticalScrollbarSize: 6,
-                      horizontalScrollbarSize: 6,
-                    },
-                    overviewRulerLanes: 0,
-                    hideCursorInOverviewRuler: true,
-                    overviewRulerBorder: false,
-                    guides: {
-                      indentation: true,
-                      bracketPairs: true,
-                    },
-                    padding: {top: 8},
-                  }}
-                />
+                <div style={{position: 'absolute', inset: 0}}>
+                  <SafeDiffEditor
+                    language={getMonacoLanguage(diff.path)}
+                    original={diff.base}
+                    modified={diff.head}
+                    theme={GEIST_THEME_NAME}
+                    options={{
+                      readOnly: true,
+                      // Only render lines that actually changed — this is the "only diff is
+                      // visible" contract. Monaco hides identical regions behind expandable
+                      // chevrons by default when this flag is on.
+                      hideUnchangedRegions: {
+                        enabled: true,
+                        contextLineCount: 3,
+                        minimumLineCount: 3,
+                        revealLineCount: 20,
+                      },
+                      renderSideBySide: false, // inline diff fits the narrow 1fr column better
+                      minimap: {enabled: false},
+                      scrollBeyondLastLine: false,
+                      fontSize: 12,
+                      lineNumbers: 'on',
+                      folding: true,
+                      showFoldingControls: 'always',
+                      wordWrap: 'off',
+                      renderLineHighlight: 'line',
+                      contextmenu: false,
+                      domReadOnly: true,
+                      cursorStyle: 'line-thin',
+                      scrollbar: {
+                        verticalScrollbarSize: 6,
+                        horizontalScrollbarSize: 6,
+                      },
+                      overviewRulerLanes: 0,
+                      hideCursorInOverviewRuler: true,
+                      overviewRulerBorder: false,
+                      guides: {
+                        indentation: true,
+                        bracketPairs: true,
+                      },
+                      padding: {top: 8},
+                    }}
+                  />
+                </div>
               </MonacoSafeMount>
             </div>
           )}

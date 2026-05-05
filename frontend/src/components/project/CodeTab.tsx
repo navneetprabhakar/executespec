@@ -14,6 +14,7 @@
  */
 import {useState} from 'react';
 import ArchitectureViewer from './ArchitectureViewer';
+import CodeQualityPanel from './CodeQualityPanel';
 import TechDebtPanel from './TechDebtPanel';
 import StandardsCompliancePanel from './StandardsCompliancePanel';
 import ContractCoveragePanel from './ContractCoveragePanel';
@@ -29,11 +30,13 @@ export type CodeSubTab =
   | 'contracts'
   | 'health'
   | 'adrs'
-  | 'invariants';
+  | 'invariants'
+  | 'review';
 
 const SUB_TABS: {key: CodeSubTab; label: string}[] = [
   {key: 'architecture', label: 'Architecture'},
   {key: 'health', label: 'Health'},
+  {key: 'review', label: 'Code review'},
   {key: 'tech-debt', label: 'Tech debt'},
   {key: 'standards', label: 'Standards'},
   {key: 'contracts', label: 'Contracts'},
@@ -131,6 +134,7 @@ export default function CodeTab({
           ))}
         {sub === 'adrs' && <AdrPanel projectId={projectId} />}
         {sub === 'invariants' && <InvariantPanel projectId={projectId} />}
+        {sub === 'review' && <CodeQualityPanel projectId={projectId} repos={repos} />}
       </div>
     </div>
   );
