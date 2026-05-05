@@ -55,9 +55,15 @@ public class RunConversationController {
    * that was never OSIV-bound — individual {@code runRepo.findById} calls still open short Hikari
    * connections, but those are released per call rather than held for the entire loop.
    */
+  /**
+   * Apply-suggestion executor — sized {@code clamp(4, 12, cores × 2)}. Apply paths are bursty (a
+   * user can fire several apply suggestions on the same run from chat); the 2× multiplier gives the
+   * pool headroom on multi-core hosts without saturating Hikari since each call still opens its own
+   * short DB connection.
+   */
   private final ExecutorService applyExecutor =
       Executors.newFixedThreadPool(
-          4,
+          com.navneet.executespec.util.PoolSizing.coreMultiple(2, 4, 12),
           new ThreadFactory() {
             private final AtomicInteger seq = new AtomicInteger();
 

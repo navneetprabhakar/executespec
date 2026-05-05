@@ -65,13 +65,15 @@ public class PrReviewService {
   private final TierConfigRepository tierConfigRepo;
 
   /**
-   * Dedicated 4-thread executor for PR-review dispatch. Scoped narrow because the agent path is a
-   * single LLM call (~10-90s) and we want the controller to return 202 immediately. Drains
-   * on @PreDestroy so a JVM shutdown doesn't lose in-flight reviews silently.
+   * Dedicated executor for PR-review dispatch — sized {@code clamp(4, 12, cores × 2)}. Scoped
+   * narrow because the agent path is a single LLM call (~10-90s) and we want the controller to
+   * return 202 immediately. The 2× multiplier reflects PR reviews being bursty (multiple reviewers
+   * click at once after a CI run); a 4-core dev VM still gets 8 threads, a small CI agent gets 4.
+   * Drains on @PreDestroy so a JVM shutdown doesn't lose in-flight reviews silently.
    */
   private final ExecutorService pool =
       Executors.newFixedThreadPool(
-          4,
+          com.navneet.executespec.util.PoolSizing.coreMultiple(2, 4, 12),
           r -> {
             Thread t = new Thread(r, "pr-review-dispatch");
             t.setDaemon(true);

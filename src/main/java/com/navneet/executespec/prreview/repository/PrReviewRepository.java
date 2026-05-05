@@ -35,4 +35,20 @@ public interface PrReviewRepository extends JpaRepository<PrReview, UUID> {
   long countByUserSince(
       @org.springframework.data.repository.query.Param("userId") String userId,
       @org.springframework.data.repository.query.Param("sinceMonthStart") java.time.Instant since);
+
+  /**
+   * Sum of {@code cost_usd} across every PR review for a project. Used by the dashboard to fold PR
+   * review spend into the project's total cost.
+   */
+  @org.springframework.data.jpa.repository.Query(
+      "SELECT COALESCE(SUM(r.costUsd), 0.0) FROM PrReview r WHERE r.projectId = :projectId")
+  double sumCostUsdByProject(
+      @org.springframework.data.repository.query.Param("projectId") String projectId);
+
+  /** Total tokens (input + output) across every PR review for a project. */
+  @org.springframework.data.jpa.repository.Query(
+      "SELECT COALESCE(SUM(r.totalInputTokens), 0L) + COALESCE(SUM(r.totalOutputTokens), 0L) "
+          + "FROM PrReview r WHERE r.projectId = :projectId")
+  long sumTokensByProject(
+      @org.springframework.data.repository.query.Param("projectId") String projectId);
 }

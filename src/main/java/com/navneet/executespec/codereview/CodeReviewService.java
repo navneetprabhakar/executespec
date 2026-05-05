@@ -92,10 +92,15 @@ public class CodeReviewService {
   private final GitHubRepoService github;
   private final TierConfigRepository tierConfigRepo;
 
-  /** Dispatch pool — same shape as PrReviewService for parity. */
+  /**
+   * Dispatch pool — sized as {@code clamp(2, 8, cores × 1)}. Code-review scans clone a repo, shell
+   * out to semgrep, and make one LLM call — I/O-bound but heavy enough that we don't want runaway
+   * concurrency. Floor at 2 so even a single-core CI agent has parallelism; ceiling at 8 so a
+   * 16-core dev box doesn't fan out into git+semgrep contention.
+   */
   private final ExecutorService pool =
       Executors.newFixedThreadPool(
-          2,
+          com.navneet.executespec.util.PoolSizing.coreMultiple(1, 2, 8),
           r -> {
             Thread t = new Thread(r, "code-review-dispatch");
             t.setDaemon(true);

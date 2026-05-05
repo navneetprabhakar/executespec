@@ -47,10 +47,15 @@ public class V2RunService {
   private final ReviewerAgentV3 reviewer;
   private final Metrics metrics;
 
-  /** Dedicated thread pool for V2 pipeline execution — keeps runs off the request thread. */
+  /**
+   * Dedicated thread pool for V2 pipeline execution — keeps runs off the request thread. Sized
+   * {@code clamp(4, 12, cores × 1)} — runs are long-lived (multi-minute LLM pipelines) so we cap to
+   * keep the system responsive on developer laptops; the floor of 4 preserves concurrency for CI
+   * agents.
+   */
   private final ExecutorService pool =
       Executors.newFixedThreadPool(
-          4,
+          com.navneet.executespec.util.PoolSizing.coreMultiple(1, 4, 12),
           new ThreadFactory() {
             private int n = 0;
 

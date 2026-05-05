@@ -77,6 +77,19 @@ export interface ScoreEntry {
   createdAt: string;
 }
 
+/**
+ * v2.6.4 — per-surface cost breakdown so the project dashboard can show "where the spend went"
+ * without an extra API call. Sum of these equals {@link ProjectDashboardDTO.totalCostUsd}.
+ */
+export interface ProjectCostBreakdown {
+  runs: number; // pipeline_run.actual_cost_usd
+  launches: number; // execution_run.total_cost_usd
+  codeReviews: number; // code_review_scan.cost_usd
+  prReviews: number; // pr_review.cost_usd
+  architecture: number; // project_architecture_doc + repo_architecture_doc
+  generatedDocs: number; // project_generated_doc
+}
+
 export interface ProjectDashboardDTO {
   activeRuns: number;
   completedRuns: number;
@@ -84,6 +97,8 @@ export interface ProjectDashboardDTO {
   avgScore: number;
   totalTokens: number;
   totalCostUsd: number;
+  /** v2.6.4 — populated by ProjectDashboardController; older responses may omit it. */
+  costBreakdown?: ProjectCostBreakdown;
   recentTasks: TaskSummary[];
   recentPrs: PrSummary[];
   architectureDocStatus: 'NONE' | 'GENERATED' | 'STALE';
