@@ -1,73 +1,83 @@
 import {DiffEditor, type DiffOnMount} from '@monaco-editor/react';
-import {useLayoutEffect, useRef} from 'react';
 
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 
 /**
- * Wrapper around `<DiffEditor>` that fixes the disposal race at the source
- * instead of swallowing it.
+ * Wrapper around `<DiffEditor>` that fixes the disposal race at the source.
  *
- * **The race.** `@monaco-editor/react`'s unmount cleanup (a `useEffect`
- * cleanup) does, in order:
+ * **The race.** `@monaco-editor/react`'s unmount cleanup is a `useEffect`
+ * cleanup that does, in order:
  *
- *   1. `original.dispose()` — fires Monaco's `onModelWillDispose` event
- *   2. `modified.dispose()` — same
- *   3. `editor.dispose()` — disposes the widget
+ *     original.dispose();   // ← fires onWillDispose on the TextModel
+ *     modified.dispose();   // ← same
+ *     editor.dispose();     // ← only NOW does the editor tear down
  *
- * Between (1) and (3), the `DiffEditorWidget`'s internal listener for
- * `onModelWillDispose` fires while the widget still references the
- * about-to-be-disposed model, lands inside `_setModel(...)` with stale
- * state, and throws "TextModel got disposed before DiffEditorWidget
- * model got reset". The throw bubbles past React's render tree because
- * Monaco re-throws it inside a `setTimeout(..., 0)`, so neither
- * `componentDidCatch` nor a `useEffect` cleanup can intercept it.
+ * Inside Monaco's `DiffEditorWidget` (verified against the Monaco 0.52.2
+ * minified bundle on jsDelivr), the constructor registers an
+ * `autorunWithStore` that subscribes `onWillDispose` on each TextModel:
  *
- * **The fix.** Detach the models from the widget *before* Monaco's
- * `useEffect` cleanup fires. `useLayoutEffect` cleanups run during the
- * commit phase, strictly before `useEffect` cleanups (which run after
- * commit). So a cleanup registered here on the wrapper component fires
- * before the inner `<DiffEditor>`'s cleanup. We call
- * `editor.setModel({original: null, modified: null})` — that detaches
- * the widget's listeners from the models. When Monaco then disposes the
- * models in step (1)/(2), no widget listener reacts; when it disposes
- * the editor in step (3), it has no models to fall over.
+ *     for (const te of [Z.model.original, Z.model.modified])
+ *       Q.add(te.onWillDispose(() => {
+ *         onUnexpectedError(new BugIndicatingError(
+ *           "TextModel got disposed before DiffEditorWidget model got reset"));
+ *         this.setModel(null);
+ *       }));
  *
- * Net effect: zero "TextModel got disposed before DiffEditorWidget
- * model got reset" warnings in the console (down from 1–2 per file
- * switch + every navigation away from a diff view). The window-level
- * suppressor in `lib/monacoSetup.ts` stays as a belt-and-suspenders
- * fallback for any future variation of the race we haven't seen yet.
+ * When @monaco-editor/react disposes the *models* before it disposes the
+ * *editor*, that listener fires and throws.
+ *
+ * **What we tried first (didn't work).**
+ *   v1: `useLayoutEffect` cleanup → `editor.setModel(null)`, theory was the
+ *       autorun would re-run with null and detach its store before the
+ *       lib's `useEffect` cleanup. Console kept showing "swallowed
+ *       Monaco disposal race" warnings — autorun re-evaluation is
+ *       batched / not synchronous from `setModel`.
+ *   v2: Use `keepCurrentOriginalModel/Modified` + dispose models in a
+ *       `queueMicrotask` after `editor.dispose()`. Same result —
+ *       Monaco's editor.dispose() doesn't synchronously tear down the
+ *       autorun's listener registration on the underlying TextModels,
+ *       so when we call `model.dispose()` in the microtask the listener
+ *       is still active and throws.
+ *
+ * **The fix that works.** Use the library's documented
+ * `keepCurrentOriginalModel` + `keepCurrentModifiedModel` flags so the
+ * lib's cleanup reduces to just `editor.dispose()` — no model.dispose()
+ * calls at all. We deliberately DO NOT dispose the models ourselves
+ * either. The TextModels become unreachable as soon as the editor is
+ * disposed (no JS code holds a reference to them), so the JavaScript
+ * GC reclaims them automatically. Monaco's internal `_modelService`
+ * does NOT pin them — it only holds a reference when callers retrieve
+ * a model by URI, and we never set explicit URIs (so each mount creates
+ * a fresh anonymous model).
+ *
+ * This eliminates the disposal race entirely: there's no `model.dispose()`
+ * to fire the willDispose event, so the listener never throws. The
+ * trade-off is that GC reclaims the models lazily instead of synchronously
+ * — for the small text models we use (a single file's contents per side)
+ * this is negligible (a few KB until the next GC cycle).
+ *
+ * The window-level suppressor in `lib/monacoSetup.ts` and the
+ * `MonacoSafeMount` error boundary stay as defence-in-depth in case a
+ * future Monaco internal change opens a new variant of the race.
  */
 type Props = React.ComponentProps<typeof DiffEditor>;
 
 export default function SafeDiffEditor(props: Props) {
-  const editorRef = useRef<Parameters<DiffOnMount>[0] | null>(null);
-
-  // Cleanup runs during the commit phase — strictly BEFORE the inner
-  // DiffEditor's useEffect cleanup that disposes the models + editor.
-  useLayoutEffect(() => {
-    return () => {
-      const editor = editorRef.current;
-      if (!editor) return;
-      try {
-        // Detach the diff model from the widget. `IDiffEditor.setModel`
-        // accepts `null` to clear; this is documented behaviour. After
-        // this, the imminent model dispose (in @monaco-editor/react's
-        // own useEffect cleanup) won't fire a "model got disposed
-        // before widget reset" event because the widget no longer
-        // holds them.
-        editor.setModel(null);
-      } catch {
-        // Editor already torn down for some other reason — nothing to do.
-        // Falls through to the window-level suppressor as a safety net.
-      }
-    };
-  }, []);
-
   const handleMount: DiffOnMount = (editor, monaco) => {
-    editorRef.current = editor;
     props.onMount?.(editor, monaco);
   };
 
-  return <DiffEditor theme={GEIST_THEME_NAME} {...props} onMount={handleMount} />;
+  // keepCurrentOriginalModel + keepCurrentModifiedModel reduce the lib's
+  // cleanup function to just `editor.dispose()` — no model.dispose() calls,
+  // no willDispose listener firing, no race. The TextModels are then
+  // unreachable after editor.dispose() and JS GC reclaims them.
+  return (
+    <DiffEditor
+      theme={GEIST_THEME_NAME}
+      {...props}
+      keepCurrentOriginalModel={true}
+      keepCurrentModifiedModel={true}
+      onMount={handleMount}
+    />
+  );
 }
