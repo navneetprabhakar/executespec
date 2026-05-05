@@ -3,9 +3,11 @@ import {useState, useEffect} from 'react';
 import {useNavigate, useSearchParams} from 'react-router-dom';
 import {
   fetchPlans,
+  fetchFounderOffer,
   subscribe,
   verifyPayment,
   type BillingPlan,
+  type FounderOffer,
   type SubscriptionInitResult,
 } from '@/lib/billing-api';
 import {PlanCard} from '@/components/billing/PlanCard';
@@ -66,6 +68,19 @@ export default function PlansPage() {
       .finally(() => setLoading(false));
   }, []);
 
+  // GA-readiness P2.4 — fetch the active founder offer for Solo (PRO tier).
+  // Returns null when no offer applies (sold out, inactive, or endpoint missing on
+  // older builds). Resolved as a side-channel so the offer doesn't gate the page render.
+  const [soloFounderOffer, setSoloFounderOffer] = useState<FounderOffer | null>(null);
+  useEffect(() => {
+    fetchFounderOffer('PRO')
+      .then(setSoloFounderOffer)
+      .catch(() => {
+        // Defensive — pricing page must not break on a missing endpoint.
+        setSoloFounderOffer(null);
+      });
+  }, []);
+
   // Group plans by tier, pick INR or USD + period variant based on toggles.
   // M-007 (Wave 1) — period axis added: MONTHLY (default) or YEARLY (V146).
   const displayPlans = (() => {
@@ -78,11 +93,13 @@ export default function PlansPage() {
       const currency = p.baseAmountInr > 0 || p.perSeatInr > 0 ? 'INR' : 'USD';
       byTier[p.tier][currency] = p;
     }
-    // Phase 1.1 #9: PRO is hidden from new buyers (lifecycle filter at backend).
-    // M-009 (Wave 1) — when ?legacy=1 arrives from /legacy/billing, show PRO
-    // inline so grandfathered subscribers can manage their existing plan.
-    // V165 — MAX dropped from the ladder; TEAM is the headline paid plan.
-    const tierOrder = legacyView ? ['PRO', 'TEAM'] : ['TEAM'];
+    // GA-readiness P2.1 (V176): un-hid PRO as Solo at $29/mo managed.
+    // PRO is now LISTED (post-V176) and the backend returns it from
+    // /api/billing/plans for everyone — no more legacy-only gate. The
+    // tier ID stays "PRO" in the DB; the UI renders the new
+    // display_name "Solo" via PlanCard. Solo first (cheapest paid),
+    // then TEAM (per-seat).
+    const tierOrder = ['PRO', 'TEAM'];
     // For TEAM, prefer the BYOK plan when both managed + BYOK exist (V165
     // promoted BYOK to canonical pricing at $39/seat; managed $49 plans
     // remain in the DB for billing-history continuity but are inactive).
@@ -272,6 +289,7 @@ export default function PlansPage() {
             userTier={user?.tier}
             initialSeats={plan.tier === 'TEAM' ? targetSeats : undefined}
             highlight={targetTier !== '' && plan.tier === targetTier}
+            founderOffer={plan.tier === soloFounderOffer?.tier ? soloFounderOffer : null}
           />
         ))}
       </div>

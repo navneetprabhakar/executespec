@@ -89,6 +89,66 @@
 > Commit: `feat(scoring+arch)` will land both P3.1 and P4.1 as a single
 > coherent batch on top of the P1 commit.
 >
+> **2026-05-06 — GA-readiness P2.1 + P2.3 + P2.4 (pricing ladder rewrite)
+> on `feature/project-cost-pool-tuning`.** Closes audit Risk #7 — the
+> FREE-to-$78 conversion chasm — with the lowest-cost-of-entry SOLO tier
+> at $29/mo (managed) un-hidden + annual rows + founder pricing schema.
+>
+> **P2.1 — V176 un-hides PRO as Solo.** Migration sets
+> `tier_config.PRO.display_name='Solo'`, `lifecycle_state='LISTED'`,
+> `monthly_run_limit=30` (was 20). Inserts NEW billing_plan rows "Solo
+> Monthly USD" ($29) + "Solo Monthly INR" (₹2,499) — the old "Pro
+> Monthly *" rows stay HIDDEN as before so grandfathered PRO subscribers
+> renew on those untouched. Frontend `PlansPage.tsx` `tierOrder` updated
+> from `['TEAM']` to `['PRO', 'TEAM']` (Solo first, cheapest paid);
+> `PlanCard.tsx` derives the visible label from `plan.name` so "Solo
+> Monthly USD" renders as "Solo" while older "Pro Monthly USD" rows
+> still render as "Pro" for grandfathered display.
+>
+> **P2.3 — V177 Solo Yearly billing_plan rows.** $289/yr (USD) +
+> ₹24,890/yr (INR) at 17% annual_discount_pct ("two months free"),
+> matching V146's existing TEAM/MAX yearly shape. The /plans Annual
+> toggle (already shipped in V146 + frontend) now picks them up.
+>
+> **P2.4 — V177 founder_pricing_discount + allocation schema.** Two
+> tables (`founder_pricing_discount` + `founder_pricing_allocation`)
+> + a singleton "FOUNDER50_SOLO_LIFETIME" seed row (50% off, max 100,
+> lifetime, active, Stripe coupon ID NULL until ops creates the
+> coupon). New entity classes `FounderPricingDiscount` +
+> `FounderPricingAllocation`, repos
+> `FounderPricingDiscountRepository` (with `findByIdForUpdate` PESSIMISTIC_WRITE
+> lock) + `FounderPricingAllocationRepository`. New service
+> `FounderPricingService.tryAllocate(userId, orgId, tier)` — atomic
+> check-capacity + increment + record-allocation under the row lock so
+> concurrent checkouts can't double-spend a slot. Returns
+> `AllocationResult.{Granted, NoOffer, SoldOut, Inactive}` sealed
+> interface. Lifetime semantics: re-subscribe by the same user returns
+> the existing allocation without bumping the counter (so churn doesn't
+> cost a slot). Revoke flow decrements + un-revokes if used. 12 unit
+> tests in `FounderPricingServiceTest` pin the contract incl. the
+> race path "active at lookup, inactive when locked → returns Inactive".
+>
+> **Frontend** — `PlansPage.tsx` fetches `/api/billing/founder-pricing/PRO`
+> on mount (returns 204 when no offer, JS folds to null), then passes
+> the result as `founderOffer={...}` into the SOLO `PlanCard`.
+> `PlanCard.tsx` renders an amber `{discountPct}% FOUNDER · {N} LEFT`
+> badge when the prop is non-null and the tier matches. The badge
+> shows `remainingCapacity` only — never the raw current/max counts
+> (anti-social-engineering posture from `BillingController.FounderOfferDto`).
+>
+> **Outstanding for P2.4 to actually charge the discount:**
+> 1. Ops creates the `FOUNDER50_LIFETIME` coupon on Stripe + Razorpay
+>    offer; populates `stripe_coupon_id` / `razorpay_offer_id` on the
+>    seeded discount row via SUPER_ADMIN endpoint or psql.
+> 2. `BillingService.subscribe` pre-checkout — call
+>    `founderPricingService.tryAllocate(userId, orgId, plan.tier)`,
+>    forward the coupon ID into the Stripe/Razorpay subscription create
+>    if `Granted`. Tracked as P2.4-followup; the schema + service +
+>    test surface ship now so the wiring is a few-line follow-up.
+>
+> Frontend build: ✓. Backend `mvn test` 97 tests across our touched
+> surfaces — all green (P1 + P3.1 + P4.1 + P2.4 service).
+>
 > **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
 >
 > Three packaged improvements:
