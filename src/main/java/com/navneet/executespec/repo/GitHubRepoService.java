@@ -1065,7 +1065,14 @@ public class GitHubRepoService {
   /** Lightweight DTO for {@link #listOwnerRepos(String, String)}. */
   public record RemoteRepo(String fullName, String defaultBranch, boolean isPrivate) {}
 
-  /** Snapshot of a PR for dashboard rendering (title, body, stats, truncated diff). */
+  /**
+   * Snapshot of a PR for dashboard rendering (title, body, stats, truncated diff).
+   *
+   * <p>v2.6.4 — gained {@code headSha} so callers (PR Review Agent in particular) can build a
+   * stable idempotency key per (repo, pr, sha). Older callers that ignore {@code headSha} are
+   * unaffected — Java records are forward-compatible at the call site as long as construction
+   * happens here.
+   */
   public record PullRequestSnapshot(
       String title,
       String body,
@@ -1076,6 +1083,7 @@ public class GitHubRepoService {
       int changedFiles,
       String headBranch,
       String baseBranch,
+      String headSha,
       String diffPreview) {}
 
   /**
@@ -1156,6 +1164,7 @@ public class GitHubRepoService {
           meta.path("changed_files").asInt(0),
           meta.path("head").path("ref").asText(""),
           meta.path("base").path("ref").asText(""),
+          meta.path("head").path("sha").asText(""),
           truncated);
     } catch (Exception e) {
       log.warn(

@@ -323,6 +323,11 @@ model-matrix:
     PromptOptimiserAgent: WORKHORSE
     TestReportGenerator: LIGHTWEIGHT
     ValidationReportGenerator: WORKHORSE
+    # v2.6.4 — PR review + code review agents. Both PLANNING because review-class
+    # quality is the whole point; cost is amortised across a single review per PR
+    # (PR Review) or a single scan per repo (Code Review LLM augmentation pass).
+    PrReviewAgent: PLANNING
+    CodeReviewAgent: PLANNING
   failover-order:
     # v2.6.0 — was `google`; enum was renamed GOOGLE → GEMINI in v2.5.13 but
     # this yaml list was missed. `ModelResolver.selectAdaptiveProvider` calls

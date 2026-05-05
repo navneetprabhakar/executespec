@@ -1,4 +1,4 @@
-import {Component, type ErrorInfo, type ReactNode} from 'react';
+import {Component, Fragment, type ErrorInfo, type ReactNode} from 'react';
 import {errMsg} from '@/lib/utils';
 import {isMonacoDisposeRace as matchDisposeRaceMessage} from '@/lib/monacoErrorPatterns';
 
@@ -92,7 +92,31 @@ export class MonacoSafeMount extends Component<Props, State> {
     // by the time Monaco's deferred event fires for the OLD file, its parent
     // is gone and the throw happens against an unmounted subtree (where the
     // boundary's getDerivedStateFromError catches it cleanly).
-    return <div key={this.props.resetKey ?? 'monaco-safe-default'}>{this.props.children}</div>;
+    //
+    // 2026-05-05 — Render children inside a React.Fragment with a key
+    // instead of a wrapper <div>. The wrapper had been collapsing the
+    // height-100% chain that @monaco-editor/react relies on (its inner
+    // `<section style={height:'100%'}>` resolves to 0px through a
+    // vanilla block-level div). Tried `display: contents` first but
+    // browsers compute it as `display: block` for getBoundingClientRect
+    // purposes which still nuked the layout in some Chrome paths.
+    //
+    // Using `<Fragment key={resetKey}>` keeps the remount-on-key
+    // behaviour (React still reconciles by key on a Fragment) without
+    // introducing any DOM node — children become direct layout
+    // children of the parent flex item, exactly as the
+    // <DiffEditor>'s `height: '100%'` props expect.
+    //
+    // Caught when the user reported "no error in console but no file
+    // data visible" on /projects/.../runs/... after the disposal-race
+    // fix shipped — the bug was actually an older layout regression
+    // (this wrapper has been here since v2.5.x) that only surfaces
+    // once the diff content actually loads. Tiny placeholder files
+    // (.gitattributes etc) folded to nothing visible, so the bug
+    // slipped through earlier sanity checks.
+    return (
+      <Fragment key={this.props.resetKey ?? 'monaco-safe-default'}>{this.props.children}</Fragment>
+    );
   }
 }
 

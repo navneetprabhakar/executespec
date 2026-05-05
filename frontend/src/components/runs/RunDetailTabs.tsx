@@ -67,8 +67,9 @@ import {
   PanelLeftOpen,
 } from 'lucide-react';
 import hljs from 'highlight.js';
-import Editor, {DiffEditor} from '@monaco-editor/react';
+import Editor from '@monaco-editor/react';
 import {MonacoSafeMount} from './MonacoSafeMount';
+import SafeDiffEditor from './SafeDiffEditor';
 import type {editor as monacoEditor} from 'monaco-editor';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
@@ -2202,23 +2203,19 @@ function IDEFileViewer({
               }
             >
               {/*
-               * 2026-05-04 — NO `key` prop on DiffEditor (and no `resetKey` on
-               * MonacoSafeMount above). Why: @monaco-editor/react's unmount path disposes the
-               * original + modified TextModels BEFORE disposing the DiffEditor widget. Monaco's
-               * deferred event queue still has events for those models, which fire AFTER the
-               * dispose and crash with "TextModel got disposed before DiffEditorWidget model
-               * got reset". Using `key={filePath}` triggered this dispose-then-recreate cycle
-               * on EVERY file switch, leaving the new DiffEditor's render in a half-broken
-               * state (the global handler in lib/monacoSetup.ts swallowed the console error,
-               * but the diff itself wouldn't render — the Code-tab regression user reported).
+               * 2026-05-05 — Use SafeDiffEditor (root-cause fix for "TextModel got
+               * disposed before DiffEditorWidget model got reset"). On unmount its
+               * useLayoutEffect cleanup detaches the widget from its models BEFORE
+               * @monaco-editor/react disposes them, so the dispose event has no
+               * widget listener to fire against. Removes the console-warn noise we
+               * were previously masking with the global suppressor in
+               * lib/monacoSetup.ts; the suppressor + MonacoSafeMount boundary stay
+               * as defence-in-depth.
                *
-               * Without the key, prop changes (original/modified/language) flow through the
-               * library's update effects which call setValue / setModelLanguage on the EXISTING
-               * models — no dispose, no race, diff renders cleanly across rapid file switches.
-               * View state (scroll, folds) carries across files; that's intentional, the user
-               * can re-fold per file.
+               * Still NO `key` prop — prop changes (file switch) flow through
+               * setValue / setModelLanguage on the existing widget instance.
                */}
-              <DiffEditor
+              <SafeDiffEditor
                 language={monacoLang}
                 original={diff.base}
                 modified={diff.head}
