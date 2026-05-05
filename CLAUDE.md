@@ -51,6 +51,44 @@
 > follow-up commit (idempotent; not blocking the read-budget fix).
 > Mvn 42/42 green on the new + existing scoring tests.
 >
+> **2026-05-06 — GA-readiness P3.1 (cost cap fix) + P4.1 (multi-tenant
+> guard ArchUnit pin) on `feature/project-cost-pool-tuning`.**
+>
+> **P3.1 — `WorkerAgent` budget exceeded outcome fix.** The hard-cap
+> enforcement path (lines 215–238 of `WorkerAgent`) was already calling
+> `recordTerminal(BUDGET_EXCEEDED, ...)` for metrics but returning
+> `errorResult(...)` which hardcodes `Outcome.ERROR`. The metric and the
+> WorkerResult disagreed — `SequentialExecutor` couldn't distinguish a
+> router crash from a cost-cap stop. Replaced the early-return with a
+> direct `WorkerResult.builder().outcome(BUDGET_EXCEEDED)` so the
+> outcome is now consistent. New `WorkerAgentV2HardCapTest` (5 tests)
+> pins the contract: (a) iter-3 over-cap → `BUDGET_EXCEEDED`, (b) under
+> cap → no premature termination, (c) null cap → no enforcement, (d)
+> zero cap → no enforcement, (e) iter-1 already-over-cap → terminate at
+> iter 1. All 5 green.
+>
+> **P4.1 — `AccessGuardCoverageTest` ArchUnit drift detector** at
+> `src/test/java/com/navneet/executespec/arch/AccessGuardCoverageTest.java`.
+> Audit Risk #5 (catastrophic): every controller has to remember to
+> call a tenant access guard, and a single missed call = data leak. The
+> test scans every `@*Mapping` method on every `@RestController` /
+> `@Controller` whose URL path contains `/runs/{`, `/projects/{`,
+> `/executions/{`, `/launches/{`, or `/repos/{` and verifies it calls
+> either the canonical `RunAccessGuard` / `ProjectAccessGuard` OR a
+> method matching the regex `^(require|requires|assert|ensure|check|authorize|loadFor|load[A-Z][a-zA-Z]*For)[A-Z][a-zA-Z]*$`
+> (covers local guard patterns like `requireRunAccess` /
+> `requireChatAccess` / `loadRepoForRead`). On first run, found **37
+> legacy methods** without a guard — locked in the `KNOWN_LEGACY_DRIFT`
+> set as documented tech debt with migration order spelled out in the
+> plan doc's §P4.1-followup. New entries to that set fail the build
+> (catches regressions today). Stale entries (controllers migrated /
+> removed) also fail (keeps the legacy ledger honest). 6 entries are
+> in `ALLOWLIST` for `ProjectSharePublicController` (public-by-design,
+> token bearer is the auth). Test runs in ~2.4s.
+>
+> Commit: `feat(scoring+arch)` will land both P3.1 and P4.1 as a single
+> coherent batch on top of the P1 commit.
+>
 > **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
 >
 > Three packaged improvements:
