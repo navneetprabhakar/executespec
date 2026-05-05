@@ -456,6 +456,53 @@ The three feature branches that are already cooked but not in dev. Land them in 
 - [ ] Status page live, linked, with valid synthetic probes.
 - [ ] On-call rotation in PagerDuty or OpsGenie.
 
+### P4.1-followup — Migrate 37 legacy guard sites to canonical RunAccessGuard / ProjectAccessGuard
+
+When the `AccessGuardCoverageTest` was first authored on 2026-05-06, it
+discovered 37 controller methods in the codebase that handle run / project /
+execution ids from the URL but don't call any tenant access guard. These
+were captured in the test's `KNOWN_LEGACY_DRIFT` set as documented tech
+debt. Adding guards to all 37 in one batch is risky (each path needs
+controller-specific test coverage); doing it incrementally is the safer path.
+
+**Migration order (from highest tenant-leak risk to lowest):**
+
+1. **`PullRequestController.listPrsForRun`** + **`PullRequestController.refreshProjectPrs`**
+   — exposes PR records cross-org. Highest leak risk in the set.
+   *Add `RunAccessGuard.requireRunAccess` / `ProjectAccessGuard.assertCanRead`.*
+2. **`TestResultController.applyTestFixes`** + **`TestResultController.runTests`**
+   — mutates run state across orgs.
+   *Add `RunAccessGuard.requireRunAccess`.*
+3. **`V2RunController.poll`** — V2 run polling endpoint.
+   *Add `RunAccessGuard.requireRunAccess`.*
+4. **`ProjectExportController.export`** — full project state in one ZIP.
+   *Add `ProjectAccessGuard.assertCanRead`.*
+5. **`ProjectController.{addMember, removeMember, archiveProject, updateSettings}`**
+   — modifies access controls directly. Need `assertCanWrite`.
+6. **`ProjectController.{getProject, listMembers}`** — read paths.
+   Need `assertCanRead`.
+7. **`ProjectDocumentController.{list, upload, delete}`** — RAG documents.
+8. **`SpecTemplateController.{listForProject, createForProject, delete}`**.
+9. **`CodeReviewController.{listForProject, latest}`**, **`PrReviewController.listForProject`**.
+10. **`ActivityFeedController.list`**, **`AdrController.{list, get}`**,
+    **`InvariantController.{list, recentViolations}`**,
+    **`StandardsComplianceController.report`** — all need `assertCanRead`.
+11. **`ProjectRepoController.*`** — repo-scoped, needs guard on the project
+    that owns the repo OR org-scope check for ORG-scoped repos.
+12. **`SuperAdminController.*`** + **`ExecutespecMigrationController.migrate`**
+    — already SUPER_ADMIN-gated by SecurityConfig; just consolidate on a
+    canonical `requireSuperAdmin` call for review-time clarity.
+
+**Acceptance per migration:**
+- Guard call added at top of method body.
+- Drop the entry from `KNOWN_LEGACY_DRIFT`.
+- Existing controller integration tests still green.
+- New test pinning the 403 case (caller in different org gets 403).
+
+**Effort.** ~1 day per controller × 14 controllers = ~14 person-days.
+Schedule as background work during P5 (beta partner support) — no blocker
+for GA cutover, but should be done by Week 12.
+
 ---
 
 ## 8. Phase 5 — Beta program + SOC 2 Type I + CLI (Weeks 8-12)
