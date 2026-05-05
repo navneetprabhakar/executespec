@@ -38,6 +38,7 @@ The following plans were merged + deployed and their plan files have been remove
 
 ## Reference docs (still authoritative)
 
+- [`docs/operations/slos.md`](operations/slos.md) — GA-readiness P4.2 (2026-05-06). Five SLOs ExecuteSpec commits to: run terminal in 15min ≥95%, verified-score correctness ≥90% (manual sample audit), cost estimate within 30% on ≥80% of runs, webhook in 60s ≥99%, hot-path 5xx <0.5%. Includes alert thresholds, owners, and measurement queries.
 - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — single source of truth for every color/radius/spacing token. Semantic palette, 4-band score palette, MUST/MUST NOT rules.
 - [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison.
 - [`docs/enterprise-sla.md`](enterprise-sla.md) — ENTERPRISE-tier P1–P4 SLA + 99.9% uptime credit schedule + CSM engagement.
