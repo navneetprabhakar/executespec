@@ -112,10 +112,10 @@ export default function PrReviewButton({projectId, repoFullName, prNumber}: PrRe
     }
     setSubmitting(true);
     setError(null);
+    setShowPopover(true); // open immediately so the user sees QUEUED → status, or the error
     try {
       const r = await submitPrReview({projectId, repoFullName, prNumber});
       setLatest(r);
-      setShowPopover(true);
     } catch (err) {
       setError(errMsg(err));
     } finally {

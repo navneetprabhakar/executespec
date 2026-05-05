@@ -105,6 +105,7 @@ public class CodeReviewScan {
   @Column(name = "finished_at")
   private Instant finishedAt;
 
-  @Column(name = "created_by_user_id", length = 36)
+  /** V173 widened from VARCHAR(36) to VARCHAR(255). See PrReview entity comment. */
+  @Column(name = "created_by_user_id", length = 255)
   private String createdByUserId;
 }

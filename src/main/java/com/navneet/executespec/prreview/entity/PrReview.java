@@ -87,6 +87,11 @@ public class PrReview {
   @Column(name = "finished_at")
   private Instant finishedAt;
 
-  @Column(name = "created_by_user_id", length = 36)
+  /**
+   * 2026-05-05 — V173 widened this from VARCHAR(36) to VARCHAR(255) for parity with every other
+   * table that references {@code app_user.id}. The seeded super-admin id is 42 chars; the legacy
+   * 36-char width truncated on insert and surfaced as a 500 to the controller.
+   */
+  @Column(name = "created_by_user_id", length = 255)
   private String createdByUserId;
 }

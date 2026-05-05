@@ -29,17 +29,33 @@ import {useAuthStore} from '@/stores/useAuthStore';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {cn} from '@/lib/utils';
 
+/**
+ * `repos` arrives as `ProjectRepoLink[]` from the parent — each link record carries the actual
+ * `ProjectRepo` under `r.repo`. We accept either shape so the panel can also be reused with a flat
+ * `ProjectRepo[]` if a future caller passes that.
+ */
 interface RepoLite {
   id?: string;
   repoId?: string;
   githubRepoFullName?: string;
   repoName?: string;
+  repo?: {id?: string; githubRepoFullName?: string};
 }
 
 interface CodeQualityPanelProps {
   projectId: string;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   repos: RepoLite[];
+}
+
+/** Resolve the full name from either a flat ProjectRepo or a ProjectRepoLink wrapper. */
+function repoFullNameOf(r: RepoLite): string | undefined {
+  return r.repo?.githubRepoFullName ?? r.githubRepoFullName ?? r.repoName;
+}
+
+/** Resolve the repo id from either shape. */
+function repoIdOf(r: RepoLite): string | undefined {
+  return r.repo?.id ?? r.repoId ?? r.id;
 }
 
 const PAID_TIERS = new Set(['PRO', 'TEAM', 'MAX', 'ENTERPRISE']);
@@ -75,13 +91,14 @@ export default function CodeQualityPanel({projectId, repos}: CodeQualityPanelPro
   return (
     <div className='space-y-3'>
       {repos.map((r) => {
-        const repoFullName = r.githubRepoFullName ?? r.repoName;
+        const repoFullName = repoFullNameOf(r);
         if (!repoFullName) return null;
+        const repoId = repoIdOf(r);
         return (
           <RepoCodeReviewCard
-            key={r.id ?? r.repoId ?? repoFullName}
+            key={repoId ?? repoFullName}
             projectId={projectId}
-            repoId={r.id ?? r.repoId}
+            repoId={repoId}
             repoFullName={repoFullName}
           />
         );

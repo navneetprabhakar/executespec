@@ -75,7 +75,8 @@ public class CodeReviewIssue {
   @Column(name = "resolved_at")
   private Instant resolvedAt;
 
-  @Column(name = "resolved_by_user_id", length = 36)
+  /** V173 widened from VARCHAR(36) to VARCHAR(255). See PrReview entity comment. */
+  @Column(name = "resolved_by_user_id", length = 255)
   private String resolvedByUserId;
 
   @Column(name = "created_at", nullable = false)
