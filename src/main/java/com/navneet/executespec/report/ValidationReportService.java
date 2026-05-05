@@ -121,13 +121,21 @@ public class ValidationReportService {
       String reviewerVerdict =
           mapVerdictToV2Name(input.review() != null ? input.review().getVerdict() : null);
       int unfixedCritical = countUnfixedCritical(input);
+      // P1.2 — feed deterministic endpoint coverage into the verifiedScore. Pulled from the
+      // accuracy report's endpointCoverage block when present (this field is a deterministic
+      // count, not LLM-graded — see AccuracyAssessmentService SYSTEM_PROMPT lines 124–128).
+      Integer endpointCoveragePercent =
+          (accuracyReport != null && accuracyReport.getEndpointCoverage() != null)
+              ? accuracyReport.getEndpointCoverage().getCoveragePercent()
+              : null;
       int verifiedScore =
           computeVerifiedScore(
               finalBuildPassed,
               testsPassedCount,
               testsTotalCount,
               reviewerVerdict,
-              unfixedCritical);
+              unfixedCritical,
+              endpointCoveragePercent);
 
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
@@ -773,6 +781,39 @@ public class ValidationReportService {
       int testsTotal,
       String reviewerVerdictName,
       int unfixedCriticalCount) {
+    return computeVerifiedScore(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        null);
+  }
+
+  /**
+   * P1.2 (GA-readiness, 2026-05-06) — overload with explicit endpoint-coverage signal so the
+   * headline verifiedScore can credit a run for delivering every spec endpoint, independent of
+   * the reviewer's text verdict. {@code endpointCoveragePercent} is taken straight from {@code
+   * accuracyReport.endpointCoverage.coveragePercent} when present (it's a deterministic count of
+   * implemented vs required endpoints, NOT an LLM-graded number).
+   *
+   * <p>Bonus: +10 when {@code endpointCoveragePercent >= 95}. Closes the audit-flagged scenario
+   * on run {@code 0444c95f} where {@code endpointCoverage.coveragePercent=100} but the headline
+   * verifiedScore only saw {@code finalBuildPassed} + {@code FIXED_ISSUES} and missed the
+   * deterministic delivery signal entirely.
+   *
+   * <p>Final clamp at 100 means a perfect run (build pass + all tests + CLEAN + 100% endpoints)
+   * yields exactly 100. The 5×{@code unfixedCritical} penalty stays — but {@link
+   * #countUnfixedCritical} now excludes accuracy-synthesised issues (id prefix {@code
+   * SYNTH-ACC-}), so the LLM read-budget bug can no longer drag this number down.
+   */
+  int computeVerifiedScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent) {
     int base = 40;
     int buildBonus = Boolean.TRUE.equals(finalBuildPassed) ? 20 : 0;
     int testBonus = (testsTotal > 0) ? (int) Math.round(20.0 * testsPassed / testsTotal) : 0;
@@ -789,8 +830,10 @@ public class ValidationReportService {
             default -> 10;
           };
     }
+    int endpointBonus =
+        (endpointCoveragePercent != null && endpointCoveragePercent >= 95) ? 10 : 0;
     int penalty = Math.max(0, unfixedCriticalCount) * 5;
-    int raw = base + buildBonus + testBonus + verdictBonus - penalty;
+    int raw = base + buildBonus + testBonus + verdictBonus + endpointBonus - penalty;
     return Math.max(0, Math.min(100, raw));
   }
 
@@ -810,12 +853,28 @@ public class ValidationReportService {
     };
   }
 
+  /**
+   * Count unfixed CRITICAL issues for the verifiedScore penalty.
+   *
+   * <p>P1.2 (GA-readiness, 2026-05-06): synthesised accuracy issues (id prefix {@code SYNTH-ACC-})
+   * are derived from the LLM's KEY SOURCE FILES read budget — when the LLM can't see file
+   * contents, it emits "missing requirement" or "missing endpoint" issues that don't reflect the
+   * actual implementation. Filter them out of the verifiedScore penalty so the read-budget bug
+   * can't drag the headline number down. They're still kept in {@code review.getIssues()} for
+   * the dashboard issues panel and {@link com.navneet.executespec.scoring.ReviewScoringService}'s
+   * 6-dimension breakdown — only the headline {@code verifiedScore} is shielded.
+   *
+   * <p>Real reviewer-flagged issues (build failures, reviewer UNRESOLVED, etc.) start with {@code
+   * SYNTH-BUILD-} or {@code SYNTH-REV-} OR have an LLM-assigned id with no SYNTH prefix; both
+   * keep counting.
+   */
   private int countUnfixedCritical(ReportInput input) {
     if (input.review() == null || input.review().getIssues() == null) return 0;
     return (int)
         input.review().getIssues().stream()
             .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
             .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())
+            .filter(i -> i.getId() == null || !i.getId().startsWith("SYNTH-ACC-"))
             .count();
   }
 

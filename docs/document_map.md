@@ -13,6 +13,7 @@
 
 | File | Type | What it is |
 |------|------|------------|
+| [`pending-ga-readiness-90-day-execution-plan.md`](plans/pending-ga-readiness-90-day-execution-plan.md) | proposed | 90-day Plan B execution doc operationalising the 2026-05-04 GA-readiness audit. Phase 0 (land in-flight branches) → P1 quality scoring fix → P2 pricing ladder → P3 cost ceiling + HIGH-band reliability → P4 observability + ArchUnit guard pin → P5 beta program + SOC 2 Type I + CLI → P6 GA cutover. Target GA 2026-08-04. Awaiting founder approval before kickoff. |
 | [`partial-work.md`](plans/partial-work.md) | consolidated | All 4 plans with partial implementations / pending follow-ups: Mobile (RN+Expo native-Android gap), Figma v2 (design-only), Harness V2 remaining work (Gap 1+2+3), and the PARTIAL-status removal proposal. |
 | [`pending-v2-batch-execution-plan.md`](plans/pending-v2-batch-execution-plan.md) | not started | Re-implement batch execution under V2 (V1 batch was deleted). Realtime-only today. |
 | [`pending-distributed-processing-plan.md`](plans/pending-distributed-processing-plan.md) | not started | Phase A NFS workspace + Phase B worker-lease pool. |
