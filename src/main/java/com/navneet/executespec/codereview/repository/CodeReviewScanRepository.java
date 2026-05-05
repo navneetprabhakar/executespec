@@ -26,6 +26,14 @@ public interface CodeReviewScanRepository extends JpaRepository<CodeReviewScan, 
       String projectId, String repoFullName, String status);
 
   /**
+   * Latest scan regardless of status — used by the dashboard panel so a FAILED scan with its {@code
+   * failure_reason} shows instead of silently reverting to "No scan yet". The chat tool still uses
+   * the COMPLETE-only finder above so it doesn't hand the user an unfinished report.
+   */
+  Optional<CodeReviewScan> findFirstByProjectIdAndRepoFullNameOrderByStartedAtDesc(
+      String projectId, String repoFullName);
+
+  /**
    * Per-month count for a given user — used by the tier-quota gate to enforce per-tier monthly caps
    * (PRO: 4/month, TEAM/MAX/ENTERPRISE: unlimited).
    */

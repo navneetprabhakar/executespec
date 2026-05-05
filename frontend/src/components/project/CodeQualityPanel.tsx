@@ -181,6 +181,11 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
   const issues = latest?.issues ?? [];
   const counts = countBySeverity(issues);
   const reportUrl = verdict ? codeReviewReportDownloadUrl(verdict.id) : null;
+  // FAILED scans surface their failure_reason inline so the user can act on it (e.g. fix
+  // PAT scope, push the missing repo). Without this the panel would silently revert to "No
+  // scan yet" and the user can't tell whether their click did anything.
+  const isFailed = verdict?.status === 'FAILED';
+  const isComplete = verdict?.status === 'COMPLETE';
 
   return (
     <div className='border border-[var(--border-default)] rounded p-3 space-y-2'>
@@ -188,14 +193,20 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
         <div className='font-mono text-[11px] text-secondary'>{repoFullName}</div>
         {verdict && (
           <div className='text-[10px] text-muted'>
-            {verdict.status} · sha={shortSha(verdict.scannedSha)} · {fmtRel(verdict.startedAt)}
+            <span
+              className={isFailed ? 'text-status-error' : isComplete ? 'text-status-complete' : ''}
+            >
+              {verdict.status}
+            </span>
+            {' · sha='}
+            {shortSha(verdict.scannedSha)} · {fmtRel(verdict.startedAt)}
             {verdict.durationMs ? ` · ${fmtDur(verdict.durationMs)}` : ''}
           </div>
         )}
         {!verdict && <div className='text-[10px] text-muted'>No scan yet</div>}
       </div>
 
-      {verdict && (
+      {isComplete && (
         <div className='flex flex-wrap gap-1.5 text-[11px]'>
           <SeverityChip label={`${counts.open} open`} variant='neutral' />
           <SeverityChip label={`${counts.critical} CRITICAL`} variant='critical' />
@@ -205,7 +216,13 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
         </div>
       )}
 
-      {activeScanId && activeStatus && (
+      {isFailed && verdict?.failureReason && (
+        <div className='text-[11px] text-status-error font-mono whitespace-pre-wrap break-words p-2 bg-status-error/5 rounded border border-status-error/20'>
+          {verdict.failureReason}
+        </div>
+      )}
+
+      {activeScanId && activeStatus && activeStatus !== 'FAILED' && (
         <div className='text-[11px] text-secondary'>
           {progressLabel(activeStatus)} (scan {activeScanId.slice(0, 8)}…)
         </div>
@@ -224,9 +241,16 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
               : 'border-accent-blue/40 text-accent-blue hover:bg-accent-blue/10',
           )}
         >
-          {activeScanId ? 'Scanning…' : verdict ? 'Run new scan' : 'Run first scan'}
+          {activeScanId
+            ? 'Scanning…'
+            : isFailed
+              ? 'Retry scan'
+              : verdict
+                ? 'Run new scan'
+                : 'Run first scan'}
         </button>
-        {verdict && (
+        {/* Report buttons only on COMPLETE — a FAILED scan has no report markdown. */}
+        {isComplete && (
           <button
             onClick={() => setShowReport((v) => !v)}
             className='text-[11px] px-2.5 py-1 rounded border border-[var(--border-default)] text-secondary hover:text-primary'
@@ -234,7 +258,7 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
             {showReport ? 'Hide report' : 'View report'}
           </button>
         )}
-        {reportUrl && (
+        {isComplete && reportUrl && (
           <a
             href={reportUrl}
             download
