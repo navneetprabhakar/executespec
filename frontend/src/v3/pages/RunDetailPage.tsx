@@ -536,7 +536,23 @@ export default function RunDetailPage() {
             </div>
           )}
           {!diffLoading && diff && (
-            <div style={{flex: 1, minHeight: 0, height: 'calc(100vh - 360px)'}}>
+            // 2026-05-05 — `position: relative` + child `position: absolute; inset: 0`
+            // so the diff editor fills this box without relying on a height-100%
+            // chain. The flex-1 + height:calc combination LOOKS explicit but
+            // height:100% on Monaco's inner section resolves to 0px in some
+            // computed-height paths (the flex-basis: 0% takes precedence over the
+            // explicit `height` for sizing purposes in some browsers, so 100% on
+            // a child sees an "indefinite" containing block). Absolute positioning
+            // with inset:0 sidesteps that — the editor box is sized from the
+            // padding box of its positioning ancestor, full stop.
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                height: 'calc(100vh - 360px)',
+                position: 'relative',
+              }}
+            >
               <MonacoSafeMount
                 fallback={
                   <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
@@ -546,60 +562,62 @@ export default function RunDetailPage() {
                 }
               >
                 {/*
+                 * absolute-fill child of the relatively-positioned parent so
+                 * SafeDiffEditor's `height: 100%` resolves against a known box.
+                 *
                  * 2026-05-05 — Use SafeDiffEditor instead of bare @monaco-editor/react
-                 * <DiffEditor>. SafeDiffEditor's useLayoutEffect cleanup detaches the
-                 * widget from its models BEFORE Monaco's useEffect cleanup disposes
-                 * those models, eliminating the "TextModel got disposed before
-                 * DiffEditorWidget model got reset" race at the source. The previous
-                 * window-level suppressor + MonacoSafeMount boundary stay as
-                 * defence-in-depth.
+                 * <DiffEditor>. SafeDiffEditor passes keepCurrent*Model and skips
+                 * model.dispose() to eliminate the "TextModel got disposed before
+                 * DiffEditorWidget model got reset" race at the source.
                  *
                  * Still NO `key` on the editor — prop changes (file switch) flow through
-                 * setValue / setModelLanguage on the existing widget; we only detach
-                 * models on unmount, not on prop change.
+                 * setValue / setModelLanguage on the existing widget; we only let it
+                 * unmount on full page unmount, not on prop change.
                  */}
-                <SafeDiffEditor
-                  language={getMonacoLanguage(diff.path)}
-                  original={diff.base}
-                  modified={diff.head}
-                  theme={GEIST_THEME_NAME}
-                  options={{
-                    readOnly: true,
-                    // Only render lines that actually changed — this is the "only diff is
-                    // visible" contract. Monaco hides identical regions behind expandable
-                    // chevrons by default when this flag is on.
-                    hideUnchangedRegions: {
-                      enabled: true,
-                      contextLineCount: 3,
-                      minimumLineCount: 3,
-                      revealLineCount: 20,
-                    },
-                    renderSideBySide: false, // inline diff fits the narrow 1fr column better
-                    minimap: {enabled: false},
-                    scrollBeyondLastLine: false,
-                    fontSize: 12,
-                    lineNumbers: 'on',
-                    folding: true,
-                    showFoldingControls: 'always',
-                    wordWrap: 'off',
-                    renderLineHighlight: 'line',
-                    contextmenu: false,
-                    domReadOnly: true,
-                    cursorStyle: 'line-thin',
-                    scrollbar: {
-                      verticalScrollbarSize: 6,
-                      horizontalScrollbarSize: 6,
-                    },
-                    overviewRulerLanes: 0,
-                    hideCursorInOverviewRuler: true,
-                    overviewRulerBorder: false,
-                    guides: {
-                      indentation: true,
-                      bracketPairs: true,
-                    },
-                    padding: {top: 8},
-                  }}
-                />
+                <div style={{position: 'absolute', inset: 0}}>
+                  <SafeDiffEditor
+                    language={getMonacoLanguage(diff.path)}
+                    original={diff.base}
+                    modified={diff.head}
+                    theme={GEIST_THEME_NAME}
+                    options={{
+                      readOnly: true,
+                      // Only render lines that actually changed — this is the "only diff is
+                      // visible" contract. Monaco hides identical regions behind expandable
+                      // chevrons by default when this flag is on.
+                      hideUnchangedRegions: {
+                        enabled: true,
+                        contextLineCount: 3,
+                        minimumLineCount: 3,
+                        revealLineCount: 20,
+                      },
+                      renderSideBySide: false, // inline diff fits the narrow 1fr column better
+                      minimap: {enabled: false},
+                      scrollBeyondLastLine: false,
+                      fontSize: 12,
+                      lineNumbers: 'on',
+                      folding: true,
+                      showFoldingControls: 'always',
+                      wordWrap: 'off',
+                      renderLineHighlight: 'line',
+                      contextmenu: false,
+                      domReadOnly: true,
+                      cursorStyle: 'line-thin',
+                      scrollbar: {
+                        verticalScrollbarSize: 6,
+                        horizontalScrollbarSize: 6,
+                      },
+                      overviewRulerLanes: 0,
+                      hideCursorInOverviewRuler: true,
+                      overviewRulerBorder: false,
+                      guides: {
+                        indentation: true,
+                        bracketPairs: true,
+                      },
+                      padding: {top: 8},
+                    }}
+                  />
+                </div>
               </MonacoSafeMount>
             </div>
           )}
