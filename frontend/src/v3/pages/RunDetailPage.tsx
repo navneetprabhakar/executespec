@@ -403,13 +403,17 @@ export default function RunDetailPage() {
         <RunFailureSummary detail={detail} report={report} />
       )}
 
-      {/* File tree + content (two-pane on desktop, stacked on mobile) */}
+      {/* File tree + content (two-pane on desktop, stacked on mobile).
+          alignItems: stretch so the diff pane matches the sidebar height
+          — the sidebar grows to fit its file list, and the diff pane
+          stretches to the same height instead of being floored at its
+          280px min-height. */}
       <div
         style={{
           display: 'grid',
           gridTemplateColumns: 'minmax(220px, 280px) 1fr',
           gap: 16,
-          alignItems: 'start',
+          alignItems: 'stretch',
         }}
         className='v3-rundetail-grid'
       >
@@ -538,18 +542,13 @@ export default function RunDetailPage() {
           {!diffLoading && diff && (
             // 2026-05-05 — `position: relative` + child `position: absolute; inset: 0`
             // so the diff editor fills this box without relying on a height-100%
-            // chain. The flex-1 + height:calc combination LOOKS explicit but
-            // height:100% on Monaco's inner section resolves to 0px in some
-            // computed-height paths (the flex-basis: 0% takes precedence over the
-            // explicit `height` for sizing purposes in some browsers, so 100% on
-            // a child sees an "indefinite" containing block). Absolute positioning
-            // with inset:0 sidesteps that — the editor box is sized from the
-            // padding box of its positioning ancestor, full stop.
+            // chain. flex: 1 here lets us take all remaining vertical space inside
+            // the right-pane <section>, which (thanks to the grid-level
+            // alignItems: stretch) is sized to match the sidebar.
             <div
               style={{
                 flex: 1,
                 minHeight: 0,
-                height: 'calc(100vh - 360px)',
                 position: 'relative',
               }}
             >
