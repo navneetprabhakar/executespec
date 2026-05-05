@@ -62,6 +62,9 @@ public class ProjectDocGeneratorService {
   private final LlmRouter llmRouter;
   private final ModelResolver modelResolver;
 
+  /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
+  private final com.navneet.executespec.v2.cost.RunCostTracker costTracker;
+
   private static final String EXPLANATION_SYSTEM =
       """
       You are writing a project explanation document for a new developer joining the team.
@@ -195,6 +198,9 @@ public class ProjectDocGeneratorService {
             .map(d -> d.getVersion() + 1)
             .orElse(1);
 
+    // v2.6.4 (V174) — compute USD cost so the project dashboard can roll doc-gen spend up.
+    double cost =
+        costTracker.computeCost(resolved.providerName(), resolved.getModel(), inTok, outTok);
     ProjectGeneratedDoc doc =
         ProjectGeneratedDoc.builder()
             .projectId(projectId)
@@ -205,6 +211,7 @@ public class ProjectDocGeneratorService {
             .modelUsed(resolved.getModel())
             .inputTokens(inTok)
             .outputTokens(outTok)
+            .costUsd(cost)
             .build();
     doc = docRepo.save(doc);
 

@@ -460,6 +460,18 @@ public class RunCostTracker {
    * fires for them, but as of 2026-05-04 OpenAI/Gemini cache reads are 0 in our flow (auto-caching
    * for OpenAI is hit-or-miss + we don't enable Gemini context caching).
    */
+  /**
+   * Public cost helper for callers that aren't going through the run-tracking flow (per-PR review,
+   * code-review scan, architecture/doc generation). Computes USD from tokens via the same pricing
+   * matrix the recording path uses; no cache_write / cache_read accounting (those callers don't
+   * expose those counts), so the result is an upper-bound when cached input is involved — matches
+   * what we'd record for a non-cached call. Returns 0 if pricing is missing for the provider/model
+   * tuple, same as the recording path.
+   */
+  public double computeCost(String provider, String model, int inTok, int outTok) {
+    return priceCall(provider, model, inTok, outTok, 0, 0);
+  }
+
   private double priceCall(
       String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead) {
     Optional<ModelPricing> found =

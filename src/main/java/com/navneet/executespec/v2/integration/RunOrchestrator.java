@@ -205,9 +205,15 @@ public class RunOrchestrator {
   /** runId → in-flight pipeline future; used by {@link #cancel(String)}. */
   private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
 
+  /**
+   * Run-orchestration pool — sized {@code clamp(4, 16, cores × 1)}. Each run can spawn parallel
+   * tasks during the LARGE planner pipeline (skeleton expand × N + sub-expansions for EPICs), so
+   * the multiplier matches CPU and the cap protects against a 32-core dev box launching 32
+   * concurrent run pipelines that would saturate Hikari + the LLM provider rate limits.
+   */
   private final ExecutorService pool =
       Executors.newFixedThreadPool(
-          4,
+          com.navneet.executespec.util.PoolSizing.coreMultiple(1, 4, 16),
           new ThreadFactory() {
             private int n = 0;
 

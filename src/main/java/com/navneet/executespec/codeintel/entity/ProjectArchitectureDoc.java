@@ -41,4 +41,13 @@ public class ProjectArchitectureDoc {
   @Column(name = "generated_at", nullable = false)
   @Builder.Default
   private Instant generatedAt = Instant.now();
+
+  /**
+   * v2.6.4 (V174) — USD cost of the combined-arch LLM synthesis. Populated by {@link
+   * com.navneet.executespec.codeintel.ArchitectureDocGenerator} after each generation; dashboard
+   * rollup sums this across versions for the project total.
+   */
+  @Column(name = "cost_usd", nullable = false)
+  @Builder.Default
+  private Double costUsd = 0.0;
 }
