@@ -119,7 +119,10 @@ public class CodeReviewController {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
-    Optional<CodeReviewScan> latest = service.latestForProjectRepo(projectId, repoFullName);
+    // Dashboard wants to see FAILED scans with their failureReason too — only the chat tool path
+    // restricts to COMPLETE so it never narrates a partial / failed report as if it were canonical.
+    Optional<CodeReviewScan> latest =
+        service.latestForProjectRepoAnyStatus(projectId, repoFullName);
     if (latest.isEmpty()) return ResponseEntity.noContent().build();
     List<CodeReviewIssue> issues = service.issuesFor(latest.get().getId());
     return ResponseEntity.ok(CodeReviewScanWithIssues.from(latest.get(), issues));

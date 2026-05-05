@@ -632,9 +632,24 @@ public class CodeReviewService {
     return scanRepo.findByProjectIdOrderByStartedAtDesc(projectId);
   }
 
+  /**
+   * Latest COMPLETE scan only — used by the chat-tool surface so the user never gets a partial /
+   * failed report narrated as if it were the canonical answer.
+   */
   public Optional<CodeReviewScan> latestForProjectRepo(String projectId, String repoFullName) {
     return scanRepo.findFirstByProjectIdAndRepoFullNameAndStatusOrderByStartedAtDesc(
         projectId, repoFullName, "COMPLETE");
+  }
+
+  /**
+   * Latest scan regardless of status — used by the dashboard so a FAILED scan with its {@code
+   * failureReason} stays visible instead of disappearing back to a "No scan yet" empty state.
+   * Surface in the controller's {@code GET /api/projects/{id}/code-reviews/latest} endpoint.
+   */
+  public Optional<CodeReviewScan> latestForProjectRepoAnyStatus(
+      String projectId, String repoFullName) {
+    return scanRepo.findFirstByProjectIdAndRepoFullNameOrderByStartedAtDesc(
+        projectId, repoFullName);
   }
 
   public List<CodeReviewIssue> issuesFor(UUID scanId) {
