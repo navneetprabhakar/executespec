@@ -3267,3 +3267,99 @@ export const getLatestCodeReviewForRepo = (projectId: string, repoFullName: stri
  * "Open report" link and for the Code Quality tab's Download button.
  */
 export const codeReviewReportDownloadUrl = (id: string) => `${BASE}/code-reviews/${id}/report`;
+
+// ── V175 — external project sharing (invites + public share links) ──────────────
+
+export type ProjectInviteRole = 'PROJECT_ADMIN' | 'PROJECT_DEVELOPER' | 'PROJECT_VIEWER';
+export type ProjectInviteStatus = 'PENDING' | 'ACCEPTED' | 'REVOKED' | 'EXPIRED';
+
+export interface ProjectInviteDto {
+  id: string;
+  projectId: string;
+  email: string;
+  projectRole: ProjectInviteRole;
+  status: ProjectInviteStatus;
+  expiresAt: string;
+  createdAt: string;
+  invitedByUserId: string;
+}
+
+export interface InvitePreview {
+  email: string;
+  projectId: string;
+  projectRole: ProjectInviteRole;
+  status: ProjectInviteStatus;
+  expiresAt: string;
+}
+
+export const createProjectInvite = (
+  projectId: string,
+  body: {email: string; role: ProjectInviteRole},
+) =>
+  req<ProjectInviteDto>(`/projects/${projectId}/invites`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const listProjectInvites = (projectId: string) =>
+  req<ProjectInviteDto[]>(`/projects/${projectId}/invites`);
+
+export const revokeProjectInvite = (projectId: string, inviteId: string) =>
+  req<void>(`/projects/${projectId}/invites/${inviteId}`, {method: 'DELETE'});
+
+export const previewProjectInvite = (token: string) =>
+  req<InvitePreview>(`/invites/preview?token=${encodeURIComponent(token)}`);
+
+export const acceptProjectInvite = (token: string) =>
+  req<{projectId: string}>(`/invites/accept?token=${encodeURIComponent(token)}`, {method: 'POST'});
+
+export type ShareLinkSurface =
+  | 'PROJECT_OVERVIEW'
+  | 'RUN_DETAIL'
+  | 'CODE_REVIEW'
+  | 'PR_REVIEW'
+  | 'VALIDATION_REPORT'
+  | 'ARCHITECTURE_DOC';
+
+export interface ShareLinkDto {
+  id: string;
+  projectId: string;
+  token: string;
+  surface: ShareLinkSurface;
+  scopeId: string | null;
+  label: string | null;
+  createdByUserId: string;
+  expiresAt: string | null;
+  revokedAt: string | null;
+  views: number;
+  lastViewedAt: string | null;
+  createdAt: string;
+  active: boolean;
+}
+
+export interface ShareLinkListResponse {
+  links: ShareLinkDto[];
+  activeCount: number;
+}
+
+export const createShareLink = (
+  projectId: string,
+  body: {surface: ShareLinkSurface; scopeId?: string; label?: string; expiresInDays?: number},
+) =>
+  req<ShareLinkDto>(`/projects/${projectId}/share-links`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const listShareLinks = (projectId: string) =>
+  req<ShareLinkListResponse>(`/projects/${projectId}/share-links`);
+
+export const revokeShareLink = (projectId: string, linkId: string) =>
+  req<void>(`/projects/${projectId}/share-links/${linkId}`, {method: 'DELETE'});
+
+/**
+ * Public share-link URL for the dashboard owner to copy. Frontend lives at
+ * `/shared/:token` (added in v2.6.4) which calls these GETs to render the surface.
+ */
+export const shareLinkPublicUrl = (token: string) =>
+  `${window.location.origin}/shared/${encodeURIComponent(token)}`;

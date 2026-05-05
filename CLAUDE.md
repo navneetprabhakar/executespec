@@ -2,6 +2,51 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
+> **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
+>
+> Three packaged improvements:
+>
+> 1. **External project sharing (V175, new `sharing/` package).** Two
+>    surfaces:
+>    - **Cross-org project invites** — paid-tier admins can invite by
+>      email; on accept the invitee gets a `ProjectMember` row with
+>      `is_external=true`. New `PROJECT_VIEWER` role (read-only).
+>    - **Public read-only share links** — `project_share_link` table
+>      with `Surface` enum (PROJECT_OVERVIEW / RUN_DETAIL / CODE_REVIEW
+>      / PR_REVIEW / VALIDATION_REPORT / ARCHITECTURE_DOC). Token in
+>      URL is the bearer. Tier-gated by `tier_config.share_link_active_cap`
+>      (FREE=3, PRO=25, TEAM/MAX/ENTERPRISE=-1 unlimited).
+>    - `ProjectAccessGuard` updated to consult `project_member` after the
+>      org-match check, opening the door to cross-org collaborators.
+>    - 8 new endpoints under `/api/projects/{id}/invites`,
+>      `/api/projects/{id}/share-links`, `/api/invites/...`, plus
+>      `/api/shared/{token}/...` whitelisted in `SecurityConfig`.
+>
+> 2. **Core-dependent dispatch pools.** New
+>    `util/PoolSizing.coreMultiple(multiplier, min, max)` helper. 5 fixed
+>    pools swapped: CodeReview (2→clamp(2,8,cores×1)), PrReview
+>    (4→clamp(4,12,cores×2)), V2RunService (4→clamp(4,12,cores×1)),
+>    RunConversationController.applyExecutor (4→clamp(4,12,cores×2)),
+>    RunOrchestrator (4→clamp(4,16,cores×1)).
+>
+> 3. **Project cost rollup.** V174 adds `cost_usd` to
+>    `repo_architecture_doc` + `project_architecture_doc` +
+>    `project_generated_doc`. New `RunCostTracker.computeCost(provider,
+>    model, inTok, outTok)` public helper. ProjectArchitectureService +
+>    ProjectDocGeneratorService now persist cost at generation time. 5
+>    new `sumCostUsdByProject` finders aggregated in
+>    ProjectDashboardController. New `DashboardDto.costBreakdown` exposes
+>    6 buckets — `runs`, `launches`, `codeReviews`, `prReviews`,
+>    `architecture`, `generatedDocs`. Sum equals `totalCostUsd`.
+>
+> Tests: 967/0/0/4 skipped on this branch. Two new test classes
+> (`ProjectAccessGuardTest`, `ProjectShareLinkServiceTest`) cover the
+> guard's allow/deny tree + the share-link tier gate + revoke/expire
+> lifecycle. AsyncAllowlist updated for the new
+> `MailService#sendProjectInviteEmail` method. Frontend
+> `lib/api.ts` extended with `ProjectInviteDto`, `ShareLinkDto`,
+> `costBreakdown` types + 9 helper functions.
+>
 > **2026-05-05 — PR Review + Code Review agents (`feature/code-review-agents`, NOT yet merged to dev/main):**
 > Two new paid-tier agents land alongside the existing run pipeline,
 > both gated to PRO/TEAM/MAX/ENTERPRISE on the `tier_config` table
@@ -584,6 +629,24 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST | `/api/projects/{id}/standards/{standardId}/exception` | E3.6 — declare a standing project-level exception to a standard; rationale ≥30 chars required |
 | DELETE | `/api/projects/{id}/standards/{standardId}/exception` | E3.6 — withdraw a standing exception |
 | GET | `/api/projects/{id}/standards/report?orgId={orgId}&sinceDays={n}` | E3.16 — read-only project standards compliance report (effective standards merged from org + project, recent violations, persistent overrides); default `sinceDays=30` |
+
+### External project sharing (v2.6.4, V175, `feature/project-cost-pool-tuning`)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/projects/{id}/invites` | Create cross-org invite by email (PRO+); body `{email, role}`; emails accept link. |
+| GET | `/api/projects/{id}/invites` | List PENDING invites for the project. |
+| DELETE | `/api/projects/{id}/invites/{inviteId}` | Revoke a pending invite. |
+| GET | `/api/invites/preview?token=` | Public — preview invite metadata before accepting (no token leak). |
+| POST | `/api/invites/accept?token=` | Authenticated — accept the invite; email-match required. |
+| POST | `/api/projects/{id}/share-links` | Create public read-only link; tier-gated by `tier_config.share_link_active_cap`. Body: `{surface, scopeId?, label?, expiresInDays?}`. |
+| GET | `/api/projects/{id}/share-links` | List + active count. |
+| DELETE | `/api/projects/{id}/share-links/{linkId}` | Revoke link (idempotent). |
+| GET | `/api/shared/{token}/meta` | Public — surface metadata, no payload. |
+| GET | `/api/shared/{token}/run` | Public — RUN_DETAIL slice (read-safe). |
+| GET | `/api/shared/{token}/validation-report` | Public — VALIDATION_REPORT slice. |
+| GET | `/api/shared/{token}/code-review` | Public — CODE_REVIEW markdown + counts. |
+| GET | `/api/shared/{token}/pr-review` | Public — PR_REVIEW summary + comment count. |
+| GET | `/api/shared/{token}/architecture` | Public — latest project ARCHITECTURE_DOC content. |
 
 ### PR Review + Code Review agents (v2.6.4, `feature/code-review-agents`)
 | Method | Path | Description |

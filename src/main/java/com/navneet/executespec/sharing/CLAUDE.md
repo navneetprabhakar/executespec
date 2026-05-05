@@ -1,0 +1,63 @@
+# sharing/ — External Project Sharing (V175)
+
+> v2.6.4. Two complementary surfaces for sharing project visibility outside the host org:
+> 1. **Project invites** — cross-org `ProjectMember` rows (collaboration)
+> 2. **Public share links** — signed read-only links per surface (one-off viewing)
+>
+> Both gated tier-aware. Lives on `feature/project-cost-pool-tuning`, NOT yet merged.
+
+## Files
+
+- `entity/ProjectInvite.java` — pending invite (email-addressed, token-based, status machine PENDING → ACCEPTED | REVOKED | EXPIRED).
+- `entity/ProjectShareLink.java` — public read-only link with `Surface` enum (PROJECT_OVERVIEW / RUN_DETAIL / CODE_REVIEW / PR_REVIEW / VALIDATION_REPORT / ARCHITECTURE_DOC) + scope id, view counter, revocation.
+- `repository/ProjectInviteRepository.java`, `ProjectShareLinkRepository.java`.
+- `service/ProjectInviteService.java` — invite lifecycle (create / accept / revoke). Tier-gated to PRO+ for `createInvite`. Email send via `MailService.sendProjectInviteEmail` (best-effort, never fails the invite).
+- `service/ProjectShareLinkService.java` — link lifecycle (create / resolve / revoke / view-counter). Tier-gated by `tier_config.share_link_active_cap` (FREE 3, PRO 25, TEAM/MAX/ENTERPRISE -1=unlimited).
+- `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview.
+- `controller/ProjectShareLinkController.java` — auth-protected admin endpoints (create/list/revoke).
+- `controller/ProjectSharePublicController.java` — **no-auth** public read paths (`/api/shared/{token}/...`).
+
+## Schema (V175)
+
+- `project_member.is_external BOOLEAN` — flags cross-org members so the UI badges them and billing skips them when computing seat usage.
+- `project_member.project_role` extended to include `PROJECT_VIEWER` (read-only).
+- `project_invite` table — id, project_id, email, role, token UNIQUE, invited_by_user_id, invited_org_id, status, expires_at, accepted_at, accepted_by_user_id, revoked_at, revoked_by_user_id, created_at. Partial index on PENDING.
+- `project_share_link` table — id, project_id, token UNIQUE, surface (CHECK constraint), scope_id, label, created_by, expires_at, revoked_at, views, last_viewed_at. Partial index on active.
+- `tier_config.share_link_active_cap INT` — seeded FREE=3, PRO=25, TEAM/MAX/ENTERPRISE=-1.
+
+## Access semantics
+
+`ProjectAccessGuard.assertCanRead` consults `project_member` after the org match. Allow if any of:
+1. SUPER_ADMIN
+2. Caller's `org_id` matches `project.org_id`
+3. Caller has a `ProjectMember` row for this project (the V175 cross-org path)
+
+Public share-link reads bypass `ProjectAccessGuard` entirely — the URL token is the bearer.
+
+## Endpoints
+
+| Method | Path | Description |
+|---|---|---|
+| POST | `/api/projects/{id}/invites` | PRO+ only. Creates pending invite + emails recipient. |
+| GET | `/api/projects/{id}/invites` | List pending invites for project. |
+| DELETE | `/api/projects/{id}/invites/{inviteId}` | Revoke pending invite. |
+| GET | `/api/invites/preview?token=` | Public — preview invite metadata (no token leakage). |
+| POST | `/api/invites/accept?token=` | Authenticated — accept invite. Email match enforced. |
+| POST | `/api/projects/{id}/share-links` | Create share link. |
+| GET | `/api/projects/{id}/share-links` | List + active count. |
+| DELETE | `/api/projects/{id}/share-links/{linkId}` | Revoke link. |
+| GET | `/api/shared/{token}/meta` | Public surface meta. |
+| GET | `/api/shared/{token}/run` | Public RUN_DETAIL surface. |
+| GET | `/api/shared/{token}/validation-report` | Public VALIDATION_REPORT surface. |
+| GET | `/api/shared/{token}/code-review` | Public CODE_REVIEW surface. |
+| GET | `/api/shared/{token}/pr-review` | Public PR_REVIEW surface. |
+| GET | `/api/shared/{token}/architecture` | Public ARCHITECTURE_DOC surface. |
+
+`/api/shared/**` and `/api/invites/preview` are whitelisted in `SecurityConfig`.
+
+## Outstanding (post-PR follow-ups)
+
+- Frontend dashboard panel for managing invites + share links (the API helpers are in `lib/api.ts`; the UI panels would be follow-up commits).
+- Public share-link viewer pages at `/shared/:token` route — frontend-side, not in this PR.
+- Scheduled cleanup job that flips PENDING invites past `expires_at` to EXPIRED (today the read path checks expiry on accept; a sweeper would keep the table tidy for analytics).
+- Per-tier monthly invite cap (today: paid-tier is the only gate; structure is in place to add a count).

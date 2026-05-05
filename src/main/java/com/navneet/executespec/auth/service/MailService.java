@@ -143,6 +143,36 @@ public class MailService {
   }
 
   /**
+   * V175 — external project-collaboration invite. Sent when a project admin invites someone (by
+   * email) who may or may not have an account yet. The accept link routes through the same flow the
+   * org-invite uses — if the recipient has an account they're added immediately as a cross-org
+   * {@code ProjectMember}; if not they sign up first and the invite is consumed when they verify
+   * their email.
+   *
+   * <p>Best-effort, same pattern as the other send methods: caller's try/catch ensures email
+   * failure never aborts the invite write.
+   */
+  @Async
+  public void sendProjectInviteEmail(
+      String toEmail,
+      String projectName,
+      String inviterEmail,
+      String acceptUrl,
+      long expiresInDays) {
+    Context ctx = new Context();
+    ctx.setVariable("projectName", projectName);
+    ctx.setVariable("inviterEmail", inviterEmail);
+    ctx.setVariable("acceptUrl", acceptUrl);
+    ctx.setVariable("expiresInDays", expiresInDays);
+    ctx.setVariable("baseUrl", baseUrl);
+    sendHtml(
+        toEmail,
+        "You've been invited to project '" + projectName + "' on executespec",
+        "email/project-invite",
+        ctx);
+  }
+
+  /**
    * R-162 — v3 Free-tier referral invite. Sent when a Free user invites a friend; the signup URL
    * embeds the V153 invite token so the auth flow can bind the referee on signup.
    *
