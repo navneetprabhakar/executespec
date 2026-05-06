@@ -10,6 +10,11 @@ import {
 import type {PrSummary} from '@/types/project';
 import Pill from './Pill';
 import {STATUS_LABELS, VERDICT_LABELS, type V3Verdict, COST_PREFIX} from '../lib/terminology';
+import {
+  deriveVerdict as canonicalDeriveVerdict,
+  toV3Verdict,
+  verdictTone as canonicalVerdictTone,
+} from '@/lib/verdict';
 
 /**
  * R-122 — inline run-result card.
@@ -33,36 +38,30 @@ interface ResultCardProps {
   initialStatus?: string;
 }
 
+/**
+ * Audit r5 (P0-3): every verdict-derivation site now goes through
+ * `lib/verdict.ts` so v2 RunsPage / v2 dashboard / v3 ResultCard /
+ * v3 RunDetailPage all agree on the same run.
+ */
 function deriveVerdict(
   detail: RunDetail | null,
   report: ValidationReportData | null,
 ): V3Verdict | null {
   if (!detail) return null;
-  const status = detail.status;
-  if (status === 'FAILED' || status === 'CANCELLED' || status === 'ABORTED') return 'FAILED';
-  if (status !== 'COMPLETE' && status !== 'PARTIAL') return null;
-  // Use report signals when present.
-  const buildOk = report?.finalBuildPassed === true;
-  const reviewerClean = report?.reviewerVerdict === 'CLEAN';
-  const testsPass =
-    report?.testsTotal != null && report.testsTotal > 0
-      ? report.testsPassed === report.testsTotal
-      : null;
-  // Honest gate: "Ready" requires build OK AND reviewer CLEAN AND
-  // (tests pass OR no tests). Anything else → Needs review. The
-  // strict-review case (no tests + accuracyScore=5) lands in
-  // "Needs review", not "Ready".
-  if (buildOk && reviewerClean && testsPass !== false) return 'READY';
-  if (status === 'PARTIAL' || !buildOk) return 'FAILED';
-  return 'NEEDS_REVIEW';
+  return toV3Verdict(
+    canonicalDeriveVerdict({
+      status: detail.status,
+      finalBuildPassed: report?.finalBuildPassed,
+      testsPassed: report?.testsPassed,
+      testsTotal: report?.testsTotal,
+      reviewerVerdict: report?.reviewerVerdict,
+      verifiedScore: report?.verifiedScore,
+      statusReason: detail.statusReason,
+    }),
+  );
 }
 
-function verdictTone(v: V3Verdict | null): 'ok' | 'warn' | 'err' | 'neutral' {
-  if (v === 'READY') return 'ok';
-  if (v === 'NEEDS_REVIEW') return 'warn';
-  if (v === 'FAILED') return 'err';
-  return 'neutral';
-}
+const verdictTone = canonicalVerdictTone;
 
 export default function ResultCard({runId, initialStatus}: ResultCardProps) {
   const [detail, setDetail] = useState<RunDetail | null>(null);
@@ -167,7 +166,12 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
             )}
             {report?.reviewerVerdict === 'FIXED_ISSUES' && (
               <Pill tone='warn' size='sm'>
-                Reviewer fixed N issues
+                {(() => {
+                  const n = report.issuesCaught ?? 0;
+                  if (n === 0) return 'Reviewer auto-fixed';
+                  if (n === 1) return 'Reviewer fixed 1 issue';
+                  return `Reviewer fixed ${n} issues`;
+                })()}
               </Pill>
             )}
             {report?.reviewerVerdict === 'UNRESOLVED_ISSUES' && (

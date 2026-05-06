@@ -839,6 +839,35 @@ management:
       environment: local
 
 ---
+# ── Local profile: silence the OTLP exporter loop ────────────────────────────
+# Audit r5 (P1-6, 2026-05-06) — without these overrides, the JVM ships
+# every span to http://localhost:4318/v1/traces (the path inherited from
+# the base management.otlp.tracing.endpoint above). When no Tempo / Otel
+# collector is running locally — the default — the exporter retries
+# every 5–30s indefinitely, logs a stack trace per attempt, and (in
+# extreme cases like the 2026-05-06 product-review walk-through) piled
+# up enough off-heap pressure to kill the JVM silently mid-session.
+# Local dev does not need traces shipped anywhere; flip the exporters
+# off so `mvn spring-boot:run -Dspring-boot.run.profiles=local` is
+# quiet by default. To turn them back on, run with `--spring.profiles
+# .active=local,observability` after starting the local Grafana stack
+# via `cd observability && docker compose up -d`. Lives in the base
+# application.yml (not application-local.yml) because that file is
+# .gitignored — every developer needs this default, not just whoever
+# happens to set it locally.
+spring:
+  config:
+    activate:
+      on-profile: local
+management:
+  tracing:
+    enabled: false
+  otlp:
+    metrics:
+      export:
+        enabled: false
+
+---
 # ── GCP profile: use Cloud Trace + Cloud Monitoring instead of OTLP/Prometheus ─
 spring:
   config:

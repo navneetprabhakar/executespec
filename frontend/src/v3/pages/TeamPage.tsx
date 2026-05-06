@@ -497,7 +497,7 @@ function FreeTierUpsellCard({onUpgrade}: {onUpgrade: () => void}) {
         {/* Task 5 (2026-05-01 fix list) — V145 capped PRO at 20 runs / month
             (grandfathered, hidden from new buyers). Previous copy claimed
             "unlimited managed runs" which contradicted /pricing. */}
-        Free is a one-developer plan with 10 runs / month. Pro ($20/mo, grandfathered) gives 20 runs
+        Free is a one-developer plan with 5 runs / month. Solo ($29/mo) gives 30 runs
         / month for one developer. Team ($39/seat) adds per-seat collaboration with shared spec
         templates, audit log, SSO — and runs go through your own Anthropic / OpenAI / Google keys
         (BYOK), so there's no per-run charge from us beyond the seat fee.

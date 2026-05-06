@@ -25,6 +25,7 @@ import {
   COST_PREFIX,
   type V3Verdict,
 } from '../lib/terminology';
+import {deriveVerdict as canonicalDeriveVerdict, toV3Verdict} from '@/lib/verdict';
 
 // Mirrors RunDetailTabs.MONACO_LANG_MAP — kept inline so RunDetailPage doesn't pull in the entire
 // 2300-LOC tabs module just for one map. Add new extensions here when worker-generated stacks
@@ -174,20 +175,22 @@ export default function RunDetailPage() {
     };
   }, [active, runId]);
 
+  // Audit r5 (P0-3): canonical resolver from lib/verdict.ts. The previous
+  // bespoke logic disagreed with the v2 RunsPage row + v2 dashboard for the
+  // same run because each surface had its own copy.
   const verdict = useMemo<V3Verdict | null>(() => {
     if (!detail) return null;
-    const status = detail.status;
-    if (status === 'FAILED' || status === 'CANCELLED' || status === 'ABORTED') return 'FAILED';
-    if (status !== 'COMPLETE' && status !== 'PARTIAL') return null;
-    const buildOk = report?.finalBuildPassed === true;
-    const reviewerClean = report?.reviewerVerdict === 'CLEAN';
-    const testsPass =
-      report?.testsTotal != null && report.testsTotal > 0
-        ? report.testsPassed === report.testsTotal
-        : null;
-    if (buildOk && reviewerClean && testsPass !== false) return 'READY';
-    if (status === 'PARTIAL' || !buildOk) return 'FAILED';
-    return 'NEEDS_REVIEW';
+    return toV3Verdict(
+      canonicalDeriveVerdict({
+        status: detail.status,
+        finalBuildPassed: report?.finalBuildPassed,
+        testsPassed: report?.testsPassed,
+        testsTotal: report?.testsTotal,
+        reviewerVerdict: report?.reviewerVerdict,
+        verifiedScore: report?.verifiedScore,
+        statusReason: detail.statusReason,
+      }),
+    );
   }, [detail, report]);
 
   const headerTone =
@@ -398,10 +401,33 @@ export default function RunDetailPage() {
         </div>
       )}
 
-      {/* Failure summary (R-131) — only when warranted */}
-      {detail && (verdict === 'FAILED' || verdict === 'NEEDS_REVIEW') && (
-        <RunFailureSummary detail={detail} report={report} />
-      )}
+      {/* Failure summary (R-131) — only when there's an actual failure signal.
+          Audit r5 (P1-4, 2026-05-06): previously rendered for any non-READY
+          verdict, which fired on CLEAN_COMPLETION runs whose verifiedScore
+          happened to land below 85 ("Needs review" by score, but nothing
+          actually went wrong). The "What went wrong" header is now gated on
+          a real failure indicator: build failed, tests failed, reviewer
+          unresolved/failed, or terminal status FAILED/CANCELLED. */}
+      {detail &&
+        (() => {
+          const buildFailed = report?.finalBuildPassed === false;
+          const testsFailed =
+            report?.testsTotal != null &&
+            report.testsTotal > 0 &&
+            (report.testsPassed ?? 0) < report.testsTotal;
+          const reviewerBad =
+            report?.reviewerVerdict === 'UNRESOLVED_ISSUES' ||
+            report?.reviewerVerdict === 'REVIEW_FAILED';
+          const terminalBad =
+            detail.status === 'FAILED' ||
+            detail.status === 'CANCELLED' ||
+            detail.status === 'ABORTED' ||
+            detail.statusReason === 'FINAL_BUILD_FAILED' ||
+            detail.statusReason === 'ALL_TASKS_FAILED' ||
+            detail.statusReason === 'REVIEWER_FAILED';
+          const hasFailureSignal = buildFailed || testsFailed || reviewerBad || terminalBad;
+          return hasFailureSignal ? <RunFailureSummary detail={detail} report={report} /> : null;
+        })()}
 
       {/* File tree + content (two-pane on desktop, stacked on mobile).
           alignItems: stretch so the diff pane matches the sidebar height

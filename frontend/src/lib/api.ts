@@ -72,11 +72,29 @@ function parseErrorMessage(status: number, raw: string): string {
 }
 
 export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + url, {
-    headers: {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers},
-    credentials: 'include', // send refresh_token cookie
-    ...opts,
-  });
+  // Audit r5 (P0-2, 2026-05-06): a backend OOM crash during the new-user
+  // walkthrough surfaced as `fetch()` rejecting with `TypeError: Failed
+  // to fetch`. The catch site (RegisterPage / LoginPage / etc.) printed
+  // a generic "Registration failed" instead of the actual root cause —
+  // the user couldn't tell whether the product was broken or if they'd
+  // mistyped. Wrap the fetch call so network errors surface as a real
+  // ApiError with `status: 0` (a sentinel callers can branch on for
+  // retry UI). Genuine 4xx/5xx responses still reach the original status
+  // path.
+  let res: Response;
+  try {
+    res = await fetch(BASE + url, {
+      headers: {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers},
+      credentials: 'include', // send refresh_token cookie
+      ...opts,
+    });
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : 'unknown';
+    throw new ApiError(
+      0,
+      `Can't reach the server (${reason}). Check your connection and try again.`,
+    );
+  }
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
     throw new ApiError(res.status, parseErrorMessage(res.status, raw));
@@ -86,6 +104,17 @@ export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const text = await res.text();
   if (!text.trim()) return undefined as unknown as T;
   return JSON.parse(text);
+}
+
+/**
+ * Retryable HTTP statuses — callers can use this to decide whether to
+ * surface a "Retry" affordance instead of asking the user to reload the
+ * page. Audit r5 (P0-2).
+ */
+export function isRetryableError(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  // 0 = network error (backend unreachable). 5xx = transient server error.
+  return e.status === 0 || e.status >= 500;
 }
 
 /** Fetch a plain-text endpoint (e.g. file content served as text/plain). */

@@ -7,6 +7,7 @@ import ResultCard from '../components/ResultCard';
 import Pill from '../components/Pill';
 import RepoAttachPopover from '../components/RepoAttachPopover';
 import {PROVIDER_DISPLAY, STATUS_LABELS} from '../lib/terminology';
+import {useLiveRunStatus} from '../hooks/useLiveRunStatus';
 
 /**
  * R-120 — the dominant screen.
@@ -310,7 +311,6 @@ function BubbleView({bubble}: {bubble: Bubble}) {
   const isUser = bubble.role === 'user';
 
   if (bubble.kind === 'run' && bubble.runId) {
-    const isAwaitingApproval = bubble.status === 'AWAITING_APPROVAL';
     return (
       <div
         style={{
@@ -319,11 +319,7 @@ function BubbleView({bubble}: {bubble: Bubble}) {
           paddingLeft: 8,
         }}
       >
-        {isAwaitingApproval ? (
-          <PlanCard runId={bubble.runId} />
-        ) : (
-          <ResultCard runId={bubble.runId} initialStatus={bubble.status} />
-        )}
+        <RunBubbleCard runId={bubble.runId} initialStatus={bubble.status} />
       </div>
     );
   }
@@ -363,4 +359,29 @@ function BubbleView({bubble}: {bubble: Bubble}) {
       </div>
     </div>
   );
+}
+
+/**
+ * Audit r5 (P0-1, 2026-05-06): polls /api/runs/{runId} via useLiveRunStatus
+ * so the bubble renders the correct card for the LIVE status, not the
+ * frozen-at-submit-time `bubble.status` from the Zustand store. Without
+ * this, every new user submitted a run, hit AWAITING_APPROVAL, and never
+ * saw a PlanCard (the only Approve UI in v3) because the bubble's status
+ * stayed at 'PLANNING' forever.
+ *
+ * AWAITING_APPROVAL  → PlanCard (Approve / Adjust / Cancel)
+ * everything else    → ResultCard (status pill, evidence chips, Open run)
+ */
+function RunBubbleCard({runId, initialStatus}: {runId: string; initialStatus?: string}) {
+  const {status, refresh} = useLiveRunStatus(runId, initialStatus);
+  // Treat the optimistic `'planning'` bubble seed as in-flight too, so we
+  // wait for the real status before deciding which card to render.
+  const effective = status ?? initialStatus ?? null;
+  if (effective === 'AWAITING_APPROVAL') {
+    // PlanCard's onApproved fires right after /approve returns 200; bumping
+    // refresh() forces useLiveRunStatus to re-poll immediately so the UI
+    // flips to ResultCard within ~1s instead of waiting for the next tick.
+    return <PlanCard runId={runId} onApproved={refresh} />;
+  }
+  return <ResultCard runId={runId} initialStatus={effective ?? undefined} />;
 }
