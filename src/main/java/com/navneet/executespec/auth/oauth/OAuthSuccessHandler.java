@@ -42,19 +42,16 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
   private final AuthService authService;
   private final JwtUtil jwtUtil;
   private final OAuth2AuthorizedClientService authorizedClientService;
-  private final OAuthSurfaceResolver surfaceResolver;
 
   public OAuthSuccessHandler(
       OAuthUserMapper oAuthUserMapper,
       @Lazy AuthService authService,
       JwtUtil jwtUtil,
-      OAuth2AuthorizedClientService authorizedClientService,
-      OAuthSurfaceResolver surfaceResolver) {
+      OAuth2AuthorizedClientService authorizedClientService) {
     this.oAuthUserMapper = oAuthUserMapper;
     this.authService = authService;
     this.jwtUtil = jwtUtil;
     this.authorizedClientService = authorizedClientService;
-    this.surfaceResolver = surfaceResolver;
   }
 
   @Value("${app.mail.base-url:http://localhost:5173}")
@@ -78,16 +75,12 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       OAuthProfile profile =
           oAuthUserMapper.toProfile(registrationId, oAuth2User, authorizedClient);
 
-      // Phase 1.0 (Plan 1 #5): per-surface return URL for the post-login bounce.
-      // Pre-split (= today): no session attribute → null → fall back to dashboardUrl.
-      // Post-split: app.executespec.ai vs build.executespec.ai get their own callbacks.
-      String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
-      String baseRedirectUrl =
-          surfaceReturn != null ? surfaceReturn : dashboardUrl + "/auth/callback";
-      String baseLoginErrorUrl =
-          surfaceReturn != null
-              ? surfaceReturn.replace("/auth/callback", "/login")
-              : dashboardUrl + "/login";
+      // Single-surface retirement (2026-05-06) — the per-surface
+      // OAuth return URL was groundwork for the consumer/B2B split
+      // that's no longer on the roadmap. Every login now lands on
+      // the single dashboardUrl, like it did before V143.
+      String baseRedirectUrl = dashboardUrl + "/auth/callback";
+      String baseLoginErrorUrl = dashboardUrl + "/login";
 
       if (profile.email() == null || profile.email().isBlank()) {
         log.warn("OAuth login failed: no email returned from provider {}", registrationId);
@@ -112,11 +105,10 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
       String refreshToken = jwtUtil.generateRefreshToken(user);
 
       log.info(
-          "OAuth login success: provider={}, email={}, userId={}, surfaceReturn={}",
+          "OAuth login success: provider={}, email={}, userId={}",
           profile.provider(),
           profile.email(),
-          user.getId(),
-          surfaceReturn != null ? "set" : "default");
+          user.getId());
 
       // Redirect to frontend callback with tokens
       String redirectUrl =
@@ -129,25 +121,15 @@ public class OAuthSuccessHandler implements AuthenticationSuccessHandler {
 
     } catch (OAuthEmailConflictException e) {
       log.warn("OAuth email conflict: {}", e.getMessage());
-      String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
-      String baseLoginErrorUrl =
-          surfaceReturn != null
-              ? surfaceReturn.replace("/auth/callback", "/login")
-              : dashboardUrl + "/login";
       response.sendRedirect(
-          baseLoginErrorUrl
-              + "?error="
+          dashboardUrl
+              + "/login?error="
               + URLEncoder.encode("oauth_email_conflict", StandardCharsets.UTF_8));
     } catch (Exception e) {
       log.error("OAuth login error", e);
-      String surfaceReturn = surfaceResolver.resolveReturnUrl(request);
-      String baseLoginErrorUrl =
-          surfaceReturn != null
-              ? surfaceReturn.replace("/auth/callback", "/login")
-              : dashboardUrl + "/login";
       response.sendRedirect(
-          baseLoginErrorUrl
-              + "?error="
+          dashboardUrl
+              + "/login?error="
               + URLEncoder.encode("oauth_failed", StandardCharsets.UTF_8));
     }
   }
