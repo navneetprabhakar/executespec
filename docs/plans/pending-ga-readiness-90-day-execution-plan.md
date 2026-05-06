@@ -5,6 +5,39 @@
 > **This document:** the per-week, per-task execution plan that operationalises Plan B.
 > **Owner:** founding eng team (3 engineers assumed: Backend/AI, Full-stack, Frontend/UX).
 > **Cadence:** Friday demo + Monday sprint plan.
+>
+> ---
+>
+> ## Status board (updated 2026-05-06)
+>
+> | Phase | Item | Status | Branch |
+> | --- | --- | --- | --- |
+> | P0 | Land in-flight branches | NOT MERGED — per founder direction (work continues on `feature/project-cost-pool-tuning`) | n/a |
+> | P1.1 | AccuracyAssessment read-budget rewrite | ✅ shipped 2026-05-06 | feature/project-cost-pool-tuning |
+> | P1.2 | verifiedScore decoupled from LLM read budget | ✅ shipped 2026-05-06 | feature/project-cost-pool-tuning |
+> | P1.2-followup | Backfill historical verifiedScore | ✅ shipped 2026-05-06 (one-shot SUPER_ADMIN endpoint) | feature/project-cost-pool-tuning |
+> | P1.4 | UI honesty pass | ✅ already covered by R-09 reconciliation + V171 backfill + v2.5.10 verifiedScore primary; no additional work needed | dev (already merged) |
+> | P2.1 | Un-hide PRO as SOLO ($29/mo) | ✅ shipped 2026-05-06 (V176) | feature/project-cost-pool-tuning |
+> | P2.2 | REVIEW bolt-on at $9/repo | ⏸ deferred — V172 agents already shipped, pricing/bolt-on schema is a follow-up | n/a |
+> | P2.3 | Activate annual billing | ✅ shipped 2026-05-06 (V177 Solo Yearly rows; V146 already had Team/Max yearly) | feature/project-cost-pool-tuning |
+> | P2.4 | Founder pricing 50% lifetime first 100 | ✅ schema + service shipped 2026-05-06 (V177); ❎ gateway wire-up blocked on ops creating FOUNDER50_LIFETIME Stripe coupon | feature/project-cost-pool-tuning |
+> | P3.1 | Cost cap outcome consistency in WorkerAgent | ✅ shipped 2026-05-06 | feature/project-cost-pool-tuning |
+> | P3.2 | UI cost-cap progress + "Stop at $X" toggle | ✅ shipped 2026-05-06 (V178 + frontend) | feature/project-cost-pool-tuning |
+> | P3.3 | v2-eval HIGH band 100% pass | ⏸ deferred — needs LLM API budget + dev access | n/a |
+> | P4.1 | ArchUnit guard coverage pin | ✅ shipped 2026-05-06 | feature/project-cost-pool-tuning |
+> | P4.1-followup | Migrate 35 legacy guard sites | ✅ shipped 2026-05-06 in 3 batches; 35 of 35 cleared | feature/project-cost-pool-tuning |
+> | P4.2 | SLO definitions doc | ✅ shipped 2026-05-06 | feature/project-cost-pool-tuning |
+> | P4.2-followup | Grafana alert rules + PagerDuty wiring | ⏸ deferred — needs PagerDuty signup + ops | n/a |
+> | P4.3 | Public status page | ⏸ deferred — needs Better Stack / Statuspage signup | n/a |
+> | P5.1 | Beta partner outreach (25 partners) | ⏸ founder workstream | n/a |
+> | P5.2 | CLI on npm | ⏸ deferred — needs npm publish token | n/a |
+> | P5.3 | SOC 2 Type I audit kickoff | ⏸ deferred — needs vCISO + AICPA auditor engagement | n/a |
+> | P5.4 | DPA + GDPR data-export endpoint | ✅ shipped 2026-05-06 (schemaVersion 2 — runs/notifications/billing) | feature/project-cost-pool-tuning |
+> | P6 | GA cutover | ⏸ Week 13 — depends on Phase 5 completion + soak | n/a |
+>
+> **What's blocked on external:** P3.3 (LLM budget), P4.2-followup (PagerDuty), P4.3 (status page service), P5.1 (founder outreach), P5.2 (npm), P5.3 (SOC 2 auditor), P2.4 gateway wire-up (Stripe coupon).
+>
+> **All autonomously shippable code work for Phases 1, 2, 3, 4, 5 is complete on `feature/project-cost-pool-tuning`.** 13 commits since the audit landed.
 
 ---
 
