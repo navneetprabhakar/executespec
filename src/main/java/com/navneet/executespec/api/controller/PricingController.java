@@ -10,6 +10,8 @@ import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.pricing.ModelPricing;
 import com.navneet.executespec.pricing.ModelPricingId;
 import com.navneet.executespec.pricing.ModelPricingRepository;
+import com.navneet.executespec.router.ModelMatrixProperties;
+import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -26,21 +28,34 @@ public class PricingController {
 
   private final ModelPricingRepository pricingRepo;
   private final RunAccessGuard guard;
+  private final ModelRegistry modelRegistry;
+
+  /**
+   * 2026-05-06 — convert a {@link ModelPricing} entity to a {@link PricingRow} DTO. Hydrates
+   * cached-input rate, chain-tier, and display-label from the YAML matrix so the frontend
+   * pricing table doesn't need a hardcoded model→role map.
+   */
+  private PricingRow toRow(ModelPricing p) {
+    String model = p.getId().getModel();
+    ModelMatrixProperties.ModelConfig cfg = modelRegistry.allModels().get(model);
+    return new PricingRow(
+        p.getId().getProvider(),
+        model,
+        p.getInputCostPer1m() != null ? p.getInputCostPer1m() : 0,
+        p.getCachedInputCostPer1m() != null ? p.getCachedInputCostPer1m() : 0,
+        p.getOutputCostPer1m() != null ? p.getOutputCostPer1m() : 0,
+        p.getNotes(),
+        cfg != null ? cfg.getChainTier() : null,
+        modelRegistry.displayLabelFor(model),
+        p.getUpdatedAt());
+  }
 
   /** List all pricing entries. Any authenticated user can view pricing. */
   @GetMapping
   public ResponseEntity<List<PricingRow>> list(
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireAuthenticated(userDetails);
-    List<PricingRow> rows =
-        pricingRepo.findAll().stream()
-            .map(
-                p ->
-                    new PricingRow(
-                        p.getId().getProvider(), p.getId().getModel(),
-                        p.getInputCostPer1m(), p.getOutputCostPer1m(),
-                        p.getNotes(), p.getUpdatedAt()))
-            .toList();
+    List<PricingRow> rows = pricingRepo.findAll().stream().map(this::toRow).toList();
     return ResponseEntity.ok(rows);
   }
 
@@ -53,13 +68,7 @@ public class PricingController {
     guard.requireAuthenticated(userDetails);
     return pricingRepo
         .findByIdProviderAndIdModel(provider, model)
-        .map(
-            p ->
-                ResponseEntity.ok(
-                    new PricingRow(
-                        p.getId().getProvider(), p.getId().getModel(),
-                        p.getInputCostPer1m(), p.getOutputCostPer1m(),
-                        p.getNotes(), p.getUpdatedAt())))
+        .map(p -> ResponseEntity.ok(toRow(p)))
         .orElse(ResponseEntity.notFound().build());
   }
 
@@ -88,10 +97,6 @@ public class PricingController {
                 .updatedAt(Instant.now())
                 .build());
 
-    return ResponseEntity.ok(
-        new PricingRow(
-            saved.getId().getProvider(), saved.getId().getModel(),
-            saved.getInputCostPer1m(), saved.getOutputCostPer1m(),
-            saved.getNotes(), saved.getUpdatedAt()));
+    return ResponseEntity.ok(toRow(saved));
   }
 }
