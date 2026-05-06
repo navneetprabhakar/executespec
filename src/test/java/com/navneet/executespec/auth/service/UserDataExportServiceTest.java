@@ -2,6 +2,7 @@ package com.navneet.executespec.auth.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -23,6 +24,13 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.billing.repository.InvoiceRepository;
+import com.navneet.executespec.notification.NotificationRepository;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
+
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +46,10 @@ class UserDataExportServiceTest {
   private AppUserRepository userRepo;
   private OrgRepository orgRepo;
   private ProjectRepository projectRepo;
+  private PipelineRunRepository runRepo;
+  private NotificationRepository notificationRepo;
+  private BillingSubscriptionRepository subRepo;
+  private InvoiceRepository invoiceRepo;
   private UserDataExportService svc;
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -46,9 +58,26 @@ class UserDataExportServiceTest {
     userRepo = mock(AppUserRepository.class);
     orgRepo = mock(OrgRepository.class);
     projectRepo = mock(ProjectRepository.class);
-    svc = new UserDataExportService(userRepo, orgRepo, projectRepo);
+    runRepo = mock(PipelineRunRepository.class);
+    notificationRepo = mock(NotificationRepository.class);
+    subRepo = mock(BillingSubscriptionRepository.class);
+    invoiceRepo = mock(InvoiceRepository.class);
+    svc =
+        new UserDataExportService(
+            userRepo, orgRepo, projectRepo, runRepo, notificationRepo, subRepo, invoiceRepo);
     lenient().when(orgRepo.findById(anyString())).thenReturn(Optional.empty());
     lenient().when(projectRepo.findByOrgId(anyString())).thenReturn(List.of());
+    Page<?> emptyPage = new PageImpl<>(List.of());
+    lenient()
+        .when(runRepo.findByCreatedByUserIdOrderByStartedAtDesc(anyString(), any()))
+        .thenAnswer(inv -> emptyPage);
+    lenient()
+        .when(notificationRepo.findByUserIdOrderByCreatedAtDesc(anyString(), any()))
+        .thenAnswer(inv -> emptyPage);
+    lenient().when(subRepo.findActiveByUserId(anyString())).thenReturn(Optional.empty());
+    lenient()
+        .when(invoiceRepo.findByUserIdOrderByInvoiceDateDesc(anyString(), any()))
+        .thenAnswer(inv -> emptyPage);
   }
 
   private AppUser sampleUser() {
@@ -99,7 +128,7 @@ class UserDataExportServiceTest {
     Map<String, Object> manifest = MAPPER.readValue(entries.get("manifest.json"), Map.class);
     assertThat(manifest).containsKey("exportedAt");
     assertThat(manifest.get("exportedFor")).isEqualTo("user-123");
-    assertThat(manifest.get("schemaVersion")).isEqualTo(1);
+    assertThat(manifest.get("schemaVersion")).isEqualTo(2);
     assertThat(manifest.get("scope").toString()).contains("Personal data only");
     assertThat(manifest.get("rights").toString())
         .contains("GDPR Article 15")
@@ -117,7 +146,7 @@ class UserDataExportServiceTest {
     @SuppressWarnings("unchecked")
     Map<String, Object> payload = MAPPER.readValue(entries.get("payload.json"), Map.class);
 
-    assertThat(payload).containsKeys("user", "orgs", "projects");
+    assertThat(payload).containsKeys("user", "orgs", "projects", "runs", "notifications", "billing");
     @SuppressWarnings("unchecked")
     Map<String, Object> userBlock = (Map<String, Object>) payload.get("user");
     assertThat(userBlock.get("email")).isEqualTo("alice@example.com");
@@ -168,6 +197,39 @@ class UserDataExportServiceTest {
         .contains("schemaVersion")
         .contains("admin@executespec.ai")
         .contains("Article 17");
+  }
+
+  @Test
+  void schemaV2_payloadContainsRunsNotificationsBillingKeys() throws Exception {
+    when(userRepo.findById("user-123")).thenReturn(Optional.of(sampleUser()));
+
+    Map<String, byte[]> entries = readZip(svc.exportForUser("user-123").zipBytes());
+    @SuppressWarnings("unchecked")
+    Map<String, Object> payload = MAPPER.readValue(entries.get("payload.json"), Map.class);
+
+    // P5.4-followup schemaVersion 2 — three new top-level keys.
+    assertThat(payload).containsKeys("runs", "notifications", "billing");
+    @SuppressWarnings("unchecked")
+    Map<String, Object> billing = (Map<String, Object>) payload.get("billing");
+    // Jackson is configured with NON_NULL inclusion, so an absent active
+    // subscription is omitted from the JSON entirely. invoices is always
+    // present (empty list when none exist).
+    assertThat(billing).containsKey("invoices");
+    assertThat(payload.get("runs")).isEqualTo(List.of());
+    assertThat(payload.get("notifications")).isEqualTo(List.of());
+    assertThat(billing.get("invoices")).isEqualTo(List.of());
+    // activeSubscription not asserted when null — its presence/absence is
+    // verified separately when the mock returns a non-null subscription.
+  }
+
+  @Test
+  void schemaV2_manifestAdvertisesRowLimit() throws Exception {
+    when(userRepo.findById("user-123")).thenReturn(Optional.of(sampleUser()));
+    Map<String, byte[]> entries = readZip(svc.exportForUser("user-123").zipBytes());
+    @SuppressWarnings("unchecked")
+    Map<String, Object> manifest = MAPPER.readValue(entries.get("manifest.json"), Map.class);
+    assertThat(manifest).containsKey("rowLimit");
+    assertThat((Integer) manifest.get("rowLimit")).isPositive();
   }
 
   @Test

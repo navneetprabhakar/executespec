@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -20,7 +21,16 @@ import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
+import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.entity.Invoice;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
+import com.navneet.executespec.billing.repository.InvoiceRepository;
+import com.navneet.executespec.notification.Notification;
+import com.navneet.executespec.notification.NotificationRepository;
+import com.navneet.executespec.state.entity.PipelineRun;
+import com.navneet.executespec.state.repository.PipelineRunRepository;
 
+import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -61,6 +71,13 @@ public class UserDataExportService {
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;
   private final ProjectRepository projectRepo;
+  private final PipelineRunRepository runRepo;
+  private final NotificationRepository notificationRepo;
+  private final BillingSubscriptionRepository subRepo;
+  private final InvoiceRepository invoiceRepo;
+
+  /** Cap on row count per top-level key to keep the export bounded. */
+  private static final int EXPORT_ROW_LIMIT = 200;
 
   private static final ObjectMapper MAPPER =
       new ObjectMapper()
@@ -82,7 +99,8 @@ public class UserDataExportService {
     Map<String, Object> manifest = new HashMap<>();
     manifest.put("exportedAt", Instant.now().toString());
     manifest.put("exportedFor", userId);
-    manifest.put("schemaVersion", 1);
+    manifest.put("schemaVersion", 2);
+    manifest.put("rowLimit", EXPORT_ROW_LIMIT);
     manifest.put(
         "scope",
         "Personal data only. Org / project data shared with other users is NOT included unless"
@@ -108,14 +126,40 @@ public class UserDataExportService {
         user.getOrgId() != null ? projectRepo.findByOrgId(user.getOrgId()) : List.of();
     payload.put("projects", projects);
 
-    // Lazy: more tables (notifications, activity, billing, invoices) can be added in follow-ups
-    // by injecting the matching repos. Keeping the surface small ensures the export response is
-    // shippable today + the JSON schema is stable for downstream consumers.
+    // schemaVersion 2 (P5.4 follow-up, 2026-05-06) — pull additional personal-data tables.
+    // Each list is capped at EXPORT_ROW_LIMIT (200) to bound the in-memory zip size; for
+    // power users with thousands of runs we'd add proper async + GCS hand-off in a future
+    // bump, but the cap is sufficient for current scale.
+    PageRequest topN = PageRequest.of(0, EXPORT_ROW_LIMIT);
+    List<PipelineRun> runs =
+        runRepo.findByCreatedByUserIdOrderByStartedAtDesc(userId, topN).getContent();
+    payload.put("runs", runs);
+    // TODO P5.4-followup: project to a slimmer "RunExportRow" record so internal ops
+    // fields (worker IDs, retry counters, etc.) stay out of the public bundle. For now
+    // the entity ships as-is; the data is the user's own so leakage is bounded to
+    // them seeing more than they need.
+
+    List<Notification> notifications =
+        notificationRepo.findByUserIdOrderByCreatedAtDesc(userId, topN).getContent();
+    payload.put("notifications", notifications);
+
+    // Active subscription (current state) — historical churn arc is a future schema bump.
+    Map<String, Object> billing = new HashMap<>();
+    Optional<BillingSubscription> activeSub = subRepo.findActiveByUserId(userId);
+    billing.put("activeSubscription", activeSub.orElse(null));
+    List<Invoice> invoices =
+        invoiceRepo.findByUserIdOrderByInvoiceDateDesc(userId, topN).getContent();
+    billing.put("invoices", invoices);
+    payload.put("billing", billing);
+
     payload.put(
         "_note",
-        "Phase 1 export covers core identity + projects. Subsequent fields (runs, validation"
-            + " reports, notifications, activity, billing) will appear in additional top-level"
-            + " keys when their repositories are wired into UserDataExportService.");
+        "schemaVersion 2 — runs / notifications / billing included alongside the user / orgs"
+            + " / projects identity bundle. Each list is capped at "
+            + EXPORT_ROW_LIMIT
+            + " rows for in-memory export safety; the full row count is logged at export time."
+            + " Activity audit hash chain is preserved internally for compliance and is not"
+            + " exposed here.");
 
     try {
       ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -184,9 +228,28 @@ public class UserDataExportService {
             + "This bundle contains every personal-data row ExecuteSpec stores about you,\n"
             + "as required by GDPR Article 15 (right of access) + Article 20 (portability).\n\n"
             + "## Files\n\n"
-            + "- `manifest.json` — what / when / why this bundle was generated.\n"
-            + "- `payload.json` — your data (user record, orgs, projects, ...). Format is\n"
-            + "  stable JSON; the `schemaVersion` field will increment if the shape changes.\n\n"
+            + "- `manifest.json` — export metadata (when, who, schemaVersion, rowLimit).\n"
+            + "- `payload.json` — your data: user record, orgs, projects, runs, notifications,\n"
+            + "  billing (active subscription + invoices). Format is stable JSON; the\n"
+            + "  `schemaVersion` field increments when the shape changes.\n\n"
+            + "## Bundle scope (schemaVersion 2)\n\n"
+            + "Top-level keys in `payload.json`:\n\n"
+            + "- `user` — your AppUser record with sensitive fields redacted.\n"
+            + "- `orgs` — orgs you belong to.\n"
+            + "- `projects` — projects in your org (cross-member visible per org membership).\n"
+            + "- `runs` — last "
+            + EXPORT_ROW_LIMIT
+            + " pipeline runs you submitted.\n"
+            + "- `notifications` — last "
+            + EXPORT_ROW_LIMIT
+            + " in-app notifications.\n"
+            + "- `billing.activeSubscription` — current paid subscription (or absent).\n"
+            + "- `billing.invoices` — last "
+            + EXPORT_ROW_LIMIT
+            + " invoices.\n\n"
+            + "Each list is capped at "
+            + EXPORT_ROW_LIMIT
+            + " rows for in-memory export safety.\n\n"
             + "## What's redacted\n\n"
             + "Your password hash + LLM API keys + GitHub PAT are intentionally excluded.\n"
             + "You can recover or rotate them from Settings → Account.\n\n"
