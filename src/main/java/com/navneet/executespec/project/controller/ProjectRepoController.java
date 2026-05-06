@@ -75,6 +75,10 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/sync")
   public ResponseEntity<ProjectRepoDto> syncRepo(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — visible repo-access check at the call site. The
+    // service-side `loadRepoForRead` runs again as defense in depth.
+    service.loadRepoForRead(
+        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     return ResponseEntity.ok(
         service.syncRepo(
             repoId,
@@ -92,6 +96,9 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/webhook")
   public ResponseEntity<java.util.Map<String, Object>> installRepoWebhook(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — explicit access check before the GitHub-side mutation.
+    service.loadRepoForRead(
+        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     var u = userDetails.getUser();
     boolean ok = service.installWebhook(repoId, u.getGithubPat(), u.getId(), u.getOrgId());
     if (ok) {
@@ -113,6 +120,10 @@ public class ProjectRepoController {
   @DeleteMapping("/api/repos/{repoId}")
   public ResponseEntity<Void> deleteRepo(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — assert tenant before destructive op. service.deleteRepo
+    // also calls loadRepoForWrite internally as defense in depth.
+    service.loadRepoForRead(
+        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     service.deleteRepo(
         repoId,
         userDetails.getUser().getId(),

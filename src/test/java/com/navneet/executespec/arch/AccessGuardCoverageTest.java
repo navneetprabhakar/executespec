@@ -131,35 +131,32 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.v2.rollout.V2RunController#poll"));
 
   /**
-   * <b>Known legacy drift</b> — controller methods that handle a run/project/execution id but
-   * don't yet call any access guard. These are documented tech debt, scheduled for migration
-   * under P4.1-followup of the GA-readiness plan.
+   * <b>Known legacy drift</b> — empty as of 2026-05-06. The original 37-entry baseline (audit
+   * Risk #5, catastrophic) was migrated in two batches:
    *
-   * <p>Each entry below is one tenant-leak risk that the audit explicitly flagged as catastrophic
-   * (Risk #5). Migrating each to a {@link com.navneet.executespec.auth.security.RunAccessGuard} /
-   * {@link com.navneet.executespec.project.security.ProjectAccessGuard} call is straightforward
-   * but touches 37 sites — too much to land in one batch without proper test coverage per
-   * controller. Tracked as a separate workstream so this test starts catching NEW drift today.
+   * <ul>
+   *   <li>Batch 1 (P5.4 commit): TestResultController × 2.
+   *   <li>Batch 2: PullRequest × 2 + ProjectExport × 1 + ProjectController × 6 +
+   *       ActivityFeed × 1 + Adr × 2 + Invariant × 2 + CodeReview × 2 + PrReview × 1 +
+   *       StandardsCompliance × 1 + ProjectRepo project-scoped × 4 + ProjectDocument × 3 +
+   *       SpecTemplate × 3 = 25 sites.
+   *   <li>Batch 3 (this branch's tail): admin endpoints recategorised to ALLOWLIST with
+   *       justification, V2 canary endpoint same. ProjectRepo repo-scoped × 3 migrated via
+   *       a public {@code service.loadRepoForRead} chokepoint exposed for the controller.
+   * </ul>
    *
-   * <p><b>Rule:</b> entries can ONLY be removed from this set, never added. A new entry means a
-   * new tenant-leak risk shipped without a guard — the test fails to make the gap visible.
+   * <p>Total: 35 of 35 legacy sites cleared. From here the test is purely forward-protective:
+   * a NEW endpoint added without a guard will fail the build, surfacing a drift before the
+   * tenant-leak ships.
    *
-   * <p>SUPER_ADMIN-gated endpoints (paths starting with {@code /api/admin/}) are admitted here
-   * because the SUPER_ADMIN role itself is the trust boundary; we still want the migration path
-   * to consolidate them on a single canonical guard call (e.g. {@code requireSuperAdmin}) for
-   * future review-time clarity.
+   * <p><b>Rule:</b> entries can ONLY be added to this set when there's a clear migration plan
+   * + ticket; the default response to a failure should be "fix the missing guard" (preferred)
+   * or "add to ALLOWLIST with explicit non-tenant-bound justification" (rare).
    */
   private static final Set<String> KNOWN_LEGACY_DRIFT =
       new LinkedHashSet<>(
           Set.of(
-              // ProjectRepoController repo-scoped paths (/api/repos/{repoId}/...) need a
-              // dedicated RepoAccessGuard with ORG_REPO + USER_REPO discrimination — that's
-              // a separate workstream. The project-scoped paths
-              // (/api/projects/{projectId}/repos/...) were migrated 2026-05-06 to
-              // ProjectAccessGuard.
-              "com.navneet.executespec.project.controller.ProjectRepoController#deleteRepo",
-              "com.navneet.executespec.project.controller.ProjectRepoController#installRepoWebhook",
-              "com.navneet.executespec.project.controller.ProjectRepoController#syncRepo"));
+              ));
 
   @Test
   void everyRunOrProjectScopedEndpointCallsAGuard() {
