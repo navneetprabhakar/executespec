@@ -6,6 +6,7 @@ import java.util.Map;
 
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelMatrixProperties;
+import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -24,29 +25,23 @@ import lombok.RequiredArgsConstructor;
 public class ModelController {
 
   private final ModelMatrixProperties matrixProps;
+  private final ModelRegistry modelRegistry;
 
   // Task 15 (2026-05-01 fix list): post-V120 the canonical provider key
   // is "gemini" (was "google" pre-migration); the label map lacked the
   // new key so the New Run modal rendered "gemini" lowercase next to
   // "Anthropic" / "OpenAI". Both keys are mapped to "Gemini" until the
   // legacy "google" alias is fully retired.
+  //
+  // Provider-level labels stay as a small in-class map because there are only 3 providers and
+  // they don't otherwise live in the YAML matrix. Model-level labels were moved to
+  // model-matrix.models.<id>.display-label per the 2026-05-06 single-source consolidation.
   private static final Map<String, String> PROVIDER_LABELS =
       Map.of(
           "anthropic", "Anthropic",
           "gemini", "Gemini",
           "google", "Gemini",
           "openai", "OpenAI");
-
-  private static final Map<String, String> MODEL_LABELS =
-      Map.ofEntries(
-          Map.entry("claude-opus-4-6", "Claude Opus 4.6"),
-          Map.entry("claude-sonnet-4-6", "Claude Sonnet 4.6"),
-          Map.entry("claude-haiku-4-5-20251001", "Claude Haiku 4.5"),
-          Map.entry("gemini-3.1-pro-preview", "Gemini 3.1 Pro"),
-          Map.entry("gemini-3-flash-preview", "Gemini 3 Flash Preview"),
-          Map.entry("gemini-2.5-flash", "Gemini 2.5 Flash"),
-          Map.entry("gpt-5.4", "GPT-5.4"),
-          Map.entry("gpt-5.4-mini", "GPT-5.4 Mini"));
 
   @GetMapping("/available")
   public ResponseEntity<AvailableModelsResponse> available() {
@@ -64,7 +59,7 @@ public class ModelController {
                     new ModelEntry(
                         models.getPlanning(),
                         "PLANNING",
-                        MODEL_LABELS.getOrDefault(models.getPlanning(), models.getPlanning())));
+                        modelRegistry.displayLabelFor(models.getPlanning())));
               }
               // WORKHORSE tier
               if (models.getWorkhorse() != null) {
@@ -77,7 +72,7 @@ public class ModelController {
                       new ModelEntry(
                           workhorseId,
                           "WORKHORSE",
-                          MODEL_LABELS.getOrDefault(workhorseId, workhorseId)));
+                          modelRegistry.displayLabelFor(workhorseId)));
                 }
               }
 
