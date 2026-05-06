@@ -37,8 +37,12 @@ public class ProjectChatController {
   private final TierConfigRepository tierConfigRepo;
   // 2026-05-02 — drive the chat header's context-window chip from the actual resolved model
   // (provider-level guess was wrong: gpt-4o = 128k vs gpt-5.4 = 256k; Sonnet 200k vs Opus-1M).
+  // 2026-05-06 — switched from ModelContextWindowMap to ModelRegistry as the single source of
+  // truth for context-window metadata. The map duplicated YAML and drifted (gpt-5.4 was 256K
+  // in the map, 200K in YAML). YAML wins; ModelRegistry's prefix-fallback handles forward-compat
+  // models the YAML doesn't yet know about.
   private final com.navneet.executespec.router.ModelResolver modelResolver;
-  private final com.navneet.executespec.router.ModelContextWindowMap contextWindowMap;
+  private final com.navneet.executespec.router.ModelRegistry modelRegistry;
 
   @GetMapping
   public ResponseEntity<List<ProjectChatMessage>> history(
@@ -77,7 +81,7 @@ public class ProjectChatController {
             resolved.getActualProvider() == null
                 ? provider.name()
                 : resolved.getActualProvider().name(),
-            contextWindowMap.forModel(model)));
+            modelRegistry.contextLimitForOrPrefixFallback(model)));
   }
 
   @PostMapping
