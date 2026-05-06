@@ -106,25 +106,19 @@ export default function LoginPage() {
         <p className='mt-1 text-sm text-muted'>Ship AI-written PRs you can actually merge.</p>
       </div>
 
-      {/* OAuth — M-047 (Backlog): route through /api/auth/oauth2/init so the
-          backend stashes the surface (vibe vs executespec) and the
-          OAuthSuccessHandler can redirect post-login to the right
-          frontend domain. The init bridge resolves surface from the
-          query param, then from Origin/Referer, then from the
-          OAuthSurfaceResolver's session fallback. Pre-Phase-2 it's a
-          no-op redirect (same /oauth2/authorization/{provider} target),
-          so this wire is forward-compatible without ops work. */}
+      {/* OAuth — direct hit on Spring Security's authorization endpoint
+          mapped at /api/auth/oauth2/authorize/{registrationId} (see
+          SecurityConfig.oauth2Login.authorizationEndpoint). The earlier
+          /api/auth/oauth2/init bridge was a forward-compat hook for the
+          v3 surface-split rewrite (vibe / executespec) which never
+          landed on this branch — calling it returns 404, breaking
+          Continue-with-Google. Going direct works on every env that has
+          OAuth configured. */}
       <div className='space-y-2.5'>
-        <OAuthButton
-          href={`/api/auth/oauth2/init?provider=google&surface=${encodeURIComponent(currentSurface())}`}
-          provider='google'
-        >
+        <OAuthButton href='/api/auth/oauth2/authorize/google' provider='google'>
           Continue with Google
         </OAuthButton>
-        <OAuthButton
-          href={`/api/auth/oauth2/init?provider=github&surface=${encodeURIComponent(currentSurface())}`}
-          provider='github'
-        >
+        <OAuthButton href='/api/auth/oauth2/authorize/github' provider='github'>
           Continue with GitHub
         </OAuthButton>
       </div>

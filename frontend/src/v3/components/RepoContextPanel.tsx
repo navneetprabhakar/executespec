@@ -135,7 +135,7 @@ export default function RepoContextPanel({projectId}: Props) {
           {summary ? (
             <p style={{margin: 0, whiteSpace: 'pre-wrap'}}>{summary}</p>
           ) : (
-            <p style={{margin: 0, color: 'var(--v3-text-subtle)', fontStyle: 'italic'}}>
+            <p style={{margin: 0, color: 'var(--v3-text-subtle)'}}>
               Summary not yet generated — run an Analyse from the Code tab to read your codebase.
             </p>
           )}

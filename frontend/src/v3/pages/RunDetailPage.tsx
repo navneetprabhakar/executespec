@@ -19,6 +19,7 @@ import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
 import Pill from '../components/Pill';
 import RunFailureSummary from '../components/RunFailureSummary';
+import RunSidePanel from '../components/RunSidePanel';
 import {
   STATUS_LABELS,
   VERDICT_LABELS,
@@ -473,15 +474,18 @@ export default function RunDetailPage() {
           return hasFailureSignal ? <RunFailureSummary detail={detail} report={report} /> : null;
         })()}
 
-      {/* File tree + content (two-pane on desktop, stacked on mobile).
-          alignItems: stretch so the diff pane matches the sidebar height
-          — the sidebar grows to fit its file list, and the diff pane
-          stretches to the same height instead of being floored at its
-          280px min-height. */}
+      {/* File tree + diff + side panel (three-pane on desktop, stacked
+          on tablet/mobile). The right side panel surfaces the operator
+          views (Plan / Log / Preview) that the v2 RunDetailTabs used to
+          host — for in-flight runs it streams SSE; for AWAITING_APPROVAL
+          it renders the inline plan-gate so users hitting the URL
+          directly can approve without bouncing back to Compose; for
+          terminal-OK runs it embeds the preview iframe. alignItems:
+          stretch keeps the three columns the same height. */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(220px, 280px) 1fr',
+          gridTemplateColumns: 'minmax(220px, 260px) minmax(0, 1fr) 380px',
           gap: 16,
           alignItems: 'stretch',
         }}
@@ -696,10 +700,30 @@ export default function RunDetailPage() {
             </div>
           )}
         </section>
+
+        <RunSidePanel
+          runId={runId}
+          detail={detail}
+          onRefetch={() => {
+            // Approve / cancel from PlanCard inside the panel — refetch the run
+            // so the next render swaps the gate for the live task list.
+            getRun(runId)
+              .then((d) => setDetail(d))
+              .catch(() => undefined);
+          }}
+        />
       </div>
 
-      {/* Mobile collapse: stack the two panes */}
+      {/* Tablet/mobile collapse: stack files + diff, then full-width side panel. */}
       <style>{`
+        @media (max-width: 1100px) {
+          .v3-rundetail-grid {
+            grid-template-columns: minmax(200px, 240px) 1fr !important;
+          }
+          .v3-rundetail-grid > aside:last-child {
+            grid-column: 1 / -1;
+          }
+        }
         @media (max-width: 768px) {
           .v3-rundetail-grid {
             grid-template-columns: 1fr !important;

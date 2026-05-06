@@ -130,6 +130,9 @@ import BillingPage from '@/v3/pages/BillingPage';
 import TeamPage from '@/v3/pages/TeamPage';
 import TrustPage from '@/v3/pages/TrustPage';
 import InsightsPage from '@/v3/pages/InsightsPage';
+// 2026-05-06 — restored flat /runs page for individual / FREE users who
+// don't have access to the Project Shell. See RunsListPage.tsx header.
+import RunsListPage from '@/v3/pages/RunsListPage';
 // R-340 — Migrations product W5 frontend (gallery + detail).
 import MigrationsPage from '@/v3/pages/MigrationsPage';
 import MigrationDetailPage from '@/v3/pages/MigrationDetailPage';
@@ -335,11 +338,14 @@ export default function App() {
                 subscribers whose tier-state-changed email links here. */}
             <Route path='legacy/billing' element={<Navigate to='/billing' replace />} />
             <Route index element={<Navigate to='/home' replace />} />
-            {/* /runs is now a redirect — the flat-list-of-all-runs
-                view (RunsPage) was deleted with the v2 chrome. Users
-                navigate runs through their project home or the per-
-                project Launches list inside ProjectDashboardPage. */}
-            <Route path='runs' element={<Navigate to='/home' replace />} />
+            {/* 2026-05-06 — /runs restored as a flat list page (was a
+                redirect to /home after the v2 RunsPage deletion). FREE
+                users have no access to the Project Shell's Launches
+                tab (gated to ENTERPRISE/MAX), so without this page
+                they had no way to view the runs they'd already
+                submitted. The endpoint /api/runs is NOT tier-gated —
+                it filters by RunVisibilitySpec on the backend. */}
+            <Route path='runs' element={<RunsListPage />} />
             <Route path='dashboard' element={<Navigate to='/insights' replace />} />
             <Route path='plans' element={<Navigate to='/pricing' replace />} />
             <Route path='admin/model-rates' element={<PricingPage />} />
