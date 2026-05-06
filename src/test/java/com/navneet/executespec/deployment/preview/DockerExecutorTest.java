@@ -1,7 +1,7 @@
 package com.navneet.executespec.deployment.preview;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assumptions.assumeThat;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -17,8 +17,9 @@ import org.junit.jupiter.api.io.TempDir;
  * Tests for DockerExecutor.
  *
  * <p>Tests that invoke actual Docker commands are guarded by
- * assumeThat(executor.isDockerAvailable()) so they skip cleanly in CI or environments without
- * Docker.
+ * {@code assumeTrue(executor.isDockerAvailable(), "Docker not available...")} so they skip cleanly
+ * in CI or environments without Docker. The reason string surfaces in the surefire report
+ * (replaces the bare "Skipped: N" line that gave no hint why).
  */
 @DisplayName("DockerExecutor")
 class DockerExecutorTest {
@@ -50,7 +51,10 @@ class DockerExecutorTest {
     @Test
     @DisplayName("Build with valid Dockerfile succeeds")
     void buildSucceeds(@TempDir Path dir) throws IOException {
-      assumeThat(executor.isDockerAvailable()).isTrue();
+      assumeTrue(
+          executor.isDockerAvailable(),
+          "Docker daemon not reachable — skipping Docker integration test. Start Docker Desktop"
+              + " (or wire `docker` into the CI image) to exercise this path.");
 
       Files.writeString(
           dir.resolve("Dockerfile"),
@@ -75,7 +79,10 @@ class DockerExecutorTest {
     @Test
     @DisplayName("Build with missing Dockerfile fails gracefully")
     void buildFailsNoDockerfile(@TempDir Path dir) {
-      assumeThat(executor.isDockerAvailable()).isTrue();
+      assumeTrue(
+          executor.isDockerAvailable(),
+          "Docker daemon not reachable — skipping Docker integration test. Start Docker Desktop"
+              + " (or wire `docker` into the CI image) to exercise this path.");
 
       var result = executor.build(dir, "test-preview-build-fail");
       assertThat(result.success()).isFalse();
@@ -85,7 +92,10 @@ class DockerExecutorTest {
     @Test
     @DisplayName("Build with invalid Dockerfile returns failure")
     void buildFailsInvalidDockerfile(@TempDir Path dir) throws IOException {
-      assumeThat(executor.isDockerAvailable()).isTrue();
+      assumeTrue(
+          executor.isDockerAvailable(),
+          "Docker daemon not reachable — skipping Docker integration test. Start Docker Desktop"
+              + " (or wire `docker` into the CI image) to exercise this path.");
 
       Files.writeString(dir.resolve("Dockerfile"), "INVALID DIRECTIVE\n");
       var result = executor.build(dir, "test-preview-build-invalid");
@@ -100,7 +110,10 @@ class DockerExecutorTest {
     @Test
     @DisplayName("Run, check running, get logs, stop — full lifecycle")
     void fullLifecycle(@TempDir Path dir) throws Exception {
-      assumeThat(executor.isDockerAvailable()).isTrue();
+      assumeTrue(
+          executor.isDockerAvailable(),
+          "Docker daemon not reachable — skipping Docker integration test. Start Docker Desktop"
+              + " (or wire `docker` into the CI image) to exercise this path.");
 
       String containerName = "preview-test-lifecycle";
       String imageTag = "preview-test-lifecycle-img";
@@ -115,7 +128,10 @@ class DockerExecutorTest {
             CMD ["sh", "-c", "echo 'SERVER READY' && sleep 60"]
             """);
         var buildResult = executor.build(dir, imageTag);
-        assumeThat(buildResult.success()).isTrue();
+        assumeTrue(
+            buildResult.success(),
+            "docker build failed during lifecycle test setup — skipping rather than failing"
+                + " (likely a transient registry pull error, not a regression in DockerExecutor).");
 
         // Run container
         String containerId = executor.run(imageTag, containerName, 19999, 80, "0.5", "64m");
