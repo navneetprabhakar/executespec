@@ -227,6 +227,68 @@
 > Tests: 9/9 green on the touched surfaces (UserDataExportServiceTest 8 +
 > AccessGuardCoverageTest 1). Frontend build: clean.
 >
+> **2026-05-06 — model-mapping consolidation: YAML is the single source
+> of truth.** Closes the 8 drift sites catalogued in
+> `docs/reports/model-mapping-audit-2026-05-06.md`. 5 commits on
+> `feature/project-cost-pool-tuning`:
+>
+> 1. **`72d75b49` — Delete `ModelContextWindowMap`.** The hardcoded
+>    Java map said `gpt-5.4` had a 256K context window while YAML
+>    said 200K. The chat-header chip and worker-side token guard
+>    disagreed. Routes everything through new
+>    `ModelRegistry.contextLimitForOrPrefixFallback(model)` — YAML
+>    wins, with a forward-compat prefix heuristic for unknowns
+>    (claude-opus-*-1m → 1M, claude → 200K, gemini → 1M, gpt → 256K).
+>    `ProjectChatController.info` switched dependency from the deleted
+>    map to `ModelRegistry`. 7 unit tests in
+>    `ModelRegistryContextLimitTest`.
+> 2. **`c9c2799a` — Cache pricing reads YAML.** `RunCostTracker.priceCall`
+>    had hardcoded per-provider cache-read multipliers (Anthropic 0.10,
+>    OpenAI 0.50, Gemini 0.25) that completely ignored the YAML
+>    `cached-input-per-1m` field. YAML cache rates updated to provider
+>    reality: gpt-5.4 cached $0.25→$1.25/M (50% of input), gpt-5.4-mini
+>    $0.075→$0.375/M, gemini-3-flash-preview $0.05→$0.125/M (25%),
+>    gemini-3-pro-preview $0.35→$0.875/M, anthropic unchanged at 10%.
+>    `priceCall` now does direct math on `p.getCachedInputCostPer1m()`
+>    with a defensive 10%-of-input fallback when YAML is null. 9 unit
+>    tests in `RunCostTrackerCachePricingTest`.
+> 3. **`fdf0dac1` — `ModelController.MODEL_LABELS` reads YAML
+>    `display-label`.** New optional field on `ModelMatrixProperties.ModelConfig`;
+>    8 active models in YAML get explicit labels ("Claude Sonnet 4.6",
+>    "Gemini 3 Pro Preview", "GPT-5.4", etc). `ModelRegistry.displayLabelFor`
+>    falls back to raw id when label missing. The previously-missing
+>    `gemini-3-pro-preview` (added 2026-05-04) now renders correctly in
+>    the model selector. 4 new test cases.
+> 4. **`f23b0e77` — Drop the last 4 hardcodes.** `RunOrchestrator.defaultModelFor`
+>    routes through `ModelRegistry.workhouseModelFor(provider)`; previously
+>    a hardcoded switch returned Haiku/flash/mini even after YAML moved
+>    Anthropic and Gemini WORKHORSE upward. Spring AI bean-init defaults
+>    bumped (gemini-2.5-flash → gemini-3-flash-preview) with a header
+>    comment explaining V2 router overrides per-call. `*Properties.java`
+>    default model strings nullified — consumers fall back to registry.
+>    Concrete consumer wired: `ApiTestSuiteProperties.getModel()` falls
+>    through to `modelRegistry.workhouseModelFor(getProvider())` when
+>    the configured value is blank. The other 3 fields had no consumers
+>    (verified via grep).
+> 5. **`ab586b5f` — Frontend `PricingTable.MODEL_ROLES` reads YAML
+>    `chainTier`.** Backend `PricingRow` DTO gains 3 fields
+>    (cachedInputCostPer1m, chainTier, displayLabel) hydrated from
+>    `ModelRegistry`. Frontend `MODEL_ROLES` map deleted; new
+>    `roleLabel(chainTier)` switch returns 'Architect' / 'Workhorse' /
+>    'Utility' from ARCHITECT/CAPABLE/UTILITY. Pricing table now
+>    reflects YAML on every model addition without a frontend release.
+>
+> Net effect: every model identifier / context-window value /
+> max-output-tokens / pricing rate / display label / fallback chain /
+> free-tier lock / agent→tier map / provider-default model lives in
+> `application.yml model-matrix.*` and is read via `ModelRegistry`.
+> The remaining model-string hits are legacy-alias test fixtures
+> (handled by the alias mechanism) and Spring AI bean-init defaults
+> (overridden per-call). Tests: 39 across touched surfaces, 0
+> failures. Live API endpoints (`/api/billing/plans`,
+> `/api/models/available`, `/api/pricing`) all serve YAML-derived
+> data after a fresh boot.
+>
 > **2026-05-06 — GA-readiness P3.2 finalization (customer "Stop at $X"
 > override) on `feature/project-cost-pool-tuning`.** Closes the second
 > half of P3.2 — the cost-cap progress bar shipped earlier displayed
