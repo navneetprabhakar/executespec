@@ -192,6 +192,14 @@
   padding: var(--v3-pad-5) var(--v3-pad-4);
 }
 
+/* 2026-05-06 — wide variant for inspection pages (RunDetailPage,
+ * future ExecutionDetailPage) where the 3-pane layout (file tree +
+ * diff + side panel ≈ 1100px minimum) does not fit inside the 960px
+ * default. Applied via JS hook on the page that needs it. */
+.v3-main--wide {
+  max-width: 1600px;
+}
+
 @media (max-width: 640px) {
   .v3-main {
     padding: var(--v3-pad-4) var(--v3-pad-3);
