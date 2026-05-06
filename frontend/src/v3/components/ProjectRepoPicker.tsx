@@ -608,7 +608,6 @@ const inputStyle: React.CSSProperties = {
 const hintStyle: React.CSSProperties = {
   fontSize: 12,
   color: 'var(--v3-text-subtle)',
-  fontStyle: 'italic',
 };
 
 const errorTextStyle: React.CSSProperties = {

@@ -34,7 +34,13 @@
   --v3-text: var(--c-ink-100); /* was #E8EAED — 4pt nudge */
   --v3-text-muted: var(--c-ink-300); /* was #94A3B8 — converged with v2 */
   --v3-text-subtle: var(--c-ink-400);
-  --v3-brand: var(--c-signal-blue);
+  /* 2026-05-06 (website parity) — brighter brand on dark surfaces.
+   * The canonical --c-signal-blue (#3B6FCC) was tuned for AA-on-white
+   * which made it dim on the warmer graphite-0; the marketing site +
+   * the user's mockup both use #5B8DEF here. Light theme keeps the
+   * darker variant via the override below. */
+  --v3-brand: #5b8def;
+  --v3-brand-hover: #7aa5f5;
   --v3-brand-2: var(--c-signal-teal);
   --v3-success: var(--c-success);
   --v3-warning: var(--c-warning);
@@ -51,7 +57,7 @@
    * Same hex as --v3-bg in dark mode but kept distinct so light-mode
    * doesn't accidentally flip it (a primary-blue button on white still
    * needs dark text, not page-bg-flipped-to-white). */
-  --v3-text-on-brand: #0b0d10;
+  --v3-text-on-brand: #10131a;
 
   --v3-radius-sm: 4px;
   --v3-radius: 6px;
@@ -112,8 +118,12 @@
   --v3-text: var(--c-graphite-0);
   --v3-text-muted: #6e7785; /* between paper-4 and graphite-6 */
   --v3-text-subtle: var(--c-graphite-6);
-  /* Brand + semantic-state + pop-grad inherit from .v3-root above —
-   * deliberately unchanged, calibrated for both backgrounds. */
+  /* 2026-05-06 (website parity) — light-theme brand stays on the
+   * darker AA-on-white #3B6FCC. The dark default brightened to
+   * #5B8DEF for visual parity with the marketing site, which would
+   * fail AA-body on white buttons here. */
+  --v3-brand: #3b6fcc;
+  --v3-brand-hover: #2b5bb3;
 }
 
 /* TopBar */
@@ -125,7 +135,7 @@
   align-items: center;
   height: 56px;
   padding: 0 var(--v3-pad-4);
-  background: rgba(11, 13, 16, 0.86);
+  background: rgba(16, 19, 26, 0.86); /* matches new --c-graphite-0 #10131A */
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--v3-border);
