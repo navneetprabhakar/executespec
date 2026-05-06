@@ -167,17 +167,17 @@ public class AuthController {
   }
 
   /**
-   * GA-readiness P5.4 (2026-05-06) — GDPR Article 15 (right of access) + Article 20
-   * (data portability). Returns a ZIP bundle of every personal data row stored about the
-   * authenticated user, in a stable JSON format. Synchronous; the typical response is &lt; 1MB.
+   * GA-readiness P5.4 (2026-05-06) — GDPR Article 15 (right of access) + Article 20 (data
+   * portability). Returns a ZIP bundle of every personal data row stored about the authenticated
+   * user, in a stable JSON format. Synchronous; the typical response is &lt; 1MB.
    *
    * <p>Sensitive fields (password hash, API keys, GitHub PAT) are redacted — see {@link
-   * UserDataExportService#exportForUser} for the full list. Org-scoped data shared with other
-   * users is excluded; each user must request their own export.
+   * UserDataExportService#exportForUser} for the full list. Org-scoped data shared with other users
+   * is excluded; each user must request their own export.
    *
    * <p>This endpoint is paired with the public {@code /legal/dpa} DPA template + an emailed
-   * deletion path at {@code admin@executespec.ai} for GDPR Article 17 (erasure). Together
-   * those three surfaces close the GDPR compliance gap flagged in the GA-readiness audit §4.
+   * deletion path at {@code admin@executespec.ai} for GDPR Article 17 (erasure). Together those
+   * three surfaces close the GDPR compliance gap flagged in the GA-readiness audit §4.
    */
   @GetMapping(value = "/me/data-export", produces = "application/zip")
   public ResponseEntity<byte[]> exportMyData(@AuthenticationPrincipal AppUserDetails userDetails) {

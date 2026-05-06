@@ -11,10 +11,9 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 /**
- * Per-user record of a {@link FounderPricingDiscount} allocation. The unique constraint on
- * {@code (discount_id, user_id)} pins lifetime semantics — a user can hold at most one
- * allocation per offer, and revoke + re-grant flows toggle {@link #revokedAt} rather than
- * inserting a new row.
+ * Per-user record of a {@link FounderPricingDiscount} allocation. The unique constraint on {@code
+ * (discount_id, user_id)} pins lifetime semantics — a user can hold at most one allocation per
+ * offer, and revoke + re-grant flows toggle {@link #revokedAt} rather than inserting a new row.
  */
 @Entity
 @Table(name = "founder_pricing_allocation")

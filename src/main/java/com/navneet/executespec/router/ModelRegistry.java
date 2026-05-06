@@ -161,19 +161,20 @@ public class ModelRegistry {
 
   /**
    * Returns the context window for a model, falling back to a family-prefix heuristic when the
-   * model isn't in the YAML matrix. Used by UI surfaces (e.g. the chat-header context-window
-   * chip) that need a number for forward-compat models the registry doesn't yet know about.
+   * model isn't in the YAML matrix. Used by UI surfaces (e.g. the chat-header context-window chip)
+   * that need a number for forward-compat models the registry doesn't yet know about.
    *
    * <p>Lookup order:
    *
    * <ol>
    *   <li>Exact match in {@code model-matrix.models} → return that config's context-limit.
-   *   <li>Family prefix: {@code claude-opus-*-1m} → 1M, other claude → 200K, gemini → 1M, gpt → 256K.
+   *   <li>Family prefix: {@code claude-opus-*-1m} → 1M, other claude → 200K, gemini → 1M, gpt →
+   *       256K.
    *   <li>Final fallback: {@link #DEFAULT_CONTEXT_LIMIT} (200K).
    * </ol>
    *
-   * <p>Replaces the deleted {@code ModelContextWindowMap} which was a separate hardcoded source
-   * of truth that drifted from YAML (gpt-5.4 was 256K in the map, 200K in YAML — the YAML wins).
+   * <p>Replaces the deleted {@code ModelContextWindowMap} which was a separate hardcoded source of
+   * truth that drifted from YAML (gpt-5.4 was 256K in the map, 200K in YAML — the YAML wins).
    */
   public int contextLimitForOrPrefixFallback(String modelName) {
     if (modelName == null || modelName.isBlank()) return DEFAULT_CONTEXT_LIMIT;

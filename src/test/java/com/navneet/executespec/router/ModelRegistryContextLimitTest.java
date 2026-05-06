@@ -62,7 +62,8 @@ class ModelRegistryContextLimitTest {
 
   @Test
   void unknownGeminiModel_fallsBackTo1M() {
-    assertThat(registry.contextLimitForOrPrefixFallback("gemini-future-model")).isEqualTo(1_048_576);
+    assertThat(registry.contextLimitForOrPrefixFallback("gemini-future-model"))
+        .isEqualTo(1_048_576);
   }
 
   @Test

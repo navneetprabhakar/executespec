@@ -38,8 +38,8 @@ import org.springframework.ai.chat.model.Generation;
  * <p>The cap mechanism was already shipped on this branch (lines 211-238 of WorkerAgent — every
  * {@link WorkerAgent#BUDGET_CHECK_EVERY_N_ITERATIONS} iterations, the worker reads {@link
  * RunCostTracker#snapshot} and force-terminates with {@link WorkerResult.Outcome#BUDGET_EXCEEDED}
- * when {@code spent &gt;= hardCapUsd}). The audit identified that the absence of a regression
- * test left the runaway-cost class untested. This test class pins the contract.
+ * when {@code spent &gt;= hardCapUsd}). The audit identified that the absence of a regression test
+ * left the runaway-cost class untested. This test class pins the contract.
  *
  * <p>Test pattern: stub the LLM router with an infinite tool-call sequence + an incrementing
  * cost-snapshot, set a small {@code hardCapUsd}, and assert the worker terminates with

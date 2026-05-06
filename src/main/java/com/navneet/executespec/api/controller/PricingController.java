@@ -32,8 +32,8 @@ public class PricingController {
 
   /**
    * 2026-05-06 — convert a {@link ModelPricing} entity to a {@link PricingRow} DTO. Hydrates
-   * cached-input rate, chain-tier, and display-label from the YAML matrix so the frontend
-   * pricing table doesn't need a hardcoded model→role map.
+   * cached-input rate, chain-tier, and display-label from the YAML matrix so the frontend pricing
+   * table doesn't need a hardcoded model→role map.
    */
   private PricingRow toRow(ModelPricing p) {
     String model = p.getId().getModel();

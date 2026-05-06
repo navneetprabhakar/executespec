@@ -13,11 +13,11 @@ import lombok.NoArgsConstructor;
 /**
  * Global founder-pricing offer (V177, GA-readiness P2.4). Represents a singleton "first N
  * subscribers get X% off" offer. The atomic allocation contract lives on {@link
- * com.navneet.executespec.billing.service.FounderPricingService} — call sites should never
- * mutate {@link #currentCount} directly.
+ * com.navneet.executespec.billing.service.FounderPricingService} — call sites should never mutate
+ * {@link #currentCount} directly.
  *
- * <p>Lifetime semantics: when {@link #isLifetime} is TRUE, an allocated discount survives churn
- * + re-subscribe by the same user. Tracking is on {@link FounderPricingAllocation}.
+ * <p>Lifetime semantics: when {@link #isLifetime} is TRUE, an allocated discount survives churn +
+ * re-subscribe by the same user. Tracking is on {@link FounderPricingAllocation}.
  */
 @Entity
 @Table(name = "founder_pricing_discount")

@@ -29,11 +29,10 @@ import com.navneet.executespec.billing.repository.InvoiceRepository;
 import com.navneet.executespec.notification.NotificationRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageImpl;
 
 /**
  * P5.4 (GA-readiness, 2026-05-06) — pins the data-export bundle contract.
@@ -146,7 +145,8 @@ class UserDataExportServiceTest {
     @SuppressWarnings("unchecked")
     Map<String, Object> payload = MAPPER.readValue(entries.get("payload.json"), Map.class);
 
-    assertThat(payload).containsKeys("user", "orgs", "projects", "runs", "notifications", "billing");
+    assertThat(payload)
+        .containsKeys("user", "orgs", "projects", "runs", "notifications", "billing");
     @SuppressWarnings("unchecked")
     Map<String, Object> userBlock = (Map<String, Object>) payload.get("user");
     assertThat(userBlock.get("email")).isEqualTo("alice@example.com");

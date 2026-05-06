@@ -37,7 +37,8 @@ class ValidationReportServiceCountUnfixedCriticalTest {
   @BeforeEach
   void setUp() throws Exception {
     svc =
-        new ValidationReportService(null, null, null, null, null, null, mock(FeatureFlagService.class));
+        new ValidationReportService(
+            null, null, null, null, null, null, mock(FeatureFlagService.class));
     countUnfixedCritical =
         ValidationReportService.class.getDeclaredMethod("countUnfixedCritical", ReportInput.class);
     countUnfixedCritical.setAccessible(true);

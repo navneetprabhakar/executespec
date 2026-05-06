@@ -4,8 +4,8 @@ import java.util.List;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.billing.dto.*;
-import com.navneet.executespec.billing.entity.TopupPackage;
 import com.navneet.executespec.billing.entity.FounderPricingDiscount;
+import com.navneet.executespec.billing.entity.TopupPackage;
 import com.navneet.executespec.billing.service.BillingService;
 import com.navneet.executespec.billing.service.FounderPricingService;
 import com.navneet.executespec.billing.service.RunTopupService;
@@ -61,16 +61,12 @@ public class BillingController {
   }
 
   /**
-   * Frontend-facing view of a founder offer. {@code remainingCapacity} is what the badge renders
-   * — never expose {@code currentCount}/{@code maxSubscribers} directly because they're cheap
+   * Frontend-facing view of a founder offer. {@code remainingCapacity} is what the badge renders —
+   * never expose {@code currentCount}/{@code maxSubscribers} directly because they're cheap
    * social-engineering hooks ("only 1 left! buy now!").
    */
   public record FounderOfferDto(
-      String name,
-      String tier,
-      int discountPct,
-      int remainingCapacity,
-      boolean isLifetime) {
+      String name, String tier, int discountPct, int remainingCapacity, boolean isLifetime) {
     static FounderOfferDto from(FounderPricingDiscount d) {
       return new FounderOfferDto(
           d.getName(),

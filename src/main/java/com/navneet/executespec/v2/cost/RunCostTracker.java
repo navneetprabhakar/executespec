@@ -42,8 +42,8 @@ public class RunCostTracker {
   /**
    * Anthropic prompt-cache writes are billed at 1.25× the input rate (per
    * https://www.anthropic.com/news/prompt-caching). Other providers don't bill cache writes as a
-   * separate line item, so this multiplier applies on Anthropic only and is a no-op for
-   * OpenAI / Gemini (their `cacheWrite` is always 0).
+   * separate line item, so this multiplier applies on Anthropic only and is a no-op for OpenAI /
+   * Gemini (their `cacheWrite` is always 0).
    */
   private static final double CACHE_WRITE_MULTIPLIER = 1.25;
 
@@ -478,19 +478,19 @@ public class RunCostTracker {
   }
 
   /**
-   * 2026-05-06 — single source of truth. Cache-read pricing is now read directly from the
-   * {@code cached-input-per-1m} field on each model in the YAML matrix, NOT from a hardcoded
-   * per-provider multiplier. The audit (docs/reports/model-mapping-audit-2026-05-06.md §4 #4)
-   * found the prior multiplier-based code ignored YAML's cache rate for OpenAI + Gemini —
-   * YAML now reflects each provider's documented rate (Anthropic 10%, OpenAI 50%, Gemini 25%
-   * of input) and this method does the math directly.
+   * 2026-05-06 — single source of truth. Cache-read pricing is now read directly from the {@code
+   * cached-input-per-1m} field on each model in the YAML matrix, NOT from a hardcoded per-provider
+   * multiplier. The audit (docs/reports/model-mapping-audit-2026-05-06.md §4 #4) found the prior
+   * multiplier-based code ignored YAML's cache rate for OpenAI + Gemini — YAML now reflects each
+   * provider's documented rate (Anthropic 10%, OpenAI 50%, Gemini 25% of input) and this method
+   * does the math directly.
    *
    * <p>Token-input semantics still differ by provider:
    *
    * <ul>
    *   <li>Anthropic: {@code input_tokens} is uncached only — don't subtract {@code cacheRead}.
-   *   <li>OpenAI / Gemini: {@code prompt_tokens} / {@code promptTokenCount} INCLUDES cached
-   *       tokens — subtract to get uncached count.
+   *   <li>OpenAI / Gemini: {@code prompt_tokens} / {@code promptTokenCount} INCLUDES cached tokens
+   *       — subtract to get uncached count.
    * </ul>
    */
   private double priceCall(

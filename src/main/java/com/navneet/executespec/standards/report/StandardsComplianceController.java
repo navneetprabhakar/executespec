@@ -146,7 +146,9 @@ public class StandardsComplianceController {
       String createdByUserId,
       String createdAt) {}
 
-  /** Extract {@link AppUserDetails} from {@link Authentication}; null when principal is wrong type. */
+  /**
+   * Extract {@link AppUserDetails} from {@link Authentication}; null when principal is wrong type.
+   */
   private static AppUserDetails principalOrNull(Authentication auth) {
     if (auth == null) return null;
     Object principal = auth.getPrincipal();

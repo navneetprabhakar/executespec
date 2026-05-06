@@ -46,7 +46,8 @@ class RunCostTrackerCachePricingTest {
   private double price(
       String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead)
       throws Exception {
-    return (double) priceCall.invoke(tracker, provider, model, inTok, outTok, cacheWrite, cacheRead);
+    return (double)
+        priceCall.invoke(tracker, provider, model, inTok, outTok, cacheWrite, cacheRead);
   }
 
   private void seedPricing(

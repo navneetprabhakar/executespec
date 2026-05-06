@@ -92,7 +92,8 @@ class AccuracyAssessmentTruncateForSnippetTest {
   void truncationMarkerCarriesAccurateOmittedCount() {
     String content = "a".repeat(50_000); // 50K
     String result = AccuracyAssessmentService.truncateForSnippet(content);
-    int omitted = 50_000 - AccuracyAssessmentService.HEAD_CHARS - AccuracyAssessmentService.TAIL_CHARS;
+    int omitted =
+        50_000 - AccuracyAssessmentService.HEAD_CHARS - AccuracyAssessmentService.TAIL_CHARS;
     assertThat(result).contains("[truncated " + omitted + " chars");
     assertThat(result).contains("file is 50000 chars total");
   }
