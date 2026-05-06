@@ -1,5 +1,5 @@
 import {errMsg} from '@/lib/utils';
-import {useEffect, useMemo, useState} from 'react';
+import {Fragment, useEffect, useMemo, useState} from 'react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import {
   getNotificationPreferences,
@@ -64,6 +64,55 @@ export default function NotificationPreferences() {
     });
   }, [grouped]);
 
+  /**
+   * Audit r5 (P2-6, 2026-05-06) — categorise events. The flat list of
+   * 30+ event types overwhelmed first-run users; the tier sort split
+   * HIGH_SIGNAL vs ADMIN_TOGGLE but didn't help users find the
+   * specific category they cared about ("just runs, please"). This
+   * resolver groups events into 5 plain-English buckets driven by
+   * the event name prefix. New event types fall into "Other" so we
+   * never lose them in a category miss.
+   */
+  function eventCategory(eventType: string): string {
+    if (/^RUN_/i.test(eventType)) return 'Runs';
+    if (/^PR_|^PR$|^PULL_REQUEST_/i.test(eventType)) return 'Pull requests';
+    if (/^STANDARDS_|^ARCH_|^INVARIANT_/i.test(eventType)) return 'Standards & architecture';
+    if (/^CODEMAP_|^ARCHITECTURE_DOC_|^MEMORY_|^AUTO_DETECTION_/i.test(eventType))
+      return 'Codebase intelligence';
+    if (/^QUOTA_|^BILLING_|^INVOICE_|^PAYMENT_|^TIER_/i.test(eventType)) return 'Billing & quota';
+    if (/^USER_|^ORG_|^INVITE_|^MEMBER_/i.test(eventType)) return 'Org & members';
+    return 'Other';
+  }
+  /**
+   * Sort categories so the most-relevant block always renders first.
+   * Runs is the daily-driver signal; Pull requests + Standards next;
+   * Codebase intelligence + Org & members further down; Other last
+   * (unknown event types stay reachable but never lead the page).
+   */
+  const CATEGORY_ORDER = [
+    'Runs',
+    'Pull requests',
+    'Standards & architecture',
+    'Billing & quota',
+    'Codebase intelligence',
+    'Org & members',
+    'Other',
+  ];
+  const eventsByCategory = useMemo(() => {
+    if (!grouped) return [] as Array<{category: string; events: string[]}>;
+    const map: Record<string, string[]> = {};
+    for (const ev of events) {
+      const c = eventCategory(ev);
+      if (!map[c]) map[c] = [];
+      map[c].push(ev);
+    }
+    return CATEGORY_ORDER.filter((c) => (map[c]?.length ?? 0) > 0).map((c) => ({
+      category: c,
+      events: map[c],
+    }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [grouped, events]);
+
   const handleToggle = async (eventType: string, channel: 'IN_APP' | 'EMAIL', next: boolean) => {
     const key = `${eventType}|${channel}`;
     setBusyKey(key);
@@ -118,52 +167,72 @@ export default function NotificationPreferences() {
               </tr>
             </thead>
             <tbody>
-              {events.map((eventType) => {
-                const g = grouped[eventType];
-                const isAdminTier = g.tier === 'ADMIN_TOGGLE';
-                return (
-                  <tr key={eventType} className='border-t border-[var(--border-default)]'>
-                    <td className='px-2 py-2'>
-                      <span className='text-secondary font-mono'>{eventType}</span>
-                      {isAdminTier && (
-                        <span className='ml-2 text-[10px] uppercase tracking-wider text-muted'>
-                          admin
-                        </span>
-                      )}
+              {/* Audit r5 (P2-6, 2026-05-06) — 5-bucket grouping with
+                  section headers. Pre-fix every event type sat in one
+                  flat alphabetical list (sorted only by HIGH_SIGNAL
+                  vs ADMIN_TOGGLE). Now Runs lead, then PRs, then
+                  Standards, etc., with a header row per category so
+                  scanning is one row per section instead of 30+. */}
+              {eventsByCategory.map(({category, events: catEvents}) => (
+                <Fragment key={category}>
+                  <tr
+                    className='border-t border-[var(--border-default)]'
+                  >
+                    <td
+                      colSpan={3}
+                      className='px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted font-semibold'
+                    >
+                      {category}
                     </td>
-                    {(['IN_APP', 'EMAIL'] as const).map((channel) => {
-                      const row = g[channel];
-                      const key = `${eventType}|${channel}`;
-                      if (!row)
-                        return (
-                          <td key={channel} className='px-2 py-2 text-center text-muted'>
-                            —
-                          </td>
-                        );
-                      return (
-                        <td key={channel} className='px-2 py-2 text-center'>
-                          <input
-                            type='checkbox'
-                            checked={row.enabled}
-                            disabled={busyKey === key}
-                            onChange={(e) => handleToggle(eventType, channel, e.target.checked)}
-                            aria-label={`${eventType} via ${channel === 'IN_APP' ? 'in-app' : 'email'}`}
-                            className='accent-accent-blue cursor-pointer'
-                          />
-                          {row.override && (
-                            <span
-                              title="You've overridden the default"
-                              className='ml-1 text-[10px] text-muted'
-                            >
-                              ·
+                  </tr>
+                  {catEvents.map((eventType) => {
+                    const g = grouped[eventType];
+                    const isAdminTier = g.tier === 'ADMIN_TOGGLE';
+                    return (
+                      <tr key={eventType} className='border-t border-[var(--border-default)]'>
+                        <td className='px-2 py-2'>
+                          <span className='text-secondary font-mono'>{eventType}</span>
+                          {isAdminTier && (
+                            <span className='ml-2 text-[10px] uppercase tracking-wider text-muted'>
+                              admin
                             </span>
                           )}
                         </td>
-                      );
-                    })}
-                  </tr>
-                );
-              })}
+                        {(['IN_APP', 'EMAIL'] as const).map((channel) => {
+                          const row = g[channel];
+                          const key = `${eventType}|${channel}`;
+                          if (!row)
+                            return (
+                              <td key={channel} className='px-2 py-2 text-center text-muted'>
+                                —
+                              </td>
+                            );
+                          return (
+                            <td key={channel} className='px-2 py-2 text-center'>
+                              <input
+                                type='checkbox'
+                                checked={row.enabled}
+                                disabled={busyKey === key}
+                                onChange={(e) => handleToggle(eventType, channel, e.target.checked)}
+                                aria-label={`${eventType} via ${channel === 'IN_APP' ? 'in-app' : 'email'}`}
+                                className='accent-accent-blue cursor-pointer'
+                              />
+                              {row.override && (
+                                <span
+                                  title="You've overridden the default"
+                                  className='ml-1 text-[10px] text-muted'
+                                >
+                                  ·
+                                </span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    );
+                  })}
+                </Fragment>
+              ))}
             </tbody>
           </table>
         </div>

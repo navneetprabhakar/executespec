@@ -51,6 +51,22 @@ export default function ProjectHomePage() {
     };
   }, [slug, load]);
 
+  // Audit r5 (P2-7, 2026-05-06) — `EmptyProjectPage` stashes
+  // `v3-open-attach-repo=1` when the user clicks "Attach one on the
+  // next screen →". We read + clear it on mount and pop the
+  // RepoAttachPopover so the new user lands in the v3-native repo
+  // attach flow without ever seeing the v2 sidebar chrome.
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('v3-open-attach-repo') === '1') {
+        sessionStorage.removeItem('v3-open-attach-repo');
+        setAttachOpen(true);
+      }
+    } catch {
+      /* private mode — silent */
+    }
+  }, []);
+
   // Auto-scroll to bottom when new bubbles arrive
   useEffect(() => {
     if (threadRef.current) {
