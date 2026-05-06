@@ -198,6 +198,32 @@
 > ProjectExportController.export). The drift detector now allows
 > exactly 35 known-legacy entries; any new violator fails CI.
 >
+> **2026-05-06 — GA-readiness P4.1-followup batch 2: 25 of 35 legacy
+> guard sites migrated** on `feature/project-cost-pool-tuning`.
+> Touched controllers: `PullRequestController` (×2),
+> `ProjectExportController` (×1), `ProjectController` (×6),
+> `ActivityFeedController` (×1), `AdrController` (×2),
+> `InvariantController` (×2), `CodeReviewController` (×2),
+> `PrReviewController` (×1), `StandardsComplianceController` (×1),
+> `ProjectRepoController` project-scoped paths (×4),
+> `ProjectDocumentController` (×3),
+> `SpecTemplateController` (×3 — `listForProject`, `createForProject`,
+> `delete`). All now call `projectAccessGuard.assertCanRead(projectId,
+> userDetails)` (or its `principalOrNull(auth)` variant for the
+> `Authentication`-style controllers, which falls back closed when the
+> principal isn't an `AppUserDetails`). Existing service-side checks
+> stay as defense in depth. Test fixture updated:
+> `ActivityFeedControllerTest` adds `@Mock ProjectAccessGuard`. Build:
+> `mvn test -Dtest='*Controller*'` 41/41 green. Remaining 10
+> entries in `KNOWN_LEGACY_DRIFT`: 3 repo-scoped sites in
+> `ProjectRepoController` (`deleteRepo`/`installRepoWebhook`/`syncRepo`)
+> need a dedicated `RepoAccessGuard`; 2 admin sites in
+> `SuperAdminController` + 1 in `ExecutespecMigrationController` are
+> SUPER_ADMIN-gated by SecurityConfig (kept for cleanup later); 1
+> in `V2RunController#poll` (V2 canary surface, separate access logic);
+> 3 unrelated. Plan doc P4.1-followup migration order updated to
+> reflect the batch landed.
+>
 > Tests: 9/9 green on the touched surfaces (UserDataExportServiceTest 8 +
 > AccessGuardCoverageTest 1). Frontend build: clean.
 >

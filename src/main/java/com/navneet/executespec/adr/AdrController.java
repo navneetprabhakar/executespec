@@ -3,6 +3,9 @@ package com.navneet.executespec.adr;
 import java.util.List;
 import java.util.UUID;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -32,6 +35,7 @@ import lombok.RequiredArgsConstructor;
 public class AdrController {
 
   private final AdrRepository adrRepo;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @GetMapping
   public ResponseEntity<List<AdrSummary>> list(
@@ -39,6 +43,9 @@ public class AdrController {
       @RequestParam(required = false, defaultValue = "false") boolean acceptedOnly,
       Authentication auth) {
     if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
+    // GA-readiness P4.1-followup — tenant guard. ADR titles + statuses leak the
+    // architecture roadmap of the project, so cross-org reads must 403.
+    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
     List<Adr> rows =
         acceptedOnly
             ? adrRepo.findAcceptedForProject(projectId)
@@ -50,6 +57,10 @@ public class AdrController {
   public ResponseEntity<AdrDetail> get(
       @PathVariable String projectId, @PathVariable UUID id, Authentication auth) {
     if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
+    // GA-readiness P4.1-followup — assert tenant boundary BEFORE the existing
+    // cross-project check below (which only handles intra-org cross-project
+    // confusion). The existing check stays as defence in depth.
+    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
     Adr adr =
         adrRepo
             .findById(id)
@@ -59,6 +70,13 @@ public class AdrController {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "ADR not found");
     }
     return ResponseEntity.ok(AdrDetail.from(adr));
+  }
+
+  /** Extract {@link AppUserDetails} from {@link Authentication}; null when principal is wrong type. */
+  private static AppUserDetails principalOrNull(Authentication auth) {
+    if (auth == null) return null;
+    Object principal = auth.getPrincipal();
+    return principal instanceof AppUserDetails ud ? ud : null;
   }
 
   /** Lightweight row for the list endpoint. */

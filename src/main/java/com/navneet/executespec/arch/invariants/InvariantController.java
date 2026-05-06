@@ -3,6 +3,9 @@ package com.navneet.executespec.arch.invariants;
 import java.time.Instant;
 import java.util.List;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -36,11 +39,15 @@ public class InvariantController {
 
   private final ArchInvariantRepository invRepo;
   private final ArchInvariantViolationRepository violationRepo;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @GetMapping
   public ResponseEntity<List<InvariantSummary>> list(
       @PathVariable String projectId, Authentication auth) {
     if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
+    // GA-readiness P4.1-followup — invariants leak architectural intent + the
+    // YAML body, so 403 across orgs.
+    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
     return ResponseEntity.ok(
         invRepo.findByProjectId(projectId).stream().map(InvariantSummary::from).toList());
   }
@@ -49,8 +56,16 @@ public class InvariantController {
   public ResponseEntity<List<ViolationDto>> recentViolations(
       @PathVariable String projectId, Authentication auth) {
     if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
+    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
     return ResponseEntity.ok(
         violationRepo.findRecentForProject(projectId).stream().map(ViolationDto::from).toList());
+  }
+
+  /** Extract {@link AppUserDetails} from {@link Authentication}; null when principal is wrong type. */
+  private static AppUserDetails principalOrNull(Authentication auth) {
+    if (auth == null) return null;
+    Object principal = auth.getPrincipal();
+    return principal instanceof AppUserDetails ud ? ud : null;
   }
 
   /**
