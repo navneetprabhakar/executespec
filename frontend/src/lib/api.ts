@@ -326,8 +326,16 @@ export interface PricingRow {
   provider: string;
   model: string;
   inputCostPer1m: number;
+  cachedInputCostPer1m: number;
   outputCostPer1m: number;
   notes: string | null;
+  /**
+   * 2026-05-06 — chain-tier from YAML model-matrix (ARCHITECT / CAPABLE / UTILITY). Null for
+   * legacy DB rows that pre-date the field. Replaces the hardcoded MODEL_ROLES map.
+   */
+  chainTier: string | null;
+  /** Display label from YAML model-matrix display-label. Null fallback to model id. */
+  displayLabel: string | null;
   updatedAt: string | null;
 }
 
