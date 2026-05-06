@@ -104,6 +104,41 @@ export const fetchPlans = (keyMode?: string) => {
 };
 
 /**
+ * GA-readiness P2.4 — read the active founder-pricing offer for a tier.
+ *
+ * Returns the offer descriptor with `remainingCapacity` (never raw current/max count
+ * — see backend BillingController.FounderOfferDto). Resolves to `null` when no offer
+ * is active OR the offer is sold out (the backend returns 204 in both cases so the
+ * frontend renders consistently).
+ */
+export interface FounderOffer {
+  name: string;
+  tier: string;
+  discountPct: number;
+  remainingCapacity: number;
+  isLifetime: boolean;
+}
+
+export const fetchFounderOffer = async (tier: string): Promise<FounderOffer | null> => {
+  // The req() helper returns `undefined` on 204 No Content (see api.ts L84). The backend
+  // emits 204 when no offer is active OR the offer is sold out, so the caller renders the
+  // same way for both. 404 (Spring's path-not-found) also folds to "no offer" — older
+  // builds without this endpoint shouldn't crash the pricing page.
+  try {
+    const offer = await req<FounderOffer | undefined>(
+      `/billing/founder-pricing/${encodeURIComponent(tier)}`,
+    );
+    return offer ?? null;
+  } catch (err) {
+    if (err && typeof err === 'object' && 'status' in err) {
+      const status = (err as {status: number}).status;
+      if (status === 204 || status === 404) return null;
+    }
+    throw err;
+  }
+};
+
+/**
  * Get current billing status for the authenticated user.
  */
 export const fetchBillingStatus = () => req<BillingStatus>('/billing/status');

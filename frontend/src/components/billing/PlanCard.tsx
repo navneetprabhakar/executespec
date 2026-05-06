@@ -1,5 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
-import type {BillingPlan} from '@/lib/billing-api';
+import type {BillingPlan, FounderOffer} from '@/lib/billing-api';
 
 // V165 — MAX dropped; ladder is FREE / STARTER / PRO / TEAM / ENTERPRISE.
 const TIER_RANK: Record<string, number> = {
@@ -21,6 +21,13 @@ interface PlanCardProps {
   /** M-002 — highlight ring + scroll target when this card matches the
    *  ?tier=... param. */
   highlight?: boolean;
+  /**
+   * GA-readiness P2.4 — when set, render a founder-pricing badge + discounted
+   * price preview. The actual coupon application happens server-side at
+   * checkout (BillingService.subscribe consults FounderPricingService);
+   * the frontend only renders the offer.
+   */
+  founderOffer?: FounderOffer | null;
 }
 
 // v2.6.0 — TEAM self-serve seat range (must match backend OrgService).
@@ -39,6 +46,7 @@ export function PlanCard({
   userTier,
   initialSeats,
   highlight,
+  founderOffer,
 }: PlanCardProps) {
   const userRank = TIER_RANK[userTier ?? 'FREE'] ?? 0;
   const planRank = TIER_RANK[plan.tier] ?? 0;
@@ -109,8 +117,29 @@ export function PlanCard({
         </span>
       )}
 
+      {/* GA-readiness P2.4 — founder pricing badge. Renders when an offer
+          for this tier is active and not sold out. The badge shows the
+          discount + remaining slots so the buyer knows it's a finite
+          window without exposing raw current/max counts. */}
+      {founderOffer && founderOffer.tier === plan.tier && founderOffer.remainingCapacity > 0 && (
+        <span
+          className='absolute -top-3 right-4 bg-[var(--status-warning)] text-primary text-xs font-semibold px-3 py-1 rounded-sm'
+          title={`First ${founderOffer.remainingCapacity} subscribers get ${founderOffer.discountPct}% off${founderOffer.isLifetime ? ' for life' : ''}`}
+        >
+          {founderOffer.discountPct}% FOUNDER · {founderOffer.remainingCapacity} LEFT
+        </span>
+      )}
+
       <h3 className='text-lg font-semibold text-primary'>
-        {plan.tier === 'TEAM' ? 'Team' : 'Pro'}
+        {/* GA-readiness P2.1 — derive the visible label from the plan name so
+            the V176 rename "Pro Monthly *" → "Solo Monthly *" surfaces here.
+            Falls back to a tier-based label for older plan rows that still
+            ship with "Pro Monthly". */}
+        {plan.name?.toLowerCase().startsWith('solo')
+          ? 'Solo'
+          : plan.tier === 'TEAM'
+            ? 'Team'
+            : 'Pro'}
       </h3>
       <p className='text-sm text-muted mt-1'>{keyModeLabel}</p>
 

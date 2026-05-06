@@ -3,6 +3,7 @@ package com.navneet.executespec.project.template;
 import java.util.List;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -17,10 +18,14 @@ import lombok.RequiredArgsConstructor;
 public class SpecTemplateController {
 
   private final SpecTemplateService service;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @GetMapping("/api/projects/{projectId}/templates")
   public ResponseEntity<List<SpecTemplateService.TemplateDto>> listForProject(
       @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails user) {
+    // GA-readiness P4.1-followup — spec templates may contain proprietary
+    // requirement language; tenant-bound.
+    projectAccessGuard.assertCanRead(projectId, user);
     return ResponseEntity.ok(service.listForProject(projectId, user.getUser()));
   }
 
@@ -29,6 +34,8 @@ public class SpecTemplateController {
       @PathVariable String projectId,
       @RequestBody SpecTemplateService.CreateRequest req,
       @AuthenticationPrincipal AppUserDetails user) {
+    // GA-readiness P4.1-followup — write access to project state.
+    projectAccessGuard.assertCanRead(projectId, user);
     return ResponseEntity.status(HttpStatus.CREATED)
         .body(service.createForProject(projectId, user.getUser(), req));
   }
@@ -47,8 +54,9 @@ public class SpecTemplateController {
       @PathVariable String projectId,
       @PathVariable String templateId,
       @AuthenticationPrincipal AppUserDetails user) {
-    // projectId in the path is for routing/access symmetry; the service
-    // resolves authorization from the template's owner_type/owner_id.
+    // GA-readiness P4.1-followup — projectId in the path is the trust boundary;
+    // the service's owner_type/owner_id resolution stays as defense in depth.
+    projectAccessGuard.assertCanRead(projectId, user);
     service.delete(templateId, user.getUser());
     return ResponseEntity.noContent().build();
   }

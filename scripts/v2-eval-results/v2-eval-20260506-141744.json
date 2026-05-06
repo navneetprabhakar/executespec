@@ -1,0 +1,23 @@
+[
+  {
+    "provider": "anthropic",
+    "band": "low",
+    "run_id": "4cb4356a-f40a-4fa7-9d38-97af072e3fc6",
+    "status": "COMPLETE",
+    "harness": "v2",
+    "startedAt": "2026-05-06T08:47:45.025458Z",
+    "completedAt": "2026-05-06T08:49:13.288685Z",
+    "tasks_total": 1,
+    "tasks_done": 1,
+    "tasks_failed": 0,
+    "review": "{\"totalLatencyMs\":30922,\"finalBuildPassed\":true,\"finalBuildExitCode\":0,\"overall\":\"CLEAN\",\"generalPassSummary\":\"Found 0 issues, fixed 0. The fibonacci implementation in fib.py is correct: base cases (n=0, n=1) are handled properly, the iterative loop runs over the correct range (2 to n inclusive), negative input raises ValueError as documented, and all 5 unit tests pass cleanly.\",\"wiringPassSummary\":\"No wiring issues found. This is a flat Python project with two files:\\n- `fib.py` — defines the `fibonacci` function.\\n- `test_fib.py` — correctly imports `fibonacci` via `from fib import fibonacci`.\\n\\nThe single import relationship is properly wired. All 5 pytest tests pass and `compileall` exits cleanly with no errors.\"}",
+    "actual_cost": 0.101743,
+    "est_low": 0.05,
+    "est_high": 0.08750000000000001,
+    "credits": 1,
+    "total_input": 17641,
+    "total_output": 3153,
+    "accuracy": 100,
+    "report_ok": true
+  }
+]

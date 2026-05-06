@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "band": "low",
+  "run_id": "493319a0-8298-4817-ad5f-92fec479e982",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-05-06T08:35:53.510369Z",
+  "completedAt": "2026-05-06T08:37:28.640574Z",
+  "tasks_total": 1,
+  "tasks_done": 1,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildPassed\":true,\"totalLatencyMs\":35186,\"wiringPassSummary\":\"No wiring issues found. The project is a minimal Python module (fib.py + test_fib.py). The single import in test_fib.py — `from fib import fibonacci` — correctly resolves to the `fibonacci` function defined in fib.py. There are no sub-modules, route handlers, barrel files, Spring components, or Rust mod declarations to wire. Build compiled cleanly and all 5 pytest tests passed.\",\"generalPassSummary\":\"Found 0 issues, fixed 0. The fibonacci implementation in fib.py is correct: base cases, iterative loop bounds, ValueError on negative input, and return type all match the documented contract. All 5 tests pass.\",\"overall\":\"CLEAN\",\"finalBuildExitCode\":0}",
+  "actual_cost": 0.100995,
+  "est_low": 0.05,
+  "est_high": 0.08750000000000001,
+  "credits": 1,
+  "total_input": 16571,
+  "total_output": 3273,
+  "accuracy": 98,
+  "report_ok": true
+}

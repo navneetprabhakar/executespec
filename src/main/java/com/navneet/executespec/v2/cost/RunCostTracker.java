@@ -39,8 +39,13 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class RunCostTracker {
 
+  /**
+   * Anthropic prompt-cache writes are billed at 1.25× the input rate (per
+   * https://www.anthropic.com/news/prompt-caching). Other providers don't bill cache writes as a
+   * separate line item, so this multiplier applies on Anthropic only and is a no-op for OpenAI /
+   * Gemini (their `cacheWrite` is always 0).
+   */
   private static final double CACHE_WRITE_MULTIPLIER = 1.25;
-  private static final double CACHE_READ_MULTIPLIER = 0.10;
 
   private final ModelPricingRepository pricingRepo;
   private final ModelResolver modelResolver;
@@ -460,6 +465,34 @@ public class RunCostTracker {
    * fires for them, but as of 2026-05-04 OpenAI/Gemini cache reads are 0 in our flow (auto-caching
    * for OpenAI is hit-or-miss + we don't enable Gemini context caching).
    */
+  /**
+   * Public cost helper for callers that aren't going through the run-tracking flow (per-PR review,
+   * code-review scan, architecture/doc generation). Computes USD from tokens via the same pricing
+   * matrix the recording path uses; no cache_write / cache_read accounting (those callers don't
+   * expose those counts), so the result is an upper-bound when cached input is involved — matches
+   * what we'd record for a non-cached call. Returns 0 if pricing is missing for the provider/model
+   * tuple, same as the recording path.
+   */
+  public double computeCost(String provider, String model, int inTok, int outTok) {
+    return priceCall(provider, model, inTok, outTok, 0, 0);
+  }
+
+  /**
+   * 2026-05-06 — single source of truth. Cache-read pricing is now read directly from the {@code
+   * cached-input-per-1m} field on each model in the YAML matrix, NOT from a hardcoded per-provider
+   * multiplier. The audit (docs/reports/model-mapping-audit-2026-05-06.md §4 #4) found the prior
+   * multiplier-based code ignored YAML's cache rate for OpenAI + Gemini — YAML now reflects each
+   * provider's documented rate (Anthropic 10%, OpenAI 50%, Gemini 25% of input) and this method
+   * does the math directly.
+   *
+   * <p>Token-input semantics still differ by provider:
+   *
+   * <ul>
+   *   <li>Anthropic: {@code input_tokens} is uncached only — don't subtract {@code cacheRead}.
+   *   <li>OpenAI / Gemini: {@code prompt_tokens} / {@code promptTokenCount} INCLUDES cached tokens
+   *       — subtract to get uncached count.
+   * </ul>
+   */
   private double priceCall(
       String provider, String model, int inTok, int outTok, int cacheWrite, int cacheRead) {
     Optional<ModelPricing> found =
@@ -472,33 +505,22 @@ public class RunCostTracker {
     ModelPricing p = found.get();
     double inRate = p.getInputCostPer1m() != null ? p.getInputCostPer1m() : 0;
     double outRate = p.getOutputCostPer1m() != null ? p.getOutputCostPer1m() : 0;
+    // Cache-read rate from YAML; falls back to inRate * 0.10 (Anthropic-shape default) when the
+    // YAML row predates the 2026-05-06 cache-rate seeding. Defensive — every shipping model
+    // SHOULD have cached_input_cost_per_1m populated by ModelPricingInitializer.
+    double cacheRate =
+        p.getCachedInputCostPer1m() != null ? p.getCachedInputCostPer1m() : inRate * 0.10;
 
-    final int normalIn;
-    final double cacheReadMultiplier;
-    if ("anthropic".equalsIgnoreCase(provider)) {
-      // Anthropic input_tokens is uncached only. Don't subtract.
-      normalIn = inTok;
-      cacheReadMultiplier = CACHE_READ_MULTIPLIER; // 10% — matches Anthropic's published rate
-    } else if ("openai".equalsIgnoreCase(provider)) {
-      // OpenAI prompt_tokens includes cached_tokens. Subtract to get uncached.
-      normalIn = Math.max(0, inTok - cacheRead);
-      // OpenAI caches at 50% on gpt-4o family (we use gpt-5.4 which is the same family);
-      // 25% on o1/o3 reasoning models. For now use 50% as the conservative billing rate.
-      cacheReadMultiplier = 0.50;
-    } else if ("gemini".equalsIgnoreCase(provider)) {
-      // Gemini promptTokenCount includes cachedContentTokenCount. Subtract.
-      normalIn = Math.max(0, inTok - cacheRead);
-      // Gemini context cached: 25% of input rate per Vertex AI pricing.
-      cacheReadMultiplier = 0.25;
-    } else {
-      normalIn = inTok;
-      cacheReadMultiplier = CACHE_READ_MULTIPLIER;
-    }
+    // Anthropic returns uncached input tokens directly; OpenAI + Gemini bundle cached + uncached
+    // into a single count and require subtraction. This is a wire-level distinction, not a
+    // pricing one — the rates above already capture the discount.
+    final int normalIn =
+        "anthropic".equalsIgnoreCase(provider) ? inTok : Math.max(0, inTok - cacheRead);
 
     double cost = 0.0;
     cost += (normalIn / 1_000_000.0) * inRate;
     cost += (cacheWrite / 1_000_000.0) * inRate * CACHE_WRITE_MULTIPLIER; // Anthropic-only
-    cost += (cacheRead / 1_000_000.0) * inRate * cacheReadMultiplier;
+    cost += (cacheRead / 1_000_000.0) * cacheRate;
     cost += (outTok / 1_000_000.0) * outRate;
     return cost;
   }

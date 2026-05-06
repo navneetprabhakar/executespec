@@ -510,6 +510,23 @@ public class StateStore {
             });
   }
 
+  /**
+   * GA-readiness P3.2 — persist the customer-supplied tighter cost ceiling for this run. Stored on
+   * {@code pipeline_run.user_cost_cap_usd} (V178); read by {@code RunOrchestrator.persistEstimate}
+   * which clamps the platform-derived {@code hard_cap_usd} to {@code min(platformCap,
+   * userCostCap)}.
+   */
+  public void setUserCostCap(String runId, Double userCostCap) {
+    if (userCostCap == null) return;
+    runRepo
+        .findById(runId)
+        .ifPresent(
+            run -> {
+              run.setUserCostCap(userCostCap);
+              runRepo.save(run);
+            });
+  }
+
   /** Persist batch cost fields computed at plan time. */
   public void setBatchCostFields(
       String runId, Integer batchCredits, boolean batchAvailable, int creditSavings) {

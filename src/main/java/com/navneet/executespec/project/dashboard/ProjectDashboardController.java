@@ -45,6 +45,23 @@ public class ProjectDashboardController {
   /** v2.5.8 — Launch runs accumulate tokens + cost here; dashboard now reads both. */
   private final com.navneet.executespec.execution.repository.ExecutionRunRepository execRunRepo;
 
+  /**
+   * v2.6.4 — code-review + pr-review + arch + generated-doc cost rollup. Each of these surfaces
+   * persists tokens + cost per artefact; the dashboard now sums them alongside pipeline_run +
+   * execution_run cost so "Project spend" reflects every LLM dollar spent in the project's
+   * lifetime, not just the worker pipeline.
+   */
+  private final com.navneet.executespec.codereview.repository.CodeReviewScanRepository
+      codeReviewRepo;
+
+  private final com.navneet.executespec.prreview.repository.PrReviewRepository prReviewRepo;
+  private final com.navneet.executespec.codeintel.repository.RepoArchitectureDocRepository
+      repoArchRepo;
+  private final com.navneet.executespec.codeintel.repository.ProjectArchitectureDocRepository
+      projectArchRepo;
+  private final com.navneet.executespec.codeintel.repository.ProjectGeneratedDocRepository
+      generatedDocRepo;
+
   private final com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
 
   public record TaskSummary(
@@ -68,6 +85,30 @@ public class ProjectDashboardController {
     }
   }
 
+  /**
+   * v2.6.4 — adds {@code costBreakdown} so the UI can show "where the spend went" without an extra
+   * API call. Existing fields ({@code totalTokens}, {@code totalCostUsd}) keep their meaning but
+   * now aggregate every LLM-spending surface in the project, not just runs:
+   *
+   * <ul>
+   *   <li>{@code runs} — pipeline_run.actual_cost_usd
+   *   <li>{@code launches} — execution_run.total_cost_usd
+   *   <li>{@code codeReviews} — code_review_scan.cost_usd
+   *   <li>{@code prReviews} — pr_review.cost_usd
+   *   <li>{@code architecture} — project_architecture_doc.cost_usd + repo_architecture_doc.cost_usd
+   *   <li>{@code generatedDocs} — project_generated_doc.cost_usd
+   * </ul>
+   *
+   * Sum of these equals {@code totalCostUsd}.
+   */
+  public record CostBreakdown(
+      double runs,
+      double launches,
+      double codeReviews,
+      double prReviews,
+      double architecture,
+      double generatedDocs) {}
+
   public record DashboardDto(
       int activeRuns,
       int completedRuns,
@@ -75,6 +116,7 @@ public class ProjectDashboardController {
       double avgScore,
       long totalTokens,
       double totalCostUsd,
+      CostBreakdown costBreakdown,
       List<TaskSummary> recentTasks,
       List<PrSummaryDto> recentPrs,
       String architectureDocStatus,
@@ -131,8 +173,25 @@ public class ProjectDashboardController {
             .filter(e -> e.getTotalCostUsd() != null)
             .mapToDouble(e -> e.getTotalCostUsd().doubleValue())
             .sum();
-    long totalTokens = pipelineTokens + execTokens;
-    double totalCost = pipelineCost + execCost;
+
+    // v2.6.4 — fold review + arch + doc spend into the project rollup. Each finder is a single
+    // SUM(cost_usd) query against an indexed project_id column, so this adds 5 cheap reads to
+    // the dashboard call.
+    double codeReviewCost = codeReviewRepo.sumCostUsdByProject(projectId);
+    long codeReviewTokens = codeReviewRepo.sumTokensByProject(projectId);
+    double prReviewCost = prReviewRepo.sumCostUsdByProject(projectId);
+    long prReviewTokens = prReviewRepo.sumTokensByProject(projectId);
+    double archCost =
+        projectArchRepo.sumCostUsdByProject(projectId)
+            + repoArchRepo.sumCostUsdByProject(projectId);
+    double generatedDocCost = generatedDocRepo.sumCostUsdByProject(projectId);
+
+    long totalTokens = pipelineTokens + execTokens + codeReviewTokens + prReviewTokens;
+    double totalCost =
+        pipelineCost + execCost + codeReviewCost + prReviewCost + archCost + generatedDocCost;
+    CostBreakdown costBreakdown =
+        new CostBreakdown(
+            pipelineCost, execCost, codeReviewCost, prReviewCost, archCost, generatedDocCost);
 
     List<ValidationReport> reports = reportRepo.findAllByProjectId(projectId);
     // v2.5.10+: prefer verifiedScore (objective build+tests+verdict signal)
@@ -188,6 +247,7 @@ public class ProjectDashboardController {
             avgScore,
             totalTokens,
             totalCost,
+            costBreakdown,
             recentTasks,
             recentPrs,
             archStatus,

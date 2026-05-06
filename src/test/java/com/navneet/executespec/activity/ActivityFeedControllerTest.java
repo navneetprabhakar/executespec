@@ -24,6 +24,12 @@ import org.springframework.web.server.ResponseStatusException;
 class ActivityFeedControllerTest {
 
   @Mock ActivityFeedEntryRepository feedRepo;
+  // GA-readiness P4.1-followup — test fixture mocks the new tenant guard. The
+  // default no-op `assertCanRead` (Mockito returns null for non-stubbed calls)
+  // is the correct behavior for these unit tests, which are scoped to the
+  // controller's filtering logic, not the guard itself. Cross-org 403 paths
+  // are exercised by ProjectAccessGuardTest separately.
+  @Mock com.navneet.executespec.project.security.ProjectAccessGuard projectAccessGuard;
   @InjectMocks ActivityFeedController controller;
 
   UUID projectUuid;

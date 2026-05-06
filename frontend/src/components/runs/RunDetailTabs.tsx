@@ -70,6 +70,7 @@ import hljs from 'highlight.js';
 import Editor from '@monaco-editor/react';
 import {MonacoSafeMount} from './MonacoSafeMount';
 import SafeDiffEditor from './SafeDiffEditor';
+import {CostProgressBar} from './CostProgressBar';
 import type {editor as monacoEditor} from 'monaco-editor';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
@@ -898,6 +899,20 @@ function OverviewTab({
               <span className='text-[10px] text-muted'>Real-time</span>
             )}
           </div>
+          {/* GA-readiness P3.2 — cost-cap progress bar. Visible to all
+              users so the customer can see spend approaching the cap they
+              approved. liveCost falls back to actualCostUsd for terminal
+              runs where the live polling has stopped. */}
+          {run.hardCapUsd != null && run.hardCapUsd > 0 && (
+            <div className='mt-3'>
+              <CostProgressBar
+                current={
+                  liveCost != null ? liveCost : run.actualCostUsd != null ? run.actualCostUsd : 0
+                }
+                cap={run.hardCapUsd}
+              />
+            </div>
+          )}
         </div>
       )}
 

@@ -11,21 +11,23 @@ const ROLE_BADGES: Record<string, string> = {
   google: 'text-accent-green bg-accent-green/10',
 };
 
-const MODEL_ROLES: Record<string, string> = {
-  'claude-opus-4-6': 'Architect',
-  'claude-sonnet-4-6': 'Workhorse',
-  'claude-haiku-4-5-20251001': 'Utility',
-  'gpt-5.4': 'Capable (3rd)',
-  'gpt-5.4-mini': 'Fast (3rd)',
-  // Legacy OpenAI models (backward compat for in-flight pricing rows)
-  'gpt-4o': 'Capable (3rd)',
-  'gpt-4o-mini': 'Utility (3rd)',
-  'gemini-3.1-pro-preview': 'Architect (2nd)',
-  'gemini-3-flash-preview': 'Fast (2nd)',
-  // Legacy preview variants (backward compat for in-flight pricing rows)
-  'gemini-3.1-pro-preview-customtools': 'Architect (2nd)',
-  'gemini-3.1-flash-lite-preview': 'Fast (2nd)',
-};
+/**
+ * 2026-05-06 — derive role label from PricingRow.chainTier (YAML model-matrix is the only
+ * source). The prior hardcoded MODEL_ROLES map drifted on every YAML update + missed preview
+ * variants. Returns "—" for legacy DB rows whose YAML entry has been pruned.
+ */
+function roleLabel(chainTier: string | null | undefined): string {
+  switch (chainTier) {
+    case 'ARCHITECT':
+      return 'Architect';
+    case 'CAPABLE':
+      return 'Workhorse';
+    case 'UTILITY':
+      return 'Utility';
+    default:
+      return '—';
+  }
+}
 
 interface EditCell {
   provider: string;
@@ -113,7 +115,7 @@ export default function PricingTable({rows, onRefresh}: PricingTableProps) {
               >
                 {row.provider}
               </span>
-              <span className='text-xs text-muted'>{MODEL_ROLES[row.model] ?? '—'}</span>
+              <span className='text-xs text-muted'>{roleLabel(row.chainTier)}</span>
             </div>
             <p className='font-mono text-xs text-secondary truncate'>{row.model}</p>
             <div className='flex gap-4 text-xs'>
@@ -165,7 +167,7 @@ export default function PricingTable({rows, onRefresh}: PricingTableProps) {
               </td>
               <td className='px-4 py-2.5 font-mono text-xs text-secondary'>{row.model}</td>
               <td className='px-4 py-2.5'>
-                <span className='text-xs text-muted'>{MODEL_ROLES[row.model] ?? '—'}</span>
+                <span className='text-xs text-muted'>{roleLabel(row.chainTier)}</span>
               </td>
               <td className='px-4 py-2.5'>
                 <EditableCell row={row} field='inputCostPer1m' />

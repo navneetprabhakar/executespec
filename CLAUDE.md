@@ -2,6 +2,420 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
+> **2026-05-06 — GA-readiness Phase 1 (quality scoring fix) shipped on
+> `feature/project-cost-pool-tuning`, NOT yet merged.** Operationalises
+> §P1.1 + §P1.2 of `docs/plans/pending-ga-readiness-90-day-execution-plan.md`.
+> The audit on run `0444c95f` (project ppl-ai, dev) found `verifiedScore=50`
+> on a run with `finalBuildPassed=true` + `reviewerVerdict=FIXED_ISSUES` +
+> `endpointCoverage.coveragePercent=100`. The documented formula yields 75;
+> the persisted value was 50. Audit traced the −25 gap to two compounding
+> artefacts:
+>
+> 1. **AccuracyAssessmentService LLM read budget too small** (P1.1).
+>    Per-file content cap was 2,500 chars head-only — multi-endpoint
+>    routers (FastAPI / Express with 5+ handlers) showed only imports +
+>    first 2 endpoints, then the LLM emitted "controller exists but
+>    content not readable" for the others (14× on run 0444c95f). Fix:
+>    `buildKeyFileSnippets` now uses 10,000-char per-file cap with
+>    head-6K + tail-3K truncation when files exceed it, plus a 100K total
+>    snippet ceiling so token cost stays predictable. New marker text
+>    "... [truncated N chars in the middle; file is M chars total] ..."
+>    is recognised in the SYSTEM_PROMPT so the LLM treats it as PARTIAL,
+>    not MISSING. Read errors ("ACCESS DENIED:" / "Cannot read") are
+>    filtered before reaching the LLM. New `truncateForSnippet` static
+>    helper covered by 6 tests in
+>    `AccuracyAssessmentTruncateForSnippetTest`. The selection layer
+>    (`inferKeyFilePaths`) was already hardened by R-343 + b171fa52 and
+>    needed no change.
+> 2. **`countUnfixedCritical` penalised LLM read-budget bugs** (P1.2).
+>    `RunOrchestrator.synthesiseReviewIssues` translates AccuracyReport's
+>    `missingRequirements` and `endpointCoverage.missing` into CRITICAL
+>    `SYNTH-ACC-MISS-*` / `SYNTH-ACC-EP-*` ReviewIssues (capped at 5
+>    each). Those then fed the 5×N verifiedScore penalty — so the same
+>    read-budget bug that produced the false partials also dragged the
+>    headline number down by up to 25 points. Fix:
+>    `ValidationReportService.countUnfixedCritical` now filters out IDs
+>    starting with `SYNTH-ACC-` (LLM-derived). Real reviewer signals
+>    (`SYNTH-BUILD-*` for build failures, `SYNTH-REV-*` for unresolved
+>    verdicts, plus uncategorised LLM-flagged criticals) keep counting.
+>    `computeVerifiedScore` gains a 6-arg overload taking
+>    `endpointCoveragePercent` — bonus +10 when ≥95% so deterministic
+>    endpoint delivery credits the headline number. Old 5-arg overload
+>    delegates with `null`. 8 new tests in
+>    `ValidationReportServiceCountUnfixedCriticalTest` + 8 new tests in
+>    `ValidationReportServiceVerifiedScoreTest` (incl. `run_0444c95f_audit_regression_case`).
+>
+> Net effect on the 0444c95f shape: 40 base + 20 build + 0 tests + 15
+> FIXED_ISSUES + 10 endpoint-coverage − 0 unfixed-critical = **85**, up
+> from the persisted 50. Backfill of historical runs deferred to a P1.2
+> follow-up commit (idempotent; not blocking the read-budget fix).
+> Mvn 42/42 green on the new + existing scoring tests.
+>
+> **2026-05-06 — GA-readiness P3.1 (cost cap fix) + P4.1 (multi-tenant
+> guard ArchUnit pin) on `feature/project-cost-pool-tuning`.**
+>
+> **P3.1 — `WorkerAgent` budget exceeded outcome fix.** The hard-cap
+> enforcement path (lines 215–238 of `WorkerAgent`) was already calling
+> `recordTerminal(BUDGET_EXCEEDED, ...)` for metrics but returning
+> `errorResult(...)` which hardcodes `Outcome.ERROR`. The metric and the
+> WorkerResult disagreed — `SequentialExecutor` couldn't distinguish a
+> router crash from a cost-cap stop. Replaced the early-return with a
+> direct `WorkerResult.builder().outcome(BUDGET_EXCEEDED)` so the
+> outcome is now consistent. New `WorkerAgentV2HardCapTest` (5 tests)
+> pins the contract: (a) iter-3 over-cap → `BUDGET_EXCEEDED`, (b) under
+> cap → no premature termination, (c) null cap → no enforcement, (d)
+> zero cap → no enforcement, (e) iter-1 already-over-cap → terminate at
+> iter 1. All 5 green.
+>
+> **P4.1 — `AccessGuardCoverageTest` ArchUnit drift detector** at
+> `src/test/java/com/navneet/executespec/arch/AccessGuardCoverageTest.java`.
+> Audit Risk #5 (catastrophic): every controller has to remember to
+> call a tenant access guard, and a single missed call = data leak. The
+> test scans every `@*Mapping` method on every `@RestController` /
+> `@Controller` whose URL path contains `/runs/{`, `/projects/{`,
+> `/executions/{`, `/launches/{`, or `/repos/{` and verifies it calls
+> either the canonical `RunAccessGuard` / `ProjectAccessGuard` OR a
+> method matching the regex `^(require|requires|assert|ensure|check|authorize|loadFor|load[A-Z][a-zA-Z]*For)[A-Z][a-zA-Z]*$`
+> (covers local guard patterns like `requireRunAccess` /
+> `requireChatAccess` / `loadRepoForRead`). On first run, found **37
+> legacy methods** without a guard — locked in the `KNOWN_LEGACY_DRIFT`
+> set as documented tech debt with migration order spelled out in the
+> plan doc's §P4.1-followup. New entries to that set fail the build
+> (catches regressions today). Stale entries (controllers migrated /
+> removed) also fail (keeps the legacy ledger honest). 6 entries are
+> in `ALLOWLIST` for `ProjectSharePublicController` (public-by-design,
+> token bearer is the auth). Test runs in ~2.4s.
+>
+> Commit: `feat(scoring+arch)` will land both P3.1 and P4.1 as a single
+> coherent batch on top of the P1 commit.
+>
+> **2026-05-06 — GA-readiness P2.1 + P2.3 + P2.4 (pricing ladder rewrite)
+> on `feature/project-cost-pool-tuning`.** Closes audit Risk #7 — the
+> FREE-to-$78 conversion chasm — with the lowest-cost-of-entry SOLO tier
+> at $29/mo (managed) un-hidden + annual rows + founder pricing schema.
+>
+> **P2.1 — V176 un-hides PRO as Solo.** Migration sets
+> `tier_config.PRO.display_name='Solo'`, `lifecycle_state='LISTED'`,
+> `monthly_run_limit=30` (was 20). Inserts NEW billing_plan rows "Solo
+> Monthly USD" ($29) + "Solo Monthly INR" (₹2,499) — the old "Pro
+> Monthly *" rows stay HIDDEN as before so grandfathered PRO subscribers
+> renew on those untouched. Frontend `PlansPage.tsx` `tierOrder` updated
+> from `['TEAM']` to `['PRO', 'TEAM']` (Solo first, cheapest paid);
+> `PlanCard.tsx` derives the visible label from `plan.name` so "Solo
+> Monthly USD" renders as "Solo" while older "Pro Monthly USD" rows
+> still render as "Pro" for grandfathered display.
+>
+> **P2.3 — V177 Solo Yearly billing_plan rows.** $289/yr (USD) +
+> ₹24,890/yr (INR) at 17% annual_discount_pct ("two months free"),
+> matching V146's existing TEAM/MAX yearly shape. The /plans Annual
+> toggle (already shipped in V146 + frontend) now picks them up.
+>
+> **P2.4 — V177 founder_pricing_discount + allocation schema.** Two
+> tables (`founder_pricing_discount` + `founder_pricing_allocation`)
+> + a singleton "FOUNDER50_SOLO_LIFETIME" seed row (50% off, max 100,
+> lifetime, active, Stripe coupon ID NULL until ops creates the
+> coupon). New entity classes `FounderPricingDiscount` +
+> `FounderPricingAllocation`, repos
+> `FounderPricingDiscountRepository` (with `findByIdForUpdate` PESSIMISTIC_WRITE
+> lock) + `FounderPricingAllocationRepository`. New service
+> `FounderPricingService.tryAllocate(userId, orgId, tier)` — atomic
+> check-capacity + increment + record-allocation under the row lock so
+> concurrent checkouts can't double-spend a slot. Returns
+> `AllocationResult.{Granted, NoOffer, SoldOut, Inactive}` sealed
+> interface. Lifetime semantics: re-subscribe by the same user returns
+> the existing allocation without bumping the counter (so churn doesn't
+> cost a slot). Revoke flow decrements + un-revokes if used. 12 unit
+> tests in `FounderPricingServiceTest` pin the contract incl. the
+> race path "active at lookup, inactive when locked → returns Inactive".
+>
+> **Frontend** — `PlansPage.tsx` fetches `/api/billing/founder-pricing/PRO`
+> on mount (returns 204 when no offer, JS folds to null), then passes
+> the result as `founderOffer={...}` into the SOLO `PlanCard`.
+> `PlanCard.tsx` renders an amber `{discountPct}% FOUNDER · {N} LEFT`
+> badge when the prop is non-null and the tier matches. The badge
+> shows `remainingCapacity` only — never the raw current/max counts
+> (anti-social-engineering posture from `BillingController.FounderOfferDto`).
+>
+> **Outstanding for P2.4 to actually charge the discount:**
+> 1. Ops creates the `FOUNDER50_LIFETIME` coupon on Stripe + Razorpay
+>    offer; populates `stripe_coupon_id` / `razorpay_offer_id` on the
+>    seeded discount row via SUPER_ADMIN endpoint or psql.
+> 2. `BillingService.subscribe` pre-checkout — call
+>    `founderPricingService.tryAllocate(userId, orgId, plan.tier)`,
+>    forward the coupon ID into the Stripe/Razorpay subscription create
+>    if `Granted`. Tracked as P2.4-followup; the schema + service +
+>    test surface ship now so the wiring is a few-line follow-up.
+>
+> Frontend build: ✓. Backend `mvn test` 97 tests across our touched
+> surfaces — all green (P1 + P3.1 + P4.1 + P2.4 service).
+>
+> **2026-05-06 — GA-readiness P3.2 (cost-cap progress bar) + P4.2 (SLO
+> doc) + P5.4 (GDPR data-export) + P4.1-followup partial (2 of 37
+> guards migrated) on `feature/project-cost-pool-tuning`.**
+>
+> **P3.2 — visible cost-cap progress bar.** New
+> `frontend/src/components/runs/CostProgressBar.tsx` renders inside the
+> `RunDetailTabs` Credits panel for ALL users (not gated on
+> SUPER_ADMIN). Three-threshold horizontal bar (green 0-80%, amber
+> 80-100%, red ≥100%) with aria-progressbar attributes for screen
+> readers. Falls through silently when `hardCapUsd` is null. The
+> "Stop at $X" customer override is deferred to a P3.2-followup that
+> needs RunRequest field + PipelineRun column.
+>
+> **P4.2 — SLO documentation.** New `docs/operations/slos.md` —
+> 5 SLOs with measurement queries, target / alert thresholds, and
+> ownership: (1) run terminal in 15min ≥95%, (2) verified-score
+> correctness ≥90% (weekly random-sample audit), (3) cost estimate
+> within ±30% on ≥80% of runs, (4) webhook in 60s ≥99%, (5) hot-path
+> GET 5xx <0.5%. GA cutover gate: all 5 GREEN over 30 consecutive
+> days. Alert YAML rules + Grafana dashboards land alongside
+> PagerDuty wiring in P4.2-followup.
+>
+> **P5.4 — GDPR data-export endpoint.** New
+> `auth/service/UserDataExportService.java` builds a ZIP bundle of
+> the requesting user's personal data: `manifest.json` (export
+> metadata + GDPR Article 15/20 attribution) + `payload.json` (user
+> + orgs + projects with sensitive fields redacted) + `README.md`
+> (export usage + erasure path at `admin@executespec.ai`). New
+> endpoint `GET /api/auth/me/data-export` returns
+> `application/zip` with `Content-Disposition` filename including
+> userId + date. Sensitive fields stripped: password hash, all 3 LLM
+> API keys (Anthropic/OpenAI/Gemini), GitHub PAT. Capability flags
+> (`hasAnthropicKey`, etc.) DO appear so the user can confirm
+> settings without re-exposing the secret. 8 unit tests in
+> `UserDataExportServiceTest` pin the contract: zip structure,
+> manifest content, payload structure, redaction, README usage,
+> empty-org path. Future schema additions (runs, validation reports,
+> notifications, billing, activity audit) bumping the
+> `schemaVersion` to 2.
+>
+> **P4.1-followup — migrated 2 of 37 legacy guard sites.**
+> `TestResultController.runTests` + `applyTestFixes` now call
+> `runAccessGuard.requireRunAccess` directly. Both removed from
+> `KNOWN_LEGACY_DRIFT`. Remaining 35 sites tracked under §P4.1-followup
+> in the plan doc; high-traffic + high-risk surfaces prioritised next
+> (PullRequestController, ProjectController.{addMember,removeMember},
+> ProjectExportController.export). The drift detector now allows
+> exactly 35 known-legacy entries; any new violator fails CI.
+>
+> **2026-05-06 — GA-readiness P4.1-followup batch 2: 25 of 35 legacy
+> guard sites migrated** on `feature/project-cost-pool-tuning`.
+> Touched controllers: `PullRequestController` (×2),
+> `ProjectExportController` (×1), `ProjectController` (×6),
+> `ActivityFeedController` (×1), `AdrController` (×2),
+> `InvariantController` (×2), `CodeReviewController` (×2),
+> `PrReviewController` (×1), `StandardsComplianceController` (×1),
+> `ProjectRepoController` project-scoped paths (×4),
+> `ProjectDocumentController` (×3),
+> `SpecTemplateController` (×3 — `listForProject`, `createForProject`,
+> `delete`). All now call `projectAccessGuard.assertCanRead(projectId,
+> userDetails)` (or its `principalOrNull(auth)` variant for the
+> `Authentication`-style controllers, which falls back closed when the
+> principal isn't an `AppUserDetails`). Existing service-side checks
+> stay as defense in depth. Test fixture updated:
+> `ActivityFeedControllerTest` adds `@Mock ProjectAccessGuard`. Build:
+> `mvn test -Dtest='*Controller*'` 41/41 green. Remaining 10
+> entries in `KNOWN_LEGACY_DRIFT`: 3 repo-scoped sites in
+> `ProjectRepoController` (`deleteRepo`/`installRepoWebhook`/`syncRepo`)
+> need a dedicated `RepoAccessGuard`; 2 admin sites in
+> `SuperAdminController` + 1 in `ExecutespecMigrationController` are
+> SUPER_ADMIN-gated by SecurityConfig (kept for cleanup later); 1
+> in `V2RunController#poll` (V2 canary surface, separate access logic);
+> 3 unrelated. Plan doc P4.1-followup migration order updated to
+> reflect the batch landed.
+>
+> Tests: 9/9 green on the touched surfaces (UserDataExportServiceTest 8 +
+> AccessGuardCoverageTest 1). Frontend build: clean.
+>
+> **2026-05-06 — model-mapping consolidation: YAML is the single source
+> of truth.** Closes the 8 drift sites catalogued in
+> `docs/reports/model-mapping-audit-2026-05-06.md`. 5 commits on
+> `feature/project-cost-pool-tuning`:
+>
+> 1. **`72d75b49` — Delete `ModelContextWindowMap`.** The hardcoded
+>    Java map said `gpt-5.4` had a 256K context window while YAML
+>    said 200K. The chat-header chip and worker-side token guard
+>    disagreed. Routes everything through new
+>    `ModelRegistry.contextLimitForOrPrefixFallback(model)` — YAML
+>    wins, with a forward-compat prefix heuristic for unknowns
+>    (claude-opus-*-1m → 1M, claude → 200K, gemini → 1M, gpt → 256K).
+>    `ProjectChatController.info` switched dependency from the deleted
+>    map to `ModelRegistry`. 7 unit tests in
+>    `ModelRegistryContextLimitTest`.
+> 2. **`c9c2799a` — Cache pricing reads YAML.** `RunCostTracker.priceCall`
+>    had hardcoded per-provider cache-read multipliers (Anthropic 0.10,
+>    OpenAI 0.50, Gemini 0.25) that completely ignored the YAML
+>    `cached-input-per-1m` field. YAML cache rates updated to provider
+>    reality: gpt-5.4 cached $0.25→$1.25/M (50% of input), gpt-5.4-mini
+>    $0.075→$0.375/M, gemini-3-flash-preview $0.05→$0.125/M (25%),
+>    gemini-3-pro-preview $0.35→$0.875/M, anthropic unchanged at 10%.
+>    `priceCall` now does direct math on `p.getCachedInputCostPer1m()`
+>    with a defensive 10%-of-input fallback when YAML is null. 9 unit
+>    tests in `RunCostTrackerCachePricingTest`.
+> 3. **`fdf0dac1` — `ModelController.MODEL_LABELS` reads YAML
+>    `display-label`.** New optional field on `ModelMatrixProperties.ModelConfig`;
+>    8 active models in YAML get explicit labels ("Claude Sonnet 4.6",
+>    "Gemini 3 Pro Preview", "GPT-5.4", etc). `ModelRegistry.displayLabelFor`
+>    falls back to raw id when label missing. The previously-missing
+>    `gemini-3-pro-preview` (added 2026-05-04) now renders correctly in
+>    the model selector. 4 new test cases.
+> 4. **`f23b0e77` — Drop the last 4 hardcodes.** `RunOrchestrator.defaultModelFor`
+>    routes through `ModelRegistry.workhouseModelFor(provider)`; previously
+>    a hardcoded switch returned Haiku/flash/mini even after YAML moved
+>    Anthropic and Gemini WORKHORSE upward. Spring AI bean-init defaults
+>    bumped (gemini-2.5-flash → gemini-3-flash-preview) with a header
+>    comment explaining V2 router overrides per-call. `*Properties.java`
+>    default model strings nullified — consumers fall back to registry.
+>    Concrete consumer wired: `ApiTestSuiteProperties.getModel()` falls
+>    through to `modelRegistry.workhouseModelFor(getProvider())` when
+>    the configured value is blank. The other 3 fields had no consumers
+>    (verified via grep).
+> 5. **`ab586b5f` — Frontend `PricingTable.MODEL_ROLES` reads YAML
+>    `chainTier`.** Backend `PricingRow` DTO gains 3 fields
+>    (cachedInputCostPer1m, chainTier, displayLabel) hydrated from
+>    `ModelRegistry`. Frontend `MODEL_ROLES` map deleted; new
+>    `roleLabel(chainTier)` switch returns 'Architect' / 'Workhorse' /
+>    'Utility' from ARCHITECT/CAPABLE/UTILITY. Pricing table now
+>    reflects YAML on every model addition without a frontend release.
+>
+> Net effect: every model identifier / context-window value /
+> max-output-tokens / pricing rate / display label / fallback chain /
+> free-tier lock / agent→tier map / provider-default model lives in
+> `application.yml model-matrix.*` and is read via `ModelRegistry`.
+> The remaining model-string hits are legacy-alias test fixtures
+> (handled by the alias mechanism) and Spring AI bean-init defaults
+> (overridden per-call). Tests: 39 across touched surfaces, 0
+> failures. Live API endpoints (`/api/billing/plans`,
+> `/api/models/available`, `/api/pricing`) all serve YAML-derived
+> data after a fresh boot.
+>
+> **2026-05-06 — log-noise cleanup: ReviewerAgentV2 + Docker preview
+> WARNs.** Two cosmetic warnings flagged during the post-consolidation
+> 3-provider eval are now silent.
+>
+> 1. **`ReviewerAgentV2` → `ReviewerAgentV3`.** `CostEstimator.java:101`
+>    + `RunOrchestrator.java:2854` both called
+>    `modelResolver.resolve("ReviewerAgentV2", ...)` — a class name
+>    that hasn't existed since v2.5.10 retired V2 in favour of V3. The
+>    YAML `agent-tier-map` has `ReviewerAgentV3: PLANNING` (correct).
+>    The 2-arg form on CostEstimator's call fell through to "No tier
+>    mapping for agent ReviewerAgentV2 — defaulting to WORKHORSE";
+>    the 3-arg form on RunOrchestrator's call bypassed the tier
+>    lookup but kept the stale class name. Both updated.
+> 2. **Docker preview engine — distinguish "daemon not running" from
+>    real preview-engine bugs.** `PreviewService.handoffToPreviewEngine`
+>    used to log every docker subprocess failure at ERROR with the
+>    full 1.5KB stack trace + CLI output, including the "no such
+>    file or directory" socket error that fires on every local-dev
+>    box without Docker Desktop running. Each completed run produced
+>    one of these. New behaviour: detects docker-daemon-down via
+>    `e.getMessage()` matching `docker.sock` / `docker daemon` /
+>    `Cannot connect to the Docker daemon` / `dial unix...docker`
+>    and logs a single concise WARN — "preview skipped — Docker
+>    daemon not reachable. Run completed normally; only the auto-
+>    preview was skipped. Start Docker Desktop to enable previews."
+>    Real preview bugs (any other exception) still log at ERROR with
+>    the stack trace. The downstream `fail()` log line also gets a
+>    short message ("Docker daemon not reachable; preview skipped")
+>    instead of the docker-CLI dump.
+>
+> Verified: post-restart eval (Anthropic LOW @ 14:20) shows zero
+> `ReviewerAgentV2` warnings, exactly two clean WARN lines for the
+> docker-daemon-down case, and zero ERROR-level entries outside the
+> known OTel/gcloud fail-open paths. Run completed cleanly with
+> cost=$0.0991, status=COMPLETE, reason=CLEAN_COMPLETION.
+>
+> **2026-05-06 — GA-readiness P3.2 finalization (customer "Stop at $X"
+> override) on `feature/project-cost-pool-tuning`.** Closes the second
+> half of P3.2 — the cost-cap progress bar shipped earlier displayed
+> the platform-derived `hard_cap_usd`. This commit lets the customer
+> voluntarily lower the ceiling at submission time.
+>
+> **Schema (V178):** `pipeline_run.user_cost_cap_usd DOUBLE PRECISION`,
+> nullable. Idempotent ALTER TABLE.
+>
+> **Backend:**
+> - `RunRequest.userCostCap` field (`Double`,
+>   `@DecimalMin(0.10)`/`@DecimalMax(1000.00)`, optional) so unbounded
+>   or negative values are rejected before reaching DB.
+> - `PipelineRun.userCostCap` field + getter/setter via Lombok.
+> - `StateStore.setUserCostCap(runId, cap)` chokepoint method
+>   (mirroring `setHardCapUsd`).
+> - `RunController.submit` stamps `userCostCap` onto the new run row
+>   right after `submitRun()` returns.
+> - `RunOrchestrator.persistEstimate` clamps `hard_cap_usd =
+>   min(platformCap, userCostCap)` via new package-private
+>   `clampHardCap(platformCap, userCostCap)` helper. Customer can lower
+>   the ceiling but not raise it past what credits authorised.
+> - 7 unit tests in `RunOrchestratorClampHardCapTest` pin: null user
+>   cap → platform; user > platform → platform; user < platform →
+>   user; equal → either; zero/negative → defensive fallback to
+>   platform; zero platform + positive user → 0 (immediate-terminate
+>   edge).
+>
+> **Frontend:** `NewRunModal` adds a "Stop at $X" numeric input under
+> the TDD-mode checkbox with range $0.10–$1000, step $0.10, range
+> attributes for HTML5 validation. `useRunStore.createRun` +
+> `lib/api.ts` createRun signature gain optional `userCostCap?: number`.
+> Empty / unparseable input means "no override" — backend uses the
+> platform cap unchanged.
+>
+> **End-to-end story:** customer enters $5 in NewRunModal → submission
+> stamps userCostCap=5 onto pipeline_run row → planner emits a plan
+> → persistEstimate computes platform cap (e.g. $7.50 for 1 credit)
+> → clamp returns $5 → WorkerAgent budget guard force-terminates with
+> `Outcome.BUDGET_EXCEEDED` when cumulative spend hits $5 → cost-cap
+> progress bar in UI flips to red → customer sees the cap honoured.
+>
+> Tests: 110 across all touched surfaces, 0 failures. Frontend build:
+> clean. Migration is additive + idempotent (no historical data
+> impact).
+>
+> **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
+>
+> Three packaged improvements:
+>
+> 1. **External project sharing (V175, new `sharing/` package).** Two
+>    surfaces:
+>    - **Cross-org project invites** — paid-tier admins can invite by
+>      email; on accept the invitee gets a `ProjectMember` row with
+>      `is_external=true`. New `PROJECT_VIEWER` role (read-only).
+>    - **Public read-only share links** — `project_share_link` table
+>      with `Surface` enum (PROJECT_OVERVIEW / RUN_DETAIL / CODE_REVIEW
+>      / PR_REVIEW / VALIDATION_REPORT / ARCHITECTURE_DOC). Token in
+>      URL is the bearer. Tier-gated by `tier_config.share_link_active_cap`
+>      (FREE=3, PRO=25, TEAM/MAX/ENTERPRISE=-1 unlimited).
+>    - `ProjectAccessGuard` updated to consult `project_member` after the
+>      org-match check, opening the door to cross-org collaborators.
+>    - 8 new endpoints under `/api/projects/{id}/invites`,
+>      `/api/projects/{id}/share-links`, `/api/invites/...`, plus
+>      `/api/shared/{token}/...` whitelisted in `SecurityConfig`.
+>
+> 2. **Core-dependent dispatch pools.** New
+>    `util/PoolSizing.coreMultiple(multiplier, min, max)` helper. 5 fixed
+>    pools swapped: CodeReview (2→clamp(2,8,cores×1)), PrReview
+>    (4→clamp(4,12,cores×2)), V2RunService (4→clamp(4,12,cores×1)),
+>    RunConversationController.applyExecutor (4→clamp(4,12,cores×2)),
+>    RunOrchestrator (4→clamp(4,16,cores×1)).
+>
+> 3. **Project cost rollup.** V174 adds `cost_usd` to
+>    `repo_architecture_doc` + `project_architecture_doc` +
+>    `project_generated_doc`. New `RunCostTracker.computeCost(provider,
+>    model, inTok, outTok)` public helper. ProjectArchitectureService +
+>    ProjectDocGeneratorService now persist cost at generation time. 5
+>    new `sumCostUsdByProject` finders aggregated in
+>    ProjectDashboardController. New `DashboardDto.costBreakdown` exposes
+>    6 buckets — `runs`, `launches`, `codeReviews`, `prReviews`,
+>    `architecture`, `generatedDocs`. Sum equals `totalCostUsd`.
+>
+> Tests: 967/0/0/4 skipped on this branch. Two new test classes
+> (`ProjectAccessGuardTest`, `ProjectShareLinkServiceTest`) cover the
+> guard's allow/deny tree + the share-link tier gate + revoke/expire
+> lifecycle. AsyncAllowlist updated for the new
+> `MailService#sendProjectInviteEmail` method. Frontend
+> `lib/api.ts` extended with `ProjectInviteDto`, `ShareLinkDto`,
+> `costBreakdown` types + 9 helper functions.
+>
 > **2026-05-05 — PR Review + Code Review agents (`feature/code-review-agents`, NOT yet merged to dev/main):**
 > Two new paid-tier agents land alongside the existing run pipeline,
 > both gated to PRO/TEAM/MAX/ENTERPRISE on the `tier_config` table
@@ -584,6 +998,24 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | POST | `/api/projects/{id}/standards/{standardId}/exception` | E3.6 — declare a standing project-level exception to a standard; rationale ≥30 chars required |
 | DELETE | `/api/projects/{id}/standards/{standardId}/exception` | E3.6 — withdraw a standing exception |
 | GET | `/api/projects/{id}/standards/report?orgId={orgId}&sinceDays={n}` | E3.16 — read-only project standards compliance report (effective standards merged from org + project, recent violations, persistent overrides); default `sinceDays=30` |
+
+### External project sharing (v2.6.4, V175, `feature/project-cost-pool-tuning`)
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/api/projects/{id}/invites` | Create cross-org invite by email (PRO+); body `{email, role}`; emails accept link. |
+| GET | `/api/projects/{id}/invites` | List PENDING invites for the project. |
+| DELETE | `/api/projects/{id}/invites/{inviteId}` | Revoke a pending invite. |
+| GET | `/api/invites/preview?token=` | Public — preview invite metadata before accepting (no token leak). |
+| POST | `/api/invites/accept?token=` | Authenticated — accept the invite; email-match required. |
+| POST | `/api/projects/{id}/share-links` | Create public read-only link; tier-gated by `tier_config.share_link_active_cap`. Body: `{surface, scopeId?, label?, expiresInDays?}`. |
+| GET | `/api/projects/{id}/share-links` | List + active count. |
+| DELETE | `/api/projects/{id}/share-links/{linkId}` | Revoke link (idempotent). |
+| GET | `/api/shared/{token}/meta` | Public — surface metadata, no payload. |
+| GET | `/api/shared/{token}/run` | Public — RUN_DETAIL slice (read-safe). |
+| GET | `/api/shared/{token}/validation-report` | Public — VALIDATION_REPORT slice. |
+| GET | `/api/shared/{token}/code-review` | Public — CODE_REVIEW markdown + counts. |
+| GET | `/api/shared/{token}/pr-review` | Public — PR_REVIEW summary + comment count. |
+| GET | `/api/shared/{token}/architecture` | Public — latest project ARCHITECTURE_DOC content. |
 
 ### PR Review + Code Review agents (v2.6.4, `feature/code-review-agents`)
 | Method | Path | Description |
