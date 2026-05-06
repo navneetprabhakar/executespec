@@ -505,7 +505,7 @@ export default function RunDetailPage() {
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(220px, 260px) minmax(0, 1fr) 380px',
+          gridTemplateColumns: 'minmax(220px, 260px) minmax(0, 1fr) minmax(440px, 520px)',
           gap: 16,
           alignItems: 'stretch',
         }}
@@ -736,7 +736,7 @@ export default function RunDetailPage() {
 
       {/* Tablet/mobile collapse: stack files + diff, then full-width side panel. */}
       <style>{`
-        @media (max-width: 1100px) {
+        @media (max-width: 1240px) {
           .v3-rundetail-grid {
             grid-template-columns: minmax(200px, 240px) 1fr !important;
           }
