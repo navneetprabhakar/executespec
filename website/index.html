@@ -518,8 +518,15 @@
             --blue: var(--c-signal-blue);
             --blue-light: var(--c-signal-blue-hover);
             --purple: var(--c-accent-purple);
-            --orange: var(--c-pop-orange);            /* brand-pop gradient start */
-            --yellow: var(--c-pop-amber);             /* brand-pop gradient end */
+            /* Website refresh deeper (2026-05-06) — `--orange` semantic
+             * alias now points at the new warm coral, not the
+             * Tailwind-orange #F97316 that read "AI tool default."
+             * Every TEAM-tier marker, mode-card top-stripe, and
+             * snapshot counter inherits the softer color in one swap.
+             * `--c-pop-orange` raw token kept for the Vue-2 etc.
+             * dual-color logos that need the original hue. */
+            --orange: var(--c-accent-warm);
+            --yellow: var(--c-pop-amber);             /* brand-pop gradient end (kept) */
             --green: var(--c-success);
             --red: var(--c-error);                    /* was #F26D6D — drift-resolved to #EF4444 */
             --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
@@ -613,21 +620,46 @@
             min-height: 100vh; display: flex; align-items: center; justify-content: center;
             text-align: center; position: relative; padding-top: 80px;
         }
+        /* Website refresh deeper (2026-05-06) — hero-bg simplified.
+         * Dropped the radial-glow + 40px grid pattern (the "AI-tool
+         * starter template" hero look every dev tool ships). New
+         * version is a clean dark surface with a single very-soft
+         * accent bloom from the top-center, low alpha, no grid.
+         * Lets the H1 + composer carry the page instead of competing
+         * with chrome. */
         .hero-bg {
             position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-            background-image: 
-                radial-gradient(circle at 50% 0%, rgba(59, 130, 246, 0.15) 0%, transparent 50%),
-                linear-gradient(to right, rgba(255,255,255,0.02) 1px, transparent 1px), 
-                linear-gradient(to bottom, rgba(255,255,255,0.02) 1px, transparent 1px);
-            background-size: 100% 100%, 40px 40px, 40px 40px;
+            background:
+                radial-gradient(ellipse 60% 40% at 50% 0%, rgba(91,141,239,0.07) 0%, transparent 70%);
             z-index: -1;
         }
         .hero-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 40px; }
         
-        /* Layout */
-        section { padding: 100px 0; border-bottom: 1px solid var(--surface-border); }
-        .section-header { margin-bottom: 64px; }
-        .section-label { display: inline-block; margin-bottom: 16px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85rem;}
+        /* Layout — Website refresh deeper (2026-05-06).
+         * Pre-fix every section had identical 100px vertical padding
+         * + hairline border, which baked a uniform "AI tool template"
+         * rhythm into the whole page. Loosened to 88px default + per-
+         * section overrides via inline style where it matters; the
+         * bottom borders stay (they're load-bearing for the section
+         * boundaries) but the section-header bottom-margin tightens
+         * 64 → 48 so the H2 sits closer to its body content. */
+        section { padding: 88px 0; border-bottom: 1px solid var(--surface-border); }
+        .section-header { margin-bottom: 48px; }
+        .section-label { display: inline-block; margin-bottom: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85rem;}
+        /* Hand-drawn underline accent — applied to H2s where the
+         * section is supposed to feel personal (real-example,
+         * contact). Pure SVG so it scales + recolors with the
+         * surrounding text. Opt-in via class .h2-handdrawn. */
+        .h2-handdrawn { position: relative; display: inline-block; }
+        .h2-handdrawn::after {
+            content: '';
+            position: absolute;
+            left: 0; right: 0; bottom: -8px;
+            height: 8px;
+            background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 8' preserveAspectRatio='none'%3E%3Cpath d='M2 5 Q 25 2, 50 4 T 100 5 T 150 4 T 198 5' stroke='%23FF8E72' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-size: 100% 8px;
+        }
 
         /* Dual Mode Comparison */
         .dual-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
@@ -675,7 +707,33 @@
         input:checked + .slider:before { transform: translateX(20px); background-color: var(--text-main); }
         .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
         .price-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 40px; border-radius: 16px; display: flex; flex-direction: column; }
-        .price-card.popular { border-color: var(--blue); background: linear-gradient(180deg, rgba(91,141,239,0.08) 0%, transparent 100%); box-shadow: 0 8px 32px rgba(91,141,239,0.10); }
+        /* Website refresh deeper (2026-05-06) — dropped the glassmorphism
+         * gradient on the "popular" pricing card. The 0.08-alpha blue
+         * fade-to-transparent + colored shadow was the same SaaS-AI
+         * "this is the recommended plan" treatment every Cursor-clone
+         * uses. Replaced with a clean 2px blue border + a small
+         * "Recommended" wordmark (rendered via :before below) — same
+         * visual hierarchy, less of the AI-tool fingerprint. */
+        .price-card.popular {
+            border-color: var(--blue);
+            border-width: 2px;
+            background: var(--surface);
+            position: relative;
+        }
+        .price-card.popular::before {
+            content: 'Recommended';
+            position: absolute;
+            top: -10px; left: 24px;
+            padding: 2px 10px;
+            background: var(--bg);
+            color: var(--blue);
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            border: 1px solid var(--blue);
+            border-radius: 3px;
+        }
         .price-amount { font-size: 3rem; font-weight: 700; margin: 16px 0; font-family: var(--font-mono); }
         .price-amount span { font-size: 1rem; color: var(--text-muted); font-family: var(--font-body); font-weight: 400; }
         .price-card .btn { margin-top: auto; width: 100%; }
@@ -690,6 +748,47 @@
         .faq-answer { padding: 0 24px 24px 24px; color: var(--text-muted); font-size: 0.95rem; line-height: 1.6; }
 
         /* About & Contact */
+        /* Website refresh deeper (2026-05-06) — founder block in the
+         * Contact section. Single warmest-color avatar + name +
+         * one-line role + handwritten-feeling italic founder note.
+         * Anti-AI-generated signal: a real person willing to put their
+         * name on the page. Avatar is a monogram placeholder until
+         * ops has the headshot file; .founder-block-avatar swaps to
+         * an `<img>` element later with no markup change. */
+        .founder-block {
+            display: flex; align-items: flex-start; gap: 18px;
+            max-width: 720px; margin: 32px auto 48px;
+            padding: 22px 24px;
+            background: var(--surface);
+            border: 1px solid var(--surface-border);
+            border-radius: 14px;
+            text-align: left;
+        }
+        .founder-block-avatar {
+            width: 56px; height: 56px; border-radius: 50%;
+            display: inline-flex; align-items: center; justify-content: center;
+            background: var(--accent-warm);
+            color: #1F1A14; font-family: var(--font-mono);
+            font-weight: 700; font-size: 22px;
+            flex-shrink: 0;
+            box-shadow: 0 1px 0 rgba(255,255,255,0.08) inset;
+        }
+        .founder-block-text { min-width: 0; }
+        .founder-block-name { font-size: 1.05rem; font-weight: 700; color: var(--text-main); }
+        .founder-block-role { font-size: 0.85rem; color: var(--text-muted); margin-top: 2px; }
+        .founder-block-why {
+            margin-top: 10px;
+            font-family: var(--font-serif);
+            font-style: italic;
+            font-size: 1rem;
+            line-height: 1.55;
+            color: var(--text-secondary);
+        }
+        @media (max-width: 640px) {
+            .founder-block { padding: 18px; gap: 14px; }
+            .founder-block-avatar { width: 44px; height: 44px; font-size: 18px; }
+            .founder-block-why { font-size: 0.95rem; }
+        }
         .founder-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 40px; border-radius: 16px; max-width: 800px; margin: 0 auto; text-align: left; }
         .founder-header { display: flex; align-items: center; gap: 16px; margin-bottom: 24px; }
         .founder-avatar { width: 80px; height: 80px; border-radius: 50%; object-fit: cover; border: 2px solid var(--surface-border); flex-shrink: 0; }
@@ -1288,7 +1387,7 @@
       <div class="container" style="max-width: 1080px;">
         <div class="section-header" style="text-align: center; margin-bottom: 48px;">
           <span class="section-label mono" style="color: var(--c-accent-warm); border: 1px solid var(--c-accent-warm); padding: 4px 12px; border-radius: 20px;">A real run · 47s</span>
-          <h2 class="h2" style="color: var(--c-paper-ink); margin-top: 16px;">You type one line. We open one PR.</h2>
+          <h2 class="h2 h2-handdrawn" style="color: var(--c-paper-ink); margin-top: 16px;">You type one line. We open one PR.</h2>
           <p style="font-size: 1rem; color: var(--c-paper-ink-muted); max-width: 620px; margin: 12px auto 0; line-height: 1.55;">
             Plan → approve cost → ship code → reviewer pass → final build → PR with a verdict you can act on. No diffs to validate by hand.
           </p>
@@ -1402,6 +1501,238 @@
                 <h2 class="h2" style="margin-top: 16px;">Your codebase, made AI-shaped.</h2>
                 <p class="subtitle" style="margin: 0 auto;">Most AI coding tools stare at the file you pasted in. ExecuteSpec understands the whole project — multiple repos, architecture, past work, tech debt — so every run builds on what's already there. Available on Pro, Team, and Enterprise; Free gets a read-only demo project to see the shape.</p>
             </div>
+
+            <!-- Website refresh deeper pass (2026-05-06) — hand-built
+                 mockup of the project page so the section opens with
+                 a visual instead of yet another paragraph. Zero asset
+                 weight (no PNG to ship), pixel-matches the live UI
+                 (same panel shapes, same chip colors, same score
+                 ring), and stays accurate as the product evolves
+                 because it's HTML, not a screenshot frozen at one
+                 release. The values shown are illustrative — the
+                 numbers say "this is what the page looks like," not
+                 "this is your data." -->
+            <div class="ws-mockup" aria-hidden="true">
+                <div class="ws-mockup-frame">
+                    <!-- Faux top bar -->
+                    <div class="ws-mockup-topbar">
+                        <span class="ws-mockup-logo">ES</span>
+                        <span class="ws-mockup-brand">ExecuteSpec</span>
+                        <span class="ws-mockup-pill">Sample project</span>
+                        <span class="ws-mockup-spacer"></span>
+                        <span class="ws-mockup-quota">2/30 runs</span>
+                        <span class="ws-mockup-avatar">RW</span>
+                    </div>
+                    <!-- Project header -->
+                    <div class="ws-mockup-projhead">
+                        <div class="ws-mockup-projicon">▣</div>
+                        <div>
+                            <div class="ws-mockup-projlabel">PROJECT</div>
+                            <div class="ws-mockup-projname">payments-platform</div>
+                        </div>
+                        <div class="ws-mockup-stats">
+                            <span><span class="ws-mockup-statk">REPOS</span> 4</span>
+                            <span><span class="ws-mockup-statk">DONE</span> 23</span>
+                            <span><span class="ws-mockup-statk">SCORE</span> 87</span>
+                            <span><span class="ws-mockup-statk">SPEND</span> $14.20</span>
+                        </div>
+                    </div>
+                    <!-- Tab strip -->
+                    <div class="ws-mockup-tabs">
+                        <span class="ws-mockup-tab">Compose</span>
+                        <span class="ws-mockup-tab is-active">Pulse</span>
+                        <span class="ws-mockup-tab">Repos</span>
+                        <span class="ws-mockup-tab">Runs</span>
+                        <span class="ws-mockup-tab">Code</span>
+                        <span class="ws-mockup-tab">Chat</span>
+                    </div>
+                    <!-- Body grid: last-run card + score ring -->
+                    <div class="ws-mockup-grid">
+                        <div class="ws-mockup-card">
+                            <div class="ws-mockup-card-eyebrow">LAST RUN · <span style="color: #10B981;">● READY</span></div>
+                            <div class="ws-mockup-card-title">Add forgot-password flow with JWT email-token reset</div>
+                            <div class="ws-mockup-card-meta">5b16a2c1 · 12 min ago</div>
+                            <div class="ws-mockup-chiprow">
+                                <span class="ws-mockup-chip ws-mockup-chip-ok">BUILD ✓</span>
+                                <span class="ws-mockup-chip ws-mockup-chip-ok">8/8 tests</span>
+                                <span class="ws-mockup-chip ws-mockup-chip-ok">Reviewer CLEAN</span>
+                            </div>
+                            <div class="ws-mockup-cardbtns">
+                                <button class="ws-mockup-btn-pri" tabindex="-1">View report</button>
+                                <button class="ws-mockup-btn-sec" tabindex="-1">Open run</button>
+                            </div>
+                        </div>
+                        <div class="ws-mockup-ring-card">
+                            <svg class="ws-mockup-ring" viewBox="0 0 120 120" width="120" height="120">
+                                <circle cx="60" cy="60" r="48" fill="none" stroke="rgba(91,141,239,0.18)" stroke-width="10"/>
+                                <circle cx="60" cy="60" r="48" fill="none" stroke="var(--blue)" stroke-width="10" stroke-linecap="round" stroke-dasharray="262.5" stroke-dashoffset="34.1" transform="rotate(-90 60 60)"/>
+                                <text x="60" y="58" text-anchor="middle" fill="var(--text-main)" font-size="28" font-weight="700" font-family="var(--font-mono)">87</text>
+                                <text x="60" y="78" text-anchor="middle" fill="var(--text-muted)" font-size="9" font-family="var(--font-mono)" letter-spacing="2">VERIFIED</text>
+                            </svg>
+                            <div class="ws-mockup-ring-label">est. 91</div>
+                        </div>
+                    </div>
+                    <!-- Spend bar -->
+                    <div class="ws-mockup-spendbar">
+                        <span class="ws-mockup-spendk">Project spend so far</span>
+                        <span class="ws-mockup-spendv">$14.20</span>
+                        <span class="ws-mockup-spendx">·</span>
+                        <span class="ws-mockup-spendt">412k tokens</span>
+                    </div>
+                    <!-- Triple rollup -->
+                    <div class="ws-mockup-rollup">
+                        <div class="ws-mockup-rollup-cell">
+                            <div class="ws-mockup-rollup-h">♥ Health &amp; debt</div>
+                            <div class="ws-mockup-rollup-p">2 stale codemaps · 3 minor issues across 4 repos.</div>
+                        </div>
+                        <div class="ws-mockup-rollup-cell">
+                            <div class="ws-mockup-rollup-h">📖 Knowledge</div>
+                            <div class="ws-mockup-rollup-p">Architecture v7 · explanation + setup docs ready.</div>
+                        </div>
+                        <div class="ws-mockup-rollup-cell">
+                            <div class="ws-mockup-rollup-h">⚡ Activity</div>
+                            <div class="ws-mockup-rollup-p">7 events in the last 30 days.</div>
+                        </div>
+                    </div>
+                </div>
+                <p class="ws-mockup-caption">One URL. Compose drives the new run; Pulse / Repos / Runs / Code / Chat are one click away on the same page.</p>
+            </div>
+
+            <style>
+                .ws-mockup { margin: 48px auto 0; max-width: 1000px; }
+                .ws-mockup-frame {
+                    background: var(--surface);
+                    border: 1px solid var(--surface-border);
+                    border-radius: 14px;
+                    padding: 0;
+                    box-shadow: 0 32px 80px -32px rgba(0,0,0,0.5), 0 1px 0 rgba(255,255,255,0.04) inset;
+                    overflow: hidden;
+                }
+                .ws-mockup-topbar {
+                    display: flex; align-items: center; gap: 12px;
+                    padding: 12px 18px;
+                    background: rgba(255,255,255,0.015);
+                    border-bottom: 1px solid var(--surface-border);
+                    font-size: 12px;
+                }
+                .ws-mockup-logo {
+                    width: 22px; height: 22px; background: var(--blue); border-radius: 5px;
+                    display: inline-flex; align-items: center; justify-content: center;
+                    color: #fff; font-weight: 800; font-family: var(--font-mono); font-size: 11px;
+                }
+                .ws-mockup-brand { font-weight: 700; color: var(--text-main); }
+                .ws-mockup-pill {
+                    margin-left: 12px; padding: 3px 10px; border-radius: 4px;
+                    background: var(--surface-2); color: var(--text-muted); font-size: 11px;
+                }
+                .ws-mockup-spacer { flex: 1; }
+                .ws-mockup-quota { font-family: var(--font-mono); color: var(--text-muted); font-size: 11px; }
+                .ws-mockup-avatar {
+                    width: 22px; height: 22px; border-radius: 50%; background: var(--blue);
+                    color: #fff; font-size: 10px; font-weight: 700; display: inline-flex;
+                    align-items: center; justify-content: center;
+                }
+                .ws-mockup-projhead {
+                    display: flex; align-items: center; gap: 14px;
+                    padding: 18px 22px 8px;
+                    flex-wrap: wrap;
+                }
+                .ws-mockup-projicon {
+                    width: 36px; height: 36px; border-radius: 8px;
+                    background: var(--surface-2); display: inline-flex;
+                    align-items: center; justify-content: center;
+                    color: var(--blue-light); font-size: 18px;
+                }
+                .ws-mockup-projlabel { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); letter-spacing: 0.12em; }
+                .ws-mockup-projname { font-size: 1.15rem; font-weight: 700; color: var(--text-main); margin-top: 1px; }
+                .ws-mockup-stats {
+                    margin-left: auto; display: flex; gap: 18px; flex-wrap: wrap;
+                    font-family: var(--font-mono); font-size: 11px; color: var(--text-secondary);
+                }
+                .ws-mockup-statk { color: var(--text-muted); margin-right: 4px; letter-spacing: 0.1em; }
+                .ws-mockup-tabs {
+                    display: flex; gap: 0; padding: 0 22px;
+                    border-bottom: 1px solid var(--surface-border);
+                }
+                .ws-mockup-tab {
+                    padding: 10px 14px;
+                    font-size: 12.5px; color: var(--text-muted);
+                    border-bottom: 2px solid transparent;
+                    margin-bottom: -1px;
+                }
+                .ws-mockup-tab.is-active { color: var(--text-main); border-bottom-color: var(--accent-warm); font-weight: 600; }
+                .ws-mockup-grid {
+                    display: grid; grid-template-columns: 1fr 200px; gap: 16px;
+                    padding: 18px 22px;
+                }
+                .ws-mockup-card {
+                    background: var(--surface-2); border: 1px solid var(--surface-border);
+                    border-radius: 10px; padding: 16px;
+                }
+                .ws-mockup-card-eyebrow { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); letter-spacing: 0.1em; }
+                .ws-mockup-card-title { margin-top: 6px; font-size: 0.98rem; font-weight: 600; color: var(--text-main); line-height: 1.35; }
+                .ws-mockup-card-meta { margin-top: 6px; font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+                .ws-mockup-chiprow { margin-top: 12px; display: flex; gap: 6px; flex-wrap: wrap; }
+                .ws-mockup-chip {
+                    font-family: var(--font-mono); font-size: 10.5px;
+                    padding: 2px 7px; border-radius: 4px;
+                }
+                .ws-mockup-chip-ok { background: rgba(16,185,129,0.10); color: #10B981; }
+                .ws-mockup-cardbtns { margin-top: 14px; display: flex; gap: 8px; }
+                .ws-mockup-btn-pri {
+                    background: var(--blue); color: #fff; border: none;
+                    padding: 5px 12px; border-radius: 5px; font-size: 12px; font-weight: 600;
+                    font-family: inherit; pointer-events: none;
+                }
+                .ws-mockup-btn-sec {
+                    background: transparent; color: var(--text-muted);
+                    border: 1px solid var(--surface-border);
+                    padding: 5px 12px; border-radius: 5px; font-size: 12px;
+                    font-family: inherit; pointer-events: none;
+                }
+                .ws-mockup-ring-card {
+                    background: var(--surface-2); border: 1px solid var(--surface-border);
+                    border-radius: 10px; padding: 12px;
+                    display: flex; flex-direction: column; align-items: center; justify-content: center;
+                    gap: 6px;
+                }
+                .ws-mockup-ring-label { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+                .ws-mockup-spendbar {
+                    margin: 0 22px 18px; padding: 10px 14px;
+                    background: var(--surface-2); border: 1px solid var(--surface-border);
+                    border-radius: 8px;
+                    font-size: 12.5px; color: var(--text-secondary);
+                    display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+                }
+                .ws-mockup-spendk { color: var(--text-muted); }
+                .ws-mockup-spendv { font-family: var(--font-mono); font-weight: 600; color: var(--text-main); }
+                .ws-mockup-spendx { color: var(--text-muted); }
+                .ws-mockup-spendt { font-family: var(--font-mono); color: var(--text-muted); font-size: 11.5px; }
+                .ws-mockup-rollup {
+                    display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+                    padding: 0 22px 22px;
+                }
+                .ws-mockup-rollup-cell {
+                    background: var(--surface-2); border: 1px solid var(--surface-border);
+                    border-radius: 8px; padding: 12px 14px;
+                }
+                .ws-mockup-rollup-h { font-size: 12px; font-weight: 600; color: var(--text-main); margin-bottom: 4px; }
+                .ws-mockup-rollup-p { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+                .ws-mockup-caption {
+                    margin: 18px auto 0; max-width: 700px;
+                    text-align: center;
+                    font-family: var(--font-serif); font-style: italic;
+                    font-size: 0.95rem; color: var(--text-muted); line-height: 1.5;
+                }
+                @media (max-width: 720px) {
+                    .ws-mockup-grid { grid-template-columns: 1fr; }
+                    .ws-mockup-rollup { grid-template-columns: 1fr; }
+                    .ws-mockup-projhead { padding: 14px 16px 6px; }
+                    .ws-mockup-stats { font-size: 10px; gap: 10px; }
+                    .ws-mockup-tabs { padding: 0 12px; overflow-x: auto; flex-wrap: nowrap; }
+                    .ws-mockup-tab { white-space: nowrap; }
+                }
+            </style>
 
             <div class="feature-grid" style="margin-top: 40px;">
                 <div class="feature-card">
@@ -2291,8 +2622,35 @@
         <div class="container text-center" style="text-align: center;">
             <div class="section-header">
                 <span class="section-label mono" style="color: var(--orange);">Reach Out</span>
-                <h2 class="h2">Let's discuss your engineering backlog.</h2>
+                <h2 class="h2 h2-handdrawn">Let's discuss your engineering backlog.</h2>
                 <p class="subtitle" style="margin: 0 auto;">Whether you need an enterprise demo, want to discuss custom integrations, or just want to talk about AI coding, we are here.</p>
+            </div>
+
+            <!-- Website refresh deeper (2026-05-06) — humanize.
+                 The page sells a tool that ships AI-written code; the
+                 strongest counter-signal to "this site is AI-generated"
+                 is a real person willing to put their name on it. The
+                 contact section was three icon cards (Email / Book /
+                 LinkedIn) with no human on the page anywhere. Adding
+                 a single founder block above the cards: name, role,
+                 one-line "why this exists." Photo is a placeholder
+                 monogram (real photo asset to drop in later when ops
+                 has it). Left-aligned, italic serif on the why-line
+                 so it reads like a note, not a marketing block. -->
+            <div class="founder-block">
+                <div class="founder-block-avatar" aria-hidden="true">N</div>
+                <div class="founder-block-text">
+                    <div class="founder-block-name">Navneet Prabhakar</div>
+                    <div class="founder-block-role">Founder · ExecuteSpec</div>
+                    <p class="founder-block-why">
+                        I built this because I kept watching Cursor confidently
+                        ship diffs that didn't compile, and Devin demos that
+                        couldn't survive a real test suite. The pipeline you
+                        see here is the one I wanted as a developer: plan,
+                        approve, run, validate, ship. Email me if any of this
+                        resonates — or doesn't.
+                    </p>
+                </div>
             </div>
 
             <div class="contact-grid">
