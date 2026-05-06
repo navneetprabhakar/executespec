@@ -44,6 +44,8 @@ interface RunStore {
     selectedRepoIds?: string[];
     figmaUrl?: string;
     tddMode?: boolean;
+    /** P3.2 — optional customer "Stop at $X" cost ceiling, USD. */
+    userCostCap?: number;
   }) => Promise<string>;
   cancelRun: (id: string) => Promise<void>;
   archiveRun: (id: string) => Promise<void>;
