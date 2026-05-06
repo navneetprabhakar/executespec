@@ -20,6 +20,11 @@ export default function MigrationsPage() {
   const [search, setSearch] = useState('');
   const [tierFilter, setTierFilter] = useState<string>('');
   const [categoryFilter, setCategoryFilter] = useState<string>('');
+  // Audit r5 (P2-5, 2026-05-06) — same hide-locked pattern as
+  // LibraryPage. Migrations is even more paywall-heavy on FREE
+  // (every recipe is PRO+ today); the toggle gives users a one-click
+  // escape from a wall of padlocks while keeping discovery default-on.
+  const [hideLocked, setHideLocked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +58,7 @@ export default function MigrationsPage() {
     return items.filter((it) => {
       if (categoryFilter && it.recipe.category !== categoryFilter) return false;
       if (tierFilter && it.recipe.tier !== tierFilter) return false;
+      if (hideLocked && it.locked) return false;
       if (needle) {
         const hay = (
           it.recipe.name +
@@ -65,7 +71,9 @@ export default function MigrationsPage() {
       }
       return true;
     });
-  }, [items, search, tierFilter, categoryFilter]);
+  }, [items, search, tierFilter, categoryFilter, hideLocked]);
+
+  const lockedCount = useMemo(() => items.filter((it) => it.locked).length, [items]);
 
   return (
     <div style={{padding: 16, paddingBottom: 48}}>
@@ -117,10 +125,37 @@ export default function MigrationsPage() {
         >
           <option value=''>All tiers</option>
           <option value='FREE'>Free</option>
-          <option value='PRO'>Pro</option>
+          <option value='PRO'>Solo</option>
           <option value='TEAM'>Team</option>
           <option value='ENTERPRISE'>Enterprise</option>
         </select>
+        {/* Audit r5 (P2-5, 2026-05-06) — quick "hide locked" toggle.
+            Same shape as LibraryPage so the IA reads consistently. */}
+        {lockedCount > 0 && (
+          <button
+            type='button'
+            onClick={() => setHideLocked((v) => !v)}
+            aria-pressed={hideLocked}
+            style={{
+              padding: '8px 12px',
+              background: hideLocked ? 'var(--v3-brand)' : 'var(--v3-bg)',
+              color: hideLocked ? 'var(--v3-text-on-brand)' : 'var(--v3-text-muted)',
+              border: '1px solid ' + (hideLocked ? 'var(--v3-brand)' : 'var(--v3-border)'),
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 12.5,
+              fontFamily: 'inherit',
+              fontWeight: 500,
+            }}
+            title={
+              hideLocked
+                ? `Showing only items your tier can use. ${lockedCount} hidden.`
+                : `Hide ${lockedCount} locked items. Upgrade options stay one click away on /pricing.`
+            }
+          >
+            {hideLocked ? `Show all (${lockedCount} locked)` : 'Hide locked'}
+          </button>
+        )}
       </div>
 
       {/* Body */}

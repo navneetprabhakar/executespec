@@ -147,18 +147,39 @@ export default function InsightsPage() {
     // When filtering, recompute totals from the filtered run list
     // since `metrics` is org-wide.  Empty filter falls back to the
     // backend metrics object.
+    // Audit r5 (P2-1, 2026-05-06) — success rate must divide by
+    // TERMINAL runs only. Pre-fix the denominator was every run on
+    // record, so a project with 1 in-flight run and 0 completed runs
+    // showed "0% success" in red — misleading because nothing has
+    // failed yet, the run is still WORKING. Now: total = COMPLETE +
+    // PARTIAL + FAILED + CANCELLED + ABORTED. If no terminal runs
+    // yet → null → renders "—" (the "no signal" state) instead of a
+    // confident 0%.
+    const TERMINAL = new Set(['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED']);
     if (projectFilter.size > 0) {
       const total = filteredRuns.length;
+      const terminal = filteredRuns.filter((r) => TERMINAL.has(r.status)).length;
       const completed = filteredRuns.filter((r) => r.status === 'COMPLETE').length;
-      const successRate = total > 0 ? Math.round((completed / total) * 100) : null;
+      const successRate = terminal > 0 ? Math.round((completed / terminal) * 100) : null;
       const totalSpend = filteredRuns.reduce((sum, r) => sum + (r.actualCostUsd ?? 0), 0);
       const needsAttention = filteredRuns.filter(
         (r) => r.status === 'PARTIAL' || r.status === 'FAILED',
       ).length;
       return {successRate, totalSpend, needsAttention, totalRuns: total, completedRuns: completed};
     }
+    // Org-wide metrics: backend totalRuns + completedRuns are total counts.
+    // Use the run list to derive a terminal denominator that matches
+    // the project-filtered branch above.
+    const orgTerminal = filteredRuns.filter((r) => TERMINAL.has(r.status)).length;
+    const orgCompleted = filteredRuns.filter((r) => r.status === 'COMPLETE').length;
     const successRate =
-      metrics.totalRuns > 0 ? Math.round((metrics.completedRuns / metrics.totalRuns) * 100) : null;
+      orgTerminal > 0
+        ? Math.round((orgCompleted / orgTerminal) * 100)
+        : metrics.totalRuns > 0 && metrics.completedRuns > 0
+          ? // Fallback when filteredRuns hasn't loaded yet but the
+            // metrics rollup has at least one completed run.
+            Math.round((metrics.completedRuns / metrics.totalRuns) * 100)
+          : null;
     const totalSpend = filteredRuns.reduce((sum, r) => sum + (r.actualCostUsd ?? 0), 0);
     const needsAttention = filteredRuns.filter(
       (r) => r.status === 'PARTIAL' || r.status === 'FAILED',
