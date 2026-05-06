@@ -5,6 +5,8 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.standards.EffectiveStandardsResolver;
 import com.navneet.executespec.standards.OrgStandardRepository;
 import com.navneet.executespec.standards.ProjectStandardOverride;
@@ -43,6 +45,7 @@ public class StandardsComplianceController {
   private final OrgStandardRepository orgStandardRepo;
   private final ProjectStandardOverrideRepository overrideRepo;
   private final StandardsViolationRepository violationRepo;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @GetMapping("/report")
   public ResponseEntity<ComplianceReport> report(
@@ -51,6 +54,9 @@ public class StandardsComplianceController {
       @RequestParam(required = false, defaultValue = "30") int sinceDays,
       Authentication auth) {
     if (auth == null) throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth");
+    // GA-readiness P4.1-followup — compliance report leaks the org's
+    // engineering standards + project violation log; tenant-bound.
+    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
 
     // Effective standards (project-level YAML not loaded here in v1)
     List<EffectiveStandardsResolver.Effective> effective = resolver.resolve(orgId, projectId, null);
@@ -139,4 +145,11 @@ public class StandardsComplianceController {
       String rationale,
       String createdByUserId,
       String createdAt) {}
+
+  /** Extract {@link AppUserDetails} from {@link Authentication}; null when principal is wrong type. */
+  private static AppUserDetails principalOrNull(Authentication auth) {
+    if (auth == null) return null;
+    Object principal = auth.getPrincipal();
+    return principal instanceof AppUserDetails ud ? ud : null;
+  }
 }

@@ -140,58 +140,20 @@ class AccessGuardCoverageTest {
   private static final Set<String> KNOWN_LEGACY_DRIFT =
       new LinkedHashSet<>(
           Set.of(
-              // E1.8/9/10 — activity feed needs ProjectAccessGuard.assertCanRead
-              "com.navneet.executespec.activity.ActivityFeedController#list",
-              // E3.12 — ADR endpoints need ProjectAccessGuard.assertCanRead
-              "com.navneet.executespec.adr.AdrController#get",
-              "com.navneet.executespec.adr.AdrController#list",
-              // E3.14 — invariant endpoints need ProjectAccessGuard.assertCanRead
-              "com.navneet.executespec.arch.invariants.InvariantController#list",
-              "com.navneet.executespec.arch.invariants.InvariantController#recentViolations",
-              // ProjectController — needs ProjectAccessGuard.assertCanRead /
-              // assertCanWrite (members + settings mutate access controls themselves so
-              // need stricter guards)
-              "com.navneet.executespec.auth.controller.ProjectController#addMember",
-              "com.navneet.executespec.auth.controller.ProjectController#archiveProject",
-              "com.navneet.executespec.auth.controller.ProjectController#getProject",
-              "com.navneet.executespec.auth.controller.ProjectController#listMembers",
-              "com.navneet.executespec.auth.controller.ProjectController#removeMember",
-              "com.navneet.executespec.auth.controller.ProjectController#updateSettings",
               // SuperAdminController — SUPER_ADMIN role gates these in SecurityConfig but
               // they still bind run ids; consolidate on requireSuperAdmin for review-time
               "com.navneet.executespec.auth.controller.SuperAdminController#forceFailTask",
               "com.navneet.executespec.auth.controller.SuperAdminController#reReviewRun",
-              // V172 — code-review needs ProjectAccessGuard.assertCanRead
-              "com.navneet.executespec.codereview.CodeReviewController#latest",
-              "com.navneet.executespec.codereview.CodeReviewController#listForProject",
-              // E4.7 — export needs ProjectAccessGuard.assertCanRead (returns full project state)
-              "com.navneet.executespec.export.ProjectExportController#export",
               // /api/admin/ — SUPER_ADMIN gated by SecurityConfig
               "com.navneet.executespec.folder.ExecutespecMigrationController#migrate",
-              // ProjectRepoController — repo-scoped, needs assertCanRead/Write on the project
-              // that owns the repo (or org-level for ORG-scoped repos)
+              // ProjectRepoController repo-scoped paths (/api/repos/{repoId}/...) need a
+              // dedicated RepoAccessGuard with ORG_REPO + USER_REPO discrimination — that's
+              // a separate workstream. The project-scoped paths
+              // (/api/projects/{projectId}/repos/...) were migrated 2026-05-06 to
+              // ProjectAccessGuard.
               "com.navneet.executespec.project.controller.ProjectRepoController#deleteRepo",
               "com.navneet.executespec.project.controller.ProjectRepoController#installRepoWebhook",
-              "com.navneet.executespec.project.controller.ProjectRepoController#linkToProject",
-              "com.navneet.executespec.project.controller.ProjectRepoController#listProjectRepos",
               "com.navneet.executespec.project.controller.ProjectRepoController#syncRepo",
-              "com.navneet.executespec.project.controller.ProjectRepoController#unlinkFromProject",
-              "com.navneet.executespec.project.controller.ProjectRepoController#updateRelationships",
-              // PR endpoints — need RunAccessGuard.requireRunAccess (run-scoped)
-              "com.navneet.executespec.project.pr.PullRequestController#listPrsForRun",
-              "com.navneet.executespec.project.pr.PullRequestController#refreshProjectPrs",
-              // RAG documents — need ProjectAccessGuard.assertCanRead/Write
-              "com.navneet.executespec.project.rag.ProjectDocumentController#delete",
-              "com.navneet.executespec.project.rag.ProjectDocumentController#list",
-              "com.navneet.executespec.project.rag.ProjectDocumentController#upload",
-              // Spec templates — need ProjectAccessGuard.assertCanRead/Write
-              "com.navneet.executespec.project.template.SpecTemplateController#createForProject",
-              "com.navneet.executespec.project.template.SpecTemplateController#delete",
-              "com.navneet.executespec.project.template.SpecTemplateController#listForProject",
-              // V172 — PR review project rollup needs ProjectAccessGuard.assertCanRead
-              "com.navneet.executespec.prreview.PrReviewController#listForProject",
-              // E3 — standards compliance report needs ProjectAccessGuard.assertCanRead
-              "com.navneet.executespec.standards.report.StandardsComplianceController#report",
               // V2 polling — needs RunAccessGuard.requireRunAccess
               "com.navneet.executespec.v2.rollout.V2RunController#poll"));
 
