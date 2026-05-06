@@ -119,6 +119,13 @@ RULES:
     * The content you can read actively contradicts its presence (stubs, throw-not-implemented, etc.)
   If the 6-file KEY SOURCE FILES snippet didn't include the relevant file, mark the requirement
   as PARTIAL with a note like "likely in unread file X, cannot confirm" rather than implemented.
+- TRUNCATION HANDLING: A KEY SOURCE FILE may contain a marker of the form
+  "... [truncated N chars in the middle; file is M chars total] ..." between a head and tail
+  segment. If the file matches a requirement's structural shape (e.g., a router file when looking
+  for an endpoint) but the specific behaviour is in the truncated middle, mark the requirement as
+  PARTIAL with a note "evidence likely in truncated middle of <path>, cannot confirm" — DO NOT mark
+  it as MISSING just because the truncated middle didn't yield a citation. A truncation marker means
+  the file has more content the assessor couldn't see; it is not evidence of absence.
 - A requirement is PARTIAL if an issue flags it as incomplete (e.g., endpoint exists but validation missing),
   or if evidence is indirect (structural hints only, no behaviour in KEY SOURCE FILES).
 - For endpointCoverage: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check
@@ -367,26 +374,47 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * Reads key source files (routes, controllers, models, entry points) and returns their content as
    * annotated snippets for the accuracy scorer. Cap is whatever {@link #inferKeyFilePaths} hands
    * back — single-repo runs stay at 6, multi-repo runs scale up to {@code MULTI_REPO_TOTAL_CAP} (18
-   * by default = 6 per repo × 3 repos). Per-file char cap stays at 2,500 so token cost grows
-   * linearly with repo count rather than file count.
+   * by default = 6 per repo × 3 repos).
+   *
+   * <p>P1.1 (2026-05-06, GA-readiness audit follow-up): the previous per-file cap was 2,500 chars,
+   * which truncated FastAPI / Express routers with 5+ endpoints to imports + the first 2 handlers —
+   * and produced 14× "controller exists but content not readable" lines in the run-{@code 0444c95f}
+   * validation report (see {@code docs/plans/pending-ga-readiness-90-day-execution-plan.md} §P1.1).
+   * The fix: per-file cap raised to 10,000 chars with head-plus-tail truncation so route handlers
+   * near the end of long files stay visible. Total snippet bytes bounded at {@code
+   * TOTAL_SNIPPETS_CHAR_CAP} (100K) to keep prompt token cost predictable. Files that come back as
+   * an error string from {@link FileSystemTool#readFile} ("ACCESS DENIED:" / "Cannot read") are
+   * skipped instead of being passed to the LLM as if they were source.
    */
   private String buildKeyFileSnippets(String runId, String fileTree) {
     List<String> candidates = inferKeyFilePaths(fileTree);
     if (candidates.isEmpty()) return "";
 
     StringBuilder sb = new StringBuilder();
+    int totalChars = 0;
     for (String path : candidates) {
+      if (totalChars >= TOTAL_SNIPPETS_CHAR_CAP) {
+        log.debug(
+            "[AccuracyAssessment] Total snippet cap ({} chars) reached after {} files; remaining"
+                + " skipped",
+            TOTAL_SNIPPETS_CHAR_CAP,
+            sb.length() == 0 ? 0 : (sb.toString().split("(?m)^### ").length - 1));
+        break;
+      }
       try {
         String content = fileSystemTool.readFile(runId, path);
         if (content == null || content.isBlank()) continue;
-        String snip =
-            content.length() > 2_500
-                ? content.substring(0, 2_500)
-                    + "\n...(truncated, "
-                    + content.length()
-                    + " chars total)"
-                : content;
+        if (isReadErrorMessage(content)) {
+          log.debug(
+              "[AccuracyAssessment] Skipping unreadable file {} for run {}: {}",
+              path,
+              runId,
+              content.lines().findFirst().orElse(""));
+          continue;
+        }
+        String snip = truncateForSnippet(content);
         sb.append("### ").append(path).append("\n```\n").append(snip).append("\n```\n\n");
+        totalChars += snip.length();
       } catch (Exception e) {
         log.debug(
             "[AccuracyAssessment] Could not read key file {} for run {}: {}",
@@ -396,6 +424,56 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
       }
     }
     return sb.toString();
+  }
+
+  /** Per-file content cap. Was 2,500; bumped 2026-05-06 to give multi-endpoint routers headroom. */
+  static final int PER_FILE_CHAR_CAP = 10_000;
+
+  /** Head bytes when truncating a file longer than {@link #PER_FILE_CHAR_CAP}. */
+  static final int HEAD_CHARS = 6_000;
+
+  /**
+   * Tail bytes when truncating a file longer than {@link #PER_FILE_CHAR_CAP}. Keeps route handlers
+   * near the end of long files visible to the LLM — the bug that emitted "controller content not
+   * readable" 14× on run {@code 0444c95f}.
+   */
+  static final int TAIL_CHARS = 3_000;
+
+  /**
+   * Hard cap on total snippet bytes the assessor sends to the LLM. 100K chars ≈ 25K tokens — about
+   * what a Sonnet PLANNING-tier call can absorb without crowding the spec + file-tree + issue
+   * sections. With {@link #MULTI_REPO_TOTAL_CAP} = 18 files at 10K each = 180K worst case, this cap
+   * cuts off the tail rather than crashing.
+   */
+  static final int TOTAL_SNIPPETS_CHAR_CAP = 100_000;
+
+  /**
+   * Truncate a file's content for snippet inclusion. Files ≤ {@link #PER_FILE_CHAR_CAP} are
+   * returned as-is. Larger files get a head-plus-tail snippet with an explicit truncation marker so
+   * the LLM never silently misses the bottom of a file.
+   */
+  static String truncateForSnippet(String content) {
+    if (content == null) return "";
+    if (content.length() <= PER_FILE_CHAR_CAP) return content;
+    String head = content.substring(0, HEAD_CHARS);
+    String tail = content.substring(content.length() - TAIL_CHARS);
+    int omitted = content.length() - HEAD_CHARS - TAIL_CHARS;
+    return head
+        + "\n\n... [truncated "
+        + omitted
+        + " chars in the middle; file is "
+        + content.length()
+        + " chars total] ...\n\n"
+        + tail;
+  }
+
+  /**
+   * {@link FileSystemTool#readFile} returns its error text inline rather than throwing. Detect
+   * those signals so we don't pass the error string to the LLM as if it were source code.
+   */
+  private static boolean isReadErrorMessage(String content) {
+    if (content == null || content.length() > 256) return false;
+    return content.startsWith("ACCESS DENIED:") || content.startsWith("Cannot read ");
   }
 
   /**

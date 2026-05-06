@@ -42,4 +42,19 @@ public interface CodeReviewScanRepository extends JpaRepository<CodeReviewScan, 
           + "WHERE s.createdByUserId = :userId AND s.startedAt >= :sinceMonthStart")
   long countByUserSince(
       @Param("userId") String userId, @Param("sinceMonthStart") Instant sinceMonthStart);
+
+  /**
+   * Sum of {@code cost_usd} across every scan for a project. Used by the dashboard to fold code
+   * review spend into the project's total cost. COALESCE handles the empty-table case (no scans
+   * yet) and the per-row null case (in-flight scans where cost hasn't been tallied yet).
+   */
+  @Query(
+      "SELECT COALESCE(SUM(s.costUsd), 0.0) FROM CodeReviewScan s WHERE s.projectId = :projectId")
+  double sumCostUsdByProject(@Param("projectId") String projectId);
+
+  /** Total tokens (input + output) across every scan for a project. */
+  @Query(
+      "SELECT COALESCE(SUM(s.totalInputTokens), 0L) + COALESCE(SUM(s.totalOutputTokens), 0L) "
+          + "FROM CodeReviewScan s WHERE s.projectId = :projectId")
+  long sumTokensByProject(@Param("projectId") String projectId);
 }

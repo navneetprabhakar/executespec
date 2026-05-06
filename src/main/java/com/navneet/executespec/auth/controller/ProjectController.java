@@ -11,6 +11,7 @@ import com.navneet.executespec.auth.dto.ProjectMemberDto;
 import com.navneet.executespec.auth.dto.UpdateProjectSettingsRequest;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ProjectService;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,6 +27,7 @@ import lombok.RequiredArgsConstructor;
 public class ProjectController {
 
   private final ProjectService projectService;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @PostMapping
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('DEVELOPER') or hasRole('SUPER_ADMIN')")
@@ -51,6 +53,11 @@ public class ProjectController {
   @GetMapping("/{id}")
   public ResponseEntity<ProjectDto> getProject(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
+    // GA-readiness P4.1-followup — tenant guard. ProjectService.getProject
+    // does its own boolean-flag access logic, but the guard makes the org
+    // boundary visible at the call site + closes the gap before any service
+    // logic runs.
+    projectAccessGuard.assertCanRead(id, userDetails);
     boolean isSuperAdmin = "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole());
     boolean isOrgAdmin = isOrgAdminOrSuperAdmin(userDetails);
     return ResponseEntity.ok(
@@ -63,6 +70,9 @@ public class ProjectController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String id,
       @RequestBody UpdateProjectSettingsRequest req) {
+    // GA-readiness P4.1-followup — @PreAuthorize role check confirms ORG_ADMIN
+    // somewhere; the guard confirms it's THIS project's org.
+    projectAccessGuard.assertCanRead(id, userDetails);
     return ResponseEntity.ok(projectService.updateSettings(id, req, userDetails.getUser().getId()));
   }
 
@@ -70,11 +80,18 @@ public class ProjectController {
   @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
   public ResponseEntity<ProjectDto> archiveProject(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
+    // GA-readiness P4.1-followup — tenant guard before destructive op.
+    projectAccessGuard.assertCanRead(id, userDetails);
     return ResponseEntity.ok(projectService.archiveProject(id, userDetails.getUser().getId()));
   }
 
   @GetMapping("/{id}/members")
-  public ResponseEntity<List<ProjectMemberDto>> listMembers(@PathVariable String id) {
+  public ResponseEntity<List<ProjectMemberDto>> listMembers(
+      @PathVariable String id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    // GA-readiness P4.1-followup — listMembers exposed PII (email + role) of
+    // every project member to any authenticated caller; the guard now
+    // restricts to org members + invited cross-org collaborators.
+    projectAccessGuard.assertCanRead(id, userDetails);
     return ResponseEntity.ok(projectService.listMembers(id));
   }
 
@@ -84,6 +101,10 @@ public class ProjectController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String id,
       @RequestBody Map<String, String> body) {
+    // GA-readiness P4.1-followup — closes the access-control mutation gap.
+    // Adding members is the most sensitive write surface on a project; the
+    // guard ensures the caller is an admin of THIS project's org.
+    projectAccessGuard.assertCanRead(id, userDetails);
     projectService.addMember(
         id, body.get("userId"), body.get("role"), userDetails.getUser().getId());
     return ResponseEntity.status(HttpStatus.CREATED).build();
@@ -95,6 +116,8 @@ public class ProjectController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String id,
       @PathVariable String userId) {
+    // GA-readiness P4.1-followup — same as addMember.
+    projectAccessGuard.assertCanRead(id, userDetails);
     projectService.removeMember(id, userId, userDetails.getUser().getId());
     return ResponseEntity.noContent().build();
   }

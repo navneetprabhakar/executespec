@@ -160,6 +160,37 @@ public class ModelRegistry {
   }
 
   /**
+   * Returns the context window for a model, falling back to a family-prefix heuristic when the
+   * model isn't in the YAML matrix. Used by UI surfaces (e.g. the chat-header context-window chip)
+   * that need a number for forward-compat models the registry doesn't yet know about.
+   *
+   * <p>Lookup order:
+   *
+   * <ol>
+   *   <li>Exact match in {@code model-matrix.models} → return that config's context-limit.
+   *   <li>Family prefix: {@code claude-opus-*-1m} → 1M, other claude → 200K, gemini → 1M, gpt →
+   *       256K.
+   *   <li>Final fallback: {@link #DEFAULT_CONTEXT_LIMIT} (200K).
+   * </ol>
+   *
+   * <p>Replaces the deleted {@code ModelContextWindowMap} which was a separate hardcoded source of
+   * truth that drifted from YAML (gpt-5.4 was 256K in the map, 200K in YAML — the YAML wins).
+   */
+  public int contextLimitForOrPrefixFallback(String modelName) {
+    if (modelName == null || modelName.isBlank()) return DEFAULT_CONTEXT_LIMIT;
+    ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
+    if (config != null) return config.getContextLimit();
+    // Forward-compat prefix heuristic — every shipping model SHOULD have a YAML entry; this
+    // exists so a brand-new model name doesn't render as a "?" in the UI before the YAML
+    // catches up.
+    if (modelName.startsWith("claude-opus-") && modelName.endsWith("-1m")) return 1_000_000;
+    if (modelName.startsWith("claude-")) return 200_000;
+    if (modelName.startsWith("gemini-")) return 1_048_576;
+    if (modelName.startsWith("gpt-")) return 256_000;
+    return DEFAULT_CONTEXT_LIMIT;
+  }
+
+  /**
    * Returns the maximum output tokens supported by a model. Replaces {@code
    * TokenBudgetMonitor.maxOutputForModel()}.
    */
@@ -182,6 +213,21 @@ public class ModelRegistry {
   public String notesFor(String modelName) {
     ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
     return config != null ? config.getNotes() : null;
+  }
+
+  /**
+   * Returns the human-readable display label for a model (used by the model-selector UI). Falls
+   * back to the canonical model id when no explicit {@code display-label} is set in YAML.
+   *
+   * <p>Replaces the hardcoded {@code MODEL_LABELS} map in {@link
+   * com.navneet.executespec.api.controller.ModelController}, restoring single-source-of-truth.
+   */
+  public String displayLabelFor(String modelName) {
+    if (modelName == null) return null;
+    ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
+    if (config == null) return modelName;
+    String label = config.getDisplayLabel();
+    return (label != null && !label.isBlank()) ? label : modelName;
   }
 
   /**

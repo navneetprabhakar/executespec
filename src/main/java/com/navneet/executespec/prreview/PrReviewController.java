@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.prreview.entity.PrReview;
 import com.navneet.executespec.prreview.entity.PrReviewComment;
 
@@ -38,6 +39,7 @@ import lombok.RequiredArgsConstructor;
 public class PrReviewController {
 
   private final PrReviewService service;
+  private final ProjectAccessGuard projectAccessGuard;
 
   // ── Submit / fetch ─────────────────────────────────────────────────────────
 
@@ -117,6 +119,9 @@ public class PrReviewController {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
+    // GA-readiness P4.1-followup — tenant guard. PR review payload includes
+    // line-anchored comments which can leak code structure across orgs.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     return ResponseEntity.ok(
         service.findByProject(projectId).stream().map(PrReviewDto::from).toList());
   }

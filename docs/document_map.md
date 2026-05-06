@@ -13,6 +13,7 @@
 
 | File | Type | What it is |
 |------|------|------------|
+| [`pending-ga-readiness-90-day-execution-plan.md`](plans/pending-ga-readiness-90-day-execution-plan.md) | proposed | 90-day Plan B execution doc operationalising the 2026-05-04 GA-readiness audit. Phase 0 (land in-flight branches) → P1 quality scoring fix → P2 pricing ladder → P3 cost ceiling + HIGH-band reliability → P4 observability + ArchUnit guard pin → P5 beta program + SOC 2 Type I + CLI → P6 GA cutover. Target GA 2026-08-04. Awaiting founder approval before kickoff. |
 | [`partial-work.md`](plans/partial-work.md) | consolidated | All 4 plans with partial implementations / pending follow-ups: Mobile (RN+Expo native-Android gap), Figma v2 (design-only), Harness V2 remaining work (Gap 1+2+3), and the PARTIAL-status removal proposal. |
 | [`pending-v2-batch-execution-plan.md`](plans/pending-v2-batch-execution-plan.md) | not started | Re-implement batch execution under V2 (V1 batch was deleted). Realtime-only today. |
 | [`pending-distributed-processing-plan.md`](plans/pending-distributed-processing-plan.md) | not started | Phase A NFS workspace + Phase B worker-lease pool. |
@@ -37,6 +38,8 @@ The following plans were merged + deployed and their plan files have been remove
 
 ## Reference docs (still authoritative)
 
+- [`docs/reports/model-mapping-audit-2026-05-06.md`](reports/model-mapping-audit-2026-05-06.md) — full audit of every place model identifiers / pricing / context-window metadata live in the codebase. 8 hardcoded sources catalogued (1 active drift on `gpt-5.4` context window, 7 stale-or-redundant). Includes a live 3-provider LOW-band cost eval (Anthropic $0.10 / OpenAI $0.04 / Gemini Pro $1.16) + 3-commit single-source-of-truth proposal. Ground reference for all model-related changes.
+- [`docs/operations/slos.md`](operations/slos.md) — GA-readiness P4.2 (2026-05-06). Five SLOs ExecuteSpec commits to: run terminal in 15min ≥95%, verified-score correctness ≥90% (manual sample audit), cost estimate within 30% on ≥80% of runs, webhook in 60s ≥99%, hot-path 5xx <0.5%. Includes alert thresholds, owners, and measurement queries.
 - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — single source of truth for every color/radius/spacing token. Semantic palette, 4-band score palette, MUST/MUST NOT rules.
 - [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison.
 - [`docs/enterprise-sla.md`](enterprise-sla.md) — ENTERPRISE-tier P1–P4 SLA + 99.9% uptime credit schedule + CSM engagement.
@@ -155,6 +158,8 @@ Find the **type of change** you are making in the table below. Update every docu
 | `tenant/` | JAVADOC §tenant isolation |
 | `prreview/` | CLAUDE.md v2.6.4 entry — PR Review Agent (single-call PLANNING-tier review of one PR's diff). |
 | `codereview/` | CLAUDE.md v2.6.4 entry — whole-repo Code Review Agent (semgrep + LLM augmentation, markdown report). |
+| `sharing/` | CLAUDE.md v2.6.4 entry (V175) — external project sharing: cross-org `ProjectMember` invites + public read-only share links. Tier-gated. |
+| `util/` | `PoolSizing.coreMultiple(multiplier, min, max)` — shared helper for sizing per-service dispatch pools (CodeReview, PrReview, V2RunService, RunOrchestrator, RunConversationController.applyExecutor). |
 | `testgen/` | JAVADOC §5.10 Test Generation Agents; WORKFLOWS §2 |
 | `tool/` (V1 GitTool, etc.) | JAVADOC §tool (legacy V1 surface) |
 | `validator/` (CodeValidator + execution/gate/language/prompt subpackages) | JAVADOC §validator |

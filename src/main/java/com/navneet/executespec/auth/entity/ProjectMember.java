@@ -27,7 +27,7 @@ public class ProjectMember {
   @Column(name = "user_id", nullable = false)
   private String userId;
 
-  /** PROJECT_ADMIN | PROJECT_DEVELOPER */
+  /** PROJECT_ADMIN | PROJECT_DEVELOPER | PROJECT_VIEWER (V175 added VIEWER for read-only). */
   @Column(name = "project_role", nullable = false)
   @Builder.Default
   private String projectRole = "PROJECT_DEVELOPER";
@@ -35,4 +35,13 @@ public class ProjectMember {
   @Column(name = "assigned_at", nullable = false)
   @Builder.Default
   private Instant assignedAt = Instant.now();
+
+  /**
+   * V175 — true when this member is a cross-org collaborator (added via {@code project_invite}).
+   * Lets the UI badge them as "External" and lets billing skip them when computing seat usage on
+   * the host org.
+   */
+  @Column(name = "is_external", nullable = false)
+  @Builder.Default
+  private boolean external = false;
 }

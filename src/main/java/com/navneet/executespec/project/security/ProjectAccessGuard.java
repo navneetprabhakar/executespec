@@ -1,6 +1,7 @@
 package com.navneet.executespec.project.security;
 
 import com.navneet.executespec.auth.entity.Project;
+import com.navneet.executespec.auth.repository.ProjectMemberRepository;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.auth.security.AppUserDetails;
 
@@ -29,6 +30,14 @@ public class ProjectAccessGuard {
   private final ProjectRepository projectRepo;
 
   /**
+   * V175 — consult {@code project_member} after the org-id check so external collaborators (added
+   * via the new project-invite flow) get past the {@code "another organization"} 403. Existing
+   * in-org reads short-circuit on the org match before this is even queried, so the only DB hit
+   * here is for the cross-org case.
+   */
+  private final ProjectMemberRepository projectMemberRepo;
+
+  /**
    * Load a project and assert the authenticated caller may read it. Throws 404 when the project
    * doesn't exist (avoids leaking existence to non-members) and 403 when the caller is
    * authenticated but unrelated to the project's organisation.
@@ -55,10 +64,20 @@ public class ProjectAccessGuard {
     }
 
     String callerOrgId = userDetails.getUser().getOrgId();
-    if (callerOrgId == null || !callerOrgId.equals(project.getOrgId())) {
-      throw new ResponseStatusException(
-          HttpStatus.FORBIDDEN, "Project belongs to another organization");
+    if (callerOrgId != null && callerOrgId.equals(project.getOrgId())) {
+      return project;
     }
-    return project;
+
+    // V175 — cross-org collaborators are admitted via project_member rows (typically created by
+    // accepting a project_invite). The 403 only fires when neither org membership nor a
+    // project_member row exists for this caller.
+    String callerUserId = userDetails.getUser().getId();
+    if (callerUserId != null
+        && projectMemberRepo.existsByProjectIdAndUserId(projectId, callerUserId)) {
+      return project;
+    }
+
+    throw new ResponseStatusException(
+        HttpStatus.FORBIDDEN, "You don't have access to this project");
   }
 }

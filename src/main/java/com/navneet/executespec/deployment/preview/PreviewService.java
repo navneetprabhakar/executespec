@@ -1108,8 +1108,30 @@ public class PreviewService {
           result.imageRef(),
           result.skippedBuild());
     } catch (Exception e) {
-      log.error("[{}] preview-engine handoff failed: {}", runId, e.getMessage(), e);
-      fail(runId, "preview-engine handoff failed: " + e.getMessage(), 0);
+      // 2026-05-06 — distinguish "docker daemon not running" (expected in local dev / CI
+      // boxes that don't run docker) from real preview-engine bugs. The daemon-down case
+      // is a known-good degradation; the run itself completed fine BEFORE preview engaged,
+      // so we want exactly ONE concise WARN line, no stack trace, no docker-CLI dump.
+      // The strings below are the docker CLI's stable wording when the unix socket can't
+      // be reached.
+      String msg = e.getMessage() == null ? "" : e.getMessage();
+      boolean dockerDaemonDown =
+          msg.contains("docker daemon")
+              || msg.contains("docker.sock")
+              || msg.contains("Cannot connect to the Docker daemon")
+              || (msg.contains("dial unix") && msg.contains("docker"));
+      if (dockerDaemonDown) {
+        log.warn(
+            "[{}] preview skipped — Docker daemon not reachable. Run completed normally; only"
+                + " the auto-preview was skipped. Start Docker Desktop to enable previews.",
+            runId);
+        // Pass a short message into fail() so the downstream WARN line ("Preview failed
+        // for run X: ...") doesn't dump the full docker-CLI output.
+        fail(runId, "Docker daemon not reachable; preview skipped", 0);
+      } else {
+        log.error("[{}] preview-engine handoff failed: {}", runId, e.getMessage(), e);
+        fail(runId, "preview-engine handoff failed: " + e.getMessage(), 0);
+      }
     }
   }
 

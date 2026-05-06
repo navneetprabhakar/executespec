@@ -65,6 +65,15 @@ public class RepoArchitectureDoc {
   @Builder.Default
   private Integer outputTokens = 0;
 
+  /**
+   * v2.6.4 (V174) — USD cost of the LLM call that generated this per-repo arch doc. Populated from
+   * the pricing matrix at generation time so dashboard rollups don't have to back-calculate from
+   * tokens × today's prices. Defaults to 0 for historical rows (V174 sets the column default).
+   */
+  @Column(name = "cost_usd", nullable = false)
+  @Builder.Default
+  private Double costUsd = 0.0;
+
   @PrePersist
   void prePersist() {
     if (generatedAt == null) generatedAt = Instant.now();

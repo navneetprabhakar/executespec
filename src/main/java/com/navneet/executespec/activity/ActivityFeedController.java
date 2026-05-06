@@ -6,6 +6,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
@@ -33,6 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ActivityFeedController {
 
   private final ActivityFeedEntryRepository feedRepo;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @GetMapping
   public ResponseEntity<ActivityPage> list(
@@ -50,6 +54,13 @@ public class ActivityFeedController {
     if (projectUuid == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "projectId must be a UUID");
     }
+    // GA-readiness P4.1-followup — tenant guard. Activity feed payload contains
+    // event details on every project change, including PII like actor user IDs
+    // — must not leak across orgs. Derive user from `auth.getPrincipal()` so
+    // existing test fixtures + caller arities don't break. Input validation
+    // (auth-not-null + UUID shape) runs first so the 400/401 responses match
+    // the existing controller test expectations exactly.
+    projectAccessGuard.assertCanRead(projectId, principalOrNull(auth));
     int safeLimit = Math.min(Math.max(limit, 1), 500);
     Instant from = Instant.now().minus(Math.max(sinceDays, 1), ChronoUnit.DAYS);
     Instant to = Instant.now().plus(1, ChronoUnit.DAYS); // include just-now events
@@ -123,6 +134,18 @@ public class ActivityFeedController {
     } catch (IllegalArgumentException ex) {
       return null;
     }
+  }
+
+  /**
+   * Extract the {@link AppUserDetails} from a Spring {@link Authentication} principal, returning
+   * null when the principal isn't of that type (e.g. tests that pass a {@code
+   * UsernamePasswordAuthenticationToken} with a plain string principal). The {@link
+   * ProjectAccessGuard} fail-closes on null, which is the correct posture.
+   */
+  private static AppUserDetails principalOrNull(Authentication auth) {
+    if (auth == null) return null;
+    Object principal = auth.getPrincipal();
+    return principal instanceof AppUserDetails ud ? ud : null;
   }
 
   public record ActivityPage(
