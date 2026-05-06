@@ -8,6 +8,7 @@ import java.util.UUID;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.codereview.entity.CodeReviewIssue;
 import com.navneet.executespec.codereview.entity.CodeReviewScan;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
@@ -42,6 +43,7 @@ import lombok.RequiredArgsConstructor;
 public class CodeReviewController {
 
   private final CodeReviewService service;
+  private final ProjectAccessGuard projectAccessGuard;
 
   // ── Submit / fetch ─────────────────────────────────────────────────────────
 
@@ -103,6 +105,9 @@ public class CodeReviewController {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
+    // GA-readiness P4.1-followup — code review scans expose source-file paths
+    // + suggested-fix snippets, both leak across orgs without a tenant guard.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     return ResponseEntity.ok(
         service.listForProject(projectId).stream().map(CodeReviewScanDto::from).toList());
   }
@@ -119,6 +124,8 @@ public class CodeReviewController {
     if (userDetails == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
     }
+    // GA-readiness P4.1-followup — same rationale as listForProject above.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     // Dashboard wants to see FAILED scans with their failureReason too — only the chat tool path
     // restricts to COMPLETE so it never narrates a partial / failed report as if it were canonical.
     Optional<CodeReviewScan> latest =

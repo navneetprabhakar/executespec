@@ -10,6 +10,7 @@ import com.navneet.executespec.project.dto.CreateRepoRequest;
 import com.navneet.executespec.project.dto.ProjectRepoDto;
 import com.navneet.executespec.project.dto.ProjectRepoLinkDto;
 import com.navneet.executespec.project.dto.UpdateRelationshipsRequest;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.repo.GitHubRepoService.RemoteRepo;
@@ -31,6 +32,7 @@ public class ProjectRepoController {
 
   private final ProjectRepoService service;
   private final GitHubRepoService gitHub;
+  private final ProjectAccessGuard projectAccessGuard;
 
   /**
    * Lists every repo the caller's GitHub PAT can see (owned + collaborator + org-member).
@@ -73,6 +75,10 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/sync")
   public ResponseEntity<ProjectRepoDto> syncRepo(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — visible repo-access check at the call site. The
+    // service-side `loadRepoForRead` runs again as defense in depth.
+    service.loadRepoForRead(
+        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     return ResponseEntity.ok(
         service.syncRepo(
             repoId,
@@ -90,6 +96,9 @@ public class ProjectRepoController {
   @PostMapping("/api/repos/{repoId}/webhook")
   public ResponseEntity<java.util.Map<String, Object>> installRepoWebhook(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — explicit access check before the GitHub-side mutation.
+    service.loadRepoForRead(
+        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     var u = userDetails.getUser();
     boolean ok = service.installWebhook(repoId, u.getGithubPat(), u.getId(), u.getOrgId());
     if (ok) {
@@ -111,6 +120,10 @@ public class ProjectRepoController {
   @DeleteMapping("/api/repos/{repoId}")
   public ResponseEntity<Void> deleteRepo(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — assert tenant before destructive op. service.deleteRepo
+    // also calls loadRepoForWrite internally as defense in depth.
+    service.loadRepoForRead(
+        repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     service.deleteRepo(
         repoId,
         userDetails.getUser().getId(),
@@ -124,6 +137,9 @@ public class ProjectRepoController {
   @GetMapping("/api/projects/{projectId}/repos")
   public ResponseEntity<List<ProjectRepoLinkDto>> listProjectRepos(
       @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String projectId) {
+    // GA-readiness P4.1-followup — tenant guard before service-level access
+    // logic so the call site visibly asserts org-boundary enforcement.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     return ResponseEntity.ok(
         service.listProjectRepos(
             projectId, userDetails.getUser().getId(), userDetails.getUser().getOrgId()));
@@ -134,6 +150,10 @@ public class ProjectRepoController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String projectId,
       @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — verify caller can write to the project
+    // before linking a repo to it (the service's downstream check stays as
+    // defense in depth).
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     ProjectRepoLinkDto dto =
         service.linkToProject(
             projectId, repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
@@ -145,6 +165,8 @@ public class ProjectRepoController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @PathVariable String projectId,
       @PathVariable UUID repoId) {
+    // GA-readiness P4.1-followup — destructive op; tenant guard up front.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     service.unlinkFromProject(
         projectId, repoId, userDetails.getUser().getId(), userDetails.getUser().getOrgId());
     return ResponseEntity.noContent().build();
@@ -156,6 +178,8 @@ public class ProjectRepoController {
       @PathVariable String projectId,
       @PathVariable UUID repoId,
       @RequestBody UpdateRelationshipsRequest req) {
+    // GA-readiness P4.1-followup — relationship metadata mutates project state.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     return ResponseEntity.ok(
         service.updateRelationships(
             projectId,

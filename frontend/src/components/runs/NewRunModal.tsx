@@ -75,6 +75,12 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
   const [figmaUrl, setFigmaUrl] = useState('');
   const [tddMode, setTddMode] = useState(false);
+  // GA-readiness P3.2 — optional customer "Stop at $X" cost ceiling. Empty
+  // string = no override (platform cap applies). Numeric values are validated
+  // against the backend [0.10, 1000] range when typed; the field stays a
+  // string here to allow the controlled input to render whatever the user
+  // types until they submit.
+  const [userCostCap, setUserCostCap] = useState<string>('');
 
   // ── chat mode state ───────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>('compose');
@@ -242,6 +248,13 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
         ...(selectedRepoIds.length > 0 ? {selectedRepoIds} : {}),
         ...(figmaUrl.trim() ? {figmaUrl: figmaUrl.trim()} : {}),
         ...(tddMode ? {tddMode: true} : {}),
+        // P3.2 — pass user cap to the backend only when valid. Validation
+        // (range + numeric) happens server-side via @DecimalMin/@DecimalMax
+        // on RunRequest; the frontend just doesn't send the field when the
+        // input is blank or unparseable.
+        ...(userCostCap.trim() && Number.isFinite(Number(userCostCap))
+          ? {userCostCap: Number(userCostCap)}
+          : {}),
       });
       addToast({type: 'success', message: `Run launched: ${runId.slice(0, 8)}`});
       navigate('/');
@@ -459,6 +472,39 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                   </span>
                 }
               />
+
+              {/* GA-readiness P3.2 — optional customer-supplied "Stop at $X" cost ceiling.
+                  The platform-derived cap (credits × $5 × 1.5) still applies as the upper
+                  bound; this lets the customer voluntarily lower the ceiling so they're
+                  protected from runaway costs even before the next plan-approval gate. */}
+              <div className='flex flex-col gap-1'>
+                <label
+                  htmlFor='user-cost-cap'
+                  className='text-xs font-medium text-secondary uppercase tracking-wider'
+                >
+                  Stop at $X
+                  <span className='ml-1 text-[10px] text-muted normal-case'>(optional)</span>
+                </label>
+                <div className='flex items-center gap-1'>
+                  <span className='text-sm text-muted'>$</span>
+                  <input
+                    id='user-cost-cap'
+                    type='number'
+                    inputMode='decimal'
+                    min='0.10'
+                    max='1000'
+                    step='0.10'
+                    value={userCostCap}
+                    onChange={(e) => setUserCostCap(e.target.value)}
+                    placeholder='e.g. 5.00'
+                    className='w-32 px-3 py-1.5 text-sm border border-[var(--border-default)] rounded-sm bg-transparent focus:outline-none focus:border-accent-blue/50 font-mono'
+                  />
+                </div>
+                <p className='text-[11px] text-muted'>
+                  Force-stop the run if cumulative spend reaches this amount. Range $0.10–$1000.
+                  Leave blank to use the platform cap (credits × $5 × 1.5).
+                </p>
+              </div>
 
               {/* R-05 (UX audit, 2026-05-03): button copy renamed from
                   the terse "Build My Spec" → "Refine spec with AI assistant"

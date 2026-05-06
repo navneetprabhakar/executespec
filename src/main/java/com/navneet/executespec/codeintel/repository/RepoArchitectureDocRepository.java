@@ -14,4 +14,14 @@ public interface RepoArchitectureDocRepository extends JpaRepository<RepoArchite
       String projectId, UUID repoId);
 
   List<RepoArchitectureDoc> findByProjectIdOrderByGeneratedAtDesc(String projectId);
+
+  /**
+   * Sum of {@code cost_usd} across every per-repo architecture doc generated for a project. Used by
+   * the project dashboard to roll up arch-generation spend.
+   */
+  @org.springframework.data.jpa.repository.Query(
+      "SELECT COALESCE(SUM(d.costUsd), 0.0) FROM RepoArchitectureDoc d "
+          + "WHERE d.projectId = :projectId")
+  double sumCostUsdByProject(
+      @org.springframework.data.repository.query.Param("projectId") String projectId);
 }

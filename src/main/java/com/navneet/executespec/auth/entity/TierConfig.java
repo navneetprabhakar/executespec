@@ -154,4 +154,13 @@ public class TierConfig {
    */
   @Column(name = "code_review_monthly_quota", nullable = false)
   private Integer codeReviewMonthlyQuota = 0;
+
+  /**
+   * v2.6.4 (V175) — max number of active (non-revoked, non-expired) public read-only project share
+   * links per project. 0 = blocked, positive = capped, -1 = unlimited. Seed: FREE=3, PRO=25,
+   * TEAM/MAX/ENTERPRISE=-1. Enforced by {@link
+   * com.navneet.executespec.sharing.service.ProjectShareLinkService#assertCanCreate}.
+   */
+  @Column(name = "share_link_active_cap", nullable = false)
+  private Integer shareLinkActiveCap = 0;
 }

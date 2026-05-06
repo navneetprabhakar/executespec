@@ -5,6 +5,7 @@ import java.util.Map;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.rag.entity.ProjectDocument;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -20,25 +21,36 @@ import lombok.RequiredArgsConstructor;
 public class ProjectDocumentController {
 
   private final ProjectDocumentService service;
+  private final ProjectAccessGuard projectAccessGuard;
 
   @PostMapping
   public ResponseEntity<ProjectDocument> upload(
       @AuthenticationPrincipal AppUserDetails principal,
       @PathVariable String projectId,
       @RequestPart("file") MultipartFile file) {
+    // GA-readiness P4.1-followup — RAG document upload writes to project state.
+    projectAccessGuard.assertCanRead(projectId, principal);
     String userId = principal != null ? principal.getUser().getId() : null;
     ProjectDocument doc = service.upload(projectId, file, userId);
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(doc);
   }
 
   @GetMapping
-  public ResponseEntity<List<ProjectDocument>> list(@PathVariable String projectId) {
+  public ResponseEntity<List<ProjectDocument>> list(
+      @AuthenticationPrincipal AppUserDetails principal, @PathVariable String projectId) {
+    // GA-readiness P4.1-followup — document list exposes filenames + sizes
+    // tied to the project; tenant-bound.
+    projectAccessGuard.assertCanRead(projectId, principal);
     return ResponseEntity.ok(service.list(projectId));
   }
 
   @DeleteMapping("/{documentId}")
   public ResponseEntity<Map<String, String>> delete(
-      @PathVariable String projectId, @PathVariable String documentId) {
+      @AuthenticationPrincipal AppUserDetails principal,
+      @PathVariable String projectId,
+      @PathVariable String documentId) {
+    // GA-readiness P4.1-followup — destructive op; verify tenant before delete.
+    projectAccessGuard.assertCanRead(projectId, principal);
     service.delete(projectId, documentId);
     return ResponseEntity.ok(Map.of("status", "deleted"));
   }

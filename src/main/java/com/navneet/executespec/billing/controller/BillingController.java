@@ -4,8 +4,10 @@ import java.util.List;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.billing.dto.*;
+import com.navneet.executespec.billing.entity.FounderPricingDiscount;
 import com.navneet.executespec.billing.entity.TopupPackage;
 import com.navneet.executespec.billing.service.BillingService;
+import com.navneet.executespec.billing.service.FounderPricingService;
 import com.navneet.executespec.billing.service.RunTopupService;
 
 import org.springframework.http.ResponseEntity;
@@ -23,6 +25,7 @@ public class BillingController {
 
   private final BillingService billingService;
   private final RunTopupService runTopupService;
+  private final FounderPricingService founderPricingService;
 
   /**
    * GET /api/billing/plans List all active plans for the pricing page. Public-ish (requires auth
@@ -42,6 +45,36 @@ public class BillingController {
             && userDetails != null
             && "SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole());
     return ResponseEntity.ok(billingService.listPlans(keyMode, effectiveIncludeHidden));
+  }
+
+  /**
+   * GET /api/billing/founder-pricing/{tier} — read-only lookup for the active founder offer for a
+   * tier. Returns 200 + offer details when an offer is active and has capacity, or 204 No Content
+   * when no offer applies. Used by PlansPage to render the "X of N left" badge on a tier card.
+   */
+  @GetMapping("/founder-pricing/{tier}")
+  public ResponseEntity<FounderOfferDto> getFounderOffer(@PathVariable String tier) {
+    return founderPricingService
+        .findActiveOfferForTier(tier.toUpperCase())
+        .map(d -> ResponseEntity.ok(FounderOfferDto.from(d)))
+        .orElse(ResponseEntity.noContent().build());
+  }
+
+  /**
+   * Frontend-facing view of a founder offer. {@code remainingCapacity} is what the badge renders —
+   * never expose {@code currentCount}/{@code maxSubscribers} directly because they're cheap
+   * social-engineering hooks ("only 1 left! buy now!").
+   */
+  public record FounderOfferDto(
+      String name, String tier, int discountPct, int remainingCapacity, boolean isLifetime) {
+    static FounderOfferDto from(FounderPricingDiscount d) {
+      return new FounderOfferDto(
+          d.getName(),
+          d.getTier(),
+          d.getDiscountPct(),
+          Math.max(0, d.getMaxSubscribers() - d.getCurrentCount()),
+          d.isLifetime());
+    }
   }
 
   /** GET /api/billing/status Current subscription + plan + usage for the authenticated user. */

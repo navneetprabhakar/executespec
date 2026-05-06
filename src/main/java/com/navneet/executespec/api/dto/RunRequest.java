@@ -3,6 +3,8 @@ package com.navneet.executespec.api.dto;
 import java.util.List;
 import java.util.UUID;
 
+import jakarta.validation.constraints.DecimalMax;
+import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
@@ -100,4 +102,21 @@ public record RunRequest(
      * <p>Free-form text — the planner treats it as advisory context, not as a hard task list.
      */
     @Size(max = 20_000, message = "PR review comments must not exceed 20,000 characters")
-        String prReviewComments) {}
+        String prReviewComments,
+    /**
+     * GA-readiness P3.2 (2026-05-06) — optional customer-supplied hard cost ceiling in USD. When
+     * set, this overrides the platform-derived {@code hard_cap_usd} (credits × $5 × 1.5) with a
+     * tighter ceiling. The {@code WorkerAgent} budget guard will force-terminate the run with
+     * {@code Outcome.BUDGET_EXCEEDED} the moment cumulative spend reaches this value.
+     *
+     * <p>Capped at $1,000 by validation so a typo or copy-paste error can't accidentally authorise
+     * an unbounded run. Min $0.10 — anything lower would prevent even a no-op run from finishing.
+     *
+     * <p>The platform cap (1.5× the credit-derived estimate) still applies as a CEILING — the
+     * effective cap is {@code min(userCostCap, platformHardCap)}, computed in {@code
+     * RunOrchestrator}. Customers can lower their ceiling but not raise it past what credits
+     * already authorised.
+     */
+    @DecimalMin(value = "0.10", message = "userCostCap must be ≥ $0.10")
+        @DecimalMax(value = "1000.00", message = "userCostCap must be ≤ $1000")
+        Double userCostCap) {}

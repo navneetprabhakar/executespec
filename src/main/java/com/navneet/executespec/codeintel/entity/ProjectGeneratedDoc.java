@@ -56,6 +56,14 @@ public class ProjectGeneratedDoc {
   @Builder.Default
   private Integer outputTokens = 0;
 
+  /**
+   * v2.6.4 (V174) — USD cost of the LLM call that generated this doc. Populated at generation time
+   * so dashboard rollups don't have to back-calculate from tokens × current prices.
+   */
+  @Column(name = "cost_usd", nullable = false)
+  @Builder.Default
+  private Double costUsd = 0.0;
+
   @PrePersist
   void prePersist() {
     if (generatedAt == null) generatedAt = Instant.now();

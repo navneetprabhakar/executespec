@@ -179,6 +179,14 @@ public class SecurityConfig {
                     // Public shared validation reports (no auth)
                     .requestMatchers(HttpMethod.GET, "/api/reports/shared/*")
                     .permitAll()
+                    // V175 — project share-links (no auth; bearer is the URL token, validated in
+                    // controller). Covers /api/shared/{token}/meta + per-surface payloads.
+                    .requestMatchers(HttpMethod.GET, "/api/shared/**")
+                    .permitAll()
+                    // V175 — invite preview is public so the recipient can see what they're
+                    // accepting before signing in. Accept itself requires auth.
+                    .requestMatchers(HttpMethod.GET, "/api/invites/preview")
+                    .permitAll()
                     // R-111 — anonymous-trial endpoint. No JWT; rate-limited
                     // by IP. Real LLM dispatch is gated by a feature flag
                     // until the anti-abuse story is locked in Wave 2.

@@ -3,6 +3,8 @@ package com.navneet.executespec.project.pr;
 import java.util.List;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.auth.security.RunAccessGuard;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.repo.GitHubRepoService;
 
 import org.springframework.http.ResponseEntity;
@@ -27,6 +29,8 @@ public class PullRequestController {
   private final PullRequestRecordService service;
   private final GitHubRepoService gitHub;
   private final PrRefreshService refreshService;
+  private final RunAccessGuard runAccessGuard;
+  private final ProjectAccessGuard projectAccessGuard;
 
   public record PrSummary(
       String repoFullName,
@@ -51,7 +55,14 @@ public class PullRequestController {
   }
 
   @GetMapping("/api/runs/{runId}/prs")
-  public ResponseEntity<List<PrSummary>> listPrsForRun(@PathVariable String runId) {
+  public ResponseEntity<List<PrSummary>> listPrsForRun(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    // GA-readiness P4.1-followup — multi-tenant access guard. The doc comment
+    // above the class said "ownership checks are intentionally loose because
+    // the record only exposes the PR URL", but probing which runs exist on
+    // which repos is itself a useful signal for an attacker. Tighten to a
+    // proper org-scoped check.
+    runAccessGuard.requireRunAccess(runId, userDetails);
     List<PrSummary> out = service.listForRun(runId).stream().map(PrSummary::from).toList();
     return ResponseEntity.ok(out);
   }
@@ -68,6 +79,10 @@ public class PullRequestController {
   @PostMapping("/api/projects/{projectId}/prs/refresh")
   public ResponseEntity<PrRefreshService.RefreshResult> refreshProjectPrs(
       @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    // GA-readiness P4.1-followup — assertCanRead before issuing the GitHub
+    // refresh. Closes the legacy gap where any authenticated caller could
+    // poll any project's PR list (returning the same data + URLs).
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     // 2026-05-02 — thread the caller's PAT so private-repo snapshots succeed. Without
     // this, getPullRequestSnapshot returned null on private repos and the refresh
     // silently no-op'd; user clicked Refresh + saw merged PRs still showing OPEN.

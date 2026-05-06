@@ -52,6 +52,11 @@ class AsyncAllowlistTest {
               "MailService#sendPasswordResetEmail",
               "MailService#sendTemporaryPasswordEmail",
               "MailService#sendOrgInviteEmail",
+              // V175 — external project-collaboration invite. Takes primitive args
+              // (toEmail, projectName, inviterEmail, acceptUrl, expiresInDays);
+              // Thymeleaf render + SMTP send only; no JPA navigation. Same safety
+              // profile as every other MailService#send* entry in this list.
+              "MailService#sendProjectInviteEmail",
               // R-162 (Wave 2) — referral magic-link email. Takes primitive String
               // args (toEmail, referrerName, token); Thymeleaf render + SMTP send only;
               // no JPA nav. Same safety profile as the other 18 MailService#send*

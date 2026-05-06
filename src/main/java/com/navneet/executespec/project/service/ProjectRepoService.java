@@ -541,7 +541,19 @@ public class ProjectRepoService {
 
   /* ──────────────────────────────── helpers ──────────────────────────────── */
 
-  private ProjectRepo loadRepoForRead(UUID repoId, String callerUserId, String callerOrgId) {
+  /**
+   * GA-readiness P4.1-followup (2026-05-06) — exposed as public so {@code ProjectRepoController}
+   * can call it BEFORE the mutating service operation, making the tenant-boundary check visible at
+   * the controller call site. Internal service callers still call this directly; the only callers
+   * added by exposing it are the controller's repo-scoped handlers (deleteRepo / installRepoWebhook
+   * / syncRepo).
+   *
+   * <p>Throws 404 when the repo doesn't exist (no existence-leak), 403 when the caller is
+   * authenticated but the repo is owned by another user / org (and the caller isn't SUPER_ADMIN).
+   * Returns the loaded entity on success — controllers can ignore the return value when the
+   * side-effect (exception on denial) is what they want.
+   */
+  public ProjectRepo loadRepoForRead(UUID repoId, String callerUserId, String callerOrgId) {
     ProjectRepo repo =
         repoRepo
             .findById(repoId)

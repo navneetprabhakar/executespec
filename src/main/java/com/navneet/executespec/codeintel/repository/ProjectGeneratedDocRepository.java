@@ -15,4 +15,14 @@ public interface ProjectGeneratedDocRepository extends JpaRepository<ProjectGene
       String projectId, DocType docType);
 
   List<ProjectGeneratedDoc> findByProjectIdOrderByGeneratedAtDesc(String projectId);
+
+  /**
+   * Sum of {@code cost_usd} across every generated doc (EXPLANATION + SETUP + future kinds) for a
+   * project. Used by the project dashboard to roll up doc-generation spend.
+   */
+  @org.springframework.data.jpa.repository.Query(
+      "SELECT COALESCE(SUM(d.costUsd), 0.0) FROM ProjectGeneratedDoc d "
+          + "WHERE d.projectId = :projectId")
+  double sumCostUsdByProject(
+      @org.springframework.data.repository.query.Param("projectId") String projectId);
 }

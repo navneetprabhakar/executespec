@@ -47,6 +47,10 @@ public class ProjectArchitectureService {
   private final ProjectWorkspaceService workspace;
   private final com.navneet.executespec.project.workspace.ProjectWorkspaceWarmer workspaceWarmer;
   private final ProjectBriefService briefService;
+
+  /** v2.6.4 — compute USD cost for arch + repo-arch generations so the dashboard can roll up. */
+  private final com.navneet.executespec.v2.cost.RunCostTracker costTracker;
+
   private final ObjectMapper objectMapper;
 
   /**
@@ -193,12 +197,23 @@ public class ProjectArchitectureService {
     } catch (Exception e) {
       log.warn("Failed to serialise generatedFromShas: {}", e.getMessage());
     }
+    // v2.6.4 (V174) — compute USD cost for the combined-arch synthesis. Skipped (= 0) on the
+    // deterministic-fallback path since no LLM call happened there.
+    double archCost =
+        "deterministic".equals(combined.modelUsed())
+            ? 0.0
+            : costTracker.computeCost(
+                providerNameFor(provider),
+                combined.modelUsed(),
+                combined.inputTokens(),
+                combined.outputTokens());
     ProjectArchitectureDoc doc =
         ProjectArchitectureDoc.builder()
             .projectId(projectId)
             .version(nextVersion)
             .content(combined.markdown())
             .generatedFromShas(shasJson)
+            .costUsd(archCost)
             .build();
     archDocRepo.save(doc);
     log.info(
@@ -309,6 +324,12 @@ public class ProjectArchitectureService {
     }
 
     int nextVersion = latest.map(d -> d.getVersion() + 1).orElse(1);
+    // v2.6.4 (V174) — compute USD cost from tokens × pricing matrix so the project dashboard
+    // can roll arch spend up. providerName() is the actual provider that served the call (after
+    // failover); pricing matches it.
+    double cost =
+        costTracker.computeCost(
+            providerNameFor(provider), rar.modelUsed(), rar.inputTokens(), rar.outputTokens());
     RepoArchitectureDoc doc =
         RepoArchitectureDoc.builder()
             .projectId(projectId)
@@ -320,6 +341,7 @@ public class ProjectArchitectureService {
             .modelUsed(rar.modelUsed())
             .inputTokens(rar.inputTokens())
             .outputTokens(rar.outputTokens())
+            .costUsd(cost)
             .build();
     repoArchRepo.save(doc);
     log.info(
@@ -331,6 +353,14 @@ public class ProjectArchitectureService {
         rar.outputTokens(),
         rar.modelUsed());
     return doc;
+  }
+
+  /**
+   * Lowercase provider name for the cost matrix lookup. Falls back to "openai" when the project
+   * doesn't have a provider set yet.
+   */
+  private static String providerNameFor(LlmProvider provider) {
+    return provider == null ? "openai" : provider.name().toLowerCase();
   }
 
   private static String shortSha(String sha) {
