@@ -225,16 +225,24 @@ public class WorkerAgent {
               String.format("%.4f", spent),
               String.format("%.4f", hardCapUsd));
           recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
-          return errorResult(
-              iter,
-              toolsDispatched,
-              toolLog,
-              start,
-              "hard cap $"
-                  + String.format("%.2f", hardCapUsd)
-                  + " exceeded mid-task (spent $"
-                  + String.format("%.2f", spent)
-                  + ")");
+          // P3.1 (GA-readiness, 2026-05-06) — return outcome=BUDGET_EXCEEDED so the executor
+          // sees the budget signal directly. Previously this path called errorResult(...) which
+          // hardcoded Outcome.ERROR; metrics recorded BUDGET_EXCEEDED but the WorkerResult
+          // outcome read as ERROR — so SequentialExecutor's budget-aware branches couldn't
+          // distinguish a router crash from a cost-cap stop.
+          return WorkerResult.builder()
+              .outcome(WorkerResult.Outcome.BUDGET_EXCEEDED)
+              .iterations(iter)
+              .toolCallsDispatched(toolsDispatched)
+              .finalAssistantText(
+                  "hard cap $"
+                      + String.format("%.2f", hardCapUsd)
+                      + " exceeded mid-task (spent $"
+                      + String.format("%.2f", spent)
+                      + ")")
+              .toolCallLog(toolLog)
+              .totalLatencyMs(System.currentTimeMillis() - start)
+              .build();
         }
       }
 

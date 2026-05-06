@@ -55,6 +55,8 @@ public class SuperAdminController {
   private final com.navneet.executespec.security.guardrail.GuardrailLevelResolver
       guardrailLevelResolver;
   private final com.navneet.executespec.v2.integration.RunOrchestrator v2RunOrchestrator;
+  private final com.navneet.executespec.report.VerifiedScoreBackfillService
+      verifiedScoreBackfillService;
 
   // ── Guardrail level diagnostic (Plan 1 P1) ────────────────────────────────
 
@@ -100,6 +102,22 @@ public class SuperAdminController {
       staleMinutes = Math.max(1, n.longValue());
     }
     return ResponseEntity.ok(adminReconciliationService.reconcileOrphans(staleMinutes));
+  }
+
+  // ── P1.2-followup: backfill historical verified scores ────────────────────
+
+  /**
+   * GA-readiness P1.2-followup (2026-05-06) — re-compute {@code validation_report.verified_score}
+   * for every existing row using the corrected formula (synth-issue filter + endpoint coverage
+   * bonus). One-shot, idempotent. Synchronous — the caller times out after 60s if there are more
+   * rows than fit comfortably; in that case use the chunked variant tracked as a P1.2-followup-2.
+   *
+   * <p>SUPER_ADMIN-gated by SecurityConfig (this whole controller is /api/admin).
+   */
+  @PostMapping("/validation-reports/backfill-verified-score")
+  public ResponseEntity<com.navneet.executespec.report.VerifiedScoreBackfillService.BackfillResult>
+      backfillVerifiedScore() {
+    return ResponseEntity.ok(verifiedScoreBackfillService.backfillAll());
   }
 
   // ── Re-review (2026-05-02 — vendored-path exclusion follow-up) ────────────

@@ -20,6 +20,7 @@ import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 import com.navneet.executespec.auth.service.AuthService;
 import com.navneet.executespec.auth.service.TierPermissionService;
+import com.navneet.executespec.auth.service.UserDataExportService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -43,6 +44,7 @@ public class AuthController {
   private final ActivityAuditService auditService;
   private final com.navneet.executespec.repo.BitbucketRepoService bitbucketRepoService;
   private final com.navneet.executespec.compliance.DataRetentionService dataRetentionService;
+  private final UserDataExportService userDataExportService;
 
   private static final int REFRESH_COOKIE_MAX_AGE_SECONDS = 7 * 24 * 3600; // 7 days
   private final PasswordEncoder passwordEncoder;
@@ -162,6 +164,30 @@ public class AuthController {
   public ResponseEntity<TierPermissionService.TierPermissions> myPermissions(
       @AuthenticationPrincipal AppUserDetails userDetails) {
     return ResponseEntity.ok(tierPermissionService.getPermissions(userDetails.getUser().getId()));
+  }
+
+  /**
+   * GA-readiness P5.4 (2026-05-06) — GDPR Article 15 (right of access) + Article 20 (data
+   * portability). Returns a ZIP bundle of every personal data row stored about the authenticated
+   * user, in a stable JSON format. Synchronous; the typical response is &lt; 1MB.
+   *
+   * <p>Sensitive fields (password hash, API keys, GitHub PAT) are redacted — see {@link
+   * UserDataExportService#exportForUser} for the full list. Org-scoped data shared with other users
+   * is excluded; each user must request their own export.
+   *
+   * <p>This endpoint is paired with the public {@code /legal/dpa} DPA template + an emailed
+   * deletion path at {@code admin@executespec.ai} for GDPR Article 17 (erasure). Together those
+   * three surfaces close the GDPR compliance gap flagged in the GA-readiness audit §4.
+   */
+  @GetMapping(value = "/me/data-export", produces = "application/zip")
+  public ResponseEntity<byte[]> exportMyData(@AuthenticationPrincipal AppUserDetails userDetails) {
+    UserDataExportService.ExportBundle bundle =
+        userDataExportService.exportForUser(userDetails.getUser().getId());
+    return ResponseEntity.ok()
+        .header(
+            "Content-Disposition", "attachment; filename=\"" + bundle.suggestedFilename() + "\"")
+        .header("Content-Type", "application/zip")
+        .body(bundle.zipBytes());
   }
 
   // ── GitHub settings ───────────────────────────────────────────────────────

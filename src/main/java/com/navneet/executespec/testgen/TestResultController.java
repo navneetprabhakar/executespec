@@ -176,6 +176,11 @@ public class TestResultController {
 
     /* V2 check removed — V2 is default */
 
+    // GA-readiness P4.1-followup — multi-tenant access guard. Closes the legacy gap
+    // where this endpoint mutated run state (manual test execution) without an org
+    // check, so a caller in org B could trigger tests on a run from org A.
+    runAccessGuard.requireRunAccess(runId, userDetails);
+
     PipelineRun run =
         stateStore
             .findRun(runId)
@@ -219,6 +224,12 @@ public class TestResultController {
       @AuthenticationPrincipal AppUserDetails userDetails) {
 
     /* V2 check removed — V2 is default */
+
+    // GA-readiness P4.1-followup — multi-tenant access guard. The endpoint is
+    // currently 410 Gone (V2 doesn't yet implement apply-test-fixes), but the
+    // guard belongs here so when V2 wires it back up the access check is
+    // already in the right place.
+    runAccessGuard.requireRunAccess(runId, userDetails);
 
     PipelineRun run =
         stateStore

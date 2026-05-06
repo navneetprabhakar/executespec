@@ -2,12 +2,16 @@ package com.navneet.executespec.export;
 
 import java.time.Instant;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
+
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -38,6 +42,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ProjectExportController {
 
   private final ProjectExportService exportService;
+  private final ProjectAccessGuard projectAccessGuard;
 
   /**
    * M-012 (Wave 1): tightened from any-project-member to ORG_ADMIN+. Project export bundles the
@@ -46,10 +51,18 @@ public class ProjectExportController {
    */
   @PostMapping
   @PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN','BILLING_ADMIN')")
-  public ResponseEntity<byte[]> export(@PathVariable String projectId, Authentication auth) {
+  public ResponseEntity<byte[]> export(
+      @PathVariable String projectId,
+      Authentication auth,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
     if (auth == null) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "auth required");
     }
+    // GA-readiness P4.1-followup — tenant guard. The @PreAuthorize role gate
+    // above checks that the caller is an admin SOMEWHERE; it does NOT verify
+    // they admin THIS project. Without this assertCanRead, an ORG_ADMIN of
+    // org A could request the export of a project owned by org B.
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     try {
       byte[] bundle = exportService.composeBundle(projectId);
       String filename =

@@ -16,4 +16,14 @@ public interface ProjectArchitectureDocRepository
   Optional<ProjectArchitectureDoc> findFirstByProjectIdOrderByVersionDesc(String projectId);
 
   Optional<ProjectArchitectureDoc> findByProjectIdAndVersion(String projectId, Integer version);
+
+  /**
+   * Sum of {@code cost_usd} across every architecture-doc version for a project. Used by the
+   * project dashboard to roll up arch-generation spend alongside run + review spend.
+   */
+  @org.springframework.data.jpa.repository.Query(
+      "SELECT COALESCE(SUM(d.costUsd), 0.0) FROM ProjectArchitectureDoc d "
+          + "WHERE d.projectId = :projectId")
+  double sumCostUsdByProject(
+      @org.springframework.data.repository.query.Param("projectId") String projectId);
 }

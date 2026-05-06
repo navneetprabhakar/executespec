@@ -126,24 +126,31 @@ spring:
         initial-interval: 2000      # 2s
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
         max-interval: 10000         # 10s cap
+    # ── Spring AI bean-init defaults ───────────────────────────────────────────
+    # These are the defaults Spring AI's auto-config uses when constructing the
+    # provider beans at startup. The V2 LlmRouterV2 path overrides per-call from
+    # the model-matrix below, so these values are only used at bean construction
+    # time; per-call dispatch resolves through ModelRegistry. Keep them as
+    # current-WORKHORSE-tier defaults so a graceful-degraded boot uses a model
+    # that's actually current (not gemini-2.5-flash, which was retired 2026-05-04).
     anthropic:
       api-key: ""                   # set via env var in profile files
       chat:
         options:
-          model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
+          model: claude-haiku-4-5-20251001  # bean-init only; V2 router resolves per-call
           max-tokens: 16384                  # Haiku default; per-call limits applied by TokenBudgetMonitor
     openai:
       api-key: ""                   # set via env var in profile files
       chat:
         options:
-          model: gpt-5.4-mini
+          model: gpt-5.4-mini                # bean-init only; V2 router resolves per-call
           max-tokens: 16384                  # gpt-5.4 max; per-call limits applied by TokenBudgetMonitor
     google:
       genai:
         api-key: ""                 # set via env var in profile files
         chat:
           options:
-            model: gemini-2.5-flash          # default; all tiers use gemini-2.5-flash
+            model: gemini-3-flash-preview     # bean-init only; V2 router resolves per-call (2026-05-06: was gemini-2.5-flash, retired)
 
 # ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
@@ -189,6 +196,7 @@ model-matrix:
       chain-tier: ARCHITECT
       context-limit: 200000
       max-output-tokens: 32000
+      display-label: "Claude Opus 4.6"
       pricing:
         input-per-1m: 5.00
         cached-input-per-1m: 0.50
@@ -199,6 +207,7 @@ model-matrix:
       chain-tier: CAPABLE
       context-limit: 200000
       max-output-tokens: 64000
+      display-label: "Claude Sonnet 4.6"
       pricing:
         input-per-1m: 3.00
         cached-input-per-1m: 0.30
@@ -209,6 +218,7 @@ model-matrix:
       chain-tier: UTILITY
       context-limit: 200000
       max-output-tokens: 8192
+      display-label: "Claude Haiku 4.5"
       pricing:
         input-per-1m: 1.00
         cached-input-per-1m: 0.10
@@ -219,6 +229,7 @@ model-matrix:
       chain-tier: UTILITY
       context-limit: 1048576
       max-output-tokens: 65536
+      display-label: "Gemini 2.5 Flash"
       pricing:
         input-per-1m: 0.30
         cached-input-per-1m: 0.03
@@ -229,9 +240,15 @@ model-matrix:
       chain-tier: CAPABLE
       context-limit: 1048576
       max-output-tokens: 65536
+      display-label: "Gemini 3 Flash Preview"
       pricing:
         input-per-1m: 0.50
-        cached-input-per-1m: 0.05
+        # 2026-05-06 — Gemini context-cache reads are billed at 25% of input rate per
+        # Vertex AI pricing (https://cloud.google.com/vertex-ai/generative-ai/pricing).
+        # Prior value 0.05 (10%) was wrong and was being overridden by a hardcoded
+        # 0.25 multiplier inside RunCostTracker. After the 2026-05-06 consolidation
+        # YAML is the only knob; updating to the real rate restores cost accuracy.
+        cached-input-per-1m: 0.125
         output-per-1m: 3.00
       notes: "Gemini 3 Flash Preview — LIGHTWEIGHT tier for Google (LOW-band scaffolds)."
     "[gemini-3-pro-preview]":
@@ -239,11 +256,13 @@ model-matrix:
       chain-tier: ARCHITECT
       context-limit: 1048576
       max-output-tokens: 65536
+      display-label: "Gemini 3 Pro Preview"
       pricing:
         # 2026-05-04 — Pro pricing per Google AI list (~6-8× flash). Verified
         # on https://ai.google.dev/gemini-api/docs/pricing (preview tier).
         input-per-1m: 3.50
-        cached-input-per-1m: 0.35
+        # 2026-05-06 — 25% of input per Vertex AI cached-read rate.
+        cached-input-per-1m: 0.875
         output-per-1m: 21.00
       notes: "Gemini 3 Pro Preview — PLANNING + WORKHORSE tier for Google (medium/high band)."
     "[gpt-5.4]":
@@ -251,9 +270,15 @@ model-matrix:
       chain-tier: CAPABLE
       context-limit: 200000
       max-output-tokens: 16384
+      display-label: "GPT-5.4"
       pricing:
         input-per-1m: 2.50
-        cached-input-per-1m: 0.25
+        # 2026-05-06 — OpenAI prompt caching bills cached_tokens at 50% of input rate
+        # for the gpt-4o / gpt-5.x family (https://platform.openai.com/docs/guides/prompt-caching).
+        # The o1 / o3 reasoning family is 25% but those aren't in the matrix today.
+        # Prior value 0.25 (10%) was wrong and was being overridden by a hardcoded
+        # 0.50 multiplier inside RunCostTracker — fixed after the 2026-05-06 consolidation.
+        cached-input-per-1m: 1.25
         output-per-1m: 15.00
       notes: "All tiers for OpenAI (PLANNING + WORKHORSE + LIGHTWEIGHT)."
     "[gpt-5.4-mini]":
@@ -261,9 +286,11 @@ model-matrix:
       chain-tier: UTILITY
       context-limit: 200000
       max-output-tokens: 16384
+      display-label: "GPT-5.4 Mini"
       pricing:
         input-per-1m: 0.75
-        cached-input-per-1m: 0.075
+        # 2026-05-06 — 50% of input per gpt-5.x family rate (see gpt-5.4 above).
+        cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
 

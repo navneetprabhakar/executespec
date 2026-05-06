@@ -38,6 +38,7 @@ import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
+import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
@@ -141,6 +142,7 @@ public class RunOrchestrator {
   private final GateStore gateStore;
   private final AccuracyAssessmentService accuracyAssessmentService;
   private final ModelResolver modelResolver;
+  private final ModelRegistry modelRegistry;
   private final com.navneet.executespec.v2.smoketest.CliSmokeRunner cliSmokeRunner;
   private final ProjectRepoService projectRepoService;
   private final FeatureAssessmentService featureAssessmentService;
@@ -205,9 +207,15 @@ public class RunOrchestrator {
   /** runId → in-flight pipeline future; used by {@link #cancel(String)}. */
   private final ConcurrentMap<String, Future<?>> activeRuns = new ConcurrentHashMap<>();
 
+  /**
+   * Run-orchestration pool — sized {@code clamp(4, 16, cores × 1)}. Each run can spawn parallel
+   * tasks during the LARGE planner pipeline (skeleton expand × N + sub-expansions for EPICs), so
+   * the multiplier matches CPU and the cap protects against a 32-core dev box launching 32
+   * concurrent run pipelines that would saturate Hikari + the LLM provider rate limits.
+   */
   private final ExecutorService pool =
       Executors.newFixedThreadPool(
-          4,
+          com.navneet.executespec.util.PoolSizing.coreMultiple(1, 4, 16),
           new ThreadFactory() {
             private int n = 0;
 
@@ -475,6 +483,11 @@ public class RunOrchestrator {
     String provider = normalizeProvider(aiProvider, projectId, runId);
     String model =
         modelName != null && !modelName.isBlank() ? modelName : defaultModelFor(provider);
+
+    // 2026-05-06 — defaultModelFor was a hardcoded provider→model fallback that drifted from
+    // the YAML matrix (returned Haiku/flash/mini when YAML PLANNING wanted Sonnet/Pro/gpt-5.4).
+    // After the consolidation it routes through ModelRegistry.workhouseModelFor(provider) so
+    // the run-level worker default tracks YAML.
 
     // Resolve per-tier models so RunDetail surfaces what the planner/reviewer
     // will actually call, not the run-level worker default — adversarial-test
@@ -2837,8 +2850,11 @@ public class RunOrchestrator {
         // for the assessment call only.
         LlmProvider provider = providerForAccuracy(run.getAiProvider());
         if (provider == LlmProvider.OPENAI) provider = LlmProvider.ANTHROPIC;
+        // 2026-05-06 — was "ReviewerAgentV2" (legacy class name). The actual reviewer is
+        // ReviewerAgentV3 in the YAML agent-tier-map. The 3-arg resolve form bypasses the
+        // tier lookup so this didn't trigger a warn, but the class-name drift was real.
         ResolvedModel planningModel =
-            modelResolver.resolve("ReviewerAgentV2", provider, AgentTier.PLANNING);
+            modelResolver.resolve("ReviewerAgentV3", provider, AgentTier.PLANNING);
         AccuracyReport accuracy =
             accuracyAssessmentService.assess(
                 runId,
@@ -2996,7 +3012,8 @@ public class RunOrchestrator {
               r.setCostEstimateLow(est.lowUsd());
               r.setCostEstimateHigh(est.highUsd());
               r.setCreditsCharged(est.credits());
-              r.setHardCapUsd(est.hardCapUsd());
+              // GA-readiness P3.2 — honour customer-supplied cost cap (P3.2 helper).
+              r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
               runRepo.save(r);
             });
     log.info(
@@ -3009,6 +3026,21 @@ public class RunOrchestrator {
         est.credits(),
         String.format("%.2f", est.hardCapUsd()),
         est.taskCount());
+  }
+
+  /**
+   * GA-readiness P3.2 — clamp the platform-derived hard cost cap by the optional customer override.
+   * The customer can lower the ceiling but not raise it past what credits already authorised, so
+   * the effective cap is {@code min(platformCap, userCap)} when userCap is set, otherwise the
+   * platform cap unchanged. Negative or zero userCap is treated as "not set" (defensive — the DTO
+   * validation already enforces ≥ 0.10 but we don't trust transitive state).
+   *
+   * <p>Static + package-private so {@code RunOrchestratorClampHardCapTest} can pin the contract
+   * without spinning up the full orchestrator.
+   */
+  static double clampHardCap(double platformCap, Double userCostCap) {
+    if (userCostCap == null || userCostCap <= 0) return platformCap;
+    return Math.min(platformCap, userCostCap);
   }
 
   private void writeRunCostLog(PipelineRun r, RunCostTracker.Snapshot cost) {
@@ -3304,16 +3336,25 @@ public class RunOrchestrator {
     return DEFAULT_PROVIDER;
   }
 
-  private static String defaultModelFor(String provider) {
-    // v2.5.9 Bug #3 — switched gemini default from 2.5-flash to 3-flash-preview
-    // because 2.5-flash emits Python-style tool calls
-    // (print(default_api.submitPlan(...))) causing MALFORMED_FUNCTION_CALL.
-    return switch (provider) {
-      case "anthropic" -> "claude-haiku-4-5-20251001";
-      case "gemini" -> "gemini-3-flash-preview";
-      case "openai" -> "gpt-5.4-mini";
-      default -> "claude-haiku-4-5-20251001";
-    };
+  /**
+   * Run-level worker model default — used when {@code RunRequest.modelName} is blank.
+   *
+   * <p>2026-05-06 single-source consolidation: routes through {@link
+   * ModelRegistry#workhouseModelFor(String)} so the YAML matrix is the only source of truth.
+   * Previously a hardcoded switch returned Haiku/flash/mini even after YAML moved Anthropic
+   * WORKHORSE to Sonnet (2026-04-19) and Gemini WORKHORSE to Pro (2026-05-04).
+   *
+   * <p>Final-fallback safety net: if YAML lookup returns null (e.g. provider mis-configured), fall
+   * back to the historical Anthropic-Haiku default rather than NPE'ing the run.
+   */
+  private String defaultModelFor(String provider) {
+    String model = modelRegistry.workhouseModelFor(provider);
+    if (model != null && !model.isBlank()) return model;
+    log.warn(
+        "RunOrchestrator: no workhorse model in YAML matrix for provider '{}'; falling back to"
+            + " claude-haiku-4-5-20251001",
+        provider);
+    return "claude-haiku-4-5-20251001";
   }
 
   /** Serialise repo IDs to a compact JSON array string, or null when empty. */

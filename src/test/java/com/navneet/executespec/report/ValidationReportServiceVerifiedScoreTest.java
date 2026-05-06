@@ -84,4 +84,63 @@ class ValidationReportServiceVerifiedScoreTest {
     int score = svc.computeVerifiedScore(true, 0, 0, "CLEAN", 0);
     assertEquals(80, score);
   }
+
+  // ── P1.2 (GA-readiness 2026-05-06): endpoint coverage overload ──────────
+
+  @Test
+  void endpoint_coverage_at_100_earns_ten_point_bonus() {
+    // base=40 + buildBonus=20 + testBonus=0 + verdictBonus(FIXED_ISSUES)=15 + endpointBonus=10 = 85
+    int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, 100);
+    assertEquals(85, score);
+  }
+
+  @Test
+  void endpoint_coverage_below_threshold_no_bonus() {
+    // 94% < 95% threshold → no bonus
+    int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, 94);
+    assertEquals(75, score);
+  }
+
+  @Test
+  void endpoint_coverage_at_threshold_earns_bonus() {
+    // 95% == threshold → bonus
+    int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, 95);
+    assertEquals(85, score);
+  }
+
+  @Test
+  void endpoint_coverage_null_no_bonus() {
+    // Non-API project (no endpointCoverage) → no bonus
+    int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, null);
+    assertEquals(75, score);
+  }
+
+  @Test
+  void endpoint_coverage_zero_no_bonus() {
+    // Endpoint coverage block exists but 0% delivered (legitimate failure) → no bonus
+    int score = svc.computeVerifiedScore(false, 0, 0, "FIXED_ISSUES", 0, 0);
+    assertEquals(55, score);
+  }
+
+  @Test
+  void run_0444c95f_audit_regression_case() {
+    // The audit's mystery -25 gap reproduction. Run 0444c95f had:
+    // - finalBuildPassed=true (+20)
+    // - testsTotal=0 (+0)
+    // - reviewerVerdict=FIXED_ISSUES (+15)
+    // - endpointCoverage.coveragePercent=100 (+10)
+    // - unfixedCritical=0 (synthesised accuracy issues filtered out by countUnfixedCritical)
+    // Expected: 40 + 20 + 0 + 15 + 10 - 0 = 85.
+    // Pre-fix the run scored 50 because the LLM's read-budget bug emitted 5 SYNTH-ACC-MISS-* /
+    // SYNTH-ACC-EP-* CRITICAL issues that penalised 5 × 5 = 25 points.
+    int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, 100);
+    assertEquals(85, score);
+  }
+
+  @Test
+  void perfect_run_caps_at_100_with_endpoint_bonus() {
+    // base=40 + build=20 + tests=20 + CLEAN=20 + endpointBonus=10 = 110 → clamp 100
+    int score = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 100);
+    assertEquals(100, score);
+  }
 }
