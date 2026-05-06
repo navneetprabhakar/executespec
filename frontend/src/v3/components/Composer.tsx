@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
 import {createRun, estimateRun, type LaunchEstimate} from '@/lib/api';
+import ConversationModal from './ConversationModal';
 import {useV3ProjectStore} from '../stores/useV3ProjectStore';
 import {useV3Ui} from '../stores/useV3Ui';
 import {trackV3, V3_EVENTS} from '../lib/events';
@@ -54,6 +55,12 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
   const [figmaUrl, setFigmaUrl] = useState('');
   const [tddMode, setTddMode] = useState(false);
   const [userCostCap, setUserCostCap] = useState<string>('');
+  // 2026-05-06 — pre-run conversation surface. Opens the requirements-
+  // analyst chat (POST /api/conversation, available to ALL tiers per
+  // ConversationController) so users can refine a fuzzy idea into a
+  // tight spec before spending credits on a run. Available regardless
+  // of project context.
+  const [refineOpen, setRefineOpen] = useState(false);
 
   // R-343 (P0 from UX persona review) — hydrate the composer with a
   // spec the user typed on executespec.ai's marketing-site hero.
@@ -470,6 +477,24 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
             </button>
             <button
               type='button'
+              onClick={() => setRefineOpen(true)}
+              title='Chat with a requirements analyst to refine your spec before submitting.'
+              style={{
+                padding: '3px 8px',
+                fontSize: 11,
+                fontWeight: 500,
+                background: 'transparent',
+                color: 'var(--accent-blue-text, var(--v3-brand))',
+                border: '1px solid color-mix(in srgb, var(--v3-brand) 40%, transparent)',
+                borderRadius: 999,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              ✨ Refine with assistant
+            </button>
+            <button
+              type='button'
               onClick={() => setAdvancedOpen((a) => !a)}
               style={{
                 padding: '3px 8px',
@@ -718,6 +743,14 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         >
           ⌘ + Enter to submit
         </div>
+      )}
+
+      {refineOpen && (
+        <ConversationModal
+          initialText={text}
+          onUseSpec={(spec) => setText(spec)}
+          onClose={() => setRefineOpen(false)}
+        />
       )}
     </form>
   );
