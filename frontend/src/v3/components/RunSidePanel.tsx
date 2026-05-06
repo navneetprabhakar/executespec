@@ -7,30 +7,45 @@ import {
   startPreview,
   stopPreview,
   getPreviewStatus,
+  getLiveCost,
 } from '@/lib/api';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
 import PlanCard from './PlanCard';
 import Pill from './Pill';
+import TaskTimeline from '@/components/runs/TaskTimeline';
+import TestProgressTracker from '@/components/runs/TestProgressTracker';
+import TestReportPanel from '@/components/runs/TestReportPanel';
 
 /**
  * Right-side panel on RunDetailPage — surfaces the operator views that
  * got cut when the v2 RunDetailTabs (Overview / Plan / Timeline / Live
  * Log / Code) was retired alongside the v2 chrome.
  *
- * Three tabs:
- *   - Plan   — task list with live status; embeds PlanCard inline when
- *              the run is AWAITING_APPROVAL so users hitting the URL
- *              directly can approve without bouncing back to Compose.
- *   - Log    — SSE event stream (tool calls, phase transitions, retry
- *              triggers), tail-follow.
+ * Six tabs:
+ *   - Overview — provider · model · cost · tokens · GitHub PR link, and
+ *               a phase rollup (planner / worker / reviewer) when the
+ *               cost endpoint is wired. Polls /runs/{id}/cost every 5s
+ *               while the run is in flight (mirrors v2 RunDetailTabs).
+ *   - Plan    — task list with live status; embeds PlanCard inline when
+ *               the run is AWAITING_APPROVAL so users hitting the URL
+ *               directly can approve without bouncing back to Compose.
+ *   - Timeline — chronological swimlane (TaskTimeline.tsx, reused from
+ *               the v2 RunDetailTabs surface).
+ *   - Log     — SSE event stream (tool calls, phase transitions, retry
+ *               triggers), tail-follow.
+ *   - Tests   — TestProgressTracker (live) + TestReportPanel (results)
+ *               for the post-run test-gen pipeline. Quiet for runs that
+ *               haven't kicked off test gen yet.
  *   - Preview — auto-preview iframe; falls back to a "Start preview"
- *              CTA when the deploy/preview-engine hasn't kicked in yet.
+ *               CTA when the deploy/preview-engine hasn't kicked in yet.
  *
  * No new backend. Reuses /runs/{id}/events SSE channel + /runs/{id}/preview/*
- * + /runs/{id}/tasks/{taskId}/retry — all of which the backend kept
- * shipping when v2 RunDetailTabs was deleted.
+ * + /runs/{id}/tasks/{taskId}/retry + /runs/{id}/cost — all of which the
+ * backend kept shipping when v2 RunDetailTabs was deleted.
  */
+type Tab = 'overview' | 'plan' | 'timeline' | 'log' | 'tests' | 'preview';
+
 export default function RunSidePanel({
   runId,
   detail,
@@ -45,11 +60,15 @@ export default function RunSidePanel({
     !['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED'].includes(status);
   const isAwaitingApproval = status === 'AWAITING_APPROVAL';
 
-  // Default tab: gate first if AWAITING_APPROVAL; preview last if terminal-ok; else Plan.
-  const [tab, setTab] = useState<'plan' | 'log' | 'preview'>('plan');
+  // Default tab:
+  //   - AWAITING_APPROVAL → Plan (gate is the action)
+  //   - in-flight non-gate → Plan (so users can watch tasks march)
+  //   - terminal-ok → Overview (cost / PR / verdict at a glance)
+  //   - terminal-fail → Plan (what failed where)
+  const [tab, setTab] = useState<Tab>('plan');
   useEffect(() => {
     if (isAwaitingApproval) setTab('plan');
-    else if (status === 'COMPLETE') setTab('preview');
+    else if (status === 'COMPLETE') setTab('overview');
   }, [isAwaitingApproval, status]);
 
   return (
@@ -72,6 +91,7 @@ export default function RunSidePanel({
         showApprovalBadge={isAwaitingApproval}
       />
       <div style={{flex: 1, overflow: 'auto'}}>
+        {tab === 'overview' && <OverviewPane runId={runId} detail={detail} live={isInFlight} />}
         {tab === 'plan' && (
           <PlanPane
             runId={runId}
@@ -80,7 +100,9 @@ export default function RunSidePanel({
             onApproved={onRefetch}
           />
         )}
+        {tab === 'timeline' && <TimelinePane detail={detail} />}
         {tab === 'log' && <LogPane runId={runId} live={isInFlight} />}
+        {tab === 'tests' && <TestsPane runId={runId} status={status} />}
         {tab === 'preview' && <PreviewPane runId={runId} runStatus={status} />}
       </div>
     </aside>
@@ -95,12 +117,13 @@ function TabBar({
   showInFlightDot,
   showApprovalBadge,
 }: {
-  tab: 'plan' | 'log' | 'preview';
-  onChange: (t: 'plan' | 'log' | 'preview') => void;
+  tab: Tab;
+  onChange: (t: Tab) => void;
   showInFlightDot: boolean;
   showApprovalBadge: boolean;
 }) {
-  const items: {key: 'plan' | 'log' | 'preview'; label: string; badge?: ReactNode}[] = [
+  const items: {key: Tab; label: string; badge?: ReactNode}[] = [
+    {key: 'overview', label: 'Overview'},
     {
       key: 'plan',
       label: 'Plan',
@@ -121,6 +144,7 @@ function TabBar({
         </span>
       ) : null,
     },
+    {key: 'timeline', label: 'Timeline'},
     {
       key: 'log',
       label: 'Log',
@@ -139,6 +163,7 @@ function TabBar({
         />
       ) : null,
     },
+    {key: 'tests', label: 'Tests'},
     {key: 'preview', label: 'Preview'},
   ];
 
@@ -162,9 +187,10 @@ function TabBar({
             onClick={() => onChange(it.key)}
             style={{
               flex: 1,
-              padding: '10px 12px',
-              fontSize: 12,
+              padding: '10px 6px',
+              fontSize: 11.5,
               fontWeight: isActive ? 600 : 500,
+              whiteSpace: 'nowrap',
               color: isActive ? 'var(--v3-text)' : 'var(--v3-text-muted)',
               background: 'transparent',
               border: 'none',
@@ -748,4 +774,360 @@ function btnGhost(disabled: boolean = false): React.CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
   };
+}
+
+// ── Overview pane ───────────────────────────────────────────────────────
+//
+// Compact key-value rollup of the run's high-level signals: provider,
+// model, cost, tokens, GitHub PR link, batch badge. Polls /runs/{id}/cost
+// every 5s while in flight (mirrors v2 RunDetailTabs.OverviewTab) so cost
+// shown matches the live spend, not the mount-time DB snapshot.
+
+function OverviewPane({
+  runId,
+  detail,
+  live,
+}: {
+  runId: string;
+  detail: RunDetail | null;
+  live: boolean;
+}) {
+  const [liveCost, setLiveCost] = useState<number | null>(null);
+  const [liveTokens, setLiveTokens] = useState<{input: number; output: number} | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    const poll = async () => {
+      try {
+        const res = await getLiveCost(runId);
+        if (cancelled) return;
+        if (typeof res.costUsd === 'number') setLiveCost(res.costUsd);
+        if (typeof res.inputTokens === 'number' && typeof res.outputTokens === 'number') {
+          setLiveTokens({input: res.inputTokens, output: res.outputTokens});
+        }
+      } catch {
+        // 404s pre-plan-approval are expected; swallow + retry.
+      }
+      if (!cancelled && live) {
+        timer = setTimeout(poll, 5000);
+      }
+    };
+    poll();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [runId, live]);
+
+  if (!detail) {
+    return <div style={paneEmptyStyle}>Loading overview…</div>;
+  }
+
+  // Run-total tokens — computed from agent + per-task usage since RunDetail
+  // doesn't carry an aggregate field. Live cost endpoint returns the same
+  // sum (planner + reviewer + worker tasks + classifier/outline/expansion/
+  // coherence phases) so liveTokens, when present, wins.
+  const taskInputSum = (detail.tasks ?? []).reduce((s, t) => s + (t.inputTokens || 0), 0);
+  const taskOutputSum = (detail.tasks ?? []).reduce((s, t) => s + (t.outputTokens || 0), 0);
+  const agentInputSum = (detail.agentTokens ?? []).reduce(
+    (s, a) => s + (a.inputTokens || 0),
+    0,
+  );
+  const agentOutputSum = (detail.agentTokens ?? []).reduce(
+    (s, a) => s + (a.outputTokens || 0),
+    0,
+  );
+  const dbInputTokens = taskInputSum + agentInputSum;
+  const dbOutputTokens = taskOutputSum + agentOutputSum;
+  const inputTokens = Math.max(liveTokens?.input ?? 0, dbInputTokens);
+  const outputTokens = Math.max(liveTokens?.output ?? 0, dbOutputTokens);
+  const totalTokens = inputTokens + outputTokens;
+  const cost = liveCost ?? detail.actualCostUsd ?? null;
+  const estLow = detail.costEstimateLow ?? null;
+  const estHigh = detail.costEstimateHigh ?? null;
+  const cap = detail.hardCapUsd ?? null;
+
+  // Provider on RunDetail is `aiProvider`. Per-task `model` is the per-call
+  // model (planner / worker tier resolves at dispatch); RunDetail itself
+  // doesn't carry a single model — pull the most-recent task's model as a
+  // best-effort summary, fall back to '—'.
+  const provider = detail.aiProvider ?? null;
+  const lastTaskModel =
+    (detail.tasks ?? []).map((t) => t.model).filter((m): m is string => !!m).pop() ?? null;
+  const isBatch = detail.approvedExecutionMode === 'BATCH';
+  const prUrl = detail.githubPrUrl ?? detail.scmPrUrl ?? null;
+
+  return (
+    <div style={{padding: 12, display: 'flex', flexDirection: 'column', gap: 12}}>
+      {/* Title (run spec) */}
+      {detail.userRequest && (
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--v3-text-muted)',
+            lineHeight: 1.55,
+            padding: '8px 10px',
+            background: 'var(--v3-bg)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+          }}
+        >
+          {detail.userRequest.length > 280
+            ? detail.userRequest.slice(0, 280) + '…'
+            : detail.userRequest}
+        </div>
+      )}
+
+      <KvSection label='Run'>
+        <Kv k='Status' v={detail.status ?? '—'} />
+        <Kv k='Provider' v={provider ? PROVIDER_LABEL[provider.toUpperCase()] ?? provider : '—'} />
+        <Kv k='Model' v={lastTaskModel || '—'} mono />
+        {isBatch && <Kv k='Mode' v='Batch (queued)' />}
+        {detail.startedAt && <Kv k='Started' v={fmtAbsolute(detail.startedAt)} mono />}
+        {detail.completedAt && <Kv k='Completed' v={fmtAbsolute(detail.completedAt)} mono />}
+        {detail.startedAt && (
+          <Kv
+            k='Duration'
+            v={fmtDuration(detail.startedAt, detail.completedAt ?? undefined)}
+            mono
+          />
+        )}
+      </KvSection>
+
+      <KvSection label='Cost'>
+        <Kv k='Spent' v={cost != null ? `$${cost.toFixed(4)}` : '—'} mono />
+        {(estLow != null || estHigh != null) && (
+          <Kv
+            k='Estimate'
+            v={
+              estLow != null && estHigh != null && estLow !== estHigh
+                ? `$${estLow.toFixed(2)}–$${estHigh.toFixed(2)}`
+                : `$${(estHigh ?? estLow ?? 0).toFixed(2)}`
+            }
+            mono
+          />
+        )}
+        {cap != null && <Kv k='Hard cap' v={`$${cap.toFixed(2)}`} mono />}
+      </KvSection>
+
+      <KvSection label='Tokens'>
+        <Kv k='Total' v={fmtNum(totalTokens)} mono />
+        <Kv k='Input' v={fmtNum(inputTokens)} mono />
+        <Kv k='Output' v={fmtNum(outputTokens)} mono />
+      </KvSection>
+
+      {prUrl && (
+        <a
+          href={prUrl}
+          target='_blank'
+          rel='noopener noreferrer'
+          style={{
+            fontSize: 12,
+            fontWeight: 600,
+            color: 'var(--accent-blue-text, var(--v3-brand))',
+            textDecoration: 'none',
+            padding: '8px 10px',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+            background: 'var(--v3-bg)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+          }}
+        >
+          Open pull request ↗
+        </a>
+      )}
+    </div>
+  );
+}
+
+const PROVIDER_LABEL: Record<string, string> = {
+  ANTHROPIC: 'Anthropic',
+  OPENAI: 'OpenAI',
+  GEMINI: 'Gemini',
+  GOOGLE: 'Gemini',
+};
+
+function KvSection({label, children}: {label: string; children: ReactNode}) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--v3-text-subtle)',
+          letterSpacing: 0.5,
+          textTransform: 'uppercase',
+          padding: '0 2px 6px',
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          background: 'var(--v3-bg)',
+          border: '1px solid var(--v3-border)',
+          borderRadius: 6,
+          padding: '6px 10px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Kv({k, v, mono}: {k: string; v: string; mono?: boolean}) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'baseline',
+        justifyContent: 'space-between',
+        gap: 12,
+        fontSize: 12,
+      }}
+    >
+      <span style={{color: 'var(--v3-text-muted)'}}>{k}</span>
+      <span
+        style={{
+          color: 'var(--v3-text)',
+          fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit',
+          fontSize: mono ? 11.5 : 12,
+          textAlign: 'right',
+          maxWidth: '60%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+        title={v}
+      >
+        {v}
+      </span>
+    </div>
+  );
+}
+
+function fmtNum(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(2) + 'M';
+  if (n >= 1_000) return (n / 1_000).toFixed(1) + 'K';
+  return String(n);
+}
+
+function fmtAbsolute(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleString(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function fmtDuration(startIso: string, endIso?: string): string {
+  try {
+    const start = new Date(startIso).getTime();
+    const end = endIso ? new Date(endIso).getTime() : Date.now();
+    const ms = Math.max(0, end - start);
+    const sec = Math.round(ms / 1000);
+    if (sec < 60) return `${sec}s`;
+    const min = Math.floor(sec / 60);
+    const s = sec % 60;
+    if (min < 60) return s ? `${min}m ${s}s` : `${min}m`;
+    const hr = Math.floor(min / 60);
+    const m = min % 60;
+    return m ? `${hr}h ${m}m` : `${hr}h`;
+  } catch {
+    return '—';
+  }
+}
+
+const paneEmptyStyle: React.CSSProperties = {
+  padding: 16,
+  fontSize: 12,
+  color: 'var(--v3-text-subtle)',
+};
+
+// ── Timeline pane ───────────────────────────────────────────────────────
+//
+// Reuses the v2 TaskTimeline swimlane. Renders a Gantt-ish bar per task
+// (start offset + duration), status-coloured. Hover shows duration +
+// model + tokens. Preserves the chronological view that the v2 chrome
+// shipped on /runs/{id}#timeline.
+
+function TimelinePane({detail}: {detail: RunDetail | null}) {
+  if (!detail) {
+    return <div style={paneEmptyStyle}>Loading timeline…</div>;
+  }
+  if (!detail.tasks || detail.tasks.length === 0) {
+    return (
+      <div style={paneEmptyStyle}>
+        No tasks yet — the timeline appears once the planner emits tasks.
+      </div>
+    );
+  }
+  return (
+    <div style={{padding: 12}}>
+      <TaskTimeline tasks={detail.tasks} runStartedAt={detail.startedAt ?? null} />
+    </div>
+  );
+}
+
+// ── Tests pane ──────────────────────────────────────────────────────────
+//
+// TestProgressTracker (live progress while test gen is in flight) +
+// TestReportPanel (results when COMPLETE). Both components handle their
+// own quiet states for runs that haven't kicked off test gen yet, so we
+// render them unconditionally.
+
+function TestsPane({runId, status}: {runId: string; status: string}) {
+  // Both components self-hide when there's no test signal — leaves a blank
+  // pane on every run that hasn't kicked off test gen, which is most of
+  // them. Fallback hint explains the surface so the empty state isn't a
+  // dead end.
+  return (
+    <div style={{padding: 12, display: 'flex', flexDirection: 'column', gap: 12}}>
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 600,
+          color: 'var(--v3-text-subtle)',
+          letterSpacing: 0.5,
+          textTransform: 'uppercase',
+          padding: '0 2px',
+        }}
+      >
+        Integration tests
+      </div>
+      <TestProgressTracker runId={runId} status={status} />
+      <TestReportPanel runId={runId} status={status} />
+      <div
+        style={{
+          fontSize: 12,
+          color: 'var(--v3-text-muted)',
+          lineHeight: 1.55,
+          padding: '8px 10px',
+          background: 'var(--v3-bg)',
+          border: '1px solid var(--v3-border)',
+          borderRadius: 6,
+        }}
+      >
+        {status === 'COMPLETE' || status === 'PARTIAL' || status === 'FAILED'
+          ? 'Test generation runs after the build completes — if no report is shown, this run did not trigger the test pipeline.'
+          : 'Tests will appear here once the run reaches a terminal state.'}
+      </div>
+    </div>
+  );
 }
