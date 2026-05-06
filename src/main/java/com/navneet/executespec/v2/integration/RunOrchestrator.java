@@ -2850,8 +2850,11 @@ public class RunOrchestrator {
         // for the assessment call only.
         LlmProvider provider = providerForAccuracy(run.getAiProvider());
         if (provider == LlmProvider.OPENAI) provider = LlmProvider.ANTHROPIC;
+        // 2026-05-06 — was "ReviewerAgentV2" (legacy class name). The actual reviewer is
+        // ReviewerAgentV3 in the YAML agent-tier-map. The 3-arg resolve form bypasses the
+        // tier lookup so this didn't trigger a warn, but the class-name drift was real.
         ResolvedModel planningModel =
-            modelResolver.resolve("ReviewerAgentV2", provider, AgentTier.PLANNING);
+            modelResolver.resolve("ReviewerAgentV3", provider, AgentTier.PLANNING);
         AccuracyReport accuracy =
             accuracyAssessmentService.assess(
                 runId,
