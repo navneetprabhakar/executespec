@@ -114,11 +114,16 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
       style={{
         position: 'fixed',
         inset: 0,
-        background: 'rgba(0,0,0,0.55)',
+        // Dark theme + dim backdrop = barely-visible separation. Bumped
+        // opacity 0.55 → 0.82 and added a backdrop blur so the page
+        // content reads as out-of-focus while the modal pops.
+        background: 'rgba(5, 7, 10, 0.82)',
+        backdropFilter: 'blur(6px)',
+        WebkitBackdropFilter: 'blur(6px)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        zIndex: 50,
+        zIndex: 1000,
         padding: 16,
       }}
     >
@@ -127,13 +132,16 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
           width: '100%',
           maxWidth: 720,
           maxHeight: '85vh',
-          background: 'var(--v3-surface)',
-          border: '1px solid var(--v3-border)',
+          // Use an opaque surface stepped one rung above the page bg so
+          // the modal box itself pops against the blurred backdrop. Strong
+          // shadow + lifted border keep the edge crisp.
+          background: 'var(--c-graphite-2, var(--v3-surface))',
+          border: '1px solid var(--c-graphite-4, var(--v3-border))',
           borderRadius: 12,
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
-          boxShadow: '0 24px 48px rgba(0,0,0,0.4)',
+          boxShadow: '0 24px 64px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(255, 255, 255, 0.04)',
         }}
       >
         {/* Header */}
