@@ -6,6 +6,8 @@ import PlanCard from '../components/PlanCard';
 import ResultCard from '../components/ResultCard';
 import Pill from '../components/Pill';
 import RepoAttachPopover from '../components/RepoAttachPopover';
+import RepoContextPanel from '../components/RepoContextPanel';
+import CodeReviewPanel from '../components/CodeReviewPanel';
 import {PROVIDER_DISPLAY, STATUS_LABELS} from '../lib/terminology';
 import {useLiveRunStatus} from '../hooks/useLiveRunStatus';
 
@@ -240,6 +242,31 @@ export default function ProjectHomePage() {
               >
                 + Attach repo
               </button>
+              {/* Audit r5 (#7, 2026-05-06): Execution View was reachable
+                  only via the v2 sidebar or by hand-typing
+                  /projects/{id}/executions/new. New users had no idea the
+                  multi-repo / multi-solution workflow existed. The page
+                  itself enforces the TEAM/ENTERPRISE tier gate, so it's
+                  safe to surface from every project. We mark the button
+                  with "Team" so FREE users have an honest cue before they
+                  click. */}
+              <button
+                type='button'
+                onClick={() => navigate(`/projects/${slug}/executions/new`)}
+                style={{
+                  padding: '4px 10px',
+                  background: 'transparent',
+                  color: 'var(--v3-text-subtle)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: 11.5,
+                  fontFamily: 'inherit',
+                }}
+                title='Multi-repo launch — decompose one requirement into per-repo PRs (Team+)'
+              >
+                Multi-repo launch →
+              </button>
             </div>
           )}
         </div>
@@ -294,6 +321,16 @@ export default function ProjectHomePage() {
             Loading conversation…
           </div>
         )}
+        {/* Audit r5 (#4, 2026-05-06) — repo context preview. Hides itself
+            when the project has no repos linked yet, so the empty-
+            project hero stays uncluttered. */}
+        {!loading && slug && <RepoContextPanel projectId={slug} />}
+        {/* Audit r5 (#8, 2026-05-06) — Code Review (whole-repo scan)
+            agent UI on the v3 surface. Backend has been live since V172
+            but had no UI on this page; surface alongside the context
+            panel so the user can both inspect and audit their repos
+            from one place. Hides when no repos are linked. */}
+        {!loading && slug && <CodeReviewPanel projectId={slug} />}
         {bubbles.map((b) => (
           <BubbleView key={b.id} bubble={b} />
         ))}

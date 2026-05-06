@@ -196,6 +196,20 @@ export default function LoginPage() {
           Sign up free
         </Link>
       </p>
+
+      {/* Audit r5 (#10, 2026-05-06): the public anonymized exec snapshot
+          at /exec-demo had no entry point — it was meant for the
+          "selling-point #6" PgM/CFO conversion path (see App.tsx) but
+          unlinked from anywhere a logged-out user could find it. The
+          anon demo is the single best "what does ExecuteSpec produce?"
+          touchpoint for procurement; surface it here so signed-out
+          visitors can poke before they commit. */}
+      <p className='mt-2 text-center text-xs text-muted'>
+        Want to see it first?{' '}
+        <Link to='/exec-demo' className='text-accent-blue-text hover:underline'>
+          See an example run →
+        </Link>
+      </p>
     </AuthShell>
   );
 }
