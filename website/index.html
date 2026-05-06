@@ -497,6 +497,15 @@
             --c-error: #EF4444;
             --c-info: #22D3EE;
             --c-accent-purple: #A78BFA;
+            /* Website refresh (2026-05-06) — warm coral as the single
+             * personality color. Used sparingly on key verbs + the
+             * paper-cream proof section, breaking the all-graphite
+             * AI-tool-lookalike monotony with one human accent. */
+            --c-accent-warm: #FF8E72;
+            --c-paper: #F5F1EA;
+            --c-paper-ink: #1F1A14;
+            --c-paper-ink-muted: #5A5246;
+            --c-paper-border: #E0D9CB;
 
             /* ── Semantic layer (consumer-facing) ────────────────── */
             --bg: var(--c-graphite-0);
@@ -515,6 +524,7 @@
             --red: var(--c-error);                    /* was #F26D6D — drift-resolved to #EF4444 */
             --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
             --pop-grad: linear-gradient(to right, var(--c-pop-orange), var(--c-pop-amber));
+            --accent-warm: var(--c-accent-warm);
             --font-body: 'DM Sans', sans-serif;
             --font-mono: 'JetBrains Mono', monospace;
             --font-serif: 'Instrument Serif', serif;
@@ -574,8 +584,12 @@
         }
         .nav-inner { display: flex; justify-content: space-between; align-items: center; }
         .logo { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 1.2rem; }
-        /* v2.5.14 — logo uses brand gradient to match in-app ES mark. */
-        .logo-box { width: 32px; height: 32px; background: var(--brand-grad); border-radius: 6px; display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 900; font-family: var(--font-mono); box-shadow: 0 2px 8px rgba(91,141,239,0.25);}
+        /* Website refresh (2026-05-06) — solid color logo replaces the
+         * blue→teal gradient. Every "AI dev tool" SaaS uses a gradient
+         * mark today; the gradient was costing us identity not building
+         * it. Solid signal-blue with a faint glow keeps the on-brand
+         * blue but feels deliberate, not procedurally-generated. */
+        .logo-box { width: 32px; height: 32px; background: var(--blue); border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 800; font-family: var(--font-mono); box-shadow: 0 2px 10px rgba(91,141,239,0.18);}
         .nav-links { display: flex; gap: 32px; align-items: center; }
         .nav-links a:not(.btn) { font-size: 0.95rem; color: var(--text-muted); transition: color 0.2s; font-weight: 500;}
         .nav-links a:not(.btn):hover { color: var(--text-main); }
@@ -916,11 +930,16 @@
                 <div class="logo-box">E</div>
                 ExecuteSpec
             </a>
+            <!-- Website refresh (2026-05-06) — nav trimmed from 6 anchors
+                 + Try Free to 4 anchors + Try Free. "Project Workspace",
+                 "Quality Gates", "Enterprise Chores" each pointed at a
+                 single section that already gets reached from the hero
+                 CTA path; clutter at the top of the page bought us
+                 nothing. Kept: How it works (the proof flow), Catalog
+                 (the differentiator), Pricing, FAQ. -->
             <div class="nav-links">
+                <a href="#real-example">How it works</a>
                 <a href="#catalog">Catalog</a>
-                <a href="#project-workspace">Project Workspace</a>
-                <a href="#quality">Quality Gates</a>
-                <a href="#use-cases">Enterprise Chores</a>
                 <a href="#pricing">Pricing</a>
                 <a href="#faq">FAQ</a>
                 <a href="https://dev.executespec.ai" class="btn btn-primary" target="_blank">Try Free</a>
@@ -944,23 +963,19 @@
     <section class="hero">
         <div class="hero-bg"></div>
         <div class="container" style="max-width: 900px;">
-            <!-- 2026-04-28: nudged the Beta Live pill lower so it doesn't
-                 crowd the top nav. Anchor is inline-block so margin-top
-                 applies inside the flex-centered .container. -->
-            <a href="https://dev.executespec.ai" target="_blank" style="text-decoration: none; display: inline-block; margin-top: 28px;"><span class="section-label mono" style="color: var(--yellow); border: 1px solid var(--yellow); padding: 4px 12px; border-radius: 20px;">Beta Live — Try Free →</span></a>
-            <!--
-                2026-05-02 — chat-first hero. Previous H1 was 17 words +
-                a 45-word subtitle, both centered, pushing the composer
-                below the fold on most laptops. Replaced with a
-                single-line outcome ("AI-written PRs you can actually
-                merge.") matching the login hero copy. The 80%-Ready /
-                catalog / verdict claims now live in a one-line proof
-                strip below the composer (see #hero-proof-line) so the
-                chat textarea is the dominant element above the fold.
-            -->
-            <h1 class="h1" style="margin-top: 18px;">
-                <span class="text-gradient-orange">AI-written PRs</span> you can actually merge.
+            <!-- Website refresh (2026-05-06) — dropped the orange-amber
+                 gradient on "AI-written PRs"; the gradient-text trope is
+                 the SaaS-AI-tool signature, and reading the page felt
+                 generated even though the engine isn't. Plain white H1
+                 with a single warm-accent on the verb is more honest:
+                 the page asks what you want shipped, not what we are. -->
+            <h1 class="h1" style="margin-top: 64px;">
+                AI-written PRs you can <span style="color: var(--accent-warm);">actually merge</span>.
             </h1>
+            <p style="margin: 14px auto 0; max-width: 620px; font-family: var(--font-serif); font-size: 1.12rem; font-style: italic; color: var(--text-secondary); line-height: 1.45;">
+                Built because Cursor's diffs lie about whether they build,
+                and Devin's $500 demo doesn't survive your test suite.
+            </p>
 
             <!-- Chat-first composer + sample prompts + live stats card.
                  Migrated 2026-04-29 (R-338) from the in-app V3Landing page
@@ -976,7 +991,7 @@
                  and redirects to /v3/landing?prefill=… ; V3Landing's mount
                  hook reads the param + hydrates its composer for the auth
                  handoff. -->
-            <form id="hero-composer" onsubmit="return heroComposerSubmit(event)" style="margin: 32px auto 0; max-width: 720px; text-align: left;">
+            <form id="hero-composer" onsubmit="return heroComposerSubmit(event)" style="margin: 36px auto 0; max-width: 720px; text-align: left;">
                 <label for="hero-spec" class="mono" style="display: block; font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">What do you want shipped?</label>
                 <textarea
                     id="hero-spec"
@@ -984,12 +999,12 @@
                     rows="3"
                     placeholder='e.g. "Add a forgot-password flow to my Spring Boot app"'
                     style="width: 100%; padding: 14px 16px; font-family: var(--font-base); font-size: 0.95rem; line-height: 1.5; background: var(--surface); color: var(--text); border: 1px solid var(--surface-border); border-radius: 12px; resize: vertical; outline: none; transition: border-color 0.15s;"
-                    onfocus="this.style.borderColor='var(--blue)'"
+                    onfocus="this.style.borderColor='var(--accent-warm)'"
                     onblur="this.style.borderColor='var(--surface-border)'"
                 ></textarea>
                 <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 12px;">
                     <button type="submit" class="btn btn-primary" style="padding: 10px 24px;">Ship this →</button>
-                    <span style="font-size: 0.78rem; color: var(--text-muted);">Free preview · no card · ~60s · sign up to ship the code</span>
+                    <span style="font-size: 0.78rem; color: var(--text-muted);">Free · no card · ~60s.</span>
                 </div>
             </form>
 
@@ -1052,9 +1067,12 @@
                 PRs shipped in the last 30 days
             </p>
 
-            <div class="hero-buttons" style="margin-top: 28px;">
+            <!-- Website refresh (2026-05-06) — dropped the second ghost
+                 CTA ("See a team's last 30 days →"); two ghost CTAs at
+                 hero bottom diluted the primary "Ship this →" button.
+                 Catalog link kept as the single discovery path. -->
+            <div class="hero-buttons" style="margin-top: 24px;">
                 <a href="https://dev.executespec.ai/library" class="btn btn-ghost" target="_blank">Browse the catalog →</a>
-                <a href="https://dev.executespec.ai/exec-demo" class="btn btn-ghost" target="_blank">See a team's last 30 days →</a>
             </div>
 
             <style>
@@ -1257,6 +1275,84 @@
             </p>
         </div>
     </section>
+
+    <!-- Website refresh (2026-05-06) — "Real example" section.
+         Breaks the all-graphite monotony with one warm-paper section
+         right after the hero. Two cards side-by-side: the spec the
+         user types, and the PR ExecuteSpec opens. Hand-built (not
+         pulled from an API) so the proof is concrete + immediate.
+         Replaces the "show, don't tell" gap the audit flagged —
+         pre-fix the page told users what we ship without showing
+         it once before pricing. -->
+    <section id="real-example" style="padding: 96px 0; background: var(--c-paper); color: var(--c-paper-ink); border: none;">
+      <div class="container" style="max-width: 1080px;">
+        <div class="section-header" style="text-align: center; margin-bottom: 48px;">
+          <span class="section-label mono" style="color: var(--c-accent-warm); border: 1px solid var(--c-accent-warm); padding: 4px 12px; border-radius: 20px;">A real run · 47s</span>
+          <h2 class="h2" style="color: var(--c-paper-ink); margin-top: 16px;">You type one line. We open one PR.</h2>
+          <p style="font-size: 1rem; color: var(--c-paper-ink-muted); max-width: 620px; margin: 12px auto 0; line-height: 1.55;">
+            Plan → approve cost → ship code → reviewer pass → final build → PR with a verdict you can act on. No diffs to validate by hand.
+          </p>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 24px; align-items: stretch;" class="real-example-grid">
+          <!-- LEFT: the spec -->
+          <div style="background: #fff; border: 1px solid var(--c-paper-border); border-radius: 14px; padding: 22px; box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 12px 32px -12px rgba(31,26,20,0.08);">
+            <div class="mono" style="font-size: 0.7rem; color: var(--c-paper-ink-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">The spec</div>
+            <p style="font-family: var(--font-serif); font-size: 1.1rem; color: var(--c-paper-ink); line-height: 1.5; margin: 0;">
+              "Add a forgot-password flow to my Spring Boot app — JWT, email-token reset, 30-min TTL."
+            </p>
+            <div style="margin-top: 18px; display: flex; gap: 8px; flex-wrap: wrap;">
+              <span style="font-family: var(--font-mono); font-size: 0.72rem; padding: 3px 9px; background: rgba(91,141,239,0.10); color: #2D5BAB; border-radius: 4px;">~$0.18</span>
+              <span style="font-family: var(--font-mono); font-size: 0.72rem; padding: 3px 9px; background: rgba(31,26,20,0.06); color: var(--c-paper-ink-muted); border-radius: 4px;">3 tasks</span>
+              <span style="font-family: var(--font-mono); font-size: 0.72rem; padding: 3px 9px; background: rgba(31,26,20,0.06); color: var(--c-paper-ink-muted); border-radius: 4px;">1 credit</span>
+            </div>
+          </div>
+
+          <!-- ARROW -->
+          <div style="display: flex; align-items: center; justify-content: center; color: var(--c-accent-warm); font-size: 1.5rem;" class="real-example-arrow" aria-hidden="true">→</div>
+
+          <!-- RIGHT: the PR -->
+          <div style="background: #fff; border: 1px solid var(--c-paper-border); border-radius: 14px; padding: 22px; box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 12px 32px -12px rgba(31,26,20,0.08);">
+            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
+              <span class="mono" style="font-size: 0.7rem; color: var(--c-paper-ink-muted); letter-spacing: 0.1em; text-transform: uppercase;">PR opened</span>
+              <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--c-paper-ink-muted);">#2143</span>
+              <span style="margin-left: auto; padding: 3px 9px; background: rgba(16,185,129,0.12); color: #047857; border: 1px solid rgba(16,185,129,0.32); border-radius: 4px; font-family: var(--font-mono); font-size: 0.72rem; font-weight: 600;">● Ready</span>
+            </div>
+            <p style="font-size: 0.98rem; font-weight: 600; color: var(--c-paper-ink); line-height: 1.4; margin: 0 0 14px;">
+              Add forgot-password flow with JWT email-token reset
+            </p>
+            <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 14px;">
+              <span style="font-family: var(--font-mono); font-size: 0.7rem; padding: 2px 7px; background: rgba(16,185,129,0.10); color: #047857; border-radius: 4px;">Build ✓</span>
+              <span style="font-family: var(--font-mono); font-size: 0.7rem; padding: 2px 7px; background: rgba(16,185,129,0.10); color: #047857; border-radius: 4px;">Tests 8/8</span>
+              <span style="font-family: var(--font-mono); font-size: 0.7rem; padding: 2px 7px; background: rgba(16,185,129,0.10); color: #047857; border-radius: 4px;">Reviewer CLEAN</span>
+              <span style="font-family: var(--font-mono); font-size: 0.7rem; padding: 2px 7px; background: rgba(31,26,20,0.06); color: var(--c-paper-ink-muted); border-radius: 4px;">Verified 92</span>
+            </div>
+            <div style="background: #FBF8F1; border: 1px solid var(--c-paper-border); border-radius: 8px; padding: 12px; font-family: var(--font-mono); font-size: 0.78rem; color: var(--c-paper-ink); line-height: 1.55;">
+              <span style="color: var(--c-paper-ink-muted);">+++</span> AuthController.java&nbsp;&nbsp;<span style="color: #047857;">+47</span> <span style="color: #B91C1C;">−2</span><br>
+              <span style="color: var(--c-paper-ink-muted);">+++</span> PasswordResetService.java&nbsp;&nbsp;<span style="color: #047857;">+86</span> <span style="color: #B91C1C;">−0</span><br>
+              <span style="color: var(--c-paper-ink-muted);">+++</span> PasswordResetServiceTest.java&nbsp;&nbsp;<span style="color: #047857;">+114</span> <span style="color: #B91C1C;">−0</span><br>
+              <span style="color: var(--c-paper-ink-muted);">+++</span> resources/email/reset.html&nbsp;&nbsp;<span style="color: #047857;">+22</span> <span style="color: #B91C1C;">−0</span>
+            </div>
+            <div style="margin-top: 12px; font-size: 0.78rem; color: var(--c-paper-ink-muted);">
+              4 files · +269 / −2 · 0 reviewer issues · pushed to <span style="font-family: var(--font-mono);">executespec/2143</span>
+            </div>
+          </div>
+        </div>
+
+        <p style="text-align: center; margin: 36px auto 0; font-family: var(--font-serif); font-size: 1.05rem; font-style: italic; color: var(--c-paper-ink-muted); max-width: 580px; line-height: 1.5;">
+          That verdict isn't a self-rating. Build, tests, and reviewer all ran. We sign the PR with what they returned.
+        </p>
+      </div>
+    </section>
+    <style>
+      /* Stack the example cards on tablet + mobile so the spec/PR pair
+         doesn't squeeze unreadably under 900px. Arrow rotates 90° to
+         keep the visual flow. */
+      @media (max-width: 900px) {
+        .real-example-grid { grid-template-columns: 1fr !important; }
+        .real-example-arrow { transform: rotate(90deg); padding: 8px 0; }
+      }
+    </style>
 
     <!-- The Pipeline — replaces the deleted "Dual Mode Strategy" section.
          The dual-mode toggle (Prototype / Production) is retired in v3 per
