@@ -66,6 +66,14 @@ public class ModelMatrixProperties {
 
     /** Human-readable notes (seeded into model_pricing table). */
     private String notes;
+
+    /**
+     * Display label for the model selector UI ({@code GET /api/models/available}). When null
+     * the controller falls back to the raw model id, so this only needs to be set when the
+     * id isn't pretty enough on its own (e.g. {@code claude-haiku-4-5-20251001} →
+     * {@code "Claude Haiku 4.5"}).
+     */
+    private String displayLabel;
   }
 
   @Data

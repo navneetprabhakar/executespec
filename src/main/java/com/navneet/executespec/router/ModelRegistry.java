@@ -215,6 +215,21 @@ public class ModelRegistry {
   }
 
   /**
+   * Returns the human-readable display label for a model (used by the model-selector UI). Falls
+   * back to the canonical model id when no explicit {@code display-label} is set in YAML.
+   *
+   * <p>Replaces the hardcoded {@code MODEL_LABELS} map in {@link
+   * com.navneet.executespec.api.controller.ModelController}, restoring single-source-of-truth.
+   */
+  public String displayLabelFor(String modelName) {
+    if (modelName == null) return null;
+    ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);
+    if (config == null) return modelName;
+    String label = config.getDisplayLabel();
+    return (label != null && !label.isBlank()) ? label : modelName;
+  }
+
+  /**
    * Returns the fallback chain for a model based on its chain-tier. Each entry is a {@code
    * String[]{provider, model}}.
    *

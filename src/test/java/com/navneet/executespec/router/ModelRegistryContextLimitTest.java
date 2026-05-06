@@ -85,6 +85,38 @@ class ModelRegistryContextLimitTest {
     assertThat(registry.contextLimitForOrPrefixFallback("   ")).isEqualTo(200_000);
   }
 
+  // ── displayLabelFor — replaces ModelController.MODEL_LABELS ──────────────
+
+  @Test
+  void displayLabelFor_returnsYamlLabelWhenPresent() {
+    ModelMatrixProperties.ModelConfig c = model("anthropic", 200_000);
+    c.setDisplayLabel("Claude Sonnet 4.6");
+    props.setModels(Map.of("claude-sonnet-4-6", c));
+    ModelRegistry r = new ModelRegistry(props);
+    assertThat(r.displayLabelFor("claude-sonnet-4-6")).isEqualTo("Claude Sonnet 4.6");
+  }
+
+  @Test
+  void displayLabelFor_falsBackToCanonicalIdWhenLabelMissing() {
+    ModelMatrixProperties.ModelConfig c = model("openai", 200_000);
+    c.setDisplayLabel(null);
+    props.setModels(Map.of("gpt-future", c));
+    ModelRegistry r = new ModelRegistry(props);
+    assertThat(r.displayLabelFor("gpt-future")).isEqualTo("gpt-future");
+  }
+
+  @Test
+  void displayLabelFor_unknownModel_returnsRawId() {
+    // Forward-compat: a model not in YAML still gets a sensible label from the API endpoint
+    // (the raw id, vs returning null and rendering blank in the dropdown).
+    assertThat(registry.displayLabelFor("brand-new-model")).isEqualTo("brand-new-model");
+  }
+
+  @Test
+  void displayLabelFor_null_returnsNull() {
+    assertThat(registry.displayLabelFor(null)).isNull();
+  }
+
   private static ModelMatrixProperties.ModelConfig model(String provider, int contextLimit) {
     ModelMatrixProperties.ModelConfig c = new ModelMatrixProperties.ModelConfig();
     c.setProvider(provider);

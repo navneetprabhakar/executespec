@@ -189,6 +189,7 @@ model-matrix:
       chain-tier: ARCHITECT
       context-limit: 200000
       max-output-tokens: 32000
+      display-label: "Claude Opus 4.6"
       pricing:
         input-per-1m: 5.00
         cached-input-per-1m: 0.50
@@ -199,6 +200,7 @@ model-matrix:
       chain-tier: CAPABLE
       context-limit: 200000
       max-output-tokens: 64000
+      display-label: "Claude Sonnet 4.6"
       pricing:
         input-per-1m: 3.00
         cached-input-per-1m: 0.30
@@ -209,6 +211,7 @@ model-matrix:
       chain-tier: UTILITY
       context-limit: 200000
       max-output-tokens: 8192
+      display-label: "Claude Haiku 4.5"
       pricing:
         input-per-1m: 1.00
         cached-input-per-1m: 0.10
@@ -219,6 +222,7 @@ model-matrix:
       chain-tier: UTILITY
       context-limit: 1048576
       max-output-tokens: 65536
+      display-label: "Gemini 2.5 Flash"
       pricing:
         input-per-1m: 0.30
         cached-input-per-1m: 0.03
@@ -229,6 +233,7 @@ model-matrix:
       chain-tier: CAPABLE
       context-limit: 1048576
       max-output-tokens: 65536
+      display-label: "Gemini 3 Flash Preview"
       pricing:
         input-per-1m: 0.50
         # 2026-05-06 — Gemini context-cache reads are billed at 25% of input rate per
@@ -244,6 +249,7 @@ model-matrix:
       chain-tier: ARCHITECT
       context-limit: 1048576
       max-output-tokens: 65536
+      display-label: "Gemini 3 Pro Preview"
       pricing:
         # 2026-05-04 — Pro pricing per Google AI list (~6-8× flash). Verified
         # on https://ai.google.dev/gemini-api/docs/pricing (preview tier).
@@ -257,6 +263,7 @@ model-matrix:
       chain-tier: CAPABLE
       context-limit: 200000
       max-output-tokens: 16384
+      display-label: "GPT-5.4"
       pricing:
         input-per-1m: 2.50
         # 2026-05-06 — OpenAI prompt caching bills cached_tokens at 50% of input rate
@@ -272,6 +279,7 @@ model-matrix:
       chain-tier: UTILITY
       context-limit: 200000
       max-output-tokens: 16384
+      display-label: "GPT-5.4 Mini"
       pricing:
         input-per-1m: 0.75
         # 2026-05-06 — 50% of input per gpt-5.x family rate (see gpt-5.4 above).
