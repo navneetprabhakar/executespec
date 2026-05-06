@@ -291,7 +291,7 @@ export default function ExecDemoPage() {
             lineHeight: 1.55,
           }}
         >
-          Sign up free — 10 runs / month, no card. Your verified-score and spend show up in your own
+          Sign up free — 5 runs / month, no card. Your verified-score and spend show up in your own
           /exec dashboard within minutes.
         </p>
         <div style={{display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'center'}}>

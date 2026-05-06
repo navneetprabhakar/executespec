@@ -139,9 +139,17 @@ export default function BillingPage() {
             {/* Task 4: Pricing-grid "Current" badge sources from canonical tier
              * (me.tier) so PRO users see the Pro card highlighted instead of
              * Free when entitlements drift. */}
+            {/* Audit r5 (P1-2): feed live FREE-tier cap so the FREE card
+                always reflects the user's actual quota — even when the
+                hardcoded PRICING_CARDS copy drifts from tier_config. */}
             <PricingGrid
               currentTier={canonicalTier(meTier, ent.tierKey) as TierKey}
               onPickTier={onPickTier}
+              freeRunLimitMonthly={
+                (canonicalTier(meTier, ent.tierKey) as TierKey) === 'FREE'
+                  ? ent.runLimitMonthly
+                  : undefined
+              }
             />
           </section>
 
