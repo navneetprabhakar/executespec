@@ -3002,7 +3002,8 @@ public class RunOrchestrator {
               r.setCostEstimateLow(est.lowUsd());
               r.setCostEstimateHigh(est.highUsd());
               r.setCreditsCharged(est.credits());
-              r.setHardCapUsd(est.hardCapUsd());
+              // GA-readiness P3.2 — honour customer-supplied cost cap (P3.2 helper).
+              r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
               runRepo.save(r);
             });
     log.info(
@@ -3015,6 +3016,22 @@ public class RunOrchestrator {
         est.credits(),
         String.format("%.2f", est.hardCapUsd()),
         est.taskCount());
+  }
+
+  /**
+   * GA-readiness P3.2 — clamp the platform-derived hard cost cap by the optional customer
+   * override. The customer can lower the ceiling but not raise it past what credits already
+   * authorised, so the effective cap is {@code min(platformCap, userCap)} when userCap is set,
+   * otherwise the platform cap unchanged. Negative or zero userCap is treated as "not set"
+   * (defensive — the DTO validation already enforces ≥ 0.10 but we don't trust transitive
+   * state).
+   *
+   * <p>Static + package-private so {@code RunOrchestratorClampHardCapTest} can pin the contract
+   * without spinning up the full orchestrator.
+   */
+  static double clampHardCap(double platformCap, Double userCostCap) {
+    if (userCostCap == null || userCostCap <= 0) return platformCap;
+    return Math.min(platformCap, userCostCap);
   }
 
   private void writeRunCostLog(PipelineRun r, RunCostTracker.Snapshot cost) {

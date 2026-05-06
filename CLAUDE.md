@@ -227,6 +227,52 @@
 > Tests: 9/9 green on the touched surfaces (UserDataExportServiceTest 8 +
 > AccessGuardCoverageTest 1). Frontend build: clean.
 >
+> **2026-05-06 — GA-readiness P3.2 finalization (customer "Stop at $X"
+> override) on `feature/project-cost-pool-tuning`.** Closes the second
+> half of P3.2 — the cost-cap progress bar shipped earlier displayed
+> the platform-derived `hard_cap_usd`. This commit lets the customer
+> voluntarily lower the ceiling at submission time.
+>
+> **Schema (V178):** `pipeline_run.user_cost_cap_usd DOUBLE PRECISION`,
+> nullable. Idempotent ALTER TABLE.
+>
+> **Backend:**
+> - `RunRequest.userCostCap` field (`Double`,
+>   `@DecimalMin(0.10)`/`@DecimalMax(1000.00)`, optional) so unbounded
+>   or negative values are rejected before reaching DB.
+> - `PipelineRun.userCostCap` field + getter/setter via Lombok.
+> - `StateStore.setUserCostCap(runId, cap)` chokepoint method
+>   (mirroring `setHardCapUsd`).
+> - `RunController.submit` stamps `userCostCap` onto the new run row
+>   right after `submitRun()` returns.
+> - `RunOrchestrator.persistEstimate` clamps `hard_cap_usd =
+>   min(platformCap, userCostCap)` via new package-private
+>   `clampHardCap(platformCap, userCostCap)` helper. Customer can lower
+>   the ceiling but not raise it past what credits authorised.
+> - 7 unit tests in `RunOrchestratorClampHardCapTest` pin: null user
+>   cap → platform; user > platform → platform; user < platform →
+>   user; equal → either; zero/negative → defensive fallback to
+>   platform; zero platform + positive user → 0 (immediate-terminate
+>   edge).
+>
+> **Frontend:** `NewRunModal` adds a "Stop at $X" numeric input under
+> the TDD-mode checkbox with range $0.10–$1000, step $0.10, range
+> attributes for HTML5 validation. `useRunStore.createRun` +
+> `lib/api.ts` createRun signature gain optional `userCostCap?: number`.
+> Empty / unparseable input means "no override" — backend uses the
+> platform cap unchanged.
+>
+> **End-to-end story:** customer enters $5 in NewRunModal → submission
+> stamps userCostCap=5 onto pipeline_run row → planner emits a plan
+> → persistEstimate computes platform cap (e.g. $7.50 for 1 credit)
+> → clamp returns $5 → WorkerAgent budget guard force-terminates with
+> `Outcome.BUDGET_EXCEEDED` when cumulative spend hits $5 → cost-cap
+> progress bar in UI flips to red → customer sees the cap honoured.
+>
+> Tests: 110 across all touched surfaces, 0 failures. Frontend build:
+> clean. Migration is additive + idempotent (no historical data
+> impact).
+>
 > **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
 >
 > Three packaged improvements:

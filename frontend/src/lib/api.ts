@@ -500,6 +500,12 @@ export const createRun = (body: {
   figmaUrl?: string;
   /** v2.5.2 (Phase 4.3) — when true, planner emits test tasks first. */
   tddMode?: boolean;
+  /**
+   * GA-readiness P3.2 — optional customer "Stop at $X" cost ceiling, USD. The platform
+   * cap (credits × $5 × 1.5) still applies as the upper bound. Range $0.10–$1000;
+   * server-side @DecimalMin/@DecimalMax rejects out-of-range values with 400.
+   */
+  userCostCap?: number;
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
 // ── Model matrix ────────────────────────────────────────────────────────────

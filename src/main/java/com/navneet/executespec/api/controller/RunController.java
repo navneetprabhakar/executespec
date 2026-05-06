@@ -151,6 +151,14 @@ public class RunController {
     // Run count already incremented atomically in assertAndIncrementRunCount above
     usageTrackingService.increment(userDetails.getUser().getId(), "RUNS", 1);
 
+    // GA-readiness P3.2 — stamp the customer-supplied cost cap onto the new run row so
+    // RunOrchestrator.persistEstimate picks it up when the planner returns a plan and clamps
+    // hard_cap_usd to min(platformCap, userCostCap). Validation (DTO @DecimalMin/@DecimalMax)
+    // already rejected unbounded or negative values before reaching here.
+    if (req.userCostCap() != null) {
+      stateStore.setUserCostCap(run.getRunId(), req.userCostCap());
+    }
+
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));
   }
 
