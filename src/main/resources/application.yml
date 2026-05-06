@@ -231,7 +231,12 @@ model-matrix:
       max-output-tokens: 65536
       pricing:
         input-per-1m: 0.50
-        cached-input-per-1m: 0.05
+        # 2026-05-06 — Gemini context-cache reads are billed at 25% of input rate per
+        # Vertex AI pricing (https://cloud.google.com/vertex-ai/generative-ai/pricing).
+        # Prior value 0.05 (10%) was wrong and was being overridden by a hardcoded
+        # 0.25 multiplier inside RunCostTracker. After the 2026-05-06 consolidation
+        # YAML is the only knob; updating to the real rate restores cost accuracy.
+        cached-input-per-1m: 0.125
         output-per-1m: 3.00
       notes: "Gemini 3 Flash Preview — LIGHTWEIGHT tier for Google (LOW-band scaffolds)."
     "[gemini-3-pro-preview]":
@@ -243,7 +248,8 @@ model-matrix:
         # 2026-05-04 — Pro pricing per Google AI list (~6-8× flash). Verified
         # on https://ai.google.dev/gemini-api/docs/pricing (preview tier).
         input-per-1m: 3.50
-        cached-input-per-1m: 0.35
+        # 2026-05-06 — 25% of input per Vertex AI cached-read rate.
+        cached-input-per-1m: 0.875
         output-per-1m: 21.00
       notes: "Gemini 3 Pro Preview — PLANNING + WORKHORSE tier for Google (medium/high band)."
     "[gpt-5.4]":
@@ -253,7 +259,12 @@ model-matrix:
       max-output-tokens: 16384
       pricing:
         input-per-1m: 2.50
-        cached-input-per-1m: 0.25
+        # 2026-05-06 — OpenAI prompt caching bills cached_tokens at 50% of input rate
+        # for the gpt-4o / gpt-5.x family (https://platform.openai.com/docs/guides/prompt-caching).
+        # The o1 / o3 reasoning family is 25% but those aren't in the matrix today.
+        # Prior value 0.25 (10%) was wrong and was being overridden by a hardcoded
+        # 0.50 multiplier inside RunCostTracker — fixed after the 2026-05-06 consolidation.
+        cached-input-per-1m: 1.25
         output-per-1m: 15.00
       notes: "All tiers for OpenAI (PLANNING + WORKHORSE + LIGHTWEIGHT)."
     "[gpt-5.4-mini]":
@@ -263,7 +274,8 @@ model-matrix:
       max-output-tokens: 16384
       pricing:
         input-per-1m: 0.75
-        cached-input-per-1m: 0.075
+        # 2026-05-06 — 50% of input per gpt-5.x family rate (see gpt-5.4 above).
+        cached-input-per-1m: 0.375
         output-per-1m: 4.50
       notes: "Legacy — replaced by gpt-5.4 for all tiers. Retained for backward compat."
 
