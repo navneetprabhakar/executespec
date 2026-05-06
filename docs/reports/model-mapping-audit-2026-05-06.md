@@ -24,6 +24,17 @@
 > **Single-source-of-truth state:** every model identifier, context-window value, max-output-tokens, pricing rate (input + cached + output), display label, fallback chain, free-tier lock, agent→tier map, and provider-default model now lives in `application.yml model-matrix.*` and is read via `ModelRegistry`. The remaining model-string occurrences in the codebase are legacy-alias test fixtures (handled by the alias mechanism) and Spring AI bean-init defaults (overridden per-call by the V2 router).
 >
 > **Tests:** 39 across all touched surfaces, 0 failures. Backend boots clean with new YAML; live `/api/billing/plans` + `/api/models/available` + `/api/pricing` all serve YAML-derived data.
+>
+> ## Post-eval log-noise cleanup (2026-05-06 14:20 IST)
+>
+> Two cosmetic warnings flagged during the validation eval:
+>
+> | Warning | Resolution |
+> | --- | --- |
+> | `[ModelResolver] No tier mapping for agent 'ReviewerAgentV2' — defaulting to WORKHORSE` | `CostEstimator.java:101` + `RunOrchestrator.java:2854` updated to use the canonical class name `ReviewerAgentV3` (the actual reviewer since v2.5.10). YAML already has `ReviewerAgentV3: PLANNING`. |
+> | `preview-engine handoff failed: ... docker.sock` (ERROR with stack trace, 1.5KB log line per run) | `PreviewService.handoffToPreviewEngine` now detects docker-daemon-down via `e.getMessage()` and logs a single concise WARN ("preview skipped — Docker daemon not reachable...") instead of the full ERROR. Real preview-engine bugs still ERROR. |
+>
+> Verified by re-running the LOW Anthropic eval after the fix: zero `ReviewerAgentV2` warnings, exactly two clean WARN lines for the daemon-down case (one from the entry catch + one from `fail()`'s post-emit log), zero ERROR-level entries outside known OTel/gcloud fail-open paths.
 
 ---
 

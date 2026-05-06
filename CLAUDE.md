@@ -289,6 +289,42 @@
 > `/api/models/available`, `/api/pricing`) all serve YAML-derived
 > data after a fresh boot.
 >
+> **2026-05-06 — log-noise cleanup: ReviewerAgentV2 + Docker preview
+> WARNs.** Two cosmetic warnings flagged during the post-consolidation
+> 3-provider eval are now silent.
+>
+> 1. **`ReviewerAgentV2` → `ReviewerAgentV3`.** `CostEstimator.java:101`
+>    + `RunOrchestrator.java:2854` both called
+>    `modelResolver.resolve("ReviewerAgentV2", ...)` — a class name
+>    that hasn't existed since v2.5.10 retired V2 in favour of V3. The
+>    YAML `agent-tier-map` has `ReviewerAgentV3: PLANNING` (correct).
+>    The 2-arg form on CostEstimator's call fell through to "No tier
+>    mapping for agent ReviewerAgentV2 — defaulting to WORKHORSE";
+>    the 3-arg form on RunOrchestrator's call bypassed the tier
+>    lookup but kept the stale class name. Both updated.
+> 2. **Docker preview engine — distinguish "daemon not running" from
+>    real preview-engine bugs.** `PreviewService.handoffToPreviewEngine`
+>    used to log every docker subprocess failure at ERROR with the
+>    full 1.5KB stack trace + CLI output, including the "no such
+>    file or directory" socket error that fires on every local-dev
+>    box without Docker Desktop running. Each completed run produced
+>    one of these. New behaviour: detects docker-daemon-down via
+>    `e.getMessage()` matching `docker.sock` / `docker daemon` /
+>    `Cannot connect to the Docker daemon` / `dial unix...docker`
+>    and logs a single concise WARN — "preview skipped — Docker
+>    daemon not reachable. Run completed normally; only the auto-
+>    preview was skipped. Start Docker Desktop to enable previews."
+>    Real preview bugs (any other exception) still log at ERROR with
+>    the stack trace. The downstream `fail()` log line also gets a
+>    short message ("Docker daemon not reachable; preview skipped")
+>    instead of the docker-CLI dump.
+>
+> Verified: post-restart eval (Anthropic LOW @ 14:20) shows zero
+> `ReviewerAgentV2` warnings, exactly two clean WARN lines for the
+> docker-daemon-down case, and zero ERROR-level entries outside the
+> known OTel/gcloud fail-open paths. Run completed cleanly with
+> cost=$0.0991, status=COMPLETE, reason=CLEAN_COMPLETION.
+>
 > **2026-05-06 — GA-readiness P3.2 finalization (customer "Stop at $X"
 > override) on `feature/project-cost-pool-tuning`.** Closes the second
 > half of P3.2 — the cost-cap progress bar shipped earlier displayed

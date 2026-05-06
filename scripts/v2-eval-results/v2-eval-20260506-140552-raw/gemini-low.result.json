@@ -1,0 +1,21 @@
+{
+  "provider": "gemini",
+  "band": "low",
+  "run_id": "95ef2dd1-5981-432b-96bd-40674900f93c",
+  "status": "COMPLETE",
+  "harness": "v2",
+  "startedAt": "2026-05-06T08:35:53.510372Z",
+  "completedAt": "2026-05-06T08:38:32.274785Z",
+  "tasks_total": 1,
+  "tasks_done": 1,
+  "tasks_failed": 0,
+  "review": "{\"finalBuildPassed\":true,\"totalLatencyMs\":59708,\"wiringPassSummary\":\"No wiring issues found. The project is a simple Python script with a test file, and the test file correctly imports the function from the script. Tests pass successfully.\",\"generalPassSummary\":\"no in-scope issues found\",\"overall\":\"CLEAN\",\"finalBuildExitCode\":0}",
+  "actual_cost": 0.202252,
+  "est_low": 0.027,
+  "est_high": 0.04725,
+  "credits": 1,
+  "total_input": 66658,
+  "total_output": 4326,
+  "accuracy": 100,
+  "report_ok": true
+}
