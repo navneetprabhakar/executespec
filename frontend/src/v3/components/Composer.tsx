@@ -48,6 +48,12 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
   // they like it (existing /runs/{id}/push-github endpoint). Default
   // off so today's behaviour is unchanged.
   const [skipAutoPush, setSkipAutoPush] = useState(false);
+  // 2026-05-06 (PA-6 Run Launch port) — port the 3 missing v2 NewRunModal
+  // fields onto the v3 Composer's Advanced expander. All three are
+  // already wired through createRun + RunRequest + the planner.
+  const [figmaUrl, setFigmaUrl] = useState('');
+  const [tddMode, setTddMode] = useState(false);
+  const [userCostCap, setUserCostCap] = useState<string>('');
 
   // R-343 (P0 from UX persona review) — hydrate the composer with a
   // spec the user typed on executespec.ai's marketing-site hero.
@@ -192,6 +198,7 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
       });
       const submittedText = text.trim();
       setText('');
+      const parsedCap = userCostCap.trim() ? Number(userCostCap.trim()) : undefined;
       const resp = await createRun({
         userRequest: submittedText,
         executionMode: mode === 'quick' ? 'PROTOTYPE' : 'PRODUCTION',
@@ -199,6 +206,14 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         projectId,
         // Audit r5 (#5, 2026-05-06) — staged-PR-before-push override.
         skipAutoPush: skipAutoPush || undefined,
+        // 2026-05-06 (PA-6 Run Launch port) — Figma URL / TDD / Stop at $X
+        // come from the Advanced expander; only forward when set so an
+        // empty Advanced section keeps the request body minimal.
+        ...(figmaUrl.trim() ? {figmaUrl: figmaUrl.trim()} : {}),
+        ...(tddMode ? {tddMode: true} : {}),
+        ...(parsedCap !== undefined && Number.isFinite(parsedCap) && parsedCap > 0
+          ? {userCostCap: parsedCap}
+          : {}),
       });
       // R-160 — every run submission counts; the backend dedupes the
       // first-time vs repeat distinction via EventTrackingService.
@@ -547,6 +562,82 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
                 </span>
               </span>
             </label>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+                fontSize: 11,
+                color: 'var(--v3-text-muted)',
+                cursor: 'pointer',
+              }}
+              title='When on, the planner emits test tasks first and implementation tasks declare dependsOn the test ids. The worker writes the tests, the user approves, then implementation runs.'
+            >
+              <input
+                type='checkbox'
+                checked={tddMode}
+                onChange={(e) => setTddMode(e.target.checked)}
+                style={{marginTop: 2}}
+              />
+              <span>
+                <span style={{fontWeight: 500}}>TDD mode</span>
+                <span style={{display: 'block', fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
+                  Tests first, then implementation.
+                </span>
+              </span>
+            </label>
+
+            <label style={{display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11}}>
+              <span style={{color: 'var(--v3-text-muted)', fontWeight: 500}}>
+                Figma URL
+                <span style={{color: 'var(--v3-text-subtle)', fontWeight: 400}}> (optional)</span>
+              </span>
+              <input
+                type='url'
+                value={figmaUrl}
+                onChange={(e) => setFigmaUrl(e.target.value)}
+                placeholder='https://www.figma.com/file/…'
+                style={{
+                  padding: '4px 6px',
+                  background: 'var(--v3-bg)',
+                  color: 'var(--v3-text)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                }}
+              />
+            </label>
+
+            <label style={{display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11}}>
+              <span style={{color: 'var(--v3-text-muted)', fontWeight: 500}}>
+                Stop at $
+                <span style={{color: 'var(--v3-text-subtle)', fontWeight: 400}}> (optional)</span>
+              </span>
+              <input
+                type='number'
+                step='0.10'
+                min='0.10'
+                max='1000'
+                value={userCostCap}
+                onChange={(e) => setUserCostCap(e.target.value)}
+                placeholder='e.g. 5.00'
+                style={{
+                  padding: '4px 6px',
+                  background: 'var(--v3-bg)',
+                  color: 'var(--v3-text)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                }}
+              />
+              <span style={{fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
+                Hard ceiling — the run terminates when spend hits this.
+              </span>
+            </label>
+
             <div
               style={{
                 gridColumn: '1 / -1',
@@ -554,7 +645,7 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
                 color: 'var(--v3-text-subtle)',
               }}
             >
-              Branch · Figma · Confluence · JIRA · TDD — more options coming soon.
+              Branch · Confluence · JIRA · spec templates — more options coming soon.
             </div>
           </div>
         )}
