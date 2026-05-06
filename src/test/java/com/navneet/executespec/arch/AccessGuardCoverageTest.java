@@ -116,7 +116,19 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.sharing.controller.ProjectSharePublicController#getValidationReport",
               "com.navneet.executespec.sharing.controller.ProjectSharePublicController#getCodeReview",
               "com.navneet.executespec.sharing.controller.ProjectSharePublicController#getPrReview",
-              "com.navneet.executespec.sharing.controller.ProjectSharePublicController#getArchitecture"));
+              "com.navneet.executespec.sharing.controller.ProjectSharePublicController#getArchitecture",
+              // SUPER_ADMIN-gated by SecurityConfig URL pattern `/api/admin/**` (line 222
+              // requires ROLE_SUPER_ADMIN). The role check is the trust boundary; no non-admin
+              // request reaches these handlers. Tenant-bound run/project IDs in their paths
+              // are administrative bypass paths used to recover specific runs / projects.
+              "com.navneet.executespec.auth.controller.SuperAdminController#forceFailTask",
+              "com.navneet.executespec.auth.controller.SuperAdminController#reReviewRun",
+              "com.navneet.executespec.folder.ExecutespecMigrationController#migrate",
+              // V2 canary surface — runIds in `/api/v2/runs/` reference V2Run rows which are a
+              // separate storage from the production `pipeline_run` table; they're scoped to
+              // V2 bring-up testing, not customer data. Live V2 runs go through the production
+              // `/api/runs` surface which has its own RunAccessGuard coverage.
+              "com.navneet.executespec.v2.rollout.V2RunController#poll"));
 
   /**
    * <b>Known legacy drift</b> — controller methods that handle a run/project/execution id but
@@ -140,12 +152,6 @@ class AccessGuardCoverageTest {
   private static final Set<String> KNOWN_LEGACY_DRIFT =
       new LinkedHashSet<>(
           Set.of(
-              // SuperAdminController — SUPER_ADMIN role gates these in SecurityConfig but
-              // they still bind run ids; consolidate on requireSuperAdmin for review-time
-              "com.navneet.executespec.auth.controller.SuperAdminController#forceFailTask",
-              "com.navneet.executespec.auth.controller.SuperAdminController#reReviewRun",
-              // /api/admin/ — SUPER_ADMIN gated by SecurityConfig
-              "com.navneet.executespec.folder.ExecutespecMigrationController#migrate",
               // ProjectRepoController repo-scoped paths (/api/repos/{repoId}/...) need a
               // dedicated RepoAccessGuard with ORG_REPO + USER_REPO discrimination — that's
               // a separate workstream. The project-scoped paths
@@ -153,9 +159,7 @@ class AccessGuardCoverageTest {
               // ProjectAccessGuard.
               "com.navneet.executespec.project.controller.ProjectRepoController#deleteRepo",
               "com.navneet.executespec.project.controller.ProjectRepoController#installRepoWebhook",
-              "com.navneet.executespec.project.controller.ProjectRepoController#syncRepo",
-              // V2 polling — needs RunAccessGuard.requireRunAccess
-              "com.navneet.executespec.v2.rollout.V2RunController#poll"));
+              "com.navneet.executespec.project.controller.ProjectRepoController#syncRepo"));
 
   @Test
   void everyRunOrProjectScopedEndpointCallsAGuard() {
