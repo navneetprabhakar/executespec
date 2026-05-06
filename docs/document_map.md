@@ -38,6 +38,7 @@ The following plans were merged + deployed and their plan files have been remove
 
 ## Reference docs (still authoritative)
 
+- [`docs/reports/model-mapping-audit-2026-05-06.md`](reports/model-mapping-audit-2026-05-06.md) — full audit of every place model identifiers / pricing / context-window metadata live in the codebase. 8 hardcoded sources catalogued (1 active drift on `gpt-5.4` context window, 7 stale-or-redundant). Includes a live 3-provider LOW-band cost eval (Anthropic $0.10 / OpenAI $0.04 / Gemini Pro $1.16) + 3-commit single-source-of-truth proposal. Ground reference for all model-related changes.
 - [`docs/operations/slos.md`](operations/slos.md) — GA-readiness P4.2 (2026-05-06). Five SLOs ExecuteSpec commits to: run terminal in 15min ≥95%, verified-score correctness ≥90% (manual sample audit), cost estimate within 30% on ≥80% of runs, webhook in 60s ≥99%, hot-path 5xx <0.5%. Includes alert thresholds, owners, and measurement queries.
 - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — single source of truth for every color/radius/spacing token. Semantic palette, 4-band score palette, MUST/MUST NOT rules.
 - [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison.
