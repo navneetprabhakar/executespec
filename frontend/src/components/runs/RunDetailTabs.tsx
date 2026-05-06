@@ -907,11 +907,7 @@ function OverviewTab({
             <div className='mt-3'>
               <CostProgressBar
                 current={
-                  liveCost != null
-                    ? liveCost
-                    : run.actualCostUsd != null
-                      ? run.actualCostUsd
-                      : 0
+                  liveCost != null ? liveCost : run.actualCostUsd != null ? run.actualCostUsd : 0
                 }
                 cap={run.hardCapUsd}
               />
