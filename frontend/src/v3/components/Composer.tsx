@@ -1,5 +1,5 @@
 import {useEffect, useState} from 'react';
-import {createRun} from '@/lib/api';
+import {createRun, estimateRun, type LaunchEstimate} from '@/lib/api';
 import {useV3ProjectStore} from '../stores/useV3ProjectStore';
 import {useV3Ui} from '../stores/useV3Ui';
 import {trackV3, V3_EVENTS} from '../lib/events';
@@ -42,6 +42,12 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Audit r5 (#5, 2026-05-06) — staged-PR-before-push toggle. When on,
+  // the run completes normally but the auto-push to GitHub is skipped
+  // — the user can inspect the diff in Run Detail and manually push if
+  // they like it (existing /runs/{id}/push-github endpoint). Default
+  // off so today's behaviour is unchanged.
+  const [skipAutoPush, setSkipAutoPush] = useState(false);
 
   // R-343 (P0 from UX persona review) — hydrate the composer with a
   // spec the user typed on executespec.ai's marketing-site hero.
@@ -64,6 +70,33 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Audit r5 (#6, 2026-05-06) — wire up the per-project prefill key.
+  // RunFailureSummary already wrote to `v3-composer-prefill-{projectId}`
+  // for the "re-prompt with failure context" path, but no consumer ever
+  // read it — the Composer would silently ignore the stash. PlanCard's
+  // new Adjust flow (audit r5 #6) writes the same key when the user
+  // wants to edit-and-retry instead of approving the current plan.
+  // Both producers are now end-to-end: stash → custom event → here.
+  useEffect(() => {
+    if (!projectId) return;
+    const key = `v3-composer-prefill-${projectId}`;
+    const hydrate = () => {
+      try {
+        const stashed = sessionStorage.getItem(key);
+        if (stashed && stashed.trim().length > 0) {
+          setText(stashed);
+          sessionStorage.removeItem(key);
+        }
+      } catch {
+        /* private mode — silent */
+      }
+    };
+    hydrate();
+    const listener = () => hydrate();
+    window.addEventListener('v3-composer-prefill', listener);
+    return () => window.removeEventListener('v3-composer-prefill', listener);
+  }, [projectId]);
   const pushBubble = useV3ProjectStore((s) => s.pushBubble);
   const bubbles = useV3ProjectStore((s) => s.bubbles);
   const cap = useV3Ui((s) => s.cap);
@@ -94,6 +127,36 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
     ? "What do you want to build? Describe it in plain English — we'll ship a draft PR you can merge."
     : 'Reply or describe a follow-up change…';
   const heroLabel = isEmpty ? 'What do you want to build?' : '';
+
+  // Audit r5 (#1, 2026-05-06) — pre-submit cost estimate. Shows
+  // "~M-N tasks · ~$X-$Y" debounced as the user types, so they go
+  // into the Approve gate already calibrated on what to expect.
+  // Endpoint is heuristic-only (no LLM call) so spamming it is cheap.
+  const [estimate, setEstimate] = useState<LaunchEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
+  useEffect(() => {
+    setEstimate(null);
+    const trimmed = text.trim();
+    if (!projectId || trimmed.length < 12) {
+      setEstimating(false);
+      return;
+    }
+    setEstimating(true);
+    const handle = setTimeout(() => {
+      estimateRun(projectId, trimmed)
+        .then((r) => {
+          setEstimate(r);
+          setEstimating(false);
+        })
+        .catch(() => {
+          // Silent fallback — estimate is decoration; the real cost
+          // shows up on the PlanCard a few seconds later.
+          setEstimate(null);
+          setEstimating(false);
+        });
+    }, 1500);
+    return () => clearTimeout(handle);
+  }, [projectId, text]);
 
   const canSubmit = text.trim().length > 0 && !submitting;
 
@@ -134,6 +197,8 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         executionMode: mode === 'quick' ? 'PROTOTYPE' : 'PRODUCTION',
         aiProvider: provider,
         projectId,
+        // Audit r5 (#5, 2026-05-06) — staged-PR-before-push override.
+        skipAutoPush: skipAutoPush || undefined,
       });
       // R-160 — every run submission counts; the backend dedupes the
       // first-time vs repeat distinction via EventTrackingService.
@@ -186,6 +251,46 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           }}
         >
           {heroLabel}
+        </div>
+      )}
+
+      {/* Audit r5 (#9, 2026-05-06) — first-run coachmark. The empty-state
+          composer used to drop a new user straight into a textarea + 3
+          sample chips with no narrative for what happens next. Two lines
+          of plain English up front prevent the "I typed something, now
+          what?" moment when planner takes ~5–7s to come back. We only
+          show this on the empty hero (isEmpty) — the inline-thread
+          composer hides it because returning users have already seen
+          the flow. */}
+      {isEmpty && (
+        <div
+          style={{
+            textAlign: 'center',
+            color: 'var(--v3-text-muted)',
+            fontSize: 13,
+            lineHeight: 1.55,
+            marginBottom: 14,
+            maxWidth: 540,
+            marginLeft: 'auto',
+            marginRight: 'auto',
+          }}
+        >
+          <span style={{color: 'var(--v3-text-subtle)'}}>
+            <strong style={{color: 'var(--v3-text-muted)'}}>How it works:</strong> describe what
+            you want →{' '}
+          </span>
+          <span style={{color: 'var(--v3-text-muted)'}}>
+            we draft a plan + cost estimate →
+          </span>{' '}
+          <span style={{color: 'var(--v3-text-muted)'}}>
+            you approve →
+          </span>{' '}
+          <span style={{color: 'var(--v3-text-muted)'}}>
+            we ship a draft PR.
+          </span>{' '}
+          <span style={{color: 'var(--v3-text-subtle)'}}>
+            Takes ~30–90s. Free plan, no card.
+          </span>
         </div>
       )}
 
@@ -280,6 +385,38 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
             }
           }}
         />
+
+        {/* Audit r5 (#1, 2026-05-06): pre-submit cost estimate.
+            Heuristic, no LLM call — shows the user roughly what to
+            expect at the Approve gate before they hit Submit. Hidden
+            until the spec is at least 12 chars, which keeps the chip
+            from flickering on every keystroke. */}
+        {(estimating || estimate) && (
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: 'var(--v3-text-subtle)',
+              fontFamily: 'inherit',
+            }}
+            aria-live='polite'
+          >
+            {estimating && !estimate ? (
+              <span style={{opacity: 0.7}}>Estimating cost…</span>
+            ) : estimate ? (
+              <span>
+                ~{estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh} tasks · ~$
+                {estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}
+                <span
+                  style={{marginLeft: 6, opacity: 0.65}}
+                  title='Heuristic from historical run data; the Approve gate shows the real estimate once the planner finishes.'
+                >
+                  ({estimate.basis})
+                </span>
+              </span>
+            ) : null}
+          </div>
+        )}
 
         <div
           style={{
@@ -385,6 +522,30 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
                   </option>
                 ))}
               </select>
+            </label>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+                fontSize: 11,
+                color: 'var(--v3-text-muted)',
+                cursor: 'pointer',
+              }}
+              title='When on, we still execute the run end-to-end but skip pushing to GitHub on success. Use it to preview the diff before shipping.'
+            >
+              <input
+                type='checkbox'
+                checked={skipAutoPush}
+                onChange={(e) => setSkipAutoPush(e.target.checked)}
+                style={{marginTop: 2}}
+              />
+              <span>
+                <span style={{fontWeight: 500}}>Stage as draft</span>
+                <span style={{display: 'block', fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
+                  Skip auto-push; review diff first.
+                </span>
+              </span>
             </label>
             <div
               style={{

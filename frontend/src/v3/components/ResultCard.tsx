@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {
+  cancelRun,
   getRun,
   getValidationReport,
   getRunPrs,
@@ -70,7 +71,34 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
   // runs, so we have to consult the registry to know if there are any PRs at all.
   const [prs, setPrs] = useState<PrSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  // Audit r5 (#3, 2026-05-06) — cancel-while-running. Tracks the
+  // in-flight cancel call so the button can disable + show a label
+  // while the DELETE roundtrips.
+  const [cancelling, setCancelling] = useState(false);
   const navigate = useNavigate();
+
+  async function onCancel() {
+    if (cancelling) return;
+    if (
+      !confirm(
+        'Cancel this run? Any work the agent has already done will be discarded.',
+      )
+    ) {
+      return;
+    }
+    setCancelling(true);
+    try {
+      await cancelRun(runId);
+      // Optimistically reflect cancellation; the polling layer above
+      // (useLiveRunStatus) will catch the real CANCELLED status on
+      // its next tick and morph the bubble appropriately.
+      setDetail((d) => (d ? {...d, status: 'CANCELLED'} : d));
+    } catch (e) {
+      alert((e as Error)?.message ?? 'Cancel failed.');
+    } finally {
+      setCancelling(false);
+    }
+  }
 
   useEffect(() => {
     let cancelled = false;
@@ -222,6 +250,35 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
             >
               Open run
             </button>
+            {/* Audit r5 (#3, 2026-05-06): cancel-while-running. Pre-fix
+                v3 had no escape hatch for an in-flight run — the user
+                had to wait the full ~30-90s to terminal even if they
+                spotted a typo in their spec. The DELETE /api/runs/{id}
+                endpoint already exists and the V2 RunOrchestrator's
+                cancel path is robust. We surface it only on in-flight
+                runs (PLANNING/AWAITING_APPROVAL/WORKING/REVIEWING) so
+                terminal cards stay clean. */}
+            {isInFlight && (
+              <button
+                type='button'
+                onClick={onCancel}
+                disabled={cancelling}
+                style={{
+                  padding: '5px 12px',
+                  fontSize: 12,
+                  fontWeight: 500,
+                  background: 'transparent',
+                  color: cancelling ? 'var(--v3-text-subtle)' : 'var(--v3-error)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 6,
+                  cursor: cancelling ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                }}
+                title='Stop this run. The agent will discard any in-progress work.'
+              >
+                {cancelling ? 'Cancelling…' : 'Cancel run'}
+              </button>
+            )}
             {/* Multi-repo aware: same logic as RunDetailPage. 0 → none, 1 → "Open PR", N>1 →
                  one button per repo labeled "<short>#<num>". Falls back to detail.githubPrUrl
                  for legacy runs without registry rows. */}

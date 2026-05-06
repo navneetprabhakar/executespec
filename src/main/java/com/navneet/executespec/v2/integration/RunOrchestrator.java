@@ -157,6 +157,8 @@ public class RunOrchestrator {
   private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+  /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
+  private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
   private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
 
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
@@ -1231,6 +1233,15 @@ public class RunOrchestrator {
                   && "EXISTING".equalsIgnoreCase(r.getRepoMode())
                   && r.getRepoUrl() != null
                   && !r.getRepoUrl().isBlank();
+        }
+        // Audit r5 (#5, 2026-05-06) — staged-PR-before-push override.
+        // When the user submitted with skipAutoPush=true the
+        // RunController stamped a Redis key; consume it here once.
+        // The flag is one-shot — a manual re-push afterward goes
+        // through the unchanged /runs/{id}/push-github path.
+        if (shouldPush && runSkipPushFlag.consume(runId)) {
+          shouldPush = false;
+          log.info("V2 run={} auto-push skipped (skipAutoPush flag set)", runId);
         }
         if (shouldPush) {
           try {

@@ -543,6 +543,14 @@ export const createRun = (body: {
    * server-side @DecimalMin/@DecimalMax rejects out-of-range values with 400.
    */
   userCostCap?: number;
+  /**
+   * Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. When true, the run executes
+   * normally but RunOrchestrator skips the trailing scmPushService.push call on success.
+   * The user can inspect the diff in Run Detail and manually push via the existing
+   * /runs/{id}/push-github endpoint if they want to ship. Backend reads this from a
+   * 24h Redis flag; not persisted to pipeline_run.
+   */
+  skipAutoPush?: boolean;
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
 // ── Model matrix ────────────────────────────────────────────────────────────

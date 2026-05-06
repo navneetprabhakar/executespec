@@ -3,6 +3,7 @@ import {Link, useParams} from 'react-router-dom';
 import SafeDiffEditor from '@/components/runs/SafeDiffEditor';
 import {MonacoSafeMount} from '@/components/runs/MonacoSafeMount';
 import {
+  cancelRun,
   getRun,
   getValidationReport,
   getFilesWithStatus,
@@ -397,6 +398,49 @@ export default function RunDetailPage() {
                 Re-prompt
               </Link>
             )}
+            {/* Audit r5 (#3, 2026-05-06): persistent Cancel on the
+                detail page for in-flight runs. Mirrors the bubble-card
+                affordance so users who navigated to /runs/{id} mid-run
+                still have an escape hatch. */}
+            {detail &&
+              !['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED'].includes(
+                detail.status,
+              ) && (
+                <button
+                  type='button'
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        'Cancel this run? Any work the agent has already done will be discarded.',
+                      )
+                    ) {
+                      return;
+                    }
+                    try {
+                      await cancelRun(runId);
+                      // Optimistic flip; the auto-refetch (useEffect on
+                      // active+runId) catches up on the next tick.
+                      setDetail((d) => (d ? {...d, status: 'CANCELLED'} : d));
+                    } catch (e) {
+                      alert((e as Error)?.message ?? 'Cancel failed.');
+                    }
+                  }}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    background: 'transparent',
+                    color: 'var(--v3-error)',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                  title='Stop this run. The agent will discard any in-progress work.'
+                >
+                  Cancel run
+                </button>
+              )}
           </div>
         </div>
       )}
