@@ -83,8 +83,28 @@ function getMonacoLanguage(filePath: string): string {
  * back to /projects/{slug} composer pre-filled with the spec.
  */
 export default function RunDetailPage() {
-  const {slug, runShort} = useParams<{slug: string; runShort: string}>();
+  // Route param is `:projectId` (renamed from `:slug` in 4a20683c); kept
+  // the old `slug` alias only for back-compat readers — every actual use
+  // now reads `projectId`. Optional because the flat `/runs/:runShort`
+  // route mounts this page without a project context (FREE / unlinked
+  // runs, audit finding 2026-05-06).
+  const {projectId, runShort} = useParams<{projectId?: string; runShort: string}>();
   const runId = runShort ?? '';
+
+  // 2026-05-06 — RunDetail's 3-pane grid (file tree + diff + side panel)
+  // needs ≥1100px to render comfortably. The default `.v3-main` cap of
+  // 960px squeezes the diff column down to ~600px on a 2000px viewport.
+  // Opt this page into the `.v3-main--wide` modifier (max-width: 1600px)
+  // for the page lifetime; cleaned up on unmount so other routes inherit
+  // the default cap.
+  useEffect(() => {
+    const main = document.querySelector('.v3-main');
+    if (!main) return;
+    main.classList.add('v3-main--wide');
+    return () => {
+      main.classList.remove('v3-main--wide');
+    };
+  }, []);
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [report, setReport] = useState<ValidationReportData | null>(null);
@@ -212,8 +232,8 @@ export default function RunDetailPage() {
       >
         <h1>Couldn't load run</h1>
         <p>{error}</p>
-        {slug && (
-          <Link to={`/projects/${slug}`} style={{color: 'var(--v3-brand)', fontSize: 12}}>
+        {projectId && (
+          <Link to={`/projects/${projectId}`} style={{color: 'var(--v3-brand)', fontSize: 12}}>
             ← Back to project
           </Link>
         )}
@@ -224,9 +244,9 @@ export default function RunDetailPage() {
   return (
     <div>
       {/* Back-link breadcrumb (the only one in v3) */}
-      {slug && (
+      {projectId && (
         <Link
-          to={`/projects/${slug}`}
+          to={`/projects/${projectId}`}
           style={{
             display: 'inline-block',
             marginBottom: 12,
@@ -380,9 +400,9 @@ export default function RunDetailPage() {
                 );
               });
             })()}
-            {slug && (
+            {projectId && (
               <Link
-                to={`/projects/${slug}`}
+                to={`/projects/${projectId}`}
                 style={{
                   padding: '5px 12px',
                   fontSize: 12,

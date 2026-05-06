@@ -308,10 +308,14 @@ export default function RunsListPage() {
             // RunDetailPage calls getRun(runId) which expects the full UUID;
             // the route param is named `runShort` but the value passed in must
             // be the full id (matches every other launcher in the app:
-            // ProjectLaunchesList, ProjectPrRollup, etc.).
+            // ProjectLaunchesList, ProjectPrRollup, etc.). 2026-05-06 — when
+            // the run isn't linked to a project (FREE / pre-project-shell),
+            // route to the flat /runs/{id} which mounts RunDetailPage with
+            // an undefined projectId. The previous /projects/empty?run=...
+            // target landed in EmptyProjectPage and dropped the runId.
             const target = projectId
               ? `/projects/${projectId}/runs/${runId}`
-              : `/projects/empty?run=${runId}`;
+              : `/runs/${runId}`;
             return (
               <Link
                 key={r.runId}

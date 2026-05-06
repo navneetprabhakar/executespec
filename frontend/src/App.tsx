@@ -284,6 +284,15 @@ export default function App() {
               here so old bookmarks survive. */}
           <Route path='/projects/empty' element={<EmptyProjectPage />} />
           <Route path='/projects/:projectId/runs/:runShort' element={<RunDetailPage />} />
+          {/* 2026-05-06 — flat run-detail route for unlinked runs (FREE
+              users without a Project Shell, runs created before a project
+              was attached). RunDetailPage handles a missing projectId by
+              hiding the breadcrumb / back-to-project link; everything
+              else (status header, file tree, diff, side panel) renders
+              from runId alone. Without this, /runs (RunsListPage) had to
+              forward unlinked rows to /projects/empty?run=... which fell
+              into the EmptyProjectPage and dropped the runId silently. */}
+          <Route path='/runs/:runShort' element={<RunDetailPage />} />
           <Route path='/settings' element={<SettingsPage />} />
           {/* R-141 (deferred Wave-1 follow-up, shipped 2026-05-02) — full
               key-management surface (GitHub PAT, AI provider keys, Bitbucket,
