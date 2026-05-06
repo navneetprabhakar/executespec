@@ -3,6 +3,27 @@
 > **Asked for:** pricing eval per model/provider, restart servers + run a cost eval, double-check context-window config, generate a report on all model mappings (single source of truth audit).
 > **Branch:** `feature/project-cost-pool-tuning`
 > **Eval results:** `scripts/v2-eval-results/v2-eval-20260506-120242.{json,md}` + the 2026-05-04 baseline.
+>
+> ---
+>
+> ## Resolution status (updated 2026-05-06 13:30 IST)
+>
+> **All 8 audit drift sites consolidated to YAML.** 5 commits on this branch:
+>
+> | Item | Status | Commit |
+> | --- | --- | --- |
+> | #1 ModelContextWindowMap (active drift) | ✅ deleted; routes through ModelRegistry | `72d75b49` |
+> | #4 RunCostTracker cache multipliers | ✅ reads YAML cached-input-per-1m directly; YAML rates updated to provider reality (OpenAI 50%, Gemini 25%) | `c9c2799a` |
+> | #2 ModelController.MODEL_LABELS | ✅ reads YAML `display-label`; new field added to ModelConfig | `fdf0dac1` |
+> | #3 RunOrchestrator.defaultModelFor | ✅ routes through ModelRegistry.workhouseModelFor | `f23b0e77` |
+> | #7 spring.ai.* stale gemini-2.5-flash comment | ✅ bumped to gemini-3-flash-preview + added bean-init-only header comment | `f23b0e77` |
+> | #8 *Properties.java default model strings | ✅ nullified; consumers fall through to ModelRegistry | `f23b0e77` |
+> | #5 frontend PricingTable.MODEL_ROLES | ✅ reads chainTier from YAML-sourced PricingRow DTO | `ab586b5f` |
+> | #6 Test fixtures with legacy aliases | 🟢 left alone — handled by YAML legacy-aliases mechanism, no functional drift |
+>
+> **Single-source-of-truth state:** every model identifier, context-window value, max-output-tokens, pricing rate (input + cached + output), display label, fallback chain, free-tier lock, agent→tier map, and provider-default model now lives in `application.yml model-matrix.*` and is read via `ModelRegistry`. The remaining model-string occurrences in the codebase are legacy-alias test fixtures (handled by the alias mechanism) and Spring AI bean-init defaults (overridden per-call by the V2 router).
+>
+> **Tests:** 39 across all touched surfaces, 0 failures. Backend boots clean with new YAML; live `/api/billing/plans` + `/api/models/available` + `/api/pricing` all serve YAML-derived data.
 
 ---
 
