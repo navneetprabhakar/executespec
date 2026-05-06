@@ -126,24 +126,31 @@ spring:
         initial-interval: 2000      # 2s
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
         max-interval: 10000         # 10s cap
+    # ── Spring AI bean-init defaults ───────────────────────────────────────────
+    # These are the defaults Spring AI's auto-config uses when constructing the
+    # provider beans at startup. The V2 LlmRouterV2 path overrides per-call from
+    # the model-matrix below, so these values are only used at bean construction
+    # time; per-call dispatch resolves through ModelRegistry. Keep them as
+    # current-WORKHORSE-tier defaults so a graceful-degraded boot uses a model
+    # that's actually current (not gemini-2.5-flash, which was retired 2026-05-04).
     anthropic:
       api-key: ""                   # set via env var in profile files
       chat:
         options:
-          model: claude-haiku-4-5-20251001  # budget default; worker tasks override via assigned_model
+          model: claude-haiku-4-5-20251001  # bean-init only; V2 router resolves per-call
           max-tokens: 16384                  # Haiku default; per-call limits applied by TokenBudgetMonitor
     openai:
       api-key: ""                   # set via env var in profile files
       chat:
         options:
-          model: gpt-5.4-mini
+          model: gpt-5.4-mini                # bean-init only; V2 router resolves per-call
           max-tokens: 16384                  # gpt-5.4 max; per-call limits applied by TokenBudgetMonitor
     google:
       genai:
         api-key: ""                 # set via env var in profile files
         chat:
           options:
-            model: gemini-2.5-flash          # default; all tiers use gemini-2.5-flash
+            model: gemini-3-flash-preview     # bean-init only; V2 router resolves per-call (2026-05-06: was gemini-2.5-flash, retired)
 
 # ── Model Matrix (user-selected provider × agent tier → model) ────────────────
 model-matrix:
