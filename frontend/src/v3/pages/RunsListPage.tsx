@@ -146,30 +146,64 @@ export default function RunsListPage() {
 
   return (
     <div style={{maxWidth: 1080, margin: '0 auto', padding: '32px 24px'}}>
-      <header style={{marginBottom: 24}}>
-        <div
+      <header
+        style={{
+          marginBottom: 24,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 16,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <div
+            style={{
+              fontFamily: 'var(--font-mono)',
+              fontSize: 11,
+              letterSpacing: '0.08em',
+              textTransform: 'uppercase',
+              color: 'var(--accent-blue-text, var(--accent-blue))',
+              display: 'inline-block',
+              padding: '4px 10px',
+              border: '1px solid rgba(91,141,239,0.30)',
+              borderRadius: 999,
+              marginBottom: 12,
+            }}
+          >
+            Runs
+          </div>
+          <h1 style={{fontSize: 28, fontWeight: 700, color: 'var(--v3-text)', margin: 0}}>
+            Every PR you've shipped, in one place.
+          </h1>
+          <p style={{margin: '8px 0 0', color: 'var(--v3-text-muted)', maxWidth: 640}}>
+            The full feed of runs you've submitted across every project. Click in to read the
+            validation report, open the PR, or fork a re-run.
+          </p>
+        </div>
+        {/* 2026-05-07 — top-right "Launch new run" CTA. /home renders the
+            Composer (project selector + spec textarea + Refine-with-
+            assistant), so a user landing on /runs has a one-click path
+            into the launch flow without bouncing through the avatar
+            menu or the TopBar's "Pick a project" pill. */}
+        <button
+          type='button'
+          onClick={() => navigate('/home')}
           style={{
-            fontFamily: 'var(--font-mono)',
-            fontSize: 11,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
-            color: 'var(--accent-blue-text, var(--accent-blue))',
-            display: 'inline-block',
-            padding: '4px 10px',
-            border: '1px solid rgba(91,141,239,0.30)',
-            borderRadius: 999,
-            marginBottom: 12,
+            background: 'var(--v3-brand)',
+            color: 'var(--v3-text-on-brand)',
+            border: 0,
+            padding: '10px 18px',
+            borderRadius: 8,
+            fontWeight: 600,
+            fontSize: 13,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            whiteSpace: 'nowrap',
           }}
         >
-          Runs
-        </div>
-        <h1 style={{fontSize: 28, fontWeight: 700, color: 'var(--v3-text)', margin: 0}}>
-          Every PR you've shipped, in one place.
-        </h1>
-        <p style={{margin: '8px 0 0', color: 'var(--v3-text-muted)', maxWidth: 640}}>
-          The full feed of runs you've submitted across every project. Click in to read the
-          validation report, open the PR, or fork a re-run.
-        </p>
+          + Launch new run
+        </button>
       </header>
 
       {/* Filter row */}
