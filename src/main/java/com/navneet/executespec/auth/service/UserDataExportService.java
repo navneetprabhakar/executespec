@@ -41,27 +41,27 @@ import lombok.extern.slf4j.Slf4j;
  * GA-readiness P5.4 (2026-05-06) — GDPR Article 15 (right of access) + Article 20 (portability).
  *
  * <p>Builds a ZIP bundle of every row tied to the requesting user across the platform's core
- * tables. Synchronous and self-contained: returns the zip bytes for the controller to stream as
- * an HTTP response. Per-user export size is small enough to do in-memory (typical user has &lt; 10
+ * tables. Synchronous and self-contained: returns the zip bytes for the controller to stream as an
+ * HTTP response. Per-user export size is small enough to do in-memory (typical user has &lt; 10
  * runs + a few projects).
  *
  * <p><b>Sensitive-field redaction:</b> {@code AppUser.password_hash}, {@code AppUser.openAiKey}
- * etc., and any other secret material is dropped from the export. The user already has these
- * inside their own settings UI; an export bundle that landed on a stolen laptop should not
- * re-expose them in plaintext.
+ * etc., and any other secret material is dropped from the export. The user already has these inside
+ * their own settings UI; an export bundle that landed on a stolen laptop should not re-expose them
+ * in plaintext.
  *
  * <p><b>What's NOT included:</b>
  *
  * <ul>
- *   <li>Other users' data (cross-org rows are excluded — even when the requesting user is an
- *       org admin, this endpoint exports their personal data only, not their org's).
+ *   <li>Other users' data (cross-org rows are excluded — even when the requesting user is an org
+ *       admin, this endpoint exports their personal data only, not their org's).
  *   <li>Workspace files on disk — these are scoped to specific runs and are accessible via the
  *       existing per-run download endpoints.
  *   <li>Internal audit hash chains — preserved for compliance, not exposed to the user.
  * </ul>
  *
- * <p>For broader org-scoped export ({@code POST /api/projects/{id}/export} from E4.7), see
- * {@code ProjectExportController}.
+ * <p>For broader org-scoped export ({@code POST /api/projects/{id}/export} from E4.7), see {@code
+ * ProjectExportController}.
  */
 @Slf4j
 @Service
@@ -169,11 +169,7 @@ public class UserDataExportService {
         writeReadme(zip);
       }
       String filename =
-          "executespec-export-"
-              + userId
-              + "-"
-              + Instant.now().toString().substring(0, 10)
-              + ".zip";
+          "executespec-export-" + userId + "-" + Instant.now().toString().substring(0, 10) + ".zip";
       log.info(
           "[UserDataExport] Generated export for user={} sizeBytes={} projectsIncluded={}",
           userId,
@@ -187,8 +183,8 @@ public class UserDataExportService {
 
   /**
    * Strip the password hash + every API-key column off a copy of {@link AppUser} before
-   * serialising. The user already knows their keys from settings UI; re-emitting them in a file
-   * the user might forward by email is a needless exposure.
+   * serialising. The user already knows their keys from settings UI; re-emitting them in a file the
+   * user might forward by email is a needless exposure.
    */
   private static Map<String, Object> redactUser(AppUser u) {
     Map<String, Object> redacted = new HashMap<>();

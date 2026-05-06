@@ -13,8 +13,8 @@ import org.junit.jupiter.api.Test;
  *
  * <ul>
  *   <li>{@code userCostCap = null} → platform cap unchanged (legacy runs + omitted override).
- *   <li>{@code userCostCap > platformCap} → platform cap unchanged (customer can't raise the
- *       cap past what credits authorised; raising would imply an unbilled charge).
+ *   <li>{@code userCostCap > platformCap} → platform cap unchanged (customer can't raise the cap
+ *       past what credits authorised; raising would imply an unbilled charge).
  *   <li>{@code userCostCap < platformCap} → use the user cap (customer voluntarily lowering).
  *   <li>{@code userCostCap == platformCap} → either equally valid; result is the value.
  *   <li>{@code userCostCap <= 0} → treated as "not set" defensively even though DTO validation

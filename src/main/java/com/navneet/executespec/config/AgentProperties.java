@@ -142,11 +142,13 @@ public class AgentProperties {
     private boolean enabled = true;
     private int maxAttempts = 3;
     private int timeoutSeconds = 300;
+
     /**
      * 2026-05-06 — null = use YAML model-matrix WORKHORSE for the configured provider. Set this
      * only when you need to pin a specific model independent of the matrix.
      */
     private String model = null;
+
     private String provider = "anthropic";
   }
 
@@ -156,11 +158,13 @@ public class AgentProperties {
   @Data
   public static class ApiTestSuite {
     private boolean enabled = true;
+
     /**
      * 2026-05-06 — null = use YAML model-matrix WORKHORSE for the configured provider. Set this
      * only when you need to pin a specific model independent of the matrix.
      */
     private String model = null;
+
     private String provider = "anthropic";
   }
 

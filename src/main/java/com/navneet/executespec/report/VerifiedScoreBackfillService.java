@@ -20,17 +20,17 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Why this exists: the original commit landed the new {@link
  * ValidationReportService#computeVerifiedScore} overload + {@link
- * ValidationReportService#countUnfixedCritical} synth-issue filter for ALL new runs, but
- * historical rows continued to display the old number until the next run on each project flushed
- * a fresh report. This service re-scores every existing row in one pass so dashboards reflect
- * the corrected values immediately on deploy.
+ * ValidationReportService#countUnfixedCritical} synth-issue filter for ALL new runs, but historical
+ * rows continued to display the old number until the next run on each project flushed a fresh
+ * report. This service re-scores every existing row in one pass so dashboards reflect the corrected
+ * values immediately on deploy.
  *
  * <p>Idempotent: running it twice produces the same result. Backfill is per-row independent — a
  * crash mid-job leaves rows in mixed states but a re-run fixes them.
  *
- * <p>Triggered only by the SUPER_ADMIN endpoint (see {@code SuperAdminController.backfillVerifiedScore}
- * — to be added separately). Synchronous; the caller times out after 60s if the table grew
- * past ~10K rows.
+ * <p>Triggered only by the SUPER_ADMIN endpoint (see {@code
+ * SuperAdminController.backfillVerifiedScore} — to be added separately). Synchronous; the caller
+ * times out after 60s if the table grew past ~10K rows.
  */
 @Slf4j
 @Service
@@ -93,19 +93,18 @@ public class VerifiedScoreBackfillService {
       }
     }
 
-    BackfillResult result =
-        new BackfillResult(rows.size(), updated, unchanged, skipped, errors);
+    BackfillResult result = new BackfillResult(rows.size(), updated, unchanged, skipped, errors);
     log.info("[VerifiedScoreBackfill] done: {}", result);
     return result;
   }
 
   /**
-   * Replicate the new {@code countUnfixedCritical} contract: count CRITICAL issues with
-   * {@code !autoFixed || !fixSucceeded}, EXCLUDING ids prefixed {@code SYNTH-ACC-} (LLM
+   * Replicate the new {@code countUnfixedCritical} contract: count CRITICAL issues with {@code
+   * !autoFixed || !fixSucceeded}, EXCLUDING ids prefixed {@code SYNTH-ACC-} (LLM
    * read-budget-derived synth issues that the new formula filters out).
    *
-   * <p>Issues are stored as a JSON array on {@code validation_report.issues_json} per
-   * {@link ValidationReportService.ReportIssueDTO}.
+   * <p>Issues are stored as a JSON array on {@code validation_report.issues_json} per {@link
+   * ValidationReportService.ReportIssueDTO}.
    */
   static int countUnfixedCriticalFromIssuesJson(String issuesJson) {
     if (issuesJson == null || issuesJson.isBlank()) return 0;
@@ -130,9 +129,9 @@ public class VerifiedScoreBackfillService {
   }
 
   /**
-   * Pull {@code endpointCoverage.coveragePercent} from {@code validation_report.accuracy_json}
-   * if present. Returns null when the run has no endpoint coverage block (non-API project) so
-   * the +10 bonus only fires for runs that actually delivered endpoints.
+   * Pull {@code endpointCoverage.coveragePercent} from {@code validation_report.accuracy_json} if
+   * present. Returns null when the run has no endpoint coverage block (non-API project) so the +10
+   * bonus only fires for runs that actually delivered endpoints.
    */
   static Integer endpointCoverageFromAccuracyJson(String accuracyJson) {
     if (accuracyJson == null || accuracyJson.isBlank()) return null;

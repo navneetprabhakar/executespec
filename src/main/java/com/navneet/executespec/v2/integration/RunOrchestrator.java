@@ -3029,12 +3029,11 @@ public class RunOrchestrator {
   }
 
   /**
-   * GA-readiness P3.2 — clamp the platform-derived hard cost cap by the optional customer
-   * override. The customer can lower the ceiling but not raise it past what credits already
-   * authorised, so the effective cap is {@code min(platformCap, userCap)} when userCap is set,
-   * otherwise the platform cap unchanged. Negative or zero userCap is treated as "not set"
-   * (defensive — the DTO validation already enforces ≥ 0.10 but we don't trust transitive
-   * state).
+   * GA-readiness P3.2 — clamp the platform-derived hard cost cap by the optional customer override.
+   * The customer can lower the ceiling but not raise it past what credits already authorised, so
+   * the effective cap is {@code min(platformCap, userCap)} when userCap is set, otherwise the
+   * platform cap unchanged. Negative or zero userCap is treated as "not set" (defensive — the DTO
+   * validation already enforces ≥ 0.10 but we don't trust transitive state).
    *
    * <p>Static + package-private so {@code RunOrchestratorClampHardCapTest} can pin the contract
    * without spinning up the full orchestrator.
@@ -3345,8 +3344,8 @@ public class RunOrchestrator {
    * Previously a hardcoded switch returned Haiku/flash/mini even after YAML moved Anthropic
    * WORKHORSE to Sonnet (2026-04-19) and Gemini WORKHORSE to Pro (2026-05-04).
    *
-   * <p>Final-fallback safety net: if YAML lookup returns null (e.g. provider mis-configured),
-   * fall back to the historical Anthropic-Haiku default rather than NPE'ing the run.
+   * <p>Final-fallback safety net: if YAML lookup returns null (e.g. provider mis-configured), fall
+   * back to the historical Anthropic-Haiku default rather than NPE'ing the run.
    */
   private String defaultModelFor(String provider) {
     String model = modelRegistry.workhouseModelFor(provider);

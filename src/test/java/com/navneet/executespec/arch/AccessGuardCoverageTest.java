@@ -9,7 +9,6 @@ import java.util.stream.Collectors;
 
 import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.domain.JavaMethod;
-import com.tngtech.archunit.core.domain.JavaMethodCall;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 
@@ -30,12 +29,12 @@ import org.springframework.web.bind.annotation.RequestMapping;
  * call = tenant data leak. This test makes the contract enforced at build time.
  *
  * <p>Rule: every controller method annotated with {@code @GetMapping / @PostMapping / @PutMapping
- * / @DeleteMapping / @PatchMapping} whose containing class has a {@code @RequestMapping}
- * (or {@code @*Mapping} on the method) path containing one of the protected segments must EITHER:
+ * / @DeleteMapping / @PatchMapping} whose containing class has a {@code @RequestMapping} (or
+ * {@code @*Mapping} on the method) path containing one of the protected segments must EITHER:
  *
  * <ul>
- *   <li>call {@link com.navneet.executespec.auth.security.RunAccessGuard} or
- *       {@link com.navneet.executespec.project.security.ProjectAccessGuard} directly, OR
+ *   <li>call {@link com.navneet.executespec.auth.security.RunAccessGuard} or {@link
+ *       com.navneet.executespec.project.security.ProjectAccessGuard} directly, OR
  *   <li>be allowlisted in {@link #ALLOWLIST} below with a one-line justification (admin-only,
  *       public-by-design, etc.).
  * </ul>
@@ -63,21 +62,21 @@ class AccessGuardCoverageTest {
    * <ul>
    *   <li>{@code requireXxx} / {@code requiresXxx} (e.g. requireRunAccess, requireFeatureEnabled,
    *       requireProjectAccess) — the canonical "this throws 403/404 on miss" verb.
-   *   <li>{@code assertXxx} (e.g. assertCanRead, assertAccess, assertCanCreateProject) — alternative
-   *       verb for the same throws-on-miss contract.
+   *   <li>{@code assertXxx} (e.g. assertCanRead, assertAccess, assertCanCreateProject) —
+   *       alternative verb for the same throws-on-miss contract.
    *   <li>{@code ensureXxx} (e.g. ensureMember, ensureCallerIsOrgAdmin) — third verb.
-   *   <li>{@code loadForXxx} / {@code loadXxxForRead} / {@code loadXxxForWrite} — the pattern
-   *       used by repository-style guards that load + check ownership in one call.
+   *   <li>{@code loadForXxx} / {@code loadXxxForRead} / {@code loadXxxForWrite} — the pattern used
+   *       by repository-style guards that load + check ownership in one call.
    *   <li>{@code checkAccess} / {@code checkPermission} — explicit permission-check verbs.
    *   <li>{@code authorize} (Spring Security pattern).
    * </ul>
    *
-   * <p>Any of these called from inside the handler body counts. This is the pragmatic baseline:
-   * the existence of an access-named method call IS the signal that the controller author thought
-   * about tenant access at all. Consolidating onto the canonical {@link
+   * <p>Any of these called from inside the handler body counts. This is the pragmatic baseline: the
+   * existence of an access-named method call IS the signal that the controller author thought about
+   * tenant access at all. Consolidating onto the canonical {@link
    * com.navneet.executespec.auth.security.RunAccessGuard} / {@link
-   * com.navneet.executespec.project.security.ProjectAccessGuard} is a separate cleanup, tracked
-   * as P4.1-followup in the GA-readiness plan.
+   * com.navneet.executespec.project.security.ProjectAccessGuard} is a separate cleanup, tracked as
+   * P4.1-followup in the GA-readiness plan.
    */
   private static final java.util.regex.Pattern GUARD_METHOD_NAME_PATTERN =
       java.util.regex.Pattern.compile(
@@ -100,8 +99,8 @@ class AccessGuardCoverageTest {
    *
    * <ul>
    *   <li>The endpoint is public-by-design (token-bearer or webhook signature is the auth).
-   *   <li>The endpoint is gated by a SUPER_ADMIN role check in {@code SecurityConfig} and the
-   *       admin role is the trust boundary.
+   *   <li>The endpoint is gated by a SUPER_ADMIN role check in {@code SecurityConfig} and the admin
+   *       role is the trust boundary.
    *   <li>The endpoint reads only resources the caller already owns (no path-id bind).
    * </ul>
    */
@@ -131,32 +130,28 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.v2.rollout.V2RunController#poll"));
 
   /**
-   * <b>Known legacy drift</b> — empty as of 2026-05-06. The original 37-entry baseline (audit
-   * Risk #5, catastrophic) was migrated in two batches:
+   * <b>Known legacy drift</b> — empty as of 2026-05-06. The original 37-entry baseline (audit Risk
+   * #5, catastrophic) was migrated in two batches:
    *
    * <ul>
    *   <li>Batch 1 (P5.4 commit): TestResultController × 2.
-   *   <li>Batch 2: PullRequest × 2 + ProjectExport × 1 + ProjectController × 6 +
-   *       ActivityFeed × 1 + Adr × 2 + Invariant × 2 + CodeReview × 2 + PrReview × 1 +
-   *       StandardsCompliance × 1 + ProjectRepo project-scoped × 4 + ProjectDocument × 3 +
-   *       SpecTemplate × 3 = 25 sites.
+   *   <li>Batch 2: PullRequest × 2 + ProjectExport × 1 + ProjectController × 6 + ActivityFeed × 1 +
+   *       Adr × 2 + Invariant × 2 + CodeReview × 2 + PrReview × 1 + StandardsCompliance × 1 +
+   *       ProjectRepo project-scoped × 4 + ProjectDocument × 3 + SpecTemplate × 3 = 25 sites.
    *   <li>Batch 3 (this branch's tail): admin endpoints recategorised to ALLOWLIST with
-   *       justification, V2 canary endpoint same. ProjectRepo repo-scoped × 3 migrated via
-   *       a public {@code service.loadRepoForRead} chokepoint exposed for the controller.
+   *       justification, V2 canary endpoint same. ProjectRepo repo-scoped × 3 migrated via a public
+   *       {@code service.loadRepoForRead} chokepoint exposed for the controller.
    * </ul>
    *
-   * <p>Total: 35 of 35 legacy sites cleared. From here the test is purely forward-protective:
-   * a NEW endpoint added without a guard will fail the build, surfacing a drift before the
-   * tenant-leak ships.
+   * <p>Total: 35 of 35 legacy sites cleared. From here the test is purely forward-protective: a NEW
+   * endpoint added without a guard will fail the build, surfacing a drift before the tenant-leak
+   * ships.
    *
-   * <p><b>Rule:</b> entries can ONLY be added to this set when there's a clear migration plan
-   * + ticket; the default response to a failure should be "fix the missing guard" (preferred)
-   * or "add to ALLOWLIST with explicit non-tenant-bound justification" (rare).
+   * <p><b>Rule:</b> entries can ONLY be added to this set when there's a clear migration plan +
+   * ticket; the default response to a failure should be "fix the missing guard" (preferred) or "add
+   * to ALLOWLIST with explicit non-tenant-bound justification" (rare).
    */
-  private static final Set<String> KNOWN_LEGACY_DRIFT =
-      new LinkedHashSet<>(
-          Set.of(
-              ));
+  private static final Set<String> KNOWN_LEGACY_DRIFT = new LinkedHashSet<>(Set.of());
 
   @Test
   void everyRunOrProjectScopedEndpointCallsAGuard() {
@@ -212,11 +207,13 @@ class AccessGuardCoverageTest {
             + "     RunAccessGuard.requireRunAccess(...) or\n"
             + "     ProjectAccessGuard.assertCanRead(...)), OR\n"
             + "  2. Add to AccessGuardCoverageTest.ALLOWLIST with a one-line justification\n"
-            + "     (only valid reasons: public-by-design, SUPER_ADMIN-gated, or no-tenant-bind).\n\n"
+            + "     (only valid reasons: public-by-design, SUPER_ADMIN-gated, or"
+            + " no-tenant-bind).\n\n"
             + "Do NOT extend KNOWN_LEGACY_DRIFT — that set is closed; new entries indicate a\n"
             + "regression. Migrating the legacy set is tracked under P4.1-followup of the\n"
             + "GA-readiness plan.\n\n"
-            + "Violations:\n  - "
+            + "Violations:\n"
+            + "  - "
             + String.join("\n  - ", violations);
 
     assertThat(violations).withFailMessage(msg).isEmpty();
@@ -293,15 +290,16 @@ class AccessGuardCoverageTest {
         .orElse("");
   }
 
-  private static java.util.Optional<String> tryGet(JavaMethod m, Class<? extends java.lang.annotation.Annotation> ann) {
+  private static java.util.Optional<String> tryGet(
+      JavaMethod m, Class<? extends java.lang.annotation.Annotation> ann) {
     if (!m.isAnnotatedWith(ann)) return java.util.Optional.empty();
     String[] paths = invokeValue(m.getAnnotationOfType(ann));
     return paths.length > 0 ? java.util.Optional.of(paths[0]) : java.util.Optional.of("");
   }
 
   /**
-   * Reflectively read the {@code value()} array on any of the @*Mapping annotation types — they
-   * all expose a {@code String[] value()} but don't share a common base interface.
+   * Reflectively read the {@code value()} array on any of the @*Mapping annotation types — they all
+   * expose a {@code String[] value()} but don't share a common base interface.
    */
   private static String[] invokeValue(Object annotation) {
     try {

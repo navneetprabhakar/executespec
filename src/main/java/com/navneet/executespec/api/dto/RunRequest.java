@@ -109,9 +109,8 @@ public record RunRequest(
      * tighter ceiling. The {@code WorkerAgent} budget guard will force-terminate the run with
      * {@code Outcome.BUDGET_EXCEEDED} the moment cumulative spend reaches this value.
      *
-     * <p>Capped at $1,000 by validation so a typo or copy-paste error can't accidentally
-     * authorise an unbounded run. Min $0.10 — anything lower would prevent even a no-op run
-     * from finishing.
+     * <p>Capped at $1,000 by validation so a typo or copy-paste error can't accidentally authorise
+     * an unbounded run. Min $0.10 — anything lower would prevent even a no-op run from finishing.
      *
      * <p>The platform cap (1.5× the credit-derived estimate) still applies as a CEILING — the
      * effective cap is {@code min(userCostCap, platformHardCap)}, computed in {@code

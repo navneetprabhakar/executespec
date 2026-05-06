@@ -127,8 +127,8 @@ public class PipelineRun {
   /**
    * GA-readiness P3.2 (V178, 2026-05-06) — optional customer-supplied tighter ceiling. When
    * present, {@code RunOrchestrator.persistEstimate} clamps {@link #hardCapUsd} to {@code
-   * min(platformCap, userCostCap)} so the customer's "Stop at $X" input is honoured. Null on
-   * legacy runs / runs without an explicit override.
+   * min(platformCap, userCostCap)} so the customer's "Stop at $X" input is honoured. Null on legacy
+   * runs / runs without an explicit override.
    */
   @Column(name = "user_cost_cap_usd")
   private Double userCostCap;

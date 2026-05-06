@@ -5,10 +5,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import org.junit.jupiter.api.Test;
 
 /**
- * P1.2-followup (2026-05-06) — pins the JSON-parsing helpers used by the verified-score
- * backfill. The {@code backfillAll} top-level method's per-row mutation behavior is hard to
- * unit-test without a real DB; the parsing helpers carry the bulk of the risk and are unit-
- * testable directly.
+ * P1.2-followup (2026-05-06) — pins the JSON-parsing helpers used by the verified-score backfill.
+ * The {@code backfillAll} top-level method's per-row mutation behavior is hard to unit-test without
+ * a real DB; the parsing helpers carry the bulk of the risk and are unit- testable directly.
  */
 class VerifiedScoreBackfillServiceTest {
 
@@ -31,8 +30,7 @@ class VerifiedScoreBackfillServiceTest {
   @Test
   void countUnfixedCritical_synthBuildAndRev_counted() {
     String json =
-        "["
-            + "{\"id\":\"SYNTH-BUILD-1\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false},"
+        "[{\"id\":\"SYNTH-BUILD-1\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false},"
             + "{\"id\":\"SYNTH-REV-1\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false}]";
     assertThat(VerifiedScoreBackfillService.countUnfixedCriticalFromIssuesJson(json)).isEqualTo(2);
   }
@@ -44,12 +42,14 @@ class VerifiedScoreBackfillServiceTest {
     StringBuilder sb = new StringBuilder("[");
     for (int i = 1; i <= 5; i++) {
       if (i > 1) sb.append(',');
-      sb.append("{\"id\":\"SYNTH-ACC-MISS-").append(i)
-        .append("\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false}");
+      sb.append("{\"id\":\"SYNTH-ACC-MISS-")
+          .append(i)
+          .append("\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false}");
     }
     for (int i = 1; i <= 5; i++) {
-      sb.append(",{\"id\":\"SYNTH-ACC-EP-").append(i)
-        .append("\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false}");
+      sb.append(",{\"id\":\"SYNTH-ACC-EP-")
+          .append(i)
+          .append("\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false}");
     }
     sb.append(']');
     assertThat(VerifiedScoreBackfillService.countUnfixedCriticalFromIssuesJson(sb.toString()))
@@ -89,8 +89,7 @@ class VerifiedScoreBackfillServiceTest {
   @Test
   void countUnfixedCritical_mixedRealAndSynth_onlyRealCounts() {
     String json =
-        "["
-            + "{\"id\":\"SYNTH-BUILD-1\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false},"
+        "[{\"id\":\"SYNTH-BUILD-1\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false},"
             + "{\"id\":\"SYNTH-ACC-MISS-1\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false},"
             + "{\"id\":\"SYNTH-ACC-EP-1\",\"severity\":\"CRITICAL\",\"autoFixed\":false,\"fixSucceeded\":false}"
             + "]";

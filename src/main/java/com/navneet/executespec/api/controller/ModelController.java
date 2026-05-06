@@ -70,9 +70,7 @@ public class ModelController {
                 if (!alreadyListed) {
                   modelEntries.add(
                       new ModelEntry(
-                          workhorseId,
-                          "WORKHORSE",
-                          modelRegistry.displayLabelFor(workhorseId)));
+                          workhorseId, "WORKHORSE", modelRegistry.displayLabelFor(workhorseId)));
                 }
               }
 

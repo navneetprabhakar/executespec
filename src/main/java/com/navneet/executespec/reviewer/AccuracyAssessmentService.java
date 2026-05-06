@@ -377,11 +377,11 @@ Return your assessment as a JSON object. No markdown fences. No explanation outs
    * by default = 6 per repo × 3 repos).
    *
    * <p>P1.1 (2026-05-06, GA-readiness audit follow-up): the previous per-file cap was 2,500 chars,
-   * which truncated FastAPI / Express routers with 5+ endpoints to imports + the first 2 handlers
-   * — and produced 14× "controller exists but content not readable" lines in the run-{@code
-   * 0444c95f} validation report (see {@code docs/plans/pending-ga-readiness-90-day-execution-plan.md}
-   * §P1.1). The fix: per-file cap raised to 10,000 chars with head-plus-tail truncation so route
-   * handlers near the end of long files stay visible. Total snippet bytes bounded at {@code
+   * which truncated FastAPI / Express routers with 5+ endpoints to imports + the first 2 handlers —
+   * and produced 14× "controller exists but content not readable" lines in the run-{@code 0444c95f}
+   * validation report (see {@code docs/plans/pending-ga-readiness-90-day-execution-plan.md} §P1.1).
+   * The fix: per-file cap raised to 10,000 chars with head-plus-tail truncation so route handlers
+   * near the end of long files stay visible. Total snippet bytes bounded at {@code
    * TOTAL_SNIPPETS_CHAR_CAP} (100K) to keep prompt token cost predictable. Files that come back as
    * an error string from {@link FileSystemTool#readFile} ("ACCESS DENIED:" / "Cannot read") are
    * skipped instead of being passed to the LLM as if they were source.

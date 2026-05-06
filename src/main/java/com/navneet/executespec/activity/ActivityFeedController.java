@@ -12,7 +12,6 @@ import com.navneet.executespec.project.security.ProjectAccessGuard;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -139,9 +138,9 @@ public class ActivityFeedController {
 
   /**
    * Extract the {@link AppUserDetails} from a Spring {@link Authentication} principal, returning
-   * null when the principal isn't of that type (e.g. tests that pass a
-   * {@code UsernamePasswordAuthenticationToken} with a plain string principal). The
-   * {@link ProjectAccessGuard} fail-closes on null, which is the correct posture.
+   * null when the principal isn't of that type (e.g. tests that pass a {@code
+   * UsernamePasswordAuthenticationToken} with a plain string principal). The {@link
+   * ProjectAccessGuard} fail-closes on null, which is the correct posture.
    */
   private static AppUserDetails principalOrNull(Authentication auth) {
     if (auth == null) return null;
