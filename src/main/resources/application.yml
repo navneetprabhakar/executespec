@@ -682,16 +682,9 @@ app:
     refresh-token-expiry-days: 7
   cors:
     allowed-origins: http://localhost:5173
-  product-routing:
-    # Localhost defaults for the OAuth surface bridge. Both surfaces
-    # collapse to the same dev frontend on :5173 because we don't run
-    # multiple frontends locally. dev/prod profiles override with their
-    # real subdomains. Without this block, OAuthSurfaceResolver falls
-    # back to its hardcoded prod @Value defaults
-    # (https://build.executespec.ai/...) and Google login on localhost
-    # lands on production.
-    app-origin: ${APP_SURFACE_ORIGIN:http://localhost:5173}
-    build-origin: ${BUILD_SURFACE_ORIGIN:http://localhost:5173}
+  # V143 product-routing config retired (V179, single-surface
+  # retirement 2026-05-06). The dual app/build surface was the
+  # consumer/B2B split that's no longer on the GA roadmap.
     app-return-url: ${APP_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
     build-return-url: ${BUILD_SURFACE_RETURN_URL:http://localhost:5173/auth/callback}
   tiers:

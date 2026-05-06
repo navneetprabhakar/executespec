@@ -6,7 +6,6 @@ import jakarta.persistence.*;
 
 import com.navneet.executespec.crypto.EncryptedValueConverter;
 
-import org.hibernate.annotations.ColumnTransformer;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -175,31 +174,9 @@ public class Org {
   @Column(name = "confluence_api_token")
   private String confluenceApiToken;
 
-  // ── V143 (Plan 1 #1) — product surface discriminator ────────────────────
-  /**
-   * "vibe" (consumer) | "executespec" (B2B). Defaulted to 'executespec' on legacy rows.
-   *
-   * <p>[J-02] (audit Sprint 3, 2026-05-01) — root-cause fix for the `org` UPDATE 500 that blocked
-   * POST /api/runs for any user whose org row got touched (every fresh user post-V162 hit this via
-   * personal-org bootstrap → /api/runs → org-state side-effect → UPDATE org SET ... product_id=? →
-   * 500).
-   *
-   * <p>V143 created `product_id` as Postgres ENUM type `product_surface`, but the JPA `@Column`
-   * annotation didn't tell Hibernate to cast the String parameter to the enum type. Hibernate's
-   * default setString binding produced ERROR: column "product_id" is of type product_surface but
-   * expression is of type character varying because Postgres refuses the implicit varchar → enum
-   * cast on UPDATE.
-   *
-   * <p>Fix: keep the Java field as String (no cascading entity refactor across BillingService,
-   * OrgService, AuthService, V143 backfill) + use {@code @ColumnTransformer} to wrap every
-   * read/write with the explicit cast. This is the recommended Hibernate-6 pattern for "Postgres
-   * ENUM column whose Java side is a free-form String" — `@JdbcType(PostgreSQLEnumJdbcType.class)`
-   * would require a Java enum to introspect (NPE on String).
-   */
-  @ColumnTransformer(read = "product_id::text", write = "?::product_surface")
-  @Column(name = "product_id", nullable = false, columnDefinition = "product_surface")
-  @Builder.Default
-  private String productId = "executespec";
+  // V143 product_id field deleted by V179 (single-surface retirement,
+  // 2026-05-06). The dual consumer/B2B surface is not on the GA roadmap;
+  // every account ran on 'executespec' anyway. Org row is leaner now.
 
   // ── V162 — solo-user bootstrap personal org ─────────────────────────────
   /**

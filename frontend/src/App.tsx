@@ -109,6 +109,10 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 
 // v3 (R-101+) — greenfield UX redesign, mounted under /v3/* without
 // touching v2 routes. Cohabitation: per-screen ship, per-persona dogfood.
+// Single-surface retirement (2026-05-06): the v3-vs-v2 split is gone;
+// this is the only chrome now. ProjectHomePage was deleted — its
+// chat-thread + composer is the default `Compose` tab inside
+// ProjectDashboardPage now.
 import Shell from '@/v3/components/Shell';
 import HomeRedirectPage from '@/v3/pages/HomeRedirectPage';
 // R-341 (2026-04-29): LandingPage route converted to a Navigate redirect
@@ -118,7 +122,9 @@ import HomeRedirectPage from '@/v3/pages/HomeRedirectPage';
 // it no longer mounts as a user-facing page.
 // import LandingPage from '@/v3/pages/LandingPage';
 import AuthPage from '@/v3/pages/AuthPage';
-import ProjectHomePage from '@/v3/pages/ProjectHomePage';
+// Single-surface retirement (2026-05-06): ProjectHomePage deleted.
+// Its chat-thread + composer is now the default `Compose` tab inside
+// ProjectDashboardPage. /projects/:projectId mounts the unified page.
 import RunDetailPage from '@/v3/pages/RunDetailPage';
 import BillingPage from '@/v3/pages/BillingPage';
 import TeamPage from '@/v3/pages/TeamPage';
@@ -265,12 +271,16 @@ export default function App() {
           catch-all below so existing bookmarks, marketing copy, email
           deep-links, and shared run URLs keep working. */}
         <Route element={<Shell />}>
-          {/* R-310 (Wave 7) — explicit empty-state route MUST come before
-            the catch-all `projects/:slug` so ProjectHomePage doesn't fire
-            a 404 GET on /api/projects/empty. */}
+          {/* Single-surface retirement (2026-05-06) — `/projects/:projectId`
+              is the canonical project URL. It mounts ProjectDashboardPage
+              with the new `Compose` tab as default (chat-thread +
+              composer, formerly the v3 ProjectHomePage). The `empty`
+              route MUST come first so the catch-all doesn't 404 on
+              /api/projects/empty. The legacy `/projects/:projectId/dashboard`
+              URL (mounted further down inside ProtectedRoute) redirects
+              here so old bookmarks survive. */}
           <Route path='/projects/empty' element={<EmptyProjectPage />} />
-          <Route path='/projects/:slug' element={<ProjectHomePage />} />
-          <Route path='/projects/:slug/runs/:runShort' element={<RunDetailPage />} />
+          <Route path='/projects/:projectId/runs/:runShort' element={<RunDetailPage />} />
           <Route path='/settings' element={<SettingsPage />} />
           {/* R-141 (deferred Wave-1 follow-up, shipped 2026-05-02) — full
               key-management surface (GitHub PAT, AI provider keys, Bitbucket,
@@ -348,15 +358,22 @@ export default function App() {
             <Route path='org/settings' element={<OrgSettingsPage />} />
             <Route path='org/projects' element={<OrgProjectsPage />} />
             <Route path='projects' element={<Navigate to='/home' replace />} />
-            {/* `/projects/:id/dashboard` — dense KPI / multi-tab view.
-                Same dataset as the chat-thread `/projects/:slug` page;
-                we keep both for now (different jobs) and may collapse
-                them after GA once usage tells us which one users
-                actually live in. */}
-            <Route path='projects/:projectId/dashboard' element={<ProjectDashboardPage />} />
+            {/* Single-surface retirement (2026-05-06) — `/projects/:projectId`
+                is the canonical project URL. Mounts ProjectDashboardPage
+                with the new `compose` tab as default (chat-thread +
+                composer, formerly the deleted v3 ProjectHomePage). */}
+            <Route path='projects/:projectId' element={<ProjectDashboardPage />} />
+            {/* Back-compat: the old `/dashboard` URL redirects to the
+                canonical one. We default to `?tab=pulse` so users with
+                explicit dashboard intent keep landing on the dense
+                inspection view they wanted. */}
+            <Route
+              path='projects/:projectId/dashboard'
+              element={<Navigate to='..?tab=pulse' replace relative='path' />}
+            />
             <Route
               path='projects/:projectId/activity'
-              element={<Navigate to='../dashboard?drawer=activity' replace relative='path' />}
+              element={<Navigate to='..?tab=pulse&drawer=activity' replace relative='path' />}
             />
             <Route path='projects/:projectId/executions/new' element={<ExecutionViewPage />} />
             <Route

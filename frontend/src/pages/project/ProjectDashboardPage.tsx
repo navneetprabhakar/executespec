@@ -11,6 +11,9 @@ import PostMergeBar from '@/components/project/PostMergeBar';
 import StatusBadge from '@/components/shared/StatusBadge';
 import PulseTab from '@/components/project/PulseTab';
 import CodeTab, {type CodeSubTab} from '@/components/project/CodeTab';
+// Single-surface retirement (2026-05-06) — chat-thread + composer
+// extracted from the now-deleted ProjectHomePage.
+import ComposeTab from '@/v3/components/ComposeTab';
 import EmptyProjectLanding from '@/components/project/EmptyProjectLanding';
 import ProjectRepoManager from '@/components/project/ProjectRepoManager';
 import MoreDrawer, {useDrawerState, type DrawerPanel} from '@/components/project/MoreDrawer';
@@ -52,7 +55,11 @@ import type {RunDetail} from '@/lib/api';
 // tab. Differentiates the Project surface from the legacy generic shell
 // (the actual frontend/build/* Vite split is documented as a follow-up in
 // docs/plans/pending-project-surface-vite-split.md).
-type TabKey = 'pulse' | 'repos' | 'runs' | 'code' | 'chat';
+// Single-surface retirement (2026-05-06) — `compose` is the new
+// default tab. It hosts the chat-thread + composer that previously
+// lived on the deleted ProjectHomePage. Pulse / Repos / Runs / Code /
+// Chat panels are still one click away on the same URL.
+type TabKey = 'compose' | 'pulse' | 'repos' | 'runs' | 'code' | 'chat';
 type RunsSubTab = 'launches' | 'prs' | 'detail';
 
 function legacyTabToNew(legacy: string | null): {
@@ -85,12 +92,18 @@ function legacyTabToNew(legacy: string | null): {
       return {tab: 'pulse', drawer: 'activity'};
     case 'team':
       return {tab: 'pulse', drawer: 'team'};
+    case 'compose':
+      return {tab: 'compose'};
     default:
-      return {tab: 'pulse'};
+      // Single-surface retirement (2026-05-06): default landing is
+      // Compose (chat-thread + composer). Users explicitly asking for
+      // ?tab=pulse/repos/code/chat get those views unchanged.
+      return {tab: 'compose'};
   }
 }
 
 const TAB_LABELS: {key: TabKey; label: string}[] = [
+  {key: 'compose', label: 'Compose'},
   {key: 'pulse', label: 'Pulse'},
   {key: 'repos', label: 'Repos'},
   {key: 'runs', label: 'Runs'},
@@ -565,9 +578,23 @@ export default function ProjectDashboardPage() {
         <main
           className={cn(
             'flex-1 min-w-0 min-h-0',
-            tab === 'chat' ? 'flex flex-col' : 'overflow-y-auto p-3 sm:p-4',
+            // Single-surface retirement (2026-05-06): Compose + Chat
+            // both want flex-column layout (composer/input pinned to
+            // the bottom of the pane). Other tabs use the standard
+            // scrolling content layout.
+            tab === 'chat' || tab === 'compose'
+              ? 'flex flex-col'
+              : 'overflow-y-auto p-3 sm:p-4',
           )}
         >
+          {/* Single-surface retirement (2026-05-06) — Compose tab.
+              Hosts the chat-thread + composer that previously lived
+              on the now-deleted ProjectHomePage. Default tab. */}
+          {tab === 'compose' && (
+            <div style={{padding: '12px 14px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0}}>
+              <ComposeTab projectId={projectId!} defaultProvider={project?.aiProvider} />
+            </div>
+          )}
           {tab === 'pulse' &&
             (noRuns && repoCount === 0 ? (
               <EmptyProjectLanding
