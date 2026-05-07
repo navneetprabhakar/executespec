@@ -2,7 +2,6 @@ package com.navneet.executespec.agent;
 
 import java.util.List;
 
-import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -19,8 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Distils a free-form user request into a concise 5-9 word imperative title. Used by the {@link
  * PlannerAgent} SINGLE_SHOT path so run titles shown in project views read naturally instead of
- * echoing the raw request. Uses the LIGHTWEIGHT tier via the V1 {@link FallbackLlmRouter} (same pattern as
- * {@code RunLedgerAgent}) — cheap + fast + no ExecutionContext plumbing needed.
+ * echoing the raw request. Uses the LIGHTWEIGHT tier via the V1 {@link FallbackLlmRouter} (same
+ * pattern as {@code RunLedgerAgent}) — cheap + fast + no ExecutionContext plumbing needed.
  *
  * <p>All failures return {@code null} so callers can fall back to deterministic truncation. Title
  * generation is a nice-to-have, never a hard dependency.

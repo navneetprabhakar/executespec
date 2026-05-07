@@ -98,8 +98,8 @@ public class AgentModelConfig {
   /**
    * System-level Anthropic bean — only created when ANTHROPIC_API_KEY is configured. Auto-config is
    * excluded (requires non-empty key at startup); we create manually so the app can start without
-   * an Anthropic key (graceful degradation on MIG restart). When absent, FallbackLlmRouter skips Anthropic
-   * in the fallback chain.
+   * an Anthropic key (graceful degradation on MIG restart). When absent, FallbackLlmRouter skips
+   * Anthropic in the fallback chain.
    */
   @Bean
   public AnthropicChatModel anthropicChatModel(
@@ -128,8 +128,8 @@ public class AgentModelConfig {
   /**
    * System-level OpenAI bean — only created when OPENAI_API_KEY is configured. Auto-config is
    * excluded (requires non-empty key at startup); we create manually so the app can start without
-   * an OpenAI key (graceful degradation). When absent, FallbackLlmRouter skips OpenAI in the fallback
-   * chain.
+   * an OpenAI key (graceful degradation). When absent, FallbackLlmRouter skips OpenAI in the
+   * fallback chain.
    */
   @Bean
   public OpenAiChatModel openAiChatModel(@Value("${spring.ai.openai.api-key:}") String apiKey) {
@@ -144,8 +144,8 @@ public class AgentModelConfig {
 
   /**
    * System-level Google Gemini bean — only created when GOOGLE_API_KEY is configured. Used as the
-   * 3rd fallback provider in FallbackLlmRouter when no user/org key is present. When absent, FallbackLlmRouter
-   * gracefully skips Gemini in the fallback chain.
+   * 3rd fallback provider in FallbackLlmRouter when no user/org key is present. When absent,
+   * FallbackLlmRouter gracefully skips Gemini in the fallback chain.
    */
   @Bean
   public GoogleGenAiChatModel googleGenAiChatModel(

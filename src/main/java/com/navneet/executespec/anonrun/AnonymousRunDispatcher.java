@@ -11,8 +11,8 @@ package com.navneet.executespec.anonrun;
  * <p>The real impl is intentionally NOT shipped here — wiring it requires:
  *
  * <ul>
- *   <li>Anthropic LIGHTWEIGHT routing through {@link com.navneet.executespec.agent.LlmRouter}
- *       with a synthetic runId so cost-tracking still works
+ *   <li>Anthropic LIGHTWEIGHT routing through {@link com.navneet.executespec.agent.LlmRouter} with
+ *       a synthetic runId so cost-tracking still works
  *   <li>Hard per-call cost cap of $0.01 (LIGHTWEIGHT class) enforced in the dispatcher
  *   <li>An "outline-only" prompt — we want value without burning a real workspace per anonymous
  *       request (the goal is "show me what you'd build", not "ship the code")

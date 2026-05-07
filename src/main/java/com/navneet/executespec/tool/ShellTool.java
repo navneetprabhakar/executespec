@@ -7,12 +7,10 @@ import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.navneet.executespec.programbench.ProgramBenchContainerStore;
-import com.navneet.executespec.tool.ShellSandboxPolicy;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -115,14 +113,7 @@ public class ShellTool implements Tool {
         pb =
             new ProcessBuilder(
                 List.of(
-                    "docker",
-                    "exec",
-                    "-w",
-                    "/workspace",
-                    containerId,
-                    "/bin/sh",
-                    "-c",
-                    command));
+                    "docker", "exec", "-w", "/workspace", containerId, "/bin/sh", "-c", command));
         // pb.directory() left as inherited — docker exec doesn't care about the
         // host-side cwd; the -w flag controls the in-container cwd.
       } else {

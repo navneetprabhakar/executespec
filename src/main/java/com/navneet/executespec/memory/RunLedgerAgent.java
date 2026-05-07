@@ -30,8 +30,8 @@ import lombok.extern.slf4j.Slf4j;
  * project_run_ledger}. Idempotent: skips if an entry already exists for the runId. Triggers {@link
  * MemoryCompactionService} every 10th run.
  *
- * <p>Uses V1 {@link FallbackLlmRouter} at LIGHTWEIGHT tier (same pattern as {@code ContextAgent}). Memory
- * generation must never break a run — all failures are caught and logged.
+ * <p>Uses V1 {@link FallbackLlmRouter} at LIGHTWEIGHT tier (same pattern as {@code ContextAgent}).
+ * Memory generation must never break a run — all failures are caught and logged.
  */
 @Service
 @RequiredArgsConstructor

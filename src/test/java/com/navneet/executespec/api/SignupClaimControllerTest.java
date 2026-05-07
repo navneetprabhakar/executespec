@@ -7,10 +7,10 @@ import static org.mockito.Mockito.*;
 import java.time.Instant;
 import java.util.Optional;
 
-import com.navneet.executespec.auth.entity.AppUser;
-import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.anonrun.AnonymousRunService;
 import com.navneet.executespec.anonrun.AnonymousRunSession;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.security.AppUserDetails;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -49,8 +49,7 @@ class SignupClaimControllerTest {
     when(anonymousRunService.bindToUser("missing", "u-alice")).thenReturn(Optional.empty());
 
     ResponseEntity<SignupClaimController.ClaimResponse> resp =
-        controller.claimAnonymousSession(
-            new SignupClaimController.ClaimRequest("missing"), alice);
+        controller.claimAnonymousSession(new SignupClaimController.ClaimRequest("missing"), alice);
 
     assertEquals(200, resp.getStatusCode().value());
     assertNotNull(resp.getBody());

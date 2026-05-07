@@ -22,8 +22,8 @@ import lombok.extern.slf4j.Slf4j;
  * doc in natural language.
  *
  * <p>Separate from {@link ArchitectureDocGenerator} which does the Step 3 combined synthesis across
- * repos. Each generator dispatches through {@link FallbackLlmRouter} via the LIGHTWEIGHT tier (cheap,
- * fast).
+ * repos. Each generator dispatches through {@link FallbackLlmRouter} via the LIGHTWEIGHT tier
+ * (cheap, fast).
  */
 @Component
 @RequiredArgsConstructor

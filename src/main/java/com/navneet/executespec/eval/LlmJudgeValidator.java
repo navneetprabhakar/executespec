@@ -49,7 +49,8 @@ public class LlmJudgeValidator {
     try {
       Prompt prompt = new Prompt(List.of(new UserMessage(judgePrompt)));
       FallbackLlmRouter.LlmResponse response =
-          fallbackLlmRouter.callDirect("anthropic", modelRegistry.lightweightModelFor("anthropic"), prompt);
+          fallbackLlmRouter.callDirect(
+              "anthropic", modelRegistry.lightweightModelFor("anthropic"), prompt);
       String judgeResponse = response.response().getResult().getOutput().getText();
 
       return parseJudgeResponse(judgeResponse, testCase.validationPatterns().size());

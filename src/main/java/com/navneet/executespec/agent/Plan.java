@@ -11,8 +11,7 @@ import lombok.Builder;
  *
  * <ul>
  *   <li>{@link #buildCommand} — explicit build command declaration. If null, V2's {@link
- *       com.navneet.executespec.smoketest.BuildCommandResolver} falls back to framework
- *       inference.
+ *       com.navneet.executespec.smoketest.BuildCommandResolver} falls back to framework inference.
  *   <li>{@link #smokeTestStrategy} — how the executor verifies each task after merge (Phase 5 owns
  *       the actual enforcement).
  *   <li>{@link PlannedTask#hardConstraints} — per-task constraints injected into the worker system
