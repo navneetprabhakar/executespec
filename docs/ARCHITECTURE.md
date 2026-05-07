@@ -1,18 +1,15 @@
 # ExecuteSpec — Architecture Document
 
-> ## Naming convention — read this before anything else
+> ## Versioning convention (2026-05-07 onward)
 >
-> "V2" and "v3" are **different concepts**, not successive generations of the same thing:
+> **No V2/V3 markers in Java code, classes, or operational resource paths.** Backend packages were unified — what used to live at `com.navneet.executespec.v2.*` (the pipeline) and `com.navneet.executespec.v3.*` (the consumer/product surface) is now flat under `com.navneet.executespec.*`. Class suffixes (`LlmRouterV2`, `ReviewerAgentV3`, `ReviewReportV2`, `ShellToolV2`, etc.) and prefixes (`V3LandingController`, `V2RunController`, etc.) are gone.
 >
-> | Term | Refers to | Source |
-> |---|---|---|
-> | **V2** (uppercase) | Backend pipeline architecture (Smart classifier → Outline planner → Sequential executor → Worker → Reviewer) | `com.navneet.executespec.v2.*` |
-> | **v3** (lowercase) | Customer product / UX surface — third generation of the consumer-facing app (landing, anonymous runs, referrals, entitlements, Graphite+Signal theme) | `com.navneet.executespec.v3.*`, `frontend/src/v3/*` |
-> | **Pilot v3.0** | Project workspace pilot (multi-repo + per-project architecture doc + score trend) — shipped in v2.5.0 | `project/`, `codeintel/` |
-> | **V1–V150** | Flyway migration numbers, unrelated to the above |
-> | **`ReviewerAgentV3`, `LlmRouterV2`, `WorkerAgentV2`, etc.** | Component-level revision numbers **inside** the V2 pipeline. Not pipeline-architecture generation indicators. |
+> **Still versioned (deliberately out of scope):**
+> - Flyway migration filenames (`V1__init.sql`..`V150__*.sql`) — Flyway tracks applied migrations by filename; renaming would break `flyway_schema_history`.
+> - Frontend bundled JS in `src/main/resources/static/assets/index-*.js` — build artifacts, not source.
+> - Prompt rollback archives `prompts/planner.v1.txt`..`v14.txt`, `prompts/reviewer-v2.txt` — kept for `PromptVersioningService` rollback semantics.
 >
-> **There is no V3 pipeline.** V1 has been deleted; V2 is the only active pipeline. References to "v3" elsewhere are about the product surface or migration numbers.
+> Below, narrative section headers like "v2.6.0 release" or "Pilot v3.0 (project workspace)" are **product release version numbers**, not architecture markers — they refer to which app version shipped a given feature, not to a separate codebase.
 
 > **Version**: 4.11
 > **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22; v2.6.1 Waves 1-6 merged + deployed 2026-04-23; v2.6.2-track hierarchical planner all 5 slices shipped on `feature/hierarchical-planner` 2026-04-25 (not yet merged); **v2.6.3-track enterprise readiness all 4 phases shipped on `feature/enterprise-readiness-eval` 2026-04-25 (not yet merged) — server-up sweep landed clean**

@@ -31,9 +31,9 @@ Default admin: `admin@executespec.ai` / `Admin@123` (forced password change on f
 
 ---
 
-## Pipeline (V2 — current as of v1.0.0-M1)
+## Pipeline (current as of v1.0.0-M1)
 
-> **Naming heads-up.** "V2" here refers to the **backend pipeline architecture**. The unrelated `com.navneet.executespec.v3.*` package + `frontend/src/v3/*` host the customer-facing **product/UX surface** (landing, anonymous runs, referrals, entitlements). There is no V3 pipeline. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full convention.
+> **Versioning note (2026-05-07 onward):** Java code no longer carries V2/V3 markers. Backend packages were flattened from `com.navneet.executespec.v2.*` and `com.navneet.executespec.v3.*` to `com.navneet.executespec.*`; class suffixes/prefixes (`LlmRouterV2`, `ReviewerAgentV3`, `V3LandingController`, …) dropped. Flyway migration filenames and prompt-rollback archives stay versioned (intentionally — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale).
 
 
 
