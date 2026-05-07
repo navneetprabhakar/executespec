@@ -209,8 +209,14 @@ public class ShellSandboxPolicy {
           // generated build script) needs, but reject anything that touches system dirs. The
           // `chmod -R 777 /` exact-match phrase already lives in BLOCKED_COMMANDS; this pattern
           // catches the broader family (chmod 755 /etc/foo, chmod +x /usr/bin/bar, etc).
+          // NOTE: `/opt` and `/var` are deliberately NOT in this list — production workspaces
+          // bind to `/opt/app/workspace/<runId>` (`agent.workspace=./workspace` resolved against
+          // `WorkingDirectory=/opt/app`), so blocking `/opt` would false-positive every worker
+          // that uses an absolute workspace path. `/var` is similarly used by some host-side
+          // scratch dirs. The remaining dirs are kernel + system + boot critical with no
+          // legitimate workspace overlap.
           Pattern.compile(
-              "\\bchmod\\b[^\\n]*\\s/(?:etc|usr|var|root|boot|sbin|bin|opt|sys|proc|dev|run)\\b"));
+              "\\bchmod\\b[^\\n]*\\s/(?:etc|usr|root|boot|sbin|bin|sys|proc|dev|run)\\b"));
 
   // Docker subcommands that are safe — all others are blocked
   private static final Set<String> ALLOWED_DOCKER_SUBCOMMANDS =

@@ -112,6 +112,19 @@ class ShellSandboxPolicyTest {
     }
 
     @Test
+    @DisplayName("chmod against /opt/app/workspace/<runId> is allowed (not a system dir)")
+    void chmodOptAppWorkspace() {
+      // Production layout: agent.workspace=./workspace resolved against
+      // WorkingDirectory=/opt/app gives /opt/app/workspace/<runId>. Workers using absolute
+      // workspace paths must not be falsely blocked by the chmod-system-dirs pattern. /opt is
+      // deliberately NOT in the blocklist for this reason.
+      var result =
+          policy.validate(
+              "chmod +x /opt/app/workspace/abc-123/compile.sh", "/opt/app/workspace/abc-123");
+      assertThat(result.permitted()).isTrue();
+    }
+
+    @Test
     @DisplayName("reboot is blocked")
     void reboot() {
       var result = policy.validate("reboot", "/ws");
