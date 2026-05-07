@@ -6,8 +6,10 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.tool.ShellSandboxPolicy;
 
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import lombok.RequiredArgsConstructor;
@@ -28,7 +30,6 @@ import lombok.extern.slf4j.Slf4j;
  */
 @Component
 @Slf4j
-@RequiredArgsConstructor
 public class ShellTool implements Tool {
 
   static final int MAX_OUTPUT_CHARS = 4_000;
@@ -36,6 +37,17 @@ public class ShellTool implements Tool {
   static final int MAX_TIMEOUT_SEC = 300;
 
   private final ShellSandboxPolicy sandboxPolicy;
+  // Programbench tasks stash their cleanroom container ID per-runId here. When set,
+  // shell commands route via `docker exec <cid> sh -c '...'` instead of host shell.
+  // For normal runs, this is always null and behavior is unchanged.
+  private final ProgramBenchContainerStore programBenchContainers;
+
+  @Autowired
+  public ShellTool(
+      ShellSandboxPolicy sandboxPolicy, ProgramBenchContainerStore programBenchContainers) {
+    this.sandboxPolicy = sandboxPolicy;
+    this.programBenchContainers = programBenchContainers;
+  }
 
   @Override
   public String name() {
@@ -90,9 +102,33 @@ public class ShellTool implements Tool {
           ToolResult.ErrorKind.FORBIDDEN, "command blocked by sandbox: " + validation.reason());
     }
 
+    // Programbench branch — when this runId has a cleanroom container registered,
+    // dispatch via `docker exec` so build/run commands hit the container's toolchain
+    // (gcc, cargo, go, etc.) which the host typically doesn't have.
+    String containerId =
+        programBenchContainers != null ? programBenchContainers.get(ctx.runId()) : null;
+
     try {
-      ProcessBuilder pb = new ProcessBuilder(List.of("/bin/sh", "-c", command));
-      pb.directory(ctx.workspaceRoot().toFile());
+      ProcessBuilder pb;
+      if (containerId != null) {
+        // Container has --network none + bind-mounted /workspace; cd to it on entry.
+        pb =
+            new ProcessBuilder(
+                List.of(
+                    "docker",
+                    "exec",
+                    "-w",
+                    "/workspace",
+                    containerId,
+                    "/bin/sh",
+                    "-c",
+                    command));
+        // pb.directory() left as inherited — docker exec doesn't care about the
+        // host-side cwd; the -w flag controls the in-container cwd.
+      } else {
+        pb = new ProcessBuilder(List.of("/bin/sh", "-c", command));
+        pb.directory(ctx.workspaceRoot().toFile());
+      }
       // Sanitize env — whitelist only safe vars (matches V1 behavior).
       Map<String, String> env = pb.environment();
       String path = env.get("PATH");

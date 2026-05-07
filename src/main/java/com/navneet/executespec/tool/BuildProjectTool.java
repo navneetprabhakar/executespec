@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.programbench.ProgramBenchContainerStore;
 import com.navneet.executespec.smoketest.BuildCommand;
 import com.navneet.executespec.smoketest.BuildCommandResolver;
 
@@ -31,6 +32,9 @@ public class BuildProjectTool implements Tool {
 
   private final BuildCommandResolver resolver;
   private final MavenDependencyValidator mavenDependencyValidator;
+  // Programbench tasks stash the cleanroom container ID per-runId; when set, build
+  // dispatches via `docker exec` so language toolchains in the cleanroom image are used.
+  private final ProgramBenchContainerStore programBenchContainers;
 
   @Override
   public String name() {
@@ -90,9 +94,29 @@ public class BuildProjectTool implements Tool {
               + msg);
     }
 
+    // Programbench branch — when this runId has a cleanroom container registered,
+    // dispatch via `docker exec` so the build hits the container's toolchain.
+    String containerId =
+        programBenchContainers != null ? programBenchContainers.get(ctx.runId()) : null;
+
     try {
-      ProcessBuilder pb = new ProcessBuilder(List.of("/bin/sh", "-c", bc.command()));
-      pb.directory(ctx.workspaceRoot().toFile());
+      ProcessBuilder pb;
+      if (containerId != null) {
+        pb =
+            new ProcessBuilder(
+                List.of(
+                    "docker",
+                    "exec",
+                    "-w",
+                    "/workspace",
+                    containerId,
+                    "/bin/sh",
+                    "-c",
+                    bc.command()));
+      } else {
+        pb = new ProcessBuilder(List.of("/bin/sh", "-c", bc.command()));
+        pb.directory(ctx.workspaceRoot().toFile());
+      }
       Map<String, String> env = pb.environment();
       String inheritedPath = env.get("PATH");
       String home = env.get("HOME");
