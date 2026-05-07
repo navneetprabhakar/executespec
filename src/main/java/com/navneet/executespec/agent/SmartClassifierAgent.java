@@ -319,9 +319,14 @@ public class SmartClassifierAgent {
       // and the LLM verifier never ran (run b171fa52 only had the heuristic verdict; the
       // upgrade-to-LEGACY check was missed). Audited via classifierReasoning persisted on the
       // run. 2026-05-02.
+      // 2026-05-07 — V2/V3 unification renamed prompts/v2/ → prompts/. Was "v2/classifier.md"
+      // since the unification, which produced "prompt assembly failed: Cannot load prompt file:
+      // prompts/v2/classifier.md" on every run (visible on classifierReasoning of all 3 cmatrix
+      // ProgramBench runs 2026-05-07). LLM verifier silently skipped on every run. Now
+      // "classifier.md" matching the actual on-disk path.
       prompt =
           promptAssembler.assemble(
-              "v2/classifier.md",
+              "classifier.md",
               java.util.Map.of(
                   "HEURISTIC_VERDICT",
                   heuristic.strategy.name(),

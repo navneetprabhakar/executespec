@@ -56,6 +56,19 @@ class ShellSandboxPolicyTest {
     void javaJar() {
       assertThat(policy.validate("java -jar app.jar", "/ws").permitted()).isTrue();
     }
+
+    @Test
+    @DisplayName("chmod +x compile.sh (relative workspace path) is allowed")
+    void chmodWorkspaceRelative() {
+      // 2026-05-07 — programbench-driven: workers were trying chmod to make their generated
+      // compile.sh executable. Without chmod allowed, every chmod warning fired and the worker
+      // stagnated. Running `./compile.sh` itself is still blocked (script-execution defeats the
+      // allowlist by design — the build-smoke gate via BuildProjectTool is the authoritative
+      // validator and bypasses the sandbox).
+      assertThat(policy.validate("chmod +x compile.sh", "/ws").permitted()).isTrue();
+      assertThat(policy.validate("chmod +x ./compile.sh", "/ws").permitted()).isTrue();
+      assertThat(policy.validate("chmod 755 build.sh", "/ws").permitted()).isTrue();
+    }
   }
 
   @Nested
@@ -75,6 +88,40 @@ class ShellSandboxPolicyTest {
     void chmodR777() {
       var result = policy.validate("chmod -R 777 /", "/ws");
       assertThat(result.permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("chmod against /etc is blocked (system-path BLOCKED_PATTERN)")
+    void chmodEtc() {
+      var result = policy.validate("chmod 644 /etc/passwd", "/ws");
+      assertThat(result.permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("chmod against /usr is blocked")
+    void chmodUsr() {
+      var result = policy.validate("chmod +x /usr/local/bin/foo", "/ws");
+      assertThat(result.permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("chmod 777 / (bare root) is blocked")
+    void chmod777Root() {
+      var result = policy.validate("chmod 777 /", "/ws");
+      assertThat(result.permitted()).isFalse();
+    }
+
+    @Test
+    @DisplayName("chmod against /opt/app/workspace/<runId> is allowed (not a system dir)")
+    void chmodOptAppWorkspace() {
+      // Production layout: agent.workspace=./workspace resolved against
+      // WorkingDirectory=/opt/app gives /opt/app/workspace/<runId>. Workers using absolute
+      // workspace paths must not be falsely blocked by the chmod-system-dirs pattern. /opt is
+      // deliberately NOT in the blocklist for this reason.
+      var result =
+          policy.validate(
+              "chmod +x /opt/app/workspace/abc-123/compile.sh", "/opt/app/workspace/abc-123");
+      assertThat(result.permitted()).isTrue();
     }
 
     @Test
