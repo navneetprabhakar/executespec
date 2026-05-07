@@ -384,6 +384,10 @@ export default function ProjectDashboardPage() {
   const noRuns = tasks.length === 0;
   const repoCount = repos?.length ?? 0;
 
+  // 2026-05-07 — wide + fill modifiers on the v3 main wrapper are
+  // driven by `Shell.classifyRoute` for /projects/:id/* paths. Previous
+  // per-page `useEffect` removed in favour of the centralised policy.
+
   return (
     <div className='h-full flex flex-col'>
       {/* Top chrome: back link + header + compact summary bar + tab strip */}

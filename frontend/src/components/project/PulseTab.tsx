@@ -1,31 +1,26 @@
 /**
  * PulseTab — replaces the old Overview pane after the v2.6.4 IA cleanup.
  *
- * Per the UX & Wireframe Report (2026-04-26 §5.2 + §5.3), the project
- * dashboard's first paint had 25 affordances and no primary action. This
- * tab consolidates what BOTH personas (Senior PM + Lead Engineer) actually
- * scan for on every visit:
+ * 2026-05-07 visual refresh — rebuilt to match the website's
+ * `Project Workspace` mockup (website/index.html .ws-mockup-* classes).
+ * Same layout the marketing site shows: hero card + score ring on top,
+ * spend bar below, 3-cell rollup (Health · Knowledge · Activity), then
+ * the recent-PRs strip. Uses the new v3 primitives (`.v3-card`,
+ * `.v3-rollup`, `.v3-eyebrow`, `.v3-chip`, `.v3-spendbar`,
+ * `.v3-hero-grid`) so the page reads consistently with every other v3
+ * surface and survives a future palette swap without per-component
+ * edits.
  *
- *   ┌──────────────────────────────────────────────┐
- *   │  Last run hero (left)   ·  Verified score (right)
- *   │  ─────────────────────────────────────────────
- *   │  Health & debt summary  ·  Activity preview
- *   └──────────────────────────────────────────────┘
- *
- * Defers everything else (Generated Docs, Project Memory, full Activity
- * feed, Workspace Health detail, Standards table, Tech Debt drilldown)
- * into the More drawer or the dedicated Code tab.
- *
- * UX-preservation contract: reuses existing primitives + 4-band semantic
- * tokens. No new colors, no new fonts, no new component primitives.
+ * The earlier Tailwind-token version (`bg-[var(--gray-100)]`,
+ * `border-[var(--border-default)]`) leaked v2 design tokens into a v3
+ * shell. Switching to the v3 token namespace closes that gap and
+ * lets light-theme + paper-* cascade through cleanly.
  */
 import {Link} from 'react-router-dom';
-import {ArrowRight, Activity, Heart, DollarSign, BookOpen, Sparkles} from 'lucide-react';
+import {ArrowRight, Activity, Heart, BookOpen, Sparkles, Rocket, FolderGit2, Plus} from 'lucide-react';
 import ScoreRing from '@/components/runs/ScoreRing';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
-import {Rocket, FolderGit2, Plus} from 'lucide-react';
-import {cn} from '@/lib/utils';
 import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {useProjectStore} from '@/stores/useProjectStore';
@@ -104,7 +99,7 @@ export default function PulseTab({
 
   if (!lastRun) {
     return (
-      <div className='space-y-4 w-full'>
+      <div style={{padding: 'var(--v3-pad-4)'}}>
         <EmptyState
           icon={Rocket}
           title='No runs yet'
@@ -119,23 +114,57 @@ export default function PulseTab({
   const heroScore = verified ?? accuracy;
 
   return (
-    <div className='space-y-3 w-full'>
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 'var(--v3-pad-4)',
+        // Padding is applied by the parent `<main>` in ProjectDashboardPage
+        // (`p-3 sm:p-4`); duplicating it here would double-pad the pane.
+      }}
+    >
       {/* v2.7.2 — inline "no repos linked" banner. Renders only when the
           parent passes onLinkRepo (which is only when repoCount === 0).
           Click pops AddRepoModal directly via the shared openAddRepoFlow
           plumbing in ProjectDashboardPage. */}
       {onLinkRepo && (
-        <div className='rounded-md border border-status-waiting/40 bg-status-waiting/10 p-3 flex items-center gap-3'>
-          <FolderGit2 className='h-4 w-4 text-status-waiting flex-shrink-0' />
-          <div className='flex-1 min-w-0'>
-            <div className='text-sm font-medium text-primary'>No repositories linked</div>
-            <div className='text-[11px] text-muted'>
+        <div
+          style={{
+            background: 'rgba(245,158,11,0.10)',
+            border: '1px solid rgba(245,158,11,0.40)',
+            borderRadius: 'var(--v3-radius-lg)',
+            padding: 'var(--v3-pad-3) var(--v3-pad-4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+          }}
+        >
+          <FolderGit2 className='h-4 w-4' style={{color: '#fbbf24', flexShrink: 0}} />
+          <div style={{flex: 1, minWidth: 0}}>
+            <div style={{fontSize: 13, fontWeight: 600, color: 'var(--v3-text)'}}>
+              No repositories linked
+            </div>
+            <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)', marginTop: 2}}>
               You have runs but no repos. Launches will be blocked until you link at least one.
             </div>
           </div>
           <button
+            type='button'
             onClick={onLinkRepo}
-            className='inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-sm border border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              fontSize: 12,
+              fontWeight: 600,
+              padding: '5px 12px',
+              borderRadius: 'var(--v3-radius)',
+              border: '1px solid rgba(245,158,11,0.40)',
+              background: 'rgba(245,158,11,0.14)',
+              color: '#fbbf24',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
           >
             <Plus className='h-3.5 w-3.5' />
             Add repository
@@ -143,46 +172,26 @@ export default function PulseTab({
         </div>
       )}
 
-      {/* v2.6.4 user-feedback fix #1 — Pulse uses the full pane (was
-          max-w-3xl ≈ 768px, looked tiny on wide monitors). 12-col grid
-          gives the hero row LastRun cols 1-8 + ScoreRing cols 9-12 on
-          md+ (tablet 768px and wider); collapses to a single column on
-          phones (<768px) so the ScoreRing isn't squeezed. */}
-      <div className='grid grid-cols-1 md:grid-cols-12 gap-3'>
-        <div className='md:col-span-8 min-w-0'>
-          <LastRunCard task={lastRun} report={report} onOpenRun={() => onOpenRun(lastRun.runId)} />
-        </div>
-        <div className='md:col-span-4'>
-          <ScoreCardCompact score={heroScore} report={report} />
-        </div>
+      {/* Hero — last-run card on the left, verified-score ring on the right.
+          Mirrors the website mockup's `.ws-mockup-grid` (1fr 200px), collapses
+          on phones via the .v3-hero-grid media-query. */}
+      <div className='v3-hero-grid'>
+        <LastRunCard task={lastRun} report={report} onOpenRun={() => onOpenRun(lastRun.runId)} />
+        <ScoreCardCompact score={heroScore} report={report} />
       </div>
 
-      {/* X-04 (UX audit, 2026-05-03) — project-scope spend chip. Pre-fix
-          enterprise admins asking "how much has this project cost?" had
-          to leave the project: SummaryBar only showed totalCost when > 0,
-          per-run cost was buried under RunDetailTabs Overview, and org-
-          wide spend at /exec is gated behind canViewCostBreakdown. The
-          data is already on the dashboard endpoint; surfacing it here
-          puts the answer one row from the score ring. Hides on cold
-          projects (totalCostUsd null/0) so the empty-project hero
-          doesn't get cluttered. */}
+      {/* Spend bar — only renders on warm projects. Single horizontal strip
+          with mono spend + token total. Mirrors `.ws-mockup-spendbar`. */}
       <ProjectSpendBar />
 
-      {/* Health · Knowledge · Activity row — 3-col on md+, stacked on mobile.
-          P-10 (UX audit, 2026-05-03) — Generated Docs were buried in the
-          More drawer with no surface affordance, so users frequently
-          regenerated them by accident or didn't realise they existed. The
-          Knowledge tile here surfaces presence + a one-click jump into the
-          drawer panel that owns the full Generate / View / Download UX. */}
-      <div className='grid grid-cols-1 md:grid-cols-3 gap-3'>
+      {/* Triple rollup — Health · Knowledge · Activity. */}
+      <div className='v3-rollup'>
         <HealthCard projectId={projectId} onOpenCode={() => onSwitchTab('code')} />
         <KnowledgeCard projectId={projectId} />
         <ActivityCard
           entries={activity}
           loading={activityLoading}
           onShowAll={() => {
-            // Deep-link to the More drawer's full activity surface — wired
-            // via a query param the parent page reads.
             const url = new URL(window.location.href);
             url.searchParams.set('drawer', 'activity');
             window.history.replaceState(null, '', url.toString());
@@ -193,32 +202,61 @@ export default function PulseTab({
 
       {/* Recent PRs — compact list (full list under Runs tab → PRs sub) */}
       {recentPrs.length > 0 && (
-        <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3'>
-          <div className='flex items-center justify-between mb-2'>
-            <h3 className='text-xs font-medium text-secondary'>Recent pull requests</h3>
+        <div className='v3-card'>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 'var(--v3-pad-2)',
+            }}
+          >
+            <h3 style={{margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--v3-text)'}}>
+              Recent pull requests
+            </h3>
             <button
+              type='button'
               onClick={() => onSwitchTab('runs')}
-              className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
+              style={{
+                fontSize: 11.5,
+                color: 'var(--v3-brand-hover)',
+                background: 'transparent',
+                border: 0,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 2,
+              }}
             >
               View all <ArrowRight className='h-3 w-3' />
             </button>
           </div>
-          <ul className='space-y-1'>
+          <ul style={{margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6}}>
             {recentPrs.slice(0, 3).map((pr) => (
               <li
                 key={`${pr.repoFullName}-${pr.prNumber}`}
-                className='flex items-center gap-2 text-[11px]'
+                style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: 12}}
               >
                 <StatusBadge status={pr.status} />
                 <a
                   href={pr.prUrl}
                   target='_blank'
                   rel='noreferrer'
-                  className='text-primary hover:text-accent-blue truncate flex-1'
+                  style={{
+                    color: 'var(--v3-text)',
+                    flex: 1,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    textDecoration: 'none',
+                  }}
                 >
                   {pr.repoFullName} {pr.headBranch ? `· ${pr.headBranch}` : ''}
                 </a>
-                <span className='text-muted font-mono'>#{pr.prNumber}</span>
+                <span className='v3-mono' style={{color: 'var(--v3-text-muted)', fontSize: 11}}>
+                  #{pr.prNumber}
+                </span>
               </li>
             ))}
           </ul>
@@ -246,16 +284,27 @@ function ProjectSpendBar() {
     return String(n);
   };
   return (
-    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] px-3 py-2 flex items-center gap-3'>
-      <DollarSign className='h-3.5 w-3.5 text-accent-blue flex-shrink-0' />
-      <span className='text-xs text-secondary'>Project spend so far</span>
-      <span className='text-xs font-mono font-medium text-primary tabular-nums'>
+    <div className='v3-spendbar'>
+      <span style={{color: 'var(--v3-text-muted)'}}>Project spend so far</span>
+      <span
+        className='v3-mono'
+        style={{fontWeight: 600, color: 'var(--v3-text)', fontVariantNumeric: 'tabular-nums'}}
+      >
         ${total.toFixed(2)}
       </span>
       {tokens > 0 && (
         <>
-          <span className='text-muted'>·</span>
-          <span className='text-[11px] text-muted tabular-nums'>{formatTokens(tokens)} tokens</span>
+          <span style={{color: 'var(--v3-text-subtle)'}}>·</span>
+          <span
+            className='v3-mono'
+            style={{
+              color: 'var(--v3-text-muted)',
+              fontSize: 11.5,
+              fontVariantNumeric: 'tabular-nums',
+            }}
+          >
+            {formatTokens(tokens)} tokens
+          </span>
         </>
       )}
     </div>
@@ -280,50 +329,92 @@ function LastRunCard({
   const reviewer = report?.reviewerVerdict ?? null;
 
   return (
-    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
-      <div className='flex items-center gap-2'>
-        <span className='text-[10px] font-mono uppercase tracking-wider text-muted'>Last run</span>
+    <div className='v3-card' style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+      <div style={{display: 'flex', alignItems: 'center', gap: 8}}>
+        <span className='v3-eyebrow'>Last run</span>
         <StatusBadge status={task.status} />
       </div>
-      <div className='font-semibold text-primary text-sm leading-tight truncate'>
+      <div
+        style={{
+          fontSize: 15,
+          fontWeight: 600,
+          color: 'var(--v3-text)',
+          lineHeight: 1.35,
+          overflow: 'hidden',
+          display: '-webkit-box',
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: 'vertical',
+        }}
+      >
         {task.name || task.runId.slice(0, 8)}
       </div>
-      <div className='text-[11px] text-muted font-mono'>
+      <div className='v3-mono' style={{fontSize: 11, color: 'var(--v3-text-subtle)'}}>
         {task.runId.slice(0, 8)} · {task.createdAt ? timeAgo(task.createdAt) : '—'}
       </div>
 
-      {/* Signal chips — only show when we have data */}
+      {/* Signal chips */}
       {(buildOk || buildBad || tests || reviewer) && (
-        <div className='flex flex-wrap gap-1 pt-1'>
-          {buildOk && <Chip color='success'>build ✓</Chip>}
-          {buildBad && <Chip color='error'>build ✗</Chip>}
+        <div style={{display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 4}}>
+          {buildOk && <span className='v3-chip v3-chip--ok'>BUILD ✓</span>}
+          {buildBad && <span className='v3-chip v3-chip--err'>BUILD ✗</span>}
           {tests && (
-            <Chip color={report?.testsPassed === report?.testsTotal ? 'success' : 'waiting'}>
-              tests {tests}
-            </Chip>
-          )}
-          {reviewer && (
-            <Chip
-              color={
-                reviewer === 'CLEAN' ? 'success' : reviewer === 'FIXED_ISSUES' ? 'waiting' : 'error'
+            <span
+              className={
+                report?.testsPassed === report?.testsTotal
+                  ? 'v3-chip v3-chip--ok'
+                  : 'v3-chip v3-chip--warn'
               }
             >
-              reviewer {reviewer.toLowerCase().replace('_', ' ')}
-            </Chip>
+              {tests} tests
+            </span>
+          )}
+          {reviewer && (
+            <span
+              className={
+                reviewer === 'CLEAN'
+                  ? 'v3-chip v3-chip--ok'
+                  : reviewer === 'FIXED_ISSUES'
+                    ? 'v3-chip v3-chip--warn'
+                    : 'v3-chip v3-chip--err'
+              }
+            >
+              Reviewer {reviewer.toLowerCase().replace('_', ' ')}
+            </span>
           )}
         </div>
       )}
 
-      <div className='flex gap-2 pt-1'>
+      <div style={{display: 'flex', gap: 8, marginTop: 6}}>
         <button
+          type='button'
           onClick={onOpenRun}
-          className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20'
+          style={{
+            background: 'var(--v3-brand)',
+            color: 'var(--v3-text-on-brand)',
+            border: 0,
+            padding: '5px 12px',
+            borderRadius: 5,
+            fontSize: 12,
+            fontWeight: 600,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
         >
           View report
         </button>
         <Link
           to={`/runs/${task.runId}`}
-          className='text-[11px] font-medium px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary'
+          style={{
+            background: 'transparent',
+            color: 'var(--v3-text-muted)',
+            border: '1px solid var(--v3-border)',
+            padding: '5px 12px',
+            borderRadius: 5,
+            fontSize: 12,
+            fontWeight: 600,
+            textDecoration: 'none',
+            fontFamily: 'inherit',
+          }}
         >
           Open run
         </Link>
@@ -341,20 +432,41 @@ function ScoreCardCompact({
 }) {
   if (score == null) {
     return (
-      <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 flex flex-col items-center justify-center min-w-[180px]'>
-        <div className='text-[11px] text-muted'>No score yet</div>
-        <div className='text-[10px] text-muted mt-1'>Awaiting validation report</div>
+      <div
+        className='v3-card'
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minHeight: 160,
+          gap: 4,
+        }}
+      >
+        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>No score yet</div>
+        <div style={{fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
+          Awaiting validation report
+        </div>
       </div>
     );
   }
   const isVerified = report?.verifiedScore != null;
   return (
-    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 flex flex-col items-center justify-center min-w-[180px]'>
+    <div
+      className='v3-card'
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+      }}
+    >
       <ScoreRing score={score} label={isVerified ? 'verified / 100' : 'est / 100'} size={120} />
       {isVerified &&
         report?.accuracyScore != null &&
         report.accuracyScore !== report.verifiedScore && (
-          <div className='text-[10px] text-muted mt-1.5 font-mono'>
+          <div className='v3-mono' style={{fontSize: 11, color: 'var(--v3-text-muted)'}}>
             est. {Math.round(report.accuracyScore)}
           </div>
         )}
@@ -364,12 +476,6 @@ function ScoreCardCompact({
 
 function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () => void}) {
   const [health, setHealth] = useState<api.WorkspaceHealthReport | null>(null);
-  // P-04 (UX audit, 2026-05-03): also pull dashboard so HealthCard can surface
-  // architectureDocStatus alongside the existing repo / codemap / PR rows.
-  // Pre-fix: arch generation had no kickoff CTA from PulseTab — users had to
-  // navigate to Code → Architecture, then click Generate. Now if the project
-  // has no architecture doc yet (status NONE) the row is a click-through to
-  // exactly that screen.
   const dashboard = useProjectStore((s) => s.dashboard);
   useEffect(() => {
     api
@@ -385,8 +491,6 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
   const archStatus = dashboard?.architectureDocStatus ?? null;
 
   const openArchTab = () => {
-    // Switch to Code tab + architecture sub-tab via the URL convention so the
-    // P-23 popstate / mount-time reader picks the right pane on landing.
     const url = new URL(window.location.href);
     url.searchParams.set('tab', 'code');
     url.searchParams.set('codeSub', 'architecture');
@@ -395,60 +499,109 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
   };
 
   return (
-    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
-      <div className='flex items-center gap-2'>
-        <Heart className='h-3.5 w-3.5 text-status-success' />
-        <h3 className='text-xs font-medium text-secondary'>Health & debt</h3>
+    <div className='v3-rollup-cell'>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6}}>
+        <Heart className='h-3.5 w-3.5' style={{color: 'var(--v3-success)'}} />
+        <h3 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
+          Health &amp; debt
+        </h3>
       </div>
       {!health ? (
-        <div className='text-[11px] text-muted'>Loading…</div>
+        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>Loading…</div>
       ) : totalRepos === 0 ? (
-        <div className='text-[11px] text-muted'>No repos linked yet.</div>
+        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>No repos linked yet.</div>
       ) : (
-        <ul className='text-[11px] space-y-1'>
-          <li className='text-secondary'>
+        <ul
+          style={{
+            margin: 0,
+            padding: 0,
+            listStyle: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+            fontSize: 11.5,
+            lineHeight: 1.5,
+          }}
+        >
+          <li style={{color: 'var(--v3-text-muted)'}}>
             {totalRepos} repo{totalRepos === 1 ? '' : 's'} linked
           </li>
-          <li className={cn(stale > 0 ? 'text-status-waiting' : 'text-status-success')}>
+          <li style={{color: stale > 0 ? 'var(--v3-warning)' : 'var(--v3-success)'}}>
             {stale === 0 ? 'codemaps current' : `${stale} stale codemap${stale === 1 ? '' : 's'}`}
           </li>
-          {/* P-04 architecture row */}
           {archStatus === 'NONE' ? (
-            <li className='text-status-waiting'>
+            <li style={{color: 'var(--v3-warning)'}}>
               Architecture not generated —{' '}
               <button
+                type='button'
                 onClick={openArchTab}
-                className='text-accent-blue hover:underline inline-flex items-center gap-0.5'
+                style={{
+                  color: 'var(--v3-brand-hover)',
+                  background: 'transparent',
+                  border: 0,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  fontSize: 'inherit',
+                  padding: 0,
+                  textDecoration: 'underline',
+                }}
               >
-                Generate now <ArrowRight className='h-2.5 w-2.5' />
+                Generate now
               </button>
             </li>
           ) : archStatus === 'STALE' ? (
-            <li className='text-status-waiting'>
+            <li style={{color: 'var(--v3-warning)'}}>
               Architecture stale —{' '}
               <button
+                type='button'
                 onClick={openArchTab}
-                className='text-accent-blue hover:underline inline-flex items-center gap-0.5'
+                style={{
+                  color: 'var(--v3-brand-hover)',
+                  background: 'transparent',
+                  border: 0,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                  fontSize: 'inherit',
+                  padding: 0,
+                  textDecoration: 'underline',
+                }}
               >
-                Regenerate <ArrowRight className='h-2.5 w-2.5' />
+                Regenerate
               </button>
             </li>
           ) : archStatus === 'GENERATED' ? (
-            <li className='text-status-success'>Architecture current</li>
+            <li style={{color: 'var(--v3-success)'}}>Architecture current</li>
           ) : null}
-          <li className='text-secondary'>
+          <li style={{color: 'var(--v3-text-muted)'}}>
             {openPrs} open PR{openPrs === 1 ? '' : 's'}
           </li>
           {lastAnalysed && (
-            <li className='text-muted text-[10px] font-mono'>
+            <li
+              className='v3-mono'
+              style={{color: 'var(--v3-text-subtle)', fontSize: 10.5}}
+            >
               last analysed {timeAgo(lastAnalysed)}
             </li>
           )}
         </ul>
       )}
       <button
+        type='button'
         onClick={onOpenCode}
-        className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
+        style={{
+          fontSize: 11.5,
+          color: 'var(--v3-brand-hover)',
+          background: 'transparent',
+          border: 0,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          padding: 0,
+          marginTop: 8,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 2,
+          textDecoration: 'underline',
+        }}
       >
         Drill into Code <ArrowRight className='h-3 w-3' />
       </button>
@@ -456,17 +609,6 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
   );
 }
 
-/**
- * P-10 (UX audit, 2026-05-03) — Knowledge tile on Pulse. Pre-fix the
- * Generated Docs surface only existed inside the More drawer and was
- * functionally invisible: users with arch generated never realised they
- * could one-click the per-project EXPLANATION/SETUP write-ups (Plan v2.5.12
- * shipping). The tile shows presence per doc-type, a one-click View action
- * (deep-links to the More → Generated Docs panel), and Generate when
- * neither doc has been produced yet. Architecture-not-yet-generated state
- * mirrors the HealthCard "Architecture not generated" row so the tile stays
- * informative on cold projects instead of becoming dead space.
- */
 function KnowledgeCard({projectId}: {projectId: string}) {
   const dashboard = useProjectStore((s) => s.dashboard);
   const archStatus = dashboard?.architectureDocStatus ?? null;
@@ -494,9 +636,6 @@ function KnowledgeCard({projectId}: {projectId: string}) {
     };
   }, [projectId, archReady]);
 
-  // Open the More drawer's Generated Docs panel via the same URL convention
-  // ProjectDashboardPage.useDrawerState listens for. Falls back to a no-op
-  // event for older deep-link consumers.
   const openDocsDrawer = () => {
     const url = new URL(window.location.href);
     url.searchParams.set('drawer', 'docs');
@@ -505,29 +644,56 @@ function KnowledgeCard({projectId}: {projectId: string}) {
   };
 
   return (
-    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
-      <div className='flex items-center gap-2'>
-        <BookOpen className='h-3.5 w-3.5 text-accent-blue' />
-        <h3 className='text-xs font-medium text-secondary'>Knowledge</h3>
+    <div className='v3-rollup-cell'>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6}}>
+        <BookOpen className='h-3.5 w-3.5' style={{color: 'var(--v3-brand-hover)'}} />
+        <h3 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
+          Knowledge
+        </h3>
       </div>
       {!archReady ? (
-        <div className='text-[11px] text-muted'>
+        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)', lineHeight: 1.5}}>
           Generate the architecture doc to unlock the human-readable explanation + setup write-ups.
         </div>
       ) : (
-        <ul className='text-[11px] space-y-1'>
-          <li className={cn(explanationReady ? 'text-status-success' : 'text-muted')}>
+        <ul
+          style={{
+            margin: 0,
+            padding: 0,
+            listStyle: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+            fontSize: 11.5,
+            lineHeight: 1.5,
+          }}
+        >
+          <li style={{color: explanationReady ? 'var(--v3-success)' : 'var(--v3-text-muted)'}}>
             Explanation{' '}
             {explanationReady === null ? '…' : explanationReady ? 'ready' : 'not generated'}
           </li>
-          <li className={cn(setupReady ? 'text-status-success' : 'text-muted')}>
+          <li style={{color: setupReady ? 'var(--v3-success)' : 'var(--v3-text-muted)'}}>
             Setup guide {setupReady === null ? '…' : setupReady ? 'ready' : 'not generated'}
           </li>
         </ul>
       )}
       <button
+        type='button'
         onClick={openDocsDrawer}
-        className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
+        style={{
+          fontSize: 11.5,
+          color: 'var(--v3-brand-hover)',
+          background: 'transparent',
+          border: 0,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          padding: 0,
+          marginTop: 8,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          textDecoration: 'underline',
+        }}
       >
         {archReady && (explanationReady || setupReady) ? (
           <>
@@ -553,58 +719,80 @@ function ActivityCard({
   onShowAll: () => void;
 }) {
   return (
-    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3 space-y-2'>
-      <div className='flex items-center gap-2'>
-        <Activity className='h-3.5 w-3.5 text-accent-blue' />
-        <h3 className='text-xs font-medium text-secondary'>Activity</h3>
+    <div className='v3-rollup-cell'>
+      <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6}}>
+        <Activity className='h-3.5 w-3.5' style={{color: 'var(--v3-brand-hover)'}} />
+        <h3 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
+          Activity
+        </h3>
       </div>
       {loading ? (
-        <div className='text-[11px] text-muted'>Loading…</div>
+        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>Loading…</div>
       ) : entries.length === 0 ? (
-        <div className='text-[11px] text-muted'>No events in the last 30 days.</div>
+        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>
+          No events in the last 30 days.
+        </div>
       ) : (
-        <ul className='space-y-1 text-[11px]'>
+        <ul
+          style={{
+            margin: 0,
+            padding: 0,
+            listStyle: 'none',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 3,
+            fontSize: 11.5,
+          }}
+        >
           {entries.slice(0, 5).map((e) => (
-            <li key={e.id} className='flex items-baseline gap-2'>
-              <span className='text-muted font-mono text-[10px] w-12 flex-shrink-0'>
+            <li key={e.id} style={{display: 'flex', alignItems: 'baseline', gap: 8}}>
+              <span
+                className='v3-mono'
+                style={{
+                  color: 'var(--v3-text-subtle)',
+                  fontSize: 10.5,
+                  width: 44,
+                  flexShrink: 0,
+                }}
+              >
                 {timeAgoShort(e.occurredAt)}
               </span>
-              <span className='text-secondary truncate'>{e.summary || e.eventType}</span>
+              <span
+                style={{
+                  color: 'var(--v3-text-muted)',
+                  flex: 1,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {e.summary || e.eventType}
+              </span>
             </li>
           ))}
         </ul>
       )}
       <button
+        type='button'
         onClick={onShowAll}
-        className='text-[11px] text-accent-blue hover:underline inline-flex items-center gap-0.5'
+        style={{
+          fontSize: 11.5,
+          color: 'var(--v3-brand-hover)',
+          background: 'transparent',
+          border: 0,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          padding: 0,
+          marginTop: 8,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 2,
+          textDecoration: 'underline',
+        }}
       >
         Show all <ArrowRight className='h-3 w-3' />
       </button>
     </div>
-  );
-}
-
-function Chip({
-  children,
-  color,
-}: {
-  children: React.ReactNode;
-  color: 'success' | 'waiting' | 'error';
-}) {
-  const colorMap = {
-    success: 'border-status-success/40 text-status-success',
-    waiting: 'border-status-waiting/40 text-status-waiting',
-    error: 'border-status-error/40 text-status-error',
-  };
-  return (
-    <span
-      className={cn(
-        'inline-flex items-center text-[10px] font-mono uppercase tracking-wider px-1.5 py-0.5 rounded-sm border',
-        colorMap[color],
-      )}
-    >
-      {children}
-    </span>
   );
 }
 

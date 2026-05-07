@@ -481,31 +481,17 @@ function Tile({label, value, tone}: {label: string; value: string; tone?: 'ok' |
   const accent =
     tone === 'ok' ? 'var(--v3-success)' : tone === 'warn' ? 'var(--v3-warning)' : 'var(--v3-text)';
   return (
-    <div
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 8,
-        padding: 12,
-      }}
-    >
-      <div style={{fontSize: 11, color: 'var(--v3-text-muted)'}}>{label}</div>
-      <div style={{fontSize: 22, fontWeight: 600, color: accent, marginTop: 2}}>{value}</div>
+    <div className='v3-rollup-cell'>
+      <div className='v3-eyebrow'>{label}</div>
+      <div style={{fontSize: 22, fontWeight: 600, color: accent, marginTop: 4}}>{value}</div>
     </div>
   );
 }
 
 function Section({title, children}: {title: string; children: React.ReactNode}) {
   return (
-    <section
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 10,
-        padding: 16,
-      }}
-    >
-      <h2 style={{margin: '0 0 8px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
+    <section className='v3-card'>
+      <h2 style={{margin: '0 0 10px', fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         {title}
       </h2>
       <div>{children}</div>
