@@ -51,7 +51,7 @@ import org.junit.jupiter.api.Test;
  *   <li>Iter-limit + zero writes → DB FAILED (existing behavior preserved)
  * </ul>
  */
-class SequentialExecutorV2SoftCompletionTest {
+class SequentialExecutorSoftCompletionTest {
 
   private final WorkerAgent worker = mock(WorkerAgent.class);
   private final BuildProjectTool buildProjectTool = mock(BuildProjectTool.class);

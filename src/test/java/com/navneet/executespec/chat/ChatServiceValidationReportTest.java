@@ -28,7 +28,7 @@ import org.junit.jupiter.api.Test;
  * accuracyScore / reviewer verdict / per-dimension scores / capped raw issue JSON so the LLM can
  * quote them verbatim.
  */
-class V2ChatServiceValidationReportTest {
+class ChatServiceValidationReportTest {
 
   private final PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
   private final LlmRouter router = mock(LlmRouter.class);

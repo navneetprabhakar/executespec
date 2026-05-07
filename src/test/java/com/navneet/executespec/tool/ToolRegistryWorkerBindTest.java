@@ -30,7 +30,7 @@ import org.springframework.ai.tool.ToolCallback;
  *
  * <p>Pure unit test — uses fake {@link Tool} stubs so no Spring context is needed.
  */
-class ToolRegistryV2WorkerBindTest {
+class ToolRegistryWorkerBindTest {
 
   private static Tool fakeTool(String name) {
     return new Tool() {

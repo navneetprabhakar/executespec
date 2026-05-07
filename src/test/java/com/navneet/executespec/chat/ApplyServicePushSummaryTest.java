@@ -16,7 +16,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>Pure pure-function tests; no Spring context.
  */
-class V2ApplyServicePushSummaryTest {
+class ApplyServicePushSummaryTest {
 
   @Test
   void skipped_renders_reason() {

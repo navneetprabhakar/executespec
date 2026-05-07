@@ -21,7 +21,7 @@ import org.springframework.context.ApplicationContext;
 
 @ExtendWith(MockitoExtension.class)
 @DisplayName("FallbackLlmRouter")
-class LlmRouterTest {
+class FallbackLlmRouterTest {
 
   @Mock private ApplicationContext ctx;
   @Mock private InboxService inboxService;

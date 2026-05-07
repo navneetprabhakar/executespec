@@ -45,7 +45,7 @@ import org.springframework.ai.chat.model.Generation;
  * <p>Tool dispatch is intercepted through a fake {@link ToolRegistry} so we don't need a real
  * filesystem.
  */
-class WorkerAgentV2StagnationTest {
+class WorkerAgentStagnationTest {
 
   private static AssistantMessage.ToolCall toolCall(String name, String args) {
     return new AssistantMessage.ToolCall("call_" + UUID.randomUUID(), "function", name, args);

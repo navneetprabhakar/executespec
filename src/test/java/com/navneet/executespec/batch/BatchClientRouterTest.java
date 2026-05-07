@@ -10,7 +10,7 @@ import com.navneet.executespec.router.LlmProvider;
 
 import org.junit.jupiter.api.Test;
 
-class V2BatchClientRouterTest {
+class BatchClientRouterTest {
 
   private static BatchClient stub(LlmProvider provider) {
     return new BatchClient() {
