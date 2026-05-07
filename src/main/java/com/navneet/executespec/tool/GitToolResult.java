@@ -1,17 +1,17 @@
 package com.navneet.executespec.tool;
 
 // Every tool call returns one of these — no exceptions thrown out of tools
-public sealed interface ToolResult permits ToolResult.Ok, ToolResult.Err {
+public sealed interface GitToolResult permits GitToolResult.Ok, GitToolResult.Err {
 
-  record Ok(String output) implements ToolResult {}
+  record Ok(String output) implements GitToolResult {}
 
-  record Err(String error) implements ToolResult {}
+  record Err(String error) implements GitToolResult {}
 
-  static ToolResult ok(String output) {
+  static GitToolResult ok(String output) {
     return new Ok(output);
   }
 
-  static ToolResult err(String error) {
+  static GitToolResult err(String error) {
     return new Err(error);
   }
 
