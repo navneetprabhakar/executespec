@@ -53,11 +53,11 @@
 
 ### What's pending (entire Figma integration v2)
 - **OAuth + credential storage** — `FigmaOAuthService` + `FigmaOAuthController` + `figma_credential` table (planned V78 — number now obsolete; renumber when scheduling).
-- **Tier + enablement gate** — `FigmaIntegrationGate.enforce(orgId, runRequest)` called from both run submission and `ToolRegistryV2.bind(ctx)`.
+- **Tier + enablement gate** — `FigmaIntegrationGate.enforce(orgId, runRequest)` called from both run submission and `ToolRegistry.bind(ctx)`.
 - **Extraction service** — `FigmaExtractionService` facade with MCP-primary + REST-fallback, Resilience4j circuit breaker (5 fail / 60s window), Caffeine cache (30 min TTL keyed by `(orgId, fileKey, nodeId, format)`).
 - **Clients** — `FigmaMcpClient` (lazy `McpSyncClient` per org, cached) + `FigmaRestClient` (Spring WebClient, exponential 429 backoff, 10MB JSON truncation).
-- **V2 tool** — `FigmaDesignContextTool` bound conditionally into `ToolRegistryV2`; JSON schema with `figmaUrl` / `outputFormat` / `includeScreenshot`. Cost attributed via `CostHook` to `V2RunCostTracker` under phase `INTEGRATION`.
-- **Planner / worker prompt augmentation** — section injected into `prompts/v2/outline-planner.md` (was `planner.md` until v2.6.2-track slice 5b deletion) + `worker.md` only when `figma_urls` are present.
+- **V2 tool** — `FigmaDesignContextTool` bound conditionally into `ToolRegistry`; JSON schema with `figmaUrl` / `outputFormat` / `includeScreenshot`. Cost attributed via `CostHook` to `RunCostTracker` under phase `INTEGRATION`.
+- **Planner / worker prompt augmentation** — section injected into `prompts/outline-planner.md` (was `planner.md` until v2.6.2-track slice 5b deletion) + `worker.md` only when `figma_urls` are present.
 - **Validation report** — `designComplianceJson` field with color-match %, typography-match %, layout-match %.
 - **Schema** — V78 `figma_credential` + V79 `pipeline_run.figma_urls TEXT[]` + `figma_context_path TEXT`. Renumber to current V-sequence when scheduling.
 - **Feature flags** — `integration.figma.{enabled, mcp_enabled, rest_enabled, max_screenshots_per_run, max_calls_per_run}`.
@@ -93,15 +93,15 @@
 | Area | Status |
 |---|---|
 | Tool layer (10 tools + completeTask) | done |
-| LlmRouterV2 (native tool calling, 3 providers) | done |
-| WorkerAgentV2 (sequential, native completeTask) | done |
+| LlmRouter (native tool calling, 3 providers) | done |
+| WorkerAgent (sequential, native completeTask) | done |
 | ~~PlannerAgentV2~~ → `OutlinePlannerAgent` (restricted-tool plan, runtimeSurface, hardConstraints) | done — legacy `PlannerAgentV2` deleted in v2.6.2-track slice 5b on `feature/hierarchical-planner`; replaced by `OutlinePlannerAgent` (`FULL_PLAN` for SMALL/MEDIUM, `SKELETON_ONLY` for LARGE/LEGACY) + `PlannerOutputUtils` (static parse/validate helpers) |
-| SequentialExecutorV2 (per-task tier routing, smoke test, retry) | done |
-| ReviewerAgentV3 (general + wiring passes) | done |
-| ContextStoreV2 (Redis persistence, per-task) | done |
-| V2Metrics observability | done |
-| V2RunOrchestrator + V1-table persistence (UI parity) | done |
-| V2RunCostTracker + per-phase attribution + run-stats fix | done |
+| SequentialExecutor (per-task tier routing, smoke test, retry) | done |
+| ReviewerAgent (general + wiring passes) | done |
+| ContextStore (Redis persistence, per-task) | done |
+| Metrics observability | done |
+| RunOrchestrator + V1-table persistence (UI parity) | done |
+| RunCostTracker + per-phase attribution + run-stats fix | done |
 | StartupRunResumerV2 fail-cleanly + resume_attempts cap + 6h stale cutoff | done (Phase 1.5) |
 | V2 cancel via `DELETE /api/runs/{id}` | done |
 | ScmPushService extracted from V1 harness | done |
@@ -120,7 +120,7 @@
 ### Gap 2 — Startup resume (full replay) — pending
 **Status:** Phase 1.5 shipped (fail-cleanly + resume_attempts cap of 3 + 6h stale cutoff). Full conversation replay still pending.
 
-**Phase 2 work:** for `WORKING` / `REVIEWING` runs with a fresh Redis snapshot, load `v2:agent-ctx:{runId}:{taskId}` and resume `WorkerAgentV2` at the saved iteration instead of failing.
+**Phase 2 work:** for `WORKING` / `REVIEWING` runs with a fresh Redis snapshot, load `v2:agent-ctx:{runId}:{taskId}` and resume `WorkerAgent` at the saved iteration instead of failing.
 
 **Acceptance:** kill the JVM mid-run, restart, run reaches a terminal state without user intervention. Integration test that simulates JVM stop.
 
@@ -154,7 +154,7 @@
 - **Ground truth during execution.** Every task ends with smoke test (`buildProject`); reviewer re-runs build after fixes.
 - **Upfront context, not search-first.** Workspace tree + planner-declared dependency files in worker's initial system prompt.
 - **Provider-agnostic at agent layer.** Provider quirks (OpenAI `extra_body`, Gemini thought-signatures, Anthropic cache blocks) live in V2 native tool clients.
-- **Redis-persisted context.** Every 5 iterations best-effort. Replay possible via `ContextStoreV2.load()`.
+- **Redis-persisted context.** Every 5 iterations best-effort. Replay possible via `ContextStore.load()`.
 
 ### Out of scope (will not change)
 - No re-introduction of V1 "progressive merge". Auto-merge is structural.
@@ -196,7 +196,7 @@ Three terminals instead of four. `COMPLETE_WITH_CONCERNS` is the new amber.
 3. `RunStatus` enum mirrors the constraint; `PARTIAL` stays as a `@Deprecated` synonym → `COMPLETE_WITH_CONCERNS` for one major version, then deleted.
 
 ### Backend changes
-- `V2RunOrchestrator.resolveTerminalStatus(exec, review)` — rewrite decision tree to the buildPassed × reviewerClean matrix.
+- `RunOrchestrator.resolveTerminalStatus(exec, review)` — rewrite decision tree to the buildPassed × reviewerClean matrix.
 - `status_reason` stays — drives tooltip copy. `REVIEWER_UNRESOLVED` migrates to surfacing on `COMPLETE_WITH_CONCERNS` instead of `PARTIAL`.
 - Remove `"PARTIAL"` branch from `mapOverallToV1Status` / `resolveTerminalStatus` fallbacks.
 

@@ -19,7 +19,7 @@ Move ExecuteSpec from a single-VM run executor to a horizontally-scalable cluste
 - Workspace: `./workspace/<runId>/` on local disk of the one GCE VM running the Spring Boot app.
 - GCS archive exists (`executespec-workspaces`), flag-disabled (`gcs-enabled: false`).
 - Run execution: single JVM runs the full pipeline — planner, worker, reviewer, test-gen — plus test-exec Docker and (in local-mode) preview Docker.
-- State: Postgres for runs/tasks/audit; Redis for feature flags, gate coordination, `ContextStoreV2` worker snapshots (every 5 iterations, 24h TTL), Shedlock.
+- State: Postgres for runs/tasks/audit; Redis for feature flags, gate coordination, `ContextStore` worker snapshots (every 5 iterations, 24h TTL), Shedlock.
 - No run lease. `PipelineRun.status` is the only ownership signal. A second JVM pointing at the same DB would race.
 - Crash recovery: V1's `StartupRunResumer` exists (currently disabled per CLAUDE.md); V2 has no resumer (Gap 2).
 
@@ -117,7 +117,7 @@ Deliverables:
 
 ## Checkpoint + recovery
 
-Already foundational: `ContextStoreV2` saves worker conversation every 5 iterations. Extend into a proper checkpoint subsystem:
+Already foundational: `ContextStore` saves worker conversation every 5 iterations. Extend into a proper checkpoint subsystem:
 
 ### What is checkpointed
 
@@ -162,9 +162,9 @@ On boot or on lease acquisition:
 
 1. Rolling deploy triggers.
 2. Cloud deploy controller sends SIGTERM to one pod.
-3. Pod's Spring `ApplicationShutdownHook` calls `V2RunOrchestrator.drain()`:
+3. Pod's Spring `ApplicationShutdownHook` calls `RunOrchestrator.drain()`:
    - Stop accepting new run assignments (`leaseAcquirer.pause()`).
-   - Current run's `WorkerAgentV2` finishes the in-flight iteration; on iteration boundary, forces `contextStore.save()`.
+   - Current run's `WorkerAgent` finishes the in-flight iteration; on iteration boundary, forces `contextStore.save()`.
    - Releases the lease.
 4. Pod exits within the 2-min grace window.
 5. New pod comes up, `StartupRunResumerV2` scans + resumes any run whose lease expired or was released.
@@ -200,10 +200,10 @@ Lease row includes a `fencing_token` (monotonic bigint). Every `PipelineRun` / `
   - Single JVM still; just prove the lease round-trips work. Every active run gets a lease.
 - **B2 — StartupRunResumerV2** (medium risk — Gap 2 delivery)
   - On boot: scan expired-lease runs, attempt resume.
-  - Wire `ContextStoreV2.load()` → `WorkerAgentV2.resumeFromIteration()`.
+  - Wire `ContextStore.load()` → `WorkerAgent.resumeFromIteration()`.
   - Iteration-boundary save: bump `CONTEXT_PERSIST_EVERY_N_ITERATIONS` to 1 during active work; tiered (every 5 at idle, every 1 at high-change).
 - **B3 — Graceful shutdown + drain** (medium risk)
-  - `ApplicationShutdownHook` → `V2RunOrchestrator.drain()`.
+  - `ApplicationShutdownHook` → `RunOrchestrator.drain()`.
   - Integration test: kill the JVM during a run, verify pickup by another pod.
 - **B4 — Multi-pod deployment** (high risk, gated on B1–B3 soak)
   - Terraform: MIG with 3 workers.
@@ -255,17 +255,17 @@ Headroom: supports ~30 concurrent runs (3 workers × 10 concurrent each). Curren
 
 ### New
 - Terraform: `infra/filestore.tf`, `infra/workers-mig.tf`, `infra/gateway-cloudrun.tf`
-- `com.navneet.executespec.v2.lease.RunLeaseService`, `RunLease` entity, `LeaseAcquirer` (scheduler)
-- `com.navneet.executespec.v2.recovery.StartupRunResumerV2`
-- `com.navneet.executespec.v2.orchestration.GracefulDrainService`
+- `com.navneet.executespec.lease.RunLeaseService`, `RunLease` entity, `LeaseAcquirer` (scheduler)
+- `com.navneet.executespec.recovery.StartupRunResumerV2`
+- `com.navneet.executespec.orchestration.GracefulDrainService`
 - Flyway: `V81__run_lease.sql`, `V82__run_lease_fencing.sql`
 - `application.yml`: `agent.workspace`, `distributed.*` profiles
 - `config/DistributedModeConfig.java` (feature-flag-gated wiring)
 
 ### Modified
-- `V2RunOrchestrator.java` (drain hook, lease integration, cost flush per iteration)
-- `WorkerAgentV2.java` (iteration-boundary save, resumeFromIteration)
-- `ContextStoreV2.java` (configurable save cadence; noeviction key prefix)
+- `RunOrchestrator.java` (drain hook, lease integration, cost flush per iteration)
+- `WorkerAgent.java` (iteration-boundary save, resumeFromIteration)
+- `ContextStore.java` (configurable save cadence; noeviction key prefix)
 - `SseBroadcaster.java` (Redis pub/sub backend)
 - `RunController.java` (lease status exposed on detail?)
 - `CLAUDE.md`, `docs/USER_MANUAL.md`, CHANGELOG, VERSION

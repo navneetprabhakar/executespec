@@ -3,7 +3,7 @@ package com.navneet.executespec.util;
 /**
  * Tiny helper for sizing per-service dispatch pools relative to host CPU count.
  *
- * <p>All our service-level executor pools (CodeReviewService, PrReviewService, V2RunService,
+ * <p>All our service-level executor pools (CodeReviewService, PrReviewService, RunService,
  * RunConversationController, RunOrchestrator, etc.) handle I/O-bound workloads — LLM API calls
  * dominate, with some git clone + DB writes mixed in. For these the textbook sizing is roughly
  * {@code cores × (1 + waitTime/computeTime)}; in practice we cap to a tidy multiple of cores with a

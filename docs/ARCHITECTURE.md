@@ -1,5 +1,16 @@
 # ExecuteSpec — Architecture Document
 
+> ## Versioning convention (2026-05-07 onward)
+>
+> **No V2/V3 markers in Java code, classes, or operational resource paths.** Backend packages were unified — what used to live at `com.navneet.executespec.v2.*` (the pipeline) and `com.navneet.executespec.v3.*` (the consumer/product surface) is now flat under `com.navneet.executespec.*`. Class suffixes (`LlmRouter`, `ReviewerAgent`, `ReviewReport`, `ShellTool`, etc.) and prefixes (`LandingController`, `RunController`, etc.) are gone.
+>
+> **Still versioned (deliberately out of scope):**
+> - Flyway migration filenames (`V1__init.sql`..`V150__*.sql`) — Flyway tracks applied migrations by filename; renaming would break `flyway_schema_history`.
+> - Frontend bundled JS in `src/main/resources/static/assets/index-*.js` — build artifacts, not source.
+> - Prompt rollback archives `prompts/planner.v1.txt`..`v14.txt`, `prompts/reviewer-v2.txt` — kept for `PromptVersioningService` rollback semantics.
+>
+> Below, narrative section headers like "v2.6.0 release" or "Pilot v3.0 (project workspace)" are **product release version numbers**, not architecture markers — they refer to which app version shipped a given feature, not to a separate codebase.
+
 > **Version**: 4.11
 > **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22; v2.6.1 Waves 1-6 merged + deployed 2026-04-23; v2.6.2-track hierarchical planner all 5 slices shipped on `feature/hierarchical-planner` 2026-04-25 (not yet merged); **v2.6.3-track enterprise readiness all 4 phases shipped on `feature/enterprise-readiness-eval` 2026-04-25 (not yet merged) — server-up sweep landed clean**
 > **App Version**: v2.6.1 (`dev`/`main`); v2.6.2-track on `feature/hierarchical-planner`; v2.6.3-track on `feature/enterprise-readiness-eval`
@@ -30,7 +41,7 @@ Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-
 - **Phase 3 — `CoherencePlannerAgent` (LIGHTWEIGHT, slice 3):** `patchPlan` tool with 5 patch kinds (`ADD_MEETS_REQUIREMENT`, `ADD_DEPENDS_ON`, `REMOVE_DEPENDS_ON`, `FIX_HARD_CONSTRAINT_CONFLICT`, `MOVE_FILE_TO_REPO_SUBDIR`). Empty patches array = clean plan. Non-fatal on individual patch failure.
 - **`PlanStrategyCircuitBreaker` (slice 3):** Redis-backed health tracker. 5 consecutive failures → 1h open → ladder degrade `LEGACY → LARGE → MEDIUM → SMALL → legacy`. Fail-open on Redis errors.
 - **`PlannerOutputUtils` (slice 5b):** static utility class housing `parsePlanFromArgs`, `validatePlan` (Validation v3 / Pillar 1), `salvagePlanFromText` (Gemini pseudo-code recovery, tool-name-agnostic), `warnIfConstraintsUnderpropagated`, `cleanTitle`, `resolveProviderForTitle`. Both `OutlinePlannerAgent` and the validation test consume from it; no Spring injection chains.
-- **Cost shape (slice 5a):** `V2RunCostTracker.estimateRunTierAware(provider, complexities, strategy)` overload computes per-strategy phase costs. Persisted on `pipeline_run.{classifier,outline,expansion,coherence}_{input,output}_tokens, _cost_usd` columns via before/after `costTracker.snapshot()` diffs in each phase helper. Run totals auto-aggregate via the in-memory accumulator. Frontend `RunDetailTabs` Overview tab shows a `PlannerPhaseBreakdown` component when `planStrategy` is set.
+- **Cost shape (slice 5a):** `RunCostTracker.estimateRunTierAware(provider, complexities, strategy)` overload computes per-strategy phase costs. Persisted on `pipeline_run.{classifier,outline,expansion,coherence}_{input,output}_tokens, _cost_usd` columns via before/after `costTracker.snapshot()` diffs in each phase helper. Run totals auto-aggregate via the in-memory accumulator. Frontend `RunDetailTabs` Overview tab shows a `PlannerPhaseBreakdown` component when `planStrategy` is set.
 - **Resume awareness (slice 4 + partial 5d):** `agent_task.{task_type, expansion_status, expanded_at}` written by `persistTasks`. `StartupRunResumerV2` failure message reports `expanded=N pending=M failed=K` per interrupted run. Auto-replay re-trigger (re-run phase 2 from persisted outline) is the one open follow-up.
 - **Migration V130** (additive only, all columns nullable): `pipeline_run` gets the strategy + outline JSON + per-phase cost columns; `agent_task` gets task_type + expansion_status + expanded_at + a partial index on `plan_strategy WHERE NOT NULL`.
 - **Calibration methodology (slice 5e):** 4 audit SQL queries (classifier accuracy, estimate accuracy, heuristic leakage, per-phase cost), tuning targets, threshold-tuning notes for `HEURISTIC_FAST_PATH_CHAR_CAP` / `DOMAIN_EXPLOSIVE` / `MULTI_FEATURE_PHRASES`, weekly→monthly audit cadence. (The standalone plan doc was archived in the 2026-04-26 cleanup pass now that all 5 slices are shipped on the branch.)
@@ -38,10 +49,10 @@ Replaces the legacy single-shot `PlannerAgentV2` (deleted in slice 5b) with a 4-
 ## 0b. 2026-04-23 refresh — v2.6.1 Waves 1-6 (merged to `dev` + `main` + deployed to `dev.executespec.ai`)
 
 - **Billing + tier lifecycle (Wave 1):** new `com.navneet.executespec.billing.lifecycle` package — `LifecycleState` enum (LISTED/HIDDEN/SUNSETTING), `TierLifecycleService` (state-machine guards + `@Transactional` transitions + SUNSETTING side-effects flag-gated by `billing.lifecycle.sunsetting.enabled`), `TierLifecycleController` (`GET/PUT /api/admin/tiers`, `PUT /api/admin/billing-plans/{id}/lifecycle`). TEAM tier row inserted by V122 (min 2 / max 20 seats, 180-day retention). PRO flipped to HIDDEN on deploy day — existing subscribers untouched. `BillingService.handleStripeCheckoutCompleted` fetches Stripe subscription post-checkout to pull `line_items[0].quantity` → syncs `BillingSubscription.totalSeats` + `Org.seat_count`. `StripePaymentGateway.createCheckoutSession(entity, planId, seats, ...)` seat-aware overload + `updateSubscriptionQuantity` for mid-cycle seat adjust. `PaymentGateway.cancelAtPeriodEnd` interface method with Stripe override (sets `cancel_at_period_end=true`) and Razorpay adapter delegating to existing `cancelAtPeriodEnd`. `InvitationService` returns 402 Payment Required on TEAM seat cap (distinct from 403 "upgrade tier").
-- **Activation funnel (Wave 2):** new `com.navneet.executespec.analytics` package — `EventName` enum (6 funnel events), `UserActivationEvent` JPA entity (composite PK on `user_id`+`event_name` = idempotency guarantee), `EventTrackingService` (`@Async` fire-and-forget + `isFirstTime` probe + DataIntegrityViolationException race-handling), `PostHogClient` `@Component` wrapper (no-op when `POSTHOG_API_KEY` unset). Event firing wired at 6 code sites: SIGNUP in `AuthService.register` + `findOrCreateFromOAuth` branch 3; PROJECT_CREATED in `ProjectService.createProject`; SPEC_SUBMITTED in `V2RunOrchestrator.submitRun`; PLAN_APPROVED in `RunController.approvePlan`; RUN_COMPLETE in `V2RunOrchestrator.terminate` (COMPLETE or PARTIAL only); PR_MERGED in `PullRequestRecordService.applyWebhookUpdate`. `AsyncAllowlistTest` updated to approve `EventTrackingService#track`.
+- **Activation funnel (Wave 2):** new `com.navneet.executespec.analytics` package — `EventName` enum (6 funnel events), `UserActivationEvent` JPA entity (composite PK on `user_id`+`event_name` = idempotency guarantee), `EventTrackingService` (`@Async` fire-and-forget + `isFirstTime` probe + DataIntegrityViolationException race-handling), `PostHogClient` `@Component` wrapper (no-op when `POSTHOG_API_KEY` unset). Event firing wired at 6 code sites: SIGNUP in `AuthService.register` + `findOrCreateFromOAuth` branch 3; PROJECT_CREATED in `ProjectService.createProject`; SPEC_SUBMITTED in `RunOrchestrator.submitRun`; PLAN_APPROVED in `RunController.approvePlan`; RUN_COMPLETE in `RunOrchestrator.terminate` (COMPLETE or PARTIAL only); PR_MERGED in `PullRequestRecordService.applyWebhookUpdate`. `AsyncAllowlistTest` updated to approve `EventTrackingService#track`.
 - **Sandbox onboarding (Wave 2):** new `com.navneet.executespec.onboarding` package — `SampleSpec` record + `SampleSpecRegistry` (`@PostConstruct` loader for `classpath:sample-specs/*.yml`, 3 templates shipped: web-api / frontend / cli), `SandboxProvisioningService.provisionIfNeeded(userId, sampleId)` (idempotent + honours sample's preferred provider), `SandboxCleanupJob` `@Scheduled("0 5 * * * *")` + `@SchedulerLock` (hourly, archives sandboxes idle >24h), `OnboardingController` (3 routes under `/api/onboarding`). `ProjectRepository.findByIsSandboxTrueAndStatus` + `PipelineRunRepository.countByProjectIdAndStartedAtGreaterThanEqual` added to support cleanup.
 - **SSO + GitHub App + team trial (Wave 3, schema-only in this merge):** Org table gains SSO columns (provider / enforced / metadata_url / domain) + GitHub App columns (installation_id BIGINT / installed_at). New `team_trial_request` table. Controllers + SAML2 wiring deferred to Wave 3 window per `docs/plans/wave-3-sso-githubapp-procurement-plan.md`.
-- **Smart provider routing (Wave 4, scaffold):** new `router.ProviderRecommendationService` — takes `userId` + `projectType` + `runtimeSurface`, returns `Optional<LlmProvider>` based on heuristic (backend → OPENAI, frontend/mobile → ANTHROPIC, static-web/marketing → GEMINI, LIBRARY → ANTHROPIC, fallback → ANTHROPIC). Gated by `provider.smart-routing.enabled` feature flag (OFF). `provider_recommendation_log` table tracks every decision for future heuristic tuning. Not yet wired into `V2RunOrchestrator.submitRun` — wiring is a follow-up when AUTO provider path ships.
+- **Smart provider routing (Wave 4, scaffold):** new `router.ProviderRecommendationService` — takes `userId` + `projectType` + `runtimeSurface`, returns `Optional<LlmProvider>` based on heuristic (backend → OPENAI, frontend/mobile → ANTHROPIC, static-web/marketing → GEMINI, LIBRARY → ANTHROPIC, fallback → ANTHROPIC). Gated by `provider.smart-routing.enabled` feature flag (OFF). `provider_recommendation_log` table tracks every decision for future heuristic tuning. Not yet wired into `RunOrchestrator.submitRun` — wiring is a follow-up when AUTO provider path ships.
 - **Startup program + 14-day trial + free-org (Wave 5, schema-only):** `startup_program_application` table + `app_user.trial_tier/trial_started_at/trial_ends_at/can_invite_teammates`. Services + frontend in `docs/plans/wave-5-startup-and-polish-plan.md` Wave 5 window.
 - **CLI + enterprise depth (Wave 6, docs-only):** `docs/enterprise-sla.md` (P1-P4 SLA + 99.9% uptime credit schedule + CSM engagement + after-hours P1 escalation). `docs/plans/cli-plan.md` (external-repo stub for `executespec-cli` Node CLI). Audit CSV export endpoint + customer logo page deferred.
 - **Deployment status:** all 9 migrations V121-V129 applied to dev.executespec.ai on 2026-04-22 (GitHub Actions run `24797704376`). Main synced with dev on 2026-04-23 (commit `abfed9f7`). Prod deploy pending `STRIPE_*`, `POSTHOG_*`, and `ADMIN_REMINDER_TOKEN` env vars per `docs/DEPLOYMENT.md`.
@@ -73,11 +84,11 @@ The planner emits a structured requirement graph alongside the task list:
 
 **Already landed from the same effort:**
 
-- **v2.5.10 — verified score + honest PARTIAL** (merged to `dev`): `ValidationReportService.computeVerifiedScore()` derives a score deterministically from `finalBuildPassed + round(20×testsPassed/testsTotal) + verdictBonus − 5×unfixedCritical` (cap 100, base 40). The 6 dimensions in `ReviewScoringService` anchor on `verifiedScore` when the flag is on, not the LLM `accuracyScore`. `V2RunOrchestrator.resolveTerminalStatus()` returns a `StatusAndReason` pair (status + one of CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN). `RunEvent.complete(runId, status, reason)` threads the reason to the UI. Migrations V106/V107/V108. Flag `scoring.v2-verified`.
-- **v2.5.9 — cross-provider evaluation hardening** (merged to `dev`): 5 bug fixes surfaced by a 6-run cross-provider eval. `ExecutionPlannerService` now honours `run.aiProvider` (was hardcoded OPENAI) and uses `FallbackMode.NO_FALLBACK` under strict mode. `execution_solution_dependency` edge dedup + batch save. Gemini default → `gemini-3-flash-preview`. `LlmRouter` emits `RUN_PROVIDER_SWITCHED` SSE on fallback. System property `-Dexecutespec.strict-provider=true` gates strict mode in `V2RunOrchestrator.normalizeProvider`. Known remaining: Bug #1c (`ModelResolver.selectAdaptiveProvider` still bypasses strict-provider at the router level).
+- **v2.5.10 — verified score + honest PARTIAL** (merged to `dev`): `ValidationReportService.computeVerifiedScore()` derives a score deterministically from `finalBuildPassed + round(20×testsPassed/testsTotal) + verdictBonus − 5×unfixedCritical` (cap 100, base 40). The 6 dimensions in `ReviewScoringService` anchor on `verifiedScore` when the flag is on, not the LLM `accuracyScore`. `RunOrchestrator.resolveTerminalStatus()` returns a `StatusAndReason` pair (status + one of CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN). `RunEvent.complete(runId, status, reason)` threads the reason to the UI. Migrations V106/V107/V108. Flag `scoring.v2-verified`.
+- **v2.5.9 — cross-provider evaluation hardening** (merged to `dev`): 5 bug fixes surfaced by a 6-run cross-provider eval. `ExecutionPlannerService` now honours `run.aiProvider` (was hardcoded OPENAI) and uses `FallbackMode.NO_FALLBACK` under strict mode. `execution_solution_dependency` edge dedup + batch save. Gemini default → `gemini-3-flash-preview`. `LlmRouter` emits `RUN_PROVIDER_SWITCHED` SSE on fallback. System property `-Dexecutespec.strict-provider=true` gates strict mode in `RunOrchestrator.normalizeProvider`. Known remaining: Bug #1c (`ModelResolver.selectAdaptiveProvider` still bypasses strict-provider at the router level).
 
 > **⚠️ V2-only as of 2026-04-13.** The V1 harness (`PipelineHarness`, `WorkerAgent`,
-> `CompilerAgent`, `ReviewerAgentV2`, `batch/*`, `SubtaskDecomposer`, progressive
+> `CompilerAgent`, `ReviewerAgent`, `batch/*`, `SubtaskDecomposer`, progressive
 > merge, clarification / merge gates) has been deleted. Sections below that
 > describe those concepts are historical.
 > **Canonical current architecture:** [`CLAUDE.md`](../CLAUDE.md).
@@ -225,7 +236,7 @@ graph TB
     subgraph "Agent Layer"
         PA[PlannerAgent]
         WA[WorkerAgent]
-        RA[ReviewerAgentV2]
+        RA[ReviewerAgent]
         CA[CompilerAgent]
         ConvA[ConversationAgent]
         CtxA[ContextAgent]
@@ -314,7 +325,7 @@ graph TB
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| PLANNING | PlannerAgent, ReviewerAgent | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
 | WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 | LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
@@ -351,11 +362,11 @@ graph TB
             W_RECOVER --> W_LLM
         end
 
-        subgraph "ReviewerAgentV2 (two-phase, background)"
+        subgraph "ReviewerAgent (two-phase, background)"
             R_DIFFS[Merged code on main] --> R_INSPECT[Phase 1: Inspect<br/>Read-only tool-use analysis]
             R_INSPECT --> R_ISSUES[Issues List<br/>CRITICAL/MINOR<br/>README gate: taskCount ≤ 5 → MINOR]
             R_ISSUES --> R_FIX[Phase 2: Auto-Fix<br/>2 attempts per issue, max 8]
-            R_FIX --> R_REPORT[ReviewReportV2<br/>PASSED/PASSED_WITH_FIXES/<br/>NEEDS_ATTENTION/FAILED]
+            R_FIX --> R_REPORT[ReviewReport<br/>PASSED/PASSED_WITH_FIXES/<br/>NEEDS_ATTENTION/FAILED]
         end
 
         subgraph "Test Generation Pipeline (background, after review)"
@@ -423,7 +434,7 @@ Side paths: AWAITING_CLARIFICATION ──(reply)──> PLANNING
 | 4 | Worker execution | `SequentialTaskExecutor` → `SubtaskDecomposer` → `WorkerAgent` | WORKING | Dependency-tier parallel dispatch; 25-min wall-clock per task; progressive merge after each task; `task-max-retries=3` |
 | 5 | Compilation | `CompilerAgent.runCompileAndFix()` | COMPILING | Detect build tool; up to 3 LLM-guided fix attempts; dynamic error truncation by file count; non-fatal |
 | 6 | Auto-merge & complete | `PipelineHarness` → `StateStore.markComplete()` | MERGING → COMPLETE | Merge all task branches; mark COMPLETE **before** review; auto-start preview; GitHub push/PR if configured |
-| 7 | Review (bg) | `ReviewerAgentV2.review()` | COMPLETE (bg thread) | Phase 1: inspect (max 10 tool calls); Phase 2: auto-fix CRITICAL issues; Phase 3: AccuracyAssessmentService |
+| 7 | Review (bg) | `ReviewerAgent.review()` | COMPLETE (bg thread) | Phase 1: inspect (max 10 tool calls); Phase 2: auto-fix CRITICAL issues; Phase 3: AccuracyAssessmentService |
 | 8 | Test gen (bg) | `TestGenOrchestrator` | COMPLETE (bg thread) | TestPlannerAgent → TestWorkerAgent; test compilation with retry |
 | 9 | Test exec (bg) | `TestPreviewCoordinator` | COMPLETE (bg thread) | Reuse auto-started preview; batch runs publish empty event to unblock report; non-fatal |
 | 10 | Validation report (bg) | `ValidationReportService` | COMPLETE (bg thread) | LLM-generated report; persist with accuracy score/grade; non-fatal |
@@ -440,7 +451,7 @@ Side paths: AWAITING_CLARIFICATION ──(reply)──> PLANNING
 | `WorkerAgent` | 4, 7 | Agentic tool-use loop (25 min), code generation |
 | `CompilerAgent` | 5 | Build detection, LLM-guided compile fixes |
 | `GitMergeService` | 4, 6 | Branch merging, conflict detection |
-| `ReviewerAgentV2` | 7 | Code inspection, auto-fix, accuracy assessment |
+| `ReviewerAgent` | 7 | Code inspection, auto-fix, accuracy assessment |
 | `AccuracyAssessmentService` | 7 | Spec adherence scoring (Phase 3 of review) |
 | `TestGenOrchestrator` | 8 | Orchestrates test planning + generation |
 | `TestPreviewCoordinator` | 9 | Preview reuse, test execution lifecycle |
@@ -1238,7 +1249,7 @@ Design files are synced from `gs://{DEPLOY_BUCKET}/designs/design-md/` to the GC
 - **Per-project workspace** at `workspace/projects/<projectId>/` owned by `ProjectWorkspaceService` (`project/workspace/`). Contains `codemaps/<repo-short-name>.md`, `architecture.md`, `summary.md`, `docs/<filename>`, plus a `.git/` history. Atomic writes via os-level rename + Redis-backed per-project lock (`project:ws-lock:<id>`).
 - **Disk vs DB** — DB stays authoritative (Cloud Run / GCE disk is ephemeral). `ProjectArchitectureService.generate()` writes to both; `ReadFileTool`'s `project:` prefix falls back to DB blobs when the disk cache is missing (`readFromDbFallback`).
 - **Project brief** — `ProjectBriefService.summarise()` makes one LIGHTWEIGHT-tier LLM call per `generate()` to produce 2-4 sentences; `buildBrief()` returns an ~800-token block (summary + arch headings) injected as `{{PROJECT_BRIEF}}` in the planner system prompt.
-- **Pre-execution refresh** — `V2RunOrchestrator` calls `StalenessService.report()` before planning; if any linked repo is stale, `ProjectArchitectureService.generate()` runs synchronously so the planner sees current codemaps. Post-success: staleness cache invalidated.
+- **Pre-execution refresh** — `RunOrchestrator` calls `StalenessService.report()` before planning; if any linked repo is stale, `ProjectArchitectureService.generate()` runs synchronously so the planner sees current codemaps. Post-success: staleness cache invalidated.
 - **RAG pipeline** (`project/rag/`) — `DocumentExtractor` (Tika `AutoDetectParser`) → `ChunkingService` (500-token windows, 50-token overlap, code-fence aware) → `EmbeddingService` (Spring AI OpenAI text-embedding-3-small, batch 100) → `ChunkStore` (JDBC `INSERT ... ?::vector` against `project_document_chunk`). `ProjectDocumentService` runs the index loop async (`@Async`).
 - **Retrieval** — `RetrievalService.retrieve(projectId, query, k=3, cap=1500 tokens)` runs `ORDER BY embedding <=> ?::vector` against pgvector; assembles a `## REFERENCE DOCS` block with `[S1] filename (chunk N)` headers. Wired into `OutlinePlannerAgent` as `{{REFERENCE_DOCS}}` (was `PlannerAgentV2` until slice 5b deletion) and into `ProjectChatService` (using last user turn as the query). Empty string when no documents are READY for the project.
 - **Architecture diff** — frontend renders an LCS line diff of `architecture.md` vN vs vN-1.

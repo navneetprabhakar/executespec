@@ -12,9 +12,9 @@ import com.navneet.executespec.codeintel.ProjectArchitectureService;
 import com.navneet.executespec.codeintel.entity.ProjectArchitectureDoc;
 import com.navneet.executespec.execution.entity.ExecutionRun;
 import com.navneet.executespec.execution.repository.ExecutionRunRepository;
+import com.navneet.executespec.integration.RunOrchestrator;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.v2.integration.RunOrchestrator;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;

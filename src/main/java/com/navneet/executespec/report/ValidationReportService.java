@@ -18,7 +18,7 @@ import com.navneet.executespec.report.model.ValidationReportShareDTO;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.scoring.ReviewScoringService;
 import com.navneet.executespec.state.StateStore;
@@ -88,7 +88,7 @@ public class ValidationReportService {
         reportMarkdown = buildFallbackMarkdown(runId, issues, input);
       }
 
-      // 3. Extract accuracy data from ReviewReportV2 (Phase 3 output)
+      // 3. Extract accuracy data from ReviewReport (Phase 3 output)
       AccuracyReport accuracyReport =
           input.review() != null ? input.review().getAccuracyReport() : null;
       Integer accuracyScore = null;
@@ -274,7 +274,7 @@ public class ValidationReportService {
     List<ReportIssueDTO> issues = new ArrayList<>();
 
     // Issues from ReviewerAgentV2 (flat issue list)
-    ReviewReportV2 review = input.review();
+    ReviewReport review = input.review();
     if (review != null && review.getIssues() != null) {
       for (ReviewIssue ri : review.getIssues()) {
         String fixNote = null;
@@ -479,7 +479,7 @@ public class ValidationReportService {
     if (issues.isEmpty()) return PipelineResult.PASSED;
 
     // Check if all review issues were auto-fixed successfully
-    ReviewReportV2 review = input.review();
+    ReviewReport review = input.review();
     if (review != null && review.getIssues() != null && !review.getIssues().isEmpty()) {
       boolean allFixed =
           review.getIssues().stream().allMatch(i -> i.isAutoFixed() && i.isFixSucceeded());
@@ -832,7 +832,7 @@ public class ValidationReportService {
   }
 
   /**
-   * Maps the V1-compat {@link ReviewVerdict} stored on {@link ReviewReportV2} back to the V2 {@code
+   * Maps the V1-compat {@link ReviewVerdict} stored on {@link ReviewReport} back to the V2 {@code
    * ReviewerResult.Overall} enum name. Persisted as-is in validation_report.reviewer_verdict so the
    * UI and downstream jobs can discriminate CLEAN vs FIXED_ISSUES (both collapse to APPROVED in
    * V1).

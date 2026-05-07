@@ -3,7 +3,7 @@ package com.navneet.executespec.report.model;
 import java.util.List;
 
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
@@ -12,7 +12,7 @@ import com.navneet.executespec.testgen.model.TestResult;
 public record ReportInput(
     PipelineRun run,
     List<WorkerReport> workerReports,
-    ReviewReportV2 review,
+    ReviewReport review,
     CompileResult compileResult,
     List<AgentTask> tasks,
     TestExecutionSummary testSummary,
@@ -26,7 +26,7 @@ public record ReportInput(
   public ReportInput(
       PipelineRun run,
       List<WorkerReport> workerReports,
-      ReviewReportV2 review,
+      ReviewReport review,
       CompileResult compileResult,
       List<AgentTask> tasks) {
     this(run, workerReports, review, compileResult, tasks, null, List.of(), false, null);
@@ -36,7 +36,7 @@ public record ReportInput(
   public ReportInput(
       PipelineRun run,
       List<WorkerReport> workerReports,
-      ReviewReportV2 review,
+      ReviewReport review,
       CompileResult compileResult,
       List<AgentTask> tasks,
       TestExecutionSummary testSummary,

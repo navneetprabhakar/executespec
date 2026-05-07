@@ -2,7 +2,7 @@
 
 Core pipeline orchestration layer. Manages run lifecycle from submission to completion.
 
-> **Note (2026-04-13):** `PipelineHarness` and the V1 batch path have been deleted. The live pipeline is `v2/integration/RunOrchestrator`. The V1 descriptions below are kept as historical reference only — see root `CLAUDE.md` "V2 pipeline" section for current behaviour.
+> **Note (2026-04-13):** `PipelineHarness` and the V1 batch path have been deleted. The live pipeline is `integration/RunOrchestrator`. The V1 descriptions below are kept as historical reference only — see root `CLAUDE.md` "V2 pipeline" section for current behaviour.
 
 ## Key Files (V1 historical — deleted)
 - `PipelineHarness.java` — Main orchestrator. Runs async pipeline: plan → approve → work → compile → merge → **COMPLETE** → auto-preview → background validation (review → test gen → test exec → report). Writes `.agent-context/project.json` with planner-declared project type in `initAgentContext()`.
@@ -30,7 +30,7 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 8. **Mark run COMPLETE** (status set, `completedAt` recorded)
 9. **Auto-start preview** (5-min TTL) for PROTOTYPE and real-time PRODUCTION modes. Batch runs skip auto-preview.
 10. **Background validation thread** (`bg-validation-{runId}` virtual thread):
-   - ReviewerAgentV2 inspects + auto-fixes
+   - ReviewerAgent inspects + auto-fixes
    - Re-validation after auto-fix
    - TestGenOrchestrator generates integration tests (async)
    - TestPreviewCoordinator reuses existing preview → executes tests

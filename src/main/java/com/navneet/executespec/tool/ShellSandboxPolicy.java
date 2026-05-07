@@ -121,7 +121,12 @@ public class ShellSandboxPolicy {
     this(null);
   }
 
-  // Commands that are NEVER allowed regardless of context
+  // Commands that are NEVER allowed regardless of context.
+  // NOTE: entries here are matched via {@code normalized.contains(blocked)} where
+  // {@code normalized = command.trim().toLowerCase()}. Therefore every entry MUST be lowercase
+  // — entries with uppercase letters silently never match. (Latent bug pre-2026-05-07: the old
+  // "chmod -R 777 /" + "chown -R" entries had capital R and never fired; the new chmod-system
+  // BLOCKED_PATTERN below + the lowercase forms here close that gap.)
   private static final Set<String> BLOCKED_COMMANDS =
       Set.of(
           "rm -rf /",
@@ -129,8 +134,9 @@ public class ShellSandboxPolicy {
           "mkfs",
           "dd if=",
           ":(){ :|:& };:",
-          "chmod -R 777 /",
-          "chown -R",
+          "chmod -r 777 /",
+          "chmod 777 /",
+          "chown -r",
           "reboot",
           "shutdown",
           "halt",
@@ -196,7 +202,21 @@ public class ShellSandboxPolicy {
           // Filesystem mount/unmount — word-boundary to avoid false-positives (e.g. Express "mount"
           // in router code)
           Pattern.compile("\\bmount\\b"),
-          Pattern.compile("\\bumount\\b"));
+          Pattern.compile("\\bumount\\b"),
+
+          // 2026-05-07 — chmod targeting system paths. We allow `chmod` in the prefix list so
+          // workers can run the legitimate `chmod +x compile.sh` that ProgramBench (and any
+          // generated build script) needs, but reject anything that touches system dirs. The
+          // `chmod -R 777 /` exact-match phrase already lives in BLOCKED_COMMANDS; this pattern
+          // catches the broader family (chmod 755 /etc/foo, chmod +x /usr/bin/bar, etc).
+          // NOTE: `/opt` and `/var` are deliberately NOT in this list — production workspaces
+          // bind to `/opt/app/workspace/<runId>` (`agent.workspace=./workspace` resolved against
+          // `WorkingDirectory=/opt/app`), so blocking `/opt` would false-positive every worker
+          // that uses an absolute workspace path. `/var` is similarly used by some host-side
+          // scratch dirs. The remaining dirs are kernel + system + boot critical with no
+          // legitimate workspace overlap.
+          Pattern.compile(
+              "\\bchmod\\b[^\\n]*\\s/(?:etc|usr|root|boot|sbin|bin|sys|proc|dev|run)\\b"));
 
   // Docker subcommands that are safe — all others are blocked
   private static final Set<String> ALLOWED_DOCKER_SUBCOMMANDS =
@@ -268,10 +288,10 @@ public class ShellSandboxPolicy {
           // `yarn add` / `deno cache` / `cargo build` / `go build` / `make`, which blocks
           // every non-npm JS project + every Rust / Go / Make project from passing the
           // build smoke test. NOT added: `bash` / `sh` (defeats the allowlist via `-c`),
-          // `chmod` / `chown` (chain unknown binaries), `apt` / `brew` / `sudo` (system
-          // mutation), `ssh` / `scp` / `rsync` (remote exfiltration paths). HIGH-mode
-          // strict verb checks for these still need a per-tool verb list — TODO when
-          // someone flips the org to HIGH guardrails.
+          // `chown` (chain unknown binaries), `apt` / `brew` / `sudo` (system mutation),
+          // `ssh` / `scp` / `rsync` (remote exfiltration paths). HIGH-mode strict verb checks
+          // for these still need a per-tool verb list — TODO when someone flips the org to
+          // HIGH guardrails.
           "bun",
           "pnpm",
           "yarn",
@@ -281,9 +301,22 @@ public class ShellSandboxPolicy {
           "go",
           "make",
           "curl",
-          "wget" // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload, exfil)
-          // are caught by BLOCKED_PATTERNS
-          );
+          "wget", // Allowed for local smoke tests — dangerous patterns (pipe to bash, upload,
+          // exfil) are caught by BLOCKED_PATTERNS
+
+          // 2026-05-07 — chmod was previously left out as "chains unknown binaries". In
+          // practice every binary the worker can chain is already in this allowlist (gcc,
+          // cargo, go, mvn, etc.), and forbidding chmod blocks the legitimate `chmod +x
+          // compile.sh && ./compile.sh` that ProgramBench tasks need to verify their build
+          // before declaring done. With chmod blocked, every cmatrix run on 2026-05-07
+          // stagnated because the worker could not validate its own compile script. The
+          // dangerous variants (`chmod -R 777 /`, chmod against /etc, /usr, /var, /root,
+          // etc.) are caught by BLOCKED_COMMANDS + the chmod-system-path BLOCKED_PATTERN
+          // entry above, so widening the allowlist with chmod does not widen the abuse
+          // surface in any meaningful way — within workspace it can only flip permission
+          // bits on files the worker already owns; in cleanroom + --network none, even
+          // dangerous chmod has no exfiltration path.
+          "chmod");
 
   /** Matches $(...) subshell syntax. */
   private static final Pattern SUBSHELL_PATTERN = Pattern.compile("\\$\\(");

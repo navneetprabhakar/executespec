@@ -283,7 +283,7 @@ Click **Approve** to start execution. Credits are charged at approval. If you re
 
 ### 4.4 Task Execution
 
-Tasks run **sequentially**, one at a time, in the order the planner emitted them. For each task, a single **WorkerAgentV2** loop:
+Tasks run **sequentially**, one at a time, in the order the planner emitted them. For each task, a single **WorkerAgent** loop:
 1. Reads the task's description + any hard constraints injected by the planner
 2. Invokes the LLM via native tool calling (Anthropic / OpenAI / Gemini)
 3. Calls file tools (`readFile`, `writeFile`, `editFile`, `shell`, `gitCommit`, etc.) as needed
@@ -433,7 +433,7 @@ After a run reaches `COMPLETE`, ExecuteSpec performs background validation in a 
 
 ### 7.1 Validation Phases
 
-1. **Code Review (ReviewerAgentV3)**
+1. **Code Review (ReviewerAgent)**
    - Two agentic passes — a general review (logic bugs, incomplete implementations, contract violations) and a project-type-aware wiring review (controller registration, barrel exports, module wiring, etc.)
    - After both passes, the build is re-run
    - Result: CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED

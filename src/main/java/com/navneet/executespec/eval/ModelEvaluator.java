@@ -13,7 +13,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.navneet.executespec.agent.CostEstimator;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.ModelMatrixProperties;
 
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ModelEvaluator {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final CostEstimator costEstimator;
   private final EvalScorer scorer;
   private final EvalTestCaseRegistry testCaseRegistry;
@@ -272,7 +272,8 @@ public class ModelEvaluator {
     long outputTokens = 0;
 
     try {
-      LlmRouter.LlmResponse llmResponse = llmRouter.callDirect(provider, model, prompt);
+      FallbackLlmRouter.LlmResponse llmResponse =
+          fallbackLlmRouter.callDirect(provider, model, prompt);
       long latencyMs = System.currentTimeMillis() - startMs;
 
       responseText = llmResponse.response().getResult().getOutput().getText();

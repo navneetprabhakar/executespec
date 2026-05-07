@@ -235,7 +235,7 @@ public class ModelRegistry {
    * String[]{provider, model}}.
    *
    * <p>Replaces the hardcoded {@code ARCHITECT_CHAIN}, {@code CAPABLE_CHAIN}, {@code
-   * UTILITY_CHAIN}, and {@code MODEL_CHAIN} in LlmRouter.
+   * UTILITY_CHAIN}, and {@code MODEL_CHAIN} in FallbackLlmRouter.
    */
   public List<String[]> fallbackChainFor(String modelName) {
     ModelMatrixProperties.ModelConfig config = lookupConfig(modelName);

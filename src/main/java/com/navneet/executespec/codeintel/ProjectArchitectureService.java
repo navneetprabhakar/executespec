@@ -49,7 +49,7 @@ public class ProjectArchitectureService {
   private final ProjectBriefService briefService;
 
   /** v2.6.4 — compute USD cost for arch + repo-arch generations so the dashboard can roll up. */
-  private final com.navneet.executespec.v2.cost.RunCostTracker costTracker;
+  private final com.navneet.executespec.cost.RunCostTracker costTracker;
 
   private final ObjectMapper objectMapper;
 

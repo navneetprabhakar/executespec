@@ -8,7 +8,7 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -43,7 +43,7 @@ public class TestReportGenerator {
   private final TestResultRepository testResultRepository;
   private final TestTaskRepository testTaskRepository;
   private final TestPlanRepository testPlanRepository;
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final StateStore stateStore;
   private final ObjectMapper objectMapper;
@@ -168,14 +168,14 @@ public class TestReportGenerator {
           new Prompt(
               List.of(
                   new SystemMessage(promptText), new UserMessage("Generate fix suggestions now.")));
-      LlmRouter.LlmResponse lr =
-          llmRouter.callWithFallbackTracked(
+      FallbackLlmRouter.LlmResponse lr =
+          fallbackLlmRouter.callWithFallbackTracked(
               model.providerName(),
               model.getModel(),
               prompt,
               runId,
               "test-fix-suggestion",
-              LlmRouter.FallbackMode.IMMEDIATE,
+              FallbackLlmRouter.FallbackMode.IMMEDIATE,
               0,
               false);
 
@@ -209,7 +209,7 @@ public class TestReportGenerator {
   }
 
   private void accumulateReportTokens(
-      Long testPlanId, LlmRouter.LlmResponse lr, ResolvedModel model) {
+      Long testPlanId, FallbackLlmRouter.LlmResponse lr, ResolvedModel model) {
     try {
       var usage = lr.response().getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();

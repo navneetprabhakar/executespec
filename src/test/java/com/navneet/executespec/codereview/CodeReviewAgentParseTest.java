@@ -7,9 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.ModelResolver;
-import com.navneet.executespec.v2.agent.LlmRouterV2;
-import com.navneet.executespec.v2.cost.RunCostTracker;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -34,7 +34,7 @@ class CodeReviewAgentParseTest {
   void setUp() {
     agent =
         new CodeReviewAgent(
-            mock(LlmRouterV2.class),
+            mock(LlmRouter.class),
             mock(ModelResolver.class),
             new ObjectMapper(),
             mock(RunCostTracker.class));

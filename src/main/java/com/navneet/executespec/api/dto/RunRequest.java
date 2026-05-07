@@ -94,7 +94,7 @@ public record RunRequest(
         String branch,
     /**
      * Fix M (2026-05-03) — feed prior PR review comments into the planner. {@link
-     * com.navneet.executespec.v2.agent.PlannerRequest#prReviewComments} already plumbed this field
+     * com.navneet.executespec.agent.PlannerRequest#prReviewComments} already plumbed this field
      * through to the {@code outline-planner.md} {@code {{PR_REVIEW_COMMENTS}}} placeholder;
      * exposing it via the public DTO lets external clients request a "address these review comments
      * on this PR" run without copy-pasting the comments into the spec body.
@@ -124,7 +124,7 @@ public record RunRequest(
      * Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode.
      *
      * <p>When true, the run executes normally but {@link
-     * com.navneet.executespec.v2.integration.RunOrchestrator} skips the auto-push to GitHub /
+     * com.navneet.executespec.integration.RunOrchestrator} skips the auto-push to GitHub /
      * Bitbucket on success. The workspace stays on disk and the user can inspect the diff in the
      * Run Detail page; if they like it they can manually push via {@code POST
      * /runs/{id}/push-github} (the existing single-repo path). Default false → ships today's
