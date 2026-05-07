@@ -192,6 +192,19 @@ public class WorkerAgent {
 
     // Stagnation guard state — counts consecutive iterations without a
     // write-class tool call. Reset to 0 on any writeFile / editFile.
+    // Per-task override (req.stagnationWarnAfter / req.stagnationForceAfter): SequentialExecutor
+    // sets these per complexity (LOW=8/12 default, MEDIUM=12/18, HIGH=18/28) so that legitimate
+    // reverse-engineering / multi-file-read iterations on HIGH tasks (e.g. ProgramBench cmatrix)
+    // don't trip the guard before the worker can write. Falls through to the static defaults
+    // when null, preserving prior behaviour for callers that don't set the override.
+    final int stagnationWarnAfter =
+        req.stagnationWarnAfter() != null && req.stagnationWarnAfter() > 0
+            ? req.stagnationWarnAfter()
+            : STAGNATION_WARN_AFTER_N;
+    final int stagnationForceAfter =
+        req.stagnationForceAfter() != null && req.stagnationForceAfter() > stagnationWarnAfter
+            ? req.stagnationForceAfter()
+            : Math.max(STAGNATION_FORCE_AFTER_N, stagnationWarnAfter + 4);
     int stagnantIters = 0;
     boolean stagnationWarned = false;
 
@@ -382,30 +395,32 @@ public class WorkerAgent {
       } else {
         stagnantIters++;
       }
-      if (!stagnationWarned && stagnantIters >= STAGNATION_WARN_AFTER_N) {
+      if (!stagnationWarned && stagnantIters >= stagnationWarnAfter) {
         log.info(
-            "WorkerAgent STAGNATION_WARN run={} task={} iter={} stagnantIters={}",
+            "WorkerAgent STAGNATION_WARN run={} task={} iter={} stagnantIters={} threshold={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
-            stagnantIters);
+            stagnantIters,
+            stagnationWarnAfter);
         history.add(
             new SystemMessage(
                 "PROGRESS CHECK: "
-                    + STAGNATION_WARN_AFTER_N
+                    + stagnationWarnAfter
                     + " consecutive iterations with no new file writes. If your task is done,"
                     + " call completeTask now. If a build error blocks you, fix the file. Do"
                     + " NOT re-read files you have already verified, do NOT re-inspect git"
                     + " state, do NOT add 'one more verification' round-trips."));
         stagnationWarned = true;
       }
-      if (stagnantIters >= STAGNATION_FORCE_AFTER_N) {
+      if (stagnantIters >= stagnationForceAfter) {
         log.warn(
-            "WorkerAgent STAGNATION_FORCE run={} task={} iter={} stagnantIters={}",
+            "WorkerAgent STAGNATION_FORCE run={} task={} iter={} stagnantIters={} threshold={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
-            stagnantIters);
+            stagnantIters,
+            stagnationForceAfter);
         recordTerminal(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, req, iter);
         return WorkerResult.builder()
             .outcome(WorkerResult.Outcome.COMPLETED_BY_STAGNATION)
