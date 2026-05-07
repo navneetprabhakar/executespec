@@ -204,7 +204,7 @@ function Chip({
 }
 
 const codeStyle: React.CSSProperties = {
-  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+  fontFamily: 'var(--v3-font-mono)',
   fontSize: 11.5,
   padding: '1px 5px',
   background: 'var(--v3-bg)',

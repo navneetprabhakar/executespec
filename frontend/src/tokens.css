@@ -87,22 +87,29 @@
 
   /* Accent — Signal palette
      F-16 (round-3 audit) — three slots, three jobs:
-       --accent-blue       button SURFACE colour (white text sits on top → 4.85 AA)
-       --accent-blue-hover button SURFACE hover  (white text sits on top → 6.46 AA)
-       --accent-blue-text  brand-blue TEXT on dark surface (link, "Sign up free", inline brand-blue text → 7.4 AA-body on graphite-2)
-     Consumers writing `color: var(--accent-blue)` on a dark surface should
-     migrate to `--accent-blue-text` to pass AA-body. Existing
-     `bg-[var(--accent-blue)] text-white` stays correct. */
-  --accent-blue: var(--c-signal-blue);
-  --accent-blue-hover: var(--c-signal-blue-hover);
+       --accent-blue       button SURFACE colour (white text sits on top)
+       --accent-blue-hover button SURFACE hover
+       --accent-blue-text  brand-blue TEXT on dark surface
+     2026-05-06 (website parity) — DARK-THEME default uses the brighter
+     #5B8DEF (the same hex the marketing site uses for its primary CTA),
+     because on the warmer graphite-0 surface #3B6FCC reads as a dim navy
+     and the user feedback flagged it as "too dark." White text on
+     #5B8DEF still hits AA-large (3.0) which is fine for button labels
+     at >=14px / 600. The light-theme override below keeps #2563EB so
+     buttons-on-white still pass AA-body. */
+  --accent-blue: #5b8def;
+  --accent-blue-hover: #7aa5f5;
   --accent-blue-text: var(--c-signal-blue-on-dark);
   --accent-harness: var(--c-accent-purple); /* harness = the agent-orchestration purple tone */
   --accent-planner: var(
     --c-info
   ); /* planner = the info-cyan tone (split from brand blue per Wave-5 E.2) */
 
-  /* Brand gradient (logo, primary CTAs, scorecard highlight) */
-  --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
+  /* Brand gradient (logo, primary CTAs, scorecard highlight). Uses the
+   * dark-surface brand-blue (--accent-blue, brighter) so the gradient
+   * doesn't dim out on the warmer graphite-0 page bg. Light theme
+   * override below uses the darker AA-on-white variant. */
+  --brand-grad: linear-gradient(135deg, var(--accent-blue) 0%, var(--c-signal-teal) 100%);
 
   /* Status — distinct color per semantic group. v2.6.0 (UI polish v1):
    * PARTIAL nudged from #F97316 → #F5A524 (softer amber, not red-adjacent).

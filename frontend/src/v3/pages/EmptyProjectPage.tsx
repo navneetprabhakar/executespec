@@ -264,20 +264,40 @@ export default function EmptyProjectPage() {
           color: 'var(--v3-text-subtle)',
         }}
       >
-        {/* D3 (round-3 audit) — "long way" framed the primary CTA as a
-            shortcut. Renamed to a positive outcome path so the secondary
-            choice is "attach a repo first" not "do it the slow way". */}
+        {/* Audit r5 (P2-7, 2026-05-06) — pre-fix this link sent the user
+            to /org/projects which mounts inside AppLayout (v2 sidebar
+            chrome). New users on the v3 top-bar shell got yanked into a
+            visually-different product within 10s of registering. Now
+            we keep them in v3: same project-create flow as the primary
+            CTA, but stash a marker that ProjectHomePage reads on mount
+            and immediately opens the RepoAttachPopover. Single chrome,
+            single mental model. */}
         Already have a GitHub repo?{' '}
-        <Link
-          to='/org/projects'
+        <button
+          type='button'
+          disabled={creating}
+          onClick={() => {
+            try {
+              sessionStorage.setItem('v3-open-attach-repo', '1');
+            } catch {
+              /* private mode — fall through, user can still click + Attach repo */
+            }
+            onCreate();
+          }}
           style={{
+            background: 'transparent',
+            border: 'none',
+            padding: 0,
             color: 'var(--v3-brand)',
             textDecoration: 'none',
             fontWeight: 500,
+            cursor: creating ? 'not-allowed' : 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 'inherit',
           }}
         >
-          Attach it first →
-        </Link>
+          Attach one on the next screen →
+        </button>
       </div>
     </div>
   );

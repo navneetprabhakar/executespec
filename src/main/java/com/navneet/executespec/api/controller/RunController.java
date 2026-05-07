@@ -83,6 +83,9 @@ public class RunController {
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
 
+  /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
+  private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
+
   /**
    * Wave 2.1 — activation funnel (SPEC_SUBMITTED fired here on run submit, PLAN_APPROVED here on
    * approval).
@@ -157,6 +160,15 @@ public class RunController {
     // already rejected unbounded or negative values before reaching here.
     if (req.userCostCap() != null) {
       stateStore.setUserCostCap(run.getRunId(), req.userCostCap());
+    }
+
+    // Audit r5 (#5, 2026-05-06) — staged-PR-before-push. The flag rides
+    // a per-run Redis key (24h TTL); RunOrchestrator's auto-push gate
+    // consumes it once on terminal-success. JVM crash during the run
+    // → flag dies with the Redis key's TTL or with the next consume()
+    // call, default behaviour (auto-push) resumes naturally.
+    if (Boolean.TRUE.equals(req.skipAutoPush())) {
+      runSkipPushFlag.mark(run.getRunId());
     }
 
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(mapper.toSummary(run));

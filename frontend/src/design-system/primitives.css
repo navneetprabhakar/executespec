@@ -24,13 +24,20 @@
 
 :root {
   /* ── Surface ladder · graphite (dark default) · 8 steps ─────────────── */
-  --c-graphite-0: #0b0d10; /* page bg — was --geist-bg / --v3-bg / --bg */
-  --c-graphite-1: #11151b; /* lowest surface — was --v3-surface */
-  --c-graphite-2: #14171c; /* card — was --surface / --gray-100 */
-  --c-graphite-3: #1b1f26; /* card-elevated — was --surface-2 / --gray-200 */
-  --c-graphite-4: #242a33; /* surface border (subtle) — was --surface-border / --gray-300 */
-  --c-graphite-5: #333b46; /* surface divider — was --gray-400 */
-  --c-graphite-6: #4c5662; /* disabled fg — was --gray-500 */
+  /* 2026-05-06 (website parity refresh) — warmed each step ~3-5° toward
+   * a charcoal-with-indigo undertone to match the marketing site. The
+   * pure-black graphite-0 (#0B0D10) read as "AI tool default flat
+   * black" against the new website; the warmer ramp lands consistent
+   * across both surfaces without losing dark-mode legibility. AA-non-
+   * text floors preserved (border-default + border-hover stay above
+   * 3.0 contrast on graphite-2). */
+  --c-graphite-0: #10131a; /* page bg — was --geist-bg / --v3-bg / --bg */
+  --c-graphite-1: #161a23; /* lowest surface — was --v3-surface */
+  --c-graphite-2: #1a1f29; /* card — was --surface / --gray-100 */
+  --c-graphite-3: #232936; /* card-elevated — was --surface-2 / --gray-200 */
+  --c-graphite-4: #2d3441; /* surface border (subtle) — was --surface-border / --gray-300 */
+  --c-graphite-5: #3d4553; /* surface divider — was --gray-400 */
+  --c-graphite-6: #545c6a; /* disabled fg — was --gray-500 */
   /* F-15 (2026-05-01 round-3 audit) — graphite-7 added for AA-passing
    * card boundaries. WCAG SC 1.4.11 requires non-text contrast ≥ 3.0
    * for UI components. graphite-5 (the previous --border-default value)
