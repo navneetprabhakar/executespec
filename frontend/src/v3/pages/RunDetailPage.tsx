@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useParams} from 'react-router-dom';
 import SafeDiffEditor from '@/components/runs/SafeDiffEditor';
 import {MonacoSafeMount} from '@/components/runs/MonacoSafeMount';
@@ -15,6 +15,8 @@ import {
   type RunDetail,
   type ValidationReportData,
 } from '@/lib/api';
+import {useSse} from '@/hooks/useSse';
+import {useSseStore} from '@/stores/useSseStore';
 import type {PrSummary} from '@/types/project';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
@@ -124,31 +126,84 @@ export default function RunDetailPage() {
   // against), but we allow the toggle anyway for consistency.
   const [viewerMode, setViewerMode] = useState<'diff' | 'full'>('diff');
 
-  // Lazy-load run + report + files + PRs in parallel
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      getRun(runId).catch((e) => {
-        if (!cancelled) setError((e as Error)?.message ?? 'Run not found');
-        return null;
-      }),
-      getValidationReport(runId).catch(() => null),
-      getFilesWithStatus(runId).catch(() => [] as FileWithStatus[]),
-      getRunPrs(runId).catch(() => [] as PrSummary[]),
-    ]).then(([d, r, f, p]) => {
-      if (cancelled) return;
-      setDetail(d);
-      setReport(r);
+  // 2026-05-07 — re-fetch is shared between the initial mount and the
+  // SSE-triggered refresh below. Ref-stable so the SSE-event effect
+  // doesn't re-arm the listener on every state change.
+  const refetchAll = useCallback(
+    async (initial: boolean) => {
+      if (initial) {
+        setLoading(true);
+        setError(null);
+      }
+      const [d, r, f, p] = await Promise.all([
+        getRun(runId).catch((e) => {
+          if (initial) setError((e as Error)?.message ?? 'Run not found');
+          return null;
+        }),
+        getValidationReport(runId).catch(() => null),
+        getFilesWithStatus(runId).catch(() => [] as FileWithStatus[]),
+        getRunPrs(runId).catch(() => [] as PrSummary[]),
+      ]);
+      // The detail fetch is the source of truth — only patch if it
+      // succeeded (a 5xx during a transient gap shouldn't blank the
+      // pane the user is looking at).
+      if (d) setDetail(d);
+      // Validation report can legitimately be null (run not done) — only
+      // patch when present so a partial pre-COMPLETE refetch can't wipe
+      // a stale-but-real report we already have. Same logic for files +
+      // PRs: they can legitimately be empty so we always patch.
+      if (r) setReport(r);
       setFilesWithStatus(f);
       setPrs(p);
-      setLoading(false);
+      if (initial) setLoading(false);
+    },
+    [runId],
+  );
+
+  // Initial parallel load on mount / runId change.
+  useEffect(() => {
+    let cancelled = false;
+    refetchAll(true).catch(() => {
+      if (cancelled) return;
+      // refetchAll already set the error message via getRun's catch.
     });
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, refetchAll]);
+
+  // 2026-05-07 — live updates via SSE. Pre-fix the page only fetched
+  // once on mount, so a non-terminal run's status / verdict / score /
+  // file tree / PR list would freeze on whatever shape it had at first
+  // load. The user's report: "the page didn't auto refresh on
+  // progress." useSse subscribes to /api/runs/{id}/events; the global
+  // SSE store collects every event into `entries`. We watch the latest
+  // entry for this runId and refetch on the events that change visible
+  // state — RUN_STATUS / RUN_DETAIL / GATE_OPENED /
+  // VALIDATION_REPORT_READY / RUN_RESTARTED / BATCH_*. Other event
+  // types (LOG, RUN_PROVIDER_SWITCHED) are ignored since they don't
+  // affect what this page renders.
+  useSse(runId);
+  const lastEntryId = useSseStore((s) => s.entries[s.entries.length - 1]?.id ?? null);
+  const lastEntryType = useSseStore((s) => s.entries[s.entries.length - 1]?.type ?? null);
+  const lastSeenIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastEntryId || lastEntryId === lastSeenIdRef.current) return;
+    lastSeenIdRef.current = lastEntryId;
+    if (
+      lastEntryType === 'RUN_STATUS' ||
+      lastEntryType === 'RUN_DETAIL' ||
+      lastEntryType === 'GATE_OPENED' ||
+      lastEntryType === 'VALIDATION_REPORT_READY' ||
+      lastEntryType === 'RUN_RESTARTED' ||
+      lastEntryType === 'BUDGET_EXCEEDED' ||
+      lastEntryType === 'BATCH_PROGRESS' ||
+      lastEntryType === 'BATCH_COMPLETE' ||
+      lastEntryType === 'BATCH_FAILED'
+    ) {
+      void refetchAll(false);
+    }
+  }, [lastEntryId, lastEntryType, refetchAll]);
 
   // Files actually changed by the run (ADDED + MODIFIED, with vendored paths filtered out).
   const VENDORED_PATTERN =
