@@ -1,4 +1,4 @@
-import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
+import {useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
 import {
   type RunDetail,
   type TaskSummary,
@@ -12,12 +12,38 @@ import {
   conversationChat,
 } from '@/lib/api';
 import {useSse} from '@/hooks/useSse';
-import {useSseStore} from '@/stores/useSseStore';
+import {useSseStore, type LogEntry} from '@/stores/useSseStore';
 import PlanCard from './PlanCard';
 import Pill from './Pill';
 import TaskTimeline from '@/components/runs/TaskTimeline';
 import TestProgressTracker from '@/components/runs/TestProgressTracker';
 import TestReportPanel from '@/components/runs/TestReportPanel';
+import {
+  AlertTriangle,
+  ArrowUpCircle,
+  Bug,
+  CheckCircle2,
+  Clock,
+  DollarSign,
+  Eye,
+  FileCode,
+  FileEdit,
+  FilePlus2,
+  FlaskConical,
+  GitCommit,
+  Globe,
+  MessageSquare,
+  PauseCircle,
+  PlayCircle,
+  RotateCcw,
+  Rocket,
+  Search,
+  Shield,
+  Terminal,
+  Wrench,
+  XCircle,
+  Zap,
+} from 'lucide-react';
 
 /**
  * Right-side panel on RunDetailPage — surfaces the operator views that
@@ -458,6 +484,674 @@ function TaskRow({
 
 // ── Log pane ────────────────────────────────────────────────────────────
 
+// ── Log pane (v3 port of v2 LiveLog) ───────────────────────────────────────
+//
+// 2026-05-07 — full UX port of `frontend/src/components/runs/LiveLog.tsx`
+// (v2 dev-branch implementation). The previous v3 LogPane just rendered
+// `time + type pill + payload string` per row. The user reported "the
+// live log had better presentation earlier than just showing JSON" —
+// referring to the v2 surface that categorised events into:
+//   1. Milestone banners (icon + colour + human text + timestamp) for
+//      every lifecycle event the backend emits (RUN_STATUS, TASK_STATUS,
+//      GATE_*, COST_UPDATE, DEPLOY_*, REVIEW_*, TEST_GEN_*, PREVIEW_*,
+//      VALIDATION_*, etc.).
+//   2. Compact file-op rows for `[write_file result]` / `[edit_file
+//      result]` / `[commit result]` / `[run result]` log lines so the
+//      user sees "Created src/foo.ts" instead of the raw tool dump.
+//   3. Suppressed noise rows for low-value internals
+//      (TOOL_DISPATCHED, LLM_REQUEST_SENT, "Iteration N (",
+//      STALL_TRUNCATION, COMPACTION_TRIGGERED).
+//   4. Emoji-prefix banner formatting (✅⚠️❌🔧) and known-agent
+//      taskId banners (harness/planner/compiler/reviewer/preview-agent).
+//   5. Status bar at the bottom with a pulsing dot when streaming.
+//   6. Newest-LAST ordering with auto-scroll-to-bottom + pause-on-scroll-up.
+//
+// Reused as-is from v2; tokens swapped for v3 (--v3-success / --v3-warning
+// / --v3-error / --v3-brand). Uses inline-style banners instead of
+// Tailwind classes so there's no v2 token leak.
+
+const MILESTONE_TYPES = new Set([
+  'RUN_STATUS',
+  'TASK_STATUS',
+  'GATE_OPENED',
+  'GATE_RESOLVED',
+  'COMPLETE',
+  'COST_UPDATE',
+  'TOKEN_USAGE',
+  'QUEUED',
+  'RECOVERY_ATTEMPTED',
+  'RUN_RESTARTED',
+  'BUDGET_EXCEEDED',
+  'VALIDATION_REPORT_READY',
+  'RUN_PROVIDER_SWITCHED',
+  // Deploy / preview engine
+  'DEPLOY_STARTED',
+  'DEPLOY_BUILDING',
+  'DEPLOY_PUSHING',
+  'DEPLOY_LIVE',
+  'DEPLOY_FAILED',
+  'ENGINE_DEPLOY_STARTED',
+  'ENGINE_PHASE',
+  'ENGINE_BUILDING',
+  'ENGINE_DEPLOYING',
+  'ENGINE_DEPLOY_LIVE',
+  'ENGINE_DEPLOY_FAILED',
+  // Reviewer
+  'REVIEW_STARTED',
+  'REVIEW_ISSUE_FOUND',
+  'REVIEW_AUTO_FIX_STARTED',
+  'REVIEW_AUTO_FIX_RESULT',
+  'REVIEW_COMPLETE',
+  // Test gen pipeline
+  'TEST_GEN_STARTED',
+  'TEST_PLANNING_STARTED',
+  'TEST_PLANNING_COMPLETED',
+  'TEST_GENERATION_STARTED',
+  'TEST_COMPILATION_STARTED',
+  'TEST_COMPILATION_PASSED',
+  'TEST_COMPILATION_FAILED',
+  'TEST_EXECUTION_STARTED',
+  'TEST_EXECUTION_SKIPPED',
+  'TEST_REPORT_READY',
+  'TEST_PIPELINE_FAILED',
+  // Context / validation
+  'CONTEXT_EXTRACTED',
+  'CLARIFICATION_NEEDED',
+  'CLARIFICATION_RESOLVED',
+  'MODEL_ESCALATED',
+  'API_SPEC_READY',
+  // Preview lifecycle
+  'PREVIEW_ANALYZING',
+  'PREVIEW_BUILDING',
+  'PREVIEW_STARTING',
+  'PREVIEW_READY',
+  'PREVIEW_STOPPED',
+  'PREVIEW_TIMED_OUT',
+  'PREVIEW_FAILED',
+  'VALIDATION_STARTED',
+  'VALIDATION_PASSED',
+  'VALIDATION_FAILED',
+  // Batch (v2 batch lifecycle, kept for forward-compat)
+  'BATCH_PROGRESS',
+  'BATCH_COMPLETE',
+  'BATCH_FAILED',
+]);
+
+type FileOp = {kind: 'write' | 'edit' | 'commit' | 'command'; path?: string};
+
+function detectFileOp(msg: string): FileOp | null {
+  if (/\[(write_file|writeFile)\s+result\]/i.test(msg)) {
+    const m = msg.match(/(?:\bto\b|\bfile:\b)\s+([\w./\\-]+\.\w+)/i);
+    return {kind: 'write', path: m?.[1]};
+  }
+  if (/\[(edit_file|editFile)\s+result\]/i.test(msg)) {
+    const m = msg.match(/(?:\bin\b|\bfile:\b)\s+([\w./\\-]+\.\w+)/i);
+    return {kind: 'edit', path: m?.[1]};
+  }
+  if (/\[(commit|git_commit|gitCommit)\s+result\]/i.test(msg)) return {kind: 'commit'};
+  if (/\[(run|run_command|run_build|run_tests|shell)\s+result\]/i.test(msg))
+    return {kind: 'command'};
+  return null;
+}
+
+/** taskId like "task-1-project_setup" → "Project Setup". */
+function humanizeTaskId(taskId: string): string {
+  if (!taskId) return '';
+  const parts = taskId.split('-');
+  const nameIdx = parts.findIndex((p) => isNaN(Number(p)) && p !== 'task' && p !== 'worker');
+  const name = parts.slice(nameIdx >= 0 ? nameIdx : 2).join(' ');
+  return name ? name.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()) : taskId;
+}
+
+function formatTimestamp(ts: number): string {
+  return new Date(ts).toISOString().split('T')[1].slice(0, 8);
+}
+
+function formatLogMessage(data: Record<string, unknown>): string {
+  return String(data.message ?? data.payload ?? '');
+}
+
+// Token palette — v3 inline so palette swaps cascade through tokens.css.
+const TONE = {
+  blue: {
+    fg: 'var(--v3-brand-hover)',
+    bd: 'color-mix(in srgb, var(--v3-brand) 50%, transparent)',
+    bg: 'color-mix(in srgb, var(--v3-brand) 8%, transparent)',
+  },
+  blueSoft: {
+    fg: 'var(--v3-text-muted)',
+    bd: 'color-mix(in srgb, var(--v3-brand) 35%, transparent)',
+    bg: 'color-mix(in srgb, var(--v3-brand) 4%, transparent)',
+  },
+  green: {
+    fg: 'var(--v3-success)',
+    bd: 'color-mix(in srgb, var(--v3-success) 50%, transparent)',
+    bg: 'color-mix(in srgb, var(--v3-success) 8%, transparent)',
+  },
+  greenSoft: {
+    fg: 'color-mix(in srgb, var(--v3-success) 80%, var(--v3-text))',
+    bd: 'color-mix(in srgb, var(--v3-success) 35%, transparent)',
+    bg: 'color-mix(in srgb, var(--v3-success) 5%, transparent)',
+  },
+  amber: {
+    fg: 'var(--v3-warning)',
+    bd: 'color-mix(in srgb, var(--v3-warning) 50%, transparent)',
+    bg: 'color-mix(in srgb, var(--v3-warning) 8%, transparent)',
+  },
+  red: {
+    fg: 'var(--v3-error)',
+    bd: 'color-mix(in srgb, var(--v3-error) 50%, transparent)',
+    bg: 'color-mix(in srgb, var(--v3-error) 8%, transparent)',
+  },
+  neutral: {
+    fg: 'var(--v3-text-muted)',
+    bd: 'var(--v3-border)',
+    bg: 'var(--v3-bg)',
+  },
+} as const;
+type ToneKey = keyof typeof TONE;
+
+function bannerStyle(tone: ToneKey): CSSProperties {
+  const t = TONE[tone];
+  return {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 8,
+    padding: '5px 10px',
+    borderRadius: 4,
+    border: `1px solid ${t.bd}`,
+    background: t.bg,
+    color: t.fg,
+    fontSize: 11.5,
+    fontWeight: 500,
+    margin: '3px 0',
+  };
+}
+
+interface MilestoneSpec {
+  icon: ReactNode;
+  text: string;
+  tone: ToneKey;
+}
+
+/** Map (type, payload) → banner spec, or null to fall through to the LOG path. */
+function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
+  const {type, data} = entry;
+  const payloadStr = String((data as Record<string, unknown>)?.payload ?? '');
+  const status = String((data as Record<string, unknown>)?.status ?? payloadStr);
+
+  // Run / task status
+  if (type === 'TASK_STATUS') {
+    const label = humanizeTaskId(String((data as Record<string, unknown>)?.taskId ?? ''));
+    const s = status.toUpperCase();
+    if (s === 'IN_PROGRESS' || s === 'RUNNING' || s === 'WORKING')
+      return {icon: <Zap className='h-3.5 w-3.5' />, text: `Task started: ${label}`, tone: 'blue'};
+    if (s === 'COMPLETE' || s === 'COMPLETED')
+      return {
+        icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+        text: `Task done: ${label}`,
+        tone: 'green',
+      };
+    if (s === 'FAILED')
+      return {
+        icon: <XCircle className='h-3.5 w-3.5' />,
+        text: `Task failed: ${label}`,
+        tone: 'red',
+      };
+    if (s === 'PARTIAL')
+      return {
+        icon: <AlertTriangle className='h-3.5 w-3.5' />,
+        text: `Task partial: ${label}`,
+        tone: 'amber',
+      };
+    return {
+      icon: <Clock className='h-3.5 w-3.5' />,
+      text: `Task ${s.toLowerCase()}: ${label}`,
+      tone: 'neutral',
+    };
+  }
+  if (type === 'RUN_STATUS') {
+    const s = status.toUpperCase();
+    if (s === 'COMPLETE')
+      return {
+        icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+        text: 'Run completed successfully',
+        tone: 'green',
+      };
+    if (s === 'PARTIAL')
+      return {
+        icon: <AlertTriangle className='h-3.5 w-3.5' />,
+        text: 'Run partial — some tasks need manual retry',
+        tone: 'amber',
+      };
+    if (s === 'FAILED')
+      return {
+        icon: <XCircle className='h-3.5 w-3.5' />,
+        text: 'Run failed — check tasks for retry',
+        tone: 'red',
+      };
+    if (s === 'CANCELLED' || s === 'ABORTED')
+      return {icon: <PauseCircle className='h-3.5 w-3.5' />, text: `Run ${s.toLowerCase()}`, tone: 'neutral'};
+    return {icon: <Rocket className='h-3.5 w-3.5' />, text: `Run → ${s}`, tone: 'blue'};
+  }
+
+  // Gates
+  if (type === 'GATE_OPENED')
+    return {
+      icon: <PauseCircle className='h-3.5 w-3.5' />,
+      text: `Waiting for ${payloadStr || 'approval'} approval`,
+      tone: 'amber',
+    };
+  if (type === 'GATE_RESOLVED') {
+    const decision = payloadStr.toUpperCase();
+    const approved = decision === 'APPROVED';
+    return {
+      icon: approved ? (
+        <PlayCircle className='h-3.5 w-3.5' />
+      ) : (
+        <XCircle className='h-3.5 w-3.5' />
+      ),
+      text: `Gate ${decision.toLowerCase()}`,
+      tone: approved ? 'green' : 'red',
+    };
+  }
+
+  // Cost / tokens
+  if (type === 'COST_UPDATE') {
+    const costNum = Number(
+      (data as Record<string, unknown>)?.totalCost ?? Number(payloadStr) ?? 0,
+    );
+    return {
+      icon: <DollarSign className='h-3.5 w-3.5' />,
+      text: `Cost: $${costNum.toFixed(4)}`,
+      tone: 'greenSoft',
+    };
+  }
+  if (type === 'TOKEN_USAGE')
+    return {
+      icon: <DollarSign className='h-3.5 w-3.5' />,
+      text: `Tokens · ${payloadStr}`,
+      tone: 'amber',
+    };
+
+  // Generic completion
+  if (type === 'COMPLETE')
+    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Pipeline complete', tone: 'green'};
+  if (type === 'RECOVERY_ATTEMPTED')
+    return {
+      icon: <RotateCcw className='h-3.5 w-3.5' />,
+      text: `Recovery: ${payloadStr}`,
+      tone: 'amber',
+    };
+  if (type === 'BUDGET_EXCEEDED')
+    return {
+      icon: <XCircle className='h-3.5 w-3.5' />,
+      text: `Budget exceeded${payloadStr ? `: ${payloadStr}` : ''}`,
+      tone: 'red',
+    };
+  if (type === 'VALIDATION_REPORT_READY')
+    return {
+      icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+      text: 'Validation report ready',
+      tone: 'green',
+    };
+  if (type === 'RUN_PROVIDER_SWITCHED')
+    return {
+      icon: <ArrowUpCircle className='h-3.5 w-3.5' />,
+      text: `Provider switched · ${payloadStr}`,
+      tone: 'amber',
+    };
+
+  // Deploy / preview engine
+  if (type === 'DEPLOY_STARTED' || type === 'ENGINE_DEPLOY_STARTED')
+    return {icon: <Rocket className='h-3.5 w-3.5' />, text: 'Deployment started', tone: 'blue'};
+  if (type === 'DEPLOY_BUILDING' || type === 'ENGINE_BUILDING')
+    return {icon: <Rocket className='h-3.5 w-3.5' />, text: 'Building container image…', tone: 'blueSoft'};
+  if (type === 'DEPLOY_PUSHING' || type === 'ENGINE_DEPLOYING')
+    return {
+      icon: <Rocket className='h-3.5 w-3.5' />,
+      text: type.includes('PUSHING') ? 'Pushing image…' : 'Deploying service…',
+      tone: 'blueSoft',
+    };
+  if (type === 'DEPLOY_LIVE' || type === 'ENGINE_DEPLOY_LIVE') {
+    const url = payloadStr.split('|').pop();
+    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: `Live at ${url}`, tone: 'green'};
+  }
+  if (type === 'DEPLOY_FAILED' || type === 'ENGINE_DEPLOY_FAILED') {
+    const err = payloadStr.split('|').pop();
+    return {icon: <XCircle className='h-3.5 w-3.5' />, text: `Deploy failed: ${err}`, tone: 'red'};
+  }
+  if (type === 'ENGINE_PHASE') {
+    const parts = payloadStr.split('|');
+    return {
+      icon: <Rocket className='h-3.5 w-3.5' />,
+      text: `Deploy: ${parts[1] ?? parts[0] ?? ''}`,
+      tone: 'blueSoft',
+    };
+  }
+
+  // Reviewer V2 events
+  if (type === 'REVIEW_STARTED')
+    return {icon: <Eye className='h-3.5 w-3.5' />, text: `Code review started${payloadStr ? ` (${payloadStr})` : ''}`, tone: 'blue'};
+  if (type === 'REVIEW_ISSUE_FOUND') {
+    const parts = payloadStr.split('|');
+    const severity = parts[1] ?? 'UNKNOWN';
+    const desc = parts[2] ?? parts[0] ?? '';
+    const isCritical = severity === 'CRITICAL';
+    return {
+      icon: isCritical ? (
+        <Bug className='h-3.5 w-3.5' />
+      ) : (
+        <AlertTriangle className='h-3.5 w-3.5' />
+      ),
+      text: `Issue: ${desc}`,
+      tone: isCritical ? 'red' : 'amber',
+    };
+  }
+  if (type === 'REVIEW_AUTO_FIX_STARTED')
+    return {icon: <Wrench className='h-3.5 w-3.5' />, text: `Auto-fixing ${payloadStr}`, tone: 'blueSoft'};
+  if (type === 'REVIEW_AUTO_FIX_RESULT') {
+    const parts = payloadStr.split('|');
+    const success = parts[1] === 'PASS';
+    return {
+      icon: success ? (
+        <CheckCircle2 className='h-3.5 w-3.5' />
+      ) : (
+        <XCircle className='h-3.5 w-3.5' />
+      ),
+      text: `Auto-fix ${parts[0]}: ${success ? 'succeeded' : 'failed'}`,
+      tone: success ? 'green' : 'red',
+    };
+  }
+  if (type === 'REVIEW_COMPLETE') {
+    const parts = payloadStr.split('|');
+    const verdict = parts[0] ?? '';
+    const isGood = verdict === 'APPROVED' || verdict === 'APPROVED_WITH_NOTES' || verdict === 'CLEAN';
+    return {
+      icon: isGood ? (
+        <CheckCircle2 className='h-3.5 w-3.5' />
+      ) : (
+        <XCircle className='h-3.5 w-3.5' />
+      ),
+      text: `Review: ${verdict.replace(/_/g, ' ').toLowerCase()}`,
+      tone: isGood ? 'green' : 'red',
+    };
+  }
+
+  // Test gen pipeline
+  if (type === 'TEST_GEN_STARTED')
+    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Test generation started', tone: 'blue'};
+  if (type === 'TEST_PLANNING_STARTED')
+    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Planning test strategy…', tone: 'blueSoft'};
+  if (type === 'TEST_PLANNING_COMPLETED')
+    return {
+      icon: <FlaskConical className='h-3.5 w-3.5' />,
+      text: `Test plan ready: ${payloadStr || '?'} test tasks`,
+      tone: 'blueSoft',
+    };
+  if (type === 'TEST_GENERATION_STARTED')
+    return {
+      icon: <FileCode className='h-3.5 w-3.5' />,
+      text: `Generating ${payloadStr || '?'} test suites…`,
+      tone: 'blueSoft',
+    };
+  if (type === 'TEST_COMPILATION_STARTED')
+    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Compiling tests…', tone: 'blueSoft'};
+  if (type === 'TEST_COMPILATION_PASSED')
+    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Tests compiled successfully', tone: 'greenSoft'};
+  if (type === 'TEST_COMPILATION_FAILED')
+    return {
+      icon: <XCircle className='h-3.5 w-3.5' />,
+      text: `Test compilation failed: ${payloadStr.slice(0, 100)}`,
+      tone: 'red',
+    };
+  if (type === 'TEST_EXECUTION_STARTED')
+    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Running tests against preview…', tone: 'blue'};
+  if (type === 'TEST_EXECUTION_SKIPPED')
+    return {
+      icon: <AlertTriangle className='h-3.5 w-3.5' />,
+      text: `Test execution skipped: ${payloadStr}`,
+      tone: 'amber',
+    };
+  if (type === 'TEST_REPORT_READY')
+    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Test report ready', tone: 'green'};
+  if (type === 'TEST_PIPELINE_FAILED')
+    return {
+      icon: <XCircle className='h-3.5 w-3.5' />,
+      text: `Test pipeline failed: ${payloadStr.slice(0, 100)}`,
+      tone: 'red',
+    };
+
+  // Context / validation / preview
+  if (type === 'CONTEXT_EXTRACTED')
+    return {
+      icon: <Search className='h-3.5 w-3.5' />,
+      text: `Context: ${payloadStr.slice(0, 120)}`,
+      tone: 'neutral',
+    };
+  if (type === 'CLARIFICATION_NEEDED')
+    return {icon: <MessageSquare className='h-3.5 w-3.5' />, text: 'Clarification needed from user', tone: 'amber'};
+  if (type === 'CLARIFICATION_RESOLVED')
+    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Clarification resolved', tone: 'greenSoft'};
+  if (type === 'MODEL_ESCALATED') {
+    const parts = payloadStr.split('|');
+    return {
+      icon: <ArrowUpCircle className='h-3.5 w-3.5' />,
+      text: `Model escalated: ${parts[0]} → ${parts[1] ?? ''}`,
+      tone: 'amber',
+    };
+  }
+  if (type === 'API_SPEC_READY')
+    return {icon: <FileCode className='h-3.5 w-3.5' />, text: 'API spec generated', tone: 'blueSoft'};
+  if (type === 'PREVIEW_ANALYZING')
+    return {
+      icon: <Search className='h-3.5 w-3.5' />,
+      text: `Analyzing project: ${payloadStr.slice(0, 100)}`,
+      tone: 'neutral',
+    };
+  if (type === 'PREVIEW_BUILDING')
+    return {
+      icon: <Rocket className='h-3.5 w-3.5' />,
+      text: `Building preview: ${payloadStr.slice(0, 100)}`,
+      tone: 'blueSoft',
+    };
+  if (type === 'PREVIEW_STARTING')
+    return {
+      icon: <Rocket className='h-3.5 w-3.5' />,
+      text: `Starting preview: ${payloadStr.slice(0, 100)}`,
+      tone: 'blue',
+    };
+  if (type === 'PREVIEW_READY')
+    return {
+      icon: <Globe className='h-3.5 w-3.5' />,
+      text: `Preview ready${payloadStr ? `: ${payloadStr.slice(0, 80)}` : ''}`,
+      tone: 'green',
+    };
+  if (type === 'PREVIEW_STOPPED')
+    return {icon: <PauseCircle className='h-3.5 w-3.5' />, text: 'Preview stopped', tone: 'neutral'};
+  if (type === 'PREVIEW_TIMED_OUT')
+    return {
+      icon: <Clock className='h-3.5 w-3.5' />,
+      text: `Preview timed out${payloadStr ? `: ${payloadStr.slice(0, 80)}` : ''}`,
+      tone: 'amber',
+    };
+  if (type === 'PREVIEW_FAILED')
+    return {
+      icon: <XCircle className='h-3.5 w-3.5' />,
+      text: `Preview failed${payloadStr ? `: ${payloadStr.slice(0, 100)}` : ''}`,
+      tone: 'red',
+    };
+  if (type === 'VALIDATION_STARTED')
+    return {icon: <Shield className='h-3.5 w-3.5' />, text: `Validating ${payloadStr}`, tone: 'neutral'};
+  if (type === 'VALIDATION_PASSED')
+    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Validation passed', tone: 'greenSoft'};
+  if (type === 'VALIDATION_FAILED')
+    return {
+      icon: <XCircle className='h-3.5 w-3.5' />,
+      text: `Validation failed: ${payloadStr.slice(0, 100)}`,
+      tone: 'red',
+    };
+
+  // Batch (forward-compat for V2 batch path)
+  if (type === 'BATCH_PROGRESS')
+    return {icon: <Rocket className='h-3.5 w-3.5' />, text: `Batch: ${payloadStr}`, tone: 'blueSoft'};
+  if (type === 'BATCH_COMPLETE')
+    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Batch complete', tone: 'green'};
+  if (type === 'BATCH_FAILED')
+    return {
+      icon: <XCircle className='h-3.5 w-3.5' />,
+      text: `Batch failed: ${payloadStr.slice(0, 100)}`,
+      tone: 'red',
+    };
+
+  return null;
+}
+
+function MilestoneBanner({entry, spec}: {entry: LogEntry; spec: MilestoneSpec}) {
+  return (
+    <div style={bannerStyle(spec.tone)}>
+      {spec.icon}
+      <span style={{flex: 1, minWidth: 0}}>{spec.text}</span>
+      <span
+        className='v3-mono'
+        style={{fontSize: 10, opacity: 0.55, flexShrink: 0}}
+      >
+        {formatTimestamp(entry.timestamp)}
+      </span>
+    </div>
+  );
+}
+
+function FileOpRow({entry, op}: {entry: LogEntry; op: FileOp}) {
+  const config = {
+    write: {icon: <FilePlus2 className='h-3 w-3' />, label: 'Created', tone: 'blue' as ToneKey},
+    edit: {icon: <FileEdit className='h-3 w-3' />, label: 'Edited', tone: 'neutral' as ToneKey},
+    commit: {
+      icon: <GitCommit className='h-3 w-3' />,
+      label: 'Committed to Git',
+      tone: 'greenSoft' as ToneKey,
+    },
+    command: {
+      icon: <Terminal className='h-3 w-3' />,
+      label: 'Command run',
+      tone: 'neutral' as ToneKey,
+    },
+  }[op.kind];
+  const t = TONE[config.tone];
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '2px 6px',
+        fontSize: 11,
+        color: t.fg,
+      }}
+    >
+      <span
+        className='v3-mono'
+        style={{color: 'var(--v3-text-subtle)', flexShrink: 0}}
+      >
+        {formatTimestamp(entry.timestamp)}
+      </span>
+      <span
+        style={{display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, fontWeight: 600}}
+      >
+        {config.icon}
+        {config.label}
+      </span>
+      {op.path && (
+        <span
+          className='v3-mono'
+          style={{
+            color: 'var(--v3-text-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {op.path}
+        </span>
+      )}
+    </div>
+  );
+}
+
+function isInternalNoise(msg: string): boolean {
+  return (
+    /TOOL_DISPATCHED/i.test(msg) ||
+    /LLM_REQUEST_SENT/i.test(msg) ||
+    /\bIteration\s+\d+\s*\(/i.test(msg) ||
+    /STALL_TRUNCATION/i.test(msg) ||
+    /COMPACTION_TRIGGERED/i.test(msg)
+  );
+}
+
+/**
+ * For LOG entries that aren't file ops or noise: if the message is
+ * emoji-prefixed (✅⚠️❌🔧) or comes from a known agent taskId
+ * (harness/planner/compiler/reviewer/preview-agent), treat it as a
+ * milestone-grade banner. Returns null otherwise → caller drops the row.
+ */
+function deriveLogBanner(msg: string, taskId: string): MilestoneSpec | null {
+  const isHarnessTag =
+    /^[✅⚠️❌🔧]/.test(msg) ||
+    taskId === 'harness' ||
+    taskId === 'planner' ||
+    taskId === 'compiler' ||
+    taskId === 'reviewer' ||
+    taskId === 'report' ||
+    taskId === 'preview-agent' ||
+    msg.startsWith('Merging') ||
+    msg.startsWith('Simple request') ||
+    msg.startsWith('Reviewer') ||
+    msg.startsWith('Compile') ||
+    msg.startsWith('Background') ||
+    msg.startsWith('Code ready') ||
+    msg.startsWith('Plan') ||
+    /^\[[\w-]+\]/.test(msg);
+
+  if (!isHarnessTag) return null;
+
+  let icon: ReactNode = <Rocket className='h-3.5 w-3.5' />;
+  let tone: ToneKey = 'neutral';
+  if (/^✅/.test(msg) || /\bsuccessfully\b/i.test(msg) || /\bpassed\b/i.test(msg)) {
+    icon = <CheckCircle2 className='h-3.5 w-3.5' />;
+    tone = 'green';
+  } else if (/^⚠️/.test(msg) || /\bWARNING\b/.test(msg)) {
+    icon = <AlertTriangle className='h-3.5 w-3.5' />;
+    tone = 'amber';
+  } else if (/^❌/.test(msg) || /\bfailed\b/i.test(msg) || /\bError\b/.test(msg)) {
+    icon = <XCircle className='h-3.5 w-3.5' />;
+    tone = 'red';
+  } else if (/^🔧/.test(msg) || (taskId === 'reviewer' && /fix/i.test(msg))) {
+    icon = <Wrench className='h-3.5 w-3.5' />;
+    tone = 'blueSoft';
+  } else if (taskId === 'planner' || /^Plan/i.test(msg)) {
+    icon = <Zap className='h-3.5 w-3.5' />;
+    tone = 'blue';
+  } else if (taskId === 'harness' || /^Merging|^\[harness\]/i.test(msg) || /^Background/i.test(msg)) {
+    icon = <GitCommit className='h-3.5 w-3.5' />;
+    tone = 'blueSoft';
+  } else if (taskId === 'compiler' || /^Compile|^Compiling/i.test(msg)) {
+    icon = <Terminal className='h-3.5 w-3.5' />;
+    tone = 'blue';
+  } else if (taskId === 'reviewer' || /^Reviewer|^\[reviewer\]/i.test(msg)) {
+    icon = <Eye className='h-3.5 w-3.5' />;
+    tone = 'blueSoft';
+  } else if (taskId === 'preview-agent') {
+    icon = <Globe className='h-3.5 w-3.5' />;
+    tone = 'blueSoft';
+  } else if (/^Simple request/i.test(msg)) {
+    icon = <Zap className='h-3.5 w-3.5' />;
+    tone = 'blue';
+  }
+
+  const cleanMsg = msg.replace(/^[✅⚠️❌🔧]\s*/, '').replace(/^\[[\w-]+\]\s*/, '');
+  return {icon, text: cleanMsg.length > 200 ? cleanMsg.slice(0, 200) + '…' : cleanMsg, tone};
+}
+
 function LogPane({runId, live}: {runId: string; live: boolean}) {
   // Hook the SSE stream into the global store while this pane is mounted.
   // The hook handles connect/reconnect/scoped-token; we just consume entries.
@@ -465,10 +1159,28 @@ function LogPane({runId, live}: {runId: string; live: boolean}) {
   const entries = useSseStore((s) => s.entries);
   const sseStatus = useSseStore((s) => s.status);
 
-  const filtered = useMemo(() => {
-    // Last 200 visible — keep DOM bounded.
-    return entries.slice(-200).reverse();
-  }, [entries]);
+  // Newest-LAST so the natural reading order matches a terminal log;
+  // auto-scroll keeps the latest event in view unless the user has
+  // scrolled up to read older entries.
+  const recent = useMemo(() => entries.slice(-300), [entries]);
+
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const isPausedRef = useRef(false);
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onScroll = () => {
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+      isPausedRef.current = !atBottom;
+    };
+    el.addEventListener('scroll', onScroll);
+    return () => el.removeEventListener('scroll', onScroll);
+  }, []);
+  useEffect(() => {
+    if (isPausedRef.current) return;
+    bottomRef.current?.scrollIntoView({behavior: 'smooth', block: 'end'});
+  }, [recent.length]);
 
   return (
     <div style={{display: 'flex', flexDirection: 'column', height: '100%'}}>
@@ -482,178 +1194,145 @@ function LogPane({runId, live}: {runId: string; live: boolean}) {
           background: 'var(--v3-bg)',
           display: 'flex',
           justifyContent: 'space-between',
+          flexShrink: 0,
         }}
       >
-        <span>{live ? 'Streaming live · newest first' : 'Final log · newest first'}</span>
-        <span style={{textTransform: 'uppercase'}}>{sseStatus}</span>
+        <span>{live ? 'Streaming live · oldest first' : 'Final log · oldest first'}</span>
       </div>
       <div
+        ref={containerRef}
         style={{
           flex: 1,
           overflow: 'auto',
           padding: 8,
-          fontFamily: 'var(--v3-font-mono)',
           fontSize: 11,
-          lineHeight: 1.6,
+          lineHeight: 1.55,
         }}
       >
-        {filtered.length === 0 && (
-          <div style={{padding: 8, color: 'var(--v3-text-subtle)'}}>
+        {recent.length === 0 && (
+          <div style={{padding: 12, color: 'var(--v3-text-subtle)', fontSize: 12}}>
             {live ? 'Waiting for events…' : 'No log captured for this run.'}
           </div>
         )}
-        {filtered.map((e) => {
-          const body = formatEventBody(e.data);
-          const tone = typeTone(e.type);
-          const taskId =
-            typeof (e.data as Record<string, unknown>)?.taskId === 'string'
-              ? ((e.data as Record<string, unknown>).taskId as string)
-              : null;
+        {recent.map((entry) => {
+          // 1. Milestone events (lifecycle / cost / deploy / preview / test
+          //    / review / validation / batch) → banner.
+          if (MILESTONE_TYPES.has(entry.type)) {
+            const spec = deriveMilestone(entry);
+            if (spec) return <MilestoneBanner key={entry.id} entry={entry} spec={spec} />;
+          }
+
+          // 2. LOG events: file ops + emoji-prefix banners; suppress noise.
+          if (entry.type === 'LOG') {
+            const data = entry.data as Record<string, unknown>;
+            const msg = formatLogMessage(data);
+            if (!msg) return null;
+            const op = detectFileOp(msg);
+            if (op) return <FileOpRow key={entry.id} entry={entry} op={op} />;
+            if (isInternalNoise(msg)) return null;
+            const taskId = String(data.taskId ?? '');
+            const banner = deriveLogBanner(msg, taskId);
+            if (banner) return <MilestoneBanner key={entry.id} entry={entry} spec={banner} />;
+            // Verbose internal log line — drop. (The user can still see
+            // raw events via the backend log if needed.)
+            return null;
+          }
+
+          // 3. Fallback for unknown types — muted small text so a new
+          //    backend event can't go invisible.
+          const fallback = String(
+            (entry.data as Record<string, unknown>)?.payload ??
+              (entry.data as Record<string, unknown>)?.message ??
+              '',
+          );
+          if (!fallback) return null;
           return (
             <div
-              key={e.id}
+              key={entry.id}
               style={{
-                borderBottom: '1px solid var(--v3-border)',
-                padding: '5px 4px 7px',
-                wordBreak: 'break-word',
                 display: 'flex',
                 gap: 8,
-                alignItems: 'baseline',
+                padding: '2px 4px',
+                fontSize: 10.5,
+                color: 'var(--v3-text-subtle)',
+                opacity: 0.7,
               }}
             >
-              <span style={{color: 'var(--v3-text-subtle)', flexShrink: 0}}>
-                {new Date(e.timestamp).toLocaleTimeString()}
+              <span className='v3-mono' style={{flexShrink: 0}}>
+                {formatTimestamp(entry.timestamp)}
               </span>
+              <span style={{flexShrink: 0}}>[{entry.type}]</span>
               <span
                 style={{
-                  color: tone.fg,
-                  background: tone.bg,
-                  border: `1px solid ${tone.bd}`,
-                  fontWeight: 600,
-                  padding: '0 5px',
-                  borderRadius: 3,
-                  fontSize: 10,
-                  letterSpacing: 0.4,
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
-                  flexShrink: 0,
                 }}
               >
-                {e.type}
+                {fallback.slice(0, 160)}
               </span>
-              {taskId && (
-                <span
-                  style={{
-                    color: 'var(--v3-text-subtle)',
-                    fontSize: 10,
-                    flexShrink: 0,
-                  }}
-                >
-                  {taskId}
-                </span>
-              )}
-              {body && (
-                <span
-                  style={{
-                    color: 'var(--v3-text-muted)',
-                    fontSize: 11,
-                    flex: 1,
-                    minWidth: 0,
-                    whiteSpace: 'pre-wrap',
-                  }}
-                >
-                  {body}
-                </span>
-              )}
             </div>
           );
         })}
+        <div ref={bottomRef} />
+      </div>
+      {/* Status bar — pulsing dot when streaming, plain text otherwise. */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '6px 12px',
+          borderTop: '1px solid var(--v3-border)',
+          background: 'var(--v3-bg)',
+          fontSize: 11,
+          flexShrink: 0,
+        }}
+      >
+        {sseStatus === 'CONNECTED' ? (
+          <>
+            <span
+              style={{
+                position: 'relative',
+                width: 6,
+                height: 6,
+                display: 'inline-flex',
+              }}
+            >
+              <span
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  borderRadius: 999,
+                  background: 'var(--v3-success)',
+                  opacity: 0.65,
+                  animation: 'v3PulseDot 1.4s ease-in-out infinite',
+                }}
+              />
+              <span
+                style={{
+                  position: 'relative',
+                  width: 6,
+                  height: 6,
+                  borderRadius: 999,
+                  background: 'var(--v3-success)',
+                }}
+              />
+            </span>
+            <span style={{color: 'var(--v3-text-muted)'}}>Streaming</span>
+          </>
+        ) : sseStatus === 'RECONNECTING' || sseStatus === 'CONNECTING' ? (
+          <span style={{color: 'var(--v3-warning)'}}>Reconnecting…</span>
+        ) : (
+          <span style={{color: 'var(--v3-text-muted)'}}>
+            Disconnected · {entries.length} events
+          </span>
+        )}
       </div>
     </div>
   );
-}
-
-/**
- * 2026-05-07 — humanise the SSE event body. The backend wraps every
- * event in `{type, runId, taskId, payload, timestamp}`; the metadata
- * is already rendered separately (timestamp + type pill on the row,
- * runId implicit from the page, taskId rendered as a chip when set),
- * so the body only needs to surface `payload`. Pre-fix the formatter
- * fell through to `JSON.stringify(data).slice(0, 240)` for any event
- * with ≥5 keys — every LOG / TOKEN_USAGE / RUN_STATUS event hit that
- * branch and rendered as a wall of raw JSON. The user reported "the
- * live log had better presentation earlier than just showing JSON."
- *
- * Strategy:
- *   - If payload is a string, render it verbatim (most events: LOG
- *     human-readable text, TOKEN_USAGE summary, RUN_STATUS status name).
- *   - If payload is an object, compactly key=value-join it (drift-safe
- *     fallback for new event types we haven't styled yet).
- *   - Otherwise drop everything that's already covered by the chips.
- */
-function formatEventBody(d: Record<string, unknown> | null | undefined): string {
-  if (!d) return '';
-  const payload = (d as Record<string, unknown>).payload;
-  if (typeof payload === 'string') return payload;
-  if (payload == null) {
-    // No payload — surface remaining fields except the ones already
-    // chipped at the row level so we don't double-print metadata.
-    const remaining = Object.entries(d).filter(
-      ([k]) => k !== 'type' && k !== 'runId' && k !== 'timestamp' && k !== 'taskId',
-    );
-    if (remaining.length === 0) return '';
-    return remaining.map(([k, v]) => `${k}=${shortValue(v)}`).join(' · ');
-  }
-  if (typeof payload === 'object') {
-    try {
-      const entries = Object.entries(payload as Record<string, unknown>);
-      if (entries.length <= 4) {
-        return entries.map(([k, v]) => `${k}=${shortValue(v)}`).join(' · ');
-      }
-      return JSON.stringify(payload).slice(0, 240);
-    } catch {
-      return '';
-    }
-  }
-  return String(payload);
-}
-
-function shortValue(v: unknown): string {
-  if (v == null) return 'null';
-  if (typeof v === 'string') return v.length > 80 ? v.slice(0, 80) + '…' : v;
-  if (typeof v === 'number' || typeof v === 'boolean') return String(v);
-  try {
-    const s = JSON.stringify(v);
-    return s.length > 80 ? s.slice(0, 80) + '…' : s;
-  } catch {
-    return '<obj>';
-  }
-}
-
-/**
- * Colour-code the event-type pill so the user can scan the stream at a
- * glance — RUN_STATUS / GATE_OPENED / VALIDATION_REPORT_READY pop, LOG
- * stays neutral, ERROR / BUDGET_EXCEEDED go red.
- */
-function typeTone(type: string): {fg: string; bg: string; bd: string} {
-  if (type === 'RUN_STATUS' || type === 'GATE_OPENED' || type === 'VALIDATION_REPORT_READY')
-    return {fg: '#7AA5F5', bg: 'rgba(91,141,239,0.10)', bd: 'rgba(91,141,239,0.36)'};
-  if (
-    type === 'BUDGET_EXCEEDED' ||
-    type === 'BATCH_FAILED' ||
-    type === 'ERROR' ||
-    type === 'RUN_FAILED'
-  )
-    return {fg: '#FCA5A5', bg: 'rgba(239,68,68,0.10)', bd: 'rgba(239,68,68,0.36)'};
-  if (type === 'TOKEN_USAGE' || type === 'COST')
-    return {fg: '#FBBF24', bg: 'rgba(245,158,11,0.10)', bd: 'rgba(245,158,11,0.36)'};
-  if (type === 'BATCH_PROGRESS' || type === 'BATCH_COMPLETE' || type === 'RUN_COMPLETE')
-    return {fg: '#34D399', bg: 'rgba(16,185,129,0.10)', bd: 'rgba(16,185,129,0.36)'};
-  // LOG + everything else — neutral chip.
-  return {
-    fg: 'var(--v3-text-muted)',
-    bg: 'var(--v3-bg)',
-    bd: 'var(--v3-border)',
-  };
 }
 
 // ── Preview pane ────────────────────────────────────────────────────────
