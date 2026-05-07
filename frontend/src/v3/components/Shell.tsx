@@ -37,8 +37,53 @@ function CapModalMount() {
   return <FreeCapBlockingModal open={open} onClose={close} />;
 }
 
+/**
+ * 2026-05-07 — centralised route-aware layout for `<main className="v3-main">`.
+ *
+ * Pre-fix every v3 page either lived inside the 960px default (cards
+ * floating in a sea of empty space on 1440-wide monitors) or wired its
+ * own `useEffect` to add `v3-main--wide` / `v3-main--fill` classes
+ * (RunDetailPage, ProjectDashboardPage). That latter pattern duplicated
+ * three lines of DOM-mutation code in every page that wanted breathing
+ * room and made the policy invisible to anyone reading Shell.tsx.
+ *
+ * This function returns the modifier suffix per route so the policy
+ * lives in one place. Three buckets:
+ *   - **wide+fill** — inspection / workbench surfaces that benefit from
+ *     filling the full viewport (RunDetail, project shell, library
+ *     detail, migration detail).
+ *   - **wide only** — list pages with naturally-scrolling content
+ *     (Runs, Library, Migrations, Insights, Team, Trust, Billing,
+ *     ExecDemo).
+ *   - **default** — narrow centered surfaces (LandingPage / Composer,
+ *     AuthPage, EmptyProjectPage). 960px feels intentional here.
+ */
+function classifyRoute(pathname: string): {wide: boolean; fill: boolean} {
+  // Inspection / workbench — wide + fill
+  if (/^\/runs\/[^/]+$/.test(pathname)) return {wide: true, fill: true};
+  if (/^\/projects\/[^/]+\/runs\/[^/]+/.test(pathname)) return {wide: true, fill: true};
+  // /projects/empty is a centered welcome → narrow. Every other project
+  // shell path (incl. /projects/:id, /projects/:id/dashboard, /projects/:id/runs)
+  // gets the workbench treatment.
+  if (/^\/projects\/(?!empty)[^/]+/.test(pathname)) return {wide: true, fill: true};
+  if (/^\/library\/[^/]+/.test(pathname)) return {wide: true, fill: true};
+  if (/^\/migrations\/[^/]+/.test(pathname)) return {wide: true, fill: true};
+  // List + analytics — wide, scroll naturally
+  if (pathname === '/runs') return {wide: true, fill: false};
+  if (pathname === '/library') return {wide: true, fill: false};
+  if (pathname === '/migrations') return {wide: true, fill: false};
+  if (pathname === '/insights') return {wide: true, fill: false};
+  if (pathname === '/team') return {wide: true, fill: false};
+  if (pathname === '/trust') return {wide: true, fill: false};
+  if (pathname === '/billing') return {wide: true, fill: false};
+  if (pathname === '/exec') return {wide: true, fill: false};
+  // Default — narrow centered (Auth, EmptyProject, Landing/Composer).
+  return {wide: false, fill: false};
+}
+
 export default function Shell({withTopBar = true}: {withTopBar?: boolean}) {
   const location = useLocation();
+  const layout = classifyRoute(location.pathname);
   useEffect(() => {
     const root = document.documentElement;
     // R-307 (Wave 6): just mark v3-active. Theme attribute stays under
@@ -48,6 +93,14 @@ export default function Shell({withTopBar = true}: {withTopBar?: boolean}) {
       root.classList.remove('v3-active');
     };
   }, []);
+
+  const mainClass = [
+    'v3-main',
+    layout.wide ? 'v3-main--wide' : '',
+    layout.fill ? 'v3-main--fill' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <div className='v3-root'>
@@ -65,7 +118,7 @@ export default function Shell({withTopBar = true}: {withTopBar?: boolean}) {
           for the App-level "Skip to main content" link. WCAG 2.4.1
           Bypass Blocks (Level A). tabIndex=-1 lets the link's target
           receive programmatic focus without making <main> a tab stop. */}
-      <main id='main' tabIndex={-1} className='v3-main'>
+      <main id='main' tabIndex={-1} className={mainClass}>
         {/* Task 2 (2026-05-01 fix list): page-level error boundary so a
          *  single broken page can't blank the entire v3 surface. The
          *  `key` on pathname remounts the boundary on route change so

@@ -31,6 +31,8 @@ import lombok.RequiredArgsConstructor;
  *
  * <p>Usage: {@code GET /api/v2/test/metrics}
  */
+// Audit r5 (§6.2, 2026-05-06) — see ContextStoreTestController for rationale.
+@org.springframework.context.annotation.Profile({"local", "dev"})
 @RestController
 @RequestMapping("/api/v2/test")
 @RequiredArgsConstructor

@@ -157,15 +157,8 @@ app:
     # The endpoints are already permitAll; this opens the CORS gate
     # for cross-origin XHR.
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://dev.executespec.ai,https://app.dev.executespec.ai,https://build.dev.executespec.ai,https://executespec.ai,https://www.executespec.ai}
-  product-routing:
-    # Phase 1 dev: the existing dev.* host is logically the executespec
-    # (B2B) surface. The vibe origin lands on a not-yet-deployed staging
-    # subdomain — wired now so OAuthSurfaceResolver works the day the
-    # consumer surface boots, no config change needed.
-    app-origin: ${APP_SURFACE_ORIGIN:https://app.dev.executespec.ai}
-    build-origin: ${BUILD_SURFACE_ORIGIN:https://dev.executespec.ai}
-    app-return-url: ${APP_SURFACE_RETURN_URL:https://app.dev.executespec.ai/auth/callback}
-    build-return-url: ${BUILD_SURFACE_RETURN_URL:https://dev.executespec.ai/auth/callback}
+  # V143 product-routing config retired (V179, single-surface
+  # retirement 2026-05-06).
 
 # ── Billing ───────────────────────────────────────────────────────────────────
 razorpay:

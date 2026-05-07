@@ -108,18 +108,55 @@ export default function AvatarMenu() {
     );
   }
 
-  // Logged-in: avatar dropdown
-  const items: {label: string; onClick: () => void; subtle?: boolean}[] = [
+  /**
+   * Audit r5 (P2-3, 2026-05-06) — surface every protected route a
+   * logged-in user can actually reach. Pre-fix the dropdown was
+   * missing /pricing, /trust, /exec, /audit, /invoices, /accounting,
+   * /admin, /admin/feature-flags — all of them mounted in App.tsx
+   * but discoverable only via direct URL or the v2 sidebar (which
+   * doesn't render in v3 chrome). Sections are separated by `divider:
+   * true` rows and gated by role/tier.
+   */
+  type MenuItem = {
+    label?: string;
+    onClick?: () => void;
+    subtle?: boolean;
+    /** Render as a section divider with optional caption. */
+    divider?: boolean;
+    caption?: string;
+  };
+  const items: MenuItem[] = [
     {label: 'Account', onClick: () => navigate('/settings')},
     {label: 'Billing & plan', onClick: () => navigate('/billing')},
+    {label: 'Pricing', onClick: () => navigate('/pricing')},
   ];
   if (user.tier && user.tier !== 'FREE') {
     items.push({label: 'Team', onClick: () => navigate('/team')});
   }
   items.push({label: 'Integrations', onClick: () => navigate('/integrations')});
+  items.push({label: 'Trust & compliance', onClick: () => navigate('/trust')});
+
+  // ORG_ADMIN section — ops + analytics surfaces gated by org role.
   if (isOrgAdmin || isSuperAdmin) {
+    items.push({divider: true, caption: 'Org admin'});
     items.push({label: 'Insights', onClick: () => navigate('/insights')});
+    items.push({label: 'Executive summary', onClick: () => navigate('/exec')});
+    items.push({label: 'Audit log', onClick: () => navigate('/audit')});
+    items.push({label: 'Invoices', onClick: () => navigate('/invoices')});
+    items.push({label: 'Accounting', onClick: () => navigate('/accounting')});
   }
+
+  // SUPER_ADMIN — platform-wide controls. Distinct section so the
+  // tier-lifecycle / feature-flag deep links don't get hidden in the
+  // org-admin block.
+  if (isSuperAdmin) {
+    items.push({divider: true, caption: 'Super admin'});
+    items.push({label: 'Admin home', onClick: () => navigate('/admin')});
+    items.push({label: 'Feature flags', onClick: () => navigate('/admin/feature-flags')});
+    items.push({label: 'Tier lifecycle', onClick: () => navigate('/admin/tiers')});
+  }
+
+  items.push({divider: true});
   items.push({label: 'Help', onClick: () => navigate('/home?dest=help')});
   items.push({
     label: 'Sign out',
@@ -216,39 +253,62 @@ export default function AvatarMenu() {
               </div>
             )}
           </li>
-          {items.map((item, idx) => (
-            <li key={idx} role='none'>
-              <button
-                role='menuitem'
-                type='button'
-                onClick={() => {
-                  item.onClick();
-                  setOpen(false);
-                }}
-                style={{
-                  display: 'block',
-                  width: '100%',
-                  textAlign: 'left',
-                  padding: '7px 10px',
-                  background: 'transparent',
-                  color: item.subtle ? 'var(--v3-text-muted)' : 'var(--v3-text)',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: 12.5,
-                  fontFamily: 'inherit',
-                }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.background = 'var(--v3-surface-elevated)';
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.background = 'transparent';
-                }}
-              >
-                {item.label}
-              </button>
-            </li>
-          ))}
+          {items.map((item, idx) => {
+            if (item.divider) {
+              return (
+                <li
+                  key={idx}
+                  role='separator'
+                  style={{
+                    margin: '6px 0',
+                    paddingTop: 6,
+                    borderTop: '1px solid var(--v3-border)',
+                    fontSize: 10,
+                    color: 'var(--v3-text-subtle)',
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    textTransform: 'uppercase',
+                    listStyle: 'none',
+                  }}
+                >
+                  {item.caption && <div style={{padding: '0 10px 2px'}}>{item.caption}</div>}
+                </li>
+              );
+            }
+            return (
+              <li key={idx} role='none'>
+                <button
+                  role='menuitem'
+                  type='button'
+                  onClick={() => {
+                    item.onClick?.();
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: 'block',
+                    width: '100%',
+                    textAlign: 'left',
+                    padding: '7px 10px',
+                    background: 'transparent',
+                    color: item.subtle ? 'var(--v3-text-muted)' : 'var(--v3-text)',
+                    border: 'none',
+                    borderRadius: 4,
+                    cursor: 'pointer',
+                    fontSize: 12.5,
+                    fontFamily: 'inherit',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'var(--v3-surface-elevated)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  {item.label}
+                </button>
+              </li>
+            );
+          })}
         </ul>
       )}
     </div>

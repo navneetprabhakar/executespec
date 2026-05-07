@@ -131,12 +131,7 @@ export function PageHeader({
     return (
       <>
         {parts[0]}
-        <span
-          className='font-serif italic font-normal'
-          style={{fontFamily: "'Instrument Serif', 'Georgia', serif"}}
-        >
-          {accent}
-        </span>
+        <span style={{color: 'var(--accent-blue-text, var(--accent-blue))'}}>{accent}</span>
         {parts.slice(1).join(accent)}
       </>
     );

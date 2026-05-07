@@ -9,6 +9,7 @@ import {
   PLAN_GATE_HEADER,
   COST_PREFIX,
 } from '../lib/terminology';
+import {useV3ProjectStore} from '../stores/useV3ProjectStore';
 
 /**
  * R-121 — inline plan-approval card.
@@ -35,6 +36,53 @@ export default function PlanCard({runId, onApproved}: PlanCardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const navigate = useNavigate();
+  const pushBubble = useV3ProjectStore((s) => s.pushBubble);
+
+  /**
+   * Audit r5 (#6, 2026-05-06) — Adjust = cancel-this-plan +
+   * pre-fill the composer with the original spec.
+   *
+   * Pre-fix the Adjust button navigated to `/projects/{projectId}/r/{runId}`
+   * which had no matching route — it dropped through to the landing
+   * page. There was no actual "edit the spec, keep the project, re-run"
+   * path on the v3 surface.
+   *
+   * The fix: cancel the in-flight run (since AWAITING_APPROVAL means
+   * the planner already ran but no credits have been spent past the
+   * planner phase), stash the user's spec into the per-project
+   * prefill key, and dispatch the `v3-composer-prefill` event so the
+   * Composer hydrates within the same render. The user is on
+   * /projects/{slug} already — no navigation needed.
+   */
+  async function onAdjust() {
+    if (!detail) return;
+    setSubmitting(true);
+    setError(null);
+    try {
+      await approveRun(runId, false);
+      const original = detail.userRequest ?? '';
+      if (detail.projectId && original.length > 0) {
+        try {
+          sessionStorage.setItem(`v3-composer-prefill-${detail.projectId}`, original);
+        } catch {
+          /* private mode — composer will fall back to empty */
+        }
+        window.dispatchEvent(new CustomEvent('v3-composer-prefill'));
+      }
+      pushBubble({
+        id: `adjust-${runId}-${Date.now()}`,
+        role: 'user',
+        kind: 'status',
+        text: 'Plan dismissed — edit the spec below and try again.',
+        createdAt: new Date().toISOString(),
+      });
+      if (onApproved) onApproved();
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Could not dismiss the plan.');
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   // Lazy-load on mount
   if (loading && !detail && !error) {
@@ -162,20 +210,88 @@ export default function PlanCard({runId, onApproved}: PlanCardProps) {
                 fontSize: 12,
               }}
             >
-              {detail.tasks.slice(0, 6).map((t, i) => (
-                <li
-                  key={t.taskId}
-                  style={{
-                    padding: '3px 0',
-                    color: 'var(--v3-text-muted)',
-                  }}
-                >
-                  <span style={{color: 'var(--v3-text-subtle)', marginRight: 8}}>
-                    {String(i + 1).padStart(2, '0')}.
-                  </span>
-                  {t.title}
-                </li>
-              ))}
+              {(() => {
+                /* Audit r5 (#2, 2026-05-06) — blast-radius preview at
+                 * plan time. The backend's plan JSON already carries
+                 * `touchesFiles: string[]` per task (PlannerAgent's
+                 * submitPlan tool schema), but RunDetail.tasks doesn't
+                 * surface it. Parse planJson client-side and overlay so
+                 * the user can see WHICH files this run will modify
+                 * before they click Approve. SINGLE_SHOT runs ship an
+                 * empty array — we hide the blast radius then since
+                 * "no files declared" is uninformative. */
+                let touchesByTaskId: Record<string, string[]> = {};
+                try {
+                  const parsed = detail.planJson ? JSON.parse(detail.planJson) : null;
+                  if (parsed && Array.isArray(parsed.tasks)) {
+                    for (const pt of parsed.tasks) {
+                      if (pt && typeof pt.id === 'string' && Array.isArray(pt.touchesFiles)) {
+                        const key = `${detail.runId.slice(0, 8)}_${pt.id}`;
+                        touchesByTaskId[pt.id] = pt.touchesFiles.filter(
+                          (f: unknown) => typeof f === 'string' && f.length > 0,
+                        );
+                        // Match the persisted taskId convention (run-prefix_T-id)
+                        // so callers using either id shape resolve.
+                        touchesByTaskId[key] = touchesByTaskId[pt.id];
+                      }
+                    }
+                  }
+                } catch {
+                  /* malformed plan JSON — silently skip the overlay */
+                }
+                return detail.tasks!.slice(0, 6).map((t, i) => {
+                  const shortId = t.taskId.includes('_') ? t.taskId.split('_').pop()! : t.taskId;
+                  const files = touchesByTaskId[shortId] ?? touchesByTaskId[t.taskId] ?? [];
+                  return (
+                    <li
+                      key={t.taskId}
+                      style={{
+                        padding: '3px 0',
+                        color: 'var(--v3-text-muted)',
+                      }}
+                    >
+                      <div>
+                        <span style={{color: 'var(--v3-text-subtle)', marginRight: 8}}>
+                          {String(i + 1).padStart(2, '0')}.
+                        </span>
+                        {t.title}
+                      </div>
+                      {files.length > 0 && (
+                        <div
+                          style={{
+                            marginTop: 2,
+                            marginLeft: 24,
+                            fontSize: 10.5,
+                            color: 'var(--v3-text-subtle)',
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: 4,
+                          }}
+                          title='Files this task plans to modify'
+                        >
+                          {files.slice(0, 8).map((f) => (
+                            <code
+                              key={f}
+                              style={{
+                                fontFamily: 'inherit',
+                                background: 'var(--v3-surface)',
+                                padding: '0 4px',
+                                borderRadius: 3,
+                                border: '1px solid var(--v3-border)',
+                              }}
+                            >
+                              {f}
+                            </code>
+                          ))}
+                          {files.length > 8 && (
+                            <span style={{opacity: 0.7}}>+ {files.length - 8} more</span>
+                          )}
+                        </div>
+                      )}
+                    </li>
+                  );
+                });
+              })()}
               {detail.tasks.length > 6 && (
                 <li style={{padding: '3px 0', color: 'var(--v3-text-subtle)', fontSize: 11}}>
                   + {detail.tasks.length - 6} more steps
@@ -205,7 +321,8 @@ export default function PlanCard({runId, onApproved}: PlanCardProps) {
             </button>
             <button
               type='button'
-              onClick={() => navigate(`/projects/${detail.projectId ?? ''}/r/${runId}`)}
+              onClick={onAdjust}
+              disabled={submitting}
               style={{
                 padding: '6px 14px',
                 fontSize: 12.5,
@@ -214,9 +331,10 @@ export default function PlanCard({runId, onApproved}: PlanCardProps) {
                 color: 'var(--v3-text-muted)',
                 border: '1px solid var(--v3-border)',
                 borderRadius: 6,
-                cursor: 'pointer',
+                cursor: submitting ? 'not-allowed' : 'pointer',
                 fontFamily: 'inherit',
               }}
+              title='Dismiss this plan and edit your spec — no credits charged.'
             >
               {PLAN_GATE_ADJUST_CTA}
             </button>

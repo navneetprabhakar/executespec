@@ -127,6 +127,15 @@ public class RunOrchestrator {
   private final SmartClassifierAgent smartClassifier;
   private final SequentialExecutor executor;
   private final ReviewerAgentV3 reviewer;
+
+  /**
+   * 2026-05-07 — deterministic auto-formatter pass between executor and reviewer. Runs prettier /
+   * spotless / black / gofmt / cargo fmt against the workspace before the LLM reviewer sees it.
+   * Cuts ~3K tokens per task off the reviewer's input by absorbing trailing-comma / indent /
+   * import-order drift up-front. Gated by feature flag {@code lint.autofix.enabled}.
+   */
+  private final com.navneet.executespec.v2.lint.LintPass lintPass;
+
   private final Metrics metrics;
   private final ObjectMapper objectMapper;
   private final AgentProperties agentProps;
@@ -157,6 +166,10 @@ public class RunOrchestrator {
   private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+
+  /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
+  private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
+
   private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
 
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */
@@ -1093,6 +1106,32 @@ public class RunOrchestrator {
       int workerOut = afterExec.outputTokens() - afterPlan.outputTokens();
       tokenAttributor.attributeWorker(runId, execResult, workerIn, workerOut, upperProvider, model);
 
+      // ── 2.5 Lint auto-fix ────────────────────────────────────────────
+      // Run deterministic formatters against the workspace before the LLM reviewer sees it.
+      // Cheap (no LLM tokens), deterministic, and absorbs trailing-comma / indent / import-order
+      // drift the worker introduces — so the reviewer's input no longer carries 3K tokens of
+      // "fix this whitespace" noise per task. Gated by feature flag so ops can disable in
+      // environments without prettier / black / gofmt on PATH (the per-tool timeout already
+      // makes failure non-fatal, but the flag short-circuits the whole pass when known broken).
+      if (featureFlagService.isEnabled("lint.autofix.enabled")) {
+        try {
+          com.navneet.executespec.v2.lint.LintPass.LintReport lintReport =
+              lintPass.run(rootCtx.workspaceRoot());
+          if (lintReport.changedAnything()) {
+            log.info("RunOrchestrator run={} lint auto-fix: {}", runId, lintReport.summary());
+            broadcaster.emit(runId, RunEvent.lintAutofixApplied(runId, lintReport.summary()));
+          } else if (!lintReport.skipped()) {
+            log.debug("RunOrchestrator run={} lint auto-fix: no changes", runId);
+          }
+        } catch (Exception e) {
+          // Never abort the run on a formatter error — reviewer still runs against unmodified code.
+          log.warn(
+              "RunOrchestrator run={} lint auto-fix failed (continuing): {}",
+              runId,
+              e.getMessage());
+        }
+      }
+
       // ── 3. Review ───────────────────────────────────────────────────
       updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
@@ -1231,6 +1270,15 @@ public class RunOrchestrator {
                   && "EXISTING".equalsIgnoreCase(r.getRepoMode())
                   && r.getRepoUrl() != null
                   && !r.getRepoUrl().isBlank();
+        }
+        // Audit r5 (#5, 2026-05-06) — staged-PR-before-push override.
+        // When the user submitted with skipAutoPush=true the
+        // RunController stamped a Redis key; consume it here once.
+        // The flag is one-shot — a manual re-push afterward goes
+        // through the unchanged /runs/{id}/push-github path.
+        if (shouldPush && runSkipPushFlag.consume(runId)) {
+          shouldPush = false;
+          log.info("V2 run={} auto-push skipped (skipAutoPush flag set)", runId);
         }
         if (shouldPush) {
           try {
