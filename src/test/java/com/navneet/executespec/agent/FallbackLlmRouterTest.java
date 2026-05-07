@@ -36,7 +36,7 @@ class LlmRouterTest {
   @Mock private com.navneet.executespec.router.RunProviderPinStore pinStore;
   @Mock private com.navneet.executespec.router.ModelPerformanceTracker modelPerfTracker;
   @Mock private com.navneet.executespec.sse.SseBroadcaster sseBroadcaster;
-  @Mock private com.navneet.executespec.v2.agent.OpenAiNativeToolClient openAiNativeToolClient;
+  @Mock private com.navneet.executespec.agent.OpenAiNativeToolClient openAiNativeToolClient;
   @Mock private AnthropicChatModel anthropicChatModel;
   @Mock private ChatResponse chatResponse;
   @Mock private org.springframework.ai.chat.model.Generation generation;

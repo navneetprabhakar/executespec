@@ -63,7 +63,7 @@ import lombok.extern.slf4j.Slf4j;
  * TestPlannerAgent, TestWorkerAgent, TestReportGenerator, ApiTestSuiteAgent, ConversationAgent,
  * ContextAgent, ValidationReportGenerator, PromptOptimiserAgent, eval stack).
  *
- * <p>V2 tool-calling agents use {@code LlmRouterV2} in {@code com.navneet.executespec.v2.agent}.
+ * <p>V2 tool-calling agents use {@code LlmRouterV2} in {@code com.navneet.executespec.agent}.
  * This router handles provider failover, circuit breaking, and API-key resolution for
  * text-completion callers that do not need native tool calling.
  */
@@ -125,7 +125,7 @@ public class FallbackLlmRouter {
    * text-only and tool-bearing calls and returns a Spring AI ChatResponse so downstream code stays
    * unchanged).
    */
-  private final com.navneet.executespec.v2.agent.OpenAiNativeToolClient openAiNativeToolClient;
+  private final com.navneet.executespec.agent.OpenAiNativeToolClient openAiNativeToolClient;
 
   /** Wraps a ChatResponse with the provider and model that actually served the request. */
   public record LlmResponse(ChatResponse response, String provider, String model) {}
@@ -746,7 +746,7 @@ public class FallbackLlmRouter {
           finalOpenAiToolChoice == null ? null : finalOpenAiToolChoice.toString();
       response =
           openAiNativeToolClient.call(
-              com.navneet.executespec.v2.agent.OpenAiNativeToolClient.OpenAiToolCallRequest
+              com.navneet.executespec.agent.OpenAiNativeToolClient.OpenAiToolCallRequest
                   .builder()
                   .model(model)
                   .messages(prompt.getInstructions())

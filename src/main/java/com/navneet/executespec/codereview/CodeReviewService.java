@@ -35,7 +35,7 @@ import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.v2.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunCostTracker;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

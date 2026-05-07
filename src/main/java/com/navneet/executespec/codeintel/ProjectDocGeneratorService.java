@@ -63,7 +63,7 @@ public class ProjectDocGeneratorService {
   private final ModelResolver modelResolver;
 
   /** v2.6.4 — compute USD cost from tokens × pricing matrix for the dashboard rollup. */
-  private final com.navneet.executespec.v2.cost.RunCostTracker costTracker;
+  private final com.navneet.executespec.cost.RunCostTracker costTracker;
 
   private static final String EXPLANATION_SYSTEM =
       """

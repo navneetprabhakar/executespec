@@ -71,7 +71,7 @@ public class AdminReconciliationService {
    * #STARTUP_STALE_MINUTES}-minute cutoff. {@code @Async} so the boot path isn't blocked; an
    * exception here must never prevent the app from starting.
    *
-   * <p>Pairs with {@link com.navneet.executespec.v2.recovery.StartupRunResumer} which already does
+   * <p>Pairs with {@link com.navneet.executespec.recovery.StartupRunResumer} which already does
    * the same for V2 PipelineRuns.
    */
   @Async

@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  * <p>Background: before the V2 BYOK rewiring (audit-output/BYOK_DEEPDIVE.md), every paying
  * TEAM/ENTERPRISE customer's run silently dispatched against the platform's {@code
  * spring.ai.anthropic.api-key} singleton instead of their own configured Anthropic key. The fix
- * lives entirely in {@link com.navneet.executespec.v2.agent.LlmRouterV2} — it builds per-key {@link
+ * lives entirely in {@link com.navneet.executespec.agent.LlmRouterV2} — it builds per-key {@link
  * org.springframework.ai.anthropic.AnthropicChatModel} instances from customer keys via a Caffeine
  * cache, leaving the platform singleton bean (built in {@link
  * com.navneet.executespec.config.AgentModelConfig}) for the no-BYOK fallback.
