@@ -1,7 +1,7 @@
 import {useEffect, useMemo, useState} from 'react';
 import {Link} from 'react-router-dom';
-import {ArrowLeft} from 'lucide-react';
-import {getProjects, type ProjectDto} from '@/lib/api';
+import {ArrowLeft, Plus} from 'lucide-react';
+import {createProject, getProjects, type ProjectDto} from '@/lib/api';
 import Composer from '../components/Composer';
 
 /**
@@ -30,6 +30,16 @@ export default function RunsNewPage() {
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
   const [pickedProjectId, setPickedProjectId] = useState<string>('');
 
+  // 2026-05-07 — Issue 3: inline "Create new project" flow. Picker has a
+  // sentinel "__create__" option; selecting it reveals a name input below
+  // the dropdown. Submit calls createProject() and auto-selects the new
+  // project so the user can immediately type their spec without bouncing
+  // through /org/projects.
+  const [creatingMode, setCreatingMode] = useState(false);
+  const [newProjectName, setNewProjectName] = useState('');
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
+
   useEffect(() => {
     let cancelled = false;
     getProjects()
@@ -43,6 +53,44 @@ export default function RunsNewPage() {
       cancelled = true;
     };
   }, []);
+
+  function onPickerChange(value: string) {
+    if (value === '__create__') {
+      setCreatingMode(true);
+      // Don't change the selected project — keep the previous pick so a
+      // user who opens the dropdown and changes their mind can cancel
+      // out without losing the standalone / existing-project state.
+      return;
+    }
+    setCreatingMode(false);
+    setNewProjectName('');
+    setCreateError(null);
+    setPickedProjectId(value);
+  }
+
+  async function onCreateProject() {
+    const name = newProjectName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setCreateError(null);
+    try {
+      const project = await createProject({name});
+      setProjects((prev) => [...(prev ?? []), project]);
+      setPickedProjectId(project.id);
+      setCreatingMode(false);
+      setNewProjectName('');
+    } catch (e) {
+      setCreateError((e as Error)?.message ?? 'Failed to create project');
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  function onCancelCreate() {
+    setCreatingMode(false);
+    setNewProjectName('');
+    setCreateError(null);
+  }
 
   // When the user picks a real project, look up its default provider
   // so the Composer's Advanced provider field reflects that project's
@@ -117,8 +165,8 @@ export default function RunsNewPage() {
         </label>
         <select
           id='runs-new-project-picker'
-          value={pickedProjectId}
-          onChange={(e) => setPickedProjectId(e.target.value)}
+          value={creatingMode ? '__create__' : pickedProjectId}
+          onChange={(e) => onPickerChange(e.target.value)}
           style={{
             width: '100%',
             padding: '8px 10px',
@@ -137,7 +185,119 @@ export default function RunsNewPage() {
               {p.aiProvider ? ` · ${p.aiProvider}` : ''}
             </option>
           ))}
+          <option value='__create__'>+ Create new project…</option>
         </select>
+
+        {/* Inline create-project form. Reveals when "Create new project…" is
+            picked. Submit names the project + auto-selects it so the user can
+            type their spec immediately without bouncing through /org/projects. */}
+        {creatingMode && (
+          <div
+            style={{
+              marginTop: 10,
+              padding: 12,
+              borderRadius: 'var(--v3-radius)',
+              border: '1px solid var(--v3-border)',
+              background: 'var(--v3-bg)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <label
+              className='v3-eyebrow'
+              htmlFor='runs-new-project-name'
+              style={{display: 'block'}}
+            >
+              New project name
+            </label>
+            <input
+              id='runs-new-project-name'
+              type='text'
+              value={newProjectName}
+              onChange={(e) => setNewProjectName(e.target.value)}
+              placeholder='e.g. payments-platform'
+              autoFocus
+              disabled={creating}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && newProjectName.trim()) {
+                  e.preventDefault();
+                  void onCreateProject();
+                }
+                if (e.key === 'Escape') onCancelCreate();
+              }}
+              style={{
+                width: '100%',
+                padding: '7px 10px',
+                background: 'var(--v3-surface)',
+                color: 'var(--v3-text)',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 'var(--v3-radius-sm)',
+                fontSize: 13,
+                fontFamily: 'inherit',
+              }}
+            />
+            <div style={{display: 'flex', gap: 8}}>
+              <button
+                type='button'
+                onClick={onCreateProject}
+                disabled={!newProjectName.trim() || creating}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  padding: '6px 12px',
+                  fontSize: 12.5,
+                  fontWeight: 600,
+                  background:
+                    newProjectName.trim() && !creating
+                      ? 'var(--v3-brand)'
+                      : 'var(--v3-surface-elevated)',
+                  color:
+                    newProjectName.trim() && !creating
+                      ? 'var(--v3-text-on-brand)'
+                      : 'var(--v3-text-subtle)',
+                  border: 'none',
+                  borderRadius: 'var(--v3-radius-sm)',
+                  cursor: newProjectName.trim() && !creating ? 'pointer' : 'not-allowed',
+                  fontFamily: 'inherit',
+                }}
+              >
+                <Plus className='h-3.5 w-3.5' />
+                {creating ? 'Creating…' : 'Create project'}
+              </button>
+              <button
+                type='button'
+                onClick={onCancelCreate}
+                disabled={creating}
+                style={{
+                  padding: '6px 12px',
+                  fontSize: 12.5,
+                  background: 'transparent',
+                  color: 'var(--v3-text-muted)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 'var(--v3-radius-sm)',
+                  cursor: creating ? 'not-allowed' : 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+            {createError && (
+              <div
+                role='alert'
+                style={{
+                  fontSize: 11.5,
+                  color: 'var(--v3-error)',
+                }}
+              >
+                {createError}
+              </div>
+            )}
+          </div>
+        )}
+
         <p
           style={{
             margin: '8px 0 0',
@@ -146,9 +306,11 @@ export default function RunsNewPage() {
             lineHeight: 1.5,
           }}
         >
-          {pickedProjectId
-            ? 'The run will live inside this project shell. Past runs in the project feed into the planner via project memory.'
-            : 'Standalone runs work end-to-end (planner, executor, validation, PR) without a project — useful for one-off scripts or trying ExecuteSpec on a fresh idea.'}
+          {creatingMode
+            ? 'You can attach a GitHub repo + tweak the AI provider after the project is created.'
+            : pickedProjectId
+              ? 'The run will live inside this project shell. Past runs in the project feed into the planner via project memory.'
+              : 'Standalone runs work end-to-end (planner, executor, validation, PR) without a project — useful for one-off scripts or trying ExecuteSpec on a fresh idea.'}
         </p>
       </div>
 
