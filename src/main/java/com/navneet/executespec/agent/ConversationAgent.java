@@ -6,7 +6,7 @@ import java.util.List;
 import java.util.Set;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.model.ReviewReport;
+import com.navneet.executespec.agent.model.TaskReviewReport;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.agent.model.TaskReview;
 import com.navneet.executespec.deployment.WorkspaceFileService;
@@ -399,7 +399,7 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
       }
 
       // V1 format (has recommendation field)
-      ReviewReport v1 = objectMapper.readValue(run.getReviewJson(), ReviewReport.class);
+      TaskReviewReport v1 = objectMapper.readValue(run.getReviewJson(), TaskReviewReport.class);
       StringBuilder sb = new StringBuilder("Fix the following code review issues:\n\n");
       int idx = 1;
 
