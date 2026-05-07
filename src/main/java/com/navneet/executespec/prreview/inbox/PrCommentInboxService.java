@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
  *   <li><b>List / count</b> — feeds the v3 RunDetail action-row chip + side-panel ChatPane
  *       pending-comments section.
  *   <li><b>Status transitions</b> — Phase P1: {@link #dismiss}. Phase P2: {@link #markAddressed}
- *       (called by {@link com.navneet.executespec.v2.chat.ApplyService} when the apply flow
+ *       (called by {@link com.navneet.executespec.chat.ApplyService} when the apply flow
  *       completes). Both are one-way; once a comment is ADDRESSED or DISMISSED it stays that way.
  * </ul>
  */
@@ -144,9 +144,9 @@ public class PrCommentInboxService {
   }
 
   /**
-   * Phase P2 — called by {@link com.navneet.executespec.v2.chat.ApplyService} after the apply flow
-   * has pushed a fix to the PR's branch. Stamps the new run id so the UI can deep-link from the
-   * inbox row to the apply run that addressed it.
+   * Phase P2 — called by {@link com.navneet.executespec.chat.ApplyService} after the apply flow has
+   * pushed a fix to the PR's branch. Stamps the new run id so the UI can deep-link from the inbox
+   * row to the apply run that addressed it.
    */
   @Transactional
   public Optional<PrCommentInbox> markAddressed(Long id, String addressedByRunId) {

@@ -7,13 +7,13 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.LlmRequest;
+import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.v2.agent.LlmRequest;
-import com.navneet.executespec.v2.agent.LlmRouterV2;
-import com.navneet.executespec.v2.cost.RunCostTracker;
-import com.navneet.executespec.v2.tool.ExecutionContext;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -47,7 +47,7 @@ public class PrReviewAgent {
 
   private static final String PROMPT_PATH = "prompts/codereview/pr-review-agent.md";
 
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final ObjectMapper objectMapper;
   private final RunCostTracker costTracker;

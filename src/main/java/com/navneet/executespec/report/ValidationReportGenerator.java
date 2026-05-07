@@ -7,13 +7,13 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ValidationReportGenerator {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
 
   /** Max issues included in the LLM prompt to stay within token budget. */
@@ -57,14 +57,14 @@ public class ValidationReportGenerator {
     String runId = input.run().getRunId();
     ResolvedModel resolved =
         modelResolver.resolve("ValidationReportGenerator", input.run().getAiProviderEnum());
-    LlmRouter.LlmResponse lr =
-        llmRouter.callWithFallbackTracked(
+    FallbackLlmRouter.LlmResponse lr =
+        fallbackLlmRouter.callWithFallbackTracked(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             runId,
             "validation-report",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 
@@ -153,7 +153,7 @@ public class ValidationReportGenerator {
     }
 
     // Review result (V2 flat issue list)
-    ReviewReportV2 review = input.review();
+    ReviewReport review = input.review();
     if (review != null) {
       checksRun.add("CODE_REVIEW");
       if (review.getIssues() != null && !review.getIssues().isEmpty()) {

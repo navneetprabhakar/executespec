@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -41,7 +41,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class TestWorkerAgent {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final StateStore stateStore;
   private final TestTaskRepository testTaskRepository;
@@ -100,7 +100,7 @@ public class TestWorkerAgent {
     LlmProvider aiProvider =
         stateStore.findRun(runId).map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
     ResolvedModel model = modelResolver.resolve("TestWorkerAgent", aiProvider);
-    LlmRouter.LlmResponse lr = callLlmTracked(runId, model, systemPrompt);
+    FallbackLlmRouter.LlmResponse lr = callLlmTracked(runId, model, systemPrompt);
     String code = lr.response().getResult().getOutput().getText();
     accumulateWorkerTokens(task.getTestPlanId(), lr, model);
 
@@ -147,7 +147,7 @@ public class TestWorkerAgent {
     LlmProvider aiProviderRetry =
         stateStore.findRun(runId).map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
     ResolvedModel retryModel = modelResolver.resolve("TestWorkerAgent", aiProviderRetry);
-    LlmRouter.LlmResponse lr = callLlmTracked(runId, retryModel, systemPrompt);
+    FallbackLlmRouter.LlmResponse lr = callLlmTracked(runId, retryModel, systemPrompt);
     String code = lr.response().getResult().getOutput().getText();
     accumulateWorkerTokens(task.getTestPlanId(), lr, retryModel);
     code = stripMarkdownFences(code);
@@ -290,7 +290,7 @@ public class TestWorkerAgent {
         .replace("{api_probe_results}", probeSection);
   }
 
-  private LlmRouter.LlmResponse callLlmTracked(
+  private FallbackLlmRouter.LlmResponse callLlmTracked(
       String runId, ResolvedModel model, String systemPrompt) {
     AnthropicCacheOptions cacheOpts =
         AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
@@ -305,19 +305,19 @@ public class TestWorkerAgent {
             List.of(
                 new SystemMessage(systemPrompt), new UserMessage("Generate the test class now.")),
             opts);
-    return llmRouter.callWithFallbackTracked(
+    return fallbackLlmRouter.callWithFallbackTracked(
         model.providerName(),
         model.getModel(),
         prompt,
         runId,
         "test-worker",
-        LlmRouter.FallbackMode.IMMEDIATE,
+        FallbackLlmRouter.FallbackMode.IMMEDIATE,
         0,
         false);
   }
 
   private synchronized void accumulateWorkerTokens(
-      Long testPlanId, LlmRouter.LlmResponse lr, ResolvedModel model) {
+      Long testPlanId, FallbackLlmRouter.LlmResponse lr, ResolvedModel model) {
     try {
       var usage = lr.response().getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();

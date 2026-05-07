@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.config.PromptVersioningService;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -53,7 +53,7 @@ public class PromptOptimiserAgent {
 
   private final PromptPatternAnalyser analyser;
   private final PromptAuditService auditService;
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final PromptOptimiserProperties props;
   private final StateStore stateStore;
@@ -62,14 +62,14 @@ public class PromptOptimiserAgent {
   public PromptOptimiserAgent(
       PromptPatternAnalyser analyser,
       PromptAuditService auditService,
-      LlmRouter llmRouter,
+      FallbackLlmRouter fallbackLlmRouter,
       ModelResolver modelResolver,
       PromptOptimiserProperties props,
       StateStore stateStore,
       PromptVersioningService versioningService) {
     this.analyser = analyser;
     this.auditService = auditService;
-    this.llmRouter = llmRouter;
+    this.fallbackLlmRouter = fallbackLlmRouter;
     this.modelResolver = modelResolver;
     this.props = props;
     this.stateStore = stateStore;
@@ -174,13 +174,13 @@ public class PromptOptimiserAgent {
 
     ResolvedModel resolved = modelResolver.resolve("PromptOptimiserAgent", run.getAiProviderEnum());
     var response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             run.getRunId(),
             "prompt-optimiser",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 

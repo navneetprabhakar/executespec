@@ -73,7 +73,7 @@ public class PipelineRun {
   private String planRequirementsJson;
 
   @Column(columnDefinition = "TEXT")
-  private String reviewJson; // ReviewReport JSON
+  private String reviewJson; // TaskReviewReport JSON
 
   private String plannerModel;
   private String workerModel;

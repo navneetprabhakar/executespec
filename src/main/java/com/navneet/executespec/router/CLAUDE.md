@@ -23,7 +23,7 @@ Each project selects its AI provider (ANTHROPIC/GEMINI/OPENAI). ModelResolver ma
 `ModelResolver.selectAdaptiveProvider` (invoked inside `resolve()`) silently switches providers based on historical success rate even when the caller — e.g. `RunOrchestrator` under `-Dexecutespec.strict-provider=true` — has explicitly locked the provider. Evidence: Proj-OpenAI (74270ac6) logged `provider=anthropic model=claude-sonnet-4-6` despite `project.aiProvider=OPENAI`. Fix deferred — needs either a strict-mode guard inside `ModelResolver.resolve()` OR an opt-out flag per org. Until then, adaptive routing remains authoritative over user-selected provider on the planner/reviewer path.
 
 ### Known tech debt — planner/reviewer don't use tier resolution (v2.5.11 finding)
-`PlannerAgent.plannerViaLlm` uses `req.model()` (the RUN-level default via `RunOrchestrator.defaultModelFor(provider)`) instead of `ModelResolver.resolve("PlannerAgent", provider).getModel()`. Consequence: swapping `anthropic: planning:` in the model matrix has no effect — the planner always runs on the Haiku-tier worker default. Same pattern likely holds for `ReviewerAgentV3`. Fix: thread a resolved planner model into `PlannerRequest` (similar for reviewer). Tracked for post-Pillar-1.
+`PlannerAgent.plannerViaLlm` uses `req.model()` (the RUN-level default via `RunOrchestrator.defaultModelFor(provider)`) instead of `ModelResolver.resolve("PlannerAgent", provider).getModel()`. Consequence: swapping `anthropic: planning:` in the model matrix has no effect — the planner always runs on the Haiku-tier worker default. Same pattern likely holds for `ReviewerAgent`. Fix: thread a resolved planner model into `PlannerRequest` (similar for reviewer). Tracked for post-Pillar-1.
 
 ## Circuit Breaker (ProviderHealthTracker)
 - **Storage:** Redis (`StringRedisTemplate`). Keys: `provider:health:{name}`, `provider:failures:{name}`
@@ -31,4 +31,4 @@ Each project selects its AI provider (ANTHROPIC/GEMINI/OPENAI). ModelResolver ma
 - **Recovery:** Unhealthy key has 60s TTL → auto-expires → provider assumed healthy again
 - **Fail-open:** Redis errors degrade to "assume healthy" (never blocks LLM calls due to Redis issues)
 - **Metrics:** `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed` (tagged by provider)
-- **Integration:** LlmRouter checks health before each provider attempt; records success/failure after each call
+- **Integration:** FallbackLlmRouter checks health before each provider attempt; records success/failure after each call

@@ -82,7 +82,7 @@ Project Dashboard → "Launch" button in header
     │
     ▼
 Backend creates ExecutionRun → dispatches a single solution →
-V2RunOrchestrator.submitRun(...)
+RunOrchestrator.submitRun(...)
     │
     ▼ (runs in background)
 Plan → Approve (auto if skipApproval=true) → Work → Review → Push PR
@@ -93,7 +93,7 @@ Auto-push flag opens a PR on <repo>'s main automatically.
 ```
 
 Key file locations:
-- Orchestrator entry: [V2RunOrchestrator.submitRun](../src/main/java/com/navneet/executespec/v2/integration/V2RunOrchestrator.java)
+- Orchestrator entry: [RunOrchestrator.submitRun](../src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)
 - UI: [ExecutionSetup.tsx](../frontend/src/components/execution/ExecutionSetup.tsx)
 
 ### 2b. Multi-repo feature → **Launch**
@@ -318,4 +318,4 @@ Other tabs:
 - **Resuming a FAILED V2 run** — Abort + create a new run; old one is a read-only artefact.
 - **Cross-project memory / docs retrieval** — scoped to one project only.
 - **Webhook auto-provisioning on new repos** — Launch flow doesn't install a PR webhook; use Refresh in the PRs tab, or configure the webhook manually.
-<!-- Worker-side `{{REFERENCE_DOCS}}` injection shipped v2.5.2 via SequentialExecutorV2.fetchReferenceDocs — bullet retired 2026-04-18. -->
+<!-- Worker-side `{{REFERENCE_DOCS}}` injection shipped v2.5.2 via SequentialExecutor.fetchReferenceDocs — bullet retired 2026-04-18. -->

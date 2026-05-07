@@ -42,7 +42,7 @@ import org.springframework.orm.ObjectOptimisticLockingFailureException;
 @ExtendWith(MockitoExtension.class)
 class ExecutionPlannerServicePersistPlanCasTest {
 
-  @Mock com.navneet.executespec.agent.LlmRouter llmRouter;
+  @Mock com.navneet.executespec.agent.FallbackLlmRouter fallbackLlmRouter;
   @Mock com.navneet.executespec.router.ModelResolver modelResolver;
   @Mock ExecutionRunRepository runRepo;
   @Mock ExecutionSolutionRepository solutionRepo;
@@ -60,7 +60,7 @@ class ExecutionPlannerServicePersistPlanCasTest {
     runCas = new ExecutionRunCasUpdater(runRepo);
     planner =
         new ExecutionPlannerService(
-            llmRouter,
+            fallbackLlmRouter,
             modelResolver,
             new ObjectMapper(),
             runRepo,

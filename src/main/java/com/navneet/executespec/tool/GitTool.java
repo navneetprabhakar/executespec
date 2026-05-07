@@ -586,9 +586,9 @@ public class GitTool {
 
   /**
    * Pushes the main branch in the run's workspace to a remote GitHub repository. Non-fatal —
-   * returns ToolResult.err() on failure.
+   * returns GitToolResult.err() on failure.
    */
-  public ToolResult pushToRemote(String runId, String repoUrl, String pat) {
+  public GitToolResult pushToRemote(String runId, String repoUrl, String pat) {
     try {
       String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
@@ -600,14 +600,14 @@ public class GitTool {
       int exit = p.waitFor();
       if (exit == 0) {
         log.info("[GitTool] Pushed main to remote: {}", repoUrl);
-        return ToolResult.ok("Pushed to " + repoUrl);
+        return GitToolResult.ok("Pushed to " + repoUrl);
       } else {
         log.warn("[GitTool] Push failed (exit {}): {}", exit, output);
-        return ToolResult.err("Push failed: " + output);
+        return GitToolResult.err("Push failed: " + output);
       }
     } catch (Exception e) {
       log.warn("[GitTool] Push failed: {}", e.getMessage());
-      return ToolResult.err("Push failed: " + e.getMessage());
+      return GitToolResult.err("Push failed: " + e.getMessage());
     }
   }
 
@@ -619,9 +619,9 @@ public class GitTool {
    * @param repoUrl HTTPS clone URL
    * @param pat GitHub PAT for authentication
    * @param branchName name for the new branch (e.g. "executespec/abc123")
-   * @return ToolResult.ok on success, ToolResult.err on failure
+   * @return GitToolResult.ok on success, GitToolResult.err on failure
    */
-  public ToolResult pushToBranch(String runId, String repoUrl, String pat, String branchName) {
+  public GitToolResult pushToBranch(String runId, String repoUrl, String pat, String branchName) {
     try {
       String authUrl = repoUrl.replace("https://", "https://oauth2:" + pat + "@");
       String wsPath = Path.of(workspaceRoot, runId).toAbsolutePath().normalize().toString();
@@ -635,7 +635,7 @@ public class GitTool {
       int exit1 = p1.waitFor();
       if (exit1 != 0) {
         log.warn("[GitTool] Branch creation failed (exit {}): {}", exit1, out1);
-        return ToolResult.err("Branch creation failed: " + out1);
+        return GitToolResult.err("Branch creation failed: " + out1);
       }
 
       // Push the branch to remote
@@ -654,14 +654,14 @@ public class GitTool {
 
       if (exit2 == 0) {
         log.info("[GitTool] Pushed branch {} to remote: {}", branchName, repoUrl);
-        return ToolResult.ok("Pushed branch " + branchName + " to " + repoUrl);
+        return GitToolResult.ok("Pushed branch " + branchName + " to " + repoUrl);
       } else {
         log.warn("[GitTool] Push branch failed (exit {}): {}", exit2, out2);
-        return ToolResult.err("Push branch failed: " + out2);
+        return GitToolResult.err("Push branch failed: " + out2);
       }
     } catch (Exception e) {
       log.warn("[GitTool] Push branch failed: {}", e.getMessage());
-      return ToolResult.err("Push branch failed: " + e.getMessage());
+      return GitToolResult.err("Push branch failed: " + e.getMessage());
     }
   }
 
@@ -671,7 +671,7 @@ public class GitTool {
    * force-pushes. Returns OK with the branch name on success, OK with "CLEAN" if no changes, ERR
    * otherwise.
    */
-  public ToolResult commitAndPushSubdir(
+  public GitToolResult commitAndPushSubdir(
       String runId,
       String subPath,
       String remoteUrl,
@@ -687,8 +687,8 @@ public class GitTool {
       Process ps = status.start();
       String statusOut = new String(ps.getInputStream().readAllBytes());
       int statusExit = ps.waitFor();
-      if (statusExit != 0) return ToolResult.err("status failed: " + statusOut);
-      if (statusOut.isBlank()) return ToolResult.ok("CLEAN");
+      if (statusExit != 0) return GitToolResult.err("status failed: " + statusOut);
+      if (statusOut.isBlank()) return GitToolResult.ok("CLEAN");
 
       runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
       runQuietly(repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
@@ -700,7 +700,7 @@ public class GitTool {
       Process pc = commit.start();
       String commitOut = new String(pc.getInputStream().readAllBytes());
       int commitExit = pc.waitFor();
-      if (commitExit != 0) return ToolResult.err("commit failed: " + commitOut);
+      if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
 
       runQuietly(repoDir, "git", "-C", repoDir, "checkout", "-B", branchName);
       String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
@@ -710,11 +710,11 @@ public class GitTool {
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
       int pushExit = pp.waitFor();
-      if (pushExit != 0) return ToolResult.err("push failed: " + pushOut);
-      return ToolResult.ok(branchName);
+      if (pushExit != 0) return GitToolResult.err("push failed: " + pushOut);
+      return GitToolResult.ok(branchName);
     } catch (Exception e) {
       log.warn("[GitTool] commitAndPushSubdir failed: {}", e.getMessage());
-      return ToolResult.err("subdir push failed: " + e.getMessage());
+      return GitToolResult.err("subdir push failed: " + e.getMessage());
     }
   }
 
@@ -724,7 +724,7 @@ public class GitTool {
    * on the target branch (cloned with {@code git clone -b <branch>}). Returns "CLEAN" if there's
    * nothing to commit.
    */
-  public ToolResult pushToExistingBranch(
+  public GitToolResult pushToExistingBranch(
       String runId,
       String subPath,
       String remoteUrl,
@@ -741,8 +741,8 @@ public class GitTool {
       Process ps = status.start();
       String statusOut = new String(ps.getInputStream().readAllBytes());
       int statusExit = ps.waitFor();
-      if (statusExit != 0) return ToolResult.err("status failed: " + statusOut);
-      if (statusOut.isBlank()) return ToolResult.ok("CLEAN");
+      if (statusExit != 0) return GitToolResult.err("status failed: " + statusOut);
+      if (statusOut.isBlank()) return GitToolResult.ok("CLEAN");
 
       runQuietly(repoDir, "git", "-C", repoDir, "add", "-A");
       runQuietly(repoDir, "git", "-C", repoDir, "config", "user.email", "agent@executespec.local");
@@ -754,7 +754,7 @@ public class GitTool {
       Process pc = commit.start();
       String commitOut = new String(pc.getInputStream().readAllBytes());
       int commitExit = pc.waitFor();
-      if (commitExit != 0) return ToolResult.err("commit failed: " + commitOut);
+      if (commitExit != 0) return GitToolResult.err("commit failed: " + commitOut);
 
       // Push WITHOUT --force (fast-forward only → safe for existing PR branches)
       String authUrl = remoteUrl.replace("https://", "https://oauth2:" + pat + "@");
@@ -763,11 +763,11 @@ public class GitTool {
       Process pp = push.start();
       String pushOut = new String(pp.getInputStream().readAllBytes());
       int pushExit = pp.waitFor();
-      if (pushExit != 0) return ToolResult.err("push failed: " + pushOut);
-      return ToolResult.ok(branchName);
+      if (pushExit != 0) return GitToolResult.err("push failed: " + pushOut);
+      return GitToolResult.ok(branchName);
     } catch (Exception e) {
       log.warn("[GitTool] pushToExistingBranch failed: {}", e.getMessage());
-      return ToolResult.err("push to existing branch failed: " + e.getMessage());
+      return GitToolResult.err("push to existing branch failed: " + e.getMessage());
     }
   }
 
@@ -788,9 +788,9 @@ public class GitTool {
    * @param username Bitbucket username
    * @param appPassword Bitbucket app password
    * @param branchName name for the new branch (e.g. "executespec/abc123")
-   * @return ToolResult.ok on success, ToolResult.err on failure
+   * @return GitToolResult.ok on success, GitToolResult.err on failure
    */
-  public ToolResult pushToBranchBitbucket(
+  public GitToolResult pushToBranchBitbucket(
       String runId, String cloneUrl, String username, String appPassword, String branchName) {
     try {
       String authUrl =
@@ -806,7 +806,7 @@ public class GitTool {
       int exit1 = p1.waitFor();
       if (exit1 != 0) {
         log.warn("[GitTool] Bitbucket branch creation failed (exit {}): {}", exit1, out1);
-        return ToolResult.err("Branch creation failed: " + out1);
+        return GitToolResult.err("Branch creation failed: " + out1);
       }
 
       // Push the branch to remote
@@ -825,14 +825,14 @@ public class GitTool {
 
       if (exit2 == 0) {
         log.info("[GitTool] Pushed branch {} to Bitbucket: {}", branchName, cloneUrl);
-        return ToolResult.ok("Pushed branch " + branchName + " to " + cloneUrl);
+        return GitToolResult.ok("Pushed branch " + branchName + " to " + cloneUrl);
       } else {
         log.warn("[GitTool] Bitbucket push failed (exit {}): {}", exit2, out2);
-        return ToolResult.err("Push branch failed: " + out2);
+        return GitToolResult.err("Push branch failed: " + out2);
       }
     } catch (Exception e) {
       log.warn("[GitTool] Bitbucket push failed: {}", e.getMessage());
-      return ToolResult.err("Push branch failed: " + e.getMessage());
+      return GitToolResult.err("Push branch failed: " + e.getMessage());
     }
   }
 

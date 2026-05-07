@@ -2,7 +2,7 @@ package com.navneet.executespec.codeintel;
 
 import java.util.List;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -22,15 +22,15 @@ import lombok.extern.slf4j.Slf4j;
  * doc in natural language.
  *
  * <p>Separate from {@link ArchitectureDocGenerator} which does the Step 3 combined synthesis across
- * repos. Each generator dispatches through {@link LlmRouter} via the LIGHTWEIGHT tier (cheap,
- * fast).
+ * repos. Each generator dispatches through {@link FallbackLlmRouter} via the LIGHTWEIGHT tier
+ * (cheap, fast).
  */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class RepoArchitectureGenerator {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
 
   private static final String SYSTEM_PROMPT =
@@ -92,13 +92,13 @@ public class RepoArchitectureGenerator {
         new Prompt(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload)));
 
     ChatResponse response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             "repo-arch-" + safeSlug(repoFullName),
             "repo-arch",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 

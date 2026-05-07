@@ -31,10 +31,14 @@ Default admin: `admin@executespec.ai` / `Admin@123` (forced password change on f
 
 ---
 
-## Pipeline (V2 — current as of v1.0.0-M1)
+## Pipeline (current as of v1.0.0-M1)
+
+> **Versioning note (2026-05-07 onward):** Java code no longer carries V2/V3 markers. Backend packages were flattened from `com.navneet.executespec.v2.*` and `com.navneet.executespec.v3.*` to `com.navneet.executespec.*`; class suffixes/prefixes (`LlmRouter`, `ReviewerAgent`, `LandingController`, …) dropped. Flyway migration filenames and prompt-rollback archives stay versioned (intentionally — see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the full rationale).
+
+
 
 ```
-POST /api/runs  →  V2RunOrchestrator
+POST /api/runs  →  RunOrchestrator
                       ↓
                 SmartClassifierAgent (LIGHTWEIGHT — heuristic fast-path
                    for ≤150-char single-feature specs; LLM verifier
@@ -55,18 +59,18 @@ POST /api/runs  →  V2RunOrchestrator
                 Plan Approval Gate (PRODUCTION pauses at AWAITING_APPROVAL;
                    PROTOTYPE/skipApproval bypasses)
                       ↓
-                SequentialExecutorV2 (one task at a time, tier-routed
+                SequentialExecutor (one task at a time, tier-routed
                    per-task — LOW=LIGHTWEIGHT, MEDIUM=WORKHORSE,
                    HIGH=PLANNING)
-                   → WorkerAgentV2 (multi-turn, native tool calling via
-                     LlmRouterV2; CompleteTaskTool terminates the loop)
+                   → WorkerAgent (multi-turn, native tool calling via
+                     LlmRouter; CompleteTaskTool terminates the loop)
                    → buildProject smoke test (final task only on
                      multi-task plans)
                    → ONE retry with build error injected on smoke fail
                       ↓
                 Auto-merge per task — no merge gate
                       ↓
-                ReviewerAgentV3 — general pass + wiring pass
+                ReviewerAgent — general pass + wiring pass
                                   (project-type-aware)
                       ↓
                 ★ COMPLETE / PARTIAL / FAILED
@@ -84,10 +88,10 @@ POST /api/runs  →  V2RunOrchestrator
 > Pipeline diagram refreshed for [F-08] (audit Sprint 1 PR-4, 2026-04-30).
 > V1 references (`RequestTriageService` as a separate service,
 > `CompilerAgent`, `SubtaskDecomposer`, `BatchClientRouter`, merge gate,
-> `PartialRunResumeService`, `ReviewerAgentV2`) deleted on 2026-04-13;
+> `PartialRunResumeService`, `ReviewerAgent`) deleted on 2026-04-13;
 > V2 has folded triage into the SmartClassifier+Outline pair, smoke-tests
 > per-task instead of running a separate compile pass, no merge gate,
-> uses ReviewerAgentV3, and uses `StartupRunResumerV2` to mark interrupted
+> uses ReviewerAgent, and uses `StartupRunResumerV2` to mark interrupted
 > runs FAILED on boot (full replay is a planned follow-up).
 
 ---
@@ -105,7 +109,7 @@ POST /api/runs  →  V2RunOrchestrator
 - **Spec adherence scoring** — `AccuracyAssessmentService` evaluates functional, API, persistence, UI, and security dimensions; stores grade + score on ValidationReport
 - **Prompt architecture** — composable fragment system via `PromptAssembler` (`{{include:name}}` markers), scaffold templates per project type, SHA-256 prompt version tracking to `prompt_audit` table, failure pattern injection into planner
 - **Code validation** — language toolchains for Java, TypeScript, Python, React (syntax → type → lint → test)
-- **ReviewerAgentV3** — two-pass review (general + project-type-aware wiring) backed by `WorkerAgentV2`, 30-iter cap each. Verdict: CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED. The deterministic `verifiedScore` (build + tests + reviewer outcome) is the canonical run-quality anchor; `accuracyScore` from `AccuracyAssessmentService` is rendered as a demoted "Est." chip per v2.5.10.
+- **ReviewerAgent** — two-pass review (general + project-type-aware wiring) backed by `WorkerAgent`, 30-iter cap each. Verdict: CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED. The deterministic `verifiedScore` (build + tests + reviewer outcome) is the canonical run-quality anchor; `accuracyScore` from `AccuracyAssessmentService` is rendered as a demoted "Est." chip per v2.5.10.
 - **Test generation** — language-agnostic pipeline: plan → generate → compile → execute against live preview; live API probe via `ApiProber`
 - **Validation report** — LLM-generated quality summary with accuracy score/grade, shareable via public URL, downloadable as PDF
 - **Container console** — terminal panel in PreviewTab; executes allowlisted commands inside the running preview container via `docker compose exec -T` (no sidecar binary required)
@@ -189,9 +193,9 @@ the per-package `CLAUDE.md` files. Highlights:
 
 | Agent Tier | Agents | Anthropic | Gemini | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgentV2, OutlinePlannerAgent, ReviewerAgentV3, AccuracyAssessmentService | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgentV2 (MEDIUM), TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent + 4 more | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
-| LIGHTWEIGHT | WorkerAgentV2 (LOW), SmartClassifierAgent, CoherencePlannerAgent, ConversationAgent, ContextAgent | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| PLANNING | PlannerAgentV2, OutlinePlannerAgent, ReviewerAgent, AccuracyAssessmentService | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| WORKHORSE | WorkerAgent (MEDIUM), TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent + 4 more | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| LIGHTWEIGHT | WorkerAgent (LOW), SmartClassifierAgent, CoherencePlannerAgent, ConversationAgent, ContextAgent | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
 Default provider: **OpenAI** (user-selected per project). Health-based failover via Redis circuit breaker.
 

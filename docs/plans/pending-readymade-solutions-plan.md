@@ -84,7 +84,7 @@ Implementation:
 
 - `TierEnforcementService.requiresCostCap(tier)` predicate (true
   for FREE/PRO, false for TEAM/ENTERPRISE).
-- `V2RunCostTracker` tracks cost regardless (for analytics +
+- `RunCostTracker` tracks cost regardless (for analytics +
   recipe-cost calibration); the cap-enforcement gate fires only
   when `requiresCostCap` is true.
 - UI: cost-cap input on detail page rendered conditionally. For

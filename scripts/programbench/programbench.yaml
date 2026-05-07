@@ -1,0 +1,189 @@
+# mini-swe-agent config for programbench tasks.
+#
+# Forks the structure of mini-swe-agent's built-in swebench.yaml. Differences:
+#   - Working dir is /workspace (programbench), not /testbed (swebench).
+#   - Cleanroom: container started with `--network none`. The agent process on
+#     the host still has internet for LLM API calls; the container does not.
+#   - System prompt asks the agent to re-implement a compiled binary in <language>
+#     from observed behavior + docs at /workspace.
+#   - No git-diff submission. The agent's submission is the contents of /workspace
+#     at completion time. The runner captures it via `docker cp` after agent.run()
+#     returns.
+#
+# `programbench_runner.py` injects per-task variables (language, repository, commit)
+# into the system_template via Jinja.
+
+agent:
+  system_template: |-
+    You are an expert programmer working in a cleanroom sandbox.
+
+    # The task
+
+    You are given a COMPILED BINARY and its documentation. You must
+    REIMPLEMENT this program from scratch in {{language}}, matching its
+    observed behavior as closely as possible.
+
+    The original repository was {{repository}} at commit {{commit}}.
+    You do NOT have internet access — you cannot look it up.
+
+    # The environment
+
+    - Sandbox: a Linux container, working directory /workspace.
+    - The binary and documentation are at /workspace.
+    - Network: DISABLED (--network none). curl, wget, git clone, pip install,
+      cargo install from the network ALL FAIL. Don't try.
+    - Compilers and language toolchains are already installed for {{language}}.
+
+    # The build contract — READ THIS FIRST
+
+    Programbench's evaluation harness does ONE thing to build your
+    submission: it runs `chmod +x ./compile.sh && ./compile.sh` from the
+    /workspace root.
+
+    Therefore your submission MUST contain a file `/workspace/compile.sh`
+    that builds the program from your sources. After it runs, the resulting
+    executable must be at `/workspace/executable` (overwriting or replacing
+    the original binary at that path).
+
+    Examples by language:
+
+    ```bash
+    # C / C++
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    gcc cmatrix.c -o executable -lncursesw     # or -lm, -lpthread, etc.
+    ```
+
+    ```bash
+    # Rust
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    cargo build --release --offline
+    cp target/release/<binname> executable
+    ```
+
+    ```bash
+    # Go
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    go build -o executable .
+    ```
+
+    Run `./compile.sh` yourself before submitting and confirm it produces a
+    working executable that matches the original's behavior.
+
+    # How to work
+
+    1. Explore /workspace. Locate the binary and docs (README, man pages,
+       --help / --version output, examples). Read them carefully.
+    2. Run the binary with representative inputs. Build a mental model of
+       its behavior, output format, edge cases, and error handling
+       (especially: invalid arguments, --help, --version).
+    3. Write source files in /workspace using the language's standard
+       project layout.
+    4. Write `compile.sh` that builds your sources to `/workspace/executable`.
+       Test it: `./compile.sh && ./executable --help` and verify against
+       the original.
+    5. Iterate. Run `diff <(./executable …) <(./original-saved-output …)`.
+       Pay special attention to error paths — reject invalid arguments
+       the same way the original does.
+    6. When done, submit (see below).
+
+    # Working style
+
+    - Full Linux shell. Use non-interactive flags (-y, -f).
+    - Avoid interactive tools (vi, nano).
+    - Install missing build tools via the package manager already
+      configured in the image (apt, apk, dnf — varies by base). Try
+      `apt list --installed | grep -i ncurses` etc. before writing
+      stub headers — the libraries you need are usually already there.
+    - The contents of /workspace at completion time ARE your submission.
+      Don't write source files outside /workspace.
+    - Be efficient with iterations. The cost cap is real — write the
+      simplest working version first, validate with `./compile.sh`,
+      then refine.
+
+    # Submission
+
+    When `./compile.sh` works and `./executable` matches the original's
+    observable behavior on representative inputs, run EXACTLY:
+
+    ```bash
+    echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && echo programbench-done
+    ```
+
+    After this command your /workspace tree is captured and you cannot
+    continue working on this task.
+  instance_template: |-
+    Reimplement the compiled program at /workspace.
+
+    Language target: {{language}}
+    Original (for context only — not accessible): {{repository}} @ {{commit}}
+
+    Start by exploring /workspace.
+  step_limit: 500
+  cost_limit: 25.0
+
+environment:
+  cwd: "/workspace"
+  timeout: 120
+  interpreter: ["bash", "-c"]
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: "off"
+    TQDM_DISABLE: "1"
+  run_args:
+    - "--rm"
+    - "--network"
+    - "none"
+  environment_class: docker
+
+model:
+  observation_template: |
+    {% if output.exception_info -%}
+    <exception>{{output.exception_info}}</exception>
+    {% endif -%}
+    <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
+    <output>
+    {{ output.output -}}
+    </output>
+    {%- else -%}
+    <warning>
+    The output of your last command was too long.
+    Try a different command that produces less output (head/tail/sed for files,
+    more selective grep patterns, etc.). If you really need the full output,
+    redirect to a file and search in it.
+    </warning>
+    {%- set elided_chars = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided_chars>
+    {{ elided_chars }} characters elided
+    </elided_chars>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
+  format_error_template: |
+    Tool call error:
+
+    <error>
+    {{error}}
+    </error>
+
+    Use the bash tool: {"command": "your_command_here"}.
+
+    When you have completed the task, submit by running:
+    `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && echo programbench-done`
+  model_name: "anthropic/claude-sonnet-4-6"
+  model_kwargs:
+    drop_params: true
+    temperature: 0.0
+    parallel_tool_calls: true
