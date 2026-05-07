@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.memory.entity.ProjectMemorySnapshot;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectMemorySnapshotRepository;
@@ -35,7 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class MemoryCompactionService {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final ProjectRunLedgerRepository ledgerRepo;
   private final ProjectMemorySnapshotRepository snapshotRepo;
@@ -136,13 +136,13 @@ public class MemoryCompactionService {
                 new SystemMessage(systemPrompt),
                 new UserMessage("Emit the updated snapshot now.")));
     ChatResponse response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             "compact-" + projectId,
             "memory-compaction",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
     return response.getResult().getOutput().getText();

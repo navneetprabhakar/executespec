@@ -15,7 +15,7 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.reviewer.model.ReviewReportV2;
 import com.navneet.executespec.router.ModelResolver;
@@ -38,7 +38,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ContextAgent {
 
   private final ContextAgentScanner scanner;
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final ContextAgentProperties props;
   private final StateStore stateStore;
@@ -50,14 +50,14 @@ public class ContextAgent {
 
   public ContextAgent(
       ContextAgentScanner scanner,
-      LlmRouter llmRouter,
+      FallbackLlmRouter fallbackLlmRouter,
       ModelResolver modelResolver,
       ContextAgentProperties props,
       StateStore stateStore,
       GitTool gitTool,
       ObjectMapper objectMapper) {
     this.scanner = scanner;
-    this.llmRouter = llmRouter;
+    this.fallbackLlmRouter = fallbackLlmRouter;
     this.modelResolver = modelResolver;
     this.props = props;
     this.stateStore = stateStore;
@@ -112,13 +112,13 @@ public class ContextAgent {
         new Prompt(List.of(new SystemMessage(systemPrompt), new UserMessage(userMessage)));
 
     var response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             run.getRunId(),
             "context-agent",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 

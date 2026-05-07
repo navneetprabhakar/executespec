@@ -31,4 +31,4 @@ Each project selects its AI provider (ANTHROPIC/GEMINI/OPENAI). ModelResolver ma
 - **Recovery:** Unhealthy key has 60s TTL → auto-expires → provider assumed healthy again
 - **Fail-open:** Redis errors degrade to "assume healthy" (never blocks LLM calls due to Redis issues)
 - **Metrics:** `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed` (tagged by provider)
-- **Integration:** LlmRouter checks health before each provider attempt; records success/failure after each call
+- **Integration:** FallbackLlmRouter checks health before each provider attempt; records success/failure after each call

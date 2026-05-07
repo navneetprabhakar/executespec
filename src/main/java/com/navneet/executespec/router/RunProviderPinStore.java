@@ -13,7 +13,7 @@ import lombok.extern.slf4j.Slf4j;
  * Redis-backed store that pins a run to the provider that served its first LLM call.
  *
  * <p>All tasks within the same run use the same provider for style consistency. The pin is advisory
- * — if the pinned provider becomes unhealthy, {@link LlmRouter} falls back normally and the pin is
+ * — if the pinned provider becomes unhealthy, {@link FallbackLlmRouter} falls back normally and the pin is
  * cleared so the new provider is used going forward.
  *
  * <h3>Redis key</h3>

@@ -70,7 +70,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class LlmRouter {
+public class FallbackLlmRouter {
 
   public enum FallbackMode {
     IMMEDIATE,
@@ -169,7 +169,7 @@ public class LlmRouter {
       if (pinnedProvider != null && !pinnedProvider.equalsIgnoreCase(primaryProvider)) {
         int pinnedIndex = findIndexInChain(chain, pinnedProvider);
         if (pinnedIndex >= 0 && healthTracker.isHealthy(toLlmProvider(pinnedProvider))) {
-          log.debug("[LlmRouter] Run {} pinned to {} — reordering chain", runId, pinnedProvider);
+          log.debug("[FallbackLlmRouter] Run {} pinned to {} — reordering chain", runId, pinnedProvider);
           primaryProvider = chain.get(pinnedIndex)[0];
           primaryModel = chain.get(pinnedIndex)[1];
         }
@@ -196,7 +196,7 @@ public class LlmRouter {
 
         // Skip providers disabled by org policy
         if (runKeys != null && !runKeys.isProviderAllowed(provider)) {
-          log.info("[LlmRouter] Provider {} disabled by org policy — skipping", provider);
+          log.info("[FallbackLlmRouter] Provider {} disabled by org policy — skipping", provider);
           continue;
         }
 
@@ -204,7 +204,7 @@ public class LlmRouter {
         LlmProvider llmProvider = toLlmProvider(provider);
         if (!healthTracker.isHealthy(llmProvider)) {
           log.info(
-              "[LlmRouter] Provider {} circuit OPEN — skipping for agent {} (iteration={})",
+              "[FallbackLlmRouter] Provider {} circuit OPEN — skipping for agent {} (iteration={})",
               provider,
               agentId,
               iteration);
@@ -234,13 +234,13 @@ public class LlmRouter {
                 .register(meterRegistry)
                 .increment();
             log.warn(
-                "[LlmRouter] Provider switch mid-run {} → {}: style consistency prompt will be"
+                "[FallbackLlmRouter] Provider switch mid-run {} → {}: style consistency prompt will be"
                     + " used",
                 fromProvider,
                 provider);
           }
           log.warn(
-              "[LlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
+              "[FallbackLlmRouter] Falling back: {} -> {} for agent {} (iteration={})",
               fromProvider,
               provider,
               agentId,
@@ -268,7 +268,7 @@ public class LlmRouter {
                 new com.navneet.executespec.sse.RunEvent(
                     "RUN_PROVIDER_SWITCHED", runId, payload, null, Instant.now()));
           } catch (Exception sseEx) {
-            log.debug("[LlmRouter] SSE emit RUN_PROVIDER_SWITCHED failed: {}", sseEx.getMessage());
+            log.debug("[FallbackLlmRouter] SSE emit RUN_PROVIDER_SWITCHED failed: {}", sseEx.getMessage());
           }
         }
 
@@ -290,7 +290,7 @@ public class LlmRouter {
           // Pin this run to the provider that just succeeded
           pinStore.pinIfAbsent(runId, provider);
           if (j > 0) {
-            log.info("[LlmRouter] Fallback succeeded: {} for {}", provider, agentId);
+            log.info("[FallbackLlmRouter] Fallback succeeded: {} for {}", provider, agentId);
           }
           recordTokenMetrics(response, provider, model, llmObs, agentId, callDuration, true);
           llmObs.lowCardinalityKeyValue("outcome", "success");
@@ -367,7 +367,7 @@ public class LlmRouter {
             Duration failDuration = Duration.between(callStart, Instant.now());
             modelPerfTracker.recordCall(provider, model, failDuration.toMillis(), false);
             log.warn(
-                "[LlmRouter] Provider {} failed for {} (non-retriable, iteration={}): {}",
+                "[FallbackLlmRouter] Provider {} failed for {} (non-retriable, iteration={}): {}",
                 provider,
                 agentId,
                 iteration,
@@ -388,7 +388,7 @@ public class LlmRouter {
       if (lastError == null) {
         if (runKeys != null && !runKeys.isProviderAllowed(primaryProvider)) {
           log.warn(
-              "[LlmRouter] All providers circuit-open AND primary {} disabled by org policy —"
+              "[FallbackLlmRouter] All providers circuit-open AND primary {} disabled by org policy —"
                   + " cannot force",
               primaryProvider);
           throw new ProviderUnavailableException(
@@ -398,7 +398,7 @@ public class LlmRouter {
                   + agentId);
         }
         log.warn(
-            "[LlmRouter] All providers circuit-open — forcing primary {} for {}",
+            "[FallbackLlmRouter] All providers circuit-open — forcing primary {} for {}",
             primaryProvider,
             agentId);
         try {
@@ -590,7 +590,7 @@ public class LlmRouter {
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
       long sleepMs = RATE_LIMIT_BACKOFF_DELAYS_MS[attempt];
       log.warn(
-          "[LlmRouter] {} on {} for {} (iteration={}) — attempt {}/{}, sleeping {}ms before retry",
+          "[FallbackLlmRouter] {} on {} for {} (iteration={}) — attempt {}/{}, sleeping {}ms before retry",
           eventDescription,
           provider,
           agentId,
@@ -625,7 +625,7 @@ public class LlmRouter {
             .record(retryDuration);
         healthTracker.recordSuccess(llmProvider);
         log.info(
-            "[LlmRouter] Post-{} retry succeeded: {} for {} (attempt {}/{})",
+            "[FallbackLlmRouter] Post-{} retry succeeded: {} for {} (attempt {}/{})",
             eventKey,
             provider,
             agentId,
@@ -642,7 +642,7 @@ public class LlmRouter {
         if (stillTransient && attempt < maxAttempts - 1) {
           // Still transient — continue to next backoff level
           log.warn(
-              "[LlmRouter] Still {} on {} (attempt {}/{}) — will retry with longer delay",
+              "[FallbackLlmRouter] Still {} on {} (attempt {}/{}) — will retry with longer delay",
               eventKey,
               provider,
               attempt + 1,
@@ -652,7 +652,7 @@ public class LlmRouter {
         // Non-transient error, fatal client error, or final attempt exhausted
         healthTracker.recordFailure(llmProvider);
         log.warn(
-            "[LlmRouter] Post-{} retry exhausted on {} for {} (attempt {}/{}): {}",
+            "[FallbackLlmRouter] Post-{} retry exhausted on {} for {} (attempt {}/{}): {}",
             eventKey,
             provider,
             agentId,
@@ -715,7 +715,7 @@ public class LlmRouter {
     final var finalOpenAiToolChoice = openAiToolChoice;
 
     log.info(
-        "[LlmRouter] callWithModelOptions: provider={} model={} tools={} internalExec={}"
+        "[FallbackLlmRouter] callWithModelOptions: provider={} model={} tools={} internalExec={}"
             + " cacheStrategy={} toolChoice={} runId={}",
         provider,
         model,
@@ -803,7 +803,7 @@ public class LlmRouter {
       case "anthropic" -> {
         String key = keys.anthropicKey();
         if (key != null) {
-          log.debug("[LlmRouter] Using user/org Anthropic key for this call");
+          log.debug("[FallbackLlmRouter] Using user/org Anthropic key for this call");
           yield buildAnthropicModel(key);
         }
         if ("OWN_KEYS".equals(keys.keySourceMode())) {
@@ -815,7 +815,7 @@ public class LlmRouter {
       case "openai" -> {
         String key = keys.openAiKey();
         if (key != null) {
-          log.debug("[LlmRouter] Using user/org OpenAI key for this call");
+          log.debug("[FallbackLlmRouter] Using user/org OpenAI key for this call");
           yield buildOpenAiModel(key);
         }
         if ("OWN_KEYS".equals(keys.keySourceMode())) {
@@ -832,7 +832,7 @@ public class LlmRouter {
       case "gemini" -> {
         String key = keys.geminiKey();
         if (key != null) {
-          log.debug("[LlmRouter] Using user/org Gemini key for this call");
+          log.debug("[FallbackLlmRouter] Using user/org Gemini key for this call");
           yield buildGeminiModel(key);
         }
         if ("OWN_KEYS".equals(keys.keySourceMode())) {

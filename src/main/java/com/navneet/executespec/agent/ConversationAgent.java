@@ -102,7 +102,7 @@ public class ConversationAgent {
   /** Max tasks in a suggestion mini-plan. If exceeded, throw ApplySuggestionTooLargeException. */
   private static final int MAX_SUGGESTION_TASKS = 6;
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final ModelRegistry modelRegistry;
   private final WorkspaceFileService workspaceFileService;
@@ -123,7 +123,7 @@ public class ConversationAgent {
   public String chat(PipelineRun run, List<ChatMessageRecord> history, String newMessage) {
     // Spring AI 1.1.4 rejects OpenAI requests with an injected `extra_body` param
     // (500+ char 400 error). V2's main pipeline bypasses Spring AI for OpenAI via
-    // OpenAiNativeToolClient, but LlmRouter used here still goes through Spring AI.
+    // OpenAiNativeToolClient, but FallbackLlmRouter used here still goes through Spring AI.
     // Reroute OPENAI → ANTHROPIC for conversation so chat works on V2 runs.
     com.navneet.executespec.router.LlmProvider chatProvider = run.getAiProviderEnum();
     if (chatProvider == com.navneet.executespec.router.LlmProvider.OPENAI) {
@@ -170,13 +170,13 @@ public class ConversationAgent {
     Prompt prompt = new Prompt(messages, opts);
 
     var response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             selectedProvider,
             selectedModel,
             prompt,
             run.getRunId(),
             "conversation",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 
@@ -220,7 +220,7 @@ public class ConversationAgent {
   public TaskPlan generateSuggestionPlan(PipelineRun run, String suggestion) {
     // Spring AI 1.1.4 rejects OpenAI requests with an injected `extra_body` param
     // (500+ char 400 error). V2's main pipeline bypasses Spring AI for OpenAI via
-    // OpenAiNativeToolClient, but LlmRouter used here still goes through Spring AI.
+    // OpenAiNativeToolClient, but FallbackLlmRouter used here still goes through Spring AI.
     // Reroute OPENAI → ANTHROPIC for conversation so chat works on V2 runs.
     com.navneet.executespec.router.LlmProvider chatProvider = run.getAiProviderEnum();
     if (chatProvider == com.navneet.executespec.router.LlmProvider.OPENAI) {
@@ -300,13 +300,13 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
             .build();
 
     var response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             selectedProvider,
             selectedModel,
             new Prompt(messages, opts),
             run.getRunId(),
             "suggestion-plan",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 

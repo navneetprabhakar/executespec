@@ -37,7 +37,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class ExecutionPlannerCodemapFilterTest {
 
-  @Mock com.navneet.executespec.agent.LlmRouter llmRouter;
+  @Mock com.navneet.executespec.agent.FallbackLlmRouter fallbackLlmRouter;
   @Mock com.navneet.executespec.router.ModelResolver modelResolver;
   @Mock com.navneet.executespec.execution.repository.ExecutionRunRepository runRepo;
   @Mock com.navneet.executespec.execution.repository.ExecutionSolutionRepository solutionRepo;
@@ -58,7 +58,7 @@ class ExecutionPlannerCodemapFilterTest {
   void wire() {
     planner =
         new ExecutionPlannerService(
-            llmRouter,
+            fallbackLlmRouter,
             modelResolver,
             new ObjectMapper(),
             runRepo,

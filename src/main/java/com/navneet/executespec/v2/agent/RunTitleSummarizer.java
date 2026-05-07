@@ -2,7 +2,7 @@ package com.navneet.executespec.v2.agent;
 
 import java.util.List;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -19,7 +19,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Distils a free-form user request into a concise 5-9 word imperative title. Used by the {@link
  * PlannerAgent} SINGLE_SHOT path so run titles shown in project views read naturally instead of
- * echoing the raw request. Uses the LIGHTWEIGHT tier via the V1 {@link LlmRouter} (same pattern as
+ * echoing the raw request. Uses the LIGHTWEIGHT tier via the V1 {@link FallbackLlmRouter} (same pattern as
  * {@code RunLedgerAgent}) — cheap + fast + no ExecutionContext plumbing needed.
  *
  * <p>All failures return {@code null} so callers can fall back to deterministic truncation. Title
@@ -42,13 +42,13 @@ public class RunTitleSummarizer {
       - Output the title ONLY — nothing else, no prefix, no explanation.
       """;
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
 
   /**
    * @param spec the raw user request
    * @param provider the project/run's LLM provider; falls back to OPENAI
-   * @param runId for logging/correlation in the LlmRouter
+   * @param runId for logging/correlation in the FallbackLlmRouter
    * @return a tightened title, or {@code null} if summarization failed
    */
   public String summarize(String spec, LlmProvider provider, String runId) {
@@ -58,13 +58,13 @@ public class RunTitleSummarizer {
       ResolvedModel resolved = modelResolver.resolve("RunTitleSummarizer", effective);
       Prompt prompt = new Prompt(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(spec)));
       ChatResponse response =
-          llmRouter.callWithFallback(
+          fallbackLlmRouter.callWithFallback(
               resolved.providerName(),
               resolved.getModel(),
               prompt,
               runId == null ? "title-" + spec.hashCode() : runId,
               "run-title",
-              LlmRouter.FallbackMode.IMMEDIATE,
+              FallbackLlmRouter.FallbackMode.IMMEDIATE,
               0,
               false);
       String text = response.getResult().getOutput().getText();

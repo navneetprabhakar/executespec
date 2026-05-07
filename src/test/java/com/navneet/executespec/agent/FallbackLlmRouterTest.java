@@ -20,7 +20,7 @@ import org.springframework.ai.chat.prompt.Prompt;
 import org.springframework.context.ApplicationContext;
 
 @ExtendWith(MockitoExtension.class)
-@DisplayName("LlmRouter")
+@DisplayName("FallbackLlmRouter")
 class LlmRouterTest {
 
   @Mock private ApplicationContext ctx;
@@ -42,11 +42,11 @@ class LlmRouterTest {
   @Mock private org.springframework.ai.chat.model.Generation generation;
   @Mock private org.springframework.ai.chat.messages.AssistantMessage assistantMessage;
 
-  private LlmRouter router;
+  private FallbackLlmRouter router;
 
   @BeforeEach
   void setUp() {
-    // LlmRouter reads agentProperties.getTokenBudget().getMaxTokens() for Anthropic calls
+    // FallbackLlmRouter reads agentProperties.getTokenBudget().getMaxTokens() for Anthropic calls
     var tokenBudget = new com.navneet.executespec.config.AgentProperties.TokenBudget();
     tokenBudget.setMaxTokens(8192);
     org.mockito.Mockito.lenient().when(agentProperties.getTokenBudget()).thenReturn(tokenBudget);
@@ -60,7 +60,7 @@ class LlmRouterTest {
     org.mockito.Mockito.lenient().when(assistantMessage.getText()).thenReturn("test response");
 
     router =
-        new LlmRouter(
+        new FallbackLlmRouter(
             ctx,
             inboxService,
             runKeyStore,
@@ -91,7 +91,7 @@ class LlmRouterTest {
               new Prompt("test"),
               "run-1",
               "planner",
-              LlmRouter.FallbackMode.IMMEDIATE,
+              FallbackLlmRouter.FallbackMode.IMMEDIATE,
               0,
               false);
 
@@ -112,7 +112,7 @@ class LlmRouterTest {
               new Prompt("test"),
               "run-1",
               "worker",
-              LlmRouter.FallbackMode.TASK_BOUNDARY,
+              FallbackLlmRouter.FallbackMode.TASK_BOUNDARY,
               0,
               false);
 
@@ -154,7 +154,7 @@ class LlmRouterTest {
               new Prompt("test"),
               "run-openai-1",
               "planner",
-              LlmRouter.FallbackMode.NO_FALLBACK,
+              FallbackLlmRouter.FallbackMode.NO_FALLBACK,
               0,
               false);
 
@@ -174,7 +174,7 @@ class LlmRouterTest {
       // Throw the router-native exception so it skips the transient
       // retry loop (which has 15s/30s/60s sleeps) and surfaces.
       when(openAiNativeToolClient.call(any()))
-          .thenThrow(new LlmRouter.ProviderUnavailableException("openai key missing"));
+          .thenThrow(new FallbackLlmRouter.ProviderUnavailableException("openai key missing"));
 
       assertThatThrownBy(
               () ->
@@ -184,10 +184,10 @@ class LlmRouterTest {
                       new Prompt("test"),
                       "run-openai-2",
                       "planner",
-                      LlmRouter.FallbackMode.NO_FALLBACK,
+                      FallbackLlmRouter.FallbackMode.NO_FALLBACK,
                       0,
                       false))
-          .isInstanceOf(LlmRouter.ProviderUnavailableException.class);
+          .isInstanceOf(FallbackLlmRouter.ProviderUnavailableException.class);
     }
   }
 
@@ -206,9 +206,9 @@ class LlmRouterTest {
                     new Prompt("test"),
                     "run-x",
                     "planner",
-                    LlmRouter.FallbackMode.IMMEDIATE,
+                    FallbackLlmRouter.FallbackMode.IMMEDIATE,
                     0,
                     false))
-        .isInstanceOf(LlmRouter.ProviderUnavailableException.class);
+        .isInstanceOf(FallbackLlmRouter.ProviderUnavailableException.class);
   }
 }

@@ -121,7 +121,7 @@ spring:
 
   ai:
     retry:
-      max-attempts: 3               # down from default 10 — LlmRouter handles its own fallback chain
+      max-attempts: 3               # down from default 10 — FallbackLlmRouter handles its own fallback chain
       backoff:
         initial-interval: 2000      # 2s
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
@@ -304,7 +304,7 @@ model-matrix:
     gemini-3-flash: gemini-3-flash-preview
     gemini-3.1-pro-preview: gemini-3-flash-preview
 
-  # ── Fallback chains by tier (replaces hardcoded LlmRouter chains) ─────────────
+  # ── Fallback chains by tier (replaces hardcoded FallbackLlmRouter chains) ─────────────
   fallback-chains:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
@@ -332,7 +332,7 @@ model-matrix:
     ReviewerAgentV3: PLANNING
     SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
     WorkerAgent: WORKHORSE
-    # Shared non-tool-calling agents (use LlmRouter)
+    # Shared non-tool-calling agents (use FallbackLlmRouter)
     TestPlannerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
     ApiTestSuiteAgent: WORKHORSE

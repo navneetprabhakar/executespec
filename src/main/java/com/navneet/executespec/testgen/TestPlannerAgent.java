@@ -6,7 +6,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -38,7 +38,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class TestPlannerAgent {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final StateStore stateStore;
   private final TestPlanRepository testPlanRepository;
@@ -119,7 +119,7 @@ public class TestPlannerAgent {
     LlmProvider aiProvider =
         stateStore.findRun(runId).map(r -> r.getAiProviderEnum()).orElse(LlmProvider.OPENAI);
     ResolvedModel model = modelResolver.resolve("TestPlannerAgent", aiProvider);
-    LlmRouter.LlmResponse lr = callLlm(runId, model, systemPrompt, 1);
+    FallbackLlmRouter.LlmResponse lr = callLlm(runId, model, systemPrompt, 1);
     String llmResponse = lr.response().getResult().getOutput().getText();
     accumulatePlannerTokens(testPlan, lr, model);
 
@@ -134,7 +134,7 @@ public class TestPlannerAgent {
           systemPrompt
               + "\n\nIMPORTANT: Your previous response was not valid JSON. "
               + "Respond with ONLY a valid JSON array. No markdown, no backticks, no explanation.";
-      LlmRouter.LlmResponse lr2 = callLlm(runId, model, retryPrompt, 2);
+      FallbackLlmRouter.LlmResponse lr2 = callLlm(runId, model, retryPrompt, 2);
       llmResponse = lr2.response().getResult().getOutput().getText();
       accumulatePlannerTokens(testPlan, lr2, model);
       try {
@@ -206,7 +206,7 @@ public class TestPlannerAgent {
     return testPlan;
   }
 
-  private LlmRouter.LlmResponse callLlm(
+  private FallbackLlmRouter.LlmResponse callLlm(
       String runId, ResolvedModel model, String prompt, int attempt) {
     AnthropicCacheOptions cacheOpts =
         AnthropicCacheOptions.builder().strategy(AnthropicCacheStrategy.SYSTEM_ONLY).build();
@@ -220,13 +220,13 @@ public class TestPlannerAgent {
         new Prompt(
             List.of(new SystemMessage(prompt), new UserMessage("Generate the test plan now.")),
             opts);
-    return llmRouter.callWithFallbackTracked(
+    return fallbackLlmRouter.callWithFallbackTracked(
         model.providerName(),
         model.getModel(),
         chatPrompt,
         runId,
         "test-planner",
-        LlmRouter.FallbackMode.IMMEDIATE,
+        FallbackLlmRouter.FallbackMode.IMMEDIATE,
         attempt - 1,
         false);
   }
@@ -249,7 +249,7 @@ public class TestPlannerAgent {
   }
 
   private void accumulatePlannerTokens(
-      TestPlan testPlan, LlmRouter.LlmResponse lr, ResolvedModel model) {
+      TestPlan testPlan, FallbackLlmRouter.LlmResponse lr, ResolvedModel model) {
     try {
       var usage = lr.response().getMetadata().getUsage();
       int inTokens = usage.getPromptTokens().intValue();
