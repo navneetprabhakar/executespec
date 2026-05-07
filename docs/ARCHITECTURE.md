@@ -1,5 +1,19 @@
 # ExecuteSpec — Architecture Document
 
+> ## Naming convention — read this before anything else
+>
+> "V2" and "v3" are **different concepts**, not successive generations of the same thing:
+>
+> | Term | Refers to | Source |
+> |---|---|---|
+> | **V2** (uppercase) | Backend pipeline architecture (Smart classifier → Outline planner → Sequential executor → Worker → Reviewer) | `com.navneet.executespec.v2.*` |
+> | **v3** (lowercase) | Customer product / UX surface — third generation of the consumer-facing app (landing, anonymous runs, referrals, entitlements, Graphite+Signal theme) | `com.navneet.executespec.v3.*`, `frontend/src/v3/*` |
+> | **Pilot v3.0** | Project workspace pilot (multi-repo + per-project architecture doc + score trend) — shipped in v2.5.0 | `project/`, `codeintel/` |
+> | **V1–V150** | Flyway migration numbers, unrelated to the above |
+> | **`ReviewerAgentV3`, `LlmRouterV2`, `WorkerAgentV2`, etc.** | Component-level revision numbers **inside** the V2 pipeline. Not pipeline-architecture generation indicators. |
+>
+> **There is no V3 pipeline.** V1 has been deleted; V2 is the only active pipeline. References to "v3" elsewhere are about the product surface or migration numbers.
+
 > **Version**: 4.11
 > **Date**: 2026-04-10 (full rewrite); V2-only refresh 2026-04-13; pilot v3.0 2026-04-14; project memory 2026-04-14; execution view 2026-04-14; project shell + launch 2026-04-14; project workspace + RAG 2026-04-15; Validation v3 Pillar 1 + verified-score + status_reason 2026-04-16; v2.6.0 UX v3 Graphite+Signal + LlmProvider GEMINI rename + pricing v3 + US-first pivot 2026-04-22; v2.6.1 Waves 1-6 merged + deployed 2026-04-23; v2.6.2-track hierarchical planner all 5 slices shipped on `feature/hierarchical-planner` 2026-04-25 (not yet merged); **v2.6.3-track enterprise readiness all 4 phases shipped on `feature/enterprise-readiness-eval` 2026-04-25 (not yet merged) — server-up sweep landed clean**
 > **App Version**: v2.6.1 (`dev`/`main`); v2.6.2-track on `feature/hierarchical-planner`; v2.6.3-track on `feature/enterprise-readiness-eval`
