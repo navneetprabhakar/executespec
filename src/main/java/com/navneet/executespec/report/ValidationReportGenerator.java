@@ -7,7 +7,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class ValidationReportGenerator {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
 
   /** Max issues included in the LLM prompt to stay within token budget. */
@@ -57,14 +57,14 @@ public class ValidationReportGenerator {
     String runId = input.run().getRunId();
     ResolvedModel resolved =
         modelResolver.resolve("ValidationReportGenerator", input.run().getAiProviderEnum());
-    LlmRouter.LlmResponse lr =
-        llmRouter.callWithFallbackTracked(
+    FallbackLlmRouter.LlmResponse lr =
+        fallbackLlmRouter.callWithFallbackTracked(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             runId,
             "validation-report",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 

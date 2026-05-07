@@ -2892,7 +2892,7 @@ public class RunOrchestrator {
       // but V2's ReviewerAgentV3 skips it, so the ValidationReport was coming
       // back with accuracyScore=null. Call it here so the report gets populated.
       try {
-        // AccuracyAssessmentService → V1's LlmRouter → Spring AI 1.1.4,
+        // AccuracyAssessmentService → V1's FallbackLlmRouter → Spring AI 1.1.4,
         // which tacks on `extra_body` for OpenAI and gets rejected. Same
         // workaround as the narrative call below: reroute OPENAI → ANTHROPIC
         // for the assessment call only.
@@ -2938,7 +2938,7 @@ public class RunOrchestrator {
       review.setIssues(synthesiseReviewIssues(reviewResult, compile, review.getAccuracyReport()));
 
       ReportInput input = new ReportInput(run, workerReports, review, compile, tasks);
-      // ValidationReportGenerator uses V1's LlmRouter which triggers Spring AI 1.1.4's
+      // ValidationReportGenerator uses V1's FallbackLlmRouter which triggers Spring AI 1.1.4's
       // `extra_body` bug on OpenAI (400 Unknown parameter). V2's native wrapper fixes
       // this for the main pipeline, but the report generator runs through Spring AI.
       // Swap the run's provider to ANTHROPIC for the report call only (narrative-only

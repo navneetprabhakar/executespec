@@ -4,7 +4,7 @@ import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.project.workspace.ProjectWorkspaceService;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -41,7 +41,7 @@ public class ProjectBriefService {
       """;
 
   private final ProjectWorkspaceService workspace;
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
 
   /**
@@ -85,13 +85,13 @@ public class ProjectBriefService {
       Prompt prompt =
           new Prompt(List.of(new SystemMessage(SUMMARY_SYSTEM), new UserMessage(archMarkdown)));
       ChatResponse response =
-          llmRouter.callWithFallback(
+          fallbackLlmRouter.callWithFallback(
               resolved.providerName(),
               resolved.getModel(),
               prompt,
               "project-brief-" + projectId,
               "project-brief",
-              LlmRouter.FallbackMode.IMMEDIATE,
+              FallbackLlmRouter.FallbackMode.IMMEDIATE,
               0,
               false);
       String text = response.getResult().getOutput().getText();

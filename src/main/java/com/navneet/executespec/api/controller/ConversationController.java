@@ -3,8 +3,8 @@ package com.navneet.executespec.api.controller;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.navneet.executespec.agent.LlmRouter;
-import com.navneet.executespec.agent.LlmRouter.FallbackMode;
+import com.navneet.executespec.agent.FallbackLlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter.FallbackMode;
 import com.navneet.executespec.api.dto.ConversationMessage;
 import com.navneet.executespec.api.dto.ConversationRequest;
 import com.navneet.executespec.api.dto.ConversationResponse;
@@ -63,7 +63,7 @@ Rules:
 - Do NOT ask more than two questions at once.
 """;
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
 
   @PostMapping
@@ -96,7 +96,7 @@ Rules:
     var options = AnthropicChatOptions.builder().model(resolved.getModel()).maxTokens(512).build();
 
     var response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             new Prompt(springMessages, options),

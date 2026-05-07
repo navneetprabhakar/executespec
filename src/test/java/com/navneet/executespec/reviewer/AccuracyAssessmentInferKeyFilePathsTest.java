@@ -7,7 +7,7 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.tool.FileSystemTool;
@@ -40,7 +40,7 @@ class AccuracyAssessmentInferKeyFilePathsTest {
   void setUp() throws Exception {
     svc =
         new AccuracyAssessmentService(
-            mock(LlmRouter.class),
+            mock(FallbackLlmRouter.class),
             mock(ModelResolver.class),
             mock(FileSystemTool.class),
             mock(StateStore.class),

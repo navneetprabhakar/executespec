@@ -46,7 +46,7 @@ class AnthropicModelAccessTest {
    *   <li>{@code LlmRouterV2} — owns dispatch + the per-key cache. This is THE place that turns a
    *       customer BYOK key into a model on the V2 path; every other consumer should call this
    *       instead of grabbing the singleton.
-   *   <li>{@code LlmRouter} — V1 router. Already implements its own per-key Anthropic model
+   *   <li>{@code FallbackLlmRouter} — V1 router. Already implements its own per-key Anthropic model
    *       construction via {@code buildAnthropicModel} (BYOK-aware by design). Kept until V1
    *       callers (chat copilot, project-doc generators, accuracy assessment) migrate to V2.
    *   <li>{@code FeatureAssessmentService} — pre-V2 assessment path. <b>Likely BYOK gap</b> — uses
@@ -63,7 +63,7 @@ class AnthropicModelAccessTest {
           Set.of(
               "AgentModelConfig",
               "FeatureAssessmentService", // BYOK follow-up: thread customer keys
-              "LlmRouter", // V1, already BYOK-aware via buildAnthropicModel
+              "FallbackLlmRouter", // V1, already BYOK-aware via buildAnthropicModel
               "LlmRouterV2", // V2 router — main BYOK entry point
               "NativeToolsTestController", // test-only smoke
               "RunCodeMapService" // BYOK follow-up: thread customer keys

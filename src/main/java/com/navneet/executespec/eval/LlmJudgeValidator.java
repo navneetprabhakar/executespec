@@ -4,7 +4,7 @@ import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.ModelRegistry;
 
 import org.springframework.ai.chat.messages.UserMessage;
@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class LlmJudgeValidator {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final EvalScorer scorer;
   private final ModelRegistry modelRegistry;
   private static final ObjectMapper mapper = new ObjectMapper();
@@ -48,8 +48,8 @@ public class LlmJudgeValidator {
 
     try {
       Prompt prompt = new Prompt(List.of(new UserMessage(judgePrompt)));
-      LlmRouter.LlmResponse response =
-          llmRouter.callDirect("anthropic", modelRegistry.lightweightModelFor("anthropic"), prompt);
+      FallbackLlmRouter.LlmResponse response =
+          fallbackLlmRouter.callDirect("anthropic", modelRegistry.lightweightModelFor("anthropic"), prompt);
       String judgeResponse = response.response().getResult().getOutput().getText();
 
       return parseJudgeResponse(judgeResponse, testCase.validationPatterns().size());
