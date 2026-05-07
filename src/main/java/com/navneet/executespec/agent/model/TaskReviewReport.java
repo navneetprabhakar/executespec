@@ -17,7 +17,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 @JsonNaming(PropertyNamingStrategies.SnakeCaseStrategy.class)
-public class ReviewReport {
+public class TaskReviewReport {
 
   private String overallConfidence; // HIGH | MEDIUM | LOW
   private String recommendation; // MERGE | REWORK | PARTIAL_MERGE

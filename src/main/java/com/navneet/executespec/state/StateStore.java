@@ -7,7 +7,7 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.model.ReviewReport;
+import com.navneet.executespec.agent.model.TaskReviewReport;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.agent.model.WorkerReport;
@@ -202,7 +202,7 @@ public class StateStore {
     runRepo.save(run);
   }
 
-  public void saveReview(String runId, ReviewReport review) {
+  public void saveReview(String runId, TaskReviewReport review) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     run.setReviewJson(toJson(review));
     // Status stays REVIEWING — merge is automatic (no gate).
@@ -1642,14 +1642,14 @@ public class StateStore {
     return runRepo.countByStatus("COMPLETE");
   }
 
-  public ReviewReport getReviewReport(String runId) {
+  public TaskReviewReport getReviewReport(String runId) {
     return runRepo
         .findById(runId)
         .filter(r -> r.getReviewJson() != null)
         .map(
             r -> {
               try {
-                return mapper.readValue(r.getReviewJson(), ReviewReport.class);
+                return mapper.readValue(r.getReviewJson(), TaskReviewReport.class);
               } catch (JsonProcessingException e) {
                 return null;
               }
