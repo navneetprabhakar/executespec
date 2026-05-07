@@ -21,6 +21,25 @@ public record RunEvent(
     return new RunEvent("LOG", runId, taskId, line, Instant.now());
   }
 
+  /**
+   * 2026-05-07 — emitted by {@link com.navneet.executespec.v2.lint.LintPass} after the
+   * deterministic auto-fixers run between executor and reviewer. Payload is a one-line summary
+   * (e.g. {@code "prettier+spotless-maven · 14 file(s) changed in 3.2s"}). LogPane on the v3
+   * RunSidePanel renders it as a milestone banner.
+   */
+  public static RunEvent lintAutofixApplied(String runId, String summary) {
+    return new RunEvent("LINT_AUTOFIX_APPLIED", runId, null, summary, Instant.now());
+  }
+
+  /**
+   * 2026-05-07 — emitted when a {@code pull_request_review_comment} webhook arrives for a PR opened
+   * by ExecuteSpec. Payload is {@code "<author>|<file>:<line>|<bodyPreview>"} so the v3 RunDetail
+   * page can show it in the action row + Chat tab without a refetch round-trip.
+   */
+  public static RunEvent prCommentReceived(String runId, String summary) {
+    return new RunEvent("PR_COMMENT_RECEIVED", runId, null, summary, Instant.now());
+  }
+
   public static RunEvent gateOpened(String runId, String gateType) {
     return new RunEvent("GATE_OPENED", runId, null, gateType, Instant.now());
   }
