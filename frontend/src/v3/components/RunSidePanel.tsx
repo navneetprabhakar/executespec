@@ -2,12 +2,8 @@ import {useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode
 import {
   type RunDetail,
   type TaskSummary,
-  type LocalPreviewStatus,
   type ConversationMessage,
   retryTask,
-  startPreview,
-  stopPreview,
-  getPreviewStatus,
   getLiveCost,
   conversationChat,
 } from '@/lib/api';
@@ -15,6 +11,7 @@ import {useSse} from '@/hooks/useSse';
 import {useSseStore, type LogEntry} from '@/stores/useSseStore';
 import PlanCard from './PlanCard';
 import Pill from './Pill';
+import RunPreviewPane from './RunPreviewPane';
 import TaskTimeline from '@/components/runs/TaskTimeline';
 import TestProgressTracker from '@/components/runs/TestProgressTracker';
 import TestReportPanel from '@/components/runs/TestReportPanel';
@@ -138,7 +135,7 @@ export default function RunSidePanel({
         {tab === 'timeline' && <TimelinePane detail={detail} />}
         {tab === 'log' && <LogPane runId={runId} live={isInFlight} />}
         {tab === 'tests' && <TestsPane runId={runId} status={status} />}
-        {tab === 'preview' && <PreviewPane runId={runId} runStatus={status} />}
+        {tab === 'preview' && <RunPreviewPane runId={runId} />}
         {tab === 'chat' && <ChatPane detail={detail} />}
       </div>
     </aside>
@@ -1335,230 +1332,6 @@ function LogPane({runId, live}: {runId: string; live: boolean}) {
   );
 }
 
-// ── Preview pane ────────────────────────────────────────────────────────
-
-function PreviewPane({runId, runStatus}: {runId: string; runStatus: string}) {
-  const [pv, setPv] = useState<LocalPreviewStatus | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState<'start' | 'stop' | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-  const isTerminalOk = ['COMPLETE', 'PARTIAL'].includes(runStatus);
-
-  useEffect(() => {
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const tick = () => {
-      getPreviewStatus(runId)
-        .then((s) => {
-          if (cancelled) return;
-          setPv(s);
-          setLoading(false);
-          // Re-poll while transitioning
-          if (
-            s.status === 'BUILDING' ||
-            s.status === 'PUSHING' ||
-            s.status === 'DEPLOYING' ||
-            s.status === 'STARTING' ||
-            s.status === 'ANALYZING'
-          ) {
-            timer = setTimeout(tick, 3000);
-          }
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setLoading(false);
-        });
-    };
-    tick();
-    return () => {
-      cancelled = true;
-      if (timer) clearTimeout(timer);
-    };
-  }, [runId]);
-
-  async function onStart() {
-    setBusy('start');
-    setErr(null);
-    try {
-      const s = await startPreview(runId);
-      setPv(s);
-    } catch (e) {
-      setErr((e as Error)?.message ?? 'Failed to start preview');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function onStop() {
-    setBusy('stop');
-    setErr(null);
-    try {
-      await stopPreview(runId);
-      const s = await getPreviewStatus(runId).catch(() => null);
-      setPv(s);
-    } catch (e) {
-      setErr((e as Error)?.message ?? 'Failed to stop preview');
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
-        Loading preview…
-      </div>
-    );
-  }
-
-  if (!isTerminalOk && (!pv || pv.status === 'IDLE')) {
-    return (
-      <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-muted)', lineHeight: 1.6}}>
-        The preview spins up automatically once the run finishes successfully.
-        It exposes a 5-minute live-app URL you can click through to verify behavior.
-      </div>
-    );
-  }
-
-  const url = pv?.url ?? pv?.frontendUrl ?? pv?.backendUrl ?? null;
-  const isRunning = pv?.status === 'RUNNING';
-
-  return (
-    <div style={{display: 'flex', flexDirection: 'column', height: '100%'}}>
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '8px 12px',
-          borderBottom: '1px solid var(--v3-border)',
-          background: 'var(--v3-bg)',
-          flexWrap: 'wrap',
-        }}
-      >
-        <Pill tone={isRunning ? 'ok' : pv?.status === 'FAILED' ? 'err' : 'info'} size='sm' dot={!isRunning && pv?.status !== 'FAILED'}>
-          {(pv?.status ?? 'idle').toLowerCase().replace(/_/g, ' ')}
-        </Pill>
-        {pv?.ttlRemainingSeconds != null && pv.ttlRemainingSeconds > 0 && (
-          <span
-            style={{
-              fontSize: 11,
-              fontFamily: 'var(--v3-font-mono)',
-              color: 'var(--v3-text-subtle)',
-            }}
-          >
-            ttl {Math.round(pv.ttlRemainingSeconds / 60)}m
-          </span>
-        )}
-        <div style={{marginLeft: 'auto', display: 'flex', gap: 6}}>
-          {!isRunning && isTerminalOk && (
-            <button
-              type='button'
-              disabled={busy === 'start'}
-              onClick={onStart}
-              style={btnPrimary(busy === 'start')}
-            >
-              {busy === 'start' ? 'Starting…' : 'Start preview'}
-            </button>
-          )}
-          {isRunning && url && (
-            <a href={url} target='_blank' rel='noopener noreferrer' style={btnGhost()}>
-              Open ↗
-            </a>
-          )}
-          {isRunning && (
-            <button
-              type='button'
-              disabled={busy === 'stop'}
-              onClick={onStop}
-              style={btnGhost(busy === 'stop')}
-            >
-              {busy === 'stop' ? 'Stopping…' : 'Stop'}
-            </button>
-          )}
-        </div>
-      </div>
-
-      {err && (
-        <div
-          role='alert'
-          style={{
-            padding: '6px 12px',
-            margin: 8,
-            background: 'rgba(239,68,68,0.10)',
-            border: '1px solid rgba(239,68,68,0.30)',
-            color: '#FCA5A5',
-            fontSize: 11.5,
-            borderRadius: 4,
-          }}
-        >
-          {err}
-        </div>
-      )}
-
-      {url && isRunning ? (
-        <iframe
-          title='Run preview'
-          src={url}
-          style={{
-            flex: 1,
-            border: 'none',
-            background: '#fff',
-            minHeight: 320,
-          }}
-          sandbox='allow-forms allow-scripts allow-same-origin allow-popups'
-        />
-      ) : (
-        <div
-          style={{
-            flex: 1,
-            padding: 16,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            color: 'var(--v3-text-subtle)',
-            fontSize: 12,
-            textAlign: 'center',
-          }}
-        >
-          {pv?.status === 'FAILED'
-            ? pv.errorMessage || 'Preview failed to start.'
-            : 'Preview will appear here once it boots.'}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function btnPrimary(disabled: boolean): React.CSSProperties {
-  return {
-    padding: '4px 12px',
-    fontSize: 11.5,
-    fontWeight: 600,
-    background: 'var(--v3-brand)',
-    color: '#fff',
-    border: 'none',
-    borderRadius: 4,
-    cursor: disabled ? 'wait' : 'pointer',
-    fontFamily: 'inherit',
-  };
-}
-function btnGhost(disabled: boolean = false): React.CSSProperties {
-  return {
-    padding: '4px 12px',
-    fontSize: 11.5,
-    fontWeight: 500,
-    background: 'transparent',
-    color: 'var(--v3-text-muted)',
-    border: '1px solid var(--v3-border)',
-    borderRadius: 4,
-    cursor: disabled ? 'wait' : 'pointer',
-    fontFamily: 'inherit',
-    textDecoration: 'none',
-    display: 'inline-flex',
-    alignItems: 'center',
-  };
-}
 
 // ── Overview pane ───────────────────────────────────────────────────────
 //
