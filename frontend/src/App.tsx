@@ -133,6 +133,7 @@ import InsightsPage from '@/v3/pages/InsightsPage';
 // 2026-05-06 — restored flat /runs page for individual / FREE users who
 // don't have access to the Project Shell. See RunsListPage.tsx header.
 import RunsListPage from '@/v3/pages/RunsListPage';
+import RunsNewPage from '@/v3/pages/RunsNewPage';
 // R-340 — Migrations product W5 frontend (gallery + detail).
 import MigrationsPage from '@/v3/pages/MigrationsPage';
 import MigrationDetailPage from '@/v3/pages/MigrationDetailPage';
@@ -341,7 +342,13 @@ export default function App() {
           <Route path='welcome' element={<WelcomePage />} />
 
           <Route element={<Shell />}>
-            <Route path='runs/new' element={<Navigate to='/home' replace />} />
+            {/* 2026-05-07 — `/runs/new` is now a real page (was a redirect
+                to /home → first project, which forced FREE / no-project
+                users into a project shell they didn't have). Renders the
+                v3 Composer with an optional project picker; project-less
+                submissions land in /runs and redirect to /runs/{id} for
+                the live planner view. */}
+            <Route path='runs/new' element={<RunsNewPage />} />
             <Route path='runs/new/sandbox' element={<RunsNewLanding />} />
             {/* /legacy/billing — soft landing for grandfathered PRO
                 subscribers whose tier-state-changed email links here. */}

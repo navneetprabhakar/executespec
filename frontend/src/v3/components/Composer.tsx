@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {useNavigate} from 'react-router-dom';
 import {createRun, estimateRun, type LaunchEstimate} from '@/lib/api';
 import ConversationModal from './ConversationModal';
 import {useV3ProjectStore} from '../stores/useV3ProjectStore';
@@ -27,7 +28,14 @@ import {PROVIDER_DISPLAY, RUN_MODE_PLAN_REVIEW, RUN_MODE_QUICK} from '../lib/ter
  *      and ResultCard as the run progresses (SSE wiring lands with R-130).
  */
 interface ComposerProps {
-  projectId: string;
+  /**
+   * 2026-05-07 — projectId is optional. When undefined the composer
+   * submits a project-less run (the backend's `createRun` accepts a
+   * null projectId — runs created this way appear under /runs but
+   * not inside any project shell). Used by the new /runs/new page so
+   * users can launch one-shot runs without picking a project first.
+   */
+  projectId?: string;
   /** When true, the composer renders the "first message" empty-state framing
    *  ("What do you want to build?"). When false, it renders the inline-thread
    *  framing ("Reply or describe a follow-up change…"). */
@@ -110,6 +118,7 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
     window.addEventListener('v3-composer-prefill', listener);
     return () => window.removeEventListener('v3-composer-prefill', listener);
   }, [projectId]);
+  const navigate = useNavigate();
   const pushBubble = useV3ProjectStore((s) => s.pushBubble);
   const bubbles = useV3ProjectStore((s) => s.bubbles);
   const cap = useV3Ui((s) => s.cap);
@@ -145,6 +154,9 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
   // "~M-N tasks · ~$X-$Y" debounced as the user types, so they go
   // into the Approve gate already calibrated on what to expect.
   // Endpoint is heuristic-only (no LLM call) so spamming it is cheap.
+  // When projectId is undefined (standalone /runs/new flow) we skip
+  // the estimate — the endpoint requires a projectId for the
+  // historical-run lookback.
   const [estimate, setEstimate] = useState<LaunchEstimate | null>(null);
   const [estimating, setEstimating] = useState(false);
   useEffect(() => {
@@ -187,22 +199,27 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
     setError(null);
     try {
       // Optimistic bubble — visible BEFORE the network round-trip so the
-      // chat feels immediate even when the planner takes 5-7s.
+      // chat feels immediate even when the planner takes 5-7s. Skipped
+      // in the project-less flow (/runs/new) since there's no chat
+      // surface to mount the bubbles into — we redirect to /runs/{id}
+      // on success instead.
       const tempId = `tmp-${Date.now()}`;
-      pushBubble({
-        id: tempId,
-        role: 'user',
-        text: text.trim(),
-        createdAt: new Date().toISOString(),
-      });
-      pushBubble({
-        id: `${tempId}-assistant`,
-        role: 'assistant',
-        kind: 'status',
-        status: 'planning',
-        text: 'Planning…',
-        createdAt: new Date().toISOString(),
-      });
+      if (projectId) {
+        pushBubble({
+          id: tempId,
+          role: 'user',
+          text: text.trim(),
+          createdAt: new Date().toISOString(),
+        });
+        pushBubble({
+          id: `${tempId}-assistant`,
+          role: 'assistant',
+          kind: 'status',
+          status: 'planning',
+          text: 'Planning…',
+          createdAt: new Date().toISOString(),
+        });
+      }
       const submittedText = text.trim();
       setText('');
       const parsedCap = userCostCap.trim() ? Number(userCostCap.trim()) : undefined;
@@ -210,7 +227,9 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         userRequest: submittedText,
         executionMode: mode === 'quick' ? 'PROTOTYPE' : 'PRODUCTION',
         aiProvider: provider,
-        projectId,
+        // Only forward projectId when set — backend treats omitted as
+        // a standalone unlinked run.
+        ...(projectId ? {projectId} : {}),
         // Audit r5 (#5, 2026-05-06) — staged-PR-before-push override.
         skipAutoPush: skipAutoPush || undefined,
         // 2026-05-06 (PA-6 Run Launch port) — Figma URL / TDD / Stop at $X
@@ -230,17 +249,24 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         mode,
         textLen: submittedText.length,
       });
-      // Mark the planning bubble with the real runId so SSE updates can
-      // morph it into a PlanCard / ResultCard.
-      pushBubble({
-        id: `run-${resp.runId}`,
-        role: 'assistant',
-        kind: 'run',
-        runId: resp.runId,
-        status: 'PLANNING',
-        createdAt: new Date().toISOString(),
-        replacesId: `${tempId}-assistant`,
-      });
+      if (projectId) {
+        // Mark the planning bubble with the real runId so SSE updates can
+        // morph it into a PlanCard / ResultCard inside the project chat.
+        pushBubble({
+          id: `run-${resp.runId}`,
+          role: 'assistant',
+          kind: 'run',
+          runId: resp.runId,
+          status: 'PLANNING',
+          createdAt: new Date().toISOString(),
+          replacesId: `${tempId}-assistant`,
+        });
+      } else {
+        // Standalone run — there's no chat thread to morph into a
+        // PlanCard, so jump directly to the run detail page where the
+        // user can watch the planner come through SSE.
+        navigate(`/runs/${resp.runId}`);
+      }
     } catch (err) {
       const msg = (err as Error)?.message ?? 'Submit failed';
       setError(msg);

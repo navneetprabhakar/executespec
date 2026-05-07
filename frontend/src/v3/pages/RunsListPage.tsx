@@ -181,14 +181,16 @@ export default function RunsListPage() {
             validation report, open the PR, or fork a re-run.
           </p>
         </div>
-        {/* 2026-05-07 — top-right "Launch new run" CTA. /home renders the
-            Composer (project selector + spec textarea + Refine-with-
-            assistant), so a user landing on /runs has a one-click path
-            into the launch flow without bouncing through the avatar
-            menu or the TopBar's "Pick a project" pill. */}
+        {/* 2026-05-07 — top-right "Launch new run" CTA targets the
+            standalone /runs/new launcher (project picker is optional —
+            standalone is the default). The previous /home target
+            forced users into a specific project shell, breaking the
+            FREE / no-project use case the user flagged: "I should be
+            able to submit run even without a project, that is a
+            critical offering." */}
         <button
           type='button'
-          onClick={() => navigate('/home')}
+          onClick={() => navigate('/runs/new')}
           style={{
             background: 'var(--v3-brand)',
             color: 'var(--v3-text-on-brand)',
@@ -289,7 +291,7 @@ export default function RunsListPage() {
           <div style={{display: 'flex', gap: 8, justifyContent: 'center'}}>
             <button
               type='button'
-              onClick={() => navigate('/home')}
+              onClick={() => navigate('/runs/new')}
               style={{
                 background: 'var(--v3-brand)',
                 color: '#fff',
