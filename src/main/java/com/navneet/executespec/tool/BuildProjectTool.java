@@ -99,6 +99,18 @@ public class BuildProjectTool implements Tool {
     String containerId =
         programBenchContainers != null ? programBenchContainers.get(ctx.runId()) : null;
 
+    // 2026-05-08 — programbench-only "did compile.sh actually compile" guard.
+    // Cleanroom workspaces ship with a pre-existing /workspace/executable (the original
+    // binary the agent is supposed to reverse-engineer). A no-op compile.sh that just verifies
+    // ./executable exists exits 0 against the cleanroom's binary, smoke "passes", run is marked
+    // COMPLETE — but the submission has no source code. ProgramBench eval wipes /workspace
+    // before running the agent's compile.sh, so the no-op compile.sh fails there. ExecuteSpec
+    // was scoring 100 spuriously (anthropic run 9b37b099, 2026-05-08). Wrap the buildCommand to
+    // fail-fast when compile.sh leaves the cleanroom's original executable in place — forces
+    // the agent to write real source and a real compile.sh.
+    String effectiveCmd =
+        containerId != null ? wrapForExecutableCompileCheck(bc.command()) : bc.command();
+
     try {
       ProcessBuilder pb;
       if (containerId != null) {
@@ -112,9 +124,9 @@ public class BuildProjectTool implements Tool {
                     containerId,
                     "/bin/sh",
                     "-c",
-                    bc.command()));
+                    effectiveCmd));
       } else {
-        pb = new ProcessBuilder(List.of("/bin/sh", "-c", bc.command()));
+        pb = new ProcessBuilder(List.of("/bin/sh", "-c", effectiveCmd));
         pb.directory(ctx.workspaceRoot().toFile());
       }
       Map<String, String> env = pb.environment();
@@ -166,6 +178,41 @@ public class BuildProjectTool implements Tool {
       Thread.currentThread().interrupt();
       return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
     }
+  }
+
+  /**
+   * Wrap the build command with a "did compile.sh actually compile" guard. Captures the executable
+   * hash before, runs the command, captures the hash after; fails the build if executable is
+   * missing post-run OR if the hash is unchanged (= no new compilation happened, agent is gaming
+   * the smoke against the cleanroom's pre-existing binary).
+   *
+   * <p>Implementation note: built as a single shell pipeline so the original command's exit code is
+   * preserved (passing through unless one of our guards fires). The {@code stash-restore-trap}
+   * gives the agent's mid-task buildProject calls a chance to recover — if compile.sh fails to
+   * produce a binary, the original is restored so the next iteration can still run {@code
+   * ./executable --help} for behavior inspection.
+   *
+   * <p>Visible-for-test so the wrapping logic can be pinned by unit tests without standing up a
+   * full docker container.
+   */
+  static String wrapForExecutableCompileCheck(String userCommand) {
+    return "ORIG_HASH=$(sha256sum ./executable 2>/dev/null | awk '{print $1}'); "
+        + "USER_RC=0; { "
+        + userCommand
+        + "; } || USER_RC=$?; "
+        + "if [ ! -f ./executable ]; then "
+        + "  echo '[programbench] BUILD FAIL: compile.sh did not produce ./executable. Your "
+        + "compile.sh must compile your source files into a fresh /workspace/executable.'; "
+        + "  exit 1; "
+        + "fi; "
+        + "NEW_HASH=$(sha256sum ./executable 2>/dev/null | awk '{print $1}'); "
+        + "if [ -n \"$ORIG_HASH\" ] && [ \"$NEW_HASH\" = \"$ORIG_HASH\" ]; then "
+        + "  echo '[programbench] BUILD FAIL: compile.sh did not produce a NEW ./executable "
+        + "(hash unchanged). compile.sh must compile your source code into a fresh executable, "
+        + "not just verify the existing one.'; "
+        + "  exit 1; "
+        + "fi; "
+        + "exit $USER_RC";
   }
 
   private static String truncate(String s) {
