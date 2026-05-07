@@ -19,6 +19,7 @@ import RunPreviewPane from './RunPreviewPane';
 import TaskTimeline from '@/components/runs/TaskTimeline';
 import TestProgressTracker from '@/components/runs/TestProgressTracker';
 import TestReportPanel from '@/components/runs/TestReportPanel';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {
   AlertTriangle,
   ArrowUpCircle,
@@ -144,7 +145,14 @@ export default function RunSidePanel({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
+        // 2026-05-07 — Issue 2: cap the side panel against the viewport so its
+        // body scrolls internally instead of growing the parent grid row.
+        // Mirrors the file-tree aside on the same page (also `calc(100vh -
+        // 320px)`). Without the cap, the LogPane's recent[] (up to 300 rows)
+        // pushes the grid row taller and taller, dragging the diff editor
+        // off-screen with it.
         minHeight: 480,
+        maxHeight: 'calc(100vh - 320px)',
       }}
       aria-label='Run side panel'
     >
@@ -2274,11 +2282,19 @@ function ChatBubble({role, content}: {role: 'user' | 'assistant'; content: strin
           fontSize: 12.5,
           lineHeight: 1.55,
           color: 'var(--v3-text)',
-          whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
       >
-        {content}
+        {/* 2026-05-07 — Issue 1: assistant replies render markdown so headings,
+            bold, lists, fenced code blocks, tables, etc. all show up correctly.
+            User messages stay as plain pre-wrap (anything they typed is text;
+            rendering markdown they didn't author is a privacy / rendering-
+            ambiguity risk). */}
+        {isUser ? (
+          <span style={{whiteSpace: 'pre-wrap'}}>{content}</span>
+        ) : (
+          <MarkdownContent content={content} compact />
+        )}
       </div>
     </div>
   );
