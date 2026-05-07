@@ -407,6 +407,8 @@ public class SequentialExecutor {
                 req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
             .temperature(0.0)
             .maxTokensPerCall(cfg.maxTokens)
+            .stagnationWarnAfter(cfg.stagnationWarnAfter)
+            .stagnationForceAfter(cfg.stagnationForceAfter)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -654,6 +656,8 @@ public class SequentialExecutor {
                     req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
                 .temperature(0.0)
                 .maxTokensPerCall(cfg.maxTokens)
+                .stagnationWarnAfter(cfg.stagnationWarnAfter)
+                .stagnationForceAfter(cfg.stagnationForceAfter)
                 .build());
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
@@ -787,13 +791,30 @@ public class SequentialExecutor {
    * match any enum value), we fall back to the run-level provider+model so the executor never
    * crashes on a planner edge case.
    */
-  private record TierConfig(String provider, String model, int maxIter, int maxTokens) {}
+  /**
+   * Per-task tuning carrier. {@code stagnationWarnAfter} / {@code stagnationForceAfter} are
+   * complexity-aware overrides forwarded into {@link WorkerTaskRequest} so the stagnation guard
+   * fires at thresholds proportional to the task's expected exploration depth. Calibrated
+   * 2026-05-08 against ProgramBench cmatrix anthropic run 9b37b099 — HIGH and MEDIUM tasks both
+   * stagnated at the static 12-iter cap before the worker could write substantive source. The new
+   * HIGH cap (18 warn / 28 force) is enough for legitimate reverse-engineering patterns: read
+   * README + man page + binary --help/--version + plan + write.
+   */
+  private record TierConfig(
+      String provider,
+      String model,
+      int maxIter,
+      int maxTokens,
+      int stagnationWarnAfter,
+      int stagnationForceAfter) {}
 
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
     AgentTier tier;
     int maxIter;
     int maxTokens;
+    int stagnationWarnAfter;
+    int stagnationForceAfter;
     switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
         // Caps bumped again 2026-04-19: 20/30/45 → 30/50/75. Observed on
         // the RN Calorie Tracker run (0a0201c7) — MEDIUM scaffold task
@@ -805,20 +826,37 @@ public class SequentialExecutor {
         // "implement 4 screens + service" on the same run) with headroom.
         // (Previous bump 12/22/35 → 20/30/45 was for multi-repo Launches;
         //  this second bump is for codegen-dense greenfield scaffolds.)
+        //
+        // 2026-05-08 — stagnation thresholds are now complexity-aware too. Static
+        // STAGNATION_WARN_AFTER_N=8 / STAGNATION_FORCE_AFTER_N=12 was calibrated
+        // for typical write-then-verify-then-stop patterns; for HIGH-complexity
+        // ProgramBench-style reverse-engineering the worker legitimately needs
+        // ~15-20 read iters before its first write, and was force-terminating
+        // at iter 12 before any source was written. Reviewer then "fixed" the
+        // empty workspace with no-op compile.sh — passing build smoke without
+        // actually compiling source. Verified on cmatrix anthropic run 9b37b099
+        // (2026-05-08) with empty workspace + 100/100 programbench score (which
+        // counted the cleanroom's original binary).
       case LOW -> {
         tier = AgentTier.LIGHTWEIGHT;
         maxIter = 30;
         maxTokens = 4096;
+        stagnationWarnAfter = 8; // matches WorkerAgent.STAGNATION_WARN_AFTER_N default
+        stagnationForceAfter = 12;
       }
       case HIGH -> {
         tier = AgentTier.PLANNING;
         maxIter = 75;
         maxTokens = 16384;
+        stagnationWarnAfter = 18;
+        stagnationForceAfter = 28;
       }
       default -> {
         tier = AgentTier.WORKHORSE;
         maxIter = 50;
         maxTokens = 8192;
+        stagnationWarnAfter = 12;
+        stagnationForceAfter = 20;
       }
     }
     // Project runs (Launches on an existing cloned codebase) need more
@@ -845,7 +883,13 @@ public class SequentialExecutor {
       LlmProvider p =
           runProvider == null ? LlmProvider.OPENAI : LlmProvider.valueOf(runProvider.toUpperCase());
       ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
-      return new TierConfig(resolved.providerName(), resolved.getModel(), maxIter, maxTokens);
+      return new TierConfig(
+          resolved.providerName(),
+          resolved.getModel(),
+          maxIter,
+          maxTokens,
+          stagnationWarnAfter,
+          stagnationForceAfter);
     } catch (Exception e) {
       log.warn(
           "tierConfigFor: resolve failed for provider={} tier={} — using run-level {} / {}",
@@ -853,7 +897,8 @@ public class SequentialExecutor {
           tier,
           runProvider,
           runModel);
-      return new TierConfig(runProvider, runModel, maxIter, maxTokens);
+      return new TierConfig(
+          runProvider, runModel, maxIter, maxTokens, stagnationWarnAfter, stagnationForceAfter);
     }
   }
 

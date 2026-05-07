@@ -222,6 +222,85 @@ class WorkerAgentStagnationTest {
             + " has a chance to react.");
   }
 
+  /**
+   * Per-task override builder — used by the complexity-aware tests below. Allows the caller to
+   * raise the warn / force thresholds per-call (SequentialExecutor's tier config sets these to 8/12
+   * for LOW, 12/18 for MEDIUM, 18/28 for HIGH).
+   */
+  private static WorkerTaskRequest reqWithStagnation(
+      int maxIter, Integer warnAfter, Integer forceAfter) {
+    return WorkerTaskRequest.builder()
+        .provider("anthropic")
+        .model("claude-haiku-4-5-20251001")
+        .systemPrompt("system")
+        .userPrompt("do thing")
+        .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/ws-stagnation")))
+        .maxIterations(maxIter)
+        .temperature(0.0)
+        .maxTokensPerCall(4096)
+        .stagnationWarnAfter(warnAfter)
+        .stagnationForceAfter(forceAfter)
+        .build();
+  }
+
+  @Test
+  void per_task_override_extends_force_threshold_for_HIGH_complexity_tasks() {
+    // 25 consecutive readFile calls. Default force threshold is 12 (would terminate); HIGH
+    // complexity sets force=28, so the worker should NOT have terminated by iter 25.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 25; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")));
+    Fixture f = newWorker(seq);
+
+    // HIGH-complexity thresholds from SequentialExecutor.tierConfigFor.
+    WorkerResult result = f.worker.run(reqWithStagnation(40, 18, 28));
+
+    assertEquals(
+        WorkerResult.Outcome.COMPLETED,
+        result.outcome(),
+        "With force=28 the worker should NOT have stagnated at iter 12 — should reach"
+            + " completeTask at iter 26.");
+    assertEquals(26, result.iterations());
+  }
+
+  @Test
+  void per_task_override_force_threshold_still_terminates_when_actually_exceeded() {
+    // 30 consecutive readFile calls — exceeds even HIGH's force=28.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 30; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(reqWithStagnation(40, 18, 28));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(28, result.iterations(), "Should terminate exactly at the override force=28.");
+  }
+
+  @Test
+  void invalid_override_falls_back_to_static_defaults() {
+    // forceAfter <= warnAfter is invalid → fallback to the static
+    // STAGNATION_WARN_AFTER_N=8 / STAGNATION_FORCE_AFTER_N=12 pair.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 20; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    Fixture f = newWorker(seq);
+
+    // warn=10, force=5 (force < warn — invalid)
+    WorkerResult result = f.worker.run(reqWithStagnation(40, 10, 5));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    // Falls back to max(STAGNATION_FORCE_AFTER_N=12, warnAfter+4=14) = 14
+    assertEquals(
+        14,
+        result.iterations(),
+        "Invalid forceAfter (≤ warnAfter) should fall back to max(12, warnAfter+4)=14.");
+  }
+
   @Test
   void empty_tool_calls_does_not_blow_up_stagnation_counter() {
     // If the model returns no tool calls at all, the worker should exit immediately with

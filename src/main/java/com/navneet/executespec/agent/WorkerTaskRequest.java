@@ -20,6 +20,14 @@ import lombok.Builder;
  * @param maxIterations max LLM calls; 0/null defaults to {@link WorkerAgent#DEFAULT_MAX_ITER}
  * @param temperature sampling temperature; null defaults to 0.0
  * @param maxTokensPerCall max output tokens per LLM call; null defaults per-provider
+ * @param stagnationWarnAfter optional override for the stagnation-warn threshold (consecutive
+ *     non-write iters before injecting a one-shot PROGRESS CHECK). When null, falls through to
+ *     {@link WorkerAgent#STAGNATION_WARN_AFTER_N}. Use to give complex (HIGH-complexity)
+ *     reverse-engineering tasks more headroom for legitimate read+plan iterations before the
+ *     warning fires.
+ * @param stagnationForceAfter optional override for the stagnation-force-terminate threshold. When
+ *     null, falls through to {@link WorkerAgent#STAGNATION_FORCE_AFTER_N}. Should be ≥
+ *     stagnationWarnAfter + 4 so the worker has at least 4 iterations after the warn to recover.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -30,7 +38,9 @@ public record WorkerTaskRequest(
     ExecutionContext context,
     Integer maxIterations,
     Double temperature,
-    Integer maxTokensPerCall) {
+    Integer maxTokensPerCall,
+    Integer stagnationWarnAfter,
+    Integer stagnationForceAfter) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())
