@@ -5,7 +5,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.memory.entity.ProjectRunLedger;
 import com.navneet.executespec.memory.repository.ProjectRunLedgerRepository;
 import com.navneet.executespec.router.ModelResolver;
@@ -30,15 +30,15 @@ import lombok.extern.slf4j.Slf4j;
  * project_run_ledger}. Idempotent: skips if an entry already exists for the runId. Triggers {@link
  * MemoryCompactionService} every 10th run.
  *
- * <p>Uses V1 {@link LlmRouter} at LIGHTWEIGHT tier (same pattern as {@code ContextAgent}). Memory
- * generation must never break a run — all failures are caught and logged.
+ * <p>Uses V1 {@link FallbackLlmRouter} at LIGHTWEIGHT tier (same pattern as {@code ContextAgent}).
+ * Memory generation must never break a run — all failures are caught and logged.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class RunLedgerAgent {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final ProjectRunLedgerRepository ledgerRepo;
   private final PipelineRunRepository runRepo;
@@ -137,13 +137,13 @@ public class RunLedgerAgent {
                 new SystemMessage(systemPrompt),
                 new UserMessage("Generate the ledger entry now.")));
     org.springframework.ai.chat.model.ChatResponse response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             runId,
             "run-ledger",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
     return response.getResult().getOutput().getText();

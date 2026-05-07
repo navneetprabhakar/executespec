@@ -121,14 +121,14 @@ spring:
 
   ai:
     retry:
-      max-attempts: 3               # down from default 10 — LlmRouter handles its own fallback chain
+      max-attempts: 3               # down from default 10 — FallbackLlmRouter handles its own fallback chain
       backoff:
         initial-interval: 2000      # 2s
         multiplier: 2               # 2s → 4s → 8s (total ~14s vs default ~23 min)
         max-interval: 10000         # 10s cap
     # ── Spring AI bean-init defaults ───────────────────────────────────────────
     # These are the defaults Spring AI's auto-config uses when constructing the
-    # provider beans at startup. The V2 LlmRouterV2 path overrides per-call from
+    # provider beans at startup. The V2 LlmRouter path overrides per-call from
     # the model-matrix below, so these values are only used at bean construction
     # time; per-call dispatch resolves through ModelRegistry. Keep them as
     # current-WORKHORSE-tier defaults so a graceful-degraded boot uses a model
@@ -304,7 +304,7 @@ model-matrix:
     gemini-3-flash: gemini-3-flash-preview
     gemini-3.1-pro-preview: gemini-3-flash-preview
 
-  # ── Fallback chains by tier (replaces hardcoded LlmRouter chains) ─────────────
+  # ── Fallback chains by tier (replaces hardcoded FallbackLlmRouter chains) ─────────────
   fallback-chains:
     ARCHITECT:
       - { provider: anthropic, model: claude-opus-4-6 }
@@ -329,10 +329,10 @@ model-matrix:
     OutlinePlannerAgent: PLANNING           # v2.6.2 hierarchical-planner phase 1
     TaskExpanderAgent: WORKHORSE            # v2.6.2 hierarchical-planner phase 2 (parallel)
     CoherencePlannerAgent: LIGHTWEIGHT      # v2.6.2 hierarchical-planner phase 3
-    ReviewerAgentV3: PLANNING
+    ReviewerAgent: PLANNING
     SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
     WorkerAgent: WORKHORSE
-    # Shared non-tool-calling agents (use LlmRouter)
+    # Shared non-tool-calling agents (use FallbackLlmRouter)
     TestPlannerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
     ApiTestSuiteAgent: WORKHORSE

@@ -3,7 +3,7 @@
 All LLM-calling agents and the routing infrastructure.
 
 ## Key Files
-- `LlmRouter.java` — Central LLM call dispatcher. Multi-provider fallback (Anthropic → Google → OpenAI). Integrates with `ProviderHealthTracker` (Redis-backed circuit breaker) to skip unhealthy providers. Uses Caffeine caches (6h TTL, 1000 max) for per-run state. All LLM calls MUST go through this. **v2.5.9**: emits `RUN_PROVIDER_SWITCHED` SSE event (payload `fromProvider|toProvider|reason`) whenever a fallback kicks in, so silent provider switches are observable in the UI. **`FallbackMode.NO_FALLBACK`** (also v2.5.9) added so callers — e.g. `ExecutionPlannerService` — can opt out of auto-failover entirely; required when `-Dexecutespec.strict-provider=true` is set.
+- `FallbackLlmRouter.java` — Central LLM call dispatcher. Multi-provider fallback (Anthropic → Google → OpenAI). Integrates with `ProviderHealthTracker` (Redis-backed circuit breaker) to skip unhealthy providers. Uses Caffeine caches (6h TTL, 1000 max) for per-run state. All LLM calls MUST go through this. **v2.5.9**: emits `RUN_PROVIDER_SWITCHED` SSE event (payload `fromProvider|toProvider|reason`) whenever a fallback kicks in, so silent provider switches are observable in the UI. **`FallbackMode.NO_FALLBACK`** (also v2.5.9) added so callers — e.g. `ExecutionPlannerService` — can opt out of auto-failover entirely; required when `-Dexecutespec.strict-provider=true` is set.
 - `WorkerAgent.java` — Executes individual tasks. XML `<tool_call>` format, manual tool dispatch, 25-min wall-clock limit. Silent hard cap enforcement: checks `isOverBudget()` every 5 LLM iterations (no progressive warnings — user approved cost upfront). **Self-play prevention:** strips fabricated `<tool_result>` blocks via `FABRICATED_TOOL_RESULT_PATTERN` regex before parsing. **XML-first parsing** for PATH B (Anthropic/Google): `parseXmlToolCalls()` first, `parseJsonToolCalls()` fallback — prevents JSON short-circuit from losing multi-tool responses.
 - `PlannerAgent.java` — Generates execution plans from user specs. Uses PLANNING tier (Opus). Outputs `project_type` field in plan JSON for downstream preview/deploy detection.
 - `ConversationAgent.java` — Chat copilot. Uses LIGHTWEIGHT tier via ModelResolver. Compact mode for large projects (>50 files).
@@ -23,7 +23,7 @@ All LLM-calling agents and the routing infrastructure.
 - Sliding window context: first 2 + last 12 units (reduced from 18 to cut ~33% input tokens)
 - Truncation limits: readFile 5k, shell 4k, diff 3k chars (reduced from 8k/6k/5k)
 - Non-subtask iteration floor: 25 (`REGULAR_TASK_MIN_ITERATIONS`) vs subtask floor 15 (`SUBTASK_ITERATION_LIMIT`)
-- Never call LLM providers directly — always through LlmRouter
+- Never call LLM providers directly — always through FallbackLlmRouter
 - Worker stall detection: no file writes in 5min → escalate model (WORKHORSE → PLANNING tier)
 - Worker prompts: `worker.txt` (Anthropic), `worker-openai.txt` (OpenAI), `worker-gemini.txt` (Google)
 - **Self-play prevention:** Anthropic models may output `<tool_call>` + fabricated `<tool_result>` + more `<tool_call>` in one response. `FABRICATED_TOOL_RESULT_PATTERN` strips fake results before parsing. Applied to both main response and truncation salvage paths.

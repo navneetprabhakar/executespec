@@ -47,13 +47,13 @@ They cross-link. Day-to-day surface is the chat; deeper inspection routes throug
 2. Delete `frontend/src/components/layout/AppLayout.tsx`.
 3. Delete `frontend/src/components/layout/Sidebar.tsx`.
 4. Delete `frontend/src/components/layout/Header.tsx` (the v2 top-bar — Shell has its own).
-5. Delete `frontend/src/components/layout/CommandPalette.tsx` (v3 has `v3/components/CmdK.tsx`).
+5. Delete `frontend/src/components/layout/CommandPalette.tsx` (v3 has `components/CmdK.tsx`).
 6. Keep `NotificationBell.tsx` + `NotificationPanel.tsx` — Shell wires them in.
 
 ### Phase B — drop dead pages
 1. `pages/DashboardPage.tsx` — already a redirect to /insights. Drop.
 2. `pages/PlansPage.tsx` — already a redirect to /pricing. Drop.
-3. `pages/BillingPage.tsx` — superseded by `v3/pages/BillingPage.tsx`. Drop.
+3. `pages/BillingPage.tsx` — superseded by `pages/BillingPage.tsx`. Drop.
 4. `pages/RunsPage.tsx` — admin/dev run-list view. Drop the route + redirect /runs to /home; the avatar dropdown surfaces the relevant admin views.
 5. `pages/SharedProjectPage.tsx` is a stub but useful — keep as-is (the audit flagged it but the page is intentional).
 

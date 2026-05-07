@@ -25,7 +25,7 @@ import lombok.extern.slf4j.Slf4j;
  * the lookback window.
  *
  * <p>Issue shape: every validation report stores a JSON array of {@code {category, severity, file,
- * description}} objects. Category + severity taxonomies follow ReviewerAgentV3's contract:
+ * description}} objects. Category + severity taxonomies follow ReviewerAgent's contract:
  *
  * <ul>
  *   <li>Categories: LOGIC / SECURITY / TEST / STYLE / PERFORMANCE / ARCHITECTURE / WIRING

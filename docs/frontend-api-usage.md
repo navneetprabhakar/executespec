@@ -14,7 +14,7 @@
 
 **Wave 2 — onboarding + activation funnel**
 - **`listOnboardingSamples()`** → `GET /api/onboarding/sample-specs` → `SampleSpec[]` (`{id, title, surface, description, tags[], expectedTimeMinutes}`). Reads from `sample-specs/{web-api,frontend,cli}.yml` shipped on the backend classpath.
-- **`pickOnboardingSample(sampleId)`** → `POST /api/onboarding/pick-sample` body `{sampleId}` → `{runId, projectId}`. Provisions (or reuses) the sandbox project, drops the sample spec into the new run, dispatches via `V2RunOrchestrator.submitRun`.
+- **`pickOnboardingSample(sampleId)`** → `POST /api/onboarding/pick-sample` body `{sampleId}` → `{runId, projectId}`. Provisions (or reuses) the sandbox project, drops the sample spec into the new run, dispatches via `RunOrchestrator.submitRun`.
 - **`getSandboxStatus()`** → `GET /api/onboarding/sandbox-status` → `{provisioned, projectId?, lastActivity?, expiresAt?}`. Called by `WelcomePage` + `FirstRunCelebration` to decide whether to deep-link into the sandbox.
 - **`RegisterPayload`** — adds `signupSource`, `utmCampaign`, `utmMedium`, `utmSource`, `referrer` (optional). `RegisterPage.tsx` reads `document.referrer` + querystring UTM params before the submit; backend writes to `app_user.signup_*` columns (Wave 2 V125 ledger + V126 sandbox).
 - **`analytics.ts`** — thin wrapper over `posthog-js` (`initAnalytics`, `identify`, `page`, `reset`, `track`). Enabled only when `VITE_POSTHOG_KEY` is set. Events mirror the 6-event funnel (SIGNUP, PROJECT_CREATED, SPEC_SUBMITTED, PLAN_APPROVED, RUN_COMPLETE, PR_MERGED).

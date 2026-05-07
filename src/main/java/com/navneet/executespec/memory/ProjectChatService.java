@@ -5,6 +5,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
+import com.navneet.executespec.agent.LlmRequest;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.auth.entity.Project;
 import com.navneet.executespec.auth.repository.ProjectRepository;
 import com.navneet.executespec.codeintel.ProjectArchitectureService;
@@ -14,9 +16,7 @@ import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.v2.agent.LlmRequest;
-import com.navneet.executespec.v2.agent.LlmRouterV2;
-import com.navneet.executespec.v2.tool.ExecutionContext;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -36,7 +36,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Project-level chat (v2.4.0). ENTERPRISE + MAX premium feature. Each turn feeds the compacted
- * project memory + latest arch doc as system context and dispatches through {@link LlmRouterV2} at
+ * project memory + latest arch doc as system context and dispatches through {@link LlmRouter} at
  * PLANNING tier using the project's configured provider. Read-only — no file tools, just talk over
  * project context. Unlimited turns; users bring their own tokens via project provider.
  */
@@ -54,7 +54,7 @@ public class ProjectChatService {
   private final ProjectArchitectureService archService;
   private final com.navneet.executespec.project.rag.RetrievalService retrievalService;
   private final ModelResolver modelResolver;
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final com.navneet.executespec.memory.chattools.ProjectChatTools projectChatTools;
 
   public List<ProjectChatMessage> history(String projectId) {
@@ -305,7 +305,7 @@ public class ProjectChatService {
    * into tools that hit private repos (regenerate_architecture). When {@code callerPat} is null,
    * those tools still bind but return a clear error if the project's repos are private.
    *
-   * <p>2026-05-02 fix — runs a manual tool-execution loop because {@code LlmRouterV2} hardcodes
+   * <p>2026-05-02 fix — runs a manual tool-execution loop because {@code LlmRouter} hardcodes
    * {@code internalToolExecutionEnabled(false)} (the V2 worker pattern handles its own loop).
    * Without this loop, the model emits a {@code tool_use} block and we'd save just the
    * pre-tool-call text ("Let me pull the latest architecture...") and stop, never getting the

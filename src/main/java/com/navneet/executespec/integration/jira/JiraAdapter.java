@@ -7,7 +7,7 @@ import java.util.UUID;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.integration.*;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -189,7 +189,7 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
   }
 
   @Override
-  public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReportV2 review) {
+  public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReport review) {
     String msg;
     if (review != null) {
       String verdict = review.getRecommendationCompat();

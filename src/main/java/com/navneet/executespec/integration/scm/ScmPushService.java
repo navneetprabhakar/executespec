@@ -20,7 +20,7 @@ import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.tool.GitTool;
-import com.navneet.executespec.tool.ToolResult;
+import com.navneet.executespec.tool.GitToolResult;
 
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
@@ -186,7 +186,7 @@ public class ScmPushService {
               ? projectRepository.findById(run.getProjectId()).orElse(null)
               : null;
       String branchName = resolveBranchName(project, run);
-      ToolResult result = gitTool.pushToBranch(run.getRunId(), remote, pat, branchName);
+      GitToolResult result = gitTool.pushToBranch(run.getRunId(), remote, pat, branchName);
       if (!result.isOk()) {
         log.warn("GitHub branch push failed for run {}: {}", run.getRunId(), result.value());
         return;
@@ -231,7 +231,7 @@ public class ScmPushService {
       }
       gitHubRepoService.updateRepoDescription(remote, run.getUserRequest(), pat);
     } else {
-      ToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
+      GitToolResult result = gitTool.pushToRemote(run.getRunId(), remote, pat);
       if (!result.isOk()) {
         log.warn("GitHub push failed for run {}: {}", run.getRunId(), result.value());
       }
@@ -530,7 +530,7 @@ public class ScmPushService {
   // ─── Apply-suggestion push (Fix L, 2026-05-03) ──────────────────────────
 
   /**
-   * Per-repo outcome for an apply-time push. Mirrors the shape of {@link ToolResult}'s ok/err
+   * Per-repo outcome for an apply-time push. Mirrors the shape of {@link GitToolResult}'s ok/err
    * envelope but flattens it to JSON-friendly fields so the UI can render the per-repo list.
    */
   public record ApplyRepoOutcome(
@@ -621,7 +621,7 @@ public class ScmPushService {
         String remote = "https://github.com/" + repoFullName;
         String branchName = repoToBranch.getOrDefault(repoFullName, fallbackBranch);
 
-        ToolResult res =
+        GitToolResult res =
             gitTool.pushToExistingBranch(
                 run.getRunId(), subPath, remote, pat, branchName, commitMessage);
         boolean ok = res.isOk();
@@ -652,7 +652,7 @@ public class ScmPushService {
           break;
         }
       }
-      ToolResult res =
+      GitToolResult res =
           gitTool.pushToExistingBranch(
               run.getRunId(), ".", run.getRepoUrl(), pat, branch, commitMessage);
       String repoName = repoFullNameFromUrl(run.getRepoUrl());

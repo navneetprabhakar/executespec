@@ -159,7 +159,7 @@ Find the **type of change** you are making in the table below. Update every docu
 | `prreview/` | CLAUDE.md v2.6.4 entry — PR Review Agent (single-call PLANNING-tier review of one PR's diff). |
 | `codereview/` | CLAUDE.md v2.6.4 entry — whole-repo Code Review Agent (semgrep + LLM augmentation, markdown report). |
 | `sharing/` | CLAUDE.md v2.6.4 entry (V175) — external project sharing: cross-org `ProjectMember` invites + public read-only share links. Tier-gated. |
-| `util/` | `PoolSizing.coreMultiple(multiplier, min, max)` — shared helper for sizing per-service dispatch pools (CodeReview, PrReview, V2RunService, RunOrchestrator, RunConversationController.applyExecutor). |
+| `util/` | `PoolSizing.coreMultiple(multiplier, min, max)` — shared helper for sizing per-service dispatch pools (CodeReview, PrReview, RunService, RunOrchestrator, RunConversationController.applyExecutor). |
 | `testgen/` | JAVADOC §5.10 Test Generation Agents; WORKFLOWS §2 |
 | `tool/` (V1 GitTool, etc.) | JAVADOC §tool (legacy V1 surface) |
 | `validator/` (CodeValidator + execution/gate/language/prompt subpackages) | JAVADOC §validator |

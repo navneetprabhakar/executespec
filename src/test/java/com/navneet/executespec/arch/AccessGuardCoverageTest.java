@@ -123,11 +123,11 @@ class AccessGuardCoverageTest {
               "com.navneet.executespec.auth.controller.SuperAdminController#forceFailTask",
               "com.navneet.executespec.auth.controller.SuperAdminController#reReviewRun",
               "com.navneet.executespec.folder.ExecutespecMigrationController#migrate",
-              // V2 canary surface — runIds in `/api/v2/runs/` reference V2Run rows which are a
+              // V2 canary surface — runIds in `/api/v2/runs/` reference Run rows which are a
               // separate storage from the production `pipeline_run` table; they're scoped to
               // V2 bring-up testing, not customer data. Live V2 runs go through the production
               // `/api/runs` surface which has its own RunAccessGuard coverage.
-              "com.navneet.executespec.v2.rollout.V2RunController#poll"));
+              "com.navneet.executespec.rollout.RolloutRunController#poll"));
 
   /**
    * <b>Known legacy drift</b> — empty as of 2026-05-06. The original 37-entry baseline (audit Risk

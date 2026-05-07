@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
@@ -51,7 +51,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class AccuracyAssessmentService {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final FileSystemTool fileSystemTool;
   private final StateStore stateStore;
@@ -180,14 +180,14 @@ RULES:
               : null;
       Prompt prompt = opts != null ? new Prompt(messages, opts) : new Prompt(messages);
 
-      LlmRouter.LlmResponse lr =
-          llmRouter.callWithFallbackTracked(
+      FallbackLlmRouter.LlmResponse lr =
+          fallbackLlmRouter.callWithFallbackTracked(
               provider,
               model.getModel(),
               prompt,
               runId,
               "accuracy-assessment",
-              LlmRouter.FallbackMode.IMMEDIATE,
+              FallbackLlmRouter.FallbackMode.IMMEDIATE,
               0,
               false);
 
@@ -232,14 +232,14 @@ RULES:
                 "Your response was not valid JSON. Return ONLY a valid JSON object matching the"
                     + " required format. No markdown, no explanation."));
         try {
-          LlmRouter.LlmResponse retryLr =
-              llmRouter.callWithFallbackTracked(
+          FallbackLlmRouter.LlmResponse retryLr =
+              fallbackLlmRouter.callWithFallbackTracked(
                   provider,
                   model.getModel(),
                   opts != null ? new Prompt(messages, opts) : new Prompt(messages),
                   runId,
                   "accuracy-assessment-retry",
-                  LlmRouter.FallbackMode.IMMEDIATE,
+                  FallbackLlmRouter.FallbackMode.IMMEDIATE,
                   1,
                   false);
           String retryText = retryLr.response().getResult().getOutput().getText();

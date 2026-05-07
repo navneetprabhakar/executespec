@@ -19,7 +19,7 @@ import org.junit.jupiter.api.Test;
  * <p>Background: before the V2 BYOK rewiring (audit-output/BYOK_DEEPDIVE.md), every paying
  * TEAM/ENTERPRISE customer's run silently dispatched against the platform's {@code
  * spring.ai.anthropic.api-key} singleton instead of their own configured Anthropic key. The fix
- * lives entirely in {@link com.navneet.executespec.v2.agent.LlmRouterV2} — it builds per-key {@link
+ * lives entirely in {@link com.navneet.executespec.agent.LlmRouter} — it builds per-key {@link
  * org.springframework.ai.anthropic.AnthropicChatModel} instances from customer keys via a Caffeine
  * cache, leaving the platform singleton bean (built in {@link
  * com.navneet.executespec.config.AgentModelConfig}) for the no-BYOK fallback.
@@ -30,7 +30,7 @@ import org.junit.jupiter.api.Test;
  * so the regression is caught at CI time.
  *
  * <p>To add a new approved consumer: justify why the new caller should either (a) use a per-key
- * model from {@code LlmRouterV2}'s cache or (b) is genuinely platform-key-only (e.g. an admin
+ * model from {@code LlmRouter}'s cache or (b) is genuinely platform-key-only (e.g. an admin
  * endpoint that doesn't route customer prompts), then add the simple class name to {@link
  * #APPROVED_CONSUMERS}.
  */
@@ -43,10 +43,10 @@ class AnthropicModelAccessTest {
    * <ul>
    *   <li>{@code AgentModelConfig} — defines the platform singleton bean (the @Bean factory
    *       method).
-   *   <li>{@code LlmRouterV2} — owns dispatch + the per-key cache. This is THE place that turns a
+   *   <li>{@code LlmRouter} — owns dispatch + the per-key cache. This is THE place that turns a
    *       customer BYOK key into a model on the V2 path; every other consumer should call this
    *       instead of grabbing the singleton.
-   *   <li>{@code LlmRouter} — V1 router. Already implements its own per-key Anthropic model
+   *   <li>{@code FallbackLlmRouter} — V1 router. Already implements its own per-key Anthropic model
    *       construction via {@code buildAnthropicModel} (BYOK-aware by design). Kept until V1
    *       callers (chat copilot, project-doc generators, accuracy assessment) migrate to V2.
    *   <li>{@code FeatureAssessmentService} — pre-V2 assessment path. <b>Likely BYOK gap</b> — uses
@@ -63,8 +63,8 @@ class AnthropicModelAccessTest {
           Set.of(
               "AgentModelConfig",
               "FeatureAssessmentService", // BYOK follow-up: thread customer keys
-              "LlmRouter", // V1, already BYOK-aware via buildAnthropicModel
-              "LlmRouterV2", // V2 router — main BYOK entry point
+              "FallbackLlmRouter", // V1, already BYOK-aware via buildAnthropicModel
+              "LlmRouter", // V2 router — main BYOK entry point
               "NativeToolsTestController", // test-only smoke
               "RunCodeMapService" // BYOK follow-up: thread customer keys
               ));
@@ -98,7 +98,7 @@ class AnthropicModelAccessTest {
         "AnthropicChatModel access drift detected. Either: \n"
             + "  (a) you intended to reference the platform singleton — add the class to"
             + " APPROVED_CONSUMERS with a justification, OR\n"
-            + "  (b) you should be calling LlmRouterV2.call() so per-customer BYOK keys land. \n"
+            + "  (b) you should be calling LlmRouter.call() so per-customer BYOK keys land. \n"
             + "See audit-output/BYOK_DEEPDIVE.md for context.\n"
             + "Expected: "
             + APPROVED_CONSUMERS

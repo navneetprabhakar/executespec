@@ -5,7 +5,7 @@ import static java.util.stream.Collectors.toMap;
 import java.util.Map;
 
 import com.navneet.executespec.harness.event.PipelineEvent;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
@@ -111,7 +111,7 @@ public class IntegrationOutboundListener {
     switch (status) {
       case "PLANNING" -> adapter.onRunStarted(ir, run);
       case "COMPLETE" -> {
-        ReviewReportV2 review = stateStore.getReviewReportV2(run.getRunId());
+        ReviewReport review = stateStore.getReviewReportV2(run.getRunId());
         adapter.onRunComplete(ir, run, review);
       }
       case "FAILED" ->

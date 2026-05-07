@@ -89,7 +89,7 @@ Implementation notes:
 - `TierEnforcementService` already knows the user's tier; add a
   `requiresCostCap(tier)` predicate that returns true for
   FREE/PRO, false for TEAM/ENTERPRISE.
-- `V2RunCostTracker` continues to track cost regardless (we want
+- `RunCostTracker` continues to track cost regardless (we want
   the data for analytics + recipe-cost calibration); the **gate**
   on `BudgetExceeded` events fires only when `requiresCostCap` is
   true.
@@ -376,7 +376,7 @@ CREATE TABLE migration_dry_run_cache (
 ### W8 — Hybrid AST + AI fallback (Angle 1, v1.5) (R-343)
 
 - ast-grep integration:
-  - Spawn ast-grep as subprocess via existing `ShellToolV2`
+  - Spawn ast-grep as subprocess via existing `ShellTool`
     sandbox (or include the Rust binary in the runtime image).
   - Per-recipe `deterministic_recipe_ref` column populated with
     `ast-grep:./recipes/<slug>.yml` reference.
@@ -442,7 +442,7 @@ CREATE TABLE migration_dry_run_cache (
 
 ## Cross-references
 
-- Codebase: V2 pipeline (`V2RunOrchestrator`, `WorkerAgentV2`),
+- Codebase: V2 pipeline (`RunOrchestrator`, `WorkerAgent`),
   `StackDetector`, `ProjectArchitectureService`, multi-repo
   Execution View (R-324 just shipped),
   `PostMergeCascadeService`, `ApiKeyResolver` (BYOK).

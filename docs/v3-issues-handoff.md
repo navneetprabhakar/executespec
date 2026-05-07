@@ -112,7 +112,7 @@ flow. **That was wrong.** V143 is the product-split ENUM
 is per-seat TEAM tier reinstatement. Neither touches multi-repo.
 
 The actual multi-repo machinery was substantially built across the
-existing codebase (ExecutionSolution.repoMappings, V2RunOrchestrator
+existing codebase (ExecutionSolution.repoMappings, RunOrchestrator
 multi-clone, ExecutionPlannerService per-repo decomposition); the gap
 was that `req.repoIds()` was being dropped on the floor by the
 orchestrator. R-324 added V155 `execution_run.selected_repo_ids` JSONB
@@ -194,10 +194,10 @@ Memory file: `executespec_post_ux_scope.md` in the user's persistent memory.
 **Description:** Net-new product capability. Probably a "compose your own agent" UI surface that lets users define custom agent personalities + tool sets + prompt fragments.
 
 **Audit prep (read these first):**
-- `src/main/java/com/navneet/executespec/v2/agent/PlannerAgentV2.java` (the canonical agent shape)
-- `src/main/java/com/navneet/executespec/v2/agent/WorkerAgentV2.java`
-- `src/main/java/com/navneet/executespec/v2/tool/ToolRegistryV2.java` (tool plumbing)
-- `src/main/resources/prompts/v2/*.md` (agent prompts)
+- `src/main/java/com/navneet/executespec/agent/PlannerAgentV2.java` (the canonical agent shape)
+- `src/main/java/com/navneet/executespec/agent/WorkerAgent.java`
+- `src/main/java/com/navneet/executespec/tool/ToolRegistry.java` (tool plumbing)
+- `src/main/resources/prompts/*.md` (agent prompts)
 - `src/main/resources/application.yml` `model-matrix:` (provider × tier mapping)
 - `agent-tier-map:` config — agent → tier mapping
 
@@ -205,7 +205,7 @@ Memory file: `executespec_post_ux_scope.md` in the user's persistent memory.
 - New `AgentDefinition` entity + table for user-defined agents
 - A `prompts/user/<userId>/<agentName>.md` file pattern (or DB-backed)
 - Tool-set picker UI on a new `/v3/agents/builder` route
-- Wire user-defined agents into the WorkerAgentV2 dispatch path
+- Wire user-defined agents into the WorkerAgent dispatch path
 - Tier-gated: agent-builder availability per tier (probably TEAM+ENTERPRISE only)
 
 ### #2 — Readymade solutions
@@ -247,12 +247,12 @@ Memory file: `executespec_post_ux_scope.md` in the user's persistent memory.
 
 **Description:** Plugin SDK + first-party plugin examples. Probably extends agent capabilities (custom tools / model providers / linters / scaffolds).
 
-**Likely architecture:** Plugin = a typed Java/Kotlin module that registers itself with `ToolRegistryV2` (for new tools) or `LlmRouterV2` (for new model providers) or `ReviewerAgentV3` (for custom validators). Plus a marketplace surface on `/v3/plugins`.
+**Likely architecture:** Plugin = a typed Java/Kotlin module that registers itself with `ToolRegistry` (for new tools) or `LlmRouter` (for new model providers) or `ReviewerAgent` (for custom validators). Plus a marketplace surface on `/v3/plugins`.
 
 **Audit prep:**
-- `ToolRegistryV2.java` registration pattern (current Tool contract is `v2/tool/Tool.java`)
-- `LlmRouterV2.java` provider dispatch (current providers: anthropic / openai / gemini)
-- `ReviewerAgentV3.java` review-pass plugin points
+- `ToolRegistry.java` registration pattern (current Tool contract is `tool/Tool.java`)
+- `LlmRouter.java` provider dispatch (current providers: anthropic / openai / gemini)
+- `ReviewerAgent.java` review-pass plugin points
 
 **Decision-needed:** first-party-only OR third-party-allowed? If third-party: need sandboxing + signed-bundle review + a plugin-store schema. Big scope.
 
@@ -273,7 +273,7 @@ Memory file: `executespec_post_ux_scope.md` in the user's persistent memory.
 ### Carry-over invariants (unchanged)
 
 - **No PR opens.** Push enabled to the feature branch.
-- **Cohabitation invariant:** keep new work under `frontend/src/v3/` etc. v2 untouched **except** sanctioned shared-source edits (per the strict-UX handoff): `EventName.java` (additive enum), `SecurityConfig.java` (one `permitAll`), `V2RunOrchestrator.java` (R-162 referral wire-point), `ProtectedRoute.tsx` (concern 1 root-route special-case), and the R-190/R-191 v2 cleanup files (post-cutover sanctioned). Any new v2 edit needs commit-body justification.
+- **Cohabitation invariant:** keep new work under `frontend/src/v3/` etc. v2 untouched **except** sanctioned shared-source edits (per the strict-UX handoff): `EventName.java` (additive enum), `SecurityConfig.java` (one `permitAll`), `RunOrchestrator.java` (R-162 referral wire-point), `ProtectedRoute.tsx` (concern 1 root-route special-case), and the R-190/R-191 v2 cleanup files (post-cutover sanctioned). Any new v2 edit needs commit-body justification.
 - **Per-3-items checkpoint:** commit + push to `feature/v3-platform-expansion` + dispatch update. Per-wave-boundary checkpoint also.
 - **Each commit:** `feat(v3):` / `fix(v3):` / `chore(v3):` + R-### in subject + co-author footer.
 - **Verify before push:**
@@ -401,7 +401,7 @@ Any user-visible "Vibe" / "Mission" hits should be 0 (R-190 + R-191 covered them
 
 ### Audit-the-tier-mapping reminder for Phase 2 #1 (agent builder)
 
-The agent builder will likely need new agent-tier mappings. Reading `application.yml` `agent-tier-map:` + every entry in `prompts/v2/*.md` is essential prep — the platform's current agent contract (each agent declares a tier, the LlmRouterV2 resolves the tier × provider matrix) is the foundation user-defined agents will plug into.
+The agent builder will likely need new agent-tier mappings. Reading `application.yml` `agent-tier-map:` + every entry in `prompts/*.md` is essential prep — the platform's current agent contract (each agent declares a tier, the LlmRouter resolves the tier × provider matrix) is the foundation user-defined agents will plug into.
 
 ### Project-wide CLAUDE.md is the canonical doc
 

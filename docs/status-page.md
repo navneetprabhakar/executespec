@@ -151,7 +151,7 @@ Auth header: Bearer <CANARY_BEARER_TOKEN> (rotated quarterly)
 Frequency:   */15 * * * *
 ```
 
-The endpoint kicks a LOW spec into V2RunOrchestrator on the anthropic
+The endpoint kicks a LOW spec into RunOrchestrator on the anthropic
 provider, polls to terminal, and on success pings Better Stack's
 heartbeat URL.
 
