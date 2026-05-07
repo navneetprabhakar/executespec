@@ -35,6 +35,15 @@ public class GitHubWebhookController {
   private final CiFailureAutoFixService ciAutoFixService;
   private final ObjectMapper objectMapper;
 
+  /**
+   * 2026-05-07 — Phase P1: ingest {@code pull_request_review_comment} webhook events into the inbox
+   * so the v3 RunDetail surface can show "your reviewer left a comment" without polling.
+   * {@code @Autowired(required = false)} because legacy environments may not have wired this
+   * service yet.
+   */
+  @org.springframework.beans.factory.annotation.Autowired(required = false)
+  private com.navneet.executespec.prreview.inbox.PrCommentInboxService prCommentInboxService;
+
   @Value("${github.webhook.secret:}")
   private String webhookSecret;
 
@@ -68,6 +77,7 @@ public class GitHubWebhookController {
       switch (event) {
         case "pull_request" -> handlePullRequest(root);
         case "check_run" -> handleCheckRun(root);
+        case "pull_request_review_comment" -> handlePullRequestReviewComment(root);
         default -> {
           // Other event types (push, issues, etc.) are not subscribed to in our app config but
           // may arrive if a maintainer enabled "Send everything." Silently drop.
@@ -141,6 +151,56 @@ public class GitHubWebhookController {
     } else {
       log.debug(
           "[ci-auto-fix] skipped {} (branch {}): {}", repoFullName, headBranch, result.reason());
+    }
+  }
+
+  /**
+   * 2026-05-07 — Phase P1: a reviewer left a line-anchored or PR-level comment on a PR ExecuteSpec
+   * opened. Resolve {@code (repo_full_name, pr_number)} to a runId via the existing {@link
+   * PullRequestRecord} table and insert into {@code pr_comment_inbox}; the v3 RunDetail surface
+   * will pick it up via the {@code PR_COMMENT_RECEIVED} SSE event the service emits.
+   *
+   * <p>We listen for {@code action=created} only — edits + deletions don't produce actionable "the
+   * user said something new" signals (and the dedup constraint on commentId would no-op the edit
+   * case anyway).
+   *
+   * <p>Comments on PRs ExecuteSpec didn't open are silently dropped by the service when the (repo,
+   * prNumber) lookup misses.
+   */
+  private void handlePullRequestReviewComment(JsonNode root) {
+    if (prCommentInboxService == null) return; // not wired in this environment
+    String action = textOrNull(root, "action");
+    if (!"created".equals(action)) return;
+
+    JsonNode comment = root.path("comment");
+    JsonNode pr = root.path("pull_request");
+    JsonNode repo = root.path("repository");
+    String repoFullName = textOrNull(repo, "full_name");
+    Integer prNumber = pr.hasNonNull("number") ? pr.get("number").asInt() : null;
+    Long commentId = comment.hasNonNull("id") ? comment.get("id").asLong() : null;
+    if (repoFullName == null || prNumber == null || commentId == null) return;
+
+    String body = textOrNull(comment, "body");
+    if (body == null || body.isBlank()) return;
+    String filePath = textOrNull(comment, "path");
+    Integer lineNumber =
+        comment.hasNonNull("line")
+            ? comment.get("line").asInt()
+            : (comment.hasNonNull("original_line") ? comment.get("original_line").asInt() : null);
+    String author = textOrNull(comment.path("user"), "login");
+    String htmlUrl = textOrNull(comment, "html_url");
+
+    try {
+      prCommentInboxService.ingest(
+          new com.navneet.executespec.prreview.inbox.PrCommentInboxService.IngestRequest(
+              repoFullName, prNumber, commentId, filePath, lineNumber, body, author, htmlUrl));
+    } catch (Exception e) {
+      log.warn(
+          "[pr-comment-inbox] ingest failed for {}:{} comment {}: {}",
+          repoFullName,
+          prNumber,
+          commentId,
+          e.getMessage());
     }
   }
 

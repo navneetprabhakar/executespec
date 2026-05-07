@@ -46,6 +46,14 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Usage: {@code GET /api/v2/test/context}
  */
+// Audit r5 (§6.2, 2026-05-06) — gate test scaffold on non-prod profiles.
+// These /api/v2/test/* controllers were Phase-0 verification scaffolds
+// that registered as @RestController in every profile, including prod.
+// They expose internal mechanics (raw planner/worker/router calls)
+// that have no business on a customer-facing surface. @Profile here
+// keeps them reachable on local + dev for engineers but cuts them out
+// of every prod-active profile (prod, gcp).
+@org.springframework.context.annotation.Profile({"local", "dev"})
 @RestController
 @RequestMapping("/api/v2/test")
 @RequiredArgsConstructor

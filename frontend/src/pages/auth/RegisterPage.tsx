@@ -5,6 +5,7 @@ import {Eye, EyeOff, Mail, Check, AlertCircle} from 'lucide-react';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {readSignupAttribution} from '@/lib/analytics';
 import {AuthShell} from './LoginPage';
+import {isRetryableError} from '@/lib/api';
 
 const PWD_RULES: Array<{label: string; test: (p: string) => boolean}> = [
   {label: '10+ characters', test: (p) => p.length >= 10},
@@ -41,6 +42,10 @@ export default function RegisterPage() {
   });
   const [persona, setPersona] = useState<SignupPersona>('personal');
   const [error, setError] = useState('');
+  // Audit r5 (P0-2): when registration fails on a 5xx or network error,
+  // we render a Retry button so the user doesn't have to re-fill the
+  // form. Cleared at the start of every submit.
+  const [retryable, setRetryable] = useState(false);
   const [success, setSuccess] = useState(false);
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -73,6 +78,7 @@ export default function RegisterPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setRetryable(false);
     if (form.password !== form.confirm) {
       setError('Passwords do not match');
       return;
@@ -98,11 +104,15 @@ export default function RegisterPage() {
       await register(form.email, form.firstName, form.lastName, form.password, attribution);
       setSuccess(true);
     } catch (err) {
+      // Audit r5 (P0-2): preserve retry-ability so the error block can
+      // render a Retry button instead of leaving the user stuck on a
+      // generic banner. Network-down + 5xx are both transient.
       setError(
         errMsg(err)?.includes('409')
           ? 'This email is already registered.'
           : (errMsg(err) ?? 'Registration failed'),
       );
+      setRetryable(isRetryableError(err));
     } finally {
       setLoading(false);
     }
@@ -290,9 +300,34 @@ export default function RegisterPage() {
         </Field>
 
         {error && (
-          <p className='rounded-md bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)] border border-[color-mix(in_srgb,var(--status-error)_30%,transparent)] px-3 py-2 text-xs text-accent-red'>
-            {error}
-          </p>
+          <div
+            role='alert'
+            className='rounded-md bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)] border border-[color-mix(in_srgb,var(--status-error)_30%,transparent)] px-3 py-2 text-xs text-accent-red'
+          >
+            <div className='flex items-start gap-2'>
+              <AlertCircle className='h-3.5 w-3.5 mt-0.5 flex-shrink-0' />
+              <div className='flex-1'>
+                <p>{error}</p>
+                {retryable && (
+                  <button
+                    type='button'
+                    onClick={() => {
+                      // Re-trigger submit by clearing error + clicking the
+                      // submit button programmatically. Form state is
+                      // preserved so the user keeps their typed values.
+                      setError('');
+                      setRetryable(false);
+                      const form = document.querySelector<HTMLFormElement>('form');
+                      form?.requestSubmit();
+                    }}
+                    className='mt-1.5 inline-flex items-center gap-1 text-[11px] font-medium text-accent-red hover:underline'
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
         )}
 
         <button

@@ -72,11 +72,29 @@ function parseErrorMessage(status: number, raw: string): string {
 }
 
 export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(BASE + url, {
-    headers: {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers},
-    credentials: 'include', // send refresh_token cookie
-    ...opts,
-  });
+  // Audit r5 (P0-2, 2026-05-06): a backend OOM crash during the new-user
+  // walkthrough surfaced as `fetch()` rejecting with `TypeError: Failed
+  // to fetch`. The catch site (RegisterPage / LoginPage / etc.) printed
+  // a generic "Registration failed" instead of the actual root cause —
+  // the user couldn't tell whether the product was broken or if they'd
+  // mistyped. Wrap the fetch call so network errors surface as a real
+  // ApiError with `status: 0` (a sentinel callers can branch on for
+  // retry UI). Genuine 4xx/5xx responses still reach the original status
+  // path.
+  let res: Response;
+  try {
+    res = await fetch(BASE + url, {
+      headers: {'Content-Type': 'application/json', ...authHeader(), ...opts?.headers},
+      credentials: 'include', // send refresh_token cookie
+      ...opts,
+    });
+  } catch (e) {
+    const reason = e instanceof Error ? e.message : 'unknown';
+    throw new ApiError(
+      0,
+      `Can't reach the server (${reason}). Check your connection and try again.`,
+    );
+  }
   if (!res.ok) {
     const raw = await res.text().catch(() => '');
     throw new ApiError(res.status, parseErrorMessage(res.status, raw));
@@ -86,6 +104,17 @@ export async function req<T>(url: string, opts?: RequestInit): Promise<T> {
   const text = await res.text();
   if (!text.trim()) return undefined as unknown as T;
   return JSON.parse(text);
+}
+
+/**
+ * Retryable HTTP statuses — callers can use this to decide whether to
+ * surface a "Retry" affordance instead of asking the user to reload the
+ * page. Audit r5 (P0-2).
+ */
+export function isRetryableError(e: unknown): boolean {
+  if (!(e instanceof ApiError)) return false;
+  // 0 = network error (backend unreachable). 5xx = transient server error.
+  return e.status === 0 || e.status >= 500;
 }
 
 /** Fetch a plain-text endpoint (e.g. file content served as text/plain). */
@@ -514,6 +543,14 @@ export const createRun = (body: {
    * server-side @DecimalMin/@DecimalMax rejects out-of-range values with 400.
    */
   userCostCap?: number;
+  /**
+   * Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. When true, the run executes
+   * normally but RunOrchestrator skips the trailing scmPushService.push call on success.
+   * The user can inspect the diff in Run Detail and manually push via the existing
+   * /runs/{id}/push-github endpoint if they want to ship. Backend reads this from a
+   * 24h Redis flag; not persisted to pipeline_run.
+   */
+  skipAutoPush?: boolean;
 }) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
 
 // ── Model matrix ────────────────────────────────────────────────────────────
@@ -1990,6 +2027,46 @@ export const runTests = (runId: string) =>
   req<{runId: string; testPlanId: number; previewUrl: string}>(`/runs/${runId}/run-tests`, {
     method: 'POST',
   });
+
+// ── Phase P1: PR review comment inbox ─────────────────────────────────────
+
+/**
+ * 2026-05-07 — Phase P1: incoming PR review comments on PRs ExecuteSpec opened. Webhook
+ * ingestion populates `pr_comment_inbox` server-side; the v3 RunDetail page polls these to
+ * drive the action-row chip + side-panel ChatPane "pending comments" section.
+ */
+export interface PrCommentInboxDto {
+  id: number;
+  runId: string;
+  repoFullName: string;
+  prNumber: number;
+  commentId: number;
+  filePath: string | null;
+  lineNumber: number | null;
+  body: string;
+  author: string;
+  githubUrl: string;
+  status: 'PENDING' | 'ADDRESSED' | 'DISMISSED';
+  addressedRunId: string | null;
+  createdAt: string;
+}
+
+export const getPrComments = (runId: string) =>
+  req<PrCommentInboxDto[]>(`/runs/${runId}/pr-comments`);
+
+export const getPrCommentPendingCount = (runId: string) =>
+  req<{count: number}>(`/runs/${runId}/pr-comments/pending-count`);
+
+export const dismissPrComment = (runId: string, commentId: number) =>
+  req<PrCommentInboxDto>(`/runs/${runId}/pr-comments/${commentId}/dismiss`, {method: 'POST'});
+
+/**
+ * Phase P2 — apply a PR review comment via ApplyService. Pushes the resulting fix to the same
+ * branch the PR is from, so the PR auto-updates. Returns the apply-run id; UI follows it via
+ * the existing apply-run polling loop.
+ */
+export const applyPrComment = (runId: string, commentId: number) =>
+  req<{applyRunId: string}>(`/runs/${runId}/pr-comments/${commentId}/apply`, {method: 'POST'});
 
 // ── Admin Analytics ──────────────────────────────────────────────────────────
 

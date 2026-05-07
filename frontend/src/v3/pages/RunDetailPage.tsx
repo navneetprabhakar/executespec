@@ -1,8 +1,10 @@
-import {useEffect, useMemo, useState} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {Link, useParams} from 'react-router-dom';
 import SafeDiffEditor from '@/components/runs/SafeDiffEditor';
 import {MonacoSafeMount} from '@/components/runs/MonacoSafeMount';
+import {Editor as MonacoEditor} from '@monaco-editor/react';
 import {
+  cancelRun,
   getRun,
   getValidationReport,
   getFilesWithStatus,
@@ -13,11 +15,14 @@ import {
   type RunDetail,
   type ValidationReportData,
 } from '@/lib/api';
+import {useSse} from '@/hooks/useSse';
+import {useSseStore} from '@/stores/useSseStore';
 import type {PrSummary} from '@/types/project';
 import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
 import '@/lib/monacoSetup';
 import Pill from '../components/Pill';
 import RunFailureSummary from '../components/RunFailureSummary';
+import RunSidePanel from '../components/RunSidePanel';
 import {
   STATUS_LABELS,
   VERDICT_LABELS,
@@ -25,6 +30,7 @@ import {
   COST_PREFIX,
   type V3Verdict,
 } from '../lib/terminology';
+import {deriveVerdict as canonicalDeriveVerdict, toV3Verdict} from '@/lib/verdict';
 
 // Mirrors RunDetailTabs.MONACO_LANG_MAP — kept inline so RunDetailPage doesn't pull in the entire
 // 2300-LOC tabs module just for one map. Add new extensions here when worker-generated stacks
@@ -80,8 +86,19 @@ function getMonacoLanguage(filePath: string): string {
  * back to /projects/{slug} composer pre-filled with the spec.
  */
 export default function RunDetailPage() {
-  const {slug, runShort} = useParams<{slug: string; runShort: string}>();
+  // Route param is `:projectId` (renamed from `:slug` in 4a20683c); kept
+  // the old `slug` alias only for back-compat readers — every actual use
+  // now reads `projectId`. Optional because the flat `/runs/:runShort`
+  // route mounts this page without a project context (FREE / unlinked
+  // runs, audit finding 2026-05-06).
+  const {projectId, runShort} = useParams<{projectId?: string; runShort: string}>();
   const runId = runShort ?? '';
+
+  // 2026-05-07 — RunDetail's 3-pane grid + diff editor want both
+  // `v3-main--wide` (max-width 1600px) and `v3-main--fill` (full
+  // viewport height) modifiers. Previously these were applied via
+  // a per-page `useEffect`; they're now driven by `Shell.classifyRoute`
+  // so the layout policy lives in one place. No-op here.
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [report, setReport] = useState<ValidationReportData | null>(null);
@@ -101,32 +118,92 @@ export default function RunDetailPage() {
   const [loading, setLoading] = useState(true);
   const [diffLoading, setDiffLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-05-07 — viewer mode toggle (parity with v2 RunDetailTabs Code
+  // tab). 'diff' shows the SafeDiffEditor with hideUnchangedRegions —
+  // good for review at a glance; 'full' shows the modified file as a
+  // normal Monaco editor — good for reading the file in context.
+  // ADDED files show the same thing in both modes (no original to diff
+  // against), but we allow the toggle anyway for consistency.
+  const [viewerMode, setViewerMode] = useState<'diff' | 'full'>('diff');
 
-  // Lazy-load run + report + files + PRs in parallel
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    Promise.all([
-      getRun(runId).catch((e) => {
-        if (!cancelled) setError((e as Error)?.message ?? 'Run not found');
-        return null;
-      }),
-      getValidationReport(runId).catch(() => null),
-      getFilesWithStatus(runId).catch(() => [] as FileWithStatus[]),
-      getRunPrs(runId).catch(() => [] as PrSummary[]),
-    ]).then(([d, r, f, p]) => {
-      if (cancelled) return;
-      setDetail(d);
-      setReport(r);
+  // 2026-05-07 — re-fetch is shared between the initial mount and the
+  // SSE-triggered refresh below. Ref-stable so the SSE-event effect
+  // doesn't re-arm the listener on every state change.
+  const refetchAll = useCallback(
+    async (initial: boolean) => {
+      if (initial) {
+        setLoading(true);
+        setError(null);
+      }
+      const [d, r, f, p] = await Promise.all([
+        getRun(runId).catch((e) => {
+          if (initial) setError((e as Error)?.message ?? 'Run not found');
+          return null;
+        }),
+        getValidationReport(runId).catch(() => null),
+        getFilesWithStatus(runId).catch(() => [] as FileWithStatus[]),
+        getRunPrs(runId).catch(() => [] as PrSummary[]),
+      ]);
+      // The detail fetch is the source of truth — only patch if it
+      // succeeded (a 5xx during a transient gap shouldn't blank the
+      // pane the user is looking at).
+      if (d) setDetail(d);
+      // Validation report can legitimately be null (run not done) — only
+      // patch when present so a partial pre-COMPLETE refetch can't wipe
+      // a stale-but-real report we already have. Same logic for files +
+      // PRs: they can legitimately be empty so we always patch.
+      if (r) setReport(r);
       setFilesWithStatus(f);
       setPrs(p);
-      setLoading(false);
+      if (initial) setLoading(false);
+    },
+    [runId],
+  );
+
+  // Initial parallel load on mount / runId change.
+  useEffect(() => {
+    let cancelled = false;
+    refetchAll(true).catch(() => {
+      if (cancelled) return;
+      // refetchAll already set the error message via getRun's catch.
     });
     return () => {
       cancelled = true;
     };
-  }, [runId]);
+  }, [runId, refetchAll]);
+
+  // 2026-05-07 — live updates via SSE. Pre-fix the page only fetched
+  // once on mount, so a non-terminal run's status / verdict / score /
+  // file tree / PR list would freeze on whatever shape it had at first
+  // load. The user's report: "the page didn't auto refresh on
+  // progress." useSse subscribes to /api/runs/{id}/events; the global
+  // SSE store collects every event into `entries`. We watch the latest
+  // entry for this runId and refetch on the events that change visible
+  // state — RUN_STATUS / RUN_DETAIL / GATE_OPENED /
+  // VALIDATION_REPORT_READY / RUN_RESTARTED / BATCH_*. Other event
+  // types (LOG, RUN_PROVIDER_SWITCHED) are ignored since they don't
+  // affect what this page renders.
+  useSse(runId);
+  const lastEntryId = useSseStore((s) => s.entries[s.entries.length - 1]?.id ?? null);
+  const lastEntryType = useSseStore((s) => s.entries[s.entries.length - 1]?.type ?? null);
+  const lastSeenIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastEntryId || lastEntryId === lastSeenIdRef.current) return;
+    lastSeenIdRef.current = lastEntryId;
+    if (
+      lastEntryType === 'RUN_STATUS' ||
+      lastEntryType === 'RUN_DETAIL' ||
+      lastEntryType === 'GATE_OPENED' ||
+      lastEntryType === 'VALIDATION_REPORT_READY' ||
+      lastEntryType === 'RUN_RESTARTED' ||
+      lastEntryType === 'BUDGET_EXCEEDED' ||
+      lastEntryType === 'BATCH_PROGRESS' ||
+      lastEntryType === 'BATCH_COMPLETE' ||
+      lastEntryType === 'BATCH_FAILED'
+    ) {
+      void refetchAll(false);
+    }
+  }, [lastEntryId, lastEntryType, refetchAll]);
 
   // Files actually changed by the run (ADDED + MODIFIED, with vendored paths filtered out).
   const VENDORED_PATTERN =
@@ -174,20 +251,22 @@ export default function RunDetailPage() {
     };
   }, [active, runId]);
 
+  // Audit r5 (P0-3): canonical resolver from lib/verdict.ts. The previous
+  // bespoke logic disagreed with the v2 RunsPage row + v2 dashboard for the
+  // same run because each surface had its own copy.
   const verdict = useMemo<V3Verdict | null>(() => {
     if (!detail) return null;
-    const status = detail.status;
-    if (status === 'FAILED' || status === 'CANCELLED' || status === 'ABORTED') return 'FAILED';
-    if (status !== 'COMPLETE' && status !== 'PARTIAL') return null;
-    const buildOk = report?.finalBuildPassed === true;
-    const reviewerClean = report?.reviewerVerdict === 'CLEAN';
-    const testsPass =
-      report?.testsTotal != null && report.testsTotal > 0
-        ? report.testsPassed === report.testsTotal
-        : null;
-    if (buildOk && reviewerClean && testsPass !== false) return 'READY';
-    if (status === 'PARTIAL' || !buildOk) return 'FAILED';
-    return 'NEEDS_REVIEW';
+    return toV3Verdict(
+      canonicalDeriveVerdict({
+        status: detail.status,
+        finalBuildPassed: report?.finalBuildPassed,
+        testsPassed: report?.testsPassed,
+        testsTotal: report?.testsTotal,
+        reviewerVerdict: report?.reviewerVerdict,
+        verifiedScore: report?.verifiedScore,
+        statusReason: detail.statusReason,
+      }),
+    );
   }, [detail, report]);
 
   const headerTone =
@@ -207,8 +286,8 @@ export default function RunDetailPage() {
       >
         <h1>Couldn't load run</h1>
         <p>{error}</p>
-        {slug && (
-          <Link to={`/projects/${slug}`} style={{color: 'var(--v3-brand)', fontSize: 12}}>
+        {projectId && (
+          <Link to={`/projects/${projectId}`} style={{color: 'var(--v3-brand)', fontSize: 12}}>
             ← Back to project
           </Link>
         )}
@@ -219,9 +298,9 @@ export default function RunDetailPage() {
   return (
     <div>
       {/* Back-link breadcrumb (the only one in v3) */}
-      {slug && (
+      {projectId && (
         <Link
-          to={`/projects/${slug}`}
+          to={`/projects/${projectId}`}
           style={{
             display: 'inline-block',
             marginBottom: 12,
@@ -375,9 +454,9 @@ export default function RunDetailPage() {
                 );
               });
             })()}
-            {slug && (
+            {projectId && (
               <Link
-                to={`/projects/${slug}`}
+                to={`/projects/${projectId}`}
                 style={{
                   padding: '5px 12px',
                   fontSize: 12,
@@ -394,24 +473,93 @@ export default function RunDetailPage() {
                 Re-prompt
               </Link>
             )}
+            {/* Audit r5 (#3, 2026-05-06): persistent Cancel on the
+                detail page for in-flight runs. Mirrors the bubble-card
+                affordance so users who navigated to /runs/{id} mid-run
+                still have an escape hatch. */}
+            {detail &&
+              !['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED'].includes(
+                detail.status,
+              ) && (
+                <button
+                  type='button'
+                  onClick={async () => {
+                    if (
+                      !confirm(
+                        'Cancel this run? Any work the agent has already done will be discarded.',
+                      )
+                    ) {
+                      return;
+                    }
+                    try {
+                      await cancelRun(runId);
+                      // Optimistic flip; the auto-refetch (useEffect on
+                      // active+runId) catches up on the next tick.
+                      setDetail((d) => (d ? {...d, status: 'CANCELLED'} : d));
+                    } catch (e) {
+                      alert((e as Error)?.message ?? 'Cancel failed.');
+                    }
+                  }}
+                  style={{
+                    padding: '5px 12px',
+                    fontSize: 12,
+                    fontWeight: 500,
+                    background: 'transparent',
+                    color: 'var(--v3-error)',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 6,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                  title='Stop this run. The agent will discard any in-progress work.'
+                >
+                  Cancel run
+                </button>
+              )}
           </div>
         </div>
       )}
 
-      {/* Failure summary (R-131) — only when warranted */}
-      {detail && (verdict === 'FAILED' || verdict === 'NEEDS_REVIEW') && (
-        <RunFailureSummary detail={detail} report={report} />
-      )}
+      {/* Failure summary (R-131) — only when there's an actual failure signal.
+          Audit r5 (P1-4, 2026-05-06): previously rendered for any non-READY
+          verdict, which fired on CLEAN_COMPLETION runs whose verifiedScore
+          happened to land below 85 ("Needs review" by score, but nothing
+          actually went wrong). The "What went wrong" header is now gated on
+          a real failure indicator: build failed, tests failed, reviewer
+          unresolved/failed, or terminal status FAILED/CANCELLED. */}
+      {detail &&
+        (() => {
+          const buildFailed = report?.finalBuildPassed === false;
+          const testsFailed =
+            report?.testsTotal != null &&
+            report.testsTotal > 0 &&
+            (report.testsPassed ?? 0) < report.testsTotal;
+          const reviewerBad =
+            report?.reviewerVerdict === 'UNRESOLVED_ISSUES' ||
+            report?.reviewerVerdict === 'REVIEW_FAILED';
+          const terminalBad =
+            detail.status === 'FAILED' ||
+            detail.status === 'CANCELLED' ||
+            detail.status === 'ABORTED' ||
+            detail.statusReason === 'FINAL_BUILD_FAILED' ||
+            detail.statusReason === 'ALL_TASKS_FAILED' ||
+            detail.statusReason === 'REVIEWER_FAILED';
+          const hasFailureSignal = buildFailed || testsFailed || reviewerBad || terminalBad;
+          return hasFailureSignal ? <RunFailureSummary detail={detail} report={report} /> : null;
+        })()}
 
-      {/* File tree + content (two-pane on desktop, stacked on mobile).
-          alignItems: stretch so the diff pane matches the sidebar height
-          — the sidebar grows to fit its file list, and the diff pane
-          stretches to the same height instead of being floored at its
-          280px min-height. */}
+      {/* File tree + diff + side panel (three-pane on desktop, stacked
+          on tablet/mobile). The right side panel surfaces the operator
+          views (Plan / Log / Preview) that the v2 RunDetailTabs used to
+          host — for in-flight runs it streams SSE; for AWAITING_APPROVAL
+          it renders the inline plan-gate so users hitting the URL
+          directly can approve without bouncing back to Compose; for
+          terminal-OK runs it embeds the preview iframe. alignItems:
+          stretch keeps the three columns the same height. */}
       <div
         style={{
           display: 'grid',
-          gridTemplateColumns: 'minmax(220px, 280px) 1fr',
+          gridTemplateColumns: 'minmax(220px, 260px) minmax(0, 1fr) minmax(440px, 520px)',
           gap: 16,
           alignItems: 'stretch',
         }}
@@ -467,7 +615,7 @@ export default function RunDetailPage() {
                       borderRadius: 4,
                       cursor: 'pointer',
                       fontSize: 11.5,
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontFamily: 'var(--v3-font-mono)',
                       overflow: 'hidden',
                     }}
                     title={f.path}
@@ -520,7 +668,7 @@ export default function RunDetailPage() {
                 borderBottom: '1px solid var(--v3-border)',
                 fontSize: 11.5,
                 color: 'var(--v3-text-muted)',
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontFamily: 'var(--v3-font-mono)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,
@@ -531,6 +679,51 @@ export default function RunDetailPage() {
                 <Pill tone={diff.status === 'ADDED' ? 'ok' : 'warn'} size='sm'>
                   {diff.status === 'ADDED' ? 'New file' : 'Modified'}
                 </Pill>
+              )}
+              {/* 2026-05-07 — Diff / Full toggle restoring parity with v2
+                  RunDetailTabs Code tab. */}
+              {diff && (
+                <div
+                  role='radiogroup'
+                  aria-label='File viewer mode'
+                  style={{
+                    display: 'inline-flex',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 999,
+                    overflow: 'hidden',
+                    background: 'var(--v3-bg)',
+                  }}
+                >
+                  {(['diff', 'full'] as const).map((m) => {
+                    const active = viewerMode === m;
+                    return (
+                      <button
+                        key={m}
+                        role='radio'
+                        aria-checked={active}
+                        type='button'
+                        onClick={() => setViewerMode(m)}
+                        title={m === 'diff' ? 'Show only changed lines' : 'Show full file'}
+                        style={{
+                          padding: '2px 10px',
+                          fontSize: 11,
+                          fontWeight: 600,
+                          fontFamily: 'inherit',
+                          background: active
+                            ? 'color-mix(in srgb, var(--v3-brand) 18%, transparent)'
+                            : 'transparent',
+                          color: active
+                            ? 'var(--accent-blue-text, var(--v3-brand))'
+                            : 'var(--v3-text-muted)',
+                          border: 'none',
+                          cursor: 'pointer',
+                        }}
+                      >
+                        {m === 'diff' ? 'Diff' : 'Full'}
+                      </button>
+                    );
+                  })}
+                </div>
               )}
             </div>
           )}
@@ -574,48 +767,79 @@ export default function RunDetailPage() {
                  * unmount on full page unmount, not on prop change.
                  */}
                 <div style={{position: 'absolute', inset: 0}}>
-                  <SafeDiffEditor
-                    language={getMonacoLanguage(diff.path)}
-                    original={diff.base}
-                    modified={diff.head}
-                    theme={GEIST_THEME_NAME}
-                    options={{
-                      readOnly: true,
-                      // Only render lines that actually changed — this is the "only diff is
-                      // visible" contract. Monaco hides identical regions behind expandable
-                      // chevrons by default when this flag is on.
-                      hideUnchangedRegions: {
-                        enabled: true,
-                        contextLineCount: 3,
-                        minimumLineCount: 3,
-                        revealLineCount: 20,
-                      },
-                      renderSideBySide: false, // inline diff fits the narrow 1fr column better
-                      minimap: {enabled: false},
-                      scrollBeyondLastLine: false,
-                      fontSize: 12,
-                      lineNumbers: 'on',
-                      folding: true,
-                      showFoldingControls: 'always',
-                      wordWrap: 'off',
-                      renderLineHighlight: 'line',
-                      contextmenu: false,
-                      domReadOnly: true,
-                      cursorStyle: 'line-thin',
-                      scrollbar: {
-                        verticalScrollbarSize: 6,
-                        horizontalScrollbarSize: 6,
-                      },
-                      overviewRulerLanes: 0,
-                      hideCursorInOverviewRuler: true,
-                      overviewRulerBorder: false,
-                      guides: {
-                        indentation: true,
-                        bracketPairs: true,
-                      },
-                      padding: {top: 8},
-                    }}
-                  />
+                  {viewerMode === 'diff' ? (
+                    <SafeDiffEditor
+                      language={getMonacoLanguage(diff.path)}
+                      original={diff.base}
+                      modified={diff.head}
+                      theme={GEIST_THEME_NAME}
+                      options={{
+                        readOnly: true,
+                        // Only render lines that actually changed — this is the "only diff is
+                        // visible" contract. Monaco hides identical regions behind expandable
+                        // chevrons by default when this flag is on.
+                        hideUnchangedRegions: {
+                          enabled: true,
+                          contextLineCount: 3,
+                          minimumLineCount: 3,
+                          revealLineCount: 20,
+                        },
+                        renderSideBySide: false, // inline diff fits the narrow 1fr column better
+                        minimap: {enabled: false},
+                        scrollBeyondLastLine: false,
+                        fontSize: 12,
+                        lineNumbers: 'on',
+                        folding: true,
+                        showFoldingControls: 'always',
+                        wordWrap: 'off',
+                        renderLineHighlight: 'line',
+                        contextmenu: false,
+                        domReadOnly: true,
+                        cursorStyle: 'line-thin',
+                        scrollbar: {
+                          verticalScrollbarSize: 6,
+                          horizontalScrollbarSize: 6,
+                        },
+                        overviewRulerLanes: 0,
+                        hideCursorInOverviewRuler: true,
+                        overviewRulerBorder: false,
+                        guides: {
+                          indentation: true,
+                          bracketPairs: true,
+                        },
+                        padding: {top: 8},
+                      }}
+                    />
+                  ) : (
+                    <MonacoEditor
+                      language={getMonacoLanguage(diff.path)}
+                      value={diff.head}
+                      theme={GEIST_THEME_NAME}
+                      options={{
+                        readOnly: true,
+                        minimap: {enabled: false},
+                        scrollBeyondLastLine: false,
+                        fontSize: 12,
+                        lineNumbers: 'on',
+                        folding: true,
+                        showFoldingControls: 'always',
+                        wordWrap: 'off',
+                        renderLineHighlight: 'line',
+                        contextmenu: false,
+                        domReadOnly: true,
+                        cursorStyle: 'line-thin',
+                        scrollbar: {
+                          verticalScrollbarSize: 6,
+                          horizontalScrollbarSize: 6,
+                        },
+                        overviewRulerLanes: 0,
+                        hideCursorInOverviewRuler: true,
+                        overviewRulerBorder: false,
+                        guides: {indentation: true, bracketPairs: true},
+                        padding: {top: 8},
+                      }}
+                    />
+                  )}
                 </div>
               </MonacoSafeMount>
             </div>
@@ -626,10 +850,30 @@ export default function RunDetailPage() {
             </div>
           )}
         </section>
+
+        <RunSidePanel
+          runId={runId}
+          detail={detail}
+          onRefetch={() => {
+            // Approve / cancel from PlanCard inside the panel — refetch the run
+            // so the next render swaps the gate for the live task list.
+            getRun(runId)
+              .then((d) => setDetail(d))
+              .catch(() => undefined);
+          }}
+        />
       </div>
 
-      {/* Mobile collapse: stack the two panes */}
+      {/* Tablet/mobile collapse: stack files + diff, then full-width side panel. */}
       <style>{`
+        @media (max-width: 1240px) {
+          .v3-rundetail-grid {
+            grid-template-columns: minmax(200px, 240px) 1fr !important;
+          }
+          .v3-rundetail-grid > aside:last-child {
+            grid-column: 1 / -1;
+          }
+        }
         @media (max-width: 768px) {
           .v3-rundetail-grid {
             grid-template-columns: 1fr !important;

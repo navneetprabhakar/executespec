@@ -42,15 +42,17 @@ export const PRICING_CARDS: PricingCard[] = [
     priceInr: 0,
     priceUnit: '',
     badge: null,
-    // Task 8 (2026-05-01 fix list) — V145 raised FREE from 5 lifetime
-    // runs to 10/month. The pricing card has to agree with the canonical
-    // tier_config.monthly_run_limit so the four FREE-user surfaces (top-bar,
-    // billing hero, sidebar, pricing card) all read "10". The referral
-    // line is intentionally omitted until product confirms whether the
-    // +5/friend mechanic still ships under the monthly model.
-    subhead: '10 runs / month · no credit card',
+    // Audit r5 (P1-2, 2026-05-06) — synced with DB. V145 had bumped FREE
+    // to 10/month, but V167 reverted to 5/month and the pricing copy
+    // wasn't updated, leaving four user-facing surfaces (top-bar,
+    // billing hero, settings tier banner, pricing card) claiming "10"
+    // while the actual quota was 5. Cards now use the runtime
+    // `V3Entitlements.runLimitMonthly` whenever a logged-in caller
+    // passes one in via `pricingCardsWith()`; this default copy stays
+    // accurate for anonymous /pricing viewers.
+    subhead: '5 runs / month · no credit card',
     bullets: [
-      '10 runs / month',
+      '5 runs / month',
       '1 project · 1 repo',
       'All providers available',
       'Anonymous trial — no signup',
@@ -58,35 +60,27 @@ export const PRICING_CARDS: PricingCard[] = [
     ctaLabel: 'Try free →',
   },
   {
+    // V176 (2026-05-06) renamed `tier_config.PRO` display_name "Pro" → "Solo"
+    // and re-LISTED it as the bridge between FREE and TEAM at $29/mo with
+    // 30 credits/month. The TierKey enum still says 'PRO' because the
+    // database PK didn't change; the user-facing copy is "Solo". Audit r5
+    // (P1-2, 2026-05-06): the frontend pricing.ts hadn't caught up to V176
+    // — it still sold PRO as $20 / 20 credits / Grandfathered. Synced.
     tier: 'PRO',
-    name: 'Pro',
-    priceUsd: 20,
-    priceInr: 1700,
+    name: 'Solo',
+    priceUsd: 29,
+    priceInr: 2499,
     priceUnit: '/ month',
-    // [F-28] (audit Sprint 1 PR-4, 2026-04-30) — PRO is HIDDEN per
-    // `tier_config.PRO.lifecycle_state = 'HIDDEN'` (v2.6.1 Wave 1).
-    // New buyers should choose TEAM. PRO continues to bill for grandfathered
-    // subscribers only — the card stays visible so existing users recognise
-    // their plan, but the badge + subhead now name the grandfathered
-    // status explicitly instead of selling PRO as "Most popular".
-    // Task 7 (2026-05-01 fix list): MAX was retired in V165 — the
-    // public-facing copy must not name a tier we no longer sell.
-    badge: 'Grandfathered',
-    subhead: 'Existing subscribers only — new buyers, choose Team',
-    // [S-03] (coverage Sprint 3 follow-up to F-28, 2026-04-30) — bullet
-    // list reconciled with V145 cap. Pre-V145 PRO copy claimed
-    // "Unlimited runs / month"; V145 capped PRO at 20 credits/month
-    // (intentional, ladder-aligned with the more-attractive TEAM seat
-    // pool). Coverage Prompt C found the stale bullet contradicting
-    // both V145 and the F-28 "Grandfathered" badge on the same card.
+    badge: null,
+    subhead: 'For solo developers — managed keys, plan & review gate',
     bullets: [
-      '20 credits / month (grandfathered cap)',
+      '30 credits / month',
+      '2 projects · 2 repos each',
       'All providers (BYOK option)',
-      'Unlimited projects + repos',
       'Plan & review gate',
       'Priority email support',
     ],
-    ctaLabel: 'Manage subscription →',
+    ctaLabel: 'Upgrade to Solo →',
   },
   {
     tier: 'TEAM',
@@ -107,6 +101,29 @@ export const PRICING_CARDS: PricingCard[] = [
     ctaLabel: 'Add seats →',
   },
 ];
+
+/**
+ * Audit r5 (P1-2, 2026-05-06) — overlay live entitlements onto the FREE
+ * card so logged-in users always see their actual cap. The runtime
+ * `V3Entitlements.runLimitMonthly` is fed from `tier_config`, so this
+ * closes the "PRICING_CARDS drift" class of bugs without forcing every
+ * caller to re-read from the API.
+ *
+ * Anonymous /pricing viewers (no entitlements) get the static default
+ * copy, which we keep synced to the DB seed via PR review.
+ */
+export function pricingCardsWith(freeRunLimitMonthly: number | null | undefined): PricingCard[] {
+  if (freeRunLimitMonthly == null || freeRunLimitMonthly < 0) return PRICING_CARDS;
+  const n = freeRunLimitMonthly;
+  return PRICING_CARDS.map((card) => {
+    if (card.tier !== 'FREE') return card;
+    return {
+      ...card,
+      subhead: `${n} runs / month · no credit card`,
+      bullets: card.bullets.map((b) => (/^\d+ runs \/ month$/.test(b) ? `${n} runs / month` : b)),
+    };
+  });
+}
 
 /** Enterprise sits below the grid; not a card. */
 export const ENTERPRISE_FOOTER = {

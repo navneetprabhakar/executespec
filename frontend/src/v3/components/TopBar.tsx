@@ -4,6 +4,11 @@ import {Menu, X} from 'lucide-react';
 import AvatarMenu from './AvatarMenu';
 import ProjectSwitcher from './ProjectSwitcher';
 import {UsageBadge} from '@/components/billing/UsageBadge';
+// Single-surface retirement (2026-05-06) — kept after v2 Header
+// deletion. NotificationBell + NotificationPanel are framework-
+// agnostic (they poll the existing /api/notifications endpoint and
+// render a styled flyout) so they fit the v3 chrome unchanged.
+import NotificationBell from '@/components/layout/NotificationBell';
 
 /**
  * R-101 — top-bar shell.
@@ -144,6 +149,11 @@ export default function TopBar() {
         {/* [IA-Q4] quota chip — visible on both desktop and mobile.
             UsageBadge self-hides for TEAM/ENTERPRISE/SUPER_ADMIN. */}
         <UsageBadge />
+        {/* Single-surface retirement (2026-05-06) — NotificationBell
+            moved here from the deleted v2 Header. The bell self-hides
+            when the user is anonymous (it polls `/api/notifications`
+            which 401s without auth) so it's safe on every page. */}
+        {!isMobile && <NotificationBell />}
         {!isMobile && <AvatarMenu />}
         {isMobile && (
           <button

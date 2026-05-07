@@ -94,17 +94,11 @@ public class StripePaymentGateway implements PaymentGateway {
               .putMetadata("billing_entity_id", entity.getId())
               .putMetadata("billing_entity_type", entity.getEntityType())
               .putMetadata("plan_id", planId)
-              .putMetadata("seats", String.valueOf(seats))
-              // Phase 2 wiring — Stripe metadata per product so webhook
-              // handlers can route TEAM/ENTERPRISE → executespec (Build)
-              // and MAX/PRO → vibe (Vibe). The product is derived from
-              // the plan's tier via TierProductSurfaceMapper; if the
-              // plan lookup fails (cold cache), default to executespec
-              // to preserve today's single-surface behavior.
-              .putMetadata(
-                  "product",
-                  com.navneet.executespec.auth.service.TierProductSurfaceMapper.defaultSurfaceFor(
-                      resolveTierForPlan(planId)));
+              .putMetadata("seats", String.valueOf(seats));
+      // V143 "product" metadata retired (V179, single-surface
+      // retirement 2026-05-06). All checkouts run on the
+      // unified 'executespec' surface; no discriminator
+      // needed in Stripe metadata.
 
       // Attach existing Stripe customer if available
       if (entity.getStripeCustomerId() != null && !entity.getStripeCustomerId().isBlank()) {

@@ -257,7 +257,7 @@ export default function ProjectRepoPicker({
                         checked={repoIds.includes(link.repo.id)}
                         onChange={() => toggleRepo(link.repo.id)}
                       />
-                      <span style={{fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace'}}>
+                      <span style={{fontFamily: 'var(--v3-font-mono)'}}>
                         {link.repo.githubRepoFullName}
                       </span>
                       <span style={{color: 'var(--v3-text-subtle)', fontSize: 11}}>
@@ -608,7 +608,6 @@ const inputStyle: React.CSSProperties = {
 const hintStyle: React.CSSProperties = {
   fontSize: 12,
   color: 'var(--v3-text-subtle)',
-  fontStyle: 'italic',
 };
 
 const errorTextStyle: React.CSSProperties = {

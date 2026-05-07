@@ -425,6 +425,9 @@ export default function SettingsPage() {
             // Tier-coherence: 4-tier ladder (FREE / PRO / TEAM / ENTERPRISE).
             // Legacy MAX was renamed to TEAM in V141 — checks updated to match.
             const planTier = billing?.plan?.tier ?? user?.tier ?? 'FREE';
+            // V176 (2026-05-06) renamed PRO display_name "Pro" → "Solo".
+            // The TierKey enum is still 'PRO' (the DB PK didn't change) but
+            // user-facing copy + the badge letter use the Solo branding.
             const planName =
               billing?.plan?.name ??
               (planTier === 'ENTERPRISE'
@@ -432,7 +435,7 @@ export default function SettingsPage() {
                 : planTier === 'TEAM'
                   ? 'Team Plan'
                   : planTier === 'PRO'
-                    ? 'Pro Plan'
+                    ? 'Solo Plan'
                     : 'Free Plan');
             const badge =
               planTier === 'ENTERPRISE'
@@ -440,21 +443,24 @@ export default function SettingsPage() {
                 : planTier === 'TEAM'
                   ? {cls: 'bg-status-success/20 text-status-success', letter: 'T'}
                   : planTier === 'PRO'
-                    ? {cls: 'bg-accent-blue/20 text-accent-blue', letter: 'P'}
+                    ? {cls: 'bg-accent-blue/20 text-accent-blue', letter: 'S'}
                     : {cls: 'bg-[var(--gray-400)] text-secondary', letter: 'F'};
-            // Task 5+8 (2026-05-01 fix list) — PRO subtitle previously
-            // claimed "Unlimited managed runs" which contradicts /pricing
-            // (V145 capped PRO at 20/month, grandfathered). FREE subtitle
-            // pre-V145 promised lifetime runs; the canonical message is
-            // now "10 runs / month".
+            // Audit r5 (P1-2, 2026-05-06) — FREE subtitle now matches the
+            // DB seed (V167 reverted to 5 runs/month). The pre-existing
+            // "10 runs / month" copy lied to every FREE-tier user; the
+            // monthly cap they actually got was 5. Same drift forced
+            // BillingPage's FREE pricing card to claim "10". Both
+            // surfaces now use the canonical seed; logged-in callers
+            // get a live `runLimitMonthly` overlay via
+            // `pricingCardsWith()` in v3/lib/pricing.ts.
             const subtitle =
               planTier === 'ENTERPRISE'
                 ? 'Unlimited runs, priority support, dedicated infrastructure'
                 : planTier === 'TEAM'
                   ? 'BYOK + per-seat collaboration, audit log, SSO'
                   : planTier === 'PRO'
-                    ? '20 runs / month (grandfathered) — managed keys, plan & review gate'
-                    : '10 runs / month · no credit card';
+                    ? '30 runs / month — managed keys, plan & review gate'
+                    : '5 runs / month · no credit card';
             return (
               <>
                 <div
