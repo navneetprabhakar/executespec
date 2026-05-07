@@ -133,7 +133,7 @@ model:
 
     When you have completed the task, submit by running:
     `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && echo programbench-done`
-  model_name: "anthropic/claude-sonnet-4-5-20250929"
+  model_name: "anthropic/claude-sonnet-4-6"
   model_kwargs:
     drop_params: true
     temperature: 0.0
