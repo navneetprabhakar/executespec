@@ -1,6 +1,7 @@
 import {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {conversationChat, type ConversationMessage} from '@/lib/api';
+import {MarkdownContent} from '@/components/shared/MarkdownContent';
 
 /**
  * Pre-run "Refine with assistant" chat modal.
@@ -376,11 +377,22 @@ function Bubble({role, content}: {role: 'user' | 'assistant'; content: string}) 
           fontSize: 13,
           lineHeight: 1.55,
           color: 'var(--v3-text)',
-          whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
       >
-        {before && <div>{before}</div>}
+        {/* 2026-05-07 — Issue 1: assistant replies render markdown so headings,
+            bold, lists, fenced code blocks, tables, links all show up correctly
+            instead of as raw `**bold**` / `# heading` text. User messages stay
+            plain pre-wrap (anything they typed is text; we don't render markdown
+            they didn't author). The REQUIREMENT SUMMARY tinted-card path stays
+            intact below — it splits on the prefix and renders the summary in
+            its own block. */}
+        {before &&
+          (isUser ? (
+            <div style={{whiteSpace: 'pre-wrap'}}>{before}</div>
+          ) : (
+            <MarkdownContent content={before} compact />
+          ))}
         {hasSummary && (
           <div
             style={{
@@ -404,7 +416,7 @@ function Bubble({role, content}: {role: 'user' | 'assistant'; content: string}) 
             >
               Requirement summary
             </div>
-            <div>{summary}</div>
+            <div style={{whiteSpace: 'pre-wrap'}}>{summary}</div>
           </div>
         )}
       </div>
