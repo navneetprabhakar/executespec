@@ -166,7 +166,27 @@ public class ProgramBenchTaskService {
       if (startResult.exit() != 0) {
         throw new RuntimeException("docker run failed: " + startResult.output());
       }
-      String containerId = startResult.output().trim();
+      // Extract the container ID from the LAST non-blank line of output. On arm64 hosts
+      // (Apple Silicon dev macs) running an amd64 cleanroom image, docker emits a
+      // "WARNING: requested image's platform (linux/amd64) does not match the detected host
+      // platform (linux/arm64/v8)..." line on stderr that's merged into stdout BEFORE the
+      // cid. A naive `output().trim()` then captures the warning as the cid, every
+      // subsequent `docker exec <warning>` returns "404 page not found", and the agent
+      // can't run any shell command. Caught locally 2026-05-07 against the Gemini fix
+      // verification — worker stagnated trying to invoke shell while the container was
+      // actually running fine under its `--name pb-run-...` alias.
+      String[] outLines = startResult.output().trim().split("\\r?\\n");
+      String containerId = "";
+      for (int i = outLines.length - 1; i >= 0; i--) {
+        if (!outLines[i].trim().isEmpty()) {
+          containerId = outLines[i].trim();
+          break;
+        }
+      }
+      if (containerId.isEmpty()) {
+        throw new RuntimeException(
+            "docker run produced no container id; output=" + startResult.output());
+      }
       log.info(
           "ProgramBench: container {} ({}) ready for run {}, workspace={}",
           recipe.containerName(),
