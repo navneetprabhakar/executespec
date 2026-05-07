@@ -583,6 +583,12 @@ public class RunOrchestrator {
           createdByUserId, com.navneet.executespec.analytics.EventName.SPEC_SUBMITTED, props);
     }
 
+    // Synchronous lifecycle event — fires on the calling thread before the async
+    // pipeline kicks off. Listeners (e.g. ProgramBenchTaskService's cid-stash) get
+    // a deterministic hook between persistence and pipeline start, so they can
+    // attach per-run state that the worker tools will observe on first invocation.
+    eventPublisher.publishEvent(new PipelineEvent.RunStarted(runId));
+
     // Kick off the pipeline on a background thread. The returned PipelineRun is the
     // initial state; the frontend polls GET /api/runs/{id} to observe progression.
     final String runIdFinal = runId;
