@@ -1,5 +1,8 @@
 # ExecuteSpec — Codemap
 
+> **STALE-PATH NOTE (2026-05-07):** the package map below uses `v2/<sub>/` paths from before the unification pass on `feature/programbench-benchmark`. Mentally rewrite each `v2/<sub>/` as just `<sub>/` (e.g. `v2/agent/` is now `agent/`, `v2/harness/` is now `harness/`, `v2/tool/` is now `tool/`, etc.). Class names with `V2`/`V3` suffixes (`LlmRouterV2`, `ReviewerAgentV3`, `ReviewReportV2`, `WorkerAgentV2`, `ShellToolV2`, etc.) are also unsuffixed in the current source. The new top-level `programbench/` package holds the ProgramBench adapter (`ContainerStore`, `Properties`, `Bootstrap`, `TaskService`, `Controller`). A full rewrite of this file is on the post-merge cleanup queue.
+
+
 > Structural index of `src/main/java/com/navneet/executespec/` as of 2026-04-25.
 > Companion to [ARCHITECTURE.md](ARCHITECTURE.md) (deep-dive) and [JAVADOC.md](JAVADOC.md) (class-level reference).
 > When a new top-level package is added, update this file and `document_map.md`.
