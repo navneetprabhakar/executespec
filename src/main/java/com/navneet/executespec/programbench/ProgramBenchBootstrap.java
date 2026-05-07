@@ -61,9 +61,12 @@ public class ProgramBenchBootstrap {
       Org org = new Org();
       org.setId(orgId);
       org.setName("ProgramBench Bench");
+      org.setDomainPatterns(
+          ""); // NOT NULL on the column; no domain enforcement for the bench fixture
       org.setTier("ENTERPRISE");
       org.setStatus("ACTIVE");
       org.setSeatCount(1);
+      org.setCreatedByUserId(userId); // soft string ref — User row created next; no FK constraint
       org.setCreatedAt(Instant.now());
       org.setUpdatedAt(Instant.now());
       orgRepo.save(org);
