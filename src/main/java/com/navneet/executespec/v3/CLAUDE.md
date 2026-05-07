@@ -3,7 +3,7 @@
 > **What this is — and what it isn't.**
 >
 > - ✅ **The third-generation customer product / UX surface.** Landing page logic, anonymous run dispatcher, referrals, per-user entitlements, lifetime credits — i.e. things a logged-out or low-tier consumer interacts with.
-> - ❌ **NOT a pipeline architecture.** The active pipeline is V2 (`com.navneet.executespec.v2.*`). There is no V3 pipeline. References like `ReviewerAgentV3` live inside the V2 pipeline and are unrelated to this package.
+> - ❌ **NOT a pipeline architecture.** The active pipeline is V2 ((former pipeline; now flat under com.navneet.executespec.*)). There is no V3 pipeline. References like `ReviewerAgentV3` live inside the V2 pipeline and are unrelated to this package.
 >
 > The "v3" name comes from the **UX overhaul v3 (Graphite+Signal)** shipped in v2.6.0 — the third generation of the consumer-facing surface. It runs in parallel to (not replacing) the V2 pipeline.
 

@@ -20,7 +20,7 @@ import com.navneet.executespec.sse.RunEvent;
 import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.v2.integration.RunOrchestrator;
+import com.navneet.executespec.integration.RunOrchestrator;
 
 import org.springframework.stereotype.Service;
 

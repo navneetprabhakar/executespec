@@ -127,7 +127,7 @@ class AccessGuardCoverageTest {
               // separate storage from the production `pipeline_run` table; they're scoped to
               // V2 bring-up testing, not customer data. Live V2 runs go through the production
               // `/api/runs` surface which has its own RunAccessGuard coverage.
-              "com.navneet.executespec.v2.rollout.V2RunController#poll"));
+              "com.navneet.executespec.rollout.V2RunController#poll"));
 
   /**
    * <b>Known legacy drift</b> — empty as of 2026-05-06. The original 37-entry baseline (audit Risk

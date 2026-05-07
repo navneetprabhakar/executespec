@@ -18,7 +18,7 @@ import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 import com.navneet.executespec.sse.SseBroadcaster;
-import com.navneet.executespec.v2.cost.RunCostTracker;
+import com.navneet.executespec.cost.RunCostTracker;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

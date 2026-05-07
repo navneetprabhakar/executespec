@@ -13,7 +13,7 @@ import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.IntegrationEventLogRepository;
 import com.navneet.executespec.state.repository.IntegrationRunRepository;
-import com.navneet.executespec.v2.integration.RunOrchestrator;
+import com.navneet.executespec.integration.RunOrchestrator;
 
 import org.springframework.stereotype.Service;
 

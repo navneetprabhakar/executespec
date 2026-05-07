@@ -8,7 +8,7 @@ import java.util.UUID;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.v2.integration.RunOrchestrator;
+import com.navneet.executespec.integration.RunOrchestrator;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;

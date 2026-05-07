@@ -10,10 +10,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.v2.agent.LlmRequest;
-import com.navneet.executespec.v2.agent.LlmRouterV2;
-import com.navneet.executespec.v2.cost.RunCostTracker;
-import com.navneet.executespec.v2.tool.ExecutionContext;
+import com.navneet.executespec.agent.LlmRequest;
+import com.navneet.executespec.agent.LlmRouterV2;
+import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;

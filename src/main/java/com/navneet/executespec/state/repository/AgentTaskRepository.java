@@ -23,7 +23,7 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
 
   /**
    * 2026-05-04 — used by {@link
-   * com.navneet.executespec.v2.harness.SequentialExecutor#resolveResumeAction} to inspect a
+   * com.navneet.executespec.harness.SequentialExecutor#resolveResumeAction} to inspect a
    * specific task's persisted status during boot-time replay. Returns Optional because resume may
    * run for tasks that were never persisted (worker died before the first {@code persistTaskStatus}
    * call).

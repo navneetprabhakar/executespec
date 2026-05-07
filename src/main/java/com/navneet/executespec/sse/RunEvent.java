@@ -22,7 +22,7 @@ public record RunEvent(
   }
 
   /**
-   * 2026-05-07 — emitted by {@link com.navneet.executespec.v2.lint.LintPass} after the
+   * 2026-05-07 — emitted by {@link com.navneet.executespec.lint.LintPass} after the
    * deterministic auto-fixers run between executor and reviewer. Payload is a one-line summary
    * (e.g. {@code "prettier+spotless-maven · 14 file(s) changed in 3.2s"}). LogPane on the v3
    * RunSidePanel renders it as a milestone banner.

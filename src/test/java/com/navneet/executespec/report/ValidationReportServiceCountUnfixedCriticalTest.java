@@ -23,7 +23,7 @@ import org.junit.jupiter.api.Test;
  *
  * <p>The audit on run {@code 0444c95f} found a -25 gap between the documented {@code
  * computeVerifiedScore} formula (75) and the persisted value (50). The cause: {@link
- * com.navneet.executespec.v2.integration.RunOrchestrator#synthesiseReviewIssues} translates the
+ * com.navneet.executespec.integration.RunOrchestrator#synthesiseReviewIssues} translates the
  * accuracy report's {@code missingRequirements} + {@code endpointCoverage.missing} into CRITICAL
  * {@code SYNTH-ACC-MISS-*} / {@code SYNTH-ACC-EP-*} ReviewIssues, which then penalised the
  * verifiedScore at 5 points each. Because those issues come from the LLM's read-budget bug, they
