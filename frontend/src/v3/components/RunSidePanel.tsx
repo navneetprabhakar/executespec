@@ -6,6 +6,10 @@ import {
   retryTask,
   getLiveCost,
   conversationChat,
+  getPrComments,
+  dismissPrComment,
+  applyPrComment,
+  type PrCommentInboxDto,
 } from '@/lib/api';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore, type LogEntry} from '@/stores/useSseStore';
@@ -102,6 +106,35 @@ export default function RunSidePanel({
     else if (status === 'COMPLETE') setTab('overview');
   }, [isAwaitingApproval, status]);
 
+  // 2026-05-07 — Phase P1: pull pending PR review comments for this run on
+  // mount + every PR_COMMENT_RECEIVED SSE event. Drives both the Chat-tab
+  // badge (count) and the ChatPane inbox listing (list). Single source of
+  // truth here so both consumers stay coherent without re-fetching twice.
+  const [prComments, setPrComments] = useState<PrCommentInboxDto[]>([]);
+  const refetchPrComments = useMemo(
+    () => () => {
+      if (!runId) return;
+      getPrComments(runId)
+        .then(setPrComments)
+        .catch(() => setPrComments([]));
+    },
+    [runId],
+  );
+  useEffect(() => {
+    refetchPrComments();
+  }, [refetchPrComments]);
+  const sseEntriesForPr = useSseStore((s) => s.entries);
+  const lastEntryIdForPr = sseEntriesForPr[sseEntriesForPr.length - 1]?.id ?? null;
+  const lastEntryTypeForPr = sseEntriesForPr[sseEntriesForPr.length - 1]?.type ?? null;
+  const seenPrEntryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastEntryIdForPr || lastEntryIdForPr === seenPrEntryRef.current) return;
+    seenPrEntryRef.current = lastEntryIdForPr;
+    if (lastEntryTypeForPr === 'PR_COMMENT_RECEIVED') refetchPrComments();
+  }, [lastEntryIdForPr, lastEntryTypeForPr, refetchPrComments]);
+
+  const pendingPrComments = prComments.filter((c) => c.status === 'PENDING').length;
+
   return (
     <aside
       style={{
@@ -120,6 +153,7 @@ export default function RunSidePanel({
         onChange={setTab}
         showInFlightDot={isInFlight}
         showApprovalBadge={isAwaitingApproval}
+        chatBadgeCount={pendingPrComments}
       />
       <div style={{flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column'}}>
         {tab === 'overview' && <OverviewPane runId={runId} detail={detail} live={isInFlight} />}
@@ -135,7 +169,13 @@ export default function RunSidePanel({
         {tab === 'log' && <LogPane runId={runId} live={isInFlight} />}
         {tab === 'tests' && <TestsPane runId={runId} status={status} />}
         {tab === 'preview' && <RunPreviewPane runId={runId} />}
-        {tab === 'chat' && <ChatPane detail={detail} />}
+        {tab === 'chat' && (
+          <ChatPane
+            detail={detail}
+            prComments={prComments}
+            onPrCommentChanged={refetchPrComments}
+          />
+        )}
       </div>
     </aside>
   );
@@ -148,11 +188,13 @@ function TabBar({
   onChange,
   showInFlightDot,
   showApprovalBadge,
+  chatBadgeCount,
 }: {
   tab: Tab;
   onChange: (t: Tab) => void;
   showInFlightDot: boolean;
   showApprovalBadge: boolean;
+  chatBadgeCount: number;
 }) {
   const items: {key: Tab; label: string; badge?: ReactNode}[] = [
     {key: 'overview', label: 'Overview'},
@@ -197,7 +239,31 @@ function TabBar({
     },
     {key: 'tests', label: 'Tests'},
     {key: 'preview', label: 'Preview'},
-    {key: 'chat', label: 'Chat'},
+    {
+      key: 'chat',
+      label: 'Chat',
+      // 2026-05-07 — Phase P1: numeric badge when there are pending incoming PR
+      // review comments on the run's PR. Same amber palette as the Plan-tab
+      // Action badge so "needs your attention" reads consistently across tabs.
+      badge:
+        chatBadgeCount > 0 ? (
+          <span
+            aria-label={`${chatBadgeCount} pending PR comment${chatBadgeCount === 1 ? '' : 's'}`}
+            style={{
+              marginLeft: 6,
+              fontSize: 9,
+              padding: '1px 6px',
+              borderRadius: 999,
+              background: 'rgba(245,158,11,0.18)',
+              color: '#FBBF24',
+              border: '1px solid rgba(245,158,11,0.40)',
+              fontWeight: 600,
+            }}
+          >
+            {chatBadgeCount}
+          </span>
+        ) : null,
+    },
   ];
 
   return (
@@ -588,6 +654,8 @@ const MILESTONE_TYPES = new Set([
   'BATCH_FAILED',
   // 2026-05-07 — Phase L1: deterministic auto-format pass between executor and reviewer.
   'LINT_AUTOFIX_APPLIED',
+  // 2026-05-07 — Phase P1: incoming PR review comment on a PR ExecuteSpec opened.
+  'PR_COMMENT_RECEIVED',
 ]);
 
 type FileOp = {kind: 'write' | 'edit' | 'commit' | 'command'; path?: string};
@@ -1089,6 +1157,22 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       text: `Auto-format · ${payloadStr}`,
       tone: 'blueSoft',
     };
+
+  // 2026-05-07 — Phase P1: PR review comment received. Payload format
+  // "{author}|{anchor}|{bodyPreview}" so the banner can show "Reviewer @octocat
+  // commented on src/foo.ts:42 — 'consider using…'" without the UI needing to
+  // refetch the inbox first.
+  if (type === 'PR_COMMENT_RECEIVED') {
+    const parts = payloadStr.split('|');
+    const author = parts[0] ?? 'reviewer';
+    const anchor = parts[1] ?? '';
+    const preview = parts.slice(2).join('|') || '';
+    return {
+      icon: <MessageSquare className='h-3.5 w-3.5' />,
+      text: `@${author} on ${anchor} — ${preview}`,
+      tone: 'amber',
+    };
+  }
 
   return null;
 }
@@ -1796,12 +1880,28 @@ function TestsPane({runId, status}: {runId: string; status: string}) {
 // rebuild the seed context from `detail` on every send so a stale tab
 // can't drift away from the truth.
 
-function ChatPane({detail}: {detail: RunDetail | null}) {
+function ChatPane({
+  detail,
+  prComments,
+  onPrCommentChanged,
+}: {
+  detail: RunDetail | null;
+  prComments: PrCommentInboxDto[];
+  onPrCommentChanged: () => void;
+}) {
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  // Phase P2 — track per-comment apply state so the user gets feedback while
+  // the new run kicks off + the GitHub branch updates.
+  const [applyingId, setApplyingId] = useState<number | null>(null);
+
+  const pendingComments = prComments.filter((c) => c.status === 'PENDING');
+  const recentlyAddressed = prComments
+    .filter((c) => c.status === 'ADDRESSED' || c.status === 'DISMISSED')
+    .slice(0, 3);
 
   // Auto-scroll thread on each new message.
   useEffect(() => {
@@ -1883,6 +1983,44 @@ function ChatPane({detail}: {detail: RunDetail | null}) {
     await send(text);
   }
 
+  // 2026-05-07 — Phase P1: dismiss a PR review comment without taking action.
+  async function onDismiss(commentId: number) {
+    if (!detail?.runId) return;
+    try {
+      await dismissPrComment(detail.runId, commentId);
+      onPrCommentChanged();
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Dismiss failed');
+    }
+  }
+
+  // 2026-05-07 — Phase P2: address a PR review comment by dispatching an
+  // ApplyService run. The new run pushes its diff to the PR's branch (same
+  // branch the original PR is from), so the GitHub PR auto-updates.
+  async function onApply(commentId: number) {
+    if (!detail?.runId || applyingId !== null) return;
+    setApplyingId(commentId);
+    setError(null);
+    try {
+      await applyPrComment(detail.runId, commentId);
+      onPrCommentChanged();
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Apply failed');
+    } finally {
+      setApplyingId(null);
+    }
+  }
+
+  // 2026-05-07 — Phase P2: quote a PR review comment into the chat thread so
+  // the user can ask the assistant about it before deciding to apply.
+  function onQuote(c: PrCommentInboxDto) {
+    const anchor = c.filePath
+      ? `${c.filePath}${c.lineNumber ? `:${c.lineNumber}` : ''}`
+      : 'PR-level';
+    const quoted = `> @${c.author} on ${anchor}:\n> ${c.body.replace(/\n/g, '\n> ')}\n\n`;
+    setInput((prev) => (prev.trim() ? `${prev}\n\n${quoted}` : quoted));
+  }
+
   // Quick-question chips help users start a conversation without
   // staring at an empty textbox. Each chip is just a pre-filled
   // first-turn user message; the seed context kicks in on send.
@@ -1915,7 +2053,82 @@ function ChatPane({detail}: {detail: RunDetail | null}) {
           minHeight: 200,
         }}
       >
-        {messages.length === 0 && (
+        {/* 2026-05-07 — Phase P1: pending PR review comments listed at the top
+            of the Chat tab. Each row carries the comment text + author + file
+            anchor + Dismiss + (P2) Quote in chat + Apply. The list updates live
+            via the PR_COMMENT_RECEIVED SSE event handler in the parent. */}
+        {pendingComments.length > 0 && (
+          <div
+            style={{
+              border: '1px solid color-mix(in srgb, var(--v3-warning) 30%, transparent)',
+              background: 'color-mix(in srgb, var(--v3-warning) 6%, transparent)',
+              borderRadius: 8,
+              padding: 10,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <div
+              className='v3-eyebrow'
+              style={{
+                color: 'var(--v3-warning)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+              }}
+            >
+              <MessageSquare className='h-3 w-3' />
+              {pendingComments.length} pending PR comment{pendingComments.length === 1 ? '' : 's'}
+            </div>
+            {pendingComments.map((c) => (
+              <PrCommentRow
+                key={c.id}
+                comment={c}
+                applying={applyingId === c.id}
+                onApply={() => onApply(c.id)}
+                onQuote={() => onQuote(c)}
+                onDismiss={() => onDismiss(c.id)}
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Recently-resolved comments (1 line each, neutral) so the user has a
+            mini audit trail without needing to leave the run. Capped at 3. */}
+        {recentlyAddressed.length > 0 && (
+          <div
+            style={{
+              fontSize: 11,
+              color: 'var(--v3-text-subtle)',
+              padding: '6px 10px',
+              borderTop: '1px dashed var(--v3-border)',
+            }}
+          >
+            <span className='v3-eyebrow' style={{marginRight: 6}}>
+              Recent
+            </span>
+            {recentlyAddressed.map((c, i) => (
+              <span key={c.id}>
+                {i > 0 && <span style={{color: 'var(--v3-text-subtle)'}}> · </span>}
+                <a
+                  href={c.githubUrl}
+                  target='_blank'
+                  rel='noreferrer'
+                  style={{color: 'var(--v3-text-muted)', textDecoration: 'none'}}
+                >
+                  @{c.author}
+                </a>
+                <span style={{color: 'var(--v3-text-subtle)'}}>
+                  {' '}
+                  {c.status === 'ADDRESSED' ? '✓ addressed' : 'dismissed'}
+                </span>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {messages.length === 0 && pendingComments.length === 0 && (
           <div
             style={{
               textAlign: 'center',
@@ -2066,6 +2279,136 @@ function ChatBubble({role, content}: {role: 'user' | 'assistant'; content: strin
         }}
       >
         {content}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * 2026-05-07 — Phase P1 + P2: a single pending PR review comment row inside
+ * ChatPane. Carries the comment text + author + file:line anchor + 4 actions:
+ * "View on GitHub" (always), "Quote in chat" (Phase P2), "Address" (Phase P2 —
+ * dispatches an apply run that pushes a fix to the PR's branch), and "Dismiss"
+ * (Phase P1).
+ */
+function PrCommentRow({
+  comment,
+  applying,
+  onApply,
+  onQuote,
+  onDismiss,
+}: {
+  comment: PrCommentInboxDto;
+  applying: boolean;
+  onApply: () => void;
+  onQuote: () => void;
+  onDismiss: () => void;
+}) {
+  const anchor = comment.filePath
+    ? `${comment.filePath}${comment.lineNumber ? `:${comment.lineNumber}` : ''}`
+    : 'PR-level';
+  const preview = comment.body.length > 220 ? comment.body.slice(0, 220) + '…' : comment.body;
+  return (
+    <div
+      style={{
+        background: 'var(--v3-surface-elevated)',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 6,
+        padding: '8px 10px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          flexWrap: 'wrap',
+          fontSize: 11,
+        }}
+      >
+        <span style={{fontWeight: 600, color: 'var(--v3-text)'}}>@{comment.author}</span>
+        <span className='v3-mono' style={{color: 'var(--v3-text-subtle)'}}>
+          {anchor}
+        </span>
+        <a
+          href={comment.githubUrl}
+          target='_blank'
+          rel='noreferrer'
+          style={{
+            marginLeft: 'auto',
+            color: 'var(--v3-text-subtle)',
+            fontSize: 10.5,
+            textDecoration: 'none',
+          }}
+        >
+          View ↗
+        </a>
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          color: 'var(--v3-text)',
+          whiteSpace: 'pre-wrap',
+          lineHeight: 1.5,
+        }}
+      >
+        {preview}
+      </div>
+      <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
+        <button
+          type='button'
+          onClick={onApply}
+          disabled={applying}
+          style={{
+            padding: '4px 10px',
+            fontSize: 11,
+            fontWeight: 600,
+            background: 'var(--v3-brand)',
+            color: 'var(--v3-text-on-brand)',
+            border: 'none',
+            borderRadius: 4,
+            cursor: applying ? 'not-allowed' : 'pointer',
+            opacity: applying ? 0.6 : 1,
+            fontFamily: 'inherit',
+          }}
+        >
+          {applying ? 'Applying…' : 'Address with chat'}
+        </button>
+        <button
+          type='button'
+          onClick={onQuote}
+          style={{
+            padding: '4px 10px',
+            fontSize: 11,
+            background: 'transparent',
+            color: 'var(--v3-text-muted)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          Quote in chat
+        </button>
+        <button
+          type='button'
+          onClick={onDismiss}
+          style={{
+            padding: '4px 10px',
+            fontSize: 11,
+            background: 'transparent',
+            color: 'var(--v3-text-subtle)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 4,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+          }}
+        >
+          Dismiss
+        </button>
       </div>
     </div>
   );
