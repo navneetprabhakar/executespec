@@ -125,7 +125,7 @@ agent:
 
     Start by exploring /workspace.
   step_limit: 500
-  cost_limit: 5.0
+  cost_limit: 25.0
 
 environment:
   cwd: "/workspace"
