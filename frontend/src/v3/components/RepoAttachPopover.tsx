@@ -466,7 +466,7 @@ export default function RepoAttachPopover({
                     borderRadius: 4,
                     fontSize: 12.5,
                     outline: 'none',
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                    fontFamily: 'var(--v3-font-mono)',
                   }}
                 />
                 <div style={{marginTop: 8, display: 'flex', gap: 8}}>
@@ -695,7 +695,7 @@ export default function RepoAttachPopover({
                         borderRadius: 4,
                         cursor: selecting !== null ? 'progress' : 'pointer',
                         fontSize: 12.5,
-                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        fontFamily: 'var(--v3-font-mono)',
                       }}
                       onMouseEnter={(e) => {
                         if (selecting === null)

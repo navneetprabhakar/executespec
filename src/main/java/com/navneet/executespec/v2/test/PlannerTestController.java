@@ -33,6 +33,8 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Usage: {@code GET /api/v2/test/planner?provider=anthropic&model=claude-haiku-4-5-20251001} or
  * override spec via {@code &spec=...}.
  */
+// Audit r5 (§6.2, 2026-05-06) — see ContextStoreTestController for rationale.
+@org.springframework.context.annotation.Profile({"local", "dev"})
 @RestController
 @RequestMapping("/api/v2/test")
 @RequiredArgsConstructor

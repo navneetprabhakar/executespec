@@ -30,6 +30,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Removed once V2 has integration tests covering the same surface.
  */
+// Audit r5 (§6.2, 2026-05-06) — see ContextStoreTestController for rationale.
+@org.springframework.context.annotation.Profile({"local", "dev"})
 @RestController
 @RequestMapping("/api/v2/test")
 @RequiredArgsConstructor

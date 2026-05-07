@@ -421,7 +421,7 @@ export default function CmdK() {
                     style={{
                       color: 'var(--v3-text-subtle)',
                       fontSize: 11,
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontFamily: 'var(--v3-font-mono)',
                     }}
                   >
                     {a.hint}

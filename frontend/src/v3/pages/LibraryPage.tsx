@@ -26,6 +26,11 @@ export default function LibraryPage() {
   const [tierFilter, setTierFilter] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('');
   const [macroFilter, setMacroFilter] = useState('');
+  // Audit r5 (P2-5, 2026-05-06) — let FREE users hide locked cards so
+  // the page doesn't feel like a 90% paywall on first paint. Default
+  // off (preserves discovery for everyone); flipping on filters to
+  // only the cards the current tier can actually use.
+  const [hideLocked, setHideLocked] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -73,13 +78,16 @@ export default function LibraryPage() {
       if (categoryFilter && s.category !== categoryFilter) return false;
       if (macroFilter && s.macroGroup !== macroFilter) return false;
       if (tierFilter && s.tier !== tierFilter) return false;
+      if (hideLocked && it.locked) return false;
       if (needle) {
         const hay = (s.name + ' ' + (s.tagline ?? '') + ' ' + (s.description ?? '')).toLowerCase();
         if (!hay.includes(needle)) return false;
       }
       return true;
     });
-  }, [items, search, tierFilter, categoryFilter, macroFilter]);
+  }, [items, search, tierFilter, categoryFilter, macroFilter, hideLocked]);
+
+  const lockedCount = useMemo(() => items.filter((it) => it.locked).length, [items]);
 
   return (
     <div style={{padding: 16, paddingBottom: 48}}>
@@ -153,10 +161,40 @@ export default function LibraryPage() {
         >
           <option value=''>All tiers</option>
           <option value='FREE'>Free</option>
-          <option value='PRO'>Pro</option>
+          <option value='PRO'>Solo</option>
           <option value='TEAM'>Team</option>
           <option value='ENTERPRISE'>Enterprise</option>
         </select>
+        {/* Audit r5 (P2-5, 2026-05-06) — quick "hide locked" toggle.
+            FREE users with ~3 unlocked / 28 cards saw mostly padlocks
+            on first paint. This pill flips the locked items off
+            without forcing them onto a hunt through filters. Locked
+            count surfaces honestly so the upgrade path stays visible. */}
+        {lockedCount > 0 && (
+          <button
+            type='button'
+            onClick={() => setHideLocked((v) => !v)}
+            aria-pressed={hideLocked}
+            style={{
+              padding: '8px 12px',
+              background: hideLocked ? 'var(--v3-brand)' : 'var(--v3-bg)',
+              color: hideLocked ? 'var(--v3-text-on-brand)' : 'var(--v3-text-muted)',
+              border: '1px solid ' + (hideLocked ? 'var(--v3-brand)' : 'var(--v3-border)'),
+              borderRadius: 6,
+              cursor: 'pointer',
+              fontSize: 12.5,
+              fontFamily: 'inherit',
+              fontWeight: 500,
+            }}
+            title={
+              hideLocked
+                ? `Showing only items your tier can use. ${lockedCount} hidden.`
+                : `Hide ${lockedCount} locked items. Upgrade options stay one click away on /pricing.`
+            }
+          >
+            {hideLocked ? `Show all (${lockedCount} locked)` : 'Hide locked'}
+          </button>
+        )}
       </div>
 
       {/* Body */}

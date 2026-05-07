@@ -34,7 +34,13 @@
   --v3-text: var(--c-ink-100); /* was #E8EAED — 4pt nudge */
   --v3-text-muted: var(--c-ink-300); /* was #94A3B8 — converged with v2 */
   --v3-text-subtle: var(--c-ink-400);
-  --v3-brand: var(--c-signal-blue);
+  /* 2026-05-06 (website parity) — brighter brand on dark surfaces.
+   * The canonical --c-signal-blue (#3B6FCC) was tuned for AA-on-white
+   * which made it dim on the warmer graphite-0; the marketing site +
+   * the user's mockup both use #5B8DEF here. Light theme keeps the
+   * darker variant via the override below. */
+  --v3-brand: #5b8def;
+  --v3-brand-hover: #7aa5f5;
   --v3-brand-2: var(--c-signal-teal);
   --v3-success: var(--c-success);
   --v3-warning: var(--c-warning);
@@ -51,11 +57,17 @@
    * Same hex as --v3-bg in dark mode but kept distinct so light-mode
    * doesn't accidentally flip it (a primary-blue button on white still
    * needs dark text, not page-bg-flipped-to-white). */
-  --v3-text-on-brand: #0b0d10;
+  --v3-text-on-brand: #10131a;
 
   --v3-radius-sm: 4px;
   --v3-radius: 6px;
   --v3-radius-lg: 10px;
+  /* 2026-05-07 — frame radius matches the website's Project Workspace
+   * mockup (.ws-mockup-frame). Used by .v3-frame to wrap whole-page
+   * shells (Pulse, RunDetail right pane). 14px is the mockup's outer
+   * shell radius; cards inside stay on --v3-radius-lg=10px. */
+  --v3-radius-frame: 14px;
+  --v3-radius-rollup: 8px;
 
   --v3-pad-1: 4px;
   --v3-pad-2: 8px;
@@ -73,10 +85,32 @@
   --v3-fs-h2: 22px;
   --v3-fs-h1: 32px;
 
+  /* 2026-05-07 — single source of truth for font-family across v3.
+   *
+   * Pre-fix history: v3-root led with `-apple-system` AND named
+   * `'Geist'` (no `@font-face` for that family — only `'Geist Sans'`
+   * is registered in tokens.css), so the chain fell to SF Pro on
+   * macOS while the v2 body chain rendered Geist Sans → visible
+   * font mismatch on v3 surfaces. Several .tsx files also hardcoded
+   * mono stacks in three different shapes (some led with
+   * `ui-monospace` so Geist Mono never resolved; one used the
+   * undefined `var(--font-mono)` and fell to whatever the parent
+   * font was — i.e. a sans-serif font for "monospace" content).
+   *
+   * Centralising the canonical stacks here lets every consumer write
+   * `fontFamily: 'var(--v3-font-sans)'` or `var(--v3-font-mono)` and
+   * stay aligned automatically. The sans chain matches `body` in
+   * `index.css`; the mono chain leads with `'Geist Mono'` (the only
+   * registered mono face) before falling to system mono. */
+  --v3-font-sans:
+    'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    sans-serif;
+  --v3-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
   background: var(--v3-bg);
   color: var(--v3-text);
   min-height: 100vh;
-  font-family: -apple-system, BlinkMacSystemFont, 'Geist', 'Inter', 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--v3-font-sans);
   font-size: var(--v3-fs-body);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -112,8 +146,12 @@
   --v3-text: var(--c-graphite-0);
   --v3-text-muted: #6e7785; /* between paper-4 and graphite-6 */
   --v3-text-subtle: var(--c-graphite-6);
-  /* Brand + semantic-state + pop-grad inherit from .v3-root above —
-   * deliberately unchanged, calibrated for both backgrounds. */
+  /* 2026-05-06 (website parity) — light-theme brand stays on the
+   * darker AA-on-white #3B6FCC. The dark default brightened to
+   * #5B8DEF for visual parity with the marketing site, which would
+   * fail AA-body on white buttons here. */
+  --v3-brand: #3b6fcc;
+  --v3-brand-hover: #2b5bb3;
 }
 
 /* TopBar */
@@ -125,7 +163,7 @@
   align-items: center;
   height: 56px;
   padding: 0 var(--v3-pad-4);
-  background: rgba(11, 13, 16, 0.86);
+  background: rgba(16, 19, 26, 0.86); /* matches new --c-graphite-0 #10131A */
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border-bottom: 1px solid var(--v3-border);
@@ -180,6 +218,38 @@
   max-width: 960px;
   margin: 0 auto;
   padding: var(--v3-pad-5) var(--v3-pad-4);
+}
+
+/* 2026-05-06 — wide variant for inspection pages (RunDetailPage,
+ * future ExecutionDetailPage) where the 3-pane layout (file tree +
+ * diff + side panel ≈ 1100px minimum) does not fit inside the 960px
+ * default. Applied via JS hook on the page that needs it. */
+.v3-main--wide {
+  max-width: 1600px;
+}
+
+/* 2026-05-07 — full-viewport variant for surfaces that need to fill
+ * available height (project shell with sticky composer, chat, code
+ * viewer). Without this, pages with `h-full flex flex-col` children
+ * collapse to their natural content height and the page bg leaves a
+ * large empty band below.
+ *
+ * 60px ≈ TopBar height (.v3-topbar = 56px desktop / 52px mobile, plus
+ * 1px border). The slight 4px overshoot is intentional — better to
+ * have a tiny scrollbar than a hairline gap below the page. */
+.v3-main--fill {
+  min-height: calc(100vh - 60px);
+  display: flex;
+  flex-direction: column;
+}
+.v3-main--fill > * {
+  flex: 1;
+  min-height: 0;
+}
+
+/* Combined modifier — most inspection pages want both. */
+.v3-main--wide.v3-main--fill {
+  max-width: 1600px;
 }
 
 @media (max-width: 640px) {
@@ -260,7 +330,156 @@
   border: 1px solid var(--v3-border);
   border-radius: var(--v3-radius-sm);
   padding: 1px 6px;
-  font-family: ui-monospace, 'Geist Mono', SFMono-Regular, Menlo, monospace;
+  font-family: var(--v3-font-mono);
   font-size: var(--v3-fs-caption);
   color: var(--v3-brand-2);
+}
+
+/* ─────────────────────────────────────────────────────────────────────
+ * 2026-05-07 — Website mockup parity primitives.
+ *
+ * Cribbed from website/index.html (.ws-mockup-* classes, lines 1628-1761)
+ * so every v3 surface can opt into the same visual language as the
+ * marketing site's Project Workspace mockup. Centralises the radius +
+ * padding + chip styling that was previously duplicated inline across
+ * Pulse / Composer / RunSidePanel / Insights / Billing / Library etc.
+ *
+ * Naming maps 1-to-1 with website .ws-mockup-*:
+ *   .v3-frame     ←  .ws-mockup-frame    (outer shell, radius 14)
+ *   .v3-card      ←  .ws-mockup-card     (panel, radius 10)
+ *   .v3-rollup    ←  .ws-mockup-rollup   (3-up grid)
+ *   .v3-rollup-cell ← .ws-mockup-rollup-cell (small card, radius 8)
+ *   .v3-eyebrow   ←  .ws-mockup-card-eyebrow (mono UPPER label)
+ *   .v3-mono      — mono font helper for any inline mono text
+ *   .v3-chip      ←  .ws-mockup-chip     (mono pill)
+ *   .v3-chip--ok / --warn / --err — semantic chip flavours
+ *   .v3-spendbar  ←  .ws-mockup-spendbar (rollup-bar with mono values)
+ *   .v3-statk     ←  .ws-mockup-statk    (mono UPPER stat key)
+ * ──────────────────────────────────────────────────────────────────── */
+
+.v3-frame {
+  background: var(--v3-surface);
+  border: 1px solid var(--v3-border);
+  border-radius: var(--v3-radius-frame);
+  box-shadow:
+    0 32px 80px -32px rgba(0, 0, 0, 0.5),
+    0 1px 0 rgba(255, 255, 255, 0.04) inset;
+  overflow: hidden;
+}
+
+.v3-card {
+  background: var(--v3-surface-elevated);
+  border: 1px solid var(--v3-border);
+  border-radius: var(--v3-radius-lg);
+  padding: var(--v3-pad-4);
+}
+
+.v3-card--lg {
+  padding: var(--v3-pad-5);
+}
+
+.v3-rollup {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--v3-pad-3);
+}
+
+.v3-rollup-cell {
+  background: var(--v3-surface-elevated);
+  border: 1px solid var(--v3-border);
+  border-radius: var(--v3-radius-rollup);
+  padding: var(--v3-pad-3) 14px;
+}
+
+.v3-eyebrow {
+  font-family: var(--v3-font-mono);
+  font-size: 10px;
+  color: var(--v3-text-muted);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.v3-mono {
+  font-family: var(--v3-font-mono);
+}
+
+.v3-chip {
+  font-family: var(--v3-font-mono);
+  font-size: 10.5px;
+  padding: 2px 7px;
+  border-radius: var(--v3-radius-sm);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  line-height: 1.45;
+}
+
+.v3-chip--ok {
+  background: rgba(16, 185, 129, 0.1);
+  color: #10b981;
+}
+.v3-chip--warn {
+  background: rgba(245, 158, 11, 0.12);
+  color: #fbbf24;
+}
+.v3-chip--err {
+  background: rgba(239, 68, 68, 0.12);
+  color: #fca5a5;
+}
+.v3-chip--info {
+  background: rgba(91, 141, 239, 0.12);
+  color: var(--v3-brand-hover);
+}
+.v3-chip--neutral {
+  background: var(--v3-surface);
+  color: var(--v3-text-muted);
+  border: 1px solid var(--v3-border);
+}
+
+.v3-spendbar {
+  padding: 10px 14px;
+  background: var(--v3-surface-elevated);
+  border: 1px solid var(--v3-border);
+  border-radius: var(--v3-radius-rollup);
+  font-size: 12.5px;
+  color: var(--v3-text-muted);
+  display: flex;
+  gap: var(--v3-pad-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.v3-statk {
+  font-family: var(--v3-font-mono);
+  font-size: 10px;
+  color: var(--v3-text-subtle);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  margin-right: 4px;
+}
+
+/* Common 1fr-200px grid pairing a hero card with a score ring (Pulse). */
+.v3-hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 220px;
+  gap: var(--v3-pad-4);
+}
+
+@media (max-width: 720px) {
+  .v3-rollup,
+  .v3-hero-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Light theme — rollup cell + frame deepen by one level so they read
+   on a paper-0 background. Cards stay on paper-2 (the elevated stripe). */
+[data-theme='light'] .v3-frame,
+[data-theme='light'] .v3-card,
+[data-theme='light'] .v3-rollup-cell,
+[data-theme='light'] .v3-spendbar {
+  box-shadow:
+    0 16px 40px -24px rgba(15, 23, 42, 0.18),
+    0 1px 0 rgba(255, 255, 255, 0.6) inset;
 }

@@ -7,6 +7,7 @@ import {
   annualPriceUsd,
   formatPrice,
   detectDefaultCurrency,
+  pricingCardsWith,
   type TierKey,
 } from '../lib/pricing';
 import Pill from './Pill';
@@ -34,6 +35,14 @@ interface PricingGridProps {
   /** When false, hide the annual/monthly toggle (e.g. inside billing
    *  card we only show monthly). */
   showPeriodToggle?: boolean;
+  /**
+   * Audit r5 (P1-2, 2026-05-06): the live FREE-tier monthly cap from
+   * `V3Entitlements.runLimitMonthly`. When passed, overrides the
+   * hardcoded "5 runs / month" copy on the FREE card so logged-in
+   * surfaces always show the actual quota. Anonymous viewers (no
+   * entitlements) leave this null and fall back to the static seed.
+   */
+  freeRunLimitMonthly?: number | null;
 }
 
 export default function PricingGrid({
@@ -41,11 +50,13 @@ export default function PricingGrid({
   onPickTier,
   initialCurrency,
   showPeriodToggle = true,
+  freeRunLimitMonthly,
 }: PricingGridProps) {
   const [currency, setCurrency] = useState<'USD' | 'INR'>(
     initialCurrency ?? detectDefaultCurrency(),
   );
   const [annual, setAnnual] = useState(false);
+  const cards = pricingCardsWith(freeRunLimitMonthly);
 
   return (
     <div>
@@ -86,7 +97,13 @@ export default function PricingGrid({
           alignItems: 'stretch',
         }}
       >
-        {PRICING_CARDS.map((card) => (
+        {/* Audit r5 (P1-3, 2026-05-06): the original review flagged PRO
+            as a confusing upsell target ("Existing subscribers only").
+            V176 (shipped 2026-05-06) un-hid PRO and rebranded it as
+            "Solo" at $29/mo with 30 runs/month — closing the FREE→Team
+            $0→$78 chasm. The card-hide filter has been retired since
+            Solo is now the canonical FREE-user upgrade path. */}
+        {cards.map((card) => (
           <Card
             key={card.tier}
             card={card}

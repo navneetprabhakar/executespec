@@ -139,9 +139,17 @@ export default function BillingPage() {
             {/* Task 4: Pricing-grid "Current" badge sources from canonical tier
              * (me.tier) so PRO users see the Pro card highlighted instead of
              * Free when entitlements drift. */}
+            {/* Audit r5 (P1-2): feed live FREE-tier cap so the FREE card
+                always reflects the user's actual quota — even when the
+                hardcoded PRICING_CARDS copy drifts from tier_config. */}
             <PricingGrid
               currentTier={canonicalTier(meTier, ent.tierKey) as TierKey}
               onPickTier={onPickTier}
+              freeRunLimitMonthly={
+                (canonicalTier(meTier, ent.tierKey) as TierKey) === 'FREE'
+                  ? ent.runLimitMonthly
+                  : undefined
+              }
             />
           </section>
 
@@ -168,14 +176,7 @@ function PlanCard({ent, meTier}: {ent: V3Entitlements; meTier: string | null}) {
   const pillTone = isPaidTier(tier) ? 'brand' : 'neutral';
 
   return (
-    <section
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 10,
-        padding: 16,
-      }}
-    >
+    <section className='v3-card'>
       <div
         style={{
           display: 'flex',
@@ -274,14 +275,7 @@ function UsageCard({ent}: {ent: V3Entitlements}) {
   // strict-review fix.
   const showBudget = !ent.isUnlimited && ent.softCostBudgetUsd != null;
   return (
-    <section
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 10,
-        padding: 16,
-      }}
-    >
+    <section className='v3-card'>
       <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Usage this month
       </h2>
@@ -331,14 +325,7 @@ function ReceiptsSection({ent}: {ent: V3Entitlements}) {
   const showGst = false; // TODO(R-141 follow-up): consume org.country once exposed
 
   return (
-    <section
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 10,
-        padding: 16,
-      }}
-    >
+    <section className='v3-card'>
       <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Receipts and billing profile
       </h2>

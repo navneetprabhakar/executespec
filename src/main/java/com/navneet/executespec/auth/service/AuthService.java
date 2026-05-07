@@ -255,11 +255,31 @@ public class AuthService {
   // ── Login ─────────────────────────────────────────────────────────────────
 
   public LoginResponse login(LoginRequest req) {
+    // Audit r5 (P2-2, 2026-05-06) — distinguish account-state failures
+    // from real bad-credential failures so the UI shows the right
+    // error. Pre-fix every Spring auth exception fell through to
+    // "Invalid credentials" — including DisabledException thrown when
+    // AppUserDetails.isEnabled() returns false (PENDING_VERIFICATION).
+    // The downstream status check below was unreachable for pending
+    // users because they failed authentication first. New user
+    // registers → email link arrives → user tries to login before
+    // clicking link → backend said "Invalid credentials" → user
+    // thought the password was wrong. Now the message points them at
+    // the verification email.
     Authentication auth;
     try {
       auth =
           authManager.authenticate(
               new UsernamePasswordAuthenticationToken(req.email().toLowerCase(), req.password()));
+    } catch (org.springframework.security.authentication.DisabledException e) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Email not verified — check your inbox for the activation link, or use Forgot password to"
+              + " resend.");
+    } catch (org.springframework.security.authentication.LockedException e) {
+      throw new ResponseStatusException(
+          HttpStatus.FORBIDDEN,
+          "Account suspended. Contact support@executespec.ai if this is unexpected.");
     } catch (Exception e) {
       throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "Invalid credentials");
     }
@@ -268,8 +288,15 @@ public class AuthService {
     AppUser user = details.getUser();
 
     if (!"ACTIVE".equals(user.getStatus())) {
+      // Defense in depth — unreachable now that DisabledException is
+      // caught above, but kept so a future status enum addition (e.g.
+      // PASSWORD_RESET_REQUIRED) doesn't accidentally let a non-active
+      // user through.
       if ("PENDING_VERIFICATION".equals(user.getStatus())) {
-        throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Email not verified");
+        throw new ResponseStatusException(
+            HttpStatus.FORBIDDEN,
+            "Email not verified — check your inbox for the activation link, or use Forgot password"
+                + " to resend.");
       }
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account suspended");
     }

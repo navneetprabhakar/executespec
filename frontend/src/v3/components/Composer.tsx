@@ -1,5 +1,7 @@
 import {useEffect, useState} from 'react';
-import {createRun} from '@/lib/api';
+import {useNavigate} from 'react-router-dom';
+import {createRun, estimateRun, type LaunchEstimate} from '@/lib/api';
+import ConversationModal from './ConversationModal';
 import {useV3ProjectStore} from '../stores/useV3ProjectStore';
 import {useV3Ui} from '../stores/useV3Ui';
 import {trackV3, V3_EVENTS} from '../lib/events';
@@ -26,7 +28,14 @@ import {PROVIDER_DISPLAY, RUN_MODE_PLAN_REVIEW, RUN_MODE_QUICK} from '../lib/ter
  *      and ResultCard as the run progresses (SSE wiring lands with R-130).
  */
 interface ComposerProps {
-  projectId: string;
+  /**
+   * 2026-05-07 — projectId is optional. When undefined the composer
+   * submits a project-less run (the backend's `createRun` accepts a
+   * null projectId — runs created this way appear under /runs but
+   * not inside any project shell). Used by the new /runs/new page so
+   * users can launch one-shot runs without picking a project first.
+   */
+  projectId?: string;
   /** When true, the composer renders the "first message" empty-state framing
    *  ("What do you want to build?"). When false, it renders the inline-thread
    *  framing ("Reply or describe a follow-up change…"). */
@@ -42,6 +51,24 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Audit r5 (#5, 2026-05-06) — staged-PR-before-push toggle. When on,
+  // the run completes normally but the auto-push to GitHub is skipped
+  // — the user can inspect the diff in Run Detail and manually push if
+  // they like it (existing /runs/{id}/push-github endpoint). Default
+  // off so today's behaviour is unchanged.
+  const [skipAutoPush, setSkipAutoPush] = useState(false);
+  // 2026-05-06 (PA-6 Run Launch port) — port the 3 missing v2 NewRunModal
+  // fields onto the v3 Composer's Advanced expander. All three are
+  // already wired through createRun + RunRequest + the planner.
+  const [figmaUrl, setFigmaUrl] = useState('');
+  const [tddMode, setTddMode] = useState(false);
+  const [userCostCap, setUserCostCap] = useState<string>('');
+  // 2026-05-06 — pre-run conversation surface. Opens the requirements-
+  // analyst chat (POST /api/conversation, available to ALL tiers per
+  // ConversationController) so users can refine a fuzzy idea into a
+  // tight spec before spending credits on a run. Available regardless
+  // of project context.
+  const [refineOpen, setRefineOpen] = useState(false);
 
   // R-343 (P0 from UX persona review) — hydrate the composer with a
   // spec the user typed on executespec.ai's marketing-site hero.
@@ -64,6 +91,34 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Audit r5 (#6, 2026-05-06) — wire up the per-project prefill key.
+  // RunFailureSummary already wrote to `v3-composer-prefill-{projectId}`
+  // for the "re-prompt with failure context" path, but no consumer ever
+  // read it — the Composer would silently ignore the stash. PlanCard's
+  // new Adjust flow (audit r5 #6) writes the same key when the user
+  // wants to edit-and-retry instead of approving the current plan.
+  // Both producers are now end-to-end: stash → custom event → here.
+  useEffect(() => {
+    if (!projectId) return;
+    const key = `v3-composer-prefill-${projectId}`;
+    const hydrate = () => {
+      try {
+        const stashed = sessionStorage.getItem(key);
+        if (stashed && stashed.trim().length > 0) {
+          setText(stashed);
+          sessionStorage.removeItem(key);
+        }
+      } catch {
+        /* private mode — silent */
+      }
+    };
+    hydrate();
+    const listener = () => hydrate();
+    window.addEventListener('v3-composer-prefill', listener);
+    return () => window.removeEventListener('v3-composer-prefill', listener);
+  }, [projectId]);
+  const navigate = useNavigate();
   const pushBubble = useV3ProjectStore((s) => s.pushBubble);
   const bubbles = useV3ProjectStore((s) => s.bubbles);
   const cap = useV3Ui((s) => s.cap);
@@ -95,6 +150,39 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
     : 'Reply or describe a follow-up change…';
   const heroLabel = isEmpty ? 'What do you want to build?' : '';
 
+  // Audit r5 (#1, 2026-05-06) — pre-submit cost estimate. Shows
+  // "~M-N tasks · ~$X-$Y" debounced as the user types, so they go
+  // into the Approve gate already calibrated on what to expect.
+  // Endpoint is heuristic-only (no LLM call) so spamming it is cheap.
+  // When projectId is undefined (standalone /runs/new flow) we skip
+  // the estimate — the endpoint requires a projectId for the
+  // historical-run lookback.
+  const [estimate, setEstimate] = useState<LaunchEstimate | null>(null);
+  const [estimating, setEstimating] = useState(false);
+  useEffect(() => {
+    setEstimate(null);
+    const trimmed = text.trim();
+    if (!projectId || trimmed.length < 12) {
+      setEstimating(false);
+      return;
+    }
+    setEstimating(true);
+    const handle = setTimeout(() => {
+      estimateRun(projectId, trimmed)
+        .then((r) => {
+          setEstimate(r);
+          setEstimating(false);
+        })
+        .catch(() => {
+          // Silent fallback — estimate is decoration; the real cost
+          // shows up on the PlanCard a few seconds later.
+          setEstimate(null);
+          setEstimating(false);
+        });
+    }, 1500);
+    return () => clearTimeout(handle);
+  }, [projectId, text]);
+
   const canSubmit = text.trim().length > 0 && !submitting;
 
   async function onSubmit(e: React.FormEvent) {
@@ -111,29 +199,47 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
     setError(null);
     try {
       // Optimistic bubble — visible BEFORE the network round-trip so the
-      // chat feels immediate even when the planner takes 5-7s.
+      // chat feels immediate even when the planner takes 5-7s. Skipped
+      // in the project-less flow (/runs/new) since there's no chat
+      // surface to mount the bubbles into — we redirect to /runs/{id}
+      // on success instead.
       const tempId = `tmp-${Date.now()}`;
-      pushBubble({
-        id: tempId,
-        role: 'user',
-        text: text.trim(),
-        createdAt: new Date().toISOString(),
-      });
-      pushBubble({
-        id: `${tempId}-assistant`,
-        role: 'assistant',
-        kind: 'status',
-        status: 'planning',
-        text: 'Planning…',
-        createdAt: new Date().toISOString(),
-      });
+      if (projectId) {
+        pushBubble({
+          id: tempId,
+          role: 'user',
+          text: text.trim(),
+          createdAt: new Date().toISOString(),
+        });
+        pushBubble({
+          id: `${tempId}-assistant`,
+          role: 'assistant',
+          kind: 'status',
+          status: 'planning',
+          text: 'Planning…',
+          createdAt: new Date().toISOString(),
+        });
+      }
       const submittedText = text.trim();
       setText('');
+      const parsedCap = userCostCap.trim() ? Number(userCostCap.trim()) : undefined;
       const resp = await createRun({
         userRequest: submittedText,
         executionMode: mode === 'quick' ? 'PROTOTYPE' : 'PRODUCTION',
         aiProvider: provider,
-        projectId,
+        // Only forward projectId when set — backend treats omitted as
+        // a standalone unlinked run.
+        ...(projectId ? {projectId} : {}),
+        // Audit r5 (#5, 2026-05-06) — staged-PR-before-push override.
+        skipAutoPush: skipAutoPush || undefined,
+        // 2026-05-06 (PA-6 Run Launch port) — Figma URL / TDD / Stop at $X
+        // come from the Advanced expander; only forward when set so an
+        // empty Advanced section keeps the request body minimal.
+        ...(figmaUrl.trim() ? {figmaUrl: figmaUrl.trim()} : {}),
+        ...(tddMode ? {tddMode: true} : {}),
+        ...(parsedCap !== undefined && Number.isFinite(parsedCap) && parsedCap > 0
+          ? {userCostCap: parsedCap}
+          : {}),
       });
       // R-160 — every run submission counts; the backend dedupes the
       // first-time vs repeat distinction via EventTrackingService.
@@ -143,17 +249,24 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         mode,
         textLen: submittedText.length,
       });
-      // Mark the planning bubble with the real runId so SSE updates can
-      // morph it into a PlanCard / ResultCard.
-      pushBubble({
-        id: `run-${resp.runId}`,
-        role: 'assistant',
-        kind: 'run',
-        runId: resp.runId,
-        status: 'PLANNING',
-        createdAt: new Date().toISOString(),
-        replacesId: `${tempId}-assistant`,
-      });
+      if (projectId) {
+        // Mark the planning bubble with the real runId so SSE updates can
+        // morph it into a PlanCard / ResultCard inside the project chat.
+        pushBubble({
+          id: `run-${resp.runId}`,
+          role: 'assistant',
+          kind: 'run',
+          runId: resp.runId,
+          status: 'PLANNING',
+          createdAt: new Date().toISOString(),
+          replacesId: `${tempId}-assistant`,
+        });
+      } else {
+        // Standalone run — there's no chat thread to morph into a
+        // PlanCard, so jump directly to the run detail page where the
+        // user can watch the planner come through SSE.
+        navigate(`/runs/${resp.runId}`);
+      }
     } catch (err) {
       const msg = (err as Error)?.message ?? 'Submit failed';
       setError(msg);
@@ -186,6 +299,38 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           }}
         >
           {heroLabel}
+        </div>
+      )}
+
+      {/* Audit r5 (#9, 2026-05-06) — first-run coachmark. The empty-state
+          composer used to drop a new user straight into a textarea + 3
+          sample chips with no narrative for what happens next. Two lines
+          of plain English up front prevent the "I typed something, now
+          what?" moment when planner takes ~5–7s to come back. We only
+          show this on the empty hero (isEmpty) — the inline-thread
+          composer hides it because returning users have already seen
+          the flow. */}
+      {isEmpty && (
+        <div
+          style={{
+            textAlign: 'center',
+            color: 'var(--v3-text-muted)',
+            fontSize: 13,
+            lineHeight: 1.55,
+            marginBottom: 14,
+            maxWidth: 540,
+            marginLeft: 'auto',
+            marginRight: 'auto',
+          }}
+        >
+          <span style={{color: 'var(--v3-text-subtle)'}}>
+            <strong style={{color: 'var(--v3-text-muted)'}}>How it works:</strong> describe what you
+            want →{' '}
+          </span>
+          <span style={{color: 'var(--v3-text-muted)'}}>we draft a plan + cost estimate →</span>{' '}
+          <span style={{color: 'var(--v3-text-muted)'}}>you approve →</span>{' '}
+          <span style={{color: 'var(--v3-text-muted)'}}>we ship a draft PR.</span>{' '}
+          <span style={{color: 'var(--v3-text-subtle)'}}>Takes ~30–90s. Free plan, no card.</span>
         </div>
       )}
 
@@ -281,6 +426,38 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           }}
         />
 
+        {/* Audit r5 (#1, 2026-05-06): pre-submit cost estimate.
+            Heuristic, no LLM call — shows the user roughly what to
+            expect at the Approve gate before they hit Submit. Hidden
+            until the spec is at least 12 chars, which keeps the chip
+            from flickering on every keystroke. */}
+        {(estimating || estimate) && (
+          <div
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: 'var(--v3-text-subtle)',
+              fontFamily: 'inherit',
+            }}
+            aria-live='polite'
+          >
+            {estimating && !estimate ? (
+              <span style={{opacity: 0.7}}>Estimating cost…</span>
+            ) : estimate ? (
+              <span>
+                ~{estimate.estimatedTasksLow}–{estimate.estimatedTasksHigh} tasks · ~$
+                {estimate.estimatedCostLow.toFixed(2)}–${estimate.estimatedCostHigh.toFixed(2)}
+                <span
+                  style={{marginLeft: 6, opacity: 0.65}}
+                  title='Heuristic from historical run data; the Approve gate shows the real estimate once the planner finishes.'
+                >
+                  ({estimate.basis})
+                </span>
+              </span>
+            ) : null}
+          </div>
+        )}
+
         <div
           style={{
             display: 'flex',
@@ -315,6 +492,24 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
               }}
             >
               {mode === 'quick' ? RUN_MODE_QUICK : RUN_MODE_PLAN_REVIEW}
+            </button>
+            <button
+              type='button'
+              onClick={() => setRefineOpen(true)}
+              title='Chat with a requirements analyst to refine your spec before submitting.'
+              style={{
+                padding: '3px 8px',
+                fontSize: 11,
+                fontWeight: 500,
+                background: 'transparent',
+                color: 'var(--accent-blue-text, var(--v3-brand))',
+                border: '1px solid color-mix(in srgb, var(--v3-brand) 40%, transparent)',
+                borderRadius: 999,
+                cursor: 'pointer',
+                fontFamily: 'inherit',
+              }}
+            >
+              ✨ Refine with assistant
             </button>
             <button
               type='button'
@@ -386,6 +581,106 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
                 ))}
               </select>
             </label>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+                fontSize: 11,
+                color: 'var(--v3-text-muted)',
+                cursor: 'pointer',
+              }}
+              title='When on, we still execute the run end-to-end but skip pushing to GitHub on success. Use it to preview the diff before shipping.'
+            >
+              <input
+                type='checkbox'
+                checked={skipAutoPush}
+                onChange={(e) => setSkipAutoPush(e.target.checked)}
+                style={{marginTop: 2}}
+              />
+              <span>
+                <span style={{fontWeight: 500}}>Stage as draft</span>
+                <span style={{display: 'block', fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
+                  Skip auto-push; review diff first.
+                </span>
+              </span>
+            </label>
+
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 6,
+                fontSize: 11,
+                color: 'var(--v3-text-muted)',
+                cursor: 'pointer',
+              }}
+              title='When on, the planner emits test tasks first and implementation tasks declare dependsOn the test ids. The worker writes the tests, the user approves, then implementation runs.'
+            >
+              <input
+                type='checkbox'
+                checked={tddMode}
+                onChange={(e) => setTddMode(e.target.checked)}
+                style={{marginTop: 2}}
+              />
+              <span>
+                <span style={{fontWeight: 500}}>TDD mode</span>
+                <span style={{display: 'block', fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
+                  Tests first, then implementation.
+                </span>
+              </span>
+            </label>
+
+            <label style={{display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11}}>
+              <span style={{color: 'var(--v3-text-muted)', fontWeight: 500}}>
+                Figma URL
+                <span style={{color: 'var(--v3-text-subtle)', fontWeight: 400}}> (optional)</span>
+              </span>
+              <input
+                type='url'
+                value={figmaUrl}
+                onChange={(e) => setFigmaUrl(e.target.value)}
+                placeholder='https://www.figma.com/file/…'
+                style={{
+                  padding: '4px 6px',
+                  background: 'var(--v3-bg)',
+                  color: 'var(--v3-text)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                }}
+              />
+            </label>
+
+            <label style={{display: 'flex', flexDirection: 'column', gap: 4, fontSize: 11}}>
+              <span style={{color: 'var(--v3-text-muted)', fontWeight: 500}}>
+                Stop at $
+                <span style={{color: 'var(--v3-text-subtle)', fontWeight: 400}}> (optional)</span>
+              </span>
+              <input
+                type='number'
+                step='0.10'
+                min='0.10'
+                max='1000'
+                value={userCostCap}
+                onChange={(e) => setUserCostCap(e.target.value)}
+                placeholder='e.g. 5.00'
+                style={{
+                  padding: '4px 6px',
+                  background: 'var(--v3-bg)',
+                  color: 'var(--v3-text)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 4,
+                  fontSize: 12,
+                  fontFamily: 'inherit',
+                }}
+              />
+              <span style={{fontSize: 10.5, color: 'var(--v3-text-subtle)'}}>
+                Hard ceiling — the run terminates when spend hits this.
+              </span>
+            </label>
+
             <div
               style={{
                 gridColumn: '1 / -1',
@@ -393,7 +688,7 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
                 color: 'var(--v3-text-subtle)',
               }}
             >
-              Branch · Figma · Confluence · JIRA · TDD — more options coming soon.
+              Branch · Confluence · JIRA · spec templates — more options coming soon.
             </div>
           </div>
         )}
@@ -466,6 +761,14 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         >
           ⌘ + Enter to submit
         </div>
+      )}
+
+      {refineOpen && (
+        <ConversationModal
+          initialText={text}
+          onUseSpec={(spec) => setText(spec)}
+          onClose={() => setRefineOpen(false)}
+        />
       )}
     </form>
   );

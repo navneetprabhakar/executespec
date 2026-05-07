@@ -155,21 +155,8 @@ export default function LandingPage() {
               page max per the strategy; "merge" is the verb the whole
               pitch hangs on. Mirrors website's text-gradient-orange
               treatment via --v3-pop-grad (orange→amber). */}
-          <span
-            style={{
-              fontStyle: 'italic',
-              fontFamily: "'Instrument Serif', Georgia, serif",
-              fontWeight: 500,
-              backgroundImage: 'var(--v3-pop-grad)',
-              backgroundClip: 'text',
-              WebkitBackgroundClip: 'text',
-              color: 'transparent',
-              WebkitTextFillColor: 'transparent',
-            }}
-          >
-            merge
-          </span>{' '}
-          — for one repo or for twenty.
+          <span style={{color: 'var(--c-pop-orange)', fontWeight: 700}}>merge</span> — for one repo
+          or for twenty.
         </h1>
         <p
           style={{
@@ -546,7 +533,7 @@ function DemoAnimation() {
         border: '1px solid var(--v3-border-strong)',
         borderRadius: 10,
         padding: '14px 16px',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: 'var(--v3-font-mono)',
         fontSize: 12.5,
       }}
     >
@@ -742,14 +729,8 @@ function TrustedByStrip({snapshot}: {snapshot?: V3ExecSnapshot | null}) {
           >
             <span
               style={{
-                backgroundImage: 'var(--v3-pop-grad)',
-                backgroundClip: 'text',
-                WebkitBackgroundClip: 'text',
-                color: 'transparent',
-                WebkitTextFillColor: 'transparent',
-                fontFamily: "'Instrument Serif', Georgia, serif",
-                fontStyle: 'italic',
-                fontWeight: 500,
+                color: 'var(--c-pop-orange)',
+                fontWeight: 700,
                 fontSize: 22,
               }}
             >
