@@ -117,7 +117,7 @@ public class ReferralService {
       if (displayName == null || displayName.isBlank()) {
         displayName = referrer.getEmail();
       }
-      mailService.sendV3ReferralInvite(normalised, displayName, invite.getToken());
+      mailService.sendReferralInvite(normalised, displayName, invite.getToken());
     } catch (Exception mailErr) {
       log.warn(
           "v3 referral email failed for invite={} — recorded but not delivered: {}",

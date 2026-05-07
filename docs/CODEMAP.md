@@ -1,6 +1,6 @@
 # ExecuteSpec — Codemap
 
-> **STALE-PATH NOTE (2026-05-07):** the package map below uses `v2/<sub>/` paths from before the unification pass on `feature/programbench-benchmark`. Mentally rewrite each `v2/<sub>/` as just `<sub>/` (e.g. `v2/agent/` is now `agent/`, `v2/harness/` is now `harness/`, `v2/tool/` is now `tool/`, etc.). Class names with `V2`/`V3` suffixes (`LlmRouterV2`, `ReviewerAgentV3`, `ReviewReportV2`, `WorkerAgentV2`, `ShellToolV2`, etc.) are also unsuffixed in the current source. The new top-level `programbench/` package holds the ProgramBench adapter (`ContainerStore`, `Properties`, `Bootstrap`, `TaskService`, `Controller`). A full rewrite of this file is on the post-merge cleanup queue.
+> **STALE-PATH NOTE (2026-05-07):** the package map below uses `v2/<sub>/` paths from before the unification pass on `feature/programbench-benchmark`. Mentally rewrite each `v2/<sub>/` as just `<sub>/` (e.g. `agent/` is now `agent/`, `harness/` is now `harness/`, `tool/` is now `tool/`, etc.). Class names with `V2`/`V3` suffixes (`LlmRouter`, `ReviewerAgent`, `ReviewReport`, `WorkerAgent`, `ShellTool`, etc.) are also unsuffixed in the current source. The new top-level `programbench/` package holds the ProgramBench adapter (`ContainerStore`, `Properties`, `Bootstrap`, `TaskService`, `Controller`). A full rewrite of this file is on the post-merge cleanup queue.
 
 
 > Structural index of `src/main/java/com/navneet/executespec/` as of 2026-04-25.
@@ -88,21 +88,21 @@ The V2 pipeline is the only active path. V1 was deleted in deprecation P1–P6 (
 
 | Subpackage | Key files | Purpose |
 |------------|-----------|---------|
-| `v2/agent/` | `SmartClassifierAgent`, `OutlinePlannerAgent`, `TaskExpanderAgent`, `CoherencePlannerAgent`, `PlannerOutputUtils`, `PlanStrategy`, `PlanStrategyCircuitBreaker`, `ClassificationResult`, `WorkerAgentV2`, `LlmRouterV2`, `OpenAiNativeToolClient`, `GeminiNativeToolClient` | Hierarchical planner pipeline (classify → outline → expand → coherence) + per-task worker loop + native-tool LLM dispatch. (v2.6.2-track on `feature/hierarchical-planner`; legacy `PlannerAgentV2` + `prompts/v2/planner.md` were deleted in slice 5b. The `hierarchical-planner-plan.md` design doc was archived in the 2026-04-26 cleanup pass now that all 5 slices are shipped on the branch.) |
-| `v2/tool/` | `ToolRegistryV2`, `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `ListFilesTool`, `SearchFilesTool`, `ShellTool`, `GitStatusTool`, `GitDiffTool`, `GitCommitTool`, `BuildProjectTool`, `CompleteTaskTool` | 10 tools + native termination |
-| `v2/harness/` | `SequentialExecutorV2` | Per-task tier-routed worker dispatch + smoke + retry. **2026-05-04**: gained `execute(req, ResumeRequest)` — when called with a non-null `ResumeRequest`, walks every PlannedTask and decides per-task SKIP_TERMINAL / RESUME_FROM_SNAPSHOT / RUN_FRESH based on the persisted `agent_task.status`. The resume target's Redis snapshot is loaded and handed to a new `WorkerAgent.run(req, SavedContext)` overload that resumes the iteration loop at `iter+1`. |
-| `v2/reviewer/` | `ReviewerAgentV3` | General + wiring passes (project-type-aware) |
-| `v2/integration/` | `V2RunOrchestrator` | Entry point: planner → gate → executor → reviewer → terminal. **2026-05-04**: gained `resumeAfterCrash(runId)` for boot-time crash recovery — reads persisted plan from `pipeline_run.plan_json`, reuses workspace, calls `SequentialExecutor.execute(req, ResumeRequest)` with auto-detect target, re-runs reviewer + report. Returns `CrashResumeOutcome.{OK, NOT_FOUND, NOT_APPLICABLE, EXHAUSTED, WORKSPACE_GONE, PLAN_MISSING}`. |
-| `v2/context/` | `ContextStoreV2` | Redis snapshot per task (24h TTL, every 5 iters) |
-| `v2/cost/` | `V2RunCostTracker` | Per-call token + $ accumulator (Anthropic cache-aware) |
-| `v2/observability/` | `V2Metrics` | `executespec.v2.*` Micrometer meters |
-| `v2/recovery/` | `StartupRunResumerV2` | Boot-time crash recovery for non-terminal V2 runs — **2026-05-04: full replay landed**. `AWAITING_APPROVAL` stays as-is; salvageable runs (executor done, reviewer interrupted) flip to COMPLETE; otherwise calls `RunOrchestrator.resumeAfterCrash(runId)` which loads the persisted plan + Redis worker snapshot and re-dispatches. Cap of 3 resume attempts shared with the legacy fail-clean fallback. Workspace files at `<agent.workspace>/<runId>/` survive across the JVM restart. |
-| `v2/smoketest/` | `CliSmokeRunner` | CLI smoke runner |
-| `v2/test/` | (V2 test scaffolding) | V2 test plumbing |
-| `v2/batch/` | (skeleton; see `pending-v2-batch-execution-plan.md`) | Batch execution — not yet implemented |
-| `v2/chat/`, `v2/compiler/`, `v2/rollout/` | (auxiliary) | Internal helpers |
+| `agent/` | `SmartClassifierAgent`, `OutlinePlannerAgent`, `TaskExpanderAgent`, `CoherencePlannerAgent`, `PlannerOutputUtils`, `PlanStrategy`, `PlanStrategyCircuitBreaker`, `ClassificationResult`, `WorkerAgent`, `LlmRouter`, `OpenAiNativeToolClient`, `GeminiNativeToolClient` | Hierarchical planner pipeline (classify → outline → expand → coherence) + per-task worker loop + native-tool LLM dispatch. (v2.6.2-track on `feature/hierarchical-planner`; legacy `PlannerAgentV2` + `prompts/planner.md` were deleted in slice 5b. The `hierarchical-planner-plan.md` design doc was archived in the 2026-04-26 cleanup pass now that all 5 slices are shipped on the branch.) |
+| `tool/` | `ToolRegistry`, `ReadFileTool`, `WriteFileTool`, `EditFileTool`, `ListFilesTool`, `SearchFilesTool`, `ShellTool`, `GitStatusTool`, `GitDiffTool`, `GitCommitTool`, `BuildProjectTool`, `CompleteTaskTool` | 10 tools + native termination |
+| `harness/` | `SequentialExecutor` | Per-task tier-routed worker dispatch + smoke + retry. **2026-05-04**: gained `execute(req, ResumeRequest)` — when called with a non-null `ResumeRequest`, walks every PlannedTask and decides per-task SKIP_TERMINAL / RESUME_FROM_SNAPSHOT / RUN_FRESH based on the persisted `agent_task.status`. The resume target's Redis snapshot is loaded and handed to a new `WorkerAgent.run(req, SavedContext)` overload that resumes the iteration loop at `iter+1`. |
+| `reviewer/` | `ReviewerAgent` | General + wiring passes (project-type-aware) |
+| `integration/` | `RunOrchestrator` | Entry point: planner → gate → executor → reviewer → terminal. **2026-05-04**: gained `resumeAfterCrash(runId)` for boot-time crash recovery — reads persisted plan from `pipeline_run.plan_json`, reuses workspace, calls `SequentialExecutor.execute(req, ResumeRequest)` with auto-detect target, re-runs reviewer + report. Returns `CrashResumeOutcome.{OK, NOT_FOUND, NOT_APPLICABLE, EXHAUSTED, WORKSPACE_GONE, PLAN_MISSING}`. |
+| `context/` | `ContextStore` | Redis snapshot per task (24h TTL, every 5 iters) |
+| `cost/` | `RunCostTracker` | Per-call token + $ accumulator (Anthropic cache-aware) |
+| `observability/` | `Metrics` | `executespec.v2.*` Micrometer meters |
+| `recovery/` | `StartupRunResumerV2` | Boot-time crash recovery for non-terminal V2 runs — **2026-05-04: full replay landed**. `AWAITING_APPROVAL` stays as-is; salvageable runs (executor done, reviewer interrupted) flip to COMPLETE; otherwise calls `RunOrchestrator.resumeAfterCrash(runId)` which loads the persisted plan + Redis worker snapshot and re-dispatches. Cap of 3 resume attempts shared with the legacy fail-clean fallback. Workspace files at `<agent.workspace>/<runId>/` survive across the JVM restart. |
+| `smoketest/` | `CliSmokeRunner` | CLI smoke runner |
+| `test/` | (V2 test scaffolding) | V2 test plumbing |
+| `batch/` | (skeleton; see `pending-v2-batch-execution-plan.md`) | Batch execution — not yet implemented |
+| `chat/`, `compiler/`, `rollout/` | (auxiliary) | Internal helpers |
 
-Entry point: `V2RunOrchestrator.submitRun(...)` — see [ARCHITECTURE.md §3 V2 pipeline](ARCHITECTURE.md).
+Entry point: `RunOrchestrator.submitRun(...)` — see [ARCHITECTURE.md §3 V2 pipeline](ARCHITECTURE.md).
 
 ---
 
@@ -308,7 +308,7 @@ ENTERPRISE + MAX project-level workbench for multi-repo, multi-solution work.
 | `src/main/resources/application.yml` | All Spring config: model matrix, failover order, model pricing, provider pool, feature flags, billing gateway, security |
 | `src/main/resources/application-prod.yml` | Prod overrides — Stripe default gateway, env-gated billing flags |
 | `src/main/resources/db/migration/` | Flyway V1–V130 (V130 `hierarchical_planner` committed on `feature/hierarchical-planner`; not yet merged to `dev`/`main`) |
-| `src/main/resources/prompts/` | All LLM prompt files. `prompts/v2/{classifier.md, outline-planner.md, outline-planner-skeleton.md, task-expander.md, coherence-planner.md, worker.md}`, `prompts/fragments/`, `prompts/scaffolds/` (legacy `prompts/v2/planner.md` deleted in slice 5b of the hierarchical-planner work) |
+| `src/main/resources/prompts/` | All LLM prompt files. `prompts/{classifier.md, outline-planner.md, outline-planner-skeleton.md, task-expander.md, coherence-planner.md, worker.md}`, `prompts/fragments/`, `prompts/scaffolds/` (legacy `prompts/planner.md` deleted in slice 5b of the hierarchical-planner work) |
 | `src/main/resources/sample-specs/` | 3 onboarding samples (web-api, frontend, cli) loaded by `SampleSpecRegistry` |
 | `src/main/resources/static/` | Frontend bundle (built by `npm --prefix frontend run build`) |
 | `src/main/resources/templates/email/` | 17 email templates |
@@ -370,9 +370,9 @@ Older ranges are documented in `JAVADOC.md §21.1 Flyway Migrations` and `DEPLOY
 
 | If you're trying to… | Start at |
 |----------------------|---------|
-| Understand the V2 run pipeline | `v2/integration/V2RunOrchestrator.java` |
-| Debug a planner issue | `v2/agent/OutlinePlannerAgent.java` (FULL_PLAN / SKELETON_ONLY modes) + `v2/agent/SmartClassifierAgent.java` (Phase 0) + `v2/agent/TaskExpanderAgent.java` (Phase 2 parallel) + `v2/agent/CoherencePlannerAgent.java` (Phase 3) + `prompts/v2/{classifier, outline-planner, outline-planner-skeleton, task-expander, coherence-planner}.md` |
-| Add or modify an LLM tool | `v2/tool/` (subclass `Tool`) + register in `ToolRegistryV2` |
+| Understand the V2 run pipeline | `integration/RunOrchestrator.java` |
+| Debug a planner issue | `agent/OutlinePlannerAgent.java` (FULL_PLAN / SKELETON_ONLY modes) + `agent/SmartClassifierAgent.java` (Phase 0) + `agent/TaskExpanderAgent.java` (Phase 2 parallel) + `agent/CoherencePlannerAgent.java` (Phase 3) + `prompts/{classifier, outline-planner, outline-planner-skeleton, task-expander, coherence-planner}.md` |
+| Add or modify an LLM tool | `tool/` (subclass `Tool`) + register in `ToolRegistry` |
 | Add a new REST endpoint | `api/controller/` + register in OpenAPI spec |
 | Add a new feature flag | `config/featureflag/FeatureFlagService` + seed migration |
 | Trace billing flow | `billing/service/BillingService` → `billing/gateway/PaymentGatewayRouter` |

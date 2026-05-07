@@ -3,7 +3,7 @@
 > **User journey diagrams** for every major feature flow, rendered with Mermaid.
 
 > **⚠️ V2-only as of 2026-04-13.** Diagrams below referencing `PipelineHarness`,
-> `CompilerAgent`, `ReviewerAgentV2`, `SubtaskDecomposer`, batch flows
+> `CompilerAgent`, `ReviewerAgent`, `SubtaskDecomposer`, batch flows
 > (`QUEUED_BATCH` → `BATCH_COMPLETE`), or merge / clarification gates describe
 > the retired V1 pipeline. The current V2 flow is:
 > **PLANNING → AWAITING_APPROVAL → WORKING → REVIEWING → COMPLETE** (no batch,
@@ -12,7 +12,7 @@
 > for the canonical V2 flow.
 >
 > **v2.5.10 — status transitions with reason.** Terminal status is now decided
-> by `V2RunOrchestrator.resolveTerminalStatus()` which returns a
+> by `RunOrchestrator.resolveTerminalStatus()` which returns a
 > `{status, reason}` pair. PARTIAL always carries a reason
 > (`CLEAN_WITH_INTERMEDIATE_WARNINGS` / `FINAL_BUILD_FAILED` /
 > `TESTS_FAILED:N_OF_M` / `REVIEWER_UNRESOLVED` / `REVIEWER_FAILED` /
@@ -196,7 +196,7 @@ After the run is marked COMPLETE and the preview is started, a background virtua
 flowchart TD
     A([Run marked COMPLETE]) --> B[Auto-start preview — 5-min TTL]
     B --> C[Spawn background virtual thread: bg-validation-runId]
-    C --> D[ReviewerAgentV2 — PLANNING tier — inspects merged code, README gate softened for small runs: taskCount <= 5 -> MINOR]
+    C --> D[ReviewerAgent — PLANNING tier — inspects merged code, README gate softened for small runs: taskCount <= 5 -> MINOR]
     D --> E{Issues found?}
     E -->|Yes| F[Auto-fix applied — commit to main]
     E -->|No| G[Review clean]
@@ -231,7 +231,7 @@ flowchart TD
 sequenceDiagram
     participant PH as PipelineHarness
     participant BG as Background Thread
-    participant RV as ReviewerAgentV2
+    participant RV as ReviewerAgent
     participant TG as TestGenOrchestrator
     participant TP as TestPreviewCoordinator
     participant PS as PreviewService
@@ -1233,7 +1233,7 @@ sequenceDiagram
 
 | Tier | Purpose | Agents | OpenAI | Anthropic | Google |
 |------|---------|--------|--------|-----------|--------|
-| PLANNING | Strategic reasoning, complex review | PlannerAgent, ReviewerAgentV2 | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-3-flash-preview` |
+| PLANNING | Strategic reasoning, complex review | PlannerAgent, ReviewerAgent | `gpt-5.4` | `claude-sonnet-4-6` | `gemini-3-flash-preview` |
 | WORKHORSE | Code generation, compilation, testing | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, PromptOptimiserAgent, ValidationReportGenerator | `gpt-5.4` | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` |
 | LIGHTWEIGHT | Conversation, context, reporting | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `gpt-5.4` | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` |
 

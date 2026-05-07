@@ -24,7 +24,7 @@ Port V1's batch-execution path to V2 primitives. Users who approve a plan in BAT
    - **(d) Single-shot workers** — at plan approval in batch mode, the planner's `SINGLE_SHOT` path is forced; worker call is one turn with all tools the model can take, completeTask returns result. Requires planner to classify aggressively; breaks for anything non-trivial.
 
    **Proposed: (a) for v1.** Batch the first worker turn per task (usually reads + first writes). Any remaining turns go realtime. Document the tradeoff; revisit after measuring actual discount capture.
-3. **Retry semantics** — V1 auto-retries failed batch tasks in realtime. Same in V2? **Proposed: yes, unchanged. Retry via `SequentialExecutorV2`.**
+3. **Retry semantics** — V1 auto-retries failed batch tasks in realtime. Same in V2? **Proposed: yes, unchanged. Retry via `SequentialExecutor`.**
 4. **Credit refund on partial batch failure** — V1 refunds only on full FAILURE. If 3/4 tasks succeed in batch + 1 retries realtime, net credits may exceed initial estimate. **Proposed: keep V1 behaviour — no refund on partial, retry cost absorbed by the 50% headroom.**
 
 ## Architecture
@@ -33,7 +33,7 @@ Port V1's batch-execution path to V2 primitives. Users who approve a plan in BAT
 [plan approval: executionMode=BATCH]
         │
         ▼
-V2RunOrchestrator.submit() ── routes to ──▶ V2BatchCoordinator.submit(plan)
+RunOrchestrator.submit() ── routes to ──▶ V2BatchCoordinator.submit(plan)
                                                     │
                                                     ├─▶ V2BatchRequestBuilder.build(task, plan, ctx)
                                                     │      (one BatchRequest per task's first turn)
@@ -58,32 +58,32 @@ V2RunOrchestrator.submit() ── routes to ──▶ V2BatchCoordinator.submit(
                                                     │  parse results → write files → append to history
                                                     │
                                                     ▼
-                                         SequentialExecutorV2.continueFromBatch(runId, perTaskHistory)
+                                         SequentialExecutor.continueFromBatch(runId, perTaskHistory)
                                                     │  for each task:
                                                     │    if first-turn hit completeTask → record SUCCESS
-                                                    │    else resume loop realtime (WorkerAgentV2)
+                                                    │    else resume loop realtime (WorkerAgent)
                                                     ▼
                                          Normal V2 post-exec path: reviewer → report → testgen → preview
 ```
 
 New V2 classes:
-- `v2/batch/V2BatchCoordinator.java` — entry point called by orchestrator
-- `v2/batch/V2BatchRequestBuilder.java` — composes a batch request from a `PlannedTaskV2` + initial system/user prompt + tool schema
-- `v2/batch/V2BatchClient.java` — provider-agnostic interface (submit / poll / fetchResults / cancel)
-- `v2/batch/V2AnthropicBatchClient.java`
-- `v2/batch/V2OpenAiBatchClient.java`
-- `v2/batch/V2GeminiBatchClient.java`
-- `v2/batch/V2BatchClientRouter.java` — provider → client dispatcher
-- `v2/batch/V2BatchPollService.java` — `@Scheduled(30s)` + `@SchedulerLock`
-- `v2/batch/V2BatchResumeService.java` — parse results, hand off to executor
-- `v2/batch/BatchJob.java` (record) — in-flight job state persisted to DB (or Redis + DB for recovery)
-- `v2/batch/BatchTaskResult.java` — per-task result: assistant message + tool calls
+- `batch/V2BatchCoordinator.java` — entry point called by orchestrator
+- `batch/V2BatchRequestBuilder.java` — composes a batch request from a `PlannedTaskV2` + initial system/user prompt + tool schema
+- `batch/V2BatchClient.java` — provider-agnostic interface (submit / poll / fetchResults / cancel)
+- `batch/V2AnthropicBatchClient.java`
+- `batch/V2OpenAiBatchClient.java`
+- `batch/V2GeminiBatchClient.java`
+- `batch/V2BatchClientRouter.java` — provider → client dispatcher
+- `batch/V2BatchPollService.java` — `@Scheduled(30s)` + `@SchedulerLock`
+- `batch/V2BatchResumeService.java` — parse results, hand off to executor
+- `batch/BatchJob.java` (record) — in-flight job state persisted to DB (or Redis + DB for recovery)
+- `batch/BatchTaskResult.java` — per-task result: assistant message + tool calls
 
 Reused:
-- `v2/agent/LlmRouterV2.java` — **unchanged**; batch bypasses the router
-- `v2/tool/ToolRegistryV2.java` — reused for tool schema serialization + post-batch local dispatch
-- `v2/agent/WorkerAgentV2.java` — **extended** with `resumeFromBatch(history, ctx)` that picks up at iteration 2+ using the existing loop
-- `v2/harness/SequentialExecutorV2.java` — **extended** with batch-aware task lifecycle (`executeBatch(plan)` splits submission from completion)
+- `agent/LlmRouter.java` — **unchanged**; batch bypasses the router
+- `tool/ToolRegistry.java` — reused for tool schema serialization + post-batch local dispatch
+- `agent/WorkerAgent.java` — **extended** with `resumeFromBatch(history, ctx)` that picks up at iteration 2+ using the existing loop
+- `harness/SequentialExecutor.java` — **extended** with batch-aware task lifecycle (`executeBatch(plan)` splits submission from completion)
 
 ## Component-by-component plan
 
@@ -105,8 +105,8 @@ public interface V2BatchClient {
 public record V2BatchRequest(
         String taskId,                 // correlates response → task
         String model,                  // tier-resolved (HIGH → PLANNING, etc.)
-        List<Message> messages,        // same spring-ai Message list LlmRouterV2 builds
-        List<ToolCallback> tools,      // same tools WorkerAgentV2 would bind
+        List<Message> messages,        // same spring-ai Message list LlmRouter builds
+        List<ToolCallback> tools,      // same tools WorkerAgent would bind
         Double temperature,
         Integer maxTokens) {}
 ```
@@ -142,7 +142,7 @@ for each taskId in plan.tasks():
 
 ### 5. Retry path
 
-Failed or missing results → `SequentialExecutorV2.executeOne(task)` realtime. Already returns proper `TaskOutcome`. No new code; just invocation.
+Failed or missing results → `SequentialExecutor.executeOne(task)` realtime. Already returns proper `TaskOutcome`. No new code; just invocation.
 
 ### 6. SSE + UI
 
@@ -151,7 +151,7 @@ Already wired in V1: `BATCH_PROGRESS`, `BATCH_COMPLETE`, `BATCH_FAILED`. Emit th
 ### 7. Orchestrator wiring
 
 ```java
-// V2RunOrchestrator.submit(...)
+// RunOrchestrator.submit(...)
 if (approvedExecutionMode == BATCH) {
     v2BatchCoordinator.submit(plan);
     // return — poll service drives the rest
@@ -179,7 +179,7 @@ Deliverable: one-page probe report in `docs/v2-batch-probe-notes.md`. No code on
 ### P2 — Single provider end-to-end (1 PR, medium risk)
 7. Implement `V2AnthropicBatchClient` fully (Anthropic batch is the simplest API surface).
 8. Wire `V2BatchCoordinator.submit` → `V2BatchPollService` → `V2BatchResumeService` for Anthropic only.
-9. Implement `WorkerAgentV2.resumeFromBatch(history, ctx)` — extract the existing loop body; two entry points (fresh start / resume).
+9. Implement `WorkerAgent.resumeFromBatch(history, ctx)` — extract the existing loop body; two entry points (fresh start / resume).
 10. Dev-only SSE event asserts resume path produces the same verdict as realtime.
 
 Deliverable: Anthropic batch path works end-to-end behind flag.
@@ -222,22 +222,22 @@ Deliverable: Anthropic batch path works end-to-end behind flag.
 ## Files that will change
 
 ### New (~12 files)
-- `v2/batch/V2BatchClient.java` (interface)
-- `v2/batch/V2BatchClientRouter.java`
-- `v2/batch/V2AnthropicBatchClient.java`
-- `v2/batch/V2OpenAiBatchClient.java`
-- `v2/batch/V2GeminiBatchClient.java`
-- `v2/batch/V2BatchRequestBuilder.java`
-- `v2/batch/V2BatchCoordinator.java`
-- `v2/batch/V2BatchPollService.java`
-- `v2/batch/V2BatchResumeService.java`
-- `v2/batch/V2BatchJob.java`, `V2BatchRequest.java`, `V2BatchTaskResult.java` (records)
+- `batch/V2BatchClient.java` (interface)
+- `batch/V2BatchClientRouter.java`
+- `batch/V2AnthropicBatchClient.java`
+- `batch/V2OpenAiBatchClient.java`
+- `batch/V2GeminiBatchClient.java`
+- `batch/V2BatchRequestBuilder.java`
+- `batch/V2BatchCoordinator.java`
+- `batch/V2BatchPollService.java`
+- `batch/V2BatchResumeService.java`
+- `batch/V2BatchJob.java`, `V2BatchRequest.java`, `V2BatchTaskResult.java` (records)
 - Tests: contract fixture per provider + integration test + unit tests
 
 ### Modified
-- `v2/integration/V2RunOrchestrator.java` — BATCH branch
-- `v2/harness/SequentialExecutorV2.java` — `continueFromBatch(...)` entry point
-- `v2/agent/WorkerAgentV2.java` — `resumeFromBatch(history, ctx)` method
+- `integration/RunOrchestrator.java` — BATCH branch
+- `harness/SequentialExecutor.java` — `continueFromBatch(...)` entry point
+- `agent/WorkerAgent.java` — `resumeFromBatch(history, ctx)` method
 - `scripts/v2-eval.sh` — `--mode batch` flag
 - `CLAUDE.md`, `docs/USER_MANUAL.md`, `CHANGELOG.md`, `VERSION`
 

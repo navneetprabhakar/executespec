@@ -52,10 +52,10 @@ distinct customer-facing capabilities**, in roughly this order of investment:
    completeTask) until it self-terminates. A reviewer agent runs general
    + wiring passes. A validation report records build/test/reviewer signals
    plus an LLM "accuracy" score. The run can auto-push to GitHub as a PR.
-   Source: `v2/integration/RunOrchestrator.java`,
-   `v2/agent/{PlannerAgent, WorkerAgent}.java`,
-   `v2/harness/SequentialExecutor.java`,
-   `v2/reviewer/ReviewerAgentV3.java`,
+   Source: `integration/RunOrchestrator.java`,
+   `agent/{PlannerAgent, WorkerAgent}.java`,
+   `harness/SequentialExecutor.java`,
+   `reviewer/ReviewerAgent.java`,
    `report/ValidationReportService.java`.
 
 2. **Project workspace.** A `Project` belongs to an `Org`, holds a list of
@@ -417,7 +417,7 @@ Strings are hardcoded in `frontend/src/pages/SettingsPage.tsx` and
 `frontend/src/v3/pages/BillingPage.tsx`. Fix: drive every plan-card number
 from `GET /api/billing/plans` (or `tier_config` via a dedicated
 entitlements endpoint), not from inline JSX strings. There is already a
-`V3EntitlementsController` shaped for exactly this.
+`EntitlementsController` shaped for exactly this.
 
 **P1-3 — Pro tier is the upsell target on Billing for new users, but it's
 closed to new buyers.** "Existing subscribers only — new buyers, choose
@@ -723,7 +723,7 @@ of, given the depth of the rest of the platform.
 
 ExecuteSpec is one of those products where the **engine is genuinely
 ahead of the wrapping**. The `RunOrchestrator` → `PlannerAgent` →
-`SequentialExecutor` → `WorkerAgent` → `ReviewerAgentV3` chain produced
+`SequentialExecutor` → `WorkerAgent` → `ReviewerAgent` chain produced
 working, idiomatic, tested Python in under a minute on first try, with
 honest cost accounting, on a $0 budget. That's hard to do.
 

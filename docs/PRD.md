@@ -60,7 +60,7 @@ User (Browser) --> React SPA --> Spring Boot API --> Multi-Agent Pipeline
                                        +-- PostgreSQL       +-- PlannerAgent (PLANNING tier)
                                        +-- Redis            +-- WorkerAgent (WORKHORSE tier)
                                        +-- GitHub           +-- CompilerAgent (WORKHORSE tier)
-                                       +-- Razorpay/Stripe  +-- ReviewerAgentV2 (PLANNING tier)
+                                       +-- Razorpay/Stripe  +-- ReviewerAgent (PLANNING tier)
                                        +-- OAuth2 (Google,  +-- ConversationAgent (LIGHTWEIGHT tier)
                                            GitHub)          +-- TestGenOrchestrator (WORKHORSE/PLANNING)
                                        +-- Feature Flags    +-- RequestTriageService (LIGHTWEIGHT tier)
@@ -129,7 +129,7 @@ GitHub Push (non-blocking) -- branch `executespec/{runId-short}` + auto PR
   |
   v
 Background Validation Thread (non-blocking, emits VALIDATION_FAILED SSE on thread failure):
-  +-- ReviewerAgentV2 -- inspect merged code, auto-fix issues (2 attempts, max 8 issues, softened README gate: taskCount <= 5 -> MINOR)
+  +-- ReviewerAgent -- inspect merged code, auto-fix issues (2 attempts, max 8 issues, softened README gate: taskCount <= 5 -> MINOR)
   +-- TestGenOrchestrator -- generate language-agnostic integration tests
   +-- TestPreviewCoordinator -- reuse existing preview, execute tests
   +-- ValidationReportAgent -- LLM-generated quality summary (non-fatal)
@@ -147,7 +147,7 @@ The system uses a user-selected provider (default: OpenAI) with tier-based model
 
 | Agent Tier | Agents | Anthropic | Google | OpenAI |
 |------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
+| PLANNING | PlannerAgent, ReviewerAgent | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
 | WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, PromptOptimiserAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 | LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
 
@@ -266,7 +266,7 @@ SUPER_ADMIN (global -- full system access)
    -> CompilerAgent validates build
    -> ★ COMPLETE ★ (run done from user perspective)
    -> Auto-preview starts (5-min TTL)
-   -> Background: ReviewerAgentV2 reviews & auto-fixes, tests generated & run
+   -> Background: ReviewerAgent reviews & auto-fixes, tests generated & run
 
 3. PREVIEW
    Click "Preview" -> Cloud Run ephemeral container

@@ -54,7 +54,7 @@ non-additive v2 file edits:
 1. `EventName.java` — Wave 1, appended 8 enum entries (purely additive).
 2. `SecurityConfig.java` — Wave 1+, added permitAll matchers under `/api/v3`
    (additive — anonymous-runs, referrals/lookup).
-3. `V2RunOrchestrator.java` — Wave 3 + ReferralCompletionHook follow-up,
+3. `RunOrchestrator.java` — Wave 3 + ReferralCompletionHook follow-up,
    injected referral hook + delegated 4 lines of terminal-status logic.
    Behaviour unchanged.
 
@@ -122,7 +122,7 @@ page (R-152), help modal (R-153), mobile responsive sweep (R-170).
 **Wave 3 touched:** PWA manifest + service worker (R-171), v2→v3 opt-in
 redirect map (R-180), changelog page + tour banner (R-181), and
 `ReferralService.onRefereeFirstReadyRun` wire-point in
-`V2RunOrchestrator.terminate()`.
+`RunOrchestrator.terminate()`.
 
 ### Post-Wave-3 follow-ups
 | Commit | Subject |
@@ -147,7 +147,7 @@ redirect map (R-180), changelog page + tour banner (R-181), and
 
 The user's "fix highlighted issues in the thread" burn-down resolved:
 
-- **R-162 wire-point integration test:** Extracted `V2RunOrchestrator.terminate()`'s
+- **R-162 wire-point integration test:** Extracted `RunOrchestrator.terminate()`'s
   4-line referral conditional into `ReferralCompletionHook` so the wire-point is
   unit-testable without standing up the orchestrator's 43 collaborators.
   7 new tests (happy path / FAILED / CANCELLED / PARTIAL / null-owner /
@@ -235,17 +235,17 @@ existing PWA assets), so the count stands as of the merge into
 ```bash
 # Re-run from the dev / feature/v3-conversion worktree:
 JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn -q test \
-  -Dtest='ReferralCompletionHookTest,ReferralServiceTest,LifetimeCreditServiceTest,EntitlementResolverTest,V3SignupClaimControllerTest,AnonymousRunServiceTest,ValidationReportServiceVerifiedScoreTest'
+  -Dtest='ReferralCompletionHookTest,ReferralServiceTest,LifetimeCreditServiceTest,EntitlementResolverTest,SignupClaimControllerTest,AnonymousRunServiceTest,ValidationReportServiceVerifiedScoreTest'
 ```
 
 Test paths (all under `src/test/java/com/navneet/executespec/`):
 
-- `v3/referral/ReferralCompletionHookTest.java` — 7 tests (R-162 wire-point)
-- `v3/referral/ReferralServiceTest.java` — 14 tests (record + bind + grant + lookup-by-token)
-- `v3/credit/LifetimeCreditServiceTest.java` — 10 tests (V152 grants/decrements/cap)
-- `v3/entitlements/EntitlementResolverTest.java` — 5 tests (tier→limits resolution)
-- `v3/api/V3SignupClaimControllerTest.java` — 4 tests (post-signup anonymous claim)
-- `v3/anonrun/AnonymousRunServiceTest.java` — 8 tests (R-111 anti-abuse pipeline)
+- `referral/ReferralCompletionHookTest.java` — 7 tests (R-162 wire-point)
+- `referral/ReferralServiceTest.java` — 14 tests (record + bind + grant + lookup-by-token)
+- `credit/LifetimeCreditServiceTest.java` — 10 tests (V152 grants/decrements/cap)
+- `entitlements/EntitlementResolverTest.java` — 5 tests (tier→limits resolution)
+- `api/SignupClaimControllerTest.java` — 4 tests (post-signup anonymous claim)
+- `anonrun/AnonymousRunServiceTest.java` — 8 tests (R-111 anti-abuse pipeline)
 - `report/ValidationReportServiceVerifiedScoreTest.java` — verified-score formula
 
 ---

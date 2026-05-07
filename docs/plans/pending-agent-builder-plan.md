@@ -60,7 +60,7 @@ Four candidate differentiation angles were considered. Decisions:
 |---|---|---|
 | **PR-first output** (vs chat-first) | **YES — default + `comment` mode** | Reuses V2 pipeline; aligned with our "PRs you can merge" story; only Devin defaults this way and they're $500/mo+. |
 | **Repo-scoped permissions** | **PARTIAL — coarse repo-level only** | We have the writer chokepoint (`ExecutespecFolderWriter`) but customers won't grok subdir/glob in v1. Coarse `allowed_repos` first; fine-grained v2. |
-| **Cost-budgeted agents** | **YES — per-run cap only** | `V2RunCostTracker` already exists. Solves the #1 enterprise fear (runaway cost). Per-day/per-month caps deferred to v2. |
+| **Cost-budgeted agents** | **YES — per-run cap only** | `RunCostTracker` already exists. Solves the #1 enterprise fear (runaway cost). Per-day/per-month caps deferred to v2. |
 | **Standards-aware + contract-aware** | **NO — v1.5 / v2** | Real moat (E2/E3 plumbing exists) but most customers haven't populated `org_standard` / `contract_registry` yet. Empty-state risk. Ship Agent Builder v1 first; layer this on once adoption is real. |
 
 ## Format decision
@@ -122,13 +122,13 @@ they can hand it across tools.
 ### Wave 2 — WorkerAgentResolver + tool whitelist (R-328)
 
 - New `WorkerAgentResolver` service: given `(orgId, customAgentId)`,
-  returns either the system default `WorkerAgentV2` config or a
+  returns either the system default `WorkerAgent` config or a
   `CustomWorkerSpec` containing override fields (system prompt,
   tool whitelist, tier, cost cap, allowed repos).
-- `ToolRegistryV2.bind(ctx, allowedToolNames)` overload: filters
+- `ToolRegistry.bind(ctx, allowedToolNames)` overload: filters
   the bound `ToolCallback` list to only the whitelisted tool names
   when non-null. Existing callers unchanged.
-- `WorkerAgentV2.run(WorkerTaskRequest)` already accepts
+- `WorkerAgent.run(WorkerTaskRequest)` already accepts
   `systemPrompt`; no change needed.  We pass the resolved override
   through the existing path.
 - **Tests:** resolver returns null on missing agent (= default);
@@ -143,10 +143,10 @@ they can hand it across tools.
   ALTER TABLE pipeline_run    ADD COLUMN custom_agent_id UUID;
   ```
 - `RunRequest` + `CreateExecutionRequest` gain `customAgentId`.
-- `SequentialExecutorV2` (V2 path) + `SolutionExecutionService`
+- `SequentialExecutor` (V2 path) + `SolutionExecutionService`
   (Execution View path) call `WorkerAgentResolver.resolve(...)`
   and pass overrides into `WorkerTaskRequest`.
-- Cost-cap enforcement via existing `V2RunCostTracker`: when
+- Cost-cap enforcement via existing `RunCostTracker`: when
   `customAgent.per_run_cost_cap_usd` is set, the tracker emits a
   terminal `BudgetExceeded` event when the running total exceeds
   the cap.  V2 orchestrator translates this to a clean run abort
@@ -178,7 +178,7 @@ they can hand it across tools.
     file is committed alongside everything else under
     `.executespec/`).
 - **Validation:** name regex `^[a-z][a-z0-9-]{2,79}$`; system_prompt
-  ≤ 8000 chars; allowed_tools ⊆ `ToolRegistryV2.allKnownToolNames()`;
+  ≤ 8000 chars; allowed_tools ⊆ `ToolRegistry.allKnownToolNames()`;
   agent_tier ∈ valid tiers; allowed_repo_ids ⊆ project's linked
   repos for the calling org.
 - **Tests:** controller integration tests covering happy-path +
@@ -195,7 +195,7 @@ they can hand it across tools.
   repos), output mode toggle (PR / COMMENT), per-run cost cap
   input ($ default 5x typical), requires-approval toggle.
 - `NewRunModal` + V3 launch surface: "Agent" dropdown — default
-  "System default" (= WorkerAgentV2); list of org/user-visible
+  "System default" (= WorkerAgent); list of org/user-visible
   custom agents below.  Tier-gated badge ("TEAM+ to author").
 - `RepoCard` / project dashboard: surface "agents that can touch
   this repo" as a chip.
@@ -234,8 +234,8 @@ they can hand it across tools.
 - Format: [Anthropic Agent Skills spec](https://platform.claude.com/docs/en/agents-and-tools/agent-skills/overview)
 - Industry adoption: [Cursor Skills + Custom Agents](https://cursor.com/changelog/2-4),
   Devin Playbooks, OpenAI Codex CLI Skills.
-- Dependencies in our codebase: V2 pipeline (`V2RunOrchestrator`),
-  `V2RunCostTracker`, `ExecutespecFolderWriter` (E1), `ProjectRepo`
+- Dependencies in our codebase: V2 pipeline (`RunOrchestrator`),
+  `RunCostTracker`, `ExecutespecFolderWriter` (E1), `ProjectRepo`
   (R-322 subdir, R-325 size_kb), `TierEnforcementService` (V140
   caps).
 - Related plans:

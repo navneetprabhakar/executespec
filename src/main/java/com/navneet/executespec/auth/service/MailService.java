@@ -180,7 +180,7 @@ public class MailService {
    * aborts the invite write.
    */
   @Async
-  public void sendV3ReferralInvite(String toEmail, String referrerName, String token) {
+  public void sendReferralInvite(String toEmail, String referrerName, String token) {
     String name = (referrerName == null || referrerName.isBlank()) ? "Your friend" : referrerName;
     Context ctx = new Context();
     ctx.setVariable("referrerName", name);
