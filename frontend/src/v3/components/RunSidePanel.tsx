@@ -502,54 +502,121 @@ function LogPane({runId, live}: {runId: string; live: boolean}) {
             {live ? 'Waiting for events…' : 'No log captured for this run.'}
           </div>
         )}
-        {filtered.map((e) => (
-          <div
-            key={e.id}
-            style={{
-              borderBottom: '1px solid var(--v3-border)',
-              padding: '4px 4px 6px',
-              wordBreak: 'break-word',
-            }}
-          >
-            <span style={{color: 'var(--v3-text-subtle)'}}>
-              {new Date(e.timestamp).toLocaleTimeString()}
-            </span>{' '}
-            <span style={{color: 'var(--v3-brand-hover, var(--v3-brand))', fontWeight: 600}}>
-              {e.type}
-            </span>
-            {Object.keys(e.data ?? {}).length > 0 && (
-              <pre
+        {filtered.map((e) => {
+          const body = formatEventBody(e.data);
+          const tone = typeTone(e.type);
+          const taskId =
+            typeof (e.data as Record<string, unknown>)?.taskId === 'string'
+              ? ((e.data as Record<string, unknown>).taskId as string)
+              : null;
+          return (
+            <div
+              key={e.id}
+              style={{
+                borderBottom: '1px solid var(--v3-border)',
+                padding: '5px 4px 7px',
+                wordBreak: 'break-word',
+                display: 'flex',
+                gap: 8,
+                alignItems: 'baseline',
+              }}
+            >
+              <span style={{color: 'var(--v3-text-subtle)', flexShrink: 0}}>
+                {new Date(e.timestamp).toLocaleTimeString()}
+              </span>
+              <span
                 style={{
-                  margin: '2px 0 0',
-                  fontSize: 10.5,
-                  color: 'var(--v3-text-muted)',
-                  whiteSpace: 'pre-wrap',
+                  color: tone.fg,
+                  background: tone.bg,
+                  border: `1px solid ${tone.bd}`,
+                  fontWeight: 600,
+                  padding: '0 5px',
+                  borderRadius: 3,
+                  fontSize: 10,
+                  letterSpacing: 0.4,
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
                 }}
               >
-                {compactJson(e.data)}
-              </pre>
-            )}
-          </div>
-        ))}
+                {e.type}
+              </span>
+              {taskId && (
+                <span
+                  style={{
+                    color: 'var(--v3-text-subtle)',
+                    fontSize: 10,
+                    flexShrink: 0,
+                  }}
+                >
+                  {taskId}
+                </span>
+              )}
+              {body && (
+                <span
+                  style={{
+                    color: 'var(--v3-text-muted)',
+                    fontSize: 11,
+                    flex: 1,
+                    minWidth: 0,
+                    whiteSpace: 'pre-wrap',
+                  }}
+                >
+                  {body}
+                </span>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function compactJson(d: Record<string, unknown>): string {
-  try {
-    const keys = Object.keys(d);
-    if (keys.length === 0) return '';
-    if (keys.length <= 4) {
-      return keys
-        .map((k) => `${k}=${shortValue(d[k])}`)
-        .join(' · ');
-    }
-    return JSON.stringify(d).slice(0, 240);
-  } catch {
-    return '';
+/**
+ * 2026-05-07 — humanise the SSE event body. The backend wraps every
+ * event in `{type, runId, taskId, payload, timestamp}`; the metadata
+ * is already rendered separately (timestamp + type pill on the row,
+ * runId implicit from the page, taskId rendered as a chip when set),
+ * so the body only needs to surface `payload`. Pre-fix the formatter
+ * fell through to `JSON.stringify(data).slice(0, 240)` for any event
+ * with ≥5 keys — every LOG / TOKEN_USAGE / RUN_STATUS event hit that
+ * branch and rendered as a wall of raw JSON. The user reported "the
+ * live log had better presentation earlier than just showing JSON."
+ *
+ * Strategy:
+ *   - If payload is a string, render it verbatim (most events: LOG
+ *     human-readable text, TOKEN_USAGE summary, RUN_STATUS status name).
+ *   - If payload is an object, compactly key=value-join it (drift-safe
+ *     fallback for new event types we haven't styled yet).
+ *   - Otherwise drop everything that's already covered by the chips.
+ */
+function formatEventBody(d: Record<string, unknown> | null | undefined): string {
+  if (!d) return '';
+  const payload = (d as Record<string, unknown>).payload;
+  if (typeof payload === 'string') return payload;
+  if (payload == null) {
+    // No payload — surface remaining fields except the ones already
+    // chipped at the row level so we don't double-print metadata.
+    const remaining = Object.entries(d).filter(
+      ([k]) => k !== 'type' && k !== 'runId' && k !== 'timestamp' && k !== 'taskId',
+    );
+    if (remaining.length === 0) return '';
+    return remaining.map(([k, v]) => `${k}=${shortValue(v)}`).join(' · ');
   }
+  if (typeof payload === 'object') {
+    try {
+      const entries = Object.entries(payload as Record<string, unknown>);
+      if (entries.length <= 4) {
+        return entries.map(([k, v]) => `${k}=${shortValue(v)}`).join(' · ');
+      }
+      return JSON.stringify(payload).slice(0, 240);
+    } catch {
+      return '';
+    }
+  }
+  return String(payload);
 }
+
 function shortValue(v: unknown): string {
   if (v == null) return 'null';
   if (typeof v === 'string') return v.length > 80 ? v.slice(0, 80) + '…' : v;
@@ -560,6 +627,33 @@ function shortValue(v: unknown): string {
   } catch {
     return '<obj>';
   }
+}
+
+/**
+ * Colour-code the event-type pill so the user can scan the stream at a
+ * glance — RUN_STATUS / GATE_OPENED / VALIDATION_REPORT_READY pop, LOG
+ * stays neutral, ERROR / BUDGET_EXCEEDED go red.
+ */
+function typeTone(type: string): {fg: string; bg: string; bd: string} {
+  if (type === 'RUN_STATUS' || type === 'GATE_OPENED' || type === 'VALIDATION_REPORT_READY')
+    return {fg: '#7AA5F5', bg: 'rgba(91,141,239,0.10)', bd: 'rgba(91,141,239,0.36)'};
+  if (
+    type === 'BUDGET_EXCEEDED' ||
+    type === 'BATCH_FAILED' ||
+    type === 'ERROR' ||
+    type === 'RUN_FAILED'
+  )
+    return {fg: '#FCA5A5', bg: 'rgba(239,68,68,0.10)', bd: 'rgba(239,68,68,0.36)'};
+  if (type === 'TOKEN_USAGE' || type === 'COST')
+    return {fg: '#FBBF24', bg: 'rgba(245,158,11,0.10)', bd: 'rgba(245,158,11,0.36)'};
+  if (type === 'BATCH_PROGRESS' || type === 'BATCH_COMPLETE' || type === 'RUN_COMPLETE')
+    return {fg: '#34D399', bg: 'rgba(16,185,129,0.10)', bd: 'rgba(16,185,129,0.36)'};
+  // LOG + everything else — neutral chip.
+  return {
+    fg: 'var(--v3-text-muted)',
+    bg: 'var(--v3-bg)',
+    bd: 'var(--v3-border)',
+  };
 }
 
 // ── Preview pane ────────────────────────────────────────────────────────
