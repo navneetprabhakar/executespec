@@ -2,6 +2,74 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
+> **2026-05-07 — ProgramBench RCA fix batch on
+> `fix/programbench-workspace-path-and-classifier`, NOT yet merged.**
+> 3 cmatrix runs against ExecuteSpec V2 on dev (anthropic, 2026-05-07
+> evening) all came back PARTIAL with `verifiedScore=30` — vs the
+> standalone mini-swe-agent baseline of 98. RCA on the 3 runs found 4
+> bugs, 3 fixed in this batch (the 4th, stagnation cascade, is
+> downstream of the others and self-resolves):
+>
+> 1. **Bug A — `SmartClassifierAgent` prompt path stale.** The V2/V3
+>    unification renamed `prompts/v2/` → `prompts/`, but
+>    [agent/SmartClassifierAgent.java:324](src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java:324)
+>    still loaded `"v2/classifier.md"`. The LLM verifier silently
+>    skipped on every run; the heuristic-only verdict misclassified
+>    cmatrix as MEDIUM (4-task fragment) instead of (likely) SINGLE_SHOT.
+>    Fixed by changing the path to `"classifier.md"`.
+> 2. **Bug B — Workspace path divergence (the primary cause).**
+>    `ProgramBenchTaskService` bind-mounted
+>    `/var/programbench/workspaces/<task-epoch>/` into the cleanroom
+>    container as `/workspace`, but the V2 worker writes to
+>    `<agent.workspace>/<runId>/` (= `/opt/app/workspace/<runId>` on
+>    dev) — a DIFFERENT host directory. `Read/Write/Edit/ListFiles`
+>    tools went straight to host fs (the V2 path);
+>    `ShellTool`/`BuildProjectTool` routed via `docker exec` and saw
+>    the bind-mount path. Files written by the worker (e.g. 21KB
+>    cmatrix.c on run 25a218aa) never appeared inside the container.
+>    The build smoke `chmod +x ./compile.sh && ./compile.sh` failed
+>    with "No such file or directory" on every run. Fix: rewrite
+>    `ProgramBenchTaskService` to do all docker setup INSIDE the
+>    `RunStarted` event listener, using
+>    `<agent.workspace>/<runId>` as both the bind-mount source AND
+>    the V2 worker's host workspace — they're now the same directory.
+>    `WorkspaceInitService.ensureRunWorkspace` runs first inside
+>    `submitRun`, creating `.git/.gitignore/.gitattributes`; the
+>    listener then `docker cp`'s the cleanroom files on top, then
+>    `docker run -d -v <agent.workspace>/<runId>:/workspace`. After
+>    the listener returns, the async pipeline starts — every tool sees
+>    the same files. ~30 LOC change.
+> 3. **Bug D — `chmod` blocked in shell sandbox.** The LOW
+>    `ALLOWED_PREFIXES` list in `tool/ShellSandboxPolicy.java`
+>    deliberately excluded `chmod` ("chains unknown binaries"). In
+>    practice every binary the worker can chain is already in the
+>    allowlist (gcc, cargo, go, mvn, etc.) and forbidding chmod broke
+>    the legitimate `chmod +x compile.sh` flow. Fix: add `chmod` to
+>    `ALLOWED_PREFIXES`. Defensive guards added: a new
+>    `BLOCKED_PATTERNS` regex catches chmod against system dirs
+>    (`/etc`, `/usr`, `/var`, `/root`, `/boot`, `/sbin`, `/bin`,
+>    `/opt`, `/sys`, `/proc`, `/dev`, `/run`); BLOCKED_COMMANDS
+>    entries lowercased to actually match (`"chmod -R 777 /"` had
+>    capital R but `normalized` is lowercased before `contains` — a
+>    latent case bug; the entry was silently never firing. New
+>    coverage adds `"chmod -r 777 /"`, `"chmod 777 /"`,
+>    `"chown -r"`). Within workspace, chmod can only flip permission
+>    bits on files the worker already owns; in cleanroom +
+>    `--network none`, even dangerous chmod has no exfiltration path.
+> 4. **Bug C — Stagnation cascade.** Workers hit
+>    `Outcome.COMPLETED_BY_STAGNATION` (12-iter non-write force-
+>    terminate from `feature/worker-runaway-fixes`) on every cmatrix
+>    task because they couldn't validate (B) or chmod (D), so they
+>    burned non-write iterations exploring then got killed.
+>    Self-resolves once B+D land — verify by re-running cmatrix and
+>    watching `STAGNATION_FORCE` counts drop.
+>
+> Tests: 1038/1038 unit suite green. New `ShellSandboxPolicyTest`
+> coverage adds chmod-allow + chmod-system-dir-block + chmod-bare-root
+> tests. Format clean (`mvn spotless:check`). Expected effect on next
+> cmatrix submit: score 30 → 80–95 to match the standalone baseline of
+> 98. Verification cost ~$1 across 3 providers.
+>
 > **2026-05-06 — GA-readiness Phase 1 (quality scoring fix) shipped on
 > `feature/project-cost-pool-tuning`, NOT yet merged.** Operationalises
 > §P1.1 + §P1.2 of `docs/plans/pending-ga-readiness-90-day-execution-plan.md`.
