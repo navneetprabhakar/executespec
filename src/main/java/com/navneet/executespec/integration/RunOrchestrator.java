@@ -2691,7 +2691,7 @@ public class RunOrchestrator {
   /**
    * Writes a run-meta README.md into the workspace if one doesn't already exist.
    *
-   * <p>The planner is instructed (in prompts/v2/planner.md invariant #3) to emit a "Create
+   * <p>The planner is instructed (in prompts/planner.md invariant #3) to emit a "Create
    * README.md" task for non-trivial specs. That user-facing README is authored by the worker and
    * takes precedence — we never overwrite it. For trivial specs (single-file, no framework) the
    * planner skips the README task; this method then writes a deterministic run-meta README so the

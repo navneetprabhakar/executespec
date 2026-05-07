@@ -148,7 +148,7 @@ public class ReviewerAgent {
             req,
             maxIter,
             "reviewer-general",
-            loadPrompt("prompts/v2/reviewer-general.md"),
+            loadPrompt("prompts/reviewer-general.md"),
             GENERAL_PASS_TIMEOUT_SECONDS);
     if (general.outcome() == WorkerResult.Outcome.ERROR) {
       log.warn("ReviewerAgent general pass errored: {}", general.outcome());
@@ -173,7 +173,7 @@ public class ReviewerAgent {
               req,
               maxIter,
               "reviewer-wiring",
-              loadPrompt("prompts/v2/reviewer-wiring.md"),
+              loadPrompt("prompts/reviewer-wiring.md"),
               WIRING_PASS_TIMEOUT_SECONDS);
       if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
         log.warn("ReviewerAgent wiring pass errored: {}", wiring.outcome());

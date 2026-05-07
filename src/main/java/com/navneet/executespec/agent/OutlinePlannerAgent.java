@@ -65,7 +65,7 @@ public class OutlinePlannerAgent {
    */
   private final RunTitleSummarizer titleSummarizer;
 
-  private static final String PROMPT_PATH_FULL = "prompts/v2/outline-planner.md";
+  private static final String PROMPT_PATH_FULL = "prompts/outline-planner.md";
 
   /**
    * v2.6.2 slice 3 — skeleton-mode prompt for LARGE/LEGACY classifications. Emits
@@ -73,7 +73,7 @@ public class OutlinePlannerAgent {
    * Smaller output budget needed because no descriptions / hardConstraints / meetsRequirements per
    * task.
    */
-  private static final String PROMPT_PATH_SKELETON = "prompts/v2/outline-planner-skeleton.md";
+  private static final String PROMPT_PATH_SKELETON = "prompts/outline-planner-skeleton.md";
 
   /**
    * v2.6.2 slice 2 — 32k breathing room. The old planner's 8192 cap truncated on multi-repo specs

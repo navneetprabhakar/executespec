@@ -51,7 +51,7 @@ public class CoherencePlannerAgent {
   private final ObjectMapper objectMapper;
   private final ModelResolver modelResolver;
 
-  private static final String PROMPT_PATH = "prompts/v2/coherence-planner.md";
+  private static final String PROMPT_PATH = "prompts/coherence-planner.md";
   private static final int COHERENCE_MAX_TOKENS = 1_500;
 
   public record PatchResult(Plan patchedPlan, int patchesApplied, List<String> patchSummaries) {}
