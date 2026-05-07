@@ -89,9 +89,7 @@ export default function Placeholder({
             <>
               {' '}
               It will move to{' '}
-              <code
-                style={{fontFamily: 'var(--v3-font-mono)', fontSize: 12}}
-              >
+              <code style={{fontFamily: 'var(--v3-font-mono)', fontSize: 12}}>
                 {futureV3Route}
               </code>{' '}
               in a future wave.

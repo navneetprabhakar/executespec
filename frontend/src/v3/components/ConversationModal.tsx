@@ -212,8 +212,8 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
               }}
             >
               Tell the assistant what you want to build. It will ask one or two clarifying
-              questions, suggest a visual style if there's a UI, and produce a tight summary you
-              can ship to the planner.
+              questions, suggest a visual style if there's a UI, and produce a tight summary you can
+              ship to the planner.
             </div>
           )}
 
@@ -355,9 +355,7 @@ function Bubble({role, content}: {role: 'user' | 'assistant'; content: string}) 
   const summaryIdx = !isUser ? content.indexOf(SUMMARY_PREFIX) : -1;
   const hasSummary = summaryIdx >= 0;
   const before = hasSummary ? content.slice(0, summaryIdx).trim() : content;
-  const summary = hasSummary
-    ? content.slice(summaryIdx + SUMMARY_PREFIX.length).trim()
-    : '';
+  const summary = hasSummary ? content.slice(summaryIdx + SUMMARY_PREFIX.length).trim() : '';
 
   return (
     <div
@@ -369,7 +367,9 @@ function Bubble({role, content}: {role: 'user' | 'assistant'; content: string}) 
       <div
         style={{
           maxWidth: '85%',
-          background: isUser ? 'color-mix(in srgb, var(--v3-brand) 16%, transparent)' : 'var(--v3-bg)',
+          background: isUser
+            ? 'color-mix(in srgb, var(--v3-brand) 16%, transparent)'
+            : 'var(--v3-bg)',
           border: `1px solid ${isUser ? 'color-mix(in srgb, var(--v3-brand) 40%, transparent)' : 'var(--v3-border)'}`,
           borderRadius: 10,
           padding: '8px 12px',

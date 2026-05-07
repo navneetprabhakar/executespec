@@ -155,10 +155,8 @@ export default function LandingPage() {
               page max per the strategy; "merge" is the verb the whole
               pitch hangs on. Mirrors website's text-gradient-orange
               treatment via --v3-pop-grad (orange→amber). */}
-          <span style={{color: 'var(--c-pop-orange)', fontWeight: 700}}>
-            merge
-          </span>{' '}
-          — for one repo or for twenty.
+          <span style={{color: 'var(--c-pop-orange)', fontWeight: 700}}>merge</span> — for one repo
+          or for twenty.
         </h1>
         <p
           style={{

@@ -175,9 +175,7 @@ export default function NotificationPreferences() {
                   scanning is one row per section instead of 30+. */}
               {eventsByCategory.map(({category, events: catEvents}) => (
                 <Fragment key={category}>
-                  <tr
-                    className='border-t border-[var(--border-default)]'
-                  >
+                  <tr className='border-t border-[var(--border-default)]'>
                     <td
                       colSpan={3}
                       className='px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted font-semibold'

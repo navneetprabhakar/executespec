@@ -11,9 +11,8 @@ import lombok.RequiredArgsConstructor;
  * Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode.
  *
  * <p>Carries a per-run transient flag in Redis ("skip the auto-push to GitHub on this run") so
- * {@link com.navneet.executespec.v2.integration.RunOrchestrator} can opt out of the trailing
- * {@code scmPushService.push(fresh)} call for runs the user wants to inspect locally before
- * shipping.
+ * {@link com.navneet.executespec.v2.integration.RunOrchestrator} can opt out of the trailing {@code
+ * scmPushService.push(fresh)} call for runs the user wants to inspect locally before shipping.
  *
  * <p>Intentionally Redis-only — not persisted to {@code pipeline_run}. If the JVM crashes the
  * intent is lost and the next attempt resumes the default auto-push behaviour. Staging is a

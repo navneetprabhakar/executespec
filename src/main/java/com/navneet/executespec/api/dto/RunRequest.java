@@ -126,8 +126,9 @@ public record RunRequest(
      * <p>When true, the run executes normally but {@link
      * com.navneet.executespec.v2.integration.RunOrchestrator} skips the auto-push to GitHub /
      * Bitbucket on success. The workspace stays on disk and the user can inspect the diff in the
-     * Run Detail page; if they like it they can manually push via {@code POST /runs/{id}/push-github}
-     * (the existing single-repo path). Default false → ships today's auto-push behaviour.
+     * Run Detail page; if they like it they can manually push via {@code POST
+     * /runs/{id}/push-github} (the existing single-repo path). Default false → ships today's
+     * auto-push behaviour.
      *
      * <p>The flag is transient: not persisted to {@code pipeline_run}. A JVM crash mid-run loses
      * the skip-push intent and the run resumes its default auto-push behaviour. That's intentional

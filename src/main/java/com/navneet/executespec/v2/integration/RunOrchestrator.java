@@ -157,8 +157,10 @@ public class RunOrchestrator {
   private final com.navneet.executespec.memory.RunLedgerAgent runLedgerAgent;
   private final com.navneet.executespec.integration.scm.ScmPushService scmPushService;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
+
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
+
   private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
 
   /** Wave 2.1 — activation funnel event tracker (no-op when PostHog is unconfigured). */

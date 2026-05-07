@@ -1,10 +1,6 @@
 import {useEffect, useState} from 'react';
 import {Link} from 'react-router-dom';
-import {
-  getProjectSummary,
-  getArchitectureStaleness,
-  type StalenessReport,
-} from '@/lib/api';
+import {getProjectSummary, getArchitectureStaleness, type StalenessReport} from '@/lib/api';
 
 /**
  * Audit r5 (#4, 2026-05-06) — "what does ExecuteSpec see in your repo?"

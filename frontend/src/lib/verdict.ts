@@ -84,7 +84,8 @@ export function deriveVerdict(s: VerdictSignals): VerdictResult | null {
     s.reviewerVerdict != null ||
     s.verifiedScore != null ||
     s.statusReason != null ||
-    (s.status != null && (s.status === 'FAILED' || s.status === 'CANCELLED' || s.status === 'ABORTED'));
+    (s.status != null &&
+      (s.status === 'FAILED' || s.status === 'CANCELLED' || s.status === 'ABORTED'));
   if (!hasAnySignal) return null;
 
   // Terminal "didn't even finish" wins everything else.

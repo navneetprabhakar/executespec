@@ -271,9 +271,7 @@ export default function AvatarMenu() {
                     listStyle: 'none',
                   }}
                 >
-                  {item.caption && (
-                    <div style={{padding: '0 10px 2px'}}>{item.caption}</div>
-                  )}
+                  {item.caption && <div style={{padding: '0 10px 2px'}}>{item.caption}</div>}
                 </li>
               );
             }

@@ -141,7 +141,7 @@ export default function RunsListPage() {
   const projectName = useMemo(() => {
     const map = new Map<string, string>();
     projects.forEach((p) => p.id && map.set(p.id, p.name ?? ''));
-    return (id?: string) => (id ? map.get(id) ?? id.slice(0, 8) : '');
+    return (id?: string) => (id ? (map.get(id) ?? id.slice(0, 8)) : '');
   }, [projects]);
 
   return (
@@ -340,9 +340,7 @@ export default function RunsListPage() {
             // route to the flat /runs/{id} which mounts RunDetailPage with
             // an undefined projectId. The previous /projects/empty?run=...
             // target landed in EmptyProjectPage and dropped the runId.
-            const target = projectId
-              ? `/projects/${projectId}/runs/${runId}`
-              : `/runs/${runId}`;
+            const target = projectId ? `/projects/${projectId}/runs/${runId}` : `/runs/${runId}`;
             return (
               <Link
                 key={r.runId}

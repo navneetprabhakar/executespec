@@ -79,11 +79,7 @@ export default function ResultCard({runId, initialStatus}: ResultCardProps) {
 
   async function onCancel() {
     if (cancelling) return;
-    if (
-      !confirm(
-        'Cancel this run? Any work the agent has already done will be discarded.',
-      )
-    ) {
+    if (!confirm('Cancel this run? Any work the agent has already done will be discarded.')) {
       return;
     }
     setCancelling(true);

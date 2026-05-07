@@ -98,9 +98,9 @@ export default function RunsNewPage() {
             lineHeight: 1.55,
           }}
         >
-          Launch a one-shot run. Pick a project to anchor it inside a workspace, or leave the
-          picker on standalone — the run still shows up under /runs and you can wire it into a
-          project later.
+          Launch a one-shot run. Pick a project to anchor it inside a workspace, or leave the picker
+          on standalone — the run still shows up under /runs and you can wire it into a project
+          later.
         </p>
       </header>
 

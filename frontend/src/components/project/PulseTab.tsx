@@ -17,7 +17,16 @@
  * lets light-theme + paper-* cascade through cleanly.
  */
 import {Link} from 'react-router-dom';
-import {ArrowRight, Activity, Heart, BookOpen, Sparkles, Rocket, FolderGit2, Plus} from 'lucide-react';
+import {
+  ArrowRight,
+  Activity,
+  Heart,
+  BookOpen,
+  Sparkles,
+  Rocket,
+  FolderGit2,
+  Plus,
+} from 'lucide-react';
 import ScoreRing from '@/components/runs/ScoreRing';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
@@ -232,7 +241,16 @@ export default function PulseTab({
               View all <ArrowRight className='h-3 w-3' />
             </button>
           </div>
-          <ul style={{margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6}}>
+          <ul
+            style={{
+              margin: 0,
+              padding: 0,
+              listStyle: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
             {recentPrs.slice(0, 3).map((pr) => (
               <li
                 key={`${pr.repoFullName}-${pr.prNumber}`}
@@ -576,10 +594,7 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
             {openPrs} open PR{openPrs === 1 ? '' : 's'}
           </li>
           {lastAnalysed && (
-            <li
-              className='v3-mono'
-              style={{color: 'var(--v3-text-subtle)', fontSize: 10.5}}
-            >
+            <li className='v3-mono' style={{color: 'var(--v3-text-subtle)', fontSize: 10.5}}>
               last analysed {timeAgo(lastAnalysed)}
             </li>
           )}
