@@ -1,4 +1,12 @@
-import {useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode} from 'react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type ReactNode,
+} from 'react';
 import {
   type RunDetail,
   type TaskSummary,
@@ -10,6 +18,11 @@ import {
   dismissPrComment,
   applyPrComment,
   type PrCommentInboxDto,
+  getTestPlan,
+  runTests,
+  getPreviewStatus,
+  type TestPlanData,
+  type LocalPreviewStatus,
 } from '@/lib/api';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore, type LogEntry} from '@/stores/useSseStore';
@@ -1834,10 +1847,80 @@ function TimelinePane({detail}: {detail: RunDetail | null}) {
 // render them unconditionally.
 
 function TestsPane({runId, status}: {runId: string; status: string}) {
-  // Both components self-hide when there's no test signal — leaves a blank
-  // pane on every run that hasn't kicked off test gen, which is most of
-  // them. Fallback hint explains the surface so the empty state isn't a
-  // dead end.
+  // 2026-05-07 — fetch the test plan so we can show "tests were generated but
+  // execution blocked" when the preview engine couldn't run (Docker daemon
+  // down, registry offline, etc.). Pre-fix `TestProgressTracker` rendered
+  // null without live SSE, `TestReportPanel` rendered null when totalTests=0,
+  // and the static fallback ("if no report is shown, this run did not
+  // trigger the test pipeline") misled users into thinking nothing happened.
+  const [plan, setPlan] = useState<TestPlanData | null>(null);
+  const [planLoading, setPlanLoading] = useState(false);
+  const [previewStatus, setPreviewStatus] = useState<LocalPreviewStatus | null>(null);
+  const [runningTests, setRunningTests] = useState(false);
+  const [runError, setRunError] = useState<string | null>(null);
+
+  const isTerminal = ['COMPLETE', 'PARTIAL', 'FAILED'].includes(status);
+
+  const refetchPlan = useCallback(() => {
+    setPlanLoading(true);
+    getTestPlan(runId)
+      .then(setPlan)
+      .catch(() => setPlan(null))
+      .finally(() => setPlanLoading(false));
+  }, [runId]);
+
+  useEffect(() => {
+    if (!isTerminal) return;
+    refetchPlan();
+    getPreviewStatus(runId)
+      .then(setPreviewStatus)
+      .catch(() => setPreviewStatus(null));
+  }, [isTerminal, runId, refetchPlan]);
+
+  // Re-fetch when test pipeline events arrive — keeps the pane in lockstep
+  // with TestPreviewCoordinator without a manual refresh.
+  const sseEntries = useSseStore((s) => s.entries);
+  const lastEntryId = sseEntries[sseEntries.length - 1]?.id ?? null;
+  const lastEntryType = sseEntries[sseEntries.length - 1]?.type ?? null;
+  const seenTestEntryRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!lastEntryId || lastEntryId === seenTestEntryRef.current) return;
+    seenTestEntryRef.current = lastEntryId;
+    if (
+      typeof lastEntryType === 'string' &&
+      (lastEntryType.startsWith('TEST_') || lastEntryType.startsWith('PREVIEW_'))
+    ) {
+      refetchPlan();
+      getPreviewStatus(runId)
+        .then(setPreviewStatus)
+        .catch(() => setPreviewStatus(null));
+    }
+  }, [lastEntryId, lastEntryType, refetchPlan, runId]);
+
+  const compiledTasks = (plan?.tasks ?? []).filter((t) => t.status === 'COMPILED');
+  const failedTasks = (plan?.tasks ?? []).filter((t) => t.status === 'FAILED');
+  const previewRunning = previewStatus?.status === 'RUNNING';
+  const previewBlocked =
+    !!previewStatus && ['FAILED', 'TIMED_OUT', 'IDLE', 'STOPPED'].includes(previewStatus.status);
+  const previewError =
+    previewStatus?.errorMessage && previewStatus.errorMessage.trim().length > 0
+      ? previewStatus.errorMessage
+      : null;
+
+  async function onRunTests() {
+    if (runningTests) return;
+    setRunningTests(true);
+    setRunError(null);
+    try {
+      await runTests(runId);
+      refetchPlan();
+    } catch (e) {
+      setRunError((e as Error)?.message ?? 'Failed to start test execution');
+    } finally {
+      setRunningTests(false);
+    }
+  }
+
   return (
     <div style={{padding: 12, display: 'flex', flexDirection: 'column', gap: 12}}>
       <div
@@ -1854,20 +1937,192 @@ function TestsPane({runId, status}: {runId: string; status: string}) {
       </div>
       <TestProgressTracker runId={runId} status={status} />
       <TestReportPanel runId={runId} status={status} />
+
+      {/* 2026-05-07 — Generated-but-not-executed surface. Shows once we know
+          test gen produced compiled tasks but the report hasn't arrived
+          (TestReportPanel self-hides on totalTests=0). Lets users see what
+          got built + retry execution when the preview comes back. */}
+      {isTerminal && plan && compiledTasks.length > 0 && (
+        <GeneratedTestsCard
+          compiledTasks={compiledTasks}
+          failedTasks={failedTasks}
+          previewRunning={previewRunning}
+          previewBlocked={previewBlocked}
+          previewError={previewError}
+          runningTests={runningTests}
+          runError={runError}
+          onRunTests={onRunTests}
+        />
+      )}
+
+      {/* Quiet states — only render when the panel above isn't telling the
+          user something more useful. */}
+      {isTerminal && !planLoading && !plan && (
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--v3-text-muted)',
+            lineHeight: 1.55,
+            padding: '8px 10px',
+            background: 'var(--v3-bg)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+          }}
+        >
+          Test generation runs after the build completes — this run did not trigger the test
+          pipeline.
+        </div>
+      )}
+      {!isTerminal && (
+        <div
+          style={{
+            fontSize: 12,
+            color: 'var(--v3-text-muted)',
+            lineHeight: 1.55,
+            padding: '8px 10px',
+            background: 'var(--v3-bg)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+          }}
+        >
+          Tests will appear here once the run reaches a terminal state.
+        </div>
+      )}
+    </div>
+  );
+}
+
+function GeneratedTestsCard({
+  compiledTasks,
+  failedTasks,
+  previewRunning,
+  previewBlocked,
+  previewError,
+  runningTests,
+  runError,
+  onRunTests,
+}: {
+  compiledTasks: NonNullable<TestPlanData['tasks']>;
+  failedTasks: NonNullable<TestPlanData['tasks']>;
+  previewRunning: boolean;
+  previewBlocked: boolean;
+  previewError: string | null;
+  runningTests: boolean;
+  runError: string | null;
+  onRunTests: () => void;
+}) {
+  return (
+    <div
+      style={{
+        padding: 12,
+        background: 'var(--v3-bg)',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 6,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 10,
+      }}
+    >
       <div
         style={{
-          fontSize: 12,
-          color: 'var(--v3-text-muted)',
-          lineHeight: 1.55,
-          padding: '8px 10px',
-          background: 'var(--v3-bg)',
-          border: '1px solid var(--v3-border)',
-          borderRadius: 6,
+          display: 'flex',
+          alignItems: 'baseline',
+          gap: 8,
+          flexWrap: 'wrap',
         }}
       >
-        {status === 'COMPLETE' || status === 'PARTIAL' || status === 'FAILED'
-          ? 'Test generation runs after the build completes — if no report is shown, this run did not trigger the test pipeline.'
-          : 'Tests will appear here once the run reaches a terminal state.'}
+        <div style={{fontSize: 13, fontWeight: 600, color: 'var(--v3-text)'}}>
+          {compiledTasks.length} test class{compiledTasks.length === 1 ? '' : 'es'} generated
+        </div>
+        {failedTasks.length > 0 && (
+          <span style={{fontSize: 11, color: 'var(--v3-warning)'}}>
+            ({failedTasks.length} failed to compile)
+          </span>
+        )}
+        <span
+          className='v3-mono'
+          style={{
+            marginLeft: 'auto',
+            fontSize: 10.5,
+            color: 'var(--v3-text-subtle)',
+            textTransform: 'uppercase',
+            letterSpacing: 0.4,
+          }}
+        >
+          {previewRunning
+            ? 'Preview ready'
+            : previewBlocked
+              ? 'Preview blocked'
+              : 'Preview unknown'}
+        </span>
+      </div>
+
+      <ul
+        style={{
+          margin: 0,
+          padding: 0,
+          listStyle: 'none',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+          fontSize: 11.5,
+        }}
+      >
+        {compiledTasks.slice(0, 8).map((t) => (
+          <li key={t.id} className='v3-mono' style={{color: 'var(--v3-text-muted)'}}>
+            ✓ {t.taskName}
+          </li>
+        ))}
+        {compiledTasks.length > 8 && (
+          <li style={{color: 'var(--v3-text-subtle)', fontSize: 10.5}}>
+            … + {compiledTasks.length - 8} more
+          </li>
+        )}
+      </ul>
+
+      {previewBlocked && (
+        <div
+          style={{
+            fontSize: 11.5,
+            lineHeight: 1.55,
+            padding: '8px 10px',
+            background: 'color-mix(in srgb, var(--v3-warning) 8%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--v3-warning) 30%, transparent)',
+            borderRadius: 4,
+            color: 'color-mix(in srgb, var(--v3-warning) 80%, var(--v3-text))',
+          }}
+        >
+          Tests compiled but execution didn't run — the preview engine wasn't able to start the app.{' '}
+          {previewError ? (
+            <>
+              Last error: <em>{previewError}</em>.
+            </>
+          ) : null}{' '}
+          Start the preview from the Preview tab and click "Run tests" below to retry.
+        </div>
+      )}
+
+      <div style={{display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap'}}>
+        <button
+          type='button'
+          onClick={onRunTests}
+          disabled={runningTests}
+          style={{
+            padding: '5px 12px',
+            fontSize: 11.5,
+            fontWeight: 600,
+            background: 'var(--v3-brand)',
+            color: 'var(--v3-text-on-brand)',
+            border: 'none',
+            borderRadius: 4,
+            cursor: runningTests ? 'not-allowed' : 'pointer',
+            opacity: runningTests ? 0.6 : 1,
+            fontFamily: 'inherit',
+          }}
+        >
+          {runningTests ? 'Triggering…' : 'Run tests'}
+        </button>
+        {runError && <span style={{fontSize: 11, color: 'var(--v3-error)'}}>{runError}</span>}
       </div>
     </div>
   );
