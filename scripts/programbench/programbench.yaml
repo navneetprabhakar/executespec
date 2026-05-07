@@ -28,45 +28,94 @@ agent:
 
     # The environment
 
-    - Sandbox: a Linux container, working directory /workspace
-    - The binary and documentation are at /workspace
+    - Sandbox: a Linux container, working directory /workspace.
+    - The binary and documentation are at /workspace.
     - Network: DISABLED (--network none). curl, wget, git clone, pip install,
       cargo install from the network ALL FAIL. Don't try.
     - Compilers and language toolchains are already installed for {{language}}.
 
+    # The build contract — READ THIS FIRST
+
+    Programbench's evaluation harness does ONE thing to build your
+    submission: it runs `chmod +x ./compile.sh && ./compile.sh` from the
+    /workspace root.
+
+    Therefore your submission MUST contain a file `/workspace/compile.sh`
+    that builds the program from your sources. After it runs, the resulting
+    executable must be at `/workspace/executable` (overwriting or replacing
+    the original binary at that path).
+
+    Examples by language:
+
+    ```bash
+    # C / C++
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    gcc cmatrix.c -o executable -lncursesw     # or -lm, -lpthread, etc.
+    ```
+
+    ```bash
+    # Rust
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    cargo build --release --offline
+    cp target/release/<binname> executable
+    ```
+
+    ```bash
+    # Go
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    go build -o executable .
+    ```
+
+    Run `./compile.sh` yourself before submitting and confirm it produces a
+    working executable that matches the original's behavior.
+
     # How to work
 
-    1. Explore /workspace. Locate the binary and docs (man pages, README,
-       --help output, examples).
+    1. Explore /workspace. Locate the binary and docs (README, man pages,
+       --help / --version output, examples). Read them carefully.
     2. Run the binary with representative inputs. Build a mental model of
-       its behavior, output format, and edge cases.
+       its behavior, output format, edge cases, and error handling
+       (especially: invalid arguments, --help, --version).
     3. Write source files in /workspace using the language's standard
-       project layout (e.g. src/ + Cargo.toml for Rust, Makefile + .c
-       for C, go.mod + .go for Go).
-    4. Build your reimplementation. Compare its output against the original
-       binary on the same inputs. Iterate until they match.
-    5. When done, submit (see below).
+       project layout.
+    4. Write `compile.sh` that builds your sources to `/workspace/executable`.
+       Test it: `./compile.sh && ./executable --help` and verify against
+       the original.
+    5. Iterate. Run `diff <(./executable …) <(./original-saved-output …)`.
+       Pay special attention to error paths — reject invalid arguments
+       the same way the original does.
+    6. When done, submit (see below).
 
     # Working style
 
-    - You have a full Linux shell. Use non-interactive flags (-y, -f).
+    - Full Linux shell. Use non-interactive flags (-y, -f).
     - Avoid interactive tools (vi, nano).
-    - You can install missing system tools via the package manager already
-      configured in the image (apt, apk, dnf — depends on base).
-    - If a tool isn't available and can't be installed offline, work around it.
-    - The CONTENTS OF /workspace AT COMPLETION TIME ARE YOUR SUBMISSION.
-      Don't write source files outside /workspace. Don't delete the original
-      binary unless your build produces an equivalent at the same path.
+    - Install missing build tools via the package manager already
+      configured in the image (apt, apk, dnf — varies by base). Try
+      `apt list --installed | grep -i ncurses` etc. before writing
+      stub headers — the libraries you need are usually already there.
+    - The contents of /workspace at completion time ARE your submission.
+      Don't write source files outside /workspace.
+    - Be efficient with iterations. The cost cap is real — write the
+      simplest working version first, validate with `./compile.sh`,
+      then refine.
 
     # Submission
 
-    When you're satisfied with your implementation, run EXACTLY:
+    When `./compile.sh` works and `./executable` matches the original's
+    observable behavior on representative inputs, run EXACTLY:
 
     ```bash
     echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && echo programbench-done
     ```
 
-    After this command, your /workspace tree is captured and you cannot
+    After this command your /workspace tree is captured and you cannot
     continue working on this task.
   instance_template: |-
     Reimplement the compiled program at /workspace.
