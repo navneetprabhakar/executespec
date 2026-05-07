@@ -13,7 +13,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Per-run BYOK key cache — single-source-of-truth for which keys {@link LlmRouterV2} should thread
+ * Per-run BYOK key cache — single-source-of-truth for which keys {@link LlmRouter} should thread
  * into provider-side dispatch.
  *
  * <p>Lifecycle: {@code RunOrchestrator.runPipeline} resolves keys once at run-start via {@link
@@ -40,8 +40,8 @@ public class RunKeyContextStore {
 
   private final ApiKeyResolver apiKeyResolver;
 
-  /** runId → V2RunKeyContext. */
-  private final Cache<String, V2RunKeyContext> cache =
+  /** runId → RunKeyContext. */
+  private final Cache<String, RunKeyContext> cache =
       Caffeine.newBuilder().maximumSize(1024).expireAfterWrite(Duration.ofHours(6)).build();
 
   /**
@@ -51,20 +51,20 @@ public class RunKeyContextStore {
    *
    * @return the resolved context (also stored in the cache under runId).
    */
-  public V2RunKeyContext resolveAndPut(String runId, String userId) {
+  public RunKeyContext resolveAndPut(String runId, String userId) {
     if (runId == null || runId.isBlank()) {
       throw new IllegalArgumentException("runId required");
     }
     ResolvedKeys keys = apiKeyResolver.resolve(userId);
 
-    V2RunKeyContext.Source anthropicSrc =
+    RunKeyContext.Source anthropicSrc =
         (keys.anthropicKey() != null)
-            ? V2RunKeyContext.Source.USER
-            : V2RunKeyContext.Source.PLATFORM;
-    V2RunKeyContext.Source openAiSrc =
-        (keys.openAiKey() != null) ? V2RunKeyContext.Source.USER : V2RunKeyContext.Source.PLATFORM;
-    V2RunKeyContext.Source geminiSrc =
-        (keys.geminiKey() != null) ? V2RunKeyContext.Source.USER : V2RunKeyContext.Source.PLATFORM;
+            ? RunKeyContext.Source.USER
+            : RunKeyContext.Source.PLATFORM;
+    RunKeyContext.Source openAiSrc =
+        (keys.openAiKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
+    RunKeyContext.Source geminiSrc =
+        (keys.geminiKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
     // ApiKeyResolver merges user-level and org-level keys without
     // distinguishing which level won. We can't tell from the
     // ResolvedKeys output whether a non-null Anthropic key came from
@@ -75,8 +75,8 @@ public class RunKeyContextStore {
     // return a richer ResolvedKeys (separate user-side + org-side
     // fields) — tracked as a follow-up to the BYOK fix.
 
-    V2RunKeyContext ctx =
-        new V2RunKeyContext(
+    RunKeyContext ctx =
+        new RunKeyContext(
             keys.anthropicKey(),
             keys.openAiKey(),
             keys.geminiKey(),
@@ -95,7 +95,7 @@ public class RunKeyContextStore {
   }
 
   /** Fetch the resolved keys for a run, or {@code null} if not stored. */
-  public V2RunKeyContext get(String runId) {
+  public RunKeyContext get(String runId) {
     if (runId == null) return null;
     return cache.getIfPresent(runId);
   }

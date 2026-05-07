@@ -6,7 +6,7 @@ import java.nio.file.Path;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import com.navneet.executespec.reviewer.ReviewerAgentV3;
+import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -24,7 +24,7 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Seeds a temp workspace with a deliberately buggy Node.js module (two files, each containing
  * one intentional bug — an off-by-one in sum and a wrong comparison in max). Runs {@link
- * ReviewerAgentV3} against the buggy workspace and verifies:
+ * ReviewerAgent} against the buggy workspace and verifies:
  *
  * <ul>
  *   <li>The reviewer reaches {@code FIXED_ISSUES} or {@code CLEAN} overall
@@ -85,7 +85,7 @@ if (m.maxNumber([3,1,4,1,5,9,2,6]) !== 9) { console.error('max fail:', m.maxNumb
 console.log('smoke ok');"
 """;
 
-  private final ReviewerAgentV3 reviewer;
+  private final ReviewerAgent reviewer;
 
   @GetMapping("/reviewer")
   public Map<String, Object> testReviewer(

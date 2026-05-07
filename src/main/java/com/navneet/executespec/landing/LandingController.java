@@ -40,7 +40,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v3")
 @RequiredArgsConstructor
-public class V3LandingController {
+public class LandingController {
 
   private static final int GALLERY_LIMIT = 6;
   private static final int SPEC_TRUNCATION = 90;
@@ -52,18 +52,18 @@ public class V3LandingController {
   private final ValidationReportRepository reportRepo;
 
   @GetMapping("/landing/stats")
-  public ResponseEntity<V3LandingStats> stats() {
+  public ResponseEntity<LandingStats> stats() {
     Instant weekAgo = Instant.now().minus(7, ChronoUnit.DAYS);
     long thisWeek = reportRepo.countCompletedSince(weekAgo);
     Integer verifiedPct = reportRepo.verifiedScorePercentSince(weekAgo);
     long allTime = reportRepo.countAllTime();
-    return ResponseEntity.ok(new V3LandingStats(thisWeek, verifiedPct, allTime));
+    return ResponseEntity.ok(new LandingStats(thisWeek, verifiedPct, allTime));
   }
 
   @GetMapping("/landing/sample-runs")
-  public ResponseEntity<List<V3SampleRun>> sampleRuns() {
+  public ResponseEntity<List<SampleRun>> sampleRuns() {
     List<Object[]> rows = reportRepo.findTopGalleryRuns(GALLERY_LIMIT);
-    List<V3SampleRun> out =
+    List<SampleRun> out =
         rows.stream()
             .map(
                 r -> {
@@ -76,19 +76,19 @@ public class V3LandingController {
                       score != null && score >= 90
                           ? "READY"
                           : score != null && score >= 70 ? "NEEDS_REVIEW" : "FAILED";
-                  return new V3SampleRun(spec, verdict, score, files, durationMs, prOpened);
+                  return new SampleRun(spec, verdict, score, files, durationMs, prOpened);
                 })
             .toList();
     return ResponseEntity.ok(out);
   }
 
   @GetMapping("/public/exec-snapshot")
-  public ResponseEntity<V3ExecSnapshot> execSnapshot() {
+  public ResponseEntity<ExecSnapshot> execSnapshot() {
     Instant since = Instant.now().minus(EXEC_WINDOW_DAYS, ChronoUnit.DAYS);
     List<Object[]> totalsList = reportRepo.execSnapshotTotals(since);
     if (totalsList == null || totalsList.isEmpty()) {
       return ResponseEntity.ok(
-          new V3ExecSnapshot(
+          new ExecSnapshot(
               EXEC_WINDOW_DAYS,
               0L,
               null,
@@ -108,19 +108,19 @@ public class V3LandingController {
 
     // Anonymize project ids → "Project A", "Project B", …
     List<Object[]> spendRows = reportRepo.spendByProjectSince(since);
-    List<V3ExecSnapshot.ProjectSpend> spendByProject = new java.util.ArrayList<>();
+    List<ExecSnapshot.ProjectSpend> spendByProject = new java.util.ArrayList<>();
     for (int i = 0; i < spendRows.size(); i++) {
       Object[] row = spendRows.get(i);
       String letter = "Project " + (char) ('A' + i);
-      spendByProject.add(new V3ExecSnapshot.ProjectSpend(letter, toLong(row[1]), toDouble(row[2])));
+      spendByProject.add(new ExecSnapshot.ProjectSpend(letter, toLong(row[1]), toDouble(row[2])));
     }
 
     List<Object[]> winRows = reportRepo.topWinsSince(since);
-    List<V3ExecSnapshot.TopWin> topWins =
+    List<ExecSnapshot.TopWin> topWins =
         winRows.stream()
             .map(
                 row ->
-                    new V3ExecSnapshot.TopWin(
+                    new ExecSnapshot.TopWin(
                         truncate((String) row[0], EXEC_SPEC_TRUNCATION),
                         toInt(row[1]),
                         toDouble(row[2]),
@@ -128,7 +128,7 @@ public class V3LandingController {
             .toList();
 
     return ResponseEntity.ok(
-        new V3ExecSnapshot(
+        new ExecSnapshot(
             EXEC_WINDOW_DAYS,
             totalRuns,
             successPct,

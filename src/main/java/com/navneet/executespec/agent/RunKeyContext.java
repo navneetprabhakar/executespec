@@ -5,7 +5,7 @@ package com.navneet.executespec.agent;
  *
  * <p>Built once by {@code RunOrchestrator.runPipeline} from {@link
  * com.navneet.executespec.agent.ApiKeyResolver#resolve(String)} and stashed in {@link
- * RunKeyContextStore} for the run's lifetime. {@link LlmRouterV2#call} reads it back via {@code
+ * RunKeyContextStore} for the run's lifetime. {@link LlmRouter#call} reads it back via {@code
  * request.context().runId()} and threads the appropriate provider key into the dispatch path so the
  * V2 pipeline actually uses customer-configured BYOK keys instead of platform singletons.
  *
@@ -19,7 +19,7 @@ package com.navneet.executespec.agent;
  * platform's {@code spring.ai.*.api-key} env vars — see {@code audit-output/BYOK_DEEPDIVE.md} for
  * the full chain-of-evidence.
  */
-public record V2RunKeyContext(
+public record RunKeyContext(
     String anthropicKey,
     String openAiKey,
     String geminiKey,

@@ -53,7 +53,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class OutlinePlannerAgent {
 
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
   private final ModelResolver modelResolver;
@@ -181,7 +181,7 @@ public class OutlinePlannerAgent {
   }
 
   /**
-   * Run the outline phase. Synchronous — cost flows through {@link LlmRouterV2} → {@link
+   * Run the outline phase. Synchronous — cost flows through {@link LlmRouter} → {@link
    * com.navneet.executespec.cost.RunCostTracker} automatically; the orchestrator diffs the
    * per-run snapshot before/after to attribute the phase to {@code pipeline_run.outline_*} columns.
    *

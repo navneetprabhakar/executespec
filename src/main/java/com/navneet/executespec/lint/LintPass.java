@@ -16,7 +16,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * Auto-format / lint-fix pass that runs between {@code SequentialExecutor} and {@code
- * ReviewerAgentV3}.
+ * ReviewerAgent}.
  *
  * <p>Why: the worker writes code that often has trailing-comma drift, missing newlines, slightly
  * off indentation, etc. — issues a deterministic formatter ({@code prettier --write}, {@code

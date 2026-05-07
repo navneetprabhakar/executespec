@@ -35,12 +35,12 @@ import lombok.extern.slf4j.Slf4j;
  * <p>Calls each provider with a single-tool prompt and asserts that the response contains a
  * structured tool call (not embedded XML/JSON in text). This validates Spring AI 1.1.4's native
  * tool calling support across Anthropic, OpenAI, and Google Gemini before V2 builds the full
- * LlmRouterV2 layer on top.
+ * LlmRouter layer on top.
  *
  * <p>Usage: {@code GET /api/v2/test/native-tools?provider=anthropic|openai|gemini}
  *
  * <p>This controller is intentionally minimal — it exists to prove the foundation, not to be
- * production code. Will be removed once LlmRouterV2 is in place.
+ * production code. Will be removed once LlmRouter is in place.
  */
 // Audit r5 (§6.2, 2026-05-06) — see ContextStoreTestController for rationale.
 @org.springframework.context.annotation.Profile({"local", "dev"})

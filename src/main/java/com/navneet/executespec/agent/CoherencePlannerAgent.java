@@ -47,7 +47,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class CoherencePlannerAgent {
 
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ObjectMapper objectMapper;
   private final ModelResolver modelResolver;
 

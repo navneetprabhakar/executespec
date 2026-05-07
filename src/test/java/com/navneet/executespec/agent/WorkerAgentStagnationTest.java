@@ -83,13 +83,13 @@ class WorkerAgentV2StagnationTest {
 
   private record Fixture(
       WorkerAgent worker,
-      LlmRouterV2 router,
+      LlmRouter router,
       ToolRegistry registry,
       List<ChatResponse> responsesIssued) {}
 
   /** Build a worker pre-stubbed to issue the supplied response sequence on consecutive calls. */
   private Fixture newWorker(List<ChatResponse> responseSequence) {
-    LlmRouterV2 router = mock(LlmRouterV2.class);
+    LlmRouter router = mock(LlmRouter.class);
     ToolRegistry registry = mock(ToolRegistry.class);
     ContextStore contextStore = mock(ContextStore.class);
     Metrics metrics = mock(Metrics.class);

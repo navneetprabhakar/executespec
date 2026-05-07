@@ -22,7 +22,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v3")
 @RequiredArgsConstructor
-public class V3EntitlementsController {
+public class EntitlementsController {
 
   private final EntitlementResolver resolver;
 

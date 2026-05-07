@@ -15,7 +15,7 @@ import com.navneet.executespec.reviewer.ReviewerResult;
  * <p>Phase 9 baseline — in-memory only. DB persistence + SSE event stream land in later polish
  * passes.
  */
-public class V2Run {
+public class Run {
 
   public enum Status {
     /** Run has been submitted. Planner hasn't started yet. */
@@ -50,7 +50,7 @@ public class V2Run {
   /** Ordered status-transition log for the polling API + post-hoc debugging. */
   private final List<StatusEvent> statusLog = new CopyOnWriteArrayList<>();
 
-  public V2Run(String runId, String spec, String provider, String model, String classification) {
+  public Run(String runId, String spec, String provider, String model, String classification) {
     this.runId = runId;
     this.spec = spec;
     this.provider = provider;

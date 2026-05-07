@@ -21,7 +21,7 @@ import java.util.List;
  * @param spendByProject anonymized "Project A: 4 runs · $7.85" rows
  * @param topWins top 5 best-verifiedScore wins, anonymized spec text
  */
-public record V3ExecSnapshot(
+public record ExecSnapshot(
     int windowDays,
     long totalRuns,
     Integer successRatePercent,

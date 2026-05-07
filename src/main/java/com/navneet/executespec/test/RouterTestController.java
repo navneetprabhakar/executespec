@@ -10,7 +10,7 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.LlmRequest;
-import com.navneet.executespec.agent.LlmRouterV2;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.tool.ExecutionContext;
 import com.navneet.executespec.tool.Tool;
 import com.navneet.executespec.tool.ToolRegistry;
@@ -31,7 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 Phase 2 verification endpoint.
  *
- * <p>End-to-end probe of {@link LlmRouterV2} for every model in the V2 matrix:
+ * <p>End-to-end probe of {@link LlmRouter} for every model in the V2 matrix:
  *
  * <ol>
  *   <li>Create a temp workspace with a known file
@@ -53,7 +53,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class RouterTestController {
 
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ToolRegistry registry;
   private final ObjectMapper objectMapper;
 

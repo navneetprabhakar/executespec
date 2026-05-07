@@ -12,7 +12,7 @@ import lombok.Builder;
 /**
  * V2 LLM request DTO.
  *
- * <p>Provider-agnostic — {@link LlmRouterV2} dispatches based on {@link #provider()} and assembles
+ * <p>Provider-agnostic — {@link LlmRouter} dispatches based on {@link #provider()} and assembles
  * provider-specific options + tool callbacks internally.
  *
  * <p>Tool registration is implicit: the router calls {@link

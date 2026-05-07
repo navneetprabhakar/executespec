@@ -13,7 +13,7 @@ import com.navneet.executespec.deployment.WorkspaceFileService;
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewSession;
 import com.navneet.executespec.report.ValidationReportRepository;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
@@ -379,7 +379,7 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
     try {
       // Try V2 format first (has verdict field)
       if (run.getReviewJson().contains("\"verdict\"")) {
-        ReviewReportV2 v2 = objectMapper.readValue(run.getReviewJson(), ReviewReportV2.class);
+        ReviewReport v2 = objectMapper.readValue(run.getReviewJson(), ReviewReport.class);
         if (v2.getIssues() == null || v2.getIssues().isEmpty()) return null;
 
         StringBuilder sb = new StringBuilder("Fix the following code review issues:\n\n");

@@ -5,7 +5,7 @@ import com.navneet.executespec.tool.ExecutionContext;
 import lombok.Builder;
 
 /**
- * Input to {@link ReviewerAgentV3#review(ReviewerRequest)}.
+ * Input to {@link ReviewerAgent#review(ReviewerRequest)}.
  *
  * @param provider LLM provider for review calls
  * @param model LLM model for review calls

@@ -11,7 +11,7 @@ import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.agent.LlmRequest;
-import com.navneet.executespec.agent.LlmRouterV2;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.tool.ExecutionContext;
 
@@ -54,7 +54,7 @@ public class CodeReviewAgent {
 
   private static final String PROMPT_PATH = "prompts/codereview/code-review-agent.md";
 
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final ObjectMapper objectMapper;
   private final RunCostTracker costTracker;

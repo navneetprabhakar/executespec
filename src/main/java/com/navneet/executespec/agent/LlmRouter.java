@@ -73,7 +73,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class LlmRouterV2 {
+public class LlmRouter {
 
   private final ToolRegistry toolRegistry;
   private final OpenAiNativeToolClient openAiNativeToolClient;
@@ -117,17 +117,17 @@ public class LlmRouterV2 {
     // configured keys. Either case falls through to platform defaults
     // for HYBRID semantics; OWN_KEYS hard-fail mode is enforced by
     // ApiKeyResolver.validateKeyAvailability at submit time.
-    V2RunKeyContext keys = keyContextStore.get(request.context().runId());
+    RunKeyContext keys = keyContextStore.get(request.context().runId());
     String resolvedKey = (keys == null) ? null : keys.keyFor(request.provider());
-    V2RunKeyContext.Source source =
-        (keys == null) ? V2RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
+    RunKeyContext.Source source =
+        (keys == null) ? RunKeyContext.Source.PLATFORM : keys.sourceFor(request.provider());
     // No-key fallback is reflected as PLATFORM source for the metric,
     // even when the run has BYOK configured for *another* provider.
-    if (resolvedKey == null) source = V2RunKeyContext.Source.PLATFORM;
+    if (resolvedKey == null) source = RunKeyContext.Source.PLATFORM;
 
     long start = System.currentTimeMillis();
     log.info(
-        "LlmRouterV2 -> {} {} keySource={} (tools={}, messages={})",
+        "LlmRouter -> {} {} keySource={} (tools={}, messages={})",
         request.provider(),
         request.model(),
         source,
@@ -144,7 +144,7 @@ public class LlmRouterV2 {
       costTracker.record(runId, taskId, request.provider(), request.model(), resp);
       RunCostTracker.Snapshot snap = costTracker.snapshot(runId);
       broadcaster.emit(runId, RunEvent.tokenUsage(runId, snap.inputTokens(), snap.outputTokens()));
-      log.info("LlmRouterV2 <- {} {} ok in {}ms", request.provider(), request.model(), elapsed);
+      log.info("LlmRouter <- {} {} ok in {}ms", request.provider(), request.model(), elapsed);
       return resp;
     } catch (RuntimeException e) {
       long elapsed = System.currentTimeMillis() - start;
@@ -152,7 +152,7 @@ public class LlmRouterV2 {
           request.provider(), request.model(), "failed", java.time.Duration.ofMillis(elapsed));
       metrics.recordKeySource(request.provider(), source.name());
       log.warn(
-          "LlmRouterV2 <- {} {} FAILED in {}ms: {}",
+          "LlmRouter <- {} {} FAILED in {}ms: {}",
           request.provider(),
           request.model(),
           elapsed,

@@ -83,7 +83,7 @@ class WorkerAgentV2HardCapTest {
   private record Fixture(WorkerAgent worker) {}
 
   private Fixture newWorker(Double hardCap, double costPerIter, List<ChatResponse> seq) {
-    LlmRouterV2 router = mock(LlmRouterV2.class);
+    LlmRouter router = mock(LlmRouter.class);
     ToolRegistry registry = mock(ToolRegistry.class);
     ContextStore contextStore = mock(ContextStore.class);
     Metrics metrics = mock(Metrics.class);

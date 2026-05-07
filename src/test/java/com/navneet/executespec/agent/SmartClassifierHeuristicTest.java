@@ -41,7 +41,7 @@ class SmartClassifierHeuristicTest {
     when(ops.get(anyString())).thenReturn(null);
 
     return new SmartClassifierAgent(
-        mock(LlmRouterV2.class),
+        mock(LlmRouter.class),
         mock(ModelResolver.class),
         redis,
         mock(PromptAssembler.class),

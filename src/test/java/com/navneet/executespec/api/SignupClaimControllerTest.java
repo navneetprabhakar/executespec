@@ -19,14 +19,14 @@ import org.springframework.http.ResponseEntity;
 class V3SignupClaimControllerTest {
 
   private AnonymousRunService anonymousRunService;
-  private V3SignupClaimController controller;
+  private SignupClaimController controller;
   private AppUserDetails alice;
   private AppUserDetails bob;
 
   @BeforeEach
   void setUp() {
     anonymousRunService = mock(AnonymousRunService.class);
-    controller = new V3SignupClaimController(anonymousRunService);
+    controller = new SignupClaimController(anonymousRunService);
 
     AppUser aliceUser = AppUser.builder().id("u-alice").email("alice@test").build();
     AppUser bobUser = AppUser.builder().id("u-bob").email("bob@test").build();
@@ -38,8 +38,8 @@ class V3SignupClaimControllerTest {
 
   @Test
   void unauthenticated_caller_gets_401() {
-    ResponseEntity<V3SignupClaimController.ClaimResponse> resp =
-        controller.claimAnonymousSession(new V3SignupClaimController.ClaimRequest("tok-1"), null);
+    ResponseEntity<SignupClaimController.ClaimResponse> resp =
+        controller.claimAnonymousSession(new SignupClaimController.ClaimRequest("tok-1"), null);
     assertEquals(401, resp.getStatusCode().value());
     verifyNoInteractions(anonymousRunService);
   }
@@ -48,9 +48,9 @@ class V3SignupClaimControllerTest {
   void unknown_token_returns_200_with_session_not_found_reason() {
     when(anonymousRunService.bindToUser("missing", "u-alice")).thenReturn(Optional.empty());
 
-    ResponseEntity<V3SignupClaimController.ClaimResponse> resp =
+    ResponseEntity<SignupClaimController.ClaimResponse> resp =
         controller.claimAnonymousSession(
-            new V3SignupClaimController.ClaimRequest("missing"), alice);
+            new SignupClaimController.ClaimRequest("missing"), alice);
 
     assertEquals(200, resp.getStatusCode().value());
     assertNotNull(resp.getBody());
@@ -65,8 +65,8 @@ class V3SignupClaimControllerTest {
             "tok-1", "anon-tok-1", "spec", "STUB_COMPLETE", "msg", Instant.now(), null, "u-alice");
     when(anonymousRunService.bindToUser("tok-1", "u-alice")).thenReturn(Optional.of(bound));
 
-    ResponseEntity<V3SignupClaimController.ClaimResponse> resp =
-        controller.claimAnonymousSession(new V3SignupClaimController.ClaimRequest("tok-1"), alice);
+    ResponseEntity<SignupClaimController.ClaimResponse> resp =
+        controller.claimAnonymousSession(new SignupClaimController.ClaimRequest("tok-1"), alice);
 
     assertTrue(resp.getBody().claimed());
     assertEquals("tok-1", resp.getBody().sessionToken());
@@ -83,8 +83,8 @@ class V3SignupClaimControllerTest {
     when(anonymousRunService.bindToUser(eq("tok-1"), eq("u-alice")))
         .thenReturn(Optional.of(existing));
 
-    ResponseEntity<V3SignupClaimController.ClaimResponse> resp =
-        controller.claimAnonymousSession(new V3SignupClaimController.ClaimRequest("tok-1"), alice);
+    ResponseEntity<SignupClaimController.ClaimResponse> resp =
+        controller.claimAnonymousSession(new SignupClaimController.ClaimRequest("tok-1"), alice);
 
     assertFalse(resp.getBody().claimed(), "alice cannot claim a session already bound to bob");
     assertEquals("already_bound_to_another_user", resp.getBody().reason());

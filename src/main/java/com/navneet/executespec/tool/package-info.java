@@ -10,7 +10,7 @@
  * <ul>
  *   <li>{@code readFile}, {@code writeFile}, {@code editFile}, {@code listFiles}, {@code
  *       searchFiles} — file system (FileSystemToolV2)
- *   <li>{@code shell} — sandboxed shell (ShellToolV2; reuses V1 ShellSandboxPolicy)
+ *   <li>{@code shell} — sandboxed shell (ShellTool; reuses V1 ShellSandboxPolicy)
  *   <li>{@code gitStatus}, {@code gitDiff}, {@code gitCommit} — git (GitToolV2)
  *   <li>{@code buildProject} — runs detected build command (BuildToolV2)
  * </ul>

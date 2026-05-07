@@ -14,7 +14,7 @@ package com.navneet.executespec.landing;
  * @param durationMs start → terminal ms (null when not yet completed)
  * @param prOpened true if a GitHub PR url is set on the run
  */
-public record V3SampleRun(
+public record SampleRun(
     String spec,
     String verdict,
     Integer verifiedScore,
