@@ -29,7 +29,7 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 @RequiredArgsConstructor
-public class ShellToolV2 implements Tool {
+public class ShellTool implements Tool {
 
   static final int MAX_OUTPUT_CHARS = 4_000;
   static final int DEFAULT_TIMEOUT_SEC = 60;

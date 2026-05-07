@@ -63,7 +63,7 @@ import lombok.extern.slf4j.Slf4j;
  * TestPlannerAgent, TestWorkerAgent, TestReportGenerator, ApiTestSuiteAgent, ConversationAgent,
  * ContextAgent, ValidationReportGenerator, PromptOptimiserAgent, eval stack).
  *
- * <p>V2 tool-calling agents use {@code LlmRouterV2} in {@code com.navneet.executespec.agent}.
+ * <p>V2 tool-calling agents use {@code LlmRouter} in {@code com.navneet.executespec.agent}.
  * This router handles provider failover, circuit breaking, and API-key resolution for
  * text-completion callers that do not need native tool calling.
  */

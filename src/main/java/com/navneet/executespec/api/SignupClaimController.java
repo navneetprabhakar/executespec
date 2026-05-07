@@ -32,7 +32,7 @@ import lombok.extern.slf4j.Slf4j;
 @RestController
 @RequestMapping("/api/v3/auth")
 @RequiredArgsConstructor
-public class V3SignupClaimController {
+public class SignupClaimController {
 
   private final AnonymousRunService anonymousRunService;
 

@@ -43,7 +43,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>This client makes a direct HTTP POST to {@code /v1/chat/completions} with a clean JSON body —
  * no {@code extra_body}, no Spring AI option-merging machinery — and parses the response into
  * Spring AI's {@link ChatResponse} / {@link AssistantMessage} types so downstream V2 code
- * (LlmRouterV2, WorkerAgent) can stay provider-agnostic.
+ * (LlmRouter, WorkerAgent) can stay provider-agnostic.
  *
  * <p>Anthropic and Gemini native tool calling work fine on Spring AI 1.1.4 — only OpenAI needs this
  * wrapper.

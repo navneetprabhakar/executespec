@@ -24,7 +24,7 @@ import lombok.RequiredArgsConstructor;
  *
  * <ul>
  *   <li><b>{@code executespec.v2.run.outcome}</b> (counter) — tagged {overall} — V2 run terminal
- *       state per {@link com.navneet.executespec.rollout.V2Run.Status}.
+ *       state per {@link com.navneet.executespec.rollout.Run.Status}.
  *   <li><b>{@code executespec.v2.run.latency}</b> (timer) — tagged {overall} — end-to-end V2
  *       pipeline latency.
  *   <li><b>{@code executespec.v2.planner.latency}</b> (timer) — tagged {classification, provider,
@@ -43,7 +43,7 @@ import lombok.RequiredArgsConstructor;
  *   <li><b>{@code executespec.v2.worker.toolcall}</b> (counter) — tagged {tool} — dispatched tool
  *       calls per tool name.
  *   <li><b>{@code executespec.v2.llm.latency}</b> (timer) — tagged {provider, model, outcome} —
- *       LlmRouterV2 dispatch latency per provider call.
+ *       LlmRouter dispatch latency per provider call.
  *   <li><b>{@code executespec.v2.reviewer.verdict}</b> (counter) — tagged {verdict} — CLEAN /
  *       FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED.
  *   <li><b>{@code executespec.v2.context.save}</b> (counter) — tagged {result} — ok | skipped |
@@ -169,7 +169,7 @@ public class Metrics {
    * V165 BYOK fix — counts every dispatched LLM call by which side provided the API key (USER / ORG
    * / PLATFORM). Dashboards filter by tier to spot regressions: e.g. a TEAM/ENT row showing
    * PLATFORM counts is the gap that the audit deep-dive identified. Source label comes from {@link
-   * com.navneet.executespec.agent.V2RunKeyContext.Source}.
+   * com.navneet.executespec.agent.RunKeyContext.Source}.
    */
   public void recordKeySource(String provider, String source) {
     Counter.builder(NS + "llm.key_source")

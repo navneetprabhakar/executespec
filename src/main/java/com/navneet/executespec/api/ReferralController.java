@@ -25,7 +25,7 @@ import lombok.RequiredArgsConstructor;
 @RestController
 @RequestMapping("/api/v3/referrals")
 @RequiredArgsConstructor
-public class V3ReferralController {
+public class ReferralController {
 
   private final ReferralService service;
 

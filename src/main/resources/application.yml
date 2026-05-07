@@ -128,7 +128,7 @@ spring:
         max-interval: 10000         # 10s cap
     # ── Spring AI bean-init defaults ───────────────────────────────────────────
     # These are the defaults Spring AI's auto-config uses when constructing the
-    # provider beans at startup. The V2 LlmRouterV2 path overrides per-call from
+    # provider beans at startup. The V2 LlmRouter path overrides per-call from
     # the model-matrix below, so these values are only used at bean construction
     # time; per-call dispatch resolves through ModelRegistry. Keep them as
     # current-WORKHORSE-tier defaults so a graceful-degraded boot uses a model
@@ -329,7 +329,7 @@ model-matrix:
     OutlinePlannerAgent: PLANNING           # v2.6.2 hierarchical-planner phase 1
     TaskExpanderAgent: WORKHORSE            # v2.6.2 hierarchical-planner phase 2 (parallel)
     CoherencePlannerAgent: LIGHTWEIGHT      # v2.6.2 hierarchical-planner phase 3
-    ReviewerAgentV3: PLANNING
+    ReviewerAgent: PLANNING
     SmartClassifierAgent: LIGHTWEIGHT       # v2.6.2 hierarchical-planner phase 0
     WorkerAgent: WORKHORSE
     # Shared non-tool-calling agents (use FallbackLlmRouter)

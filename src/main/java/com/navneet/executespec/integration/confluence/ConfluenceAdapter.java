@@ -10,7 +10,7 @@ import com.navneet.executespec.integration.InboundAdapter;
 import com.navneet.executespec.integration.IntegrationEvent;
 import com.navneet.executespec.integration.IntegrationProperties;
 import com.navneet.executespec.integration.OutboundAdapter;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.IntegrationRun;
 import com.navneet.executespec.state.entity.PipelineRun;
 
@@ -120,7 +120,7 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
   }
 
   @Override
-  public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReportV2 review) {
+  public void onRunComplete(IntegrationRun ir, PipelineRun run, ReviewReport review) {
     String childTitle =
         (run.getUserRequest() != null
                 ? run.getUserRequest().lines().findFirst().orElse("Agent run")
@@ -175,7 +175,7 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
-  private String buildOutputPage(PipelineRun run, ReviewReportV2 review) {
+  private String buildOutputPage(PipelineRun run, ReviewReport review) {
     String verdict = review.getRecommendationCompat();
     String quality = review.getOverallConfidence() != null ? review.getOverallConfidence() : "N/A";
 

@@ -20,7 +20,7 @@ import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.agent.LlmRequest;
-import com.navneet.executespec.agent.LlmRouterV2;
+import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
@@ -35,7 +35,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * V2 post-run chat copilot. Answers questions about a completed run's workspace using {@link
- * LlmRouterV2} with no tool callbacks — read-only conversation, never modifies files. History is
+ * LlmRouter} with no tool callbacks — read-only conversation, never modifies files. History is
  * persisted as a JSON array of {role,content} objects on {@code pipeline_run.chat_history_json}.
  *
  * <p>Intentionally minimal: no streaming, no tool calls, no multi-turn tool agent. If the user
@@ -57,7 +57,7 @@ public class ChatService {
   private static final int MAX_FILE_TREE_LINES = 120;
 
   private final PipelineRunRepository runRepo;
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final AgentProperties agentProps;
   private final ValidationReportRepository validationReportRepo;

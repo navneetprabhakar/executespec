@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.springframework.stereotype.Component;
@@ -23,7 +23,7 @@ public class ContextAgentScanner {
   public ContextAgentInput scan(
       PipelineRun run,
       List<WorkerReport> workerReports,
-      ReviewReportV2 reviewReport,
+      ReviewReport reviewReport,
       Path projectPath)
       throws IOException {
     String currentDoc = readContextDoc(projectPath);
@@ -95,7 +95,7 @@ public class ContextAgentScanner {
         .collect(Collectors.toList());
   }
 
-  private String summariseReviewReport(ReviewReportV2 report) {
+  private String summariseReviewReport(ReviewReport report) {
     if (report == null) return "No reviewer report available";
     return "Verdict: "
         + report.getRecommendationCompat()

@@ -53,7 +53,7 @@ import lombok.extern.slf4j.Slf4j;
 @Service
 @Slf4j
 @RequiredArgsConstructor
-public class ReviewerAgentV3 {
+public class ReviewerAgent {
 
   /**
    * Default iteration cap per review pass. Was 30 — bumped to 50 on 2026-04-19 after reviewer
@@ -130,7 +130,7 @@ public class ReviewerAgentV3 {
             : req.maxIterationsPerPass();
 
     log.info(
-        "ReviewerAgentV3 START run={} task={} provider={} model={} skipWiring={}",
+        "ReviewerAgent START run={} task={} provider={} model={} skipWiring={}",
         req.context().runId(),
         req.context().taskId(),
         req.provider(),
@@ -151,7 +151,7 @@ public class ReviewerAgentV3 {
             loadPrompt("prompts/v2/reviewer-general.md"),
             GENERAL_PASS_TIMEOUT_SECONDS);
     if (general.outcome() == WorkerResult.Outcome.ERROR) {
-      log.warn("ReviewerAgentV3 general pass errored: {}", general.outcome());
+      log.warn("ReviewerAgent general pass errored: {}", general.outcome());
       return ReviewerResult.builder()
           .overall(ReviewerResult.Overall.REVIEW_FAILED)
           .generalPassOutcome(general)
@@ -160,7 +160,7 @@ public class ReviewerAgentV3 {
     }
     if (general.outcome() != WorkerResult.Outcome.COMPLETED) {
       log.warn(
-          "ReviewerAgentV3 general pass did not call completeTask ({}), "
+          "ReviewerAgent general pass did not call completeTask ({}), "
               + "continuing to wiring pass with partial work",
           general.outcome());
     }
@@ -176,7 +176,7 @@ public class ReviewerAgentV3 {
               loadPrompt("prompts/v2/reviewer-wiring.md"),
               WIRING_PASS_TIMEOUT_SECONDS);
       if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
-        log.warn("ReviewerAgentV3 wiring pass errored: {}", wiring.outcome());
+        log.warn("ReviewerAgent wiring pass errored: {}", wiring.outcome());
         return ReviewerResult.builder()
             .overall(ReviewerResult.Overall.REVIEW_FAILED)
             .generalPassOutcome(general)
@@ -187,7 +187,7 @@ public class ReviewerAgentV3 {
       }
       if (wiring.outcome() != WorkerResult.Outcome.COMPLETED) {
         log.warn(
-            "ReviewerAgentV3 wiring pass did not call completeTask ({}), "
+            "ReviewerAgent wiring pass did not call completeTask ({}), "
                 + "falling through to final build",
             wiring.outcome());
       }
@@ -213,7 +213,7 @@ public class ReviewerAgentV3 {
     ReviewerResult.Overall overall = determineOverall(general, wiring, buildPassed);
     long elapsed = System.currentTimeMillis() - start;
     log.info(
-        "ReviewerAgentV3 DONE run={} overall={} buildPassed={} elapsed={}ms",
+        "ReviewerAgent DONE run={} overall={} buildPassed={} elapsed={}ms",
         req.context().runId(),
         overall,
         buildPassed,
@@ -251,7 +251,7 @@ public class ReviewerAgentV3 {
       reviewerProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
     }
     com.navneet.executespec.router.ResolvedModel resolved =
-        modelResolver.resolve("ReviewerAgentV3", reviewerProvider);
+        modelResolver.resolve("ReviewerAgent", reviewerProvider);
     String reviewerModel = resolved.getModel();
     String reviewerProviderName = resolved.getActualProvider().name().toLowerCase();
     return worker.run(
@@ -290,7 +290,7 @@ public class ReviewerAgentV3 {
     } catch (TimeoutException te) {
       future.cancel(true);
       log.warn(
-          "ReviewerAgentV3 pass {} TIMED OUT after {}s — treating as ERROR; "
+          "ReviewerAgent pass {} TIMED OUT after {}s — treating as ERROR; "
               + "final build verdict will determine run status",
           taskIdSuffix,
           timeoutSeconds);
@@ -308,7 +308,7 @@ public class ReviewerAgentV3 {
           .iterations(0)
           .build();
     } catch (Exception e) {
-      log.error("ReviewerAgentV3 pass {} unexpected failure", taskIdSuffix, e);
+      log.error("ReviewerAgent pass {} unexpected failure", taskIdSuffix, e);
       return WorkerResult.builder()
           .outcome(WorkerResult.Outcome.ERROR)
           .completionSummary("review pass crashed: " + e.getClass().getSimpleName())

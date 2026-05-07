@@ -12,7 +12,7 @@ import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.IssueCategory;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 import org.springframework.stereotype.Service;
@@ -100,7 +100,7 @@ public class ReviewScoringService {
    */
   public Scores score(
       PipelineRun run,
-      ReviewReportV2 review,
+      ReviewReport review,
       AccuracyReport accuracy,
       Integer verifiedScore,
       String figmaUrl) {

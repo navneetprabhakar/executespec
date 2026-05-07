@@ -18,9 +18,9 @@ public class ResolvedModel {
   private boolean fallback;
 
   /**
-   * V2-canonical provider string for {@code LlmRouterV2.dispatch}: {@code anthropic | openai |
+   * V2-canonical provider string for {@code LlmRouter.dispatch}: {@code anthropic | openai |
    * gemini}. Note the enum value {@link LlmProvider#GOOGLE} maps to the V2 string {@code "gemini"}
-   * — {@code .name().toLowerCase()} would emit "google" and {@code LlmRouterV2} rejects it with
+   * — {@code .name().toLowerCase()} would emit "google" and {@code LlmRouter} rejects it with
    * "Unknown provider: google". Always call this instead of {@code
    * getActualProvider().name().toLowerCase()}.
    */

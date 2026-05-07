@@ -20,7 +20,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * V2 per-run cost accumulator. Called by {@link com.navneet.executespec.agent.LlmRouterV2} after
+ * V2 per-run cost accumulator. Called by {@link com.navneet.executespec.agent.LlmRouter} after
  * every successful LLM dispatch, so the orchestrator and the {@code /cost} endpoint can surface
  * live spend without reading the V1 {@code agent_task} token columns.
  *

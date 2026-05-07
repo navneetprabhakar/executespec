@@ -59,7 +59,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class SmartClassifierAgent {
 
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ModelResolver modelResolver;
   private final StringRedisTemplate redis;
   private final PromptAssembler promptAssembler;
@@ -442,7 +442,7 @@ public class SmartClassifierAgent {
         if (usage.getPromptTokens() != null) inputTokens = usage.getPromptTokens();
         if (usage.getCompletionTokens() != null) outputTokens = usage.getCompletionTokens();
       }
-      // Cost is recorded by RunCostTracker via LlmRouterV2 — we don't
+      // Cost is recorded by RunCostTracker via LlmRouter — we don't
       // re-compute it here (the tracker is the source of truth). For the
       // ClassificationResult shape we report 0 and let the orchestrator
       // diff the run accumulator before/after to attribute the phase cost.

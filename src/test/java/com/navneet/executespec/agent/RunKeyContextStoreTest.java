@@ -25,21 +25,21 @@ class V2RunKeyContextStoreTest {
     when(resolver.resolve("u1"))
         .thenReturn(new ResolvedKeys("sk-ant-customer", null, null, "HYBRID", null));
 
-    V2RunKeyContext ctx = store.resolveAndPut("run1", "u1");
+    RunKeyContext ctx = store.resolveAndPut("run1", "u1");
 
     assertThat(ctx.anthropicKey()).isEqualTo("sk-ant-customer");
     assertThat(ctx.openAiKey()).isNull();
     assertThat(ctx.geminiKey()).isNull();
-    assertThat(ctx.anthropicSource()).isEqualTo(V2RunKeyContext.Source.USER);
-    assertThat(ctx.openAiSource()).isEqualTo(V2RunKeyContext.Source.PLATFORM);
-    assertThat(ctx.geminiSource()).isEqualTo(V2RunKeyContext.Source.PLATFORM);
+    assertThat(ctx.anthropicSource()).isEqualTo(RunKeyContext.Source.USER);
+    assertThat(ctx.openAiSource()).isEqualTo(RunKeyContext.Source.PLATFORM);
+    assertThat(ctx.geminiSource()).isEqualTo(RunKeyContext.Source.PLATFORM);
   }
 
   @Test
   void keyFor_returnsRightProviderKey() {
     when(resolver.resolve("u1"))
         .thenReturn(new ResolvedKeys("sk-ant", "sk-oai", "AIza-gem", "HYBRID", null));
-    V2RunKeyContext ctx = store.resolveAndPut("run-multi", "u1");
+    RunKeyContext ctx = store.resolveAndPut("run-multi", "u1");
 
     assertThat(ctx.keyFor("anthropic")).isEqualTo("sk-ant");
     assertThat(ctx.keyFor("openai")).isEqualTo("sk-oai");
@@ -53,12 +53,12 @@ class V2RunKeyContextStoreTest {
     when(resolver.resolve("u-empty"))
         .thenReturn(new ResolvedKeys(null, null, null, "HYBRID", null));
 
-    V2RunKeyContext ctx = store.resolveAndPut("run-empty", "u-empty");
+    RunKeyContext ctx = store.resolveAndPut("run-empty", "u-empty");
 
-    assertThat(ctx.anthropicSource()).isEqualTo(V2RunKeyContext.Source.PLATFORM);
-    assertThat(ctx.openAiSource()).isEqualTo(V2RunKeyContext.Source.PLATFORM);
-    assertThat(ctx.geminiSource()).isEqualTo(V2RunKeyContext.Source.PLATFORM);
-    assertThat(ctx.dominantSource()).isEqualTo(V2RunKeyContext.Source.PLATFORM);
+    assertThat(ctx.anthropicSource()).isEqualTo(RunKeyContext.Source.PLATFORM);
+    assertThat(ctx.openAiSource()).isEqualTo(RunKeyContext.Source.PLATFORM);
+    assertThat(ctx.geminiSource()).isEqualTo(RunKeyContext.Source.PLATFORM);
+    assertThat(ctx.dominantSource()).isEqualTo(RunKeyContext.Source.PLATFORM);
   }
 
   @Test
@@ -67,8 +67,8 @@ class V2RunKeyContextStoreTest {
     // through. dominantSource should report USER (not PLATFORM).
     when(resolver.resolve("u1")).thenReturn(new ResolvedKeys(null, "sk-oai", null, "HYBRID", null));
 
-    V2RunKeyContext ctx = store.resolveAndPut("run1", "u1");
-    assertThat(ctx.dominantSource()).isEqualTo(V2RunKeyContext.Source.USER);
+    RunKeyContext ctx = store.resolveAndPut("run1", "u1");
+    assertThat(ctx.dominantSource()).isEqualTo(RunKeyContext.Source.USER);
   }
 
   @Test
@@ -76,7 +76,7 @@ class V2RunKeyContextStoreTest {
     when(resolver.resolve("u1")).thenReturn(new ResolvedKeys("sk-ant", null, null, "HYBRID", null));
     store.resolveAndPut("run-cache", "u1");
 
-    V2RunKeyContext fetched = store.get("run-cache");
+    RunKeyContext fetched = store.get("run-cache");
     assertThat(fetched).isNotNull();
     assertThat(fetched.keyFor("anthropic")).isEqualTo("sk-ant");
   }

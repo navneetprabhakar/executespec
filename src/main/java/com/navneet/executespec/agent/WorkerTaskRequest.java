@@ -7,7 +7,7 @@ import lombok.Builder;
 /**
  * Input to {@link WorkerAgent#run(WorkerTaskRequest)}.
  *
- * <p>The worker is provider-agnostic: it threads the supplied prompts through {@link LlmRouterV2}
+ * <p>The worker is provider-agnostic: it threads the supplied prompts through {@link LlmRouter}
  * which dispatches based on {@link #provider()}.
  *
  * @param provider {@code "anthropic" | "openai" | "gemini"}

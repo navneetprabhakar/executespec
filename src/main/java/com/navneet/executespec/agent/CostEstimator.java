@@ -99,12 +99,12 @@ public class CostEstimator {
     ResolvedModel workerModel = modelResolver.resolve("WorkerAgent", provider);
     ResolvedModel plannerModel = modelResolver.resolve("PlannerAgent", provider);
     // 2026-05-06 — was "ReviewerAgentV2" (legacy class name, not in YAML
-    // agent-tier-map). The actual reviewer is ReviewerAgentV3 which IS mapped
+    // agent-tier-map). The actual reviewer is ReviewerAgent which IS mapped
     // (PLANNING). Using V2 produced a "No tier mapping" warn on every cost
     // estimate; the resolver fell back to WORKHORSE silently — close enough
     // since both reviewer paths run on PLANNING in the matrix today, but the
     // warn was log noise + a real class-name drift.
-    ResolvedModel reviewerModel = modelResolver.resolve("ReviewerAgentV3", provider);
+    ResolvedModel reviewerModel = modelResolver.resolve("ReviewerAgent", provider);
 
     double[] workerRates = dbRatesForModel(workerModel.providerName(), workerModel.getModel());
     double[] plannerRates = dbRatesForModel(plannerModel.providerName(), plannerModel.getModel());

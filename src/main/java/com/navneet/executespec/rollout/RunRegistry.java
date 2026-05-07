@@ -21,16 +21,16 @@ import org.springframework.stereotype.Component;
  * V1's Run entity + StartupRunResumer.
  */
 @Component
-public class V2RunRegistry {
+public class RunRegistry {
 
-  private final Cache<String, V2Run> runs =
+  private final Cache<String, Run> runs =
       Caffeine.newBuilder().maximumSize(10_000).expireAfterWrite(Duration.ofHours(24)).build();
 
-  public void put(V2Run run) {
+  public void put(Run run) {
     runs.put(run.runId(), run);
   }
 
-  public Optional<V2Run> get(String runId) {
+  public Optional<Run> get(String runId) {
     return Optional.ofNullable(runs.getIfPresent(runId));
   }
 

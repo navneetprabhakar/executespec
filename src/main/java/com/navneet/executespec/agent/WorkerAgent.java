@@ -30,7 +30,7 @@ import lombok.extern.slf4j.Slf4j;
  * <p>One agent, one task, one execution context. Multi-turn loop:
  *
  * <ol>
- *   <li>Send the current message history to the LLM via {@link LlmRouterV2}
+ *   <li>Send the current message history to the LLM via {@link LlmRouter}
  *   <li>If the response contains tool calls, dispatch each through {@link ToolRegistry} and append
  *       the results as a {@link ToolResponseMessage}
  *   <li>If the response contains a {@link CompleteTaskTool} call, terminate with {@link
@@ -73,7 +73,7 @@ public class WorkerAgent {
   /** Persist context every N iterations (Phase 8 — plan P8.1 says "every 5"). */
   public static final int CONTEXT_PERSIST_EVERY_N_ITERATIONS = 5;
 
-  private final LlmRouterV2 router;
+  private final LlmRouter router;
   private final ToolRegistry toolRegistry;
   private final ObjectMapper objectMapper;
   private final ContextStore contextStore;

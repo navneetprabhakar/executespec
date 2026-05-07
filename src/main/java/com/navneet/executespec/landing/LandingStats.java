@@ -12,5 +12,5 @@ package com.navneet.executespec.landing;
  *     null if no qualifying runs
  * @param totalRunsAllTime cumulative completed-run count across the platform
  */
-public record V3LandingStats(
+public record LandingStats(
     long specsThisWeek, Integer verifiedScorePercent, long totalRunsAllTime) {}

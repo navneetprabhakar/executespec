@@ -34,7 +34,7 @@ import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.AccuracyAssessmentService;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
@@ -66,7 +66,7 @@ import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.SequentialExecutor;
 import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.observability.Metrics;
-import com.navneet.executespec.reviewer.ReviewerAgentV3;
+import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.tool.ExecutionContext;
@@ -126,7 +126,7 @@ public class RunOrchestrator {
   private final PlanStrategyCircuitBreaker planStrategyBreaker;
   private final SmartClassifierAgent smartClassifier;
   private final SequentialExecutor executor;
-  private final ReviewerAgentV3 reviewer;
+  private final ReviewerAgent reviewer;
 
   /**
    * 2026-05-07 — deterministic auto-formatter pass between executor and reviewer. Runs prettier /
@@ -186,7 +186,7 @@ public class RunOrchestrator {
       validationReportRepository;
 
   /**
-   * V165 BYOK fix — resolves customer-configured keys at run-start; LlmRouterV2 reads back per
+   * V165 BYOK fix — resolves customer-configured keys at run-start; LlmRouter reads back per
    * dispatch.
    */
   private final com.navneet.executespec.agent.RunKeyContextStore keyContextStore;
@@ -521,7 +521,7 @@ public class RunOrchestrator {
                 .getModel();
         reviewerDbModel =
             modelResolver
-                .resolve("ReviewerAgentV3", p, com.navneet.executespec.router.AgentTier.PLANNING)
+                .resolve("ReviewerAgent", p, com.navneet.executespec.router.AgentTier.PLANNING)
                 .getModel();
       } catch (Exception ex) {
         log.debug(
@@ -738,7 +738,7 @@ public class RunOrchestrator {
     String upperProvider = provider == null ? "UNKNOWN" : provider.toUpperCase();
     try {
       // V165 BYOK fix — resolve the run owner's configured keys ONCE
-      // at run-start and stash them in RunKeyContextStore. LlmRouterV2
+      // at run-start and stash them in RunKeyContextStore. LlmRouter
       // reads back per-dispatch via request.context().runId() and
       // threads the right provider key into the wire call. Without
       // this, every dispatched LLM call silently used the platform
@@ -747,7 +747,7 @@ public class RunOrchestrator {
       try {
         PipelineRun pre = runRepo.findById(runId).orElse(null);
         if (pre != null && pre.getCreatedByUserId() != null) {
-          com.navneet.executespec.agent.V2RunKeyContext kctx =
+          com.navneet.executespec.agent.RunKeyContext kctx =
               keyContextStore.resolveAndPut(runId, pre.getCreatedByUserId());
           String label = kctx.dominantSource().name();
           if (!label.equals(pre.getKeySource())) {
@@ -2321,7 +2321,7 @@ public class RunOrchestrator {
    *   <li>Deletes the existing {@code validation_report} row entirely
    *   <li>Resets {@code pipeline_run.status} to {@code REVIEWING} + clears {@code statusReason} +
    *       {@code completedAt} + {@code reviewJson}
-   *   <li>Submits an async job that runs {@link ReviewerAgentV3#review} from scratch against the
+   *   <li>Submits an async job that runs {@link ReviewerAgent#review} from scratch against the
    *       persisted workspace, calls {@link #persistReview} + {@link #generateValidationReport},
    *       then re-resolves the terminal status via {@link #resolveTerminalStatus}
    *   <li>Emits {@code STATUS} (REVIEWING) and {@code COMPLETE} SSE events so the UI mirrors the
@@ -2413,7 +2413,7 @@ public class RunOrchestrator {
       provider = LlmProvider.OPENAI;
     }
     ResolvedModel reviewerModel =
-        modelResolver.resolve("ReviewerAgentV3", provider, AgentTier.PLANNING);
+        modelResolver.resolve("ReviewerAgent", provider, AgentTier.PLANNING);
 
     Path workspace = Path.of(agentProps.getWorkspace(), runId).toAbsolutePath().normalize();
     if (!Files.isDirectory(workspace)) {
@@ -2637,7 +2637,7 @@ public class RunOrchestrator {
     broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
     broadcaster.emit(runId, RunEvent.complete(runId, finalStatus, statusReason));
     broadcaster.complete(runId);
-    // V2 run-level metrics are emitted by V2RunService only. This orchestrator is a
+    // V2 run-level metrics are emitted by RunService only. This orchestrator is a
     // parallel entry path — record run.outcome + run.latency here too so V1-endpoint-
     // submitted V2 runs are counted.
     metrics.recordRunOutcome(finalStatus);
@@ -2816,7 +2816,7 @@ public class RunOrchestrator {
    *
    * <ul>
    *   <li>{@link ExecutionResult} per-task → synthesized {@link WorkerReport}s
-   *   <li>{@link ReviewerResult} → synthesized {@link ReviewReportV2} with the mapped verdict +
+   *   <li>{@link ReviewerResult} → synthesized {@link ReviewReport} with the mapped verdict +
    *       summary
    *   <li>Final build passed → {@link CompileResult#passed(int)} else {@code failed}
    * </ul>
@@ -2866,7 +2866,7 @@ public class RunOrchestrator {
         }
       }
 
-      ReviewReportV2 review = new ReviewReportV2();
+      ReviewReport review = new ReviewReport();
       if (reviewResult != null) {
         review.setVerdict(
             switch (reviewResult.overall()) {
@@ -2889,7 +2889,7 @@ public class RunOrchestrator {
       }
 
       // Run accuracy assessment — V1 does this inside ReviewerAgentV2 phase 3,
-      // but V2's ReviewerAgentV3 skips it, so the ValidationReport was coming
+      // but V2's ReviewerAgent skips it, so the ValidationReport was coming
       // back with accuracyScore=null. Call it here so the report gets populated.
       try {
         // AccuracyAssessmentService → V1's FallbackLlmRouter → Spring AI 1.1.4,
@@ -2899,10 +2899,10 @@ public class RunOrchestrator {
         LlmProvider provider = providerForAccuracy(run.getAiProvider());
         if (provider == LlmProvider.OPENAI) provider = LlmProvider.ANTHROPIC;
         // 2026-05-06 — was "ReviewerAgentV2" (legacy class name). The actual reviewer is
-        // ReviewerAgentV3 in the YAML agent-tier-map. The 3-arg resolve form bypasses the
+        // ReviewerAgent in the YAML agent-tier-map. The 3-arg resolve form bypasses the
         // tier lookup so this didn't trigger a warn, but the class-name drift was real.
         ResolvedModel planningModel =
-            modelResolver.resolve("ReviewerAgentV3", provider, AgentTier.PLANNING);
+            modelResolver.resolve("ReviewerAgent", provider, AgentTier.PLANNING);
         AccuracyReport accuracy =
             accuracyAssessmentService.assess(
                 runId,
@@ -2929,7 +2929,7 @@ public class RunOrchestrator {
                           ? ""
                           : reviewResult.finalBuildOutput()));
 
-      // V2's ReviewerAgentV3 doesn't emit structured ReviewIssues — it just returns
+      // V2's ReviewerAgent doesn't emit structured ReviewIssues — it just returns
       // a verdict enum + summary text. That leaves ReviewScoringService with an empty
       // issues list, so every quality dimension flat-lined at the anchor regardless
       // of what actually happened. Synthesise issues from the signals we DO have
@@ -3558,7 +3558,7 @@ public class RunOrchestrator {
    * outright — the caller should treat that as the legacy path (PlannerAgent handles every
    * classification).
    *
-   * <p>Cost note: the classifier's LLM call (when it fires) flows through {@link LlmRouterV2} →
+   * <p>Cost note: the classifier's LLM call (when it fires) flows through {@link LlmRouter} →
    * {@link RunCostTracker#record}, so it auto-aggregates into the run's grand totals. We diff the
    * per-run snapshot before and after the classifier call to attribute the slice to the new {@code
    * classifier_*} columns. Any future cost reads on the run total already include this — no

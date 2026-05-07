@@ -14,7 +14,7 @@ import com.navneet.executespec.report.ValidationReportRepository;
 import com.navneet.executespec.report.entity.ValidationReport;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.agent.LlmRouterV2;
+import com.navneet.executespec.agent.LlmRouter;
 
 import org.junit.jupiter.api.Test;
 
@@ -31,7 +31,7 @@ import org.junit.jupiter.api.Test;
 class V2ChatServiceValidationReportTest {
 
   private final PipelineRunRepository runRepo = mock(PipelineRunRepository.class);
-  private final LlmRouterV2 router = mock(LlmRouterV2.class);
+  private final LlmRouter router = mock(LlmRouter.class);
   private final ModelResolver modelResolver = mock(ModelResolver.class);
   private final AgentProperties agentProps = mock(AgentProperties.class);
   private final ValidationReportRepository reportRepo = mock(ValidationReportRepository.class);

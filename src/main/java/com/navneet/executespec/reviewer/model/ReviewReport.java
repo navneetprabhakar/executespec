@@ -25,7 +25,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
-public class ReviewReportV2 {
+public class ReviewReport {
   private ReviewVerdict verdict; // APPROVED, APPROVED_WITH_NOTES, NEEDS_FIXES, REJECTED
   private List<ReviewIssue> issues; // all issues found (flat list)
   private int criticalCount;

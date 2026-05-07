@@ -222,7 +222,7 @@ public class SecurityConfig {
                     .requestMatchers("/api/admin/**")
                     .hasRole("SUPER_ADMIN")
                     // V2 Phase 0 native-tools test endpoint (no auth — temporary, removed once
-                    // LlmRouterV2 lands)
+                    // LlmRouter lands)
                     .requestMatchers("/api/v2/test/**")
                     .permitAll()
                     // v2.5.12 — V2 Phase 9 canary retired; V2 is the only harness and is

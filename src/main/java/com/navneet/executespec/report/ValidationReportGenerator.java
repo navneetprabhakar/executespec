@@ -13,7 +13,7 @@ import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.testgen.model.TestExecutionSummary;
@@ -153,7 +153,7 @@ public class ValidationReportGenerator {
     }
 
     // Review result (V2 flat issue list)
-    ReviewReportV2 review = input.review();
+    ReviewReport review = input.review();
     if (review != null) {
       checksRun.add("CODE_REVIEW");
       if (review.getIssues() != null && !review.getIssues().isEmpty()) {

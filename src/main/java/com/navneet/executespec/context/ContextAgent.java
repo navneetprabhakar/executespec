@@ -17,7 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.state.StateStore;
@@ -66,13 +66,13 @@ public class ContextAgent {
   }
 
   public void runAsync(
-      PipelineRun run, List<WorkerReport> workerReports, ReviewReportV2 reviewReport) {
+      PipelineRun run, List<WorkerReport> workerReports, ReviewReport reviewReport) {
     Thread.ofVirtual()
         .name("context-agent-" + run.getRunId())
         .start(() -> run(run, workerReports, reviewReport));
   }
 
-  private void run(PipelineRun run, List<WorkerReport> workerReports, ReviewReportV2 reviewReport) {
+  private void run(PipelineRun run, List<WorkerReport> workerReports, ReviewReport reviewReport) {
     if (!props.isEnabled()) return;
     log.info("Context Agent starting for run {}", run.getRunId());
 

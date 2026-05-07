@@ -34,9 +34,9 @@ import lombok.extern.slf4j.Slf4j;
 @RequestMapping("/api/v2/runs")
 @RequiredArgsConstructor
 @Slf4j
-public class V2RunController {
+public class RunController {
 
-  private final V2RunService runService;
+  private final RunService runService;
 
   @PostMapping
   public ResponseEntity<Map<String, Object>> submit(@RequestBody SubmitRequest body) {
@@ -53,9 +53,9 @@ public class V2RunController {
             ? Classification.valueOf(body.classification().toUpperCase())
             : Classification.MEDIUM;
 
-    V2Run run =
+    Run run =
         runService.submit(
-            new V2RunService.Request(
+            new RunService.Request(
                 body.spec(),
                 body.provider(),
                 body.model(),
@@ -83,7 +83,7 @@ public class V2RunController {
         .orElseGet(() -> ResponseEntity.notFound().build());
   }
 
-  private Map<String, Object> snapshot(V2Run run) {
+  private Map<String, Object> snapshot(Run run) {
     Map<String, Object> m = new LinkedHashMap<>();
     m.put("runId", run.runId());
     m.put("status", run.status().name());

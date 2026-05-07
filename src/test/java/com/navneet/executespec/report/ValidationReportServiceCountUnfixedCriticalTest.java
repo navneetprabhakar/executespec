@@ -11,7 +11,7 @@ import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.model.IssueCategory;
 import com.navneet.executespec.reviewer.model.IssueSeverity;
 import com.navneet.executespec.reviewer.model.ReviewIssue;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -45,7 +45,7 @@ class ValidationReportServiceCountUnfixedCriticalTest {
   }
 
   private int count(ReviewIssue... issues) throws Exception {
-    ReviewReportV2 review = new ReviewReportV2();
+    ReviewReport review = new ReviewReport();
     review.setVerdict(ReviewVerdict.APPROVED_WITH_NOTES);
     review.setIssues(List.of(issues));
     ReportInput input = new ReportInput(null, List.of(), review, null, List.of());
