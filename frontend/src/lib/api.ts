@@ -2028,6 +2028,46 @@ export const runTests = (runId: string) =>
     method: 'POST',
   });
 
+// ── Phase P1: PR review comment inbox ─────────────────────────────────────
+
+/**
+ * 2026-05-07 — Phase P1: incoming PR review comments on PRs ExecuteSpec opened. Webhook
+ * ingestion populates `pr_comment_inbox` server-side; the v3 RunDetail page polls these to
+ * drive the action-row chip + side-panel ChatPane "pending comments" section.
+ */
+export interface PrCommentInboxDto {
+  id: number;
+  runId: string;
+  repoFullName: string;
+  prNumber: number;
+  commentId: number;
+  filePath: string | null;
+  lineNumber: number | null;
+  body: string;
+  author: string;
+  githubUrl: string;
+  status: 'PENDING' | 'ADDRESSED' | 'DISMISSED';
+  addressedRunId: string | null;
+  createdAt: string;
+}
+
+export const getPrComments = (runId: string) =>
+  req<PrCommentInboxDto[]>(`/runs/${runId}/pr-comments`);
+
+export const getPrCommentPendingCount = (runId: string) =>
+  req<{count: number}>(`/runs/${runId}/pr-comments/pending-count`);
+
+export const dismissPrComment = (runId: string, commentId: number) =>
+  req<PrCommentInboxDto>(`/runs/${runId}/pr-comments/${commentId}/dismiss`, {method: 'POST'});
+
+/**
+ * Phase P2 — apply a PR review comment via ApplyService. Pushes the resulting fix to the same
+ * branch the PR is from, so the PR auto-updates. Returns the apply-run id; UI follows it via
+ * the existing apply-run polling loop.
+ */
+export const applyPrComment = (runId: string, commentId: number) =>
+  req<{applyRunId: string}>(`/runs/${runId}/pr-comments/${commentId}/apply`, {method: 'POST'});
+
 // ── Admin Analytics ──────────────────────────────────────────────────────────
 
 export interface UsageMetrics {
