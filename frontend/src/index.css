@@ -79,6 +79,21 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* 2026-05-07 — Issue 4: form controls don't inherit `font-family` from the
+ * page by default — browsers use a UA "system control" font (SF Pro on macOS,
+ * Segoe UI on Windows). Without this rule, every <input> / <textarea> /
+ * <select> / <button> renders in the OS UI font instead of Geist Sans,
+ * creating the visible font drift the user reported on chat surfaces.
+ * Page-level rule covers v2, v3, AND any react-portal that mounts directly
+ * under <body> (e.g. ConversationModal, the Refine-with-assistant chat). */
+input,
+textarea,
+select,
+button,
+optgroup {
+  font-family: inherit;
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;

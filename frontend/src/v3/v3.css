@@ -123,6 +123,28 @@
   box-sizing: border-box;
 }
 
+/* 2026-05-07 — Issue 4: form controls don't inherit `font-family` from the
+ * page by default — browsers fall back to a UA "system control" font which
+ * on macOS is SF Pro / system-ui, not Geist Sans. Components historically
+ * remembered to set `fontFamily: 'inherit'` per-element, but the discipline
+ * drifted over time and chat surfaces (textarea, input, select, button) were
+ * the most visible offenders. This single rule catches every form control
+ * inside the v3 surface so the page font (Geist Sans via --v3-font-sans)
+ * cascades automatically. ConversationModal portals to <body> but `body` has
+ * the same Geist Sans chain (index.css:70), so this still works there.
+ *
+ * Mono content (chips, run-id, command logs) still opts in via class or
+ * inline `fontFamily: 'var(--v3-font-mono)'` — the class wins over this
+ * inherit rule because it's higher specificity, no regression.
+ */
+.v3-root input,
+.v3-root textarea,
+.v3-root select,
+.v3-root button,
+.v3-root optgroup {
+  font-family: inherit;
+}
+
 /* ── R-307 (Wave 6) — v3 light-mode override ────────────────────────────────
  * Activated when [data-theme='light'] propagates from <html> (the v2
  * useUiStore theme toggle already writes this attr). Mirrors v2's
