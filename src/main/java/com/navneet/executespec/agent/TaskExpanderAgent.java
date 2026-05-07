@@ -60,7 +60,7 @@ public class TaskExpanderAgent {
   private final ObjectMapper objectMapper;
   private final ModelResolver modelResolver;
 
-  private static final String PROMPT_PATH = "prompts/v2/task-expander.md";
+  private static final String PROMPT_PATH = "prompts/task-expander.md";
 
   /** v2.6.2 slice 3 — body of a single task fits in 3k easily. */
   private static final int EXPAND_MAX_TOKENS = 3_000;

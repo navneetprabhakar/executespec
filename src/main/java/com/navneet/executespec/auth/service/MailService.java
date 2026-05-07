@@ -189,7 +189,7 @@ public class MailService {
     sendHtml(
         toEmail,
         name + " invited you to ExecuteSpec — both of you get +5 free runs",
-        "email/v3-referral-invite",
+        "email/referral-invite",
         ctx);
   }
 
