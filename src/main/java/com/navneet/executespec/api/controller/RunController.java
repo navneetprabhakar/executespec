@@ -82,6 +82,7 @@ public class RunController {
   private final com.navneet.executespec.harness.GateStore gateStore;
   private final com.navneet.executespec.config.featureflag.FeatureFlagService featureFlagService;
   private final com.navneet.executespec.security.InputSanitizer inputSanitizer;
+
   /** Audit r5 (#5, 2026-05-06) — staged-PR-before-push mode. */
   private final com.navneet.executespec.run.RunSkipPushFlag runSkipPushFlag;
 

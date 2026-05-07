@@ -6,7 +6,6 @@ import jakarta.persistence.*;
 
 import com.navneet.executespec.crypto.EncryptedValueConverter;
 
-
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;

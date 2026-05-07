@@ -240,9 +240,7 @@ export default function PlanCard({runId, onApproved}: PlanCardProps) {
                   /* malformed plan JSON — silently skip the overlay */
                 }
                 return detail.tasks!.slice(0, 6).map((t, i) => {
-                  const shortId = t.taskId.includes('_')
-                    ? t.taskId.split('_').pop()!
-                    : t.taskId;
+                  const shortId = t.taskId.includes('_') ? t.taskId.split('_').pop()! : t.taskId;
                   const files = touchesByTaskId[shortId] ?? touchesByTaskId[t.taskId] ?? [];
                   return (
                     <li

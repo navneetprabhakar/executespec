@@ -23,13 +23,7 @@ import {getRun} from '@/lib/api';
  * stays well under the rate limiter's RUNS group quota (60/min).
  */
 
-const TERMINAL_STATUSES = new Set([
-  'COMPLETE',
-  'PARTIAL',
-  'FAILED',
-  'CANCELLED',
-  'ABORTED',
-]);
+const TERMINAL_STATUSES = new Set(['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED']);
 
 export interface LiveRunStatus {
   status: string | null;

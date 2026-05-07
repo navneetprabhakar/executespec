@@ -586,16 +586,22 @@ export default function ProjectDashboardPage() {
             // both want flex-column layout (composer/input pinned to
             // the bottom of the pane). Other tabs use the standard
             // scrolling content layout.
-            tab === 'chat' || tab === 'compose'
-              ? 'flex flex-col'
-              : 'overflow-y-auto p-3 sm:p-4',
+            tab === 'chat' || tab === 'compose' ? 'flex flex-col' : 'overflow-y-auto p-3 sm:p-4',
           )}
         >
           {/* Single-surface retirement (2026-05-06) — Compose tab.
               Hosts the chat-thread + composer that previously lived
               on the now-deleted ProjectHomePage. Default tab. */}
           {tab === 'compose' && (
-            <div style={{padding: '12px 14px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0}}>
+            <div
+              style={{
+                padding: '12px 14px',
+                display: 'flex',
+                flexDirection: 'column',
+                flex: 1,
+                minHeight: 0,
+              }}
+            >
               <ComposeTab projectId={projectId!} defaultProvider={project?.aiProvider} />
             </div>
           )}

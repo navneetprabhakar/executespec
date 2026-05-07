@@ -266,11 +266,8 @@ export default function CodeReviewPanel({projectId}: Props) {
                       padding: '3px 8px',
                       fontSize: 11,
                       background: inflight ? 'transparent' : 'var(--v3-brand)',
-                      color: inflight
-                        ? 'var(--v3-text-subtle)'
-                        : 'var(--v3-text-on-brand)',
-                      border:
-                        '1px solid ' + (inflight ? 'var(--v3-border)' : 'var(--v3-brand)'),
+                      color: inflight ? 'var(--v3-text-subtle)' : 'var(--v3-text-on-brand)',
+                      border: '1px solid ' + (inflight ? 'var(--v3-border)' : 'var(--v3-brand)'),
                       borderRadius: 3,
                       cursor: inflight || submittingThis ? 'not-allowed' : 'pointer',
                       fontFamily: 'inherit',

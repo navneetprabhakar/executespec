@@ -16,10 +16,10 @@ import org.junit.jupiter.api.io.TempDir;
 /**
  * Tests for DockerExecutor.
  *
- * <p>Tests that invoke actual Docker commands are guarded by
- * {@code assumeTrue(executor.isDockerAvailable(), "Docker not available...")} so they skip cleanly
- * in CI or environments without Docker. The reason string surfaces in the surefire report
- * (replaces the bare "Skipped: N" line that gave no hint why).
+ * <p>Tests that invoke actual Docker commands are guarded by {@code
+ * assumeTrue(executor.isDockerAvailable(), "Docker not available...")} so they skip cleanly in CI
+ * or environments without Docker. The reason string surfaces in the surefire report (replaces the
+ * bare "Skipped: N" line that gave no hint why).
  */
 @DisplayName("DockerExecutor")
 class DockerExecutorTest {

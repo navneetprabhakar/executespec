@@ -112,9 +112,7 @@ export const PRICING_CARDS: PricingCard[] = [
  * Anonymous /pricing viewers (no entitlements) get the static default
  * copy, which we keep synced to the DB seed via PR review.
  */
-export function pricingCardsWith(
-  freeRunLimitMonthly: number | null | undefined,
-): PricingCard[] {
+export function pricingCardsWith(freeRunLimitMonthly: number | null | undefined): PricingCard[] {
   if (freeRunLimitMonthly == null || freeRunLimitMonthly < 0) return PRICING_CARDS;
   const n = freeRunLimitMonthly;
   return PRICING_CARDS.map((card) => {

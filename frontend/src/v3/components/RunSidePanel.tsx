@@ -88,8 +88,7 @@ export default function RunSidePanel({
   onRefetch?: () => void;
 }) {
   const status = detail?.status ?? '';
-  const isInFlight =
-    !['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED'].includes(status);
+  const isInFlight = !['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED'].includes(status);
   const isAwaitingApproval = status === 'AWAITING_APPROVAL';
 
   // Default tab:
@@ -304,9 +303,24 @@ function PlanPane({
           >
             Tasks ({detail.tasks.length})
           </div>
-          <ul style={{margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: 6}}>
+          <ul
+            style={{
+              margin: 0,
+              padding: 0,
+              listStyle: 'none',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 6,
+            }}
+          >
             {detail.tasks.map((t, i) => (
-              <TaskRow key={t.taskId} index={i} task={t} runId={runId} canRetry={!isAwaitingApproval} />
+              <TaskRow
+                key={t.taskId}
+                index={i}
+                task={t}
+                runId={runId}
+                canRetry={!isAwaitingApproval}
+              />
             ))}
           </ul>
         </div>
@@ -728,7 +742,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
         tone: 'red',
       };
     if (s === 'CANCELLED' || s === 'ABORTED')
-      return {icon: <PauseCircle className='h-3.5 w-3.5' />, text: `Run ${s.toLowerCase()}`, tone: 'neutral'};
+      return {
+        icon: <PauseCircle className='h-3.5 w-3.5' />,
+        text: `Run ${s.toLowerCase()}`,
+        tone: 'neutral',
+      };
     return {icon: <Rocket className='h-3.5 w-3.5' />, text: `Run → ${s}`, tone: 'blue'};
   }
 
@@ -743,11 +761,7 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
     const decision = payloadStr.toUpperCase();
     const approved = decision === 'APPROVED';
     return {
-      icon: approved ? (
-        <PlayCircle className='h-3.5 w-3.5' />
-      ) : (
-        <XCircle className='h-3.5 w-3.5' />
-      ),
+      icon: approved ? <PlayCircle className='h-3.5 w-3.5' /> : <XCircle className='h-3.5 w-3.5' />,
       text: `Gate ${decision.toLowerCase()}`,
       tone: approved ? 'green' : 'red',
     };
@@ -755,9 +769,7 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
 
   // Cost / tokens
   if (type === 'COST_UPDATE') {
-    const costNum = Number(
-      (data as Record<string, unknown>)?.totalCost ?? Number(payloadStr) ?? 0,
-    );
+    const costNum = Number((data as Record<string, unknown>)?.totalCost ?? Number(payloadStr) ?? 0);
     return {
       icon: <DollarSign className='h-3.5 w-3.5' />,
       text: `Cost: $${costNum.toFixed(4)}`,
@@ -773,7 +785,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
 
   // Generic completion
   if (type === 'COMPLETE')
-    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Pipeline complete', tone: 'green'};
+    return {
+      icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+      text: 'Pipeline complete',
+      tone: 'green',
+    };
   if (type === 'RECOVERY_ATTEMPTED')
     return {
       icon: <RotateCcw className='h-3.5 w-3.5' />,
@@ -803,7 +819,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
   if (type === 'DEPLOY_STARTED' || type === 'ENGINE_DEPLOY_STARTED')
     return {icon: <Rocket className='h-3.5 w-3.5' />, text: 'Deployment started', tone: 'blue'};
   if (type === 'DEPLOY_BUILDING' || type === 'ENGINE_BUILDING')
-    return {icon: <Rocket className='h-3.5 w-3.5' />, text: 'Building container image…', tone: 'blueSoft'};
+    return {
+      icon: <Rocket className='h-3.5 w-3.5' />,
+      text: 'Building container image…',
+      tone: 'blueSoft',
+    };
   if (type === 'DEPLOY_PUSHING' || type === 'ENGINE_DEPLOYING')
     return {
       icon: <Rocket className='h-3.5 w-3.5' />,
@@ -829,7 +849,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
 
   // Reviewer V2 events
   if (type === 'REVIEW_STARTED')
-    return {icon: <Eye className='h-3.5 w-3.5' />, text: `Code review started${payloadStr ? ` (${payloadStr})` : ''}`, tone: 'blue'};
+    return {
+      icon: <Eye className='h-3.5 w-3.5' />,
+      text: `Code review started${payloadStr ? ` (${payloadStr})` : ''}`,
+      tone: 'blue',
+    };
   if (type === 'REVIEW_ISSUE_FOUND') {
     const parts = payloadStr.split('|');
     const severity = parts[1] ?? 'UNKNOWN';
@@ -846,7 +870,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
     };
   }
   if (type === 'REVIEW_AUTO_FIX_STARTED')
-    return {icon: <Wrench className='h-3.5 w-3.5' />, text: `Auto-fixing ${payloadStr}`, tone: 'blueSoft'};
+    return {
+      icon: <Wrench className='h-3.5 w-3.5' />,
+      text: `Auto-fixing ${payloadStr}`,
+      tone: 'blueSoft',
+    };
   if (type === 'REVIEW_AUTO_FIX_RESULT') {
     const parts = payloadStr.split('|');
     const success = parts[1] === 'PASS';
@@ -863,13 +891,10 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
   if (type === 'REVIEW_COMPLETE') {
     const parts = payloadStr.split('|');
     const verdict = parts[0] ?? '';
-    const isGood = verdict === 'APPROVED' || verdict === 'APPROVED_WITH_NOTES' || verdict === 'CLEAN';
+    const isGood =
+      verdict === 'APPROVED' || verdict === 'APPROVED_WITH_NOTES' || verdict === 'CLEAN';
     return {
-      icon: isGood ? (
-        <CheckCircle2 className='h-3.5 w-3.5' />
-      ) : (
-        <XCircle className='h-3.5 w-3.5' />
-      ),
+      icon: isGood ? <CheckCircle2 className='h-3.5 w-3.5' /> : <XCircle className='h-3.5 w-3.5' />,
       text: `Review: ${verdict.replace(/_/g, ' ').toLowerCase()}`,
       tone: isGood ? 'green' : 'red',
     };
@@ -877,9 +902,17 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
 
   // Test gen pipeline
   if (type === 'TEST_GEN_STARTED')
-    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Test generation started', tone: 'blue'};
+    return {
+      icon: <FlaskConical className='h-3.5 w-3.5' />,
+      text: 'Test generation started',
+      tone: 'blue',
+    };
   if (type === 'TEST_PLANNING_STARTED')
-    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Planning test strategy…', tone: 'blueSoft'};
+    return {
+      icon: <FlaskConical className='h-3.5 w-3.5' />,
+      text: 'Planning test strategy…',
+      tone: 'blueSoft',
+    };
   if (type === 'TEST_PLANNING_COMPLETED')
     return {
       icon: <FlaskConical className='h-3.5 w-3.5' />,
@@ -893,9 +926,17 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       tone: 'blueSoft',
     };
   if (type === 'TEST_COMPILATION_STARTED')
-    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Compiling tests…', tone: 'blueSoft'};
+    return {
+      icon: <FlaskConical className='h-3.5 w-3.5' />,
+      text: 'Compiling tests…',
+      tone: 'blueSoft',
+    };
   if (type === 'TEST_COMPILATION_PASSED')
-    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Tests compiled successfully', tone: 'greenSoft'};
+    return {
+      icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+      text: 'Tests compiled successfully',
+      tone: 'greenSoft',
+    };
   if (type === 'TEST_COMPILATION_FAILED')
     return {
       icon: <XCircle className='h-3.5 w-3.5' />,
@@ -903,7 +944,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       tone: 'red',
     };
   if (type === 'TEST_EXECUTION_STARTED')
-    return {icon: <FlaskConical className='h-3.5 w-3.5' />, text: 'Running tests against preview…', tone: 'blue'};
+    return {
+      icon: <FlaskConical className='h-3.5 w-3.5' />,
+      text: 'Running tests against preview…',
+      tone: 'blue',
+    };
   if (type === 'TEST_EXECUTION_SKIPPED')
     return {
       icon: <AlertTriangle className='h-3.5 w-3.5' />,
@@ -911,7 +956,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       tone: 'amber',
     };
   if (type === 'TEST_REPORT_READY')
-    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Test report ready', tone: 'green'};
+    return {
+      icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+      text: 'Test report ready',
+      tone: 'green',
+    };
   if (type === 'TEST_PIPELINE_FAILED')
     return {
       icon: <XCircle className='h-3.5 w-3.5' />,
@@ -927,9 +976,17 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       tone: 'neutral',
     };
   if (type === 'CLARIFICATION_NEEDED')
-    return {icon: <MessageSquare className='h-3.5 w-3.5' />, text: 'Clarification needed from user', tone: 'amber'};
+    return {
+      icon: <MessageSquare className='h-3.5 w-3.5' />,
+      text: 'Clarification needed from user',
+      tone: 'amber',
+    };
   if (type === 'CLARIFICATION_RESOLVED')
-    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Clarification resolved', tone: 'greenSoft'};
+    return {
+      icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+      text: 'Clarification resolved',
+      tone: 'greenSoft',
+    };
   if (type === 'MODEL_ESCALATED') {
     const parts = payloadStr.split('|');
     return {
@@ -939,7 +996,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
     };
   }
   if (type === 'API_SPEC_READY')
-    return {icon: <FileCode className='h-3.5 w-3.5' />, text: 'API spec generated', tone: 'blueSoft'};
+    return {
+      icon: <FileCode className='h-3.5 w-3.5' />,
+      text: 'API spec generated',
+      tone: 'blueSoft',
+    };
   if (type === 'PREVIEW_ANALYZING')
     return {
       icon: <Search className='h-3.5 w-3.5' />,
@@ -965,7 +1026,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       tone: 'green',
     };
   if (type === 'PREVIEW_STOPPED')
-    return {icon: <PauseCircle className='h-3.5 w-3.5' />, text: 'Preview stopped', tone: 'neutral'};
+    return {
+      icon: <PauseCircle className='h-3.5 w-3.5' />,
+      text: 'Preview stopped',
+      tone: 'neutral',
+    };
   if (type === 'PREVIEW_TIMED_OUT')
     return {
       icon: <Clock className='h-3.5 w-3.5' />,
@@ -979,9 +1044,17 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       tone: 'red',
     };
   if (type === 'VALIDATION_STARTED')
-    return {icon: <Shield className='h-3.5 w-3.5' />, text: `Validating ${payloadStr}`, tone: 'neutral'};
+    return {
+      icon: <Shield className='h-3.5 w-3.5' />,
+      text: `Validating ${payloadStr}`,
+      tone: 'neutral',
+    };
   if (type === 'VALIDATION_PASSED')
-    return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Validation passed', tone: 'greenSoft'};
+    return {
+      icon: <CheckCircle2 className='h-3.5 w-3.5' />,
+      text: 'Validation passed',
+      tone: 'greenSoft',
+    };
   if (type === 'VALIDATION_FAILED')
     return {
       icon: <XCircle className='h-3.5 w-3.5' />,
@@ -991,7 +1064,11 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
 
   // Batch (forward-compat for V2 batch path)
   if (type === 'BATCH_PROGRESS')
-    return {icon: <Rocket className='h-3.5 w-3.5' />, text: `Batch: ${payloadStr}`, tone: 'blueSoft'};
+    return {
+      icon: <Rocket className='h-3.5 w-3.5' />,
+      text: `Batch: ${payloadStr}`,
+      tone: 'blueSoft',
+    };
   if (type === 'BATCH_COMPLETE')
     return {icon: <CheckCircle2 className='h-3.5 w-3.5' />, text: 'Batch complete', tone: 'green'};
   if (type === 'BATCH_FAILED')
@@ -1009,10 +1086,7 @@ function MilestoneBanner({entry, spec}: {entry: LogEntry; spec: MilestoneSpec}) 
     <div style={bannerStyle(spec.tone)}>
       {spec.icon}
       <span style={{flex: 1, minWidth: 0}}>{spec.text}</span>
-      <span
-        className='v3-mono'
-        style={{fontSize: 10, opacity: 0.55, flexShrink: 0}}
-      >
+      <span className='v3-mono' style={{fontSize: 10, opacity: 0.55, flexShrink: 0}}>
         {formatTimestamp(entry.timestamp)}
       </span>
     </div>
@@ -1046,14 +1120,17 @@ function FileOpRow({entry, op}: {entry: LogEntry; op: FileOp}) {
         color: t.fg,
       }}
     >
-      <span
-        className='v3-mono'
-        style={{color: 'var(--v3-text-subtle)', flexShrink: 0}}
-      >
+      <span className='v3-mono' style={{color: 'var(--v3-text-subtle)', flexShrink: 0}}>
         {formatTimestamp(entry.timestamp)}
       </span>
       <span
-        style={{display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0, fontWeight: 600}}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 4,
+          flexShrink: 0,
+          fontWeight: 600,
+        }}
       >
         {config.icon}
         {config.label}
@@ -1128,7 +1205,11 @@ function deriveLogBanner(msg: string, taskId: string): MilestoneSpec | null {
   } else if (taskId === 'planner' || /^Plan/i.test(msg)) {
     icon = <Zap className='h-3.5 w-3.5' />;
     tone = 'blue';
-  } else if (taskId === 'harness' || /^Merging|^\[harness\]/i.test(msg) || /^Background/i.test(msg)) {
+  } else if (
+    taskId === 'harness' ||
+    /^Merging|^\[harness\]/i.test(msg) ||
+    /^Background/i.test(msg)
+  ) {
     icon = <GitCommit className='h-3.5 w-3.5' />;
     tone = 'blueSoft';
   } else if (taskId === 'compiler' || /^Compile|^Compiling/i.test(msg)) {
@@ -1332,7 +1413,6 @@ function LogPane({runId, live}: {runId: string; live: boolean}) {
   );
 }
 
-
 // ── Overview pane ───────────────────────────────────────────────────────
 //
 // Compact key-value rollup of the run's high-level signals: provider,
@@ -1388,14 +1468,8 @@ function OverviewPane({
   // coherence phases) so liveTokens, when present, wins.
   const taskInputSum = (detail.tasks ?? []).reduce((s, t) => s + (t.inputTokens || 0), 0);
   const taskOutputSum = (detail.tasks ?? []).reduce((s, t) => s + (t.outputTokens || 0), 0);
-  const agentInputSum = (detail.agentTokens ?? []).reduce(
-    (s, a) => s + (a.inputTokens || 0),
-    0,
-  );
-  const agentOutputSum = (detail.agentTokens ?? []).reduce(
-    (s, a) => s + (a.outputTokens || 0),
-    0,
-  );
+  const agentInputSum = (detail.agentTokens ?? []).reduce((s, a) => s + (a.inputTokens || 0), 0);
+  const agentOutputSum = (detail.agentTokens ?? []).reduce((s, a) => s + (a.outputTokens || 0), 0);
   const dbInputTokens = taskInputSum + agentInputSum;
   const dbOutputTokens = taskOutputSum + agentOutputSum;
   const inputTokens = Math.max(liveTokens?.input ?? 0, dbInputTokens);
@@ -1412,7 +1486,10 @@ function OverviewPane({
   // best-effort summary, fall back to '—'.
   const provider = detail.aiProvider ?? null;
   const lastTaskModel =
-    (detail.tasks ?? []).map((t) => t.model).filter((m): m is string => !!m).pop() ?? null;
+    (detail.tasks ?? [])
+      .map((t) => t.model)
+      .filter((m): m is string => !!m)
+      .pop() ?? null;
   const isBatch = detail.approvedExecutionMode === 'BATCH';
   const prUrl = detail.githubPrUrl ?? detail.scmPrUrl ?? null;
 
@@ -1441,7 +1518,10 @@ function OverviewPane({
 
       <KvSection label='Run'>
         <Kv k='Status' v={detail.status ?? '—'} />
-        <Kv k='Provider' v={provider ? PROVIDER_LABEL[provider.toUpperCase()] ?? provider : '—'} />
+        <Kv
+          k='Provider'
+          v={provider ? (PROVIDER_LABEL[provider.toUpperCase()] ?? provider) : '—'}
+        />
         <Kv k='Model' v={lastTaskModel || '—'} mono />
         {isBatch && <Kv k='Mode' v='Batch (queued)' />}
         {detail.startedAt && <Kv k='Started' v={fmtAbsolute(detail.startedAt)} mono />}
@@ -1833,9 +1913,8 @@ function ChatPane({detail}: {detail: RunDetail | null}) {
               padding: '24px 12px',
             }}
           >
-            Ask anything about this run — what changed, why a task failed,
-            what to ship next. The assistant has the spec, status, and
-            cost already loaded.
+            Ask anything about this run — what changed, why a task failed, what to ship next. The
+            assistant has the spec, status, and cost already loaded.
           </div>
         )}
         {messages.map((m, i) => (

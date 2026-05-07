@@ -325,10 +325,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
               </div>
               <h2 className='text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight'>
                 Write a spec.{' '}
-                <span style={{color: 'var(--accent-blue-text, var(--accent-blue))'}}>
-                  Ship
-                </span>{' '}
-                it.
+                <span style={{color: 'var(--accent-blue-text, var(--accent-blue))'}}>Ship</span> it.
               </h2>
             </div>
           )}

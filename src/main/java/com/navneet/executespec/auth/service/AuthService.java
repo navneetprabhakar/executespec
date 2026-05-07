@@ -274,7 +274,8 @@ public class AuthService {
     } catch (org.springframework.security.authentication.DisabledException e) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
-          "Email not verified — check your inbox for the activation link, or use Forgot password to resend.");
+          "Email not verified — check your inbox for the activation link, or use Forgot password to"
+              + " resend.");
     } catch (org.springframework.security.authentication.LockedException e) {
       throw new ResponseStatusException(
           HttpStatus.FORBIDDEN,
@@ -294,7 +295,8 @@ public class AuthService {
       if ("PENDING_VERIFICATION".equals(user.getStatus())) {
         throw new ResponseStatusException(
             HttpStatus.FORBIDDEN,
-            "Email not verified — check your inbox for the activation link, or use Forgot password to resend.");
+            "Email not verified — check your inbox for the activation link, or use Forgot password"
+                + " to resend.");
       }
       throw new ResponseStatusException(HttpStatus.FORBIDDEN, "Account suspended");
     }

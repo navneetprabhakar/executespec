@@ -131,9 +131,7 @@ export function PageHeader({
     return (
       <>
         {parts[0]}
-        <span style={{color: 'var(--accent-blue-text, var(--accent-blue))'}}>
-          {accent}
-        </span>
+        <span style={{color: 'var(--accent-blue-text, var(--accent-blue))'}}>{accent}</span>
         {parts.slice(1).join(accent)}
       </>
     );

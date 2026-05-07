@@ -324,21 +324,13 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           }}
         >
           <span style={{color: 'var(--v3-text-subtle)'}}>
-            <strong style={{color: 'var(--v3-text-muted)'}}>How it works:</strong> describe what
-            you want →{' '}
+            <strong style={{color: 'var(--v3-text-muted)'}}>How it works:</strong> describe what you
+            want →{' '}
           </span>
-          <span style={{color: 'var(--v3-text-muted)'}}>
-            we draft a plan + cost estimate →
-          </span>{' '}
-          <span style={{color: 'var(--v3-text-muted)'}}>
-            you approve →
-          </span>{' '}
-          <span style={{color: 'var(--v3-text-muted)'}}>
-            we ship a draft PR.
-          </span>{' '}
-          <span style={{color: 'var(--v3-text-subtle)'}}>
-            Takes ~30–90s. Free plan, no card.
-          </span>
+          <span style={{color: 'var(--v3-text-muted)'}}>we draft a plan + cost estimate →</span>{' '}
+          <span style={{color: 'var(--v3-text-muted)'}}>you approve →</span>{' '}
+          <span style={{color: 'var(--v3-text-muted)'}}>we ship a draft PR.</span>{' '}
+          <span style={{color: 'var(--v3-text-subtle)'}}>Takes ~30–90s. Free plan, no card.</span>
         </div>
       )}
 

@@ -142,36 +142,46 @@ const chipStyle: CSSProperties = {
   whiteSpace: 'nowrap',
 };
 
-function buttonBase(tone: 'green' | 'amber' | 'red' | 'blue' | 'neutral'): CSSProperties {
-  const map: Record<typeof tone, {fg: string; bg: string; bgHover: string}> = {
-    green: {
-      fg: 'var(--v3-success)',
-      bg: 'color-mix(in srgb, var(--v3-success) 14%, transparent)',
-      bgHover: 'color-mix(in srgb, var(--v3-success) 22%, transparent)',
-    },
-    amber: {
-      fg: 'var(--v3-warning)',
-      bg: 'color-mix(in srgb, var(--v3-warning) 14%, transparent)',
-      bgHover: 'color-mix(in srgb, var(--v3-warning) 22%, transparent)',
-    },
-    red: {
-      fg: 'var(--v3-error)',
-      bg: 'color-mix(in srgb, var(--v3-error) 14%, transparent)',
-      bgHover: 'color-mix(in srgb, var(--v3-error) 22%, transparent)',
-    },
-    blue: {
-      fg: 'var(--v3-brand-hover)',
-      bg: 'color-mix(in srgb, var(--v3-brand) 12%, transparent)',
-      bgHover: 'color-mix(in srgb, var(--v3-brand) 22%, transparent)',
-    },
-    neutral: {
-      fg: 'var(--v3-text-muted)',
-      bg: 'var(--v3-surface)',
-      bgHover: 'var(--v3-surface-elevated)',
-    },
-  };
-  const c = map[tone];
-  return {
+type ButtonTone = 'green' | 'amber' | 'red' | 'blue' | 'neutral';
+
+const BUTTON_TONE_MAP: Record<ButtonTone, {fg: string; bg: string; bgHover: string}> = {
+  green: {
+    fg: 'var(--v3-success)',
+    bg: 'color-mix(in srgb, var(--v3-success) 14%, transparent)',
+    bgHover: 'color-mix(in srgb, var(--v3-success) 22%, transparent)',
+  },
+  amber: {
+    fg: 'var(--v3-warning)',
+    bg: 'color-mix(in srgb, var(--v3-warning) 14%, transparent)',
+    bgHover: 'color-mix(in srgb, var(--v3-warning) 22%, transparent)',
+  },
+  red: {
+    fg: 'var(--v3-error)',
+    bg: 'color-mix(in srgb, var(--v3-error) 14%, transparent)',
+    bgHover: 'color-mix(in srgb, var(--v3-error) 22%, transparent)',
+  },
+  blue: {
+    fg: 'var(--v3-brand-hover)',
+    bg: 'color-mix(in srgb, var(--v3-brand) 12%, transparent)',
+    bgHover: 'color-mix(in srgb, var(--v3-brand) 22%, transparent)',
+  },
+  neutral: {
+    fg: 'var(--v3-text-muted)',
+    bg: 'var(--v3-surface)',
+    bgHover: 'var(--v3-surface-elevated)',
+  },
+};
+
+function ToneButton(props: {
+  tone: ButtonTone;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  const [hover, setHover] = useState(false);
+  const c = BUTTON_TONE_MAP[props.tone];
+  const baseStyle: CSSProperties = {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 6,
@@ -179,28 +189,12 @@ function buttonBase(tone: 'green' | 'amber' | 'red' | 'blue' | 'neutral'): CSSPr
     borderRadius: 4,
     fontSize: 11.5,
     fontWeight: 600,
-    background: c.bg,
     color: c.fg,
     border: 'none',
-    cursor: 'pointer',
     fontFamily: 'inherit',
     transition: 'background 0.15s',
     whiteSpace: 'nowrap',
-    // CSSProperties doesn't expose --hover; sub-component handles hover via onMouseEnter/Leave
-    ['--btn-bg-hover' as keyof CSSProperties]: c.bgHover,
-  } as CSSProperties;
-}
-
-function ToneButton(props: {
-  tone: 'green' | 'amber' | 'red' | 'blue' | 'neutral';
-  onClick: () => void;
-  disabled?: boolean;
-  title?: string;
-  children: React.ReactNode;
-}) {
-  const [hover, setHover] = useState(false);
-  const base = buttonBase(props.tone);
-  const hoverBg = (base as Record<string, string>)['--btn-bg-hover'];
+  };
   return (
     <button
       type='button'
@@ -210,8 +204,8 @@ function ToneButton(props: {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
       style={{
-        ...base,
-        background: hover && !props.disabled ? hoverBg : base.background,
+        ...baseStyle,
+        background: hover && !props.disabled ? c.bgHover : c.bg,
         opacity: props.disabled ? 0.4 : 1,
         cursor: props.disabled ? 'not-allowed' : 'pointer',
       }}
@@ -609,9 +603,7 @@ export default function RunPreviewPane({runId}: {runId: string}) {
                 {(status?.status && STATUS_MESSAGES[status.status]) || 'Starting…'}
               </span>
             )}
-            {isFailed && (
-              <span style={{fontSize: 11.5, color: 'var(--v3-error)'}}>Failed</span>
-            )}
+            {isFailed && <span style={{fontSize: 11.5, color: 'var(--v3-error)'}}>Failed</span>}
             {isTimedOut && (
               <span
                 style={{
@@ -627,9 +619,7 @@ export default function RunPreviewPane({runId}: {runId: string}) {
               </span>
             )}
             {previewCountInfo && (
-              <span style={{fontSize: 10, color: 'var(--v3-text-subtle)'}}>
-                {previewCountInfo}
-              </span>
+              <span style={{fontSize: 10, color: 'var(--v3-text-subtle)'}}>{previewCountInfo}</span>
             )}
           </div>
           {isRunning && status?.url && (
@@ -691,7 +681,9 @@ export default function RunPreviewPane({runId}: {runId: string}) {
           )}
         </div>
 
-        <div style={{display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap'}}>
+        <div
+          style={{display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap'}}
+        >
           {!isStartingPhase && (
             <button
               type='button'
@@ -829,9 +821,9 @@ export default function RunPreviewPane({runId}: {runId: string}) {
             title='Preview not started'
             subtitle={
               <>
-                Click <strong style={{color: 'var(--v3-text)'}}>Start preview</strong> to launch
-                the {TYPE_LABELS[projectType]?.toLowerCase() ?? 'application'} dev server. Database
-                and dependencies will be auto-detected.
+                Click <strong style={{color: 'var(--v3-text)'}}>Start preview</strong> to launch the{' '}
+                {TYPE_LABELS[projectType]?.toLowerCase() ?? 'application'} dev server. Database and
+                dependencies will be auto-detected.
               </>
             }
             extra={
@@ -890,7 +882,10 @@ export default function RunPreviewPane({runId}: {runId: string}) {
             </span>
             <ChevronDown
               className='h-3 w-3'
-              style={{transform: logsExpanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.15s'}}
+              style={{
+                transform: logsExpanded ? 'rotate(180deg)' : 'none',
+                transition: 'transform 0.15s',
+              }}
             />
           </button>
           {logsExpanded && (
@@ -906,13 +901,11 @@ export default function RunPreviewPane({runId}: {runId: string}) {
                   }}
                 >
                   <Filter className='h-3 w-3' style={{color: 'var(--v3-text-subtle)'}} />
-                  {(
-                    [
-                      'all' as const,
-                      ...(isFullStack ? (['backend', 'frontend'] as const) : []),
-                      ...(hasDatabase ? (['db'] as const) : []),
-                    ]
-                  ).map((f) => {
+                  {[
+                    'all' as const,
+                    ...(isFullStack ? (['backend', 'frontend'] as const) : []),
+                    ...(hasDatabase ? (['db'] as const) : []),
+                  ].map((f) => {
                     const active = logFilter === f;
                     return (
                       <button
@@ -1010,7 +1003,15 @@ function CenteredMessage({
         padding: 32,
       }}
     >
-      <div style={{textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 360}}>
+      <div
+        style={{
+          textAlign: 'center',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 8,
+          maxWidth: 360,
+        }}
+      >
         {spinnerTone === 'amber' && (
           <span
             style={{
@@ -1291,11 +1292,14 @@ function EnvConfigDialog({
               border: '1px solid color-mix(in srgb, var(--v3-warning) 22%, transparent)',
             }}
           >
-            <Shield className='h-4 w-4' style={{color: 'var(--v3-warning)', marginTop: 2, flexShrink: 0}} />
+            <Shield
+              className='h-4 w-4'
+              style={{color: 'var(--v3-warning)', marginTop: 2, flexShrink: 0}}
+            />
             <p style={{fontSize: 11.5, color: 'var(--v3-warning)', lineHeight: 1.55, margin: 0}}>
               These values are <strong>not stored, logged, or transmitted</strong> beyond this
-              preview session. They exist only in the container's memory and are discarded when
-              the preview stops.
+              preview session. They exist only in the container's memory and are discarded when the
+              preview stops.
             </p>
           </div>
 
@@ -1335,13 +1339,15 @@ function EnvConfigDialog({
                   External API keys
                 </p>
                 <p style={{fontSize: 10.5, color: 'var(--v3-text-subtle)', margin: '2px 0 0'}}>
-                  Internal config (URLs, CORS, ports) is auto-configured. Only third-party keys
-                  are needed.
+                  Internal config (URLs, CORS, ports) is auto-configured. Only third-party keys are
+                  needed.
                 </p>
               </div>
               {secretVars.map((v) => (
                 <div key={v.name} style={{display: 'flex', flexDirection: 'column', gap: 4}}>
-                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+                  <div
+                    style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}
+                  >
                     <label
                       className='v3-mono'
                       style={{fontSize: 11, color: 'var(--v3-text-muted)'}}
@@ -1356,9 +1362,7 @@ function EnvConfigDialog({
                     <input
                       type={showSecrets[v.name] ? 'text' : 'password'}
                       value={values[v.name] ?? ''}
-                      onChange={(e) =>
-                        setValues((prev) => ({...prev, [v.name]: e.target.value}))
-                      }
+                      onChange={(e) => setValues((prev) => ({...prev, [v.name]: e.target.value}))}
                       placeholder='Enter value (optional)…'
                       className='v3-mono'
                       style={{
@@ -1374,9 +1378,7 @@ function EnvConfigDialog({
                     />
                     <button
                       type='button'
-                      onClick={() =>
-                        setShowSecrets((prev) => ({...prev, [v.name]: !prev[v.name]}))
-                      }
+                      onClick={() => setShowSecrets((prev) => ({...prev, [v.name]: !prev[v.name]}))}
                       style={{
                         position: 'absolute',
                         right: 6,
