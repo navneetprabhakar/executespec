@@ -34,7 +34,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequestMapping("/api/v2/runs")
 @RequiredArgsConstructor
 @Slf4j
-public class RunController {
+public class RolloutRunController {
 
   private final RunService runService;
 
