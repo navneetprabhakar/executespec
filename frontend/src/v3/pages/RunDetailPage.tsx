@@ -92,20 +92,11 @@ export default function RunDetailPage() {
   const {projectId, runShort} = useParams<{projectId?: string; runShort: string}>();
   const runId = runShort ?? '';
 
-  // 2026-05-06 — RunDetail's 3-pane grid (file tree + diff + side panel)
-  // needs ≥1100px to render comfortably. The default `.v3-main` cap of
-  // 960px squeezes the diff column down to ~600px on a 2000px viewport.
-  // Opt this page into the `.v3-main--wide` modifier (max-width: 1600px)
-  // for the page lifetime; cleaned up on unmount so other routes inherit
-  // the default cap.
-  useEffect(() => {
-    const main = document.querySelector('.v3-main');
-    if (!main) return;
-    main.classList.add('v3-main--wide');
-    return () => {
-      main.classList.remove('v3-main--wide');
-    };
-  }, []);
+  // 2026-05-07 — RunDetail's 3-pane grid + diff editor want both
+  // `v3-main--wide` (max-width 1600px) and `v3-main--fill` (full
+  // viewport height) modifiers. Previously these were applied via
+  // a per-page `useEffect`; they're now driven by `Shell.classifyRoute`
+  // so the layout policy lives in one place. No-op here.
 
   const [detail, setDetail] = useState<RunDetail | null>(null);
   const [report, setReport] = useState<ValidationReportData | null>(null);

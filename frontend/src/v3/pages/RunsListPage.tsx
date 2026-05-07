@@ -145,7 +145,7 @@ export default function RunsListPage() {
   }, [projects]);
 
   return (
-    <div style={{maxWidth: 1080, margin: '0 auto', padding: '32px 24px'}}>
+    <div style={{maxWidth: 1280, margin: '0 auto', padding: '32px 24px'}}>
       <header
         style={{
           marginBottom: 24,
@@ -273,11 +273,9 @@ export default function RunsListPage() {
 
       {runs && runs.length === 0 && !err && (
         <div
+          className='v3-frame'
           style={{
             padding: '48px 24px',
-            border: '1px solid var(--v3-border)',
-            borderRadius: 14,
-            background: 'var(--v3-surface)',
             textAlign: 'center',
           }}
         >
@@ -326,14 +324,7 @@ export default function RunsListPage() {
       )}
 
       {runs && runs.length > 0 && (
-        <div
-          style={{
-            border: '1px solid var(--v3-border)',
-            borderRadius: 14,
-            background: 'var(--v3-surface)',
-            overflow: 'hidden',
-          }}
-        >
+        <div className='v3-frame'>
           {runs.map((r, i) => {
             const tone = statusTone(r.status);
             const projectId = r.projectId ?? undefined;

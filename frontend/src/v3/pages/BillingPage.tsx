@@ -176,14 +176,7 @@ function PlanCard({ent, meTier}: {ent: V3Entitlements; meTier: string | null}) {
   const pillTone = isPaidTier(tier) ? 'brand' : 'neutral';
 
   return (
-    <section
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 10,
-        padding: 16,
-      }}
-    >
+    <section className='v3-card'>
       <div
         style={{
           display: 'flex',
@@ -282,14 +275,7 @@ function UsageCard({ent}: {ent: V3Entitlements}) {
   // strict-review fix.
   const showBudget = !ent.isUnlimited && ent.softCostBudgetUsd != null;
   return (
-    <section
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 10,
-        padding: 16,
-      }}
-    >
+    <section className='v3-card'>
       <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Usage this month
       </h2>
@@ -339,14 +325,7 @@ function ReceiptsSection({ent}: {ent: V3Entitlements}) {
   const showGst = false; // TODO(R-141 follow-up): consume org.country once exposed
 
   return (
-    <section
-      style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 10,
-        padding: 16,
-      }}
-    >
+    <section className='v3-card'>
       <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
         Receipts and billing profile
       </h2>
