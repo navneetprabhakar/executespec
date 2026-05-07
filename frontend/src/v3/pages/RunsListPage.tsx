@@ -159,7 +159,7 @@ export default function RunsListPage() {
         <div>
           <div
             style={{
-              fontFamily: 'var(--font-mono)',
+              fontFamily: 'var(--v3-font-mono)',
               fontSize: 11,
               letterSpacing: '0.08em',
               textTransform: 'uppercase',
@@ -362,7 +362,7 @@ export default function RunsListPage() {
                   <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4}}>
                     <span
                       style={{
-                        fontFamily: 'var(--font-mono)',
+                        fontFamily: 'var(--v3-font-mono)',
                         fontSize: 11,
                         padding: '2px 8px',
                         borderRadius: 999,
@@ -377,7 +377,7 @@ export default function RunsListPage() {
                     {(r.projectName || projectId) && (
                       <span
                         style={{
-                          fontFamily: 'var(--font-mono)',
+                          fontFamily: 'var(--v3-font-mono)',
                           fontSize: 11,
                           color: 'var(--v3-text-subtle)',
                         }}
@@ -387,7 +387,7 @@ export default function RunsListPage() {
                     )}
                     <span
                       style={{
-                        fontFamily: 'var(--font-mono)',
+                        fontFamily: 'var(--v3-font-mono)',
                         fontSize: 11,
                         color: 'var(--v3-text-subtle)',
                       }}
@@ -412,7 +412,7 @@ export default function RunsListPage() {
                   {typeof r.actualCostUsd === 'number' && (
                     <span
                       style={{
-                        fontFamily: 'var(--font-mono)',
+                        fontFamily: 'var(--v3-font-mono)',
                         fontSize: 11.5,
                         color: 'var(--v3-text-muted)',
                       }}
@@ -422,7 +422,7 @@ export default function RunsListPage() {
                   )}
                   <span
                     style={{
-                      fontFamily: 'var(--font-mono)',
+                      fontFamily: 'var(--v3-font-mono)',
                       fontSize: 11.5,
                       color: 'var(--v3-text-subtle)',
                       width: 64,

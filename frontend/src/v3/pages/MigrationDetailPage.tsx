@@ -585,7 +585,7 @@ function RepoApplicabilityRow({row}: {row: import('@/lib/api').MigrationDryRunRe
       <span
         style={{
           color: 'var(--v3-text)',
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontFamily: 'var(--v3-font-mono)',
           flex: 1,
         }}
       >

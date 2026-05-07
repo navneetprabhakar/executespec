@@ -348,7 +348,7 @@ function TaskRow({
       <div style={{display: 'flex', alignItems: 'flex-start', gap: 8}}>
         <span
           style={{
-            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+            fontFamily: 'var(--v3-font-mono)',
             fontSize: 10,
             color: 'var(--v3-text-subtle)',
             flexShrink: 0,
@@ -384,7 +384,7 @@ function TaskRow({
             {tokens > 0 && (
               <span
                 style={{
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  fontFamily: 'var(--v3-font-mono)',
                   fontSize: 10,
                   color: 'var(--v3-text-subtle)',
                 }}
@@ -395,7 +395,7 @@ function TaskRow({
             {task.durationMs > 0 && (
               <span
                 style={{
-                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  fontFamily: 'var(--v3-font-mono)',
                   fontSize: 10,
                   color: 'var(--v3-text-subtle)',
                 }}
@@ -477,7 +477,7 @@ function LogPane({runId, live}: {runId: string; live: boolean}) {
           padding: '6px 12px',
           borderBottom: '1px solid var(--v3-border)',
           fontSize: 11,
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontFamily: 'var(--v3-font-mono)',
           color: 'var(--v3-text-subtle)',
           background: 'var(--v3-bg)',
           display: 'flex',
@@ -492,7 +492,7 @@ function LogPane({runId, live}: {runId: string; live: boolean}) {
           flex: 1,
           overflow: 'auto',
           padding: 8,
-          fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+          fontFamily: 'var(--v3-font-mono)',
           fontSize: 11,
           lineHeight: 1.6,
         }}
@@ -670,7 +670,7 @@ function PreviewPane({runId, runStatus}: {runId: string; runStatus: string}) {
           <span
             style={{
               fontSize: 11,
-              fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+              fontFamily: 'var(--v3-font-mono)',
               color: 'var(--v3-text-subtle)',
             }}
           >
@@ -1011,7 +1011,7 @@ function Kv({k, v, mono}: {k: string; v: string; mono?: boolean}) {
       <span
         style={{
           color: 'var(--v3-text)',
-          fontFamily: mono ? 'ui-monospace, SFMono-Regular, Menlo, monospace' : 'inherit',
+          fontFamily: mono ? 'var(--v3-font-mono)' : 'inherit',
           fontSize: mono ? 11.5 : 12,
           textAlign: 'right',
           maxWidth: '60%',

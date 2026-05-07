@@ -560,7 +560,7 @@ export default function RunDetailPage() {
                       borderRadius: 4,
                       cursor: 'pointer',
                       fontSize: 11.5,
-                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                      fontFamily: 'var(--v3-font-mono)',
                       overflow: 'hidden',
                     }}
                     title={f.path}
@@ -613,7 +613,7 @@ export default function RunDetailPage() {
                 borderBottom: '1px solid var(--v3-border)',
                 fontSize: 11.5,
                 color: 'var(--v3-text-muted)',
-                fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                fontFamily: 'var(--v3-font-mono)',
                 display: 'flex',
                 alignItems: 'center',
                 gap: 8,

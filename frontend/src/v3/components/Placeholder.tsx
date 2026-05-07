@@ -90,7 +90,7 @@ export default function Placeholder({
               {' '}
               It will move to{' '}
               <code
-                style={{fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', fontSize: 12}}
+                style={{fontFamily: 'var(--v3-font-mono)', fontSize: 12}}
               >
                 {futureV3Route}
               </code>{' '}

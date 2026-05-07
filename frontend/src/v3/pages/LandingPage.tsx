@@ -535,7 +535,7 @@ function DemoAnimation() {
         border: '1px solid var(--v3-border-strong)',
         borderRadius: 10,
         padding: '14px 16px',
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+        fontFamily: 'var(--v3-font-mono)',
         fontSize: 12.5,
       }}
     >
