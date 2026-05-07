@@ -120,6 +120,10 @@ class AsyncAllowlistTest {
               "PostMergeOrchestrator#onMergeCompleted",
               "StartupRunResumer#onApplicationReady",
 
+              // programbench — async background that polls run row + tars submission.
+              // Reads the PipelineRun via id (no lazy navigation), shells out to docker.
+              "ProgramBenchTaskService#captureOnTerminalAsync",
+
               // Wave 2.1 — activation instrumentation. Tracks events to PostHog +
               // user_activation_event row. Takes primitive args (userId, enum, map);
               // no lazy JPA nav. Exceptions never propagate — analytics is a
