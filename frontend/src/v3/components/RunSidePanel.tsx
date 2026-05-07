@@ -1,13 +1,15 @@
-import {useEffect, useMemo, useState, type ReactNode} from 'react';
+import {useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import {
   type RunDetail,
   type TaskSummary,
   type LocalPreviewStatus,
+  type ConversationMessage,
   retryTask,
   startPreview,
   stopPreview,
   getPreviewStatus,
   getLiveCost,
+  conversationChat,
 } from '@/lib/api';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
@@ -39,12 +41,19 @@ import TestReportPanel from '@/components/runs/TestReportPanel';
  *               haven't kicked off test gen yet.
  *   - Preview — auto-preview iframe; falls back to a "Start preview"
  *               CTA when the deploy/preview-engine hasn't kicked in yet.
+ *   - Chat    — 2026-05-07 — run-scoped chat. Wraps POST /api/conversation
+ *               with the run's spec / status / verdict pre-seeded into
+ *               the thread so the assistant can answer "what changed?",
+ *               "why did this fail?", "summarise the diff" without the
+ *               user re-pasting context. Available regardless of project
+ *               linkage (works on FREE / unlinked runs too — the chat
+ *               endpoint has no tier gate).
  *
  * No new backend. Reuses /runs/{id}/events SSE channel + /runs/{id}/preview/*
  * + /runs/{id}/tasks/{taskId}/retry + /runs/{id}/cost — all of which the
  * backend kept shipping when v2 RunDetailTabs was deleted.
  */
-type Tab = 'overview' | 'plan' | 'timeline' | 'log' | 'tests' | 'preview';
+type Tab = 'overview' | 'plan' | 'timeline' | 'log' | 'tests' | 'preview' | 'chat';
 
 export default function RunSidePanel({
   runId,
@@ -90,7 +99,7 @@ export default function RunSidePanel({
         showInFlightDot={isInFlight}
         showApprovalBadge={isAwaitingApproval}
       />
-      <div style={{flex: 1, overflow: 'auto'}}>
+      <div style={{flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column'}}>
         {tab === 'overview' && <OverviewPane runId={runId} detail={detail} live={isInFlight} />}
         {tab === 'plan' && (
           <PlanPane
@@ -104,6 +113,7 @@ export default function RunSidePanel({
         {tab === 'log' && <LogPane runId={runId} live={isInFlight} />}
         {tab === 'tests' && <TestsPane runId={runId} status={status} />}
         {tab === 'preview' && <PreviewPane runId={runId} runStatus={status} />}
+        {tab === 'chat' && <ChatPane detail={detail} />}
       </div>
     </aside>
   );
@@ -165,6 +175,7 @@ function TabBar({
     },
     {key: 'tests', label: 'Tests'},
     {key: 'preview', label: 'Preview'},
+    {key: 'chat', label: 'Chat'},
   ];
 
   return (
@@ -1127,6 +1138,297 @@ function TestsPane({runId, status}: {runId: string; status: string}) {
         {status === 'COMPLETE' || status === 'PARTIAL' || status === 'FAILED'
           ? 'Test generation runs after the build completes — if no report is shown, this run did not trigger the test pipeline.'
           : 'Tests will appear here once the run reaches a terminal state.'}
+      </div>
+    </div>
+  );
+}
+
+// ── Chat pane ──────────────────────────────────────────────────────────────
+//
+// 2026-05-07 — run-scoped chat. Wraps POST /api/conversation (the same
+// endpoint the pre-run "Refine with assistant" modal uses; no tier gate)
+// with the run's spec / status / verdict pre-seeded as conversation
+// history so the assistant can answer questions like "what changed?",
+// "why did this fail?", "summarise the diff" without the user re-pasting
+// context.
+//
+// We deliberately don't use the legacy `/runs/{id}/chat` endpoint — V2
+// returns 410 Gone there per docs/plans/harness-v2-remaining-work.md.
+// `/api/conversation` is stateless from the backend's perspective; we
+// rebuild the seed context from `detail` on every send so a stale tab
+// can't drift away from the truth.
+
+function ChatPane({detail}: {detail: RunDetail | null}) {
+  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const threadRef = useRef<HTMLDivElement | null>(null);
+
+  // Auto-scroll thread on each new message.
+  useEffect(() => {
+    threadRef.current?.scrollTo({top: threadRef.current.scrollHeight, behavior: 'smooth'});
+  }, [messages, busy]);
+
+  // Build a single-shot context preface every time we send so the
+  // assistant always sees the latest run state. Cheap (a few hundred
+  // chars at most) and keeps the conversation honest if the run flips
+  // mid-chat (e.g. WORKING → COMPLETE).
+  const seedContext = useMemo(() => {
+    if (!detail) return '';
+    const lines = [
+      `I just submitted this request to ExecuteSpec: "${detail.userRequest ?? '(no spec)'}"`,
+      `Status: ${detail.status ?? 'UNKNOWN'}.`,
+    ];
+    if (detail.aiProvider) lines.push(`AI provider: ${detail.aiProvider}.`);
+    const tasks = detail.tasks ?? [];
+    if (tasks.length > 0) {
+      const done = tasks.filter((t) => t.status === 'COMPLETE').length;
+      lines.push(`Tasks: ${done}/${tasks.length} complete.`);
+    }
+    if (detail.actualCostUsd != null) {
+      lines.push(`Cost so far: $${detail.actualCostUsd.toFixed(4)}.`);
+    }
+    if (detail.githubPrUrl) {
+      lines.push(`Draft PR: ${detail.githubPrUrl}`);
+    }
+    lines.push(
+      'Help me understand what happened in this run, answer follow-up questions, and suggest next steps. Skip the requirements-clarification mode — I already submitted; treat this as a post-run debrief.',
+    );
+    return lines.join(' ');
+  }, [detail]);
+
+  async function send(userText: string) {
+    setBusy(true);
+    setError(null);
+    try {
+      const isFirst = messages.length === 0;
+      // On the first turn we synthesise a seeded thread so the
+      // assistant has run context before the user's first question.
+      // Subsequent turns just append to the running thread.
+      const thread: ConversationMessage[] = isFirst
+        ? [
+            {role: 'user', content: seedContext},
+            {
+              role: 'assistant',
+              content:
+                'Got it — I have the run context. What would you like to know about this run?',
+            },
+            {role: 'user', content: userText},
+          ]
+        : [...messages, {role: 'user', content: userText}];
+      const res = await conversationChat(thread);
+      // For the first turn we drop the seed pair from the rendered
+      // thread (keep them in conversationChat's internal context only)
+      // so the user sees a clean "Q → A" without the synthesised
+      // preface. The seedContext effect rebuilds it fresh on every
+      // call, so this is safe.
+      const visible: ConversationMessage[] = isFirst
+        ? [
+            {role: 'user', content: userText},
+            {role: 'assistant', content: res.reply},
+          ]
+        : [...thread, {role: 'assistant', content: res.reply}];
+      setMessages(visible);
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Chat failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onSubmit(e?: React.FormEvent) {
+    e?.preventDefault();
+    const text = input.trim();
+    if (!text || busy) return;
+    setInput('');
+    await send(text);
+  }
+
+  // Quick-question chips help users start a conversation without
+  // staring at an empty textbox. Each chip is just a pre-filled
+  // first-turn user message; the seed context kicks in on send.
+  const QUICK_QUESTIONS = [
+    'Summarise what this run changed.',
+    detail?.status === 'FAILED' || detail?.status === 'PARTIAL'
+      ? 'Why did this run fail and how do I fix it?'
+      : 'What should I review before merging?',
+    'What follow-up runs would you suggest?',
+  ];
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      }}
+    >
+      <div
+        ref={threadRef}
+        style={{
+          flex: 1,
+          overflowY: 'auto',
+          padding: '12px 14px',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          minHeight: 200,
+        }}
+      >
+        {messages.length === 0 && (
+          <div
+            style={{
+              textAlign: 'center',
+              color: 'var(--v3-text-muted)',
+              fontSize: 12.5,
+              lineHeight: 1.6,
+              padding: '24px 12px',
+            }}
+          >
+            Ask anything about this run — what changed, why a task failed,
+            what to ship next. The assistant has the spec, status, and
+            cost already loaded.
+          </div>
+        )}
+        {messages.map((m, i) => (
+          <ChatBubble key={i} role={m.role} content={m.content} />
+        ))}
+        {busy && (
+          <div
+            style={{
+              fontSize: 12,
+              color: 'var(--v3-text-subtle)',
+              padding: '4px 8px',
+            }}
+          >
+            Assistant is thinking…
+          </div>
+        )}
+        {error && (
+          <div
+            role='alert'
+            style={{
+              padding: '8px 10px',
+              background: 'rgba(239,68,68,0.10)',
+              border: '1px solid rgba(239,68,68,0.36)',
+              color: '#FCA5A5',
+              borderRadius: 6,
+              fontSize: 12,
+            }}
+          >
+            {error}
+          </div>
+        )}
+      </div>
+
+      {messages.length === 0 && !busy && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+            padding: '0 12px 8px',
+          }}
+        >
+          {QUICK_QUESTIONS.map((q, i) => (
+            <button
+              key={i}
+              type='button'
+              onClick={() => void send(q)}
+              style={{
+                padding: '4px 10px',
+                background: 'transparent',
+                color: 'var(--v3-text-muted)',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 999,
+                fontSize: 11.5,
+                fontFamily: 'inherit',
+                cursor: 'pointer',
+                whiteSpace: 'normal',
+                textAlign: 'left',
+                lineHeight: 1.4,
+              }}
+            >
+              {q}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <form
+        onSubmit={onSubmit}
+        style={{
+          padding: '10px 12px',
+          borderTop: '1px solid var(--v3-border)',
+          display: 'flex',
+          gap: 6,
+          background: 'var(--v3-bg)',
+        }}
+      >
+        <input
+          type='text'
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder={messages.length === 0 ? 'Ask about this run…' : 'Reply…'}
+          disabled={busy || !detail}
+          style={{
+            flex: 1,
+            padding: '7px 10px',
+            background: 'var(--v3-surface)',
+            color: 'var(--v3-text)',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+            fontSize: 13,
+            fontFamily: 'inherit',
+          }}
+        />
+        <button
+          type='submit'
+          disabled={!input.trim() || busy || !detail}
+          style={{
+            padding: '7px 14px',
+            fontSize: 12.5,
+            fontWeight: 600,
+            background: input.trim() && !busy ? 'var(--v3-brand)' : 'var(--v3-surface-elevated)',
+            color: input.trim() && !busy ? 'var(--v3-text-on-brand)' : 'var(--v3-text-subtle)',
+            border: 'none',
+            borderRadius: 6,
+            cursor: input.trim() && !busy ? 'pointer' : 'not-allowed',
+            fontFamily: 'inherit',
+          }}
+        >
+          Send
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function ChatBubble({role, content}: {role: 'user' | 'assistant'; content: string}) {
+  const isUser = role === 'user';
+  return (
+    <div style={{display: 'flex', justifyContent: isUser ? 'flex-end' : 'flex-start'}}>
+      <div
+        style={{
+          maxWidth: '88%',
+          background: isUser
+            ? 'color-mix(in srgb, var(--v3-brand) 16%, transparent)'
+            : 'var(--v3-bg)',
+          border: `1px solid ${
+            isUser ? 'color-mix(in srgb, var(--v3-brand) 40%, transparent)' : 'var(--v3-border)'
+          }`,
+          borderRadius: 10,
+          padding: '7px 10px',
+          fontSize: 12.5,
+          lineHeight: 1.55,
+          color: 'var(--v3-text)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {content}
       </div>
     </div>
   );

@@ -88,7 +88,22 @@
   background: var(--v3-bg);
   color: var(--v3-text);
   min-height: 100vh;
-  font-family: -apple-system, BlinkMacSystemFont, 'Geist', 'Inter', 'Segoe UI', Roboto, sans-serif;
+  /* 2026-05-07 — match the v2 body font-family chain so v3 surfaces
+   * render in the same Geist Sans the rest of the app uses. The
+   * previous chain led with `-apple-system` AND named `'Geist'`, but
+   * the only @font-face declaration registers `'Geist Sans'` (see
+   * tokens.css). The Geist family was therefore never resolved on
+   * v3 surfaces, falling through to SF Pro on macOS — a visible
+   * mismatch against the v2 chrome that does render Geist Sans.
+   * This chain matches `body` in index.css. */
+  font-family:
+    'Geist Sans',
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   font-size: var(--v3-fs-body);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
