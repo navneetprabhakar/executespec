@@ -85,25 +85,31 @@
   --v3-fs-h2: 22px;
   --v3-fs-h1: 32px;
 
+  /* 2026-05-07 — single source of truth for font-family across v3.
+   *
+   * Pre-fix history: v3-root led with `-apple-system` AND named
+   * `'Geist'` (no `@font-face` for that family — only `'Geist Sans'`
+   * is registered in tokens.css), so the chain fell to SF Pro on
+   * macOS while the v2 body chain rendered Geist Sans → visible
+   * font mismatch on v3 surfaces. Several .tsx files also hardcoded
+   * mono stacks in three different shapes (some led with
+   * `ui-monospace` so Geist Mono never resolved; one used the
+   * undefined `var(--font-mono)` and fell to whatever the parent
+   * font was — i.e. a sans-serif font for "monospace" content).
+   *
+   * Centralising the canonical stacks here lets every consumer write
+   * `fontFamily: 'var(--v3-font-sans)'` or `var(--v3-font-mono)` and
+   * stay aligned automatically. The sans chain matches `body` in
+   * `index.css`; the mono chain leads with `'Geist Mono'` (the only
+   * registered mono face) before falling to system mono. */
+  --v3-font-sans:
+    'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  --v3-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
   background: var(--v3-bg);
   color: var(--v3-text);
   min-height: 100vh;
-  /* 2026-05-07 — match the v2 body font-family chain so v3 surfaces
-   * render in the same Geist Sans the rest of the app uses. The
-   * previous chain led with `-apple-system` AND named `'Geist'`, but
-   * the only @font-face declaration registers `'Geist Sans'` (see
-   * tokens.css). The Geist family was therefore never resolved on
-   * v3 surfaces, falling through to SF Pro on macOS — a visible
-   * mismatch against the v2 chrome that does render Geist Sans.
-   * This chain matches `body` in index.css. */
-  font-family:
-    'Geist Sans',
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
+  font-family: var(--v3-font-sans);
   font-size: var(--v3-fs-body);
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
@@ -323,7 +329,7 @@
   border: 1px solid var(--v3-border);
   border-radius: var(--v3-radius-sm);
   padding: 1px 6px;
-  font-family: ui-monospace, 'Geist Mono', SFMono-Regular, Menlo, monospace;
+  font-family: var(--v3-font-mono);
   font-size: var(--v3-fs-caption);
   color: var(--v3-brand-2);
 }
@@ -385,7 +391,7 @@
 }
 
 .v3-eyebrow {
-  font-family: ui-monospace, 'Geist Mono', SFMono-Regular, Menlo, monospace;
+  font-family: var(--v3-font-mono);
   font-size: 10px;
   color: var(--v3-text-muted);
   letter-spacing: 0.1em;
@@ -393,11 +399,11 @@
 }
 
 .v3-mono {
-  font-family: ui-monospace, 'Geist Mono', SFMono-Regular, Menlo, monospace;
+  font-family: var(--v3-font-mono);
 }
 
 .v3-chip {
-  font-family: ui-monospace, 'Geist Mono', SFMono-Regular, Menlo, monospace;
+  font-family: var(--v3-font-mono);
   font-size: 10.5px;
   padding: 2px 7px;
   border-radius: var(--v3-radius-sm);
@@ -444,7 +450,7 @@
 }
 
 .v3-statk {
-  font-family: ui-monospace, 'Geist Mono', SFMono-Regular, Menlo, monospace;
+  font-family: var(--v3-font-mono);
   font-size: 10px;
   color: var(--v3-text-subtle);
   letter-spacing: 0.1em;
