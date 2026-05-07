@@ -31,10 +31,10 @@
 >
 > | Warning | Resolution |
 > | --- | --- |
-> | `[ModelResolver] No tier mapping for agent 'ReviewerAgentV2' — defaulting to WORKHORSE` | `CostEstimator.java:101` + `RunOrchestrator.java:2854` updated to use the canonical class name `ReviewerAgentV3` (the actual reviewer since v2.5.10). YAML already has `ReviewerAgentV3: PLANNING`. |
+> | `[ModelResolver] No tier mapping for agent 'ReviewerAgent' — defaulting to WORKHORSE` | `CostEstimator.java:101` + `RunOrchestrator.java:2854` updated to use the canonical class name `ReviewerAgent` (the actual reviewer since v2.5.10). YAML already has `ReviewerAgent: PLANNING`. |
 > | `preview-engine handoff failed: ... docker.sock` (ERROR with stack trace, 1.5KB log line per run) | `PreviewService.handoffToPreviewEngine` now detects docker-daemon-down via `e.getMessage()` and logs a single concise WARN ("preview skipped — Docker daemon not reachable...") instead of the full ERROR. Real preview-engine bugs still ERROR. |
 >
-> Verified by re-running the LOW Anthropic eval after the fix: zero `ReviewerAgentV2` warnings, exactly two clean WARN lines for the daemon-down case (one from the entry catch + one from `fail()`'s post-emit log), zero ERROR-level entries outside known OTel/gcloud fail-open paths.
+> Verified by re-running the LOW Anthropic eval after the fix: zero `ReviewerAgent` warnings, exactly two clean WARN lines for the daemon-down case (one from the entry catch + one from `fail()`'s post-emit log), zero ERROR-level entries outside known OTel/gcloud fail-open paths.
 
 ---
 
@@ -136,7 +136,7 @@ The live response (just queried) returns `claude-sonnet-4-6`, `gemini-3-pro-prev
 
 ### #3 — `RunOrchestrator.defaultModelFor(provider)` 🟡 STALE
 
-`v2/integration/RunOrchestrator.java:3335–3338` — fallback model strings used when no explicit model is supplied:
+`integration/RunOrchestrator.java:3335–3338` — fallback model strings used when no explicit model is supplied:
 
 | Provider | Fallback in code | YAML PLANNING tier | Drift? |
 |---|---|---|:---:|
@@ -148,7 +148,7 @@ The live response (just queried) returns `claude-sonnet-4-6`, `gemini-3-pro-prev
 
 ### #4 — `RunCostTracker.priceCall` cache-read multipliers 🟡 LOGIC DRIFT
 
-`v2/cost/RunCostTracker.java:493, 499, 504` — hardcoded provider-specific cache-read discounts that **ignore the YAML `cached-input-per-1m` field**:
+`cost/RunCostTracker.java:493, 499, 504` — hardcoded provider-specific cache-read discounts that **ignore the YAML `cached-input-per-1m` field**:
 
 ```java
 if ("anthropic")        cacheReadMultiplier = 0.10;  // matches YAML cache/input ratio
@@ -191,7 +191,7 @@ spring.ai.openai.chat.options.model: gpt-5.4-mini
 spring.ai.google.genai.chat.options.model: gemini-2.5-flash    # ← stale comment says "all tiers" but matrix uses 3-flash/3-pro
 ```
 
-These are Spring AI's own auto-config defaults. They're used at bean construction time before V2's `LlmRouterV2` overrides per-call. Effectively dead config in the V2 path but kept for graceful boot when matrix is unconfigured.
+These are Spring AI's own auto-config defaults. They're used at bean construction time before V2's `LlmRouter` overrides per-call. Effectively dead config in the V2 path but kept for graceful boot when matrix is unconfigured.
 
 **Fix:** add a comment that these are bean-init defaults only + replace `gemini-2.5-flash` with `gemini-3-flash-preview` so a graceful-degraded boot uses a current model.
 

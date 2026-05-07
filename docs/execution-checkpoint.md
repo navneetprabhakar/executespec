@@ -40,7 +40,7 @@ ApiContractTest green after Wave 1 close.
 | M-003 | NotificationPrefController + minimal Settings matrix (Email/InApp × event-type) | 82774005 |
 | M-004 | SSO config card on /org/settings (provider + metadata URL + domain + enforced) | 9565498d |
 | M-008 | Inline Drawer wires (Add GitHub PAT + Add API keys) on NewRunModal | c5c07dee |
-| M-010 | halt-all-active-runs SUPER_ADMIN tool (V2RunOrchestrator.haltAllActiveRuns + AdminPage button) | 36e83345 |
+| M-010 | halt-all-active-runs SUPER_ADMIN tool (RunOrchestrator.haltAllActiveRuns + AdminPage button) | 36e83345 |
 | M-013 | Unified governance audit + activity page (V22 + V133 at /audit + /governance/audit alias) | 4ddc39cf |
 | M-014 | ADR controller + Project → Code → ADRs panel | 35080611 |
 | M-015 | Invariant controller + Project → Code → Invariants panel | 4f31c314 |

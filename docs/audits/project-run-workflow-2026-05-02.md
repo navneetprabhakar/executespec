@@ -82,7 +82,7 @@ Three trigger paths, all manual or run-time:
 
 ### 3b. Run-time lazy refresh
 
-`V2RunOrchestrator.runPipeline` (line 780-789):
+`RunOrchestrator.runPipeline` (line 780-789):
 
 ```java
 var staleness = stalenessService.report(projectId, runUserPat);
@@ -156,14 +156,14 @@ Supporting docs are **always** user-triggered. There's no auto-population on pro
 
 ### 6a. Submit — `POST /api/runs` with `projectId` + `selectedRepoIds`
 
-`RunController.submitRun(req)` → `V2RunOrchestrator.submitRun(...)`:
+`RunController.submitRun(req)` → `RunOrchestrator.submitRun(...)`:
 
 1. Tier quota gate — `tierEnforcement.assertCanSubmitRun(userId)`
 2. Persist `pipeline_run` row (status = `QUEUED`)
 3. Schedule `runPipeline(...)` on the bounded thread pool (CallerRunsPolicy backpressure)
 4. Return `runId`
 
-### 6b. Pipeline — `V2RunOrchestrator.runPipeline(...)`
+### 6b. Pipeline — `RunOrchestrator.runPipeline(...)`
 
 Runs synchronously on a worker thread (the API has already returned).
 
@@ -181,8 +181,8 @@ Runs synchronously on a worker thread (the API has already returned).
 | 9. Planner — strategy-routed | OutlinePlannerAgent (FULL_PLAN) for SMALL/MEDIUM, OutlinePlannerAgent (SKELETON_ONLY) → TaskExpanderAgent → CoherencePlannerAgent for LARGE, single-task synthesis for SINGLE_SHOT | `submitPlan` tool call → `PlanV2` object |
 | 10. **Plan gate** | If PRODUCTION mode, status flips to `AWAITING_APPROVAL` and the pipeline thread blocks on `gateStore.waitForPlanApproval(runId, 24h)`. PROTOTYPE bypasses. | UI shows plan + cost estimate |
 | 11. **Approve plan** — `POST /api/runs/{id}/approve` | Charges N credits via `tierEnforcement.assertAndIncrementRunCount(userId, credits)`, signals the gate via `gateStore.approve(runId)` | pipeline thread wakes |
-| 12. **Sequential executor** | `SequentialExecutorV2.execute(req)` — for each task: compose prompt → `WorkerAgentV2.run()` → `buildProject` smoke (skipped on intermediate tasks of multi-task plans, see v2.5.13 hardening) | per-task outcomes: SUCCESS / COMPLETED_WITH_WARNING / FAILED |
-| 13. **Reviewer** | `ReviewerAgentV3.run()` two passes (general + wiring), 50 iter cap, 600s timeout. Project-type-aware wiring fixes (mod.rs / barrels / Spring scan / Express routes / Python decorators / Go imports) | verdict: CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED |
+| 12. **Sequential executor** | `SequentialExecutor.execute(req)` — for each task: compose prompt → `WorkerAgent.run()` → `buildProject` smoke (skipped on intermediate tasks of multi-task plans, see v2.5.13 hardening) | per-task outcomes: SUCCESS / COMPLETED_WITH_WARNING / FAILED |
+| 13. **Reviewer** | `ReviewerAgent.run()` two passes (general + wiring), 50 iter cap, 600s timeout. Project-type-aware wiring fixes (mod.rs / barrels / Spring scan / Express routes / Python decorators / Go imports) | verdict: CLEAN / FIXED_ISSUES / UNRESOLVED_ISSUES / REVIEW_FAILED |
 | 14. **Final smoke** | `buildProject` at workspace root | pass = COMPLETE; fail = PARTIAL with `status_reason` (FINAL_BUILD_FAILED) |
 | 15. **Push** — `ScmPushService.pushMultiRepo` | For each `repos/<name>/` subdir with diff: create branch `executespec/{runId}-{short}`, commit subdir-relative diff, open PR via `GitHubRepoService.openPullRequest` | per-repo PR URLs persisted to `pull_request_record` |
 | 16. **Validation report** | `ValidationReportService.generate(runId)` — verifiedScore from build + tests + reviewer verdict, accuracyScore from LLM (deterministic citation-required), score dimensions | `validation_report` row |
@@ -206,9 +206,9 @@ OutlinePlannerAgent + TaskExpanderAgent + CoherencePlannerAgent  ✅
   ↓
 PlanV2  →  ExecutionRequest  ❌ (no workspaceSummary field)
                                 ↓
-                            SequentialExecutorV2.composeSystemPrompt  ❌ (no parameter)
+                            SequentialExecutor.composeSystemPrompt  ❌ (no parameter)
                                 ↓
-                            WorkerAgentV2 system prompt  ❌ (no multi-repo context)
+                            WorkerAgent system prompt  ❌ (no multi-repo context)
                                 ↓
                             writeFile("auth.ts", ...)  →  workspace root ❌
                                 ↓
@@ -219,8 +219,8 @@ PlanV2  →  ExecutionRequest  ❌ (no workspaceSummary field)
 
 After today's fix (commits coming in this branch):
 - `ExecutionRequest` gained a `workspaceSummary` field
-- `V2RunOrchestrator` passes `buildMultiRepoSummary(projectId, selectedRepoIds)` on the executor build (line 962)
-- `SequentialExecutorV2.composeSystemPrompt` accepts the field and prepends the block when it contains `MULTI-REPO PROJECT WORKSPACE`
+- `RunOrchestrator` passes `buildMultiRepoSummary(projectId, selectedRepoIds)` on the executor build (line 962)
+- `SequentialExecutor.composeSystemPrompt` accepts the field and prepends the block when it contains `MULTI-REPO PROJECT WORKSPACE`
 - `MultiRepoWorkerPromptTest` (4 cases) pins the contract — including a counter-example asserting the codemap-fallback summary doesn't false-trigger as multi-repo
 
 ---
@@ -229,7 +229,7 @@ After today's fix (commits coming in this branch):
 
 V2's `ExecutionRequest` was first introduced at commit `372583e0` (V2 Phase 4.x, 2026-04-12) — **never had a `workspaceSummary` field**.
 
-The `V2RunOrchestrator.buildMultiRepoSummary` helper was added at commit `b01247a4` (V2 Phase 11.A, the V2 cutover behind V1's `/api/runs`). The doc-comment correctly predicts the failure mode:
+The `RunOrchestrator.buildMultiRepoSummary` helper was added at commit `b01247a4` (V2 Phase 11.A, the V2 cutover behind V1's `/api/runs`). The doc-comment correctly predicts the failure mode:
 
 > *"Builds a workspaceSummary that tells the planner (and by extension the worker) ... Without this the worker treats the workspace as an empty scratch dir and writes to the root, producing runs that finish COMPLETE but open no PRs."*
 

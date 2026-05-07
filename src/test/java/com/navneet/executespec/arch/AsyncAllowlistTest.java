@@ -62,7 +62,7 @@ class AsyncAllowlistTest {
               // no JPA nav. Same safety profile as the other 18 MailService#send*
               // entries. The allowlist drift was missed in the Wave 2 closeout — this
               // entry catches it up.
-              "MailService#sendV3ReferralInvite",
+              "MailService#sendReferralInvite",
               "MailService#sendEscalationToAdmin",
               "MailService#sendInviteRejectedEmail",
               "MailService#sendNewUserAlertToAdmin",

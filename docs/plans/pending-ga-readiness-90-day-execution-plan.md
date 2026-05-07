@@ -95,7 +95,7 @@ The three feature branches that are already cooked but not in dev. Land them in 
 
 **Files (already committed, just needs review + merge).**
 - `src/main/java/com/navneet/executespec/util/PoolSizing.java`
-- 5 pool-sizing call sites (`CodeReviewService`, `PrReviewService`, `V2RunService`, `RunConversationController`, `RunOrchestrator`)
+- 5 pool-sizing call sites (`CodeReviewService`, `PrReviewService`, `RunService`, `RunConversationController`, `RunOrchestrator`)
 - V174 + V175 migrations, sharing/ package, root + per-package CLAUDE.md.
 
 **Acceptance.**
@@ -112,7 +112,7 @@ The three feature branches that are already cooked but not in dev. Land them in 
 
 **Why.** Audit Risk #4 directly. The 4 commits (`358ec267` strip-gitCommit + `72cbf65a` stagnation guard + `74547b99` honest soft-completion gate + `8bfe9a58` per-repo language parity) close the failure class behind the 60-iteration / 70k-token wasted runs. Required for P3 hard-cap enforcement to behave sanely.
 
-**Files.** As listed in CLAUDE.md "In Progress" §worker-runaway-fixes — 4 backend commits + new test classes (`ToolRegistryV2WorkerBindTest`, `WorkerAgentV2StagnationTest`, `SequentialExecutorV2SoftCompletionTest`, `LanguageParityBlockTest`).
+**Files.** As listed in CLAUDE.md "In Progress" §worker-runaway-fixes — 4 backend commits + new test classes (`ToolRegistryWorkerBindTest`, `WorkerAgentStagnationTest`, `SequentialExecutorSoftCompletionTest`, `LanguageParityBlockTest`).
 
 **Acceptance.**
 - [ ] `git pull --ff-only origin dev` then rebase `feature/worker-runaway-fixes` onto dev (cleanly).
@@ -355,10 +355,10 @@ The three feature branches that are already cooked but not in dev. Land them in 
 **Why.** Audit §6: the cap exists in `RunCostTracker.estimateRunTierAware()` (returns `hardCapUsd = credits × $5 × 1.5` in the estimate), but no code path reads it as a runtime ceiling. A worker stuck in a loop today can burn past the cap.
 
 **Files.**
-- `src/main/java/com/navneet/executespec/v2/agent/WorkerAgent.java` — at top of each iteration, read `RunCostTracker.snapshot(runId).costUsd()` vs `pipelineRun.hardCapUsd`. If `current >= cap × 0.9`, inject a "PROGRESS CHECK — at 90% of cost cap" system message. If `current >= cap × 1.0`, force-terminate with `outcome=COMPLETED_BY_COST_CAP`.
-- `src/main/java/com/navneet/executespec/v2/cost/RunCostTracker.java` — add `currentSpend(runId)` helper.
-- `src/main/java/com/navneet/executespec/v2/integration/RunOrchestrator.java` — propagate cap from `pipelineRun.hardCapUsd` into the `LlmRequest` context so reviewers also respect it.
-- New test: `WorkerAgentV2HardCapTest` — pin force-terminate at threshold + warning at 90%.
+- `src/main/java/com/navneet/executespec/agent/WorkerAgent.java` — at top of each iteration, read `RunCostTracker.snapshot(runId).costUsd()` vs `pipelineRun.hardCapUsd`. If `current >= cap × 0.9`, inject a "PROGRESS CHECK — at 90% of cost cap" system message. If `current >= cap × 1.0`, force-terminate with `outcome=COMPLETED_BY_COST_CAP`.
+- `src/main/java/com/navneet/executespec/cost/RunCostTracker.java` — add `currentSpend(runId)` helper.
+- `src/main/java/com/navneet/executespec/integration/RunOrchestrator.java` — propagate cap from `pipelineRun.hardCapUsd` into the `LlmRequest` context so reviewers also respect it.
+- New test: `WorkerAgentHardCapTest` — pin force-terminate at threshold + warning at 90%.
 
 **Acceptance.**
 - [ ] Synthetic test: spec with `creditsCharged=1` (`hardCapUsd=$7.5`); worker loops mock-billing $1/iter; at iter 8, `outcome=COMPLETED_BY_COST_CAP`.
@@ -506,7 +506,7 @@ controller-specific test coverage); doing it incrementally is the safer path.
 2. **`TestResultController.applyTestFixes`** + **`TestResultController.runTests`**
    — mutates run state across orgs.
    *Add `RunAccessGuard.requireRunAccess`.*
-3. **`V2RunController.poll`** — V2 run polling endpoint.
+3. **`RunController.poll`** — V2 run polling endpoint.
    *Add `RunAccessGuard.requireRunAccess`.*
 4. **`ProjectExportController.export`** — full project state in one ZIP.
    *Add `ProjectAccessGuard.assertCanRead`.*
