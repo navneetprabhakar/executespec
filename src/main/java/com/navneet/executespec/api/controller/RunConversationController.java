@@ -13,9 +13,9 @@ import jakarta.annotation.PreDestroy;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
-import com.navneet.executespec.v2.chat.ApplyResultStore;
-import com.navneet.executespec.v2.chat.ApplyService;
-import com.navneet.executespec.v2.chat.ChatService;
+import com.navneet.executespec.chat.ApplyResultStore;
+import com.navneet.executespec.chat.ApplyService;
+import com.navneet.executespec.chat.ChatService;
 
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;

@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.codeintel.entity.RepoArchitectureDoc;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -33,7 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ArchitectureDocGenerator {
 
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
 
   private static final String SYSTEM_PROMPT =
@@ -105,13 +105,13 @@ public class ArchitectureDocGenerator {
         new Prompt(List.of(new SystemMessage(SYSTEM_PROMPT), new UserMessage(userPayload)));
 
     ChatResponse response =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             "combined-arch-" + projectId,
             "combined-arch",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 

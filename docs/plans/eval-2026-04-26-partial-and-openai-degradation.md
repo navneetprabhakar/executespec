@@ -64,9 +64,9 @@ it actually passed.
 
 ### Where the lie comes from
 
-`v2/tool/BuildProjectTool.java:67` runs the resolved build command
+`tool/BuildProjectTool.java:67` runs the resolved build command
 through `ProcessBuilder("/bin/sh", "-c", cmd)` and reads exit code.
-`v2/smoketest/BuildCommandResolver.java` resolves the command for a
+`smoketest/BuildCommandResolver.java` resolves the command for a
 multi-repo workspace by wrapping each repo's command:
 
 ```java
@@ -153,7 +153,7 @@ Three independent forces, in order of impact:
 
 ### Proposed OpenAI-specific tuning (not shipped)
 
-1. **Remove the 0.7× iter cap** in `SequentialExecutorV2` for OpenAI.
+1. **Remove the 0.7× iter cap** in `SequentialExecutor` for OpenAI.
    Was added when OpenAI was failing fast and cheap; now it's failing
    slow and expensive at the iteration ceiling. Let it use the full
    budget.
@@ -195,7 +195,7 @@ the reviewer have the runway Gemini got.
    us. THEN switch the resolver to return `(command, cwd)` instead
    of a wrapped string.
 2. **🟠 Remove the `0.7× iter cap` for OpenAI** in
-   `SequentialExecutorV2.tierConfigFor` — let OpenAI use Anthropic's
+   `SequentialExecutor.tierConfigFor` — let OpenAI use Anthropic's
    budget. Cost goes up; convergence rate goes way up.
 3. **🟠 Wire OpenAI prompt-cache** in `OpenAiNativeToolClient` — drops
    OpenAI cost ~70% on multi-iteration loops.

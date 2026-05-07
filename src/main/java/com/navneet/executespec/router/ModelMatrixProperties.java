@@ -34,7 +34,7 @@ public class ModelMatrixProperties {
   /** Legacy model name → canonical model name (for in-flight runs and DB backward compat). */
   private Map<String, String> legacyAliases;
 
-  /** Tier name → ordered fallback chain (replaces hardcoded LlmRouter chains). */
+  /** Tier name → ordered fallback chain (replaces hardcoded FallbackLlmRouter chains). */
   private Map<String, List<FallbackEntry>> fallbackChains;
 
   /** FREE tier model lock. */

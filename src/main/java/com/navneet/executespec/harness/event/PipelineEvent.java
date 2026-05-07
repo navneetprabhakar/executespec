@@ -3,7 +3,7 @@ package com.navneet.executespec.harness.event;
 import java.util.List;
 
 import com.navneet.executespec.agent.model.WorkerReport;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.state.entity.PipelineRun;
 
 /**
@@ -28,7 +28,7 @@ public sealed interface PipelineEvent {
       String runId,
       PipelineRun completedRun,
       List<WorkerReport> reports,
-      ReviewReportV2 review,
+      ReviewReport review,
       boolean hadFailures)
       implements PipelineEvent {}
 

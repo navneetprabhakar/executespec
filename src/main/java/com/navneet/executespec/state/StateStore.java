@@ -7,13 +7,13 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.model.ReviewReport;
 import com.navneet.executespec.agent.model.TaskDefinition;
 import com.navneet.executespec.agent.model.TaskPlan;
+import com.navneet.executespec.agent.model.TaskReviewReport;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.repository.AppUserRepository;
-import com.navneet.executespec.reviewer.model.ReviewReportV2;
+import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.router.ModelRegistry;
 import com.navneet.executespec.state.entity.*;
 import com.navneet.executespec.state.repository.*;
@@ -202,7 +202,7 @@ public class StateStore {
     runRepo.save(run);
   }
 
-  public void saveReview(String runId, ReviewReport review) {
+  public void saveReview(String runId, TaskReviewReport review) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     run.setReviewJson(toJson(review));
     // Status stays REVIEWING — merge is automatic (no gate).
@@ -211,7 +211,7 @@ public class StateStore {
   }
 
   /** Save V2 review report (used after migration to ReviewerAgentV2). */
-  public void saveReviewV2(String runId, ReviewReportV2 review) {
+  public void saveReviewV2(String runId, ReviewReport review) {
     PipelineRun run = runRepo.findById(runId).orElseThrow();
     run.setReviewJson(toJson(review));
     // Status stays REVIEWING — merge is automatic (no gate).
@@ -220,17 +220,17 @@ public class StateStore {
   }
 
   /** Deserialize V2 review report from run's reviewJson field. */
-  public ReviewReportV2 getReviewReportV2(String runId) {
+  public ReviewReport getReviewReportV2(String runId) {
     return runRepo
         .findById(runId)
         .filter(r -> r.getReviewJson() != null)
         .map(
             r -> {
               try {
-                return mapper.readValue(r.getReviewJson(), ReviewReportV2.class);
+                return mapper.readValue(r.getReviewJson(), ReviewReport.class);
               } catch (JsonProcessingException e) {
                 log.warn(
-                    "Failed to deserialize ReviewReportV2 for run {}: {}", runId, e.getMessage());
+                    "Failed to deserialize ReviewReport for run {}: {}", runId, e.getMessage());
                 return null;
               }
             })
@@ -1642,14 +1642,14 @@ public class StateStore {
     return runRepo.countByStatus("COMPLETE");
   }
 
-  public ReviewReport getReviewReport(String runId) {
+  public TaskReviewReport getReviewReport(String runId) {
     return runRepo
         .findById(runId)
         .filter(r -> r.getReviewJson() != null)
         .map(
             r -> {
               try {
-                return mapper.readValue(r.getReviewJson(), ReviewReport.class);
+                return mapper.readValue(r.getReviewJson(), TaskReviewReport.class);
               } catch (JsonProcessingException e) {
                 return null;
               }

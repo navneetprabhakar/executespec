@@ -22,7 +22,7 @@ import com.navneet.executespec.billing.entity.BillingPlan;
 import com.navneet.executespec.billing.entity.BillingSubscription;
 import com.navneet.executespec.billing.repository.BillingPlanRepository;
 import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
-import com.navneet.executespec.v3.referral.ReferralService;
+import com.navneet.executespec.referral.ReferralService;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;

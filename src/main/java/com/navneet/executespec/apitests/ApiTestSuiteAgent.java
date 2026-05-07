@@ -9,7 +9,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.navneet.executespec.agent.LlmRouter;
+import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
 import com.navneet.executespec.sse.RunEvent;
@@ -53,7 +53,7 @@ public class ApiTestSuiteAgent {
 
   private final FileSystemTool fsTool;
   private final GitTool gitTool;
-  private final LlmRouter llmRouter;
+  private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
   private final SseBroadcaster broadcaster;
   private final StateStore stateStore;
@@ -138,13 +138,13 @@ public class ApiTestSuiteAgent {
             opts);
 
     var llmResponse =
-        llmRouter.callWithFallback(
+        fallbackLlmRouter.callWithFallback(
             resolved.providerName(),
             resolved.getModel(),
             prompt,
             runId,
             "api-test-suite",
-            LlmRouter.FallbackMode.IMMEDIATE,
+            FallbackLlmRouter.FallbackMode.IMMEDIATE,
             0,
             false);
 

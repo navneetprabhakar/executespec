@@ -6,9 +6,9 @@
 
 > **Project Shell + Launch (v2.4.0)** — adds `ProjectLaunchController` + `ScaffoldController` + `ExecutionSolutionRun` entity + `ProjectRepoService.createAndLinkNewRepo`. ExecutionView gate widened to ENTERPRISE + MAX. New-repo creation supported as part of a Launch via `NewRepoSpec`. Multi-run solutions persist per-attempt history. Migration V90.
 
-> **Execution View (v2.3.0)** — new package `execution/` hosts `ExecutionController`, orchestrator / planner / solution-executor / branch / cross-repo-context / incremental-codemap services, pure-logic `SolutionDependencyResolver` + `FileConflictDetector`, entities `ExecutionRun` / `ExecutionSolution` / `ExecutionSolutionRepo` / `ExecutionContextHandover`, and `ExecutionEventTypes`. Bridges to `V2RunOrchestrator` per solution. Feature-flag + ENTERPRISE-tier gated. Migration V89.
+> **Execution View (v2.3.0)** — new package `execution/` hosts `ExecutionController`, orchestrator / planner / solution-executor / branch / cross-repo-context / incremental-codemap services, pure-logic `SolutionDependencyResolver` + `FileConflictDetector`, entities `ExecutionRun` / `ExecutionSolution` / `ExecutionSolutionRepo` / `ExecutionContextHandover`, and `ExecutionEventTypes`. Bridges to `RunOrchestrator` per solution. Feature-flag + ENTERPRISE-tier gated. Migration V89.
 >
-> **Project memory (v2.2.0)** — package `memory/` hosts `RunLedgerAgent`, `MemoryCompactionService`, `ProjectMemoryProvider`, `ProjectMemoryController` plus entities `ProjectRunLedger` / `ProjectMemorySnapshot`. Wired into `V2RunOrchestrator` post-complete and into the planner pipeline via `PlannerRequestV2.projectMemory` (`OutlinePlannerAgent` from v2.6.2-track; was `PlannerAgentV2` until slice 5b deletion). Migration V88.
+> **Project memory (v2.2.0)** — package `memory/` hosts `RunLedgerAgent`, `MemoryCompactionService`, `ProjectMemoryProvider`, `ProjectMemoryController` plus entities `ProjectRunLedger` / `ProjectMemorySnapshot`. Wired into `RunOrchestrator` post-complete and into the planner pipeline via `PlannerRequestV2.projectMemory` (`OutlinePlannerAgent` from v2.6.2-track; was `PlannerAgentV2` until slice 5b deletion). Migration V88.
 **Last Updated:** 2026-04-14
 **Stack:** Java 21, Spring Boot 3.3, Spring AI 1.1.4, PostgreSQL, Redis, JGit 6.9.0
 
@@ -25,13 +25,13 @@
 >   (heuristic + LLM-gated via `assessment.llm.enabled` flag).
 > - `com.navneet.executespec.scoring` — `ReviewScoringService`
 >   (six-dimension deterministic scoring), `TestCoverageRescorer`.
-> - `com.navneet.executespec.v2.agent.SpecClassifier` — deterministic
+> - `com.navneet.executespec.agent.SpecClassifier` — deterministic
 >   SINGLE_SHOT / MEDIUM / MULTI_TASK picker from spec text.
 > - New migrations V81–V90 documented in CHANGELOG [2.1.1] + [2.2.0] + [2.3.0] + [2.4.0].
 
 > **⚠️ Historical reference — V1 architecture.**
 > This document describes the original V1 harness (`PipelineHarness`, `WorkerAgent`,
-> `CompilerAgent`, `ReviewerAgentV2`, `batch/*`) — all deleted on 2026-04-13. The
+> `CompilerAgent`, `ReviewerAgent`, `batch/*`) — all deleted on 2026-04-13. The
 > `deprecation-removal-plan.md` doc was removed in the 2026-04-26 cleanup pass; the
 > deletion has shipped, so the plan is no longer needed.
 >
@@ -43,11 +43,11 @@
 > historical and no longer reflect runtime code.
 >
 > **Canonical architecture lives in [CLAUDE.md](../CLAUDE.md).** Start there for
-> current V2 internals (`V2RunOrchestrator`, `OutlinePlannerAgent` /
+> current V2 internals (`RunOrchestrator`, `OutlinePlannerAgent` /
 > `SmartClassifierAgent` / `TaskExpanderAgent` / `CoherencePlannerAgent` /
 > `PlannerOutputUtils` from the v2.6.2-track hierarchical planner — replacing
-> the deleted `PlannerAgentV2`), `WorkerAgentV2`, `SequentialExecutorV2`,
-> `ReviewerAgentV3`, `LlmRouterV2`, `ToolRegistryV2`).
+> the deleted `PlannerAgentV2`), `WorkerAgent`, `SequentialExecutor`,
+> `ReviewerAgent`, `LlmRouter`, `ToolRegistry`).
 >
 > A full rewrite of this file will happen as part of the deprecation plan.
 
@@ -199,7 +199,7 @@ User Request
     |
     v
 [8. Background Validation Thread (bg-validation-{runId})]
-    |-- ReviewerAgentV2 (inspect + auto-fix critical issues)
+    |-- ReviewerAgent (inspect + auto-fix critical issues)
     |-- TestGenOrchestrator (language-agnostic test generation)
     |-- TestPreviewCoordinator (reuses preview for test execution)
     \-- ValidationReport + TestReport (LLM summary)
@@ -238,7 +238,7 @@ All packages are under `com.navneet.executespec`.
 | Package | Description |
 |---------|-------------|
 | `router/` | Model routing: ModelResolver (matrix-based tier x provider routing), AgentTier, LlmProvider, ResolvedModel, ProviderHealthTracker (Redis-backed circuit breaker), AvailableProviderResolver, ModelTaskMetric, ModelMatrixProperties |
-| `reviewer/` | Agentic reviewer V2: ReviewerAgentV2 (three-phase: inspect + fix + accuracy assessment), AccuracyAssessmentService, ReviewReportV2 |
+| `reviewer/` | Agentic reviewer V2: ReviewerAgent (three-phase: inspect + fix + accuracy assessment), AccuracyAssessmentService, ReviewReport |
 | `reviewer/model/` | AccuracyReport (spec adherence scoring record with EndpointCoverage nested type), ReviewIssue, IssueSeverity |
 | `batch/` | Batch LLM execution: LlmBatchClient (interface), BatchClientRouter, AnthropicBatchClient, OpenAiBatchClient, GoogleBatchClient, BatchRequestBuilder, BatchPollService (`@Scheduled` 30s + `@SchedulerLock`), BatchResumeService (result parsing + event publish), BatchCompleteEvent |
 | `validator/` | Code validation: CodeValidator, CodeValidatorImpl, ValidationLevel, ValidationResult, ValidationVerdict, Language |
@@ -400,7 +400,7 @@ previewService.start(runId) -- 5-minute TTL
 **Step 10: Background Validation (bg-validation-{runId})**
 ```
 Virtual thread runs independently after COMPLETE:
-  --> ReviewerAgentV2.review(run, workerReports) -- inspect + auto-fix
+  --> ReviewerAgent.review(run, workerReports) -- inspect + auto-fix
   --> TestGenOrchestrator.generate(runId) -- language-agnostic test generation
   --> TestPreviewCoordinator.execute(runId) -- reuses preview for test execution
   --> ValidationReportService.generateAndPersist(runId)
@@ -522,11 +522,11 @@ This prevents the planner from under-scoping async Python setups, which were a c
 
 ### 5.3 ReviewerAgent (Legacy -- removed from pipeline)
 
-**Note:** The original single-call ReviewerAgent has been fully replaced by ReviewerAgentV2 in the pipeline. See section 5.4.
+**Note:** The original single-call ReviewerAgent has been fully replaced by ReviewerAgent in the pipeline. See section 5.4.
 
-### 5.4 ReviewerAgentV2
+### 5.4 ReviewerAgent
 
-**File:** `reviewer/ReviewerAgentV2.java`
+**File:** `reviewer/ReviewerAgent.java`
 **Tier:** PLANNING
 **Model (Anthropic):** `claude-sonnet-4-6`
 **Mode:** Three-phase agentic review
@@ -540,7 +540,7 @@ This prevents the planner from under-scoping async Python setups, which were a c
 
 **Verdict Enum:** `APPROVED`, `APPROVED_WITH_NOTES`, `NEEDS_FIXES`, `REJECTED`
 
-**Output:** `ReviewReportV2` containing:
+**Output:** `ReviewReport` containing:
 - `verdict` -- ReviewVerdict enum (APPROVED / APPROVED_WITH_NOTES / NEEDS_FIXES / REJECTED)
 - `summary` -- text summary
 - `issues` -- flat list of issues, each with `IssueSeverity` (CRITICAL / MINOR)
@@ -560,7 +560,7 @@ This prevents the planner from under-scoping async Python setups, which were a c
 ### 5.4.1 AccuracyAssessmentService
 
 **File:** `reviewer/AccuracyAssessmentService.java`
-**Tier:** PLANNING (same tier as ReviewerAgentV2)
+**Tier:** PLANNING (same tier as ReviewerAgent)
 
 **Purpose:** Phase 3 of the review pipeline. Makes a focused LLM call that scores the generated code against the original user specification, returning a structured `AccuracyReport`.
 
@@ -976,7 +976,7 @@ Central orchestrator that manages the entire pipeline lifecycle. Handles both CL
 
 | Method | Signature | Description |
 |--------|-----------|-------------|
-| `runBackgroundValidation` | `void runBackgroundValidation(String runId, PipelineRun run, List<WorkerReport> reports, String planJson, String userRequest, CompileResult compileResult, boolean computeHadFailures)` | Shared method that runs ReviewerAgentV2, TestGenOrchestrator, TestPreviewCoordinator, and ValidationReport generation in a background virtual thread (`bg-validation-{runId}`). Called from both the main pipeline flow and the iteration/resume paths. |
+| `runBackgroundValidation` | `void runBackgroundValidation(String runId, PipelineRun run, List<WorkerReport> reports, String planJson, String userRequest, CompileResult compileResult, boolean computeHadFailures)` | Shared method that runs ReviewerAgent, TestGenOrchestrator, TestPreviewCoordinator, and ValidationReport generation in a background virtual thread (`bg-validation-{runId}`). Called from both the main pipeline flow and the iteration/resume paths. |
 
 **PlannerAgent Retry (transient LLM failure hardening):**
 
@@ -1052,7 +1052,7 @@ Enhanced task executor with model routing via the model matrix. Replaces direct 
 6. Progressive merge via `GitMergeService.mergeTaskBranchWithResolution()`
 7. Track metrics via `ModelTaskMetricRepository`
 
-**Note:** Per-task validation has been removed. Validation is deferred to the review phase (CompilerAgent + ReviewerAgentV2).
+**Note:** Per-task validation has been removed. Validation is deferred to the review phase (CompilerAgent + ReviewerAgent).
 
 **Result:** `SequentialExecutionResult(reports, completedTasks, failedTasks)`
 
@@ -1120,7 +1120,7 @@ The system uses a YAML-configured model matrix that maps `AgentTier x Provider -
 
 | Tier | Agents |
 |------|--------|
-| PLANNING | PlannerAgent, ReviewerAgentV2 |
+| PLANNING | PlannerAgent, ReviewerAgent |
 | WORKHORSE | WorkerAgent, CompilerAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ConflictResolverAgent, PromptOptimiserAgent, ValidationReportGenerator |
 | LIGHTWEIGHT | ConversationAgent, ContextAgent, TestReportGenerator, RequestTriageService |
 
@@ -2373,7 +2373,7 @@ model-matrix:
       lightweight: gpt-5.4
   agent-tier-map:
     PlannerAgent: PLANNING
-    ReviewerAgentV2: PLANNING
+    ReviewerAgent: PLANNING
     TestPlannerAgent: WORKHORSE
     WorkerAgent: WORKHORSE
     TestWorkerAgent: WORKHORSE
@@ -2776,7 +2776,7 @@ billing:
 
 **File:** `validator/CodeValidator.java` (interface), `validator/CodeValidatorImpl.java` (implementation)
 
-Code validation that runs during the review phase (CompilerAgent + ReviewerAgentV2). Per-task validation has been removed from SequentialTaskExecutor. The validator uses a pluggable architecture: `CodeValidatorImpl` routes requests to language-specific `LanguageToolchain` implementations through a `GateChain` that executes each validation gate in sequence.
+Code validation that runs during the review phase (CompilerAgent + ReviewerAgent). Per-task validation has been removed from SequentialTaskExecutor. The validator uses a pluggable architecture: `CodeValidatorImpl` routes requests to language-specific `LanguageToolchain` implementations through a `GateChain` that executes each validation gate in sequence.
 
 **Configuration (`application.yml`):**
 

@@ -22,7 +22,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 @ExtendWith(MockitoExtension.class)
 class ExecutionPlannerSelectedRepoIdsTest {
 
-  @Mock com.navneet.executespec.agent.LlmRouter llmRouter;
+  @Mock com.navneet.executespec.agent.FallbackLlmRouter fallbackLlmRouter;
   @Mock com.navneet.executespec.router.ModelResolver modelResolver;
   @Mock com.navneet.executespec.execution.repository.ExecutionRunRepository runRepo;
   @Mock com.navneet.executespec.execution.repository.ExecutionSolutionRepository solutionRepo;
@@ -38,7 +38,7 @@ class ExecutionPlannerSelectedRepoIdsTest {
   void wire() {
     planner =
         new ExecutionPlannerService(
-            llmRouter,
+            fallbackLlmRouter,
             modelResolver,
             new ObjectMapper(),
             runRepo,

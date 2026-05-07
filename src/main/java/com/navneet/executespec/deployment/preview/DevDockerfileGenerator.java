@@ -74,7 +74,7 @@ public class DevDockerfileGenerator {
           // Planners (esp. V2) sometimes write lowercase / hyphenated forms like "node-backend".
           // Normalize to the enum's canonical UPPER_SNAKE form before valueOf().
           String normalized = declared.trim().toUpperCase().replace('-', '_');
-          // Planner prompt (prompts/v2/planner.md) emits values like "java-spring-boot"
+          // Planner prompt (prompts/planner.md) emits values like "java-spring-boot"
           // and "cli" that don't 1:1 map to PreviewProjectType. Map the aliases so
           // we don't fall through to heuristic detection — which wrongly picks
           // FULL_STACK when the worker generated an unused frontend/ sibling.

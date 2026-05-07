@@ -6,7 +6,7 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.model.ReviewReport;
+import com.navneet.executespec.agent.model.TaskReviewReport;
 
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -18,8 +18,8 @@ class ReviewerOutputContractTest {
 
   private static final ObjectMapper MAPPER = new ObjectMapper();
 
-  private static ReviewReport mergeReport;
-  private static ReviewReport reworkReport;
+  private static TaskReviewReport mergeReport;
+  private static TaskReviewReport reworkReport;
 
   @BeforeAll
   static void loadFixtures() throws IOException {
@@ -100,17 +100,17 @@ class ReviewerOutputContractTest {
           "post_merge_suggestions": []
         }
         """;
-    ReviewReport report = MAPPER.readValue(json, ReviewReport.class);
+    TaskReviewReport report = MAPPER.readValue(json, TaskReviewReport.class);
     assertThat(report.isReadmeUpdated()).isFalse();
   }
 
   // ── helper ────────────────────────────────────────────────────────────────
 
-  private static ReviewReport load(String resourcePath) throws IOException {
+  private static TaskReviewReport load(String resourcePath) throws IOException {
     try (InputStream in =
         Thread.currentThread().getContextClassLoader().getResourceAsStream(resourcePath)) {
       assertThat(in).as("fixture not found: " + resourcePath).isNotNull();
-      return MAPPER.readValue(in, ReviewReport.class);
+      return MAPPER.readValue(in, TaskReviewReport.class);
     }
   }
 }
