@@ -638,6 +638,16 @@
 
 ## Architecture
 
+> **Naming convention — read this first to avoid confusion.** "V2" and "v3" refer to **different things**, not successive generations of the same thing:
+> - **V2 (uppercase) = backend pipeline architecture.** `com.navneet.executespec.v2.*` is the active pipeline (Smart classifier → Outline planner → Sequential executor → Worker → Reviewer). V1 has been deleted. **There is no V3 pipeline.** Component-level revisions like `ReviewerAgentV3` (the third revision of the reviewer subcomponent inside the V2 pipeline) and `LlmRouterV2` are unrelated to the pipeline-architecture generation number.
+> - **v3 (lowercase) = customer-facing product/UX surface.** `com.navneet.executespec.v3.*` and `frontend/src/v3/*` host the third generation of the product surface (landing page, anonymous runs, referrals, entitlements, Graphite+Signal theme — shipped in v2.6.0). It is parallel to, not replacing, the V2 pipeline.
+> - **Pilot v3.0 (lowercase, distinct again) = the project workspace pilot** shipped in v2.5.0 (multi-repo workspace + per-project arch docs + score trend dashboard). This is a third concept that happens to share the digit. Always read the surrounding context.
+> - **V1–V150 = Flyway migration numbers.** Numeric only, unrelated to the above.
+>
+> If a doc says "V2", assume backend pipeline. If a doc says "v3" without a leading capital, assume product surface or migration number depending on context. The full file list under each:
+> - V2 pipeline: `src/main/java/com/navneet/executespec/v2/{agent,harness,integration,reviewer,tool,context,cost,observability,recovery}/`
+> - v3 product: `src/main/java/com/navneet/executespec/v3/{landing,referral,anonrun,entitlements,credit,api}/` and `frontend/src/v3/`
+
 - **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.4
 - **Harness:** V2 is the default and only supported path for new runs (`com.navneet.executespec.v2.*`). V1 (`harness/`, `agent/`, `compiler/`, `reviewer/`, `batch/`) is frozen pending deletion — see (plan doc removed in 2026-04-26 cleanup pass) for the phased rollout. Shared infrastructure (StateStore, PipelineRun/AgentTask entities, CostEstimator, ApiKeyResolver, WorkspaceInitService, GitHubRepoService, ModelResolver, GateStore, UiStyleResolver) stays live under V2.
 - **V2 pipeline:** `RunOrchestrator` (entry) → `PlannerAgent` (plan as a `submitPlan` tool call) → plan gate (PRODUCTION pauses at AWAITING_APPROVAL, PROTOTYPE bypasses) → `SequentialExecutor` (tier-routed worker per task, one at a time) → `ReviewerAgentV3` (general + wiring passes) → validation report + test-gen kickoff → auto-preview. Runs persist to the shared `pipeline_run`/`agent_task` tables.
