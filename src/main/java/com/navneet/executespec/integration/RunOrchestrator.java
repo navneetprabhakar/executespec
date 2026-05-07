@@ -197,14 +197,14 @@ public class RunOrchestrator {
    * Idempotent on the service side (uses pending-invite presence as the once-only marker until V153
    * promotes it to a granted_at column).
    */
-  private final com.navneet.executespec.v3.referral.ReferralService referralService;
+  private final com.navneet.executespec.referral.ReferralService referralService;
 
   /**
    * R-162 — terminal-status referral hook. Logic extracted into a helper so the wire-point is
    * unit-testable without exercising the orchestrator end-to-end (see {@link
-   * com.navneet.executespec.v3.referral.ReferralCompletionHook}).
+   * com.navneet.executespec.referral.ReferralCompletionHook}).
    */
-  private final com.navneet.executespec.v3.referral.ReferralCompletionHook referralCompletionHook;
+  private final com.navneet.executespec.referral.ReferralCompletionHook referralCompletionHook;
 
   /**
    * v2.5.8 — publishes PipelineEvent.RunCompleted/RunFailed so in-app notifications, quota refund,
