@@ -8,9 +8,8 @@ import static org.mockito.Mockito.when;
 import java.lang.reflect.Method;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.agent.PromptAssembler;
-import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.router.ModelResolver;
 
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.StringRedisTemplate;

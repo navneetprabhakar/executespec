@@ -11,10 +11,10 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.navneet.executespec.sse.RunEvent;
-import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.observability.Metrics;
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
 import com.navneet.executespec.tool.ToolRegistry;
 
 import org.springframework.ai.anthropic.AnthropicChatModel;
@@ -38,8 +38,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Phase 2 scope: routes one {@link LlmRequest} to the correct provider with native tool calling,
  * returns Spring AI's {@link ChatResponse} uniformly. Tool callbacks are always sourced from {@link
- * ToolRegistry#bind(com.navneet.executespec.tool.ExecutionContext)} so concurrent tasks never
- * share state.
+ * ToolRegistry#bind(com.navneet.executespec.tool.ExecutionContext)} so concurrent tasks never share
+ * state.
  *
  * <p>Provider routing:
  *

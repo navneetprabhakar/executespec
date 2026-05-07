@@ -19,8 +19,8 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>Stashes {@code runId → containerId} here via {@link #put}
  *   <li>Calls {@link com.navneet.executespec.integration.RunOrchestrator#submitRun} as normal
  *   <li>The unmodified {@code ShellTool} / {@code BuildProjectTool} consult this store on each
- *       invocation; when a containerId is present, they dispatch via {@code docker exec} instead
- *       of running on the host
+ *       invocation; when a containerId is present, they dispatch via {@code docker exec} instead of
+ *       running on the host
  *   <li>Post-terminal cleanup: {@code docker cp} workspace out, tar it, then {@link #remove}
  * </ol>
  *

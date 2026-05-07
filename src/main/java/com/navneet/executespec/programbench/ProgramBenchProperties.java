@@ -8,15 +8,17 @@ import lombok.Data;
 /**
  * Programbench config — disabled by default.
  *
- * <p>To enable on a host: set {@code programbench.enabled=true} + ensure docker is reachable + ensure
- * the inference host is Linux x86_64 (cleanroom images are amd64-only).
+ * <p>To enable on a host: set {@code programbench.enabled=true} + ensure docker is reachable +
+ * ensure the inference host is Linux x86_64 (cleanroom images are amd64-only).
  */
 @Component
 @ConfigurationProperties(prefix = "programbench")
 @Data
 public class ProgramBenchProperties {
 
-  /** Master switch. When false, the controller endpoints return 503 and the bootstrap is skipped. */
+  /**
+   * Master switch. When false, the controller endpoints return 503 and the bootstrap is skipped.
+   */
   private boolean enabled = false;
 
   /** When true, on startup create the synthetic Bench User/Org/Project rows if absent. */
@@ -40,7 +42,10 @@ public class ProgramBenchProperties {
   /** Default LLM provider when caller doesn't specify. */
   private String defaultProvider = "anthropic";
 
-  /** Tasks directory location override (otherwise discovered from PYTHONPATH lookup of programbench package). */
+  /**
+   * Tasks directory location override (otherwise discovered from PYTHONPATH lookup of programbench
+   * package).
+   */
   private String tasksDir = "";
 
   /** Docker org for cleanroom images (matches programbench's PROGRAMBENCH_DOCKER_ORG). */

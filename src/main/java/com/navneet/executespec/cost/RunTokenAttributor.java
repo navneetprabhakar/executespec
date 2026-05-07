@@ -1,8 +1,8 @@
 package com.navneet.executespec.cost;
 
+import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
-import com.navneet.executespec.harness.ExecutionResult;
 
 import org.springframework.stereotype.Component;
 
@@ -12,12 +12,12 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Owns per-phase + per-task token attribution for V2 runs.
  *
- * <p>Extracted from {@link com.navneet.executespec.integration.RunOrchestrator} as the first
- * step of the strangler-pattern refactor documented in {@code
- * docs/plans/v2-orchestrator-refactor.md}. The orchestrator previously held this logic as private
- * methods ({@code persistPhaseTokens} + {@code distributeWorkerTokens}) alongside pipeline control
- * flow. Moving it here shrinks RunOrchestrator and establishes a bounded context for cost
- * accounting that future additions (test-gen tokens, validation-report tokens) can grow into.
+ * <p>Extracted from {@link com.navneet.executespec.integration.RunOrchestrator} as the first step
+ * of the strangler-pattern refactor documented in {@code docs/plans/v2-orchestrator-refactor.md}.
+ * The orchestrator previously held this logic as private methods ({@code persistPhaseTokens} +
+ * {@code distributeWorkerTokens}) alongside pipeline control flow. Moving it here shrinks
+ * RunOrchestrator and establishes a bounded context for cost accounting that future additions
+ * (test-gen tokens, validation-report tokens) can grow into.
  *
  * <p>Semantics are preserved bit-for-bit from the inlined versions — this is pure code movement,
  * not a behaviour change.

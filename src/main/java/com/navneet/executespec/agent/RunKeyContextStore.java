@@ -4,8 +4,6 @@ import java.time.Duration;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import com.navneet.executespec.agent.ApiKeyResolver;
-import com.navneet.executespec.agent.ResolvedKeys;
 
 import org.springframework.stereotype.Component;
 
@@ -58,9 +56,7 @@ public class RunKeyContextStore {
     ResolvedKeys keys = apiKeyResolver.resolve(userId);
 
     RunKeyContext.Source anthropicSrc =
-        (keys.anthropicKey() != null)
-            ? RunKeyContext.Source.USER
-            : RunKeyContext.Source.PLATFORM;
+        (keys.anthropicKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
     RunKeyContext.Source openAiSrc =
         (keys.openAiKey() != null) ? RunKeyContext.Source.USER : RunKeyContext.Source.PLATFORM;
     RunKeyContext.Source geminiSrc =

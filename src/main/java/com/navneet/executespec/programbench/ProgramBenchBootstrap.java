@@ -114,7 +114,9 @@ public class ProgramBenchBootstrap {
     if (created) {
       log.info(
           "ProgramBenchBootstrap: ready — orgId={} userId={} projectId={}",
-          orgId, userId, projectId);
+          orgId,
+          userId,
+          projectId);
     } else {
       log.debug("ProgramBenchBootstrap: fixture already present, no-op");
     }

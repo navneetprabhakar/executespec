@@ -42,8 +42,11 @@ public class ProgramBenchController {
   @PostMapping("/run")
   public ResponseEntity<ProgramBenchTaskService.TaskSubmitResult> submit(
       @RequestBody SubmitRequest req) {
-    log.info("ProgramBench submit task={} provider={} model={}",
-        req.taskId(), req.aiProvider(), req.modelName());
+    log.info(
+        "ProgramBench submit task={} provider={} model={}",
+        req.taskId(),
+        req.aiProvider(),
+        req.modelName());
     return ResponseEntity.accepted()
         .body(taskService.submit(req.taskId(), req.aiProvider(), req.modelName()));
   }
@@ -55,10 +58,15 @@ public class ProgramBenchController {
   @GetMapping("/preview/{taskId}")
   public ResponseEntity<Map<String, String>> preview(@PathVariable String taskId) {
     String image = props.getDockerOrg() + "/" + taskId.replace("__", "_1776_") + ":task_cleanroom";
-    return ResponseEntity.ok(Map.of(
-        "taskId", taskId,
-        "image", image,
-        "enabled", String.valueOf(props.isEnabled()),
-        "benchProjectId", props.getBenchProjectId()));
+    return ResponseEntity.ok(
+        Map.of(
+            "taskId",
+            taskId,
+            "image",
+            image,
+            "enabled",
+            String.valueOf(props.isEnabled()),
+            "benchProjectId",
+            props.getBenchProjectId()));
   }
 }

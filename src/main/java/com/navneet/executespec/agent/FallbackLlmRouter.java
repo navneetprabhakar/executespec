@@ -63,9 +63,9 @@ import lombok.extern.slf4j.Slf4j;
  * TestPlannerAgent, TestWorkerAgent, TestReportGenerator, ApiTestSuiteAgent, ConversationAgent,
  * ContextAgent, ValidationReportGenerator, PromptOptimiserAgent, eval stack).
  *
- * <p>V2 tool-calling agents use {@code LlmRouter} in {@code com.navneet.executespec.agent}.
- * This router handles provider failover, circuit breaking, and API-key resolution for
- * text-completion callers that do not need native tool calling.
+ * <p>V2 tool-calling agents use {@code LlmRouter} in {@code com.navneet.executespec.agent}. This
+ * router handles provider failover, circuit breaking, and API-key resolution for text-completion
+ * callers that do not need native tool calling.
  */
 @Service
 @Slf4j
@@ -169,7 +169,8 @@ public class FallbackLlmRouter {
       if (pinnedProvider != null && !pinnedProvider.equalsIgnoreCase(primaryProvider)) {
         int pinnedIndex = findIndexInChain(chain, pinnedProvider);
         if (pinnedIndex >= 0 && healthTracker.isHealthy(toLlmProvider(pinnedProvider))) {
-          log.debug("[FallbackLlmRouter] Run {} pinned to {} — reordering chain", runId, pinnedProvider);
+          log.debug(
+              "[FallbackLlmRouter] Run {} pinned to {} — reordering chain", runId, pinnedProvider);
           primaryProvider = chain.get(pinnedIndex)[0];
           primaryModel = chain.get(pinnedIndex)[1];
         }
@@ -234,8 +235,8 @@ public class FallbackLlmRouter {
                 .register(meterRegistry)
                 .increment();
             log.warn(
-                "[FallbackLlmRouter] Provider switch mid-run {} → {}: style consistency prompt will be"
-                    + " used",
+                "[FallbackLlmRouter] Provider switch mid-run {} → {}: style consistency prompt will"
+                    + " be used",
                 fromProvider,
                 provider);
           }
@@ -268,7 +269,9 @@ public class FallbackLlmRouter {
                 new com.navneet.executespec.sse.RunEvent(
                     "RUN_PROVIDER_SWITCHED", runId, payload, null, Instant.now()));
           } catch (Exception sseEx) {
-            log.debug("[FallbackLlmRouter] SSE emit RUN_PROVIDER_SWITCHED failed: {}", sseEx.getMessage());
+            log.debug(
+                "[FallbackLlmRouter] SSE emit RUN_PROVIDER_SWITCHED failed: {}",
+                sseEx.getMessage());
           }
         }
 
@@ -388,8 +391,8 @@ public class FallbackLlmRouter {
       if (lastError == null) {
         if (runKeys != null && !runKeys.isProviderAllowed(primaryProvider)) {
           log.warn(
-              "[FallbackLlmRouter] All providers circuit-open AND primary {} disabled by org policy —"
-                  + " cannot force",
+              "[FallbackLlmRouter] All providers circuit-open AND primary {} disabled by org policy"
+                  + " — cannot force",
               primaryProvider);
           throw new ProviderUnavailableException(
               "All providers circuit-open and primary provider "
@@ -590,7 +593,8 @@ public class FallbackLlmRouter {
     for (int attempt = 0; attempt < maxAttempts; attempt++) {
       long sleepMs = RATE_LIMIT_BACKOFF_DELAYS_MS[attempt];
       log.warn(
-          "[FallbackLlmRouter] {} on {} for {} (iteration={}) — attempt {}/{}, sleeping {}ms before retry",
+          "[FallbackLlmRouter] {} on {} for {} (iteration={}) — attempt {}/{}, sleeping {}ms before"
+              + " retry",
           eventDescription,
           provider,
           agentId,
@@ -746,8 +750,7 @@ public class FallbackLlmRouter {
           finalOpenAiToolChoice == null ? null : finalOpenAiToolChoice.toString();
       response =
           openAiNativeToolClient.call(
-              com.navneet.executespec.agent.OpenAiNativeToolClient.OpenAiToolCallRequest
-                  .builder()
+              com.navneet.executespec.agent.OpenAiNativeToolClient.OpenAiToolCallRequest.builder()
                   .model(model)
                   .messages(prompt.getInstructions())
                   .tools(callbacks)

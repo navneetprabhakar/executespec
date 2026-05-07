@@ -30,8 +30,8 @@ import lombok.extern.slf4j.Slf4j;
  * improvement without needing replay logic.
  *
  * <p>Phase 2 (follow-up PR): actual replay via {@link
- * com.navneet.executespec.context.ContextStore#load} + {@code WorkerAgent.resumeFromSnapshot()}
- * + {@code SequentialExecutor.continueFromTask(...)}. Designed as a drop-in replacement for the
+ * com.navneet.executespec.context.ContextStore#load} + {@code WorkerAgent.resumeFromSnapshot()} +
+ * {@code SequentialExecutor.continueFromTask(...)}. Designed as a drop-in replacement for the
  * fail-path below.
  *
  * <p>Run state handling:
@@ -184,8 +184,7 @@ public class StartupRunResumer {
             run.getRunId(),
             status,
             outcome);
-        if (outcome
-            == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK) {
+        if (outcome == com.navneet.executespec.integration.RunOrchestrator.CrashResumeOutcome.OK) {
           failedInterrupted++; // counted under "interrupted-then-resumed" in the summary log
           continue;
         }

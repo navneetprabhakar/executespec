@@ -16,6 +16,18 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadFactory;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.navneet.executespec.agent.Classification;
+import com.navneet.executespec.agent.ClassificationResult;
+import com.navneet.executespec.agent.CoherencePlannerAgent;
+import com.navneet.executespec.agent.OutlinePlannerAgent;
+import com.navneet.executespec.agent.Plan;
+import com.navneet.executespec.agent.PlanStrategy;
+import com.navneet.executespec.agent.PlanStrategyCircuitBreaker;
+import com.navneet.executespec.agent.PlannedTask;
+import com.navneet.executespec.agent.PlannerRequest;
+import com.navneet.executespec.agent.SmartClassifierAgent;
+import com.navneet.executespec.agent.SpecClassifier;
+import com.navneet.executespec.agent.TaskExpanderAgent;
 import com.navneet.executespec.agent.model.WorkerReport;
 import com.navneet.executespec.assessment.FeatureAssessmentService;
 import com.navneet.executespec.auth.repository.AppUserRepository;
@@ -23,16 +35,25 @@ import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.harness.ExecutionRequest;
+import com.navneet.executespec.harness.ExecutionResult;
 import com.navneet.executespec.harness.GateStore;
+import com.navneet.executespec.harness.SequentialExecutor;
+import com.navneet.executespec.harness.TaskOutcome;
 import com.navneet.executespec.harness.UiStyleResolver;
 import com.navneet.executespec.harness.WorkspaceInitService;
 import com.navneet.executespec.harness.event.PipelineEvent;
+import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.service.ProjectRepoService;
 import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.AccuracyAssessmentService;
+import com.navneet.executespec.reviewer.ReviewerAgent;
+import com.navneet.executespec.reviewer.ReviewerRequest;
+import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.reviewer.model.AccuracyReport;
 import com.navneet.executespec.reviewer.model.ReviewReport;
 import com.navneet.executespec.reviewer.model.ReviewVerdict;
@@ -48,27 +69,6 @@ import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.AgentTaskRepository;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 import com.navneet.executespec.testgen.TestGenOrchestrator;
-import com.navneet.executespec.agent.Classification;
-import com.navneet.executespec.agent.ClassificationResult;
-import com.navneet.executespec.agent.CoherencePlannerAgent;
-import com.navneet.executespec.agent.OutlinePlannerAgent;
-import com.navneet.executespec.agent.Plan;
-import com.navneet.executespec.agent.PlanStrategy;
-import com.navneet.executespec.agent.PlanStrategyCircuitBreaker;
-import com.navneet.executespec.agent.PlannedTask;
-import com.navneet.executespec.agent.PlannerRequest;
-import com.navneet.executespec.agent.SmartClassifierAgent;
-import com.navneet.executespec.agent.SpecClassifier;
-import com.navneet.executespec.agent.TaskExpanderAgent;
-import com.navneet.executespec.cost.RunCostTracker;
-import com.navneet.executespec.harness.ExecutionRequest;
-import com.navneet.executespec.harness.ExecutionResult;
-import com.navneet.executespec.harness.SequentialExecutor;
-import com.navneet.executespec.harness.TaskOutcome;
-import com.navneet.executespec.observability.Metrics;
-import com.navneet.executespec.reviewer.ReviewerAgent;
-import com.navneet.executespec.reviewer.ReviewerRequest;
-import com.navneet.executespec.reviewer.ReviewerResult;
 import com.navneet.executespec.tool.ExecutionContext;
 
 import org.springframework.stereotype.Service;
@@ -79,11 +79,11 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 integration point for V1's existing endpoints.
  *
- * <p>{@link RunController} consults {@link
- * com.navneet.executespec.rollout.HarnessVersionResolver} on each {@code POST /api/runs}; when
- * the flag resolves to V2, this orchestrator takes over. The {@code submitRun(...)} signature
- * originally mirrored V1's {@code PipelineHarness.submitRun(...)} (since deleted) so the
- * controller's call site needed only an if/else swap during the V1 → V2 cutover.
+ * <p>{@link RunController} consults {@link com.navneet.executespec.rollout.HarnessVersionResolver}
+ * on each {@code POST /api/runs}; when the flag resolves to V2, this orchestrator takes over. The
+ * {@code submitRun(...)} signature originally mirrored V1's {@code PipelineHarness.submitRun(...)}
+ * (since deleted) so the controller's call site needed only an if/else swap during the V1 → V2
+ * cutover.
  *
  * <p>Writes to V1's {@code pipeline_run} and {@code agent_task} tables so the existing UI keeps
  * working unchanged — {@code GET /api/runs/{id}} returns V2 runs as V1-shaped JSON. The only
@@ -1737,19 +1737,18 @@ public class RunOrchestrator {
    *       persisted spec. Planning is idempotent (classifier + outline are deterministic-ish); the
    *       previous JVM's plan attempt is discarded.
    *   <li>{@code WORKING} — load the persisted plan, reuse the existing workspace, call {@link
-   *       com.navneet.executespec.harness.SequentialExecutor#execute} with a {@code
-   *       ResumeRequest} so terminal AgentTasks are skipped and the in-flight task picks up from
-   *       its Redis snapshot. Then runs reviewer + report.
+   *       com.navneet.executespec.harness.SequentialExecutor#execute} with a {@code ResumeRequest}
+   *       so terminal AgentTasks are skipped and the in-flight task picks up from its Redis
+   *       snapshot. Then runs reviewer + report.
    *   <li>{@code REVIEWING} — execute already finished pre-crash, re-run reviewer (idempotent per
    *       the workspace + plan it sees). Then report.
    *   <li>{@code AWAITING_APPROVAL} — left as-is (caller checked); the gate's Redis state carries
    *       through.
    * </ul>
    *
-   * <p>Per-run cap: {@link
-   * com.navneet.executespec.recovery.StartupRunResumer#MAX_RESUME_ATTEMPTS} — same constant the
-   * resumer enforces. Each call increments {@code pipeline_run.resume_attempts} BEFORE submitting
-   * to the pool so a crash inside resume can't loop forever.
+   * <p>Per-run cap: {@link com.navneet.executespec.recovery.StartupRunResumer#MAX_RESUME_ATTEMPTS}
+   * — same constant the resumer enforces. Each call increments {@code pipeline_run.resume_attempts}
+   * BEFORE submitting to the pool so a crash inside resume can't loop forever.
    */
   public CrashResumeOutcome resumeAfterCrash(String runId) {
     var opt = runRepo.findById(runId);
@@ -2697,10 +2696,10 @@ public class RunOrchestrator {
   /**
    * Writes a run-meta README.md into the workspace if one doesn't already exist.
    *
-   * <p>The planner is instructed (in prompts/planner.md invariant #3) to emit a "Create
-   * README.md" task for non-trivial specs. That user-facing README is authored by the worker and
-   * takes precedence — we never overwrite it. For trivial specs (single-file, no framework) the
-   * planner skips the README task; this method then writes a deterministic run-meta README so the
+   * <p>The planner is instructed (in prompts/planner.md invariant #3) to emit a "Create README.md"
+   * task for non-trivial specs. That user-facing README is authored by the worker and takes
+   * precedence — we never overwrite it. For trivial specs (single-file, no framework) the planner
+   * skips the README task; this method then writes a deterministic run-meta README so the
    * download-zip experience always includes an entry-point doc.
    *
    * <p>Best-effort — IO errors are logged and swallowed. A missing README isn't worth failing a run
@@ -3167,8 +3166,7 @@ public class RunOrchestrator {
     if (buildPassed
         && verdict != null
         && (verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.CLEAN
-            || verdict
-                == com.navneet.executespec.reviewer.ReviewerResult.Overall.FIXED_ISSUES)) {
+            || verdict == com.navneet.executespec.reviewer.ReviewerResult.Overall.FIXED_ISSUES)) {
       return new StatusAndReason(
           "COMPLETE", anyWarn ? "CLEAN_WITH_INTERMEDIATE_WARNINGS" : "CLEAN_COMPLETION");
     }

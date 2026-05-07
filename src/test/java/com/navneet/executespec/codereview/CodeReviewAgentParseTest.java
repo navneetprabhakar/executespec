@@ -7,9 +7,9 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.agent.LlmRouter;
 import com.navneet.executespec.cost.RunCostTracker;
+import com.navneet.executespec.router.ModelResolver;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

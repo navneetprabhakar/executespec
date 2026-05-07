@@ -12,10 +12,10 @@ import java.util.concurrent.TimeoutException;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.observability.Metrics;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
 import com.navneet.executespec.router.ResolvedModel;
-import com.navneet.executespec.observability.Metrics;
 
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
@@ -182,8 +182,8 @@ public class OutlinePlannerAgent {
 
   /**
    * Run the outline phase. Synchronous — cost flows through {@link LlmRouter} → {@link
-   * com.navneet.executespec.cost.RunCostTracker} automatically; the orchestrator diffs the
-   * per-run snapshot before/after to attribute the phase to {@code pipeline_run.outline_*} columns.
+   * com.navneet.executespec.cost.RunCostTracker} automatically; the orchestrator diffs the per-run
+   * snapshot before/after to attribute the phase to {@code pipeline_run.outline_*} columns.
    *
    * <p>{@link Mode#FULL_PLAN} emits descriptions + hardConstraints + meetsRequirements per task.
    * {@link Mode#SKELETON_ONLY} emits id/title/complexity/repos/dependsOn/ type — the expander fills

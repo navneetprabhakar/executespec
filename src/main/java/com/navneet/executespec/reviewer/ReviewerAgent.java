@@ -30,8 +30,8 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * V2 post-execution code reviewer.
  *
- * <p>Runs after {@link com.navneet.executespec.harness.SequentialExecutor} completes. Executes
- * two review passes as narrowly-scoped worker invocations:
+ * <p>Runs after {@link com.navneet.executespec.harness.SequentialExecutor} completes. Executes two
+ * review passes as narrowly-scoped worker invocations:
  *
  * <ol>
  *   <li><b>General review</b> — scan for logic bugs, incomplete implementations, contract
@@ -274,8 +274,8 @@ public class ReviewerAgent {
    * future is cancelled (interrupting the worker thread); we return a synthetic {@link
    * WorkerResult} with outcome {@code ERROR} so {@link #determineOverall} treats it as
    * REVIEW_FAILED and {@link
-   * com.navneet.executespec.integration.RunOrchestrator#resolveTerminalStatus} falls through to
-   * the build + execution signals.
+   * com.navneet.executespec.integration.RunOrchestrator#resolveTerminalStatus} falls through to the
+   * build + execution signals.
    */
   private WorkerResult runPassWithTimeout(
       ReviewerRequest req,

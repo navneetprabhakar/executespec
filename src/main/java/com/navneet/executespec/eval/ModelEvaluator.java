@@ -272,7 +272,8 @@ public class ModelEvaluator {
     long outputTokens = 0;
 
     try {
-      FallbackLlmRouter.LlmResponse llmResponse = fallbackLlmRouter.callDirect(provider, model, prompt);
+      FallbackLlmRouter.LlmResponse llmResponse =
+          fallbackLlmRouter.callDirect(provider, model, prompt);
       long latencyMs = System.currentTimeMillis() - startMs;
 
       responseText = llmResponse.response().getResult().getOutput().getText();

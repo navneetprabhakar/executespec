@@ -24,8 +24,8 @@
  *   <li>{@code writeFile} errors if the file already exists — use {@code editFile} to modify
  *       existing files (cuts write-phase tokens by ~60%)
  *   <li>Strict JSON schemas ({@code additionalProperties: false}) for every tool
- *   <li>Typed errors ({@link com.navneet.executespec.tool.ToolResult.Err}) instead of
- *       stringified failures
+ *   <li>Typed errors ({@link com.navneet.executespec.tool.ToolResult.Err}) instead of stringified
+ *       failures
  * </ul>
  */
 package com.navneet.executespec.tool;

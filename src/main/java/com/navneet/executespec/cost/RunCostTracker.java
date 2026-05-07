@@ -262,8 +262,8 @@ public class RunCostTracker {
    *
    * <p>v2.6.2 slice 5 — convenience overload that defaults to a null strategy (legacy single-phase
    * planner shape). New callers should pass an explicit {@link
-   * com.navneet.executespec.agent.PlanStrategy} so the estimate accounts for
-   * hierarchical-pipeline phase costs.
+   * com.navneet.executespec.agent.PlanStrategy} so the estimate accounts for hierarchical-pipeline
+   * phase costs.
    */
   public Estimate estimateRunTierAware(String provider, java.util.List<String> taskComplexities) {
     return estimateRunTierAware(provider, taskComplexities, null);

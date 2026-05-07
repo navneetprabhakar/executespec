@@ -94,8 +94,7 @@ public class RunService {
    */
   public Run submit(Request req) {
     String runId = "v2-" + UUID.randomUUID();
-    Run run =
-        new Run(runId, req.spec(), req.provider(), req.model(), req.classification().name());
+    Run run = new Run(runId, req.spec(), req.provider(), req.model(), req.classification().name());
     registry.put(run);
     pool.submit(() -> executePipeline(run, req));
     log.info(
