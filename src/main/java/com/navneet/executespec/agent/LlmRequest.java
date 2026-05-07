@@ -28,6 +28,10 @@ import lombok.Builder;
  * @param context per-task execution context (binds tool callbacks)
  * @param temperature optional sampling temperature (default 0.0 for determinism)
  * @param maxTokens optional output cap; provider-specific defaults apply if null
+ * @param readTimeoutSeconds optional per-call HTTP read-timeout override; provider clients use
+ *     their default if null. Currently plumbed only into Gemini (where the default 60s read-timeout
+ *     trips up large single-shot OutlinePlanner calls on gemini-3-pro-preview). Anthropic + OpenAI
+ *     clients ignore the field today — Spring AI manages their HTTP timeouts.
  */
 @Builder
 public record LlmRequest(
@@ -37,7 +41,8 @@ public record LlmRequest(
     ExecutionContext context,
     Double temperature,
     Integer maxTokens,
-    List<ToolCallback> toolsOverride) {
+    List<ToolCallback> toolsOverride,
+    Integer readTimeoutSeconds) {
 
   public LlmRequest {
     if (provider == null || provider.isBlank())

@@ -137,7 +137,11 @@ public class GeminiNativeToolClient {
 
     HttpClient jdkClient = HttpClient.newBuilder().connectTimeout(CONNECT_TIMEOUT).build();
     JdkClientHttpRequestFactory factory = new JdkClientHttpRequestFactory(jdkClient);
-    factory.setReadTimeout(READ_TIMEOUT);
+    Duration effectiveReadTimeout =
+        request.readTimeoutSeconds() != null && request.readTimeoutSeconds() > 0
+            ? Duration.ofSeconds(request.readTimeoutSeconds())
+            : READ_TIMEOUT;
+    factory.setReadTimeout(effectiveReadTimeout);
     RestClient client = RestClient.builder().baseUrl(baseUrl).requestFactory(factory).build();
     JsonNode response = postWithRateLimitRetry(client, uri, body);
     if (response == null) throw new IllegalStateException("Gemini returned empty response body");
@@ -498,5 +502,14 @@ public class GeminiNativeToolClient {
        * degraded-performance failure mode. Use when the caller expects exactly one specific
        * function to be called.
        */
-      Boolean forceToolCall) {}
+      Boolean forceToolCall,
+      /**
+       * Optional per-call HTTP read-timeout override (seconds). Falls through to the static {@link
+       * #READ_TIMEOUT} default when null. Used by {@code OutlinePlannerAgent} to give large
+       * single-shot planner calls on gemini-3-pro-preview enough headroom — the default 60s is too
+       * tight for a thinking model emitting a multi-task plan, and the call would error with
+       * "Request timed out: null" after which RunOrchestrator silently fell back to a 1-task
+       * SINGLE_SHOT plan (cmatrix run a0b81542 on 2026-05-07).
+       */
+      Integer readTimeoutSeconds) {}
 }
