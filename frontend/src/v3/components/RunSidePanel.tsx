@@ -586,6 +586,8 @@ const MILESTONE_TYPES = new Set([
   'BATCH_PROGRESS',
   'BATCH_COMPLETE',
   'BATCH_FAILED',
+  // 2026-05-07 — Phase L1: deterministic auto-format pass between executor and reviewer.
+  'LINT_AUTOFIX_APPLIED',
 ]);
 
 type FileOp = {kind: 'write' | 'edit' | 'commit' | 'command'; path?: string};
@@ -1076,6 +1078,16 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
       icon: <XCircle className='h-3.5 w-3.5' />,
       text: `Batch failed: ${payloadStr.slice(0, 100)}`,
       tone: 'red',
+    };
+
+  // 2026-05-07 — Phase L1: deterministic formatter pass. Payload is a one-line summary
+  // (e.g. "prettier+spotless-maven · 14 file(s) changed in 3.2s"). Use the wrench icon
+  // since it's the universal "the platform fixed something for you" affordance.
+  if (type === 'LINT_AUTOFIX_APPLIED')
+    return {
+      icon: <Wrench className='h-3.5 w-3.5' />,
+      text: `Auto-format · ${payloadStr}`,
+      tone: 'blueSoft',
     };
 
   return null;
