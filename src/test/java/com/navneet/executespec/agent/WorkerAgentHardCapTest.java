@@ -45,7 +45,7 @@ import org.springframework.ai.chat.model.Generation;
  * cost-snapshot, set a small {@code hardCapUsd}, and assert the worker terminates with
  * BUDGET_EXCEEDED at the right iteration boundary.
  */
-class WorkerAgentV2HardCapTest {
+class WorkerAgentHardCapTest {
 
   private static AssistantMessage.ToolCall toolCall(String name, String args) {
     return new AssistantMessage.ToolCall("call_" + UUID.randomUUID(), "function", name, args);

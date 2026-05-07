@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
  * com.navneet.executespec.agent.ApiKeyResolver}'s output is captured once per run and read back by
  * every subsequent LLM dispatch.
  */
-class V2RunKeyContextStoreTest {
+class RunKeyContextStoreTest {
 
   private final ApiKeyResolver resolver = mock(ApiKeyResolver.class);
   private final RunKeyContextStore store = new RunKeyContextStore(resolver);
