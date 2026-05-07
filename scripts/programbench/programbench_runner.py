@@ -186,9 +186,11 @@ def _capture_workspace(container_id: str, output_dir: Path) -> Path:
     if archive.exists():
         archive.unlink()
     with tarfile.open(archive, "w:gz") as tf:
-        # arcname="submission" so the archive top-level matches what
-        # programbench eval expects
-        tf.add(submission_dir, arcname="submission")
+        # programbench eval extracts the tar into /workspace and runs
+        # `chmod +x ./compile.sh && ./compile.sh` — so the entries must be at
+        # the archive root, NOT under a top-level "submission/" directory.
+        # (Verified by reading programbench/eval/eval.py:_compile_executable.)
+        tf.add(submission_dir, arcname=".")
     return archive
 
 
