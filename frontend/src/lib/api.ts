@@ -175,6 +175,10 @@ export interface RunSummary {
   sourceRunId?: string | null;
   /** Which harness produced this run: "v1" (default) or "v2". */
   harnessVersion?: string | null;
+  /** V183 — 'BUILD' (default planner+executor+reviewer flow) or 'PATCH' (thin single-agent loop, autofix / bench runs). */
+  runMode?: 'BUILD' | 'PATCH' | null;
+  /** V183 — finding source key for autofix-triggered patch runs. `<TYPE>:<id>`. */
+  triggeredByFinding?: string | null;
   /** v2.5.8 — total USD spent on LLM calls for this run. Null until terminal. */
   actualCostUsd?: number | null;
   /**
