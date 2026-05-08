@@ -463,10 +463,17 @@ public class GeminiNativeToolClient {
       // previous parser dropped on the floor:
       //
       //   cachedContentTokenCount — context-cached subset of promptTokenCount (subset, not
-      //                             addition). Today this is always 0 because we don't enable
-      //                             Gemini context caching (no /v1beta/cachedContents setup) —
-      //                             surfaced anyway as a safety net so the day caching IS
-      //                             enabled, billing follows automatically.
+      //                             addition). Two paths populate it:
+      //                             (1) implicit caching — auto-fires when the prefix exceeds
+      //                                 ~1024 tokens (Flash) / ~4096 tokens (Pro) AND is
+      //                                 byte-identical to a recent prior call. We rely on
+      //                                 WorkerAgent keeping system + tools + early turns
+      //                                 stable across iterations. The 2026-05-08 stagnation-
+      //                                 message-as-SystemMessage bug invalidated the prefix;
+      //                                 see WorkerAgentStagnationTest for the regression pin.
+      //                             (2) explicit caching — caller POSTs to /v1beta/cachedContents
+      //                                 to mint a cache resource then references it by ID.
+      //                                 Not yet implemented; tracked as Phase 2 of the cache audit.
       //   thoughtsTokenCount      — Gemini 2.5+ reasoning tokens (we use gemini-3-pro-preview
       //                             and gemini-3-flash-preview). Gemini bills these at the
       //                             OUTPUT rate. Previously dropped → under-billing whenever
@@ -474,11 +481,11 @@ public class GeminiNativeToolClient {
       //                             visible-output volume.
       //
       // RunCostTracker reads these via metadata keys `cache_read_input_tokens` (uniform across
-      // providers) and `thinking_tokens` (Gemini-only, summed into outTok before pricing).
+      // providers) and `thinking_tokens` (Gemini-only, summed into outTok before pricing). Always
+      // set both keys (even at 0) so the per-call log line consistently reports cacheRead — that
+      // way operators can distinguish "Gemini reported 0 hits" from "metadata absent entirely".
       int cachedContent = usage.path("cachedContentTokenCount").asInt(0);
-      if (cachedContent > 0) {
-        metaBuilder.keyValue("cache_read_input_tokens", cachedContent);
-      }
+      metaBuilder.keyValue("cache_read_input_tokens", cachedContent);
       int thoughts = usage.path("thoughtsTokenCount").asInt(0);
       if (thoughts > 0) {
         metaBuilder.keyValue("thinking_tokens", thoughts);

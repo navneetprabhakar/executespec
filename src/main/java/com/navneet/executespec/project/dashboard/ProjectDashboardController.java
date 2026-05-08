@@ -41,6 +41,7 @@ public class ProjectDashboardController {
   private final com.navneet.executespec.project.pr.PostMergeCascadeService postMergeCascadeService;
   private final com.navneet.executespec.project.estimation.EstimationService estimationService;
   private final com.navneet.executespec.project.techdebt.TechDebtService techDebtService;
+  private final com.navneet.executespec.project.techdebt.TechDebtFixService techDebtFixService;
 
   /** v2.5.8 — Launch runs accumulate tokens + cost here; dashboard now reads both. */
   private final com.navneet.executespec.execution.repository.ExecutionRunRepository execRunRepo;
@@ -316,6 +317,40 @@ public class ProjectDashboardController {
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
     projectAccessGuard.assertCanRead(projectId, userDetails);
     return ResponseEntity.ok(techDebtService.build(projectId, since));
+  }
+
+  /** Body for {@link #fixTechDebt}. */
+  public record FixTechDebtRequest(String category) {}
+
+  /** Response for {@link #fixTechDebt}. */
+  public record FixTechDebtResponse(String runId, String findingKey, String outcome) {}
+
+  /**
+   * Phase 2 (V183) — dispatch a patch-mode run that fixes every issue of the named category across
+   * the project's linked repos. One PR per category keeps diffs coherent. Idempotent: an in-flight
+   * run for the same (project, category) returns the existing run with {@code
+   * outcome=REUSED_ACTIVE} instead of dispatching a duplicate.
+   */
+  @org.springframework.web.bind.annotation.PostMapping("/api/projects/{projectId}/tech-debt/fix")
+  public ResponseEntity<FixTechDebtResponse> fixTechDebt(
+      @PathVariable String projectId,
+      @org.springframework.web.bind.annotation.RequestBody FixTechDebtRequest req,
+      @org.springframework.security.core.annotation.AuthenticationPrincipal
+          com.navneet.executespec.auth.security.AppUserDetails userDetails) {
+    if (userDetails == null) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.UNAUTHORIZED, "authentication required");
+    }
+    projectAccessGuard.assertCanRead(projectId, userDetails);
+    if (req == null || req.category() == null || req.category().isBlank()) {
+      throw new org.springframework.web.server.ResponseStatusException(
+          org.springframework.http.HttpStatus.BAD_REQUEST, "category is required");
+    }
+    var result =
+        techDebtFixService.dispatchFixForCategory(projectId, req.category(), userDetails.getUser());
+    return ResponseEntity.status(org.springframework.http.HttpStatus.ACCEPTED)
+        .body(
+            new FixTechDebtResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }
 
   /** v2.5.2 — dismiss the post-merge banner (user clicked the CTA or X). */

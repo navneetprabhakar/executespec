@@ -15,10 +15,12 @@
  * every 2.5s for status updates.
  */
 import {useCallback, useEffect, useRef, useState} from 'react';
+import {Link} from 'react-router-dom';
 
 import {
   type CodeReviewScanWithIssues,
   codeReviewReportDownloadUrl,
+  dispatchCodeReviewAutofix,
   getCodeReview,
   getLatestCodeReviewForRepo,
   submitCodeReview,
@@ -27,7 +29,7 @@ import {Lock} from 'lucide-react';
 
 import {useAuthStore} from '@/stores/useAuthStore';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
-import {cn} from '@/lib/utils';
+import {cn, errMsg} from '@/lib/utils';
 
 /**
  * `repos` arrives as `ProjectRepoLink[]` from the parent — each link record carries the actual
@@ -121,6 +123,36 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollTimer = useRef<number | null>(null);
+  // V183 Phase 4 — per-severity autofix state. Tracks {severity → {state, runId, ...}}
+  // so the user clicks "Autofix N CRITICAL" and gets a "Watch run →" link inline.
+  const [autofixState, setAutofixState] = useState<
+    Record<
+      string,
+      {
+        state: 'idle' | 'dispatching' | 'done' | 'error';
+        runId?: string;
+        error?: string;
+        outcome?: 'DISPATCHED' | 'REUSED_ACTIVE';
+      }
+    >
+  >({});
+
+  async function handleAutofix(severity: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO') {
+    if (!latest?.scan?.id) return;
+    setAutofixState((prev) => ({...prev, [severity]: {state: 'dispatching'}}));
+    try {
+      const r = await dispatchCodeReviewAutofix(latest.scan.id, severity);
+      setAutofixState((prev) => ({
+        ...prev,
+        [severity]: {state: 'done', runId: r.runId, outcome: r.outcome},
+      }));
+    } catch (e) {
+      setAutofixState((prev) => ({
+        ...prev,
+        [severity]: {state: 'error', error: errMsg(e)},
+      }));
+    }
+  }
 
   const refreshLatest = useCallback(async () => {
     try {
@@ -215,6 +247,78 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
           <SeverityChip label={`${counts.info} INFO`} variant='info' />
         </div>
       )}
+
+      {/* V183 Phase 4 — per-severity autofix dispatch. Buttons render only for buckets
+          with OPEN issues so the user can prioritise (CRITICAL first, then MAJOR…).
+          Clicking dispatches a patch-mode run that addresses every issue in the bucket
+          on a fresh executespec/<runShort> branch + opens a draft PR. */}
+      {isComplete &&
+        latest?.scan?.id &&
+        (() => {
+          const sevs: Array<{key: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO'; count: number}> = [
+            {key: 'CRITICAL', count: counts.critical},
+            {key: 'MAJOR', count: counts.major},
+            {key: 'MINOR', count: counts.minor},
+            {key: 'INFO', count: counts.info},
+          ];
+          const visible = sevs.filter((s) => s.count > 0);
+          if (visible.length === 0) return null;
+          return (
+            <div className='flex flex-wrap gap-1.5 text-[11px]'>
+              <span className='text-muted text-[10px] uppercase tracking-wide self-center pr-1'>
+                Autofix
+              </span>
+              {visible.map(({key, count}) => {
+                const s = autofixState[key] ?? {state: 'idle'};
+                if (s.state === 'idle') {
+                  return (
+                    <button
+                      key={key}
+                      type='button'
+                      onClick={() => handleAutofix(key)}
+                      className='px-2 py-0.5 text-[10px] font-medium rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20'
+                      title={`Dispatch a patch-mode run that fixes all ${count} ${key} issue${count === 1 ? '' : 's'}`}
+                    >
+                      {count} {key}
+                    </button>
+                  );
+                }
+                if (s.state === 'dispatching') {
+                  return (
+                    <span key={key} className='px-2 py-0.5 text-[10px] text-muted'>
+                      {key} dispatching…
+                    </span>
+                  );
+                }
+                if (s.state === 'done' && s.runId) {
+                  return (
+                    <Link
+                      key={key}
+                      to={`/runs/${s.runId}`}
+                      className='px-2 py-0.5 text-[10px] font-medium rounded bg-status-success/10 text-status-success hover:bg-status-success/20'
+                      title={
+                        s.outcome === 'REUSED_ACTIVE'
+                          ? `${key} fix already in flight — click to watch`
+                          : `Watch ${key} fix run`
+                      }
+                    >
+                      {key} {s.outcome === 'REUSED_ACTIVE' ? 'in flight →' : 'run →'}
+                    </Link>
+                  );
+                }
+                return (
+                  <span
+                    key={key}
+                    className='px-2 py-0.5 text-[10px] text-status-error'
+                    title={s.error}
+                  >
+                    {key} failed
+                  </span>
+                );
+              })}
+            </div>
+          );
+        })()}
 
       {isFailed && verdict?.failureReason && (
         <div className='text-[11px] text-status-error font-mono whitespace-pre-wrap break-words p-2 bg-status-error/5 rounded border border-status-error/20'>

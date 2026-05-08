@@ -301,4 +301,18 @@ public interface PipelineRunRepository
           + "WHERE r.createdByUserId = :userId AND r.deletedAt IS NULL "
           + "AND r.status NOT IN ('PENDING', 'PLANNING', 'IN_PROGRESS', 'IN_PROGRESS_BATCH')")
   int softDeleteByUserId(@Param("userId") String userId, @Param("now") Instant now);
+
+  /**
+   * V183 (2026-05-08) — find an active patch-mode run already dispatched for a finding. Used by
+   * {@code FindingPatchSubmitter} to dedupe: if a finding has a non-terminal run, the submit
+   * endpoint returns it instead of dispatching a duplicate (saves credits + prevents double-PRs on
+   * the same comment list).
+   *
+   * <p>Active = status NOT IN COMPLETE / FAILED / PARTIAL / CANCELLED / ABORTED.
+   */
+  @Query(
+      "SELECT r FROM PipelineRun r WHERE r.triggeredByFinding = :key "
+          + "AND r.status NOT IN ('COMPLETE', 'FAILED', 'PARTIAL', 'CANCELLED', 'ABORTED') "
+          + "ORDER BY r.startedAt DESC")
+  List<PipelineRun> findActiveByTriggeredByFinding(@Param("key") String findingKey);
 }

@@ -1061,6 +1061,15 @@ function OverviewTab({
 
 function GoalSection({content}: {content: string}) {
   const [copied, setCopied] = useState(false);
+  // 2026-05-08 — was permanently `line-clamp-8`. Bench-mode runs (swebench /
+  // programbench) prepend ~5KB of failing-test output to userRequest, and even
+  // product-mode prompts often span 20+ lines — clamping at 8 hid the part of
+  // the prompt the user actually wanted to see (the failing-test trace, the
+  // acceptance criteria, the constraints). Default to expanded; collapse via
+  // toggle when the content is genuinely long.
+  const [expanded, setExpanded] = useState(true);
+  const lineCount = content.split('\n').length;
+  const isLong = lineCount > 12;
   const handleCopy = () => {
     navigator.clipboard.writeText(content).then(() => {
       setCopied(true);
@@ -1071,16 +1080,31 @@ function GoalSection({content}: {content: string}) {
     <div className='pt-3 border-t border-[var(--border-default)]'>
       <div className='flex items-center justify-between mb-1.5'>
         <p className='text-xs text-muted'>Goal</p>
-        <button
-          onClick={handleCopy}
-          className='flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted hover:text-secondary transition-colors rounded hover:bg-[var(--gray-200)]'
-          title='Copy goal to clipboard'
-        >
-          {copied ? <Check className='h-3 w-3 text-accent-green' /> : <Copy className='h-3 w-3' />}
-          {copied ? 'Copied' : 'Copy'}
-        </button>
+        <div className='flex items-center gap-1'>
+          {isLong && (
+            <button
+              onClick={() => setExpanded((e) => !e)}
+              className='flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted hover:text-secondary transition-colors rounded hover:bg-[var(--gray-200)]'
+              title={expanded ? 'Collapse goal' : 'Show full goal'}
+            >
+              {expanded ? `Collapse (${lineCount} lines)` : `Show all ${lineCount} lines`}
+            </button>
+          )}
+          <button
+            onClick={handleCopy}
+            className='flex items-center gap-1 px-1.5 py-0.5 text-[10px] text-muted hover:text-secondary transition-colors rounded hover:bg-[var(--gray-200)]'
+            title='Copy goal to clipboard'
+          >
+            {copied ? (
+              <Check className='h-3 w-3 text-accent-green' />
+            ) : (
+              <Copy className='h-3 w-3' />
+            )}
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+        </div>
       </div>
-      <div className='line-clamp-8'>
+      <div className={expanded ? '' : 'line-clamp-8'}>
         <MarkdownContent content={content} />
       </div>
     </div>
