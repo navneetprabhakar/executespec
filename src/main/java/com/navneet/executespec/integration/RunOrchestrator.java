@@ -3389,11 +3389,18 @@ public class RunOrchestrator {
               r.setCreditsCharged(est.credits());
               // GA-readiness P3.2 — honour customer-supplied cost cap (P3.2 helper).
               // 2026-05-08 — BYOK cost-cap exemption. When the user's org is OWN_KEYS, skip
-              // setting hardCapUsd entirely so the WorkerAgent budget guard never fires.
-              // Customer pays their own API bill; we shouldn't hard-stop them on ours.
+              // OUR platform cap entirely; the customer pays their own API bill so we shouldn't
+              // hard-stop them on ours. BUT we still honour their EXPLICIT userCostCap (typed
+              // into NewRunModal) — that's their voluntary ceiling, not ours.
+              //
+              // Decision matrix:
+              //   BYOK    + userCostCap set    → userCostCap   (customer's voluntary cap honoured)
+              //   BYOK    + userCostCap null   → null          (no cap; fully BYOK)
+              //   non-BYOK + (any)             → clamp(platform, userCostCap) (existing behaviour)
               boolean byok = apiKeyResolver.isOwnKeysMode(r.getCreatedByUserId());
               if (byok) {
-                r.setHardCapUsd(null);
+                Double userCap = r.getUserCostCap();
+                r.setHardCapUsd(userCap != null && userCap > 0 ? userCap : null);
               } else {
                 r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
               }
