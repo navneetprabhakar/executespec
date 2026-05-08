@@ -2442,6 +2442,24 @@ export interface TechDebtReport {
 export const getTechDebt = (projectId: string, sinceDays?: number) =>
   req<TechDebtReport>(`/projects/${projectId}/tech-debt${sinceDays ? `?since=${sinceDays}` : ''}`);
 
+export interface TechDebtFixResponse {
+  runId: string;
+  findingKey: string;
+  outcome: 'DISPATCHED' | 'REUSED_ACTIVE';
+}
+
+/**
+ * Phase 2 (V183) — dispatch a patch-mode run that fixes every issue of the named
+ * category across the project's linked repos. One PR per category. Idempotent
+ * server-side: an in-flight run for the same (project, category) returns the
+ * existing run with `outcome=REUSED_ACTIVE`.
+ */
+export const dispatchTechDebtFix = (projectId: string, category: string) =>
+  req<TechDebtFixResponse>(`/projects/${projectId}/tech-debt/fix`, {
+    method: 'POST',
+    body: JSON.stringify({category}),
+  });
+
 // v2.5.2 — heuristic pre-submit Launch estimate (no LLM call).
 export interface LaunchEstimate {
   estimatedTasksLow: number;

@@ -1,7 +1,8 @@
 import {useEffect, useState} from 'react';
+import {Link} from 'react-router-dom';
 import {errMsg} from '@/lib/utils';
 import {BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell} from 'recharts';
-import {getTechDebt, type TechDebtReport} from '@/lib/api';
+import {getTechDebt, dispatchTechDebtFix, type TechDebtReport} from '@/lib/api';
 
 /**
  * v2.6.0 UI polish — token-aligned. All colours resolve to CSS custom
@@ -46,6 +47,25 @@ export default function TechDebtPanel({projectId}: {projectId: string}) {
   const [report, setReport] = useState<TechDebtReport | null>(null);
   const [since, setSince] = useState<number | undefined>(undefined);
   const [error, setError] = useState<string | null>(null);
+  // V183 Phase 2 — per-category fix dispatch. Tracks {category → {runId, outcome}} so
+  // the user clicks "Fix N security issues" and gets a "Watch run →" link inline. State
+  // is per-mount; nothing persisted client-side because the run id is the durable handle.
+  const [fixState, setFixState] = useState<
+    Record<string, {state: 'idle' | 'dispatching' | 'done' | 'error'; runId?: string; error?: string; outcome?: 'DISPATCHED' | 'REUSED_ACTIVE'}>
+  >({});
+
+  async function handleFix(category: string) {
+    setFixState((prev) => ({...prev, [category]: {state: 'dispatching'}}));
+    try {
+      const r = await dispatchTechDebtFix(projectId, category);
+      setFixState((prev) => ({
+        ...prev,
+        [category]: {state: 'done', runId: r.runId, outcome: r.outcome},
+      }));
+    } catch (e) {
+      setFixState((prev) => ({...prev, [category]: {state: 'error', error: errMsg(e)}}));
+    }
+  }
 
   useEffect(() => {
     let alive = true;
@@ -170,6 +190,69 @@ export default function TechDebtPanel({projectId}: {projectId: string}) {
           </div>
         </div>
       </div>
+
+      {/* V183 Phase 2 — per-category fix-by-category buttons. One PR per category
+          keeps diffs coherent for review; the link surfaces the dispatched run id so
+          the user can watch progress without leaving the dashboard. */}
+      {Object.keys(report.issuesByCategory).length > 0 && (
+        <div>
+          <div className='text-[11px] uppercase tracking-wide text-muted mb-1'>
+            Fix by category
+          </div>
+          <div className='space-y-1'>
+            {Object.entries(report.issuesByCategory)
+              .sort((a, b) => b[1] - a[1])
+              .map(([cat, count]) => {
+                const s = fixState[cat] ?? {state: 'idle'};
+                return (
+                  <div
+                    key={cat}
+                    className='flex items-center justify-between gap-2 text-xs'
+                  >
+                    <span
+                      className='font-mono'
+                      style={{color: catColor(cat)}}
+                    >
+                      {cat}
+                    </span>
+                    <span className='flex-1 text-right text-muted text-[10px]'>{count}</span>
+                    {s.state === 'idle' && (
+                      <button
+                        type='button'
+                        onClick={() => handleFix(cat)}
+                        className='px-2 py-0.5 text-[10px] font-medium rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 transition-colors'
+                        title={`Dispatch a patch-mode run that fixes all ${count} ${cat} issue${count === 1 ? '' : 's'}`}
+                      >
+                        Fix
+                      </button>
+                    )}
+                    {s.state === 'dispatching' && (
+                      <span className='text-[10px] text-muted'>Dispatching…</span>
+                    )}
+                    {s.state === 'done' && s.runId && (
+                      <Link
+                        to={`/runs/${s.runId}`}
+                        className='px-2 py-0.5 text-[10px] font-medium rounded bg-status-success/10 text-status-success hover:bg-status-success/20'
+                        title={
+                          s.outcome === 'REUSED_ACTIVE'
+                            ? 'Already in flight — click to watch existing run'
+                            : 'Watch dispatched run'
+                        }
+                      >
+                        {s.outcome === 'REUSED_ACTIVE' ? 'In flight →' : 'Watch run →'}
+                      </Link>
+                    )}
+                    {s.state === 'error' && s.error && (
+                      <span className='text-[10px] text-status-error truncate max-w-[120px]'>
+                        {s.error}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
 
       {report.topFiles.length > 0 && (
         <div>
