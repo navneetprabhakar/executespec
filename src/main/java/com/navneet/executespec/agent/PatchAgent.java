@@ -1,0 +1,160 @@
+package com.navneet.executespec.agent;
+
+import com.navneet.executespec.tool.ExecutionContext;
+
+import org.springframework.stereotype.Service;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Patch-mode entry point — single thin-agent loop for bug-fix shapes.
+ *
+ * <p>The architecture motivation lives in the discussion that produced V182 / {@link
+ * com.navneet.executespec.state.RunMode}; this class is the runtime end of it. It does not
+ * re-implement the loop — it delegates straight to {@link WorkerAgent} with carefully chosen
+ * configuration so the existing context-snapshot / cost-tracking / tool-dispatch / metric plumbing
+ * is reused unchanged. The differences from a build-mode worker call are:
+ *
+ * <ul>
+ *   <li>One {@code WorkerTaskRequest} for the entire user request — no classifier, no planner, no
+ *       per-task fragmentation. The model's working memory IS the plan.
+ *   <li>Iteration cap raised to 75 and stagnation thresholds raised to (effectively) off so the
+ *       agent can spend many iterations exploring before any write. On SWE-bench / bug-fix shapes,
+ *       investigation is the work — premature stagnation force-terminate killed empty-patch runs.
+ *   <li>Forced PLANNING-tier model regardless of upstream classification. Haiku-class models can't
+ *       navigate 1000-file codebases reliably; the reasoning-gap is bigger than any harness tweak.
+ *   <li>Higher per-call output cap so a long edit / multi-file patch fits in one tool-call.
+ * </ul>
+ *
+ * <p>Tools available are exactly {@link com.navneet.executespec.tool.ToolRegistry#bindForWorker}
+ * (everything except gitCommit). The git-diff capture happens at run-end inside the bench
+ * services' {@code captureOnTerminalAsync} path; the agent never commits.
+ *
+ * <p>This class deliberately stays small: ~80 LOC of orchestration + one prompt template.
+ * Improvements (better navigation primitives, retrieval, self-consistency vote) layer on top
+ * without touching the orchestrator's branch logic.
+ */
+@Service
+@Slf4j
+@RequiredArgsConstructor
+public class PatchAgent {
+
+  /**
+   * Per-call output cap. Higher than the build-mode worker's per-tier caps because a SWE-bench fix
+   * may produce one big edit rather than several small ones, and we don't want truncation to leave
+   * a half-formed tool-call.
+   */
+  private static final int MAX_TOKENS_PER_CALL = 16_000;
+
+  /**
+   * Iteration cap. Calibrated against mini-swe-agent's published runs — most SWE-bench Lite tasks
+   * resolve in 25-50 iterations; the long tail benefits from headroom to 75. Combined with the
+   * per-run hard-cap (default $4 in the bench services), this caps total cost without strangling
+   * the long-tail problems.
+   */
+  private static final int MAX_ITERATIONS = 75;
+
+  /**
+   * Stagnation thresholds set to MAX_ITERATIONS so the guard never fires in patch mode. The
+   * downstream cost cap and the iteration cap itself are the authoritative stop conditions.
+   * Investigation-heavy tasks need this — premature force-terminate at iter 12 was the failure
+   * mode that motivated the patch-mode rewrite.
+   */
+  private static final int STAGNATION_DISABLED = MAX_ITERATIONS;
+
+  private final WorkerAgent workerAgent;
+
+  /** Run a single thin-agent patch loop. Blocks until the worker terminates. */
+  public WorkerResult run(
+      String provider, String model, String userRequest, ExecutionContext ctx) {
+
+    log.info(
+        "PatchAgent START run={} provider={} model={} maxIter={}",
+        ctx.runId(),
+        provider,
+        model,
+        MAX_ITERATIONS);
+
+    WorkerTaskRequest req =
+        WorkerTaskRequest.builder()
+            .provider(provider)
+            .model(model)
+            .systemPrompt(buildSystemPrompt())
+            .userPrompt(userRequest)
+            .context(ctx)
+            .maxIterations(MAX_ITERATIONS)
+            .temperature(0.0)
+            .maxTokensPerCall(MAX_TOKENS_PER_CALL)
+            .stagnationWarnAfter(STAGNATION_DISABLED)
+            .stagnationForceAfter(STAGNATION_DISABLED)
+            .build();
+
+    WorkerResult result = workerAgent.run(req);
+
+    log.info(
+        "PatchAgent END run={} outcome={} iterations={} toolCalls={} latencyMs={}",
+        ctx.runId(),
+        result.outcome(),
+        result.iterations(),
+        result.toolCallsDispatched(),
+        result.totalLatencyMs());
+
+    return result;
+  }
+
+  /**
+   * Patch-mode system prompt. Test-driven: the first investigation step is always the failing
+   * test (when the request mentions one). Minimal-change discipline: PASS_TO_PASS regression is the
+   * dominant SWE-bench failure mode, so the prompt explicitly directs surgical edits over
+   * rewrites.
+   */
+  private String buildSystemPrompt() {
+    return """
+You are a patch-mode coding agent. The user has given you a specific bug-fix or
+targeted-edit task. Your job is to make the minimum change that fixes it.
+
+WORKING DIRECTORY
+- The repository is already at the workspace root. Files you create / edit there
+  will be captured at run-end as a unified diff (`git diff` against the base
+  commit). You don't need to commit.
+
+INVESTIGATE BEFORE EDITING
+- If the task mentions a failing test, READ THE TEST FIRST. The test defines the
+  contract — your patch is correct iff the test passes without breaking anything
+  else.
+- Use `shell` for navigation (grep / find / ls). Use `readFile` when you know
+  the path. Trace from the failing test to the production code that needs to
+  change.
+- Spend as many iterations as you need on investigation. There is no penalty for
+  reading; there is a penalty for editing the wrong file.
+
+EDIT MINIMALLY
+- Prefer `editFile` (surgical replace) over `writeFile` (whole-file overwrite).
+  A small targeted patch is much less likely to break the existing test suite.
+- Don't touch tests unless the task explicitly says to. Most bug-fix tasks
+  expect production code edits only.
+- Don't reformat / reorganise / refactor code beyond what the fix requires.
+  Style changes balloon the diff and increase regression risk.
+
+VERIFY BEFORE FINISHING
+- Run the failing test (`shell` → the repo's test runner) to confirm your patch
+  resolves it.
+- Run a small sample of the previously-passing tests to confirm no regression.
+- If a test fails, read the error message carefully, diagnose, and iterate.
+
+WHEN YOU'RE DONE
+- Call `completeTask` with a one-line summary of what you changed and why.
+- The git diff between the base commit and the workspace at that point is your
+  final patch.
+
+THINGS TO AVOID
+- Don't try to commit, push, branch, or otherwise mutate git state — those tools
+  are denied for you. Workspace state at task-end is the artifact.
+- Don't write debug print statements you forget to remove. Don't leave commented-
+  out code. Don't add "TODO" / "FIXME" markers — solve the problem in this run.
+- Don't write "I notice the failing test expects X, so I'll just modify the test
+  to expect Y" — that's not a fix.
+""";
+  }
+}
