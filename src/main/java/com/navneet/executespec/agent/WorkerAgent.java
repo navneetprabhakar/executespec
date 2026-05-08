@@ -503,8 +503,14 @@ public class WorkerAgent {
             iter,
             stagnantIters,
             stagnationWarnAfter);
+        // 2026-05-08 — must be a UserMessage, NOT a SystemMessage. GeminiNativeToolClient
+        // concatenates every SystemMessage into systemInstruction (see GeminiNativeToolClient.java
+        // ~line 240); appending one mid-run mutates the cache prefix and invalidates implicit
+        // prompt caching for the rest of the task. UserMessage stays in the contents[] list
+        // where Gemini treats it as a normal turn — cache prefix preserved. Anthropic + OpenAI
+        // honour the warning equally well as a user turn.
         history.add(
-            new SystemMessage(
+            new UserMessage(
                 "PROGRESS CHECK: "
                     + stagnationWarnAfter
                     + " consecutive iterations with no new file writes. If your task is done,"
