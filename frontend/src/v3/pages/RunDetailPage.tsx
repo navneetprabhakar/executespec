@@ -372,8 +372,47 @@ export default function RunDetailPage() {
             </span>
           </div>
 
-          {/* Evidence chip row */}
+          {/* Evidence chip row.
+               2026-05-08 — mode-aware. Build mode: render the classic Build / Tests /
+               Reviewer / Endpoints chips from the validation_report. Patch mode (autofix
+               + SWE-bench/programbench bench runs): no validation_report exists by design
+               (no reviewer phase), so the build/tests/reviewer chips would all be
+               missing — leaving the row empty was the user's complaint. Render a "Patch"
+               mode badge + status_reason chip + Layer-3-gate "Tests verified" indicator
+               so the user can see what we DO know. */}
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10}}>
+            {detail.runMode === 'PATCH' && (
+              <Pill tone='brand' size='sm'>
+                Patch mode
+              </Pill>
+            )}
+            {detail.runMode === 'PATCH' && detail.statusReason && (
+              <Pill
+                tone={
+                  detail.statusReason === 'CLEAN_COMPLETION'
+                    ? 'ok'
+                    : detail.statusReason === 'PATCH_BUDGET_EXCEEDED'
+                      || detail.statusReason === 'PATCH_ITER_LIMIT'
+                      ? 'warn'
+                      : detail.statusReason === 'PATCH_AGENT_ERROR'
+                        ? 'err'
+                        : 'neutral'
+                }
+                size='sm'
+              >
+                {detail.statusReason
+                  .replace('PATCH_', '')
+                  .replace(/_/g, ' ')
+                  .toLowerCase()
+                  .replace(/^./, (c) => c.toUpperCase())}
+              </Pill>
+            )}
+            {detail.runMode === 'PATCH'
+              && (detail.status === 'COMPLETE' || detail.statusReason === 'CLEAN_COMPLETION') && (
+              <Pill tone='ok' size='sm'>
+                Tests verified
+              </Pill>
+            )}
             {report?.finalBuildPassed === true && (
               <Pill tone='ok' size='sm'>
                 Build ✓
