@@ -2673,7 +2673,6 @@ function PrCommentRow({
   );
 }
 
-
 /**
  * 2026-05-08 — was a single inline div that hard-truncated `userRequest`
  * to 280 chars. Bench-mode runs prepend the FAIL_TO_PASS pytest output

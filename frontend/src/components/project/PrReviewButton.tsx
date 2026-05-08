@@ -264,10 +264,14 @@ export default function PrReviewButton({projectId, repoFullName, prNumber}: PrRe
                     onClick={(e) => e.stopPropagation()}
                     className='block w-full text-center px-2 py-1 text-[11px] font-medium rounded bg-status-success/10 text-status-success hover:bg-status-success/20'
                   >
-                    {autofixOutcome === 'REUSED_ACTIVE' ? 'View in-flight run →' : 'Watch autofix run →'}
+                    {autofixOutcome === 'REUSED_ACTIVE'
+                      ? 'View in-flight run →'
+                      : 'Watch autofix run →'}
                   </Link>
                 )}
-                {autofixError && <div className='text-status-error text-[10px]'>{autofixError}</div>}
+                {autofixError && (
+                  <div className='text-status-error text-[10px]'>{autofixError}</div>
+                )}
               </div>
             )}
         </div>

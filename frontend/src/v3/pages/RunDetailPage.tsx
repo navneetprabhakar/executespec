@@ -216,13 +216,7 @@ export default function RunDetailPage() {
   // is editing without waiting on a structural SSE event.
   useEffect(() => {
     if (!detail) return;
-    const TERMINAL = new Set([
-      'COMPLETE',
-      'PARTIAL',
-      'FAILED',
-      'CANCELLED',
-      'ABORTED',
-    ]);
+    const TERMINAL = new Set(['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED']);
     if (TERMINAL.has(detail.status)) return;
     const interval = setInterval(() => {
       void refetchAll(false);
@@ -391,8 +385,8 @@ export default function RunDetailPage() {
                 tone={
                   detail.statusReason === 'CLEAN_COMPLETION'
                     ? 'ok'
-                    : detail.statusReason === 'PATCH_BUDGET_EXCEEDED'
-                      || detail.statusReason === 'PATCH_ITER_LIMIT'
+                    : detail.statusReason === 'PATCH_BUDGET_EXCEEDED' ||
+                        detail.statusReason === 'PATCH_ITER_LIMIT'
                       ? 'warn'
                       : detail.statusReason === 'PATCH_AGENT_ERROR'
                         ? 'err'
@@ -407,12 +401,12 @@ export default function RunDetailPage() {
                   .replace(/^./, (c) => c.toUpperCase())}
               </Pill>
             )}
-            {detail.runMode === 'PATCH'
-              && (detail.status === 'COMPLETE' || detail.statusReason === 'CLEAN_COMPLETION') && (
-              <Pill tone='ok' size='sm'>
-                Tests verified
-              </Pill>
-            )}
+            {detail.runMode === 'PATCH' &&
+              (detail.status === 'COMPLETE' || detail.statusReason === 'CLEAN_COMPLETION') && (
+                <Pill tone='ok' size='sm'>
+                  Tests verified
+                </Pill>
+              )}
             {report?.finalBuildPassed === true && (
               <Pill tone='ok' size='sm'>
                 Build ✓
@@ -915,4 +909,3 @@ export default function RunDetailPage() {
     </div>
   );
 }
-

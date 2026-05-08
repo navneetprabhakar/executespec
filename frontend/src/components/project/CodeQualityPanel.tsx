@@ -128,7 +128,12 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
   const [autofixState, setAutofixState] = useState<
     Record<
       string,
-      {state: 'idle' | 'dispatching' | 'done' | 'error'; runId?: string; error?: string; outcome?: 'DISPATCHED' | 'REUSED_ACTIVE'}
+      {
+        state: 'idle' | 'dispatching' | 'done' | 'error';
+        runId?: string;
+        error?: string;
+        outcome?: 'DISPATCHED' | 'REUSED_ACTIVE';
+      }
     >
   >({});
 
@@ -280,10 +285,7 @@ function RepoCodeReviewCard({projectId, repoId, repoFullName}: RepoCardProps) {
                 }
                 if (s.state === 'dispatching') {
                   return (
-                    <span
-                      key={key}
-                      className='px-2 py-0.5 text-[10px] text-muted'
-                    >
+                    <span key={key} className='px-2 py-0.5 text-[10px] text-muted'>
                       {key} dispatching…
                     </span>
                   );
