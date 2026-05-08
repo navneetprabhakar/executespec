@@ -88,6 +88,10 @@ public class PatchAgent {
             .maxTokensPerCall(MAX_TOKENS_PER_CALL)
             .stagnationWarnAfter(STAGNATION_DISABLED)
             .stagnationForceAfter(STAGNATION_DISABLED)
+            // V182 layer-3 — refuse completeTask in patch mode unless runTests was called
+            // recently. Without this, prompt-only "verify before finishing" guidance can be
+            // ignored or over-applied; the gate enforces test execution programmatically.
+            .requireTestVerification(true)
             .build();
 
     WorkerResult result = workerAgent.run(req);
@@ -137,16 +141,46 @@ EDIT MINIMALLY
 - Don't reformat / reorganise / refactor code beyond what the fix requires.
   Style changes balloon the diff and increase regression risk.
 
-VERIFY BEFORE FINISHING
-- Run the failing test (`shell` → the repo's test runner) to confirm your patch
-  resolves it.
-- Run a small sample of the previously-passing tests to confirm no regression.
-- If a test fails, read the error message carefully, diagnose, and iterate.
+THE LOOP — FOLLOW THIS RHYTHM
+
+Patch tasks have a specific shape: investigate → edit → verify → iterate.
+Don't get stuck in any one phase. Most successful runs alternate:
+
+  Read 2-4 files → make ONE focused edit → run the failing test →
+  read the test output → either the test passes (move on) or you see
+  the next thing wrong (read 1-2 more files → make another focused edit →
+  run again → repeat).
+
+Don't read for 30 iterations before editing. Don't edit then call complete
+without running the test. Don't run the test 10 times without changing the
+code. Each iteration should produce a small, observable step.
+
+VERIFICATION
+
+Before calling completeTask, you MUST have:
+
+  1. Made at least one edit (writeFile / editFile) to a non-test source
+     file.
+  2. Run the failing test (via the `runTests` tool, or `shell` with
+     pytest) AND seen it pass — output should show `1 passed` or
+     equivalent.
+
+If the test still fails after your edit, your patch isn't right yet —
+read the assertion error, diagnose, edit, run again. There's no penalty
+for spending 5-10 iterations iterating; there is a big penalty for
+calling completeTask without test verification.
+
+If you call completeTask without having run a test recently, the call
+will be REFUSED and you'll be asked to run the test first. Don't waste
+the round-trip.
 
 WHEN YOU'RE DONE
-- Call `completeTask` with a one-line summary of what you changed and why.
-- The git diff between the base commit and the workspace at that point is your
-  final patch.
+- Run the failing test ONE LAST TIME to confirm.
+- Run 2-3 PASS_TO_PASS tests from the same file to confirm no regression.
+- THEN call `completeTask` with: (a) a one-line summary of the change,
+  (b) a one-line note of what test passed and what command you ran.
+  The git diff between the base commit and the workspace is your final
+  patch.
 
 THINGS TO AVOID
 - Don't try to commit, push, branch, or otherwise mutate git state — those tools
