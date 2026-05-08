@@ -35,6 +35,11 @@ public class BuildProjectTool implements Tool {
   // Programbench tasks stash the cleanroom container ID per-runId; when set, build
   // dispatches via `docker exec` so language toolchains in the cleanroom image are used.
   private final ProgramBenchContainerStore programBenchContainers;
+  // SWE-bench tasks stash their container ID here. Same docker-exec routing as programbench but
+  // the in-container working directory is /testbed rather than /workspace, AND the no-op
+  // compile.sh detection wrapper does NOT apply (SWE-bench has no compile.sh contract — the
+  // tests are the truth).
+  private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
 
   @Override
   public String name() {
@@ -94,22 +99,31 @@ public class BuildProjectTool implements Tool {
               + msg);
     }
 
-    // Programbench branch — when this runId has a cleanroom container registered,
-    // dispatch via `docker exec` so the build hits the container's toolchain.
-    String containerId =
-        programBenchContainers != null ? programBenchContainers.get(ctx.runId()) : null;
+    // Bench-mode branch — resolve which adapter (if any) registered a container for this run.
+    // Programbench: workdir=/workspace, applies the compile.sh hash-check wrapper.
+    // SWE-bench:    workdir=/testbed,    NO compile.sh wrapper (tests are truth, not compile).
+    String containerId = null;
+    String workdir = null;
+    boolean applyCompileCheckWrapper = false;
+    if (swebenchContainers != null) {
+      String swCid = swebenchContainers.get(ctx.runId());
+      if (swCid != null) {
+        containerId = swCid;
+        workdir = com.navneet.executespec.swebench.SwebenchContainerStore.WORKDIR;
+        applyCompileCheckWrapper = false;
+      }
+    }
+    if (containerId == null && programBenchContainers != null) {
+      String pbCid = programBenchContainers.get(ctx.runId());
+      if (pbCid != null) {
+        containerId = pbCid;
+        workdir = "/workspace";
+        applyCompileCheckWrapper = true; // see Bug G — programbench-only no-op compile.sh guard
+      }
+    }
 
-    // 2026-05-08 — programbench-only "did compile.sh actually compile" guard.
-    // Cleanroom workspaces ship with a pre-existing /workspace/executable (the original
-    // binary the agent is supposed to reverse-engineer). A no-op compile.sh that just verifies
-    // ./executable exists exits 0 against the cleanroom's binary, smoke "passes", run is marked
-    // COMPLETE — but the submission has no source code. ProgramBench eval wipes /workspace
-    // before running the agent's compile.sh, so the no-op compile.sh fails there. ExecuteSpec
-    // was scoring 100 spuriously (anthropic run 9b37b099, 2026-05-08). Wrap the buildCommand to
-    // fail-fast when compile.sh leaves the cleanroom's original executable in place — forces
-    // the agent to write real source and a real compile.sh.
     String effectiveCmd =
-        containerId != null ? wrapForExecutableCompileCheck(bc.command()) : bc.command();
+        applyCompileCheckWrapper ? wrapForExecutableCompileCheck(bc.command()) : bc.command();
 
     try {
       ProcessBuilder pb;
@@ -117,14 +131,7 @@ public class BuildProjectTool implements Tool {
         pb =
             new ProcessBuilder(
                 List.of(
-                    "docker",
-                    "exec",
-                    "-w",
-                    "/workspace",
-                    containerId,
-                    "/bin/sh",
-                    "-c",
-                    effectiveCmd));
+                    "docker", "exec", "-w", workdir, containerId, "/bin/sh", "-c", effectiveCmd));
       } else {
         pb = new ProcessBuilder(List.of("/bin/sh", "-c", effectiveCmd));
         pb.directory(ctx.workspaceRoot().toFile());
