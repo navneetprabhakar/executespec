@@ -6,7 +6,10 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.navneet.executespec.auth.repository.AppUserRepository;
-import com.navneet.executespec.integration.RunOrchestrator;
+import com.navneet.executespec.config.featureflag.FeatureFlagService;
+import com.navneet.executespec.finding.Finding;
+import com.navneet.executespec.finding.FindingPatchSubmitter;
+import com.navneet.executespec.finding.FindingType;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.repository.PipelineRunRepository;
 
@@ -52,8 +55,18 @@ public class CiFailureAutoFixService {
 
   private final PullRequestRecordRepository prRepo;
   private final PipelineRunRepository pipelineRunRepo;
-  private final RunOrchestrator v2RunOrchestrator;
+  private final FindingPatchSubmitter findingSubmitter;
   private final AppUserRepository userRepository;
+  private final FeatureFlagService featureFlagService;
+
+  /**
+   * V183 — feature flag gating the auto-fire webhook path. Default OFF until the
+   * SWE-bench matrix data confirms patch-mode resolved% is high enough to trust the
+   * bot. Operators flip to true via {@code PUT /api/feature-flags/ci.autofix.enabled}.
+   * The other phases (PR Review autofix, Tech Debt, Code Review) are user-clicked so
+   * they don't need the gate; only the unattended webhook path does.
+   */
+  static final String FEATURE_FLAG = "ci.autofix.enabled";
 
   /**
    * Result of an auto-fix dispatch attempt. The {@code newRunId} is set when a fresh run was
@@ -92,6 +105,19 @@ public class CiFailureAutoFixService {
       return AutoFixResult.skipped("missing repo or branch");
     }
 
+    // V183 — feature-flag gate. Webhook still 204s (no retry storm), but no run is
+    // queued until the matrix data confirms patch-mode resolved% is reliable enough
+    // to trust the unattended bot path. Manual user-clicked autofixes (Phase 1, 2, 4)
+    // ignore this flag because the user is the gate.
+    if (!featureFlagService.isEnabled(FEATURE_FLAG)) {
+      log.debug(
+          "CiFailureAutoFixService: skipped {} / {} — feature flag {} disabled",
+          repoFullName,
+          headBranch,
+          FEATURE_FLAG);
+      return AutoFixResult.skipped("feature flag " + FEATURE_FLAG + " disabled");
+    }
+
     Optional<PullRequestRecord> prOpt =
         prRepo.findFirstByRepoFullNameAndHeadBranchOrderByCreatedAtDesc(repoFullName, headBranch);
     if (prOpt.isEmpty()) {
@@ -128,70 +154,76 @@ public class CiFailureAutoFixService {
     }
     PipelineRun original = runOpt.get();
 
-    // Re-submit context. We need the original user/org/project to charge credits + scope the run
-    // correctly; the project is required for a multi-repo Launch (selectedRepoIds reads from
-    // there). If any are missing, bail rather than guess.
+    // Re-submit context. Need the original user/project to scope the patch run; the
+    // selectedRepoIds come from the originating run's column so the workspace clones
+    // the same repos.
     if (original.getCreatedByUserId() == null || original.getProjectId() == null) {
       return AutoFixResult.skipped("originating run missing user/project context");
     }
 
-    // Seeded user request: original spec + failure tail + same-branch instruction. Keep it
-    // bounded so the planner's context budget isn't wrecked by a 10MB CI log.
+    // Seeded user prompt — finding shape this time. We don't replay the full original
+    // spec the way the legacy build-mode path did; the patch agent is meant to fix
+    // ONE failing CI check, not redo the whole feature. Embedding the failure log is
+    // the highest-value signal — that's what SWE-bench taught us.
     String tail = truncate(checkRunSummary == null ? "" : checkRunSummary, 4_000);
-    String seeded =
-        "## Auto-fix re-run (CI failure on PR branch `"
+    String prompt =
+        "Address the CI check failure below on PR `"
+            + repoFullName
+            + "#"
+            + pr.getPrNumber()
+            + "` (branch `"
             + headBranch
-            + "`)\n\n"
-            + "Original spec:\n\n"
-            + (original.getUserRequest() == null ? "(missing)" : original.getUserRequest())
-            + "\n\n---\n\n"
-            + "**CI failed on the most recent commit.** Diagnose the failure below, fix the root\n"
-            + "cause, and push your fix to the same branch (the workspace will be cloned from\n"
-            + "this branch's HEAD via branchOverride; ScmPushService.pushToExistingBranch will\n"
-            + "land additional commits without force-pushing).\n\n"
-            + "Failure summary (truncated to 4KB):\n```\n"
+            + "`).\n\n"
+            + "# Failing CI check (verbatim)\n\n```\n"
             + (tail.isBlank() ? "(no summary in webhook payload)" : tail)
             + "\n```\n\n"
             + (checkRunUrl != null && !checkRunUrl.isBlank()
-                ? "Check run details: " + checkRunUrl + "\n\n"
+                ? "GitHub: " + checkRunUrl + "\n\n"
                 : "")
-            + "Auto-fix attempt "
+            + "# How to work\n\n"
+            + "1. Read the failure trace above carefully — the assertion / error /\n"
+            + "   stack tells you exactly what to fix.\n"
+            + "2. The workspace is cloned from the PR's head branch; you see the\n"
+            + "   current state of the PR's commit.\n"
+            + "3. Apply minimum-change fixes. Do NOT rewrite the whole feature — the\n"
+            + "   PR's existing commits are what the reviewer wants.\n"
+            + "4. Run `runTests` (or the project's test runner via `shell`) to confirm\n"
+            + "   the failure is gone before completing.\n"
+            + "5. Commit will be pushed automatically to the same PR branch (no force-\n"
+            + "   push, additive commits only).\n\n"
+            + "# Constraints\n\n"
+            + "- Auto-fix attempt "
             + (attempts + 1)
             + " of "
             + MAX_AUTO_FIX_ATTEMPTS
-            + ".\n";
+            + " — after the cap is reached the PR is surfaced to the human reviewer.\n"
+            + "- Do NOT modify tests unless the failure is genuinely a wrong test\n"
+            + "  expectation (rare). When in doubt, fix the production code.\n";
 
-    String pat = resolveCallerPat(original.getCreatedByUserId());
+    Finding finding =
+        new Finding(
+            FindingType.CI_FAILURE,
+            // Combined PR id + attempt index so a re-failure on the same branch can
+            // dispatch a fresh run (each attempt has a unique finding key) within the
+            // MAX_AUTO_FIX_ATTEMPTS budget.
+            pr.getId() + "|attempt-" + (attempts + 1),
+            original.getProjectId(),
+            parseRepoIds(original.getSelectedRepoIds()),
+            prompt,
+            headBranch,
+            original.getCreatedByUserId(),
+            original.getAiProvider());
 
-    PipelineRun newRun;
+    FindingPatchSubmitter.SubmitResult result;
     try {
-      newRun =
-          v2RunOrchestrator.submitRun(
-              seeded,
-              "ci-auto-fix",
-              null, // repoUrl — multi-repo path uses selectedRepoIds
-              "EXISTING",
-              pat,
-              null, // githubOwner
-              true, // skipApproval — auto-fix runs auto-approve to avoid stalling on the gate
-              true, // autoMerge irrelevant for branchOverride path
-              null, // modelName — defer to project default
-              original.getAiProvider(),
-              original.getCreatedByUserId(),
-              original.getOrgId(),
-              original.getProjectId(),
-              "REALTIME",
-              parseRepoIds(original.getSelectedRepoIds()),
-              original.getFigmaUrl(),
-              false, // tddMode
-              headBranch);
+      result = findingSubmitter.submit(finding);
     } catch (Exception e) {
       log.warn(
-          "CiFailureAutoFixService: V2 submitRun failed for {} #{}: {}",
+          "CiFailureAutoFixService: FindingPatchSubmitter failed for {} #{}: {}",
           repoFullName,
           pr.getPrNumber(),
           e.getMessage());
-      return AutoFixResult.skipped("submitRun failed: " + e.getMessage());
+      return AutoFixResult.skipped("submit failed: " + e.getMessage());
     }
 
     pr.setCiAutoFixAttempts(attempts + 1);
@@ -200,14 +232,15 @@ public class CiFailureAutoFixService {
 
     log.info(
         "CiFailureAutoFixService: auto-fix run {} dispatched for {} #{} (attempt {}/{}),"
-            + " branchOverride={}",
-        newRun.getRunId(),
+            + " branchOverride={} outcome={}",
+        result.runId(),
         repoFullName,
         pr.getPrNumber(),
         attempts + 1,
         MAX_AUTO_FIX_ATTEMPTS,
-        headBranch);
-    return AutoFixResult.dispatched(newRun.getRunId());
+        headBranch,
+        result.outcome());
+    return AutoFixResult.dispatched(result.runId());
   }
 
   private String resolveCallerPat(String userId) {
