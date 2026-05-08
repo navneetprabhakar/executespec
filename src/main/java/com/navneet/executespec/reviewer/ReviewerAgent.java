@@ -317,15 +317,68 @@ public class ReviewerAgent {
     }
   }
 
+  /** Verdict the reviewer prompt asks the agent to emit on the first line of `completeTask`. */
+  private enum PassVerdict {
+    CLEAN,
+    FIXED_ISSUES,
+    UNRESOLVED,
+    /** No verdict prefix found — fall back to free-text heuristic for backward compat. */
+    UNPARSED
+  }
+
+  /**
+   * Parse the {@code VERDICT: <CLEAN|FIXED_ISSUES|UNRESOLVED>} prefix on the first line of
+   * the worker's completion summary. Both reviewer prompts (general + wiring) require this
+   * prefix as of 2026-05-08. Pre-prompt-update runs return UNPARSED, in which case
+   * {@link #determineOverall} falls back to the legacy substring heuristic.
+   */
+  private static PassVerdict parsePassVerdict(WorkerResult result) {
+    if (result == null) return PassVerdict.UNPARSED;
+    String summary = result.completionSummary();
+    if (summary == null || summary.isBlank()) return PassVerdict.UNPARSED;
+    // Take only the first line so subsequent prose can mention any verdict word freely.
+    int nl = summary.indexOf('\n');
+    String firstLine = (nl < 0 ? summary : summary.substring(0, nl)).trim();
+    String upper = firstLine.toUpperCase();
+    if (!upper.startsWith("VERDICT:")) return PassVerdict.UNPARSED;
+    String tail = upper.substring("VERDICT:".length()).trim();
+    if (tail.startsWith("CLEAN")) return PassVerdict.CLEAN;
+    if (tail.startsWith("FIXED_ISSUES") || tail.startsWith("FIXED")) {
+      return PassVerdict.FIXED_ISSUES;
+    }
+    if (tail.startsWith("UNRESOLVED")) return PassVerdict.UNRESOLVED;
+    return PassVerdict.UNPARSED;
+  }
+
   private ReviewerResult.Overall determineOverall(
       WorkerResult general, WorkerResult wiring, boolean buildPassed) {
+    PassVerdict gV = parsePassVerdict(general);
+    PassVerdict wV = wiring == null ? PassVerdict.CLEAN : parsePassVerdict(wiring);
+
+    // Structured-verdict path: both reviewer passes emitted a parseable VERDICT: prefix.
+    if (gV != PassVerdict.UNPARSED && wV != PassVerdict.UNPARSED) {
+      // UNRESOLVED on either pass dominates. Build failure also dominates regardless of
+      // what the agent claimed (the build is the ground truth).
+      if (gV == PassVerdict.UNRESOLVED || wV == PassVerdict.UNRESOLVED || !buildPassed) {
+        return ReviewerResult.Overall.UNRESOLVED_ISSUES;
+      }
+      // Both CLEAN + build OK → CLEAN.
+      if (gV == PassVerdict.CLEAN && wV == PassVerdict.CLEAN) {
+        return ReviewerResult.Overall.CLEAN;
+      }
+      // At least one FIXED_ISSUES (the other may be CLEAN), build OK → FIXED_ISSUES.
+      return ReviewerResult.Overall.FIXED_ISSUES;
+    }
+
+    // Backward-compat: pre-prompt-update runs land here. Fall back to the legacy
+    // free-text substring match. Removing this branch is safe once every deployed
+    // reviewer prompt emits the VERDICT: prefix; tracked under doc-refresh.
     String gSum =
         general.completionSummary() == null ? "" : general.completionSummary().toLowerCase();
     String wSum =
         wiring == null || wiring.completionSummary() == null
             ? ""
             : wiring.completionSummary().toLowerCase();
-    // "no issues" / "no in-scope issues" / "no wiring issues" → clean signal
     boolean generalClean =
         gSum.contains("no issues") || gSum.contains("no in-scope") || gSum.contains("found 0");
     boolean wiringClean =
