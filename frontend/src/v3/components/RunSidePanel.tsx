@@ -1612,26 +1612,14 @@ function OverviewPane({
 
   return (
     <div style={{padding: 12, display: 'flex', flexDirection: 'column', gap: 12}}>
-      {/* Title (run spec) */}
-      {detail.userRequest && (
-        <div
-          style={{
-            fontSize: 12,
-            color: 'var(--v3-text-muted)',
-            lineHeight: 1.55,
-            padding: '8px 10px',
-            background: 'var(--v3-bg)',
-            border: '1px solid var(--v3-border)',
-            borderRadius: 6,
-            whiteSpace: 'pre-wrap',
-            wordBreak: 'break-word',
-          }}
-        >
-          {detail.userRequest.length > 280
-            ? detail.userRequest.slice(0, 280) + '…'
-            : detail.userRequest}
-        </div>
-      )}
+      {/* Title (run spec). 2026-05-08 — was hard-truncated to 280 chars,
+          which on bench-mode runs (where we prepend ~5KB of failing-test
+          output as ground truth) hid 95%+ of the prompt. Now: full content
+          with a max-height + overflow scroll, plus a Show more / Show less
+          toggle for prompts > ~600 chars so the side panel stays compact
+          by default but the operator can read the whole thing without
+          leaving the page. */}
+      {detail.userRequest && <RunSpecBlock content={detail.userRequest} />}
 
       <KvSection label='Run'>
         <Kv k='Status' v={detail.status ?? '—'} />
@@ -2680,6 +2668,110 @@ function PrCommentRow({
         >
           Dismiss
         </button>
+      </div>
+    </div>
+  );
+}
+
+
+/**
+ * 2026-05-08 — was a single inline div that hard-truncated `userRequest`
+ * to 280 chars. Bench-mode runs prepend the FAIL_TO_PASS pytest output
+ * to the user request as ground truth (~5KB), so the truncated version
+ * hid the part operators most wanted to inspect. Now: defaults to a
+ * scrollable preview with line/char counts in the header, plus an
+ * expand toggle for the full content. Pre-formatted text (whitespace
+ * preserved) so command-line output keeps its layout.
+ */
+function RunSpecBlock({content}: {content: string}) {
+  const [expanded, setExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const lineCount = content.split('\n').length;
+  const charCount = content.length;
+  const showToggle = content.length > 600;
+  const handleCopy = () => {
+    navigator.clipboard.writeText(content).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  };
+  return (
+    <div
+      style={{
+        background: 'var(--v3-bg)',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 6,
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 8,
+          padding: '6px 10px',
+          fontSize: 10,
+          fontWeight: 600,
+          textTransform: 'uppercase',
+          letterSpacing: 0.6,
+          color: 'var(--v3-text-subtle)',
+          borderBottom: '1px solid var(--v3-border)',
+        }}
+      >
+        <span>
+          Goal · {lineCount} lines · {charCount.toLocaleString()} chars
+        </span>
+        <div style={{display: 'flex', gap: 4}}>
+          <button
+            type='button'
+            onClick={handleCopy}
+            style={{
+              fontSize: 10,
+              padding: '2px 8px',
+              background: 'transparent',
+              color: 'var(--v3-text-muted)',
+              border: '1px solid var(--v3-border)',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+            title='Copy to clipboard'
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          {showToggle && (
+            <button
+              type='button'
+              onClick={() => setExpanded((e) => !e)}
+              style={{
+                fontSize: 10,
+                padding: '2px 8px',
+                background: 'transparent',
+                color: 'var(--v3-text-muted)',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 4,
+                cursor: 'pointer',
+              }}
+            >
+              {expanded ? 'Collapse' : 'Show all'}
+            </button>
+          )}
+        </div>
+      </div>
+      <div
+        style={{
+          fontSize: 12,
+          color: 'var(--v3-text-muted)',
+          lineHeight: 1.55,
+          padding: '8px 10px',
+          maxHeight: expanded ? 600 : 240,
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          fontFamily: 'var(--v3-font-mono, ui-monospace, monospace)',
+        }}
+      >
+        {content}
       </div>
     </div>
   );

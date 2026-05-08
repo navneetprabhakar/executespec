@@ -3,6 +3,7 @@ import {Link, useParams} from 'react-router-dom';
 import SafeDiffEditor from '@/components/runs/SafeDiffEditor';
 import {MonacoSafeMount} from '@/components/runs/MonacoSafeMount';
 import {Editor as MonacoEditor} from '@monaco-editor/react';
+import {FileTree} from '@/components/run/FileTree';
 import {
   cancelRun,
   getRun,
@@ -204,6 +205,30 @@ export default function RunDetailPage() {
       void refetchAll(false);
     }
   }, [lastEntryId, lastEntryType, refetchAll]);
+
+  // 2026-05-08 — fallback polling for non-terminal runs. SSE-driven refresh
+  // catches the big lifecycle events (status change, validation-report ready)
+  // but the worker writes files mid-run without emitting any SSE event the
+  // frontend listens to, so the file tree / cost / token totals freeze on
+  // last-fetched values until terminal. This 5s interval mirrors the
+  // RunDetailTabs cost-poll pattern and stops itself the moment the run
+  // reaches a terminal status. Keeps the page feeling alive while the agent
+  // is editing without waiting on a structural SSE event.
+  useEffect(() => {
+    if (!detail) return;
+    const TERMINAL = new Set([
+      'COMPLETE',
+      'PARTIAL',
+      'FAILED',
+      'CANCELLED',
+      'ABORTED',
+    ]);
+    if (TERMINAL.has(detail.status)) return;
+    const interval = setInterval(() => {
+      void refetchAll(false);
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [detail, refetchAll]);
 
   // Files actually changed by the run (ADDED + MODIFIED, with vendored paths filtered out).
   const VENDORED_PATTERN =
@@ -596,56 +621,24 @@ export default function RunDetailPage() {
             </div>
           )}
           {filesWithStatus && (
-            <ul style={{margin: 0, padding: 0, listStyle: 'none'}}>
-              {changedFiles.map((f) => (
-                <li key={f.path}>
-                  <button
-                    type='button'
-                    onClick={() => setActive(f.path)}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      width: '100%',
-                      textAlign: 'left',
-                      padding: '4px 6px',
-                      background: active === f.path ? 'var(--v3-surface-elevated)' : 'transparent',
-                      color: active === f.path ? 'var(--v3-text)' : 'var(--v3-text-muted)',
-                      border: 'none',
-                      borderRadius: 4,
-                      cursor: 'pointer',
-                      fontSize: 11.5,
-                      fontFamily: 'var(--v3-font-mono)',
-                      overflow: 'hidden',
-                    }}
-                    title={f.path}
-                  >
-                    <span
-                      style={{
-                        flexShrink: 0,
-                        width: 16,
-                        textAlign: 'center',
-                        fontSize: 10,
-                        fontWeight: 700,
-                        color: f.status === 'ADDED' ? 'var(--v3-success)' : 'var(--v3-warning)',
-                      }}
-                      aria-label={f.status === 'ADDED' ? 'Added' : 'Modified'}
-                    >
-                      {f.status === 'ADDED' ? 'A' : 'M'}
-                    </span>
-                    <span
-                      style={{
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {f.path}
-                    </span>
-                  </button>
-                </li>
-              ))}
-            </ul>
+            // 2026-05-08 — was a flat <ul> of f.path strings; with 200+ changed
+            // files (typical for swebench/programbench runs that pull a full
+            // testbed) the list became unreadable. The standalone FileTree
+            // component already builds a folder hierarchy + ADDED/MODIFIED
+            // chips + bubbled-up dir status dots — reuse it instead of
+            // re-implementing here. Mapping is trivial: every entry is a
+            // file (no directories in changedFiles).
+            <div style={{padding: '0 4px'}}>
+              <FileTree
+                files={changedFiles.map((f) => ({
+                  path: f.path,
+                  isDirectory: false,
+                  status: f.status,
+                }))}
+                onSelectFile={(p) => setActive(p)}
+                selectedFile={active ?? undefined}
+              />
+            </div>
           )}
         </aside>
 
@@ -883,3 +876,4 @@ export default function RunDetailPage() {
     </div>
   );
 }
+
