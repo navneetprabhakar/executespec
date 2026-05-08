@@ -129,6 +129,13 @@ public class RunOrchestrator {
   private final ReviewerAgent reviewer;
 
   /**
+   * V182 (2026-05-08) — patch-mode entry. Used by the {@code runPatchPipeline} branch when {@link
+   * PipelineRun#getRunMode()} is {@code RunMode.PATCH}. Build-mode runs never call this — the
+   * existing planner / executor / reviewer flow is untouched.
+   */
+  private final com.navneet.executespec.agent.PatchAgent patchAgent;
+
+  /**
    * 2026-05-07 — deterministic auto-formatter pass between executor and reviewer. Runs prettier /
    * spotless / black / gofmt / cargo fmt against the workspace before the LLM reviewer sees it.
    * Cuts ~3K tokens per task off the reviewer's input by absorbing trailing-comma / indent /
@@ -157,6 +164,7 @@ public class RunOrchestrator {
   private final FeatureAssessmentService featureAssessmentService;
   private final RunCodeMapService runCodeMapService;
   private final AppUserRepository appUserRepository;
+  private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
   private final com.navneet.executespec.memory.ProjectMemoryProvider projectMemoryProvider;
   private final com.navneet.executespec.codeintel.ProjectBriefService projectBriefService;
   private final com.navneet.executespec.codeintel.StalenessService stalenessService;
@@ -190,6 +198,15 @@ public class RunOrchestrator {
    * dispatch.
    */
   private final com.navneet.executespec.agent.RunKeyContextStore keyContextStore;
+
+  /**
+   * 2026-05-08 — programbench-mode discriminator. Used at the reviewer step to bump the iteration
+   * cap for ProgramBench runs (where the reviewer has to bisect library link errors across multiple
+   * files and the default 50 iters is tight). Null for non-programbench runs; cmatrix run 84252898
+   * had reviewer outcome ITERATION_LIMIT_EXCEEDED with the build still unfixed.
+   */
+  private final com.navneet.executespec.programbench.ProgramBenchContainerStore
+      programBenchContainerStore;
 
   /**
    * R-162 — referral hook. Wired here so that when a referee's first run reaches a successful
@@ -467,10 +484,8 @@ public class RunOrchestrator {
 
   /**
    * Fix M (2026-05-03) — full signature with {@code branchOverride} + {@code prReviewComments}.
-   * When {@code branchOverride} is non-null, every selected repo is cloned with {@code git clone -b
-   * <branchOverride>} instead of the repo's default branch (and the post-run push lands commits on
-   * that branch — no new PR). When {@code prReviewComments} is non-null, the planner receives them
-   * as advisory context via the {@code {{PR_REVIEW_COMMENTS}}} prompt placeholder.
+   * Forwarder for backwards compatibility — defaults {@code runMode = BUILD} so every existing
+   * caller keeps the planner / executor / reviewer flow.
    */
   public PipelineRun submitRun(
       String userRequest,
@@ -492,6 +507,56 @@ public class RunOrchestrator {
       boolean tddMode,
       String branchOverride,
       String prReviewComments) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        com.navneet.executespec.state.RunMode.BUILD);
+  }
+
+  /**
+   * V182 (2026-05-08) — full signature with {@code runMode}. Bench services (swebench /
+   * programbench) call this overload directly with {@code RunMode.PATCH} to opt into the thin
+   * single-agent loop. Every product entry point uses the 19-arg forwarder above and stays on
+   * {@code RunMode.BUILD} (the existing planner / executor / reviewer flow).
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode) {
     String runId = UUID.randomUUID().toString();
     String provider = normalizeProvider(aiProvider, projectId, runId);
     String model =
@@ -506,9 +571,17 @@ public class RunOrchestrator {
     // will actually call, not the run-level worker default — adversarial-test
     // Finding 14. If a user-supplied modelName was provided (rare BYOK path),
     // honour it for all three roles to preserve the override contract.
+    //
+    // V182 PATCH-mode override: a patch run never invokes the planner or
+    // reviewer, but it *must* run on PLANNING-tier (Sonnet 4.6 / GPT-5.4 /
+    // Gemini 3 Pro Preview) regardless of any caller-supplied modelName.
+    // PatchAgent picks `plannerDbModel` as the model passed to WorkerAgent.
+    // See PatchAgent javadoc — the reasoning gap between Haiku-class and
+    // Sonnet-class is bigger than any harness improvement on bug-fix shapes.
     String plannerDbModel = model;
     String reviewerDbModel = model;
-    if (modelName == null || modelName.isBlank()) {
+    boolean isPatch = com.navneet.executespec.state.RunMode.isPatch(runMode);
+    if (modelName == null || modelName.isBlank() || isPatch) {
       try {
         com.navneet.executespec.router.LlmProvider p =
             com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());
@@ -539,6 +612,10 @@ public class RunOrchestrator {
             .userRequest(userRequest)
             .status("PLANNING")
             .harnessVersion("v2")
+            .runMode(
+                runMode == null || runMode.isBlank()
+                    ? com.navneet.executespec.state.RunMode.BUILD
+                    : runMode)
             .sourceType(source != null ? source : "MANUAL")
             .repoUrl(repoUrl)
             .repoMode(repoMode)
@@ -804,6 +881,23 @@ public class RunOrchestrator {
 
       ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
       setWorkspacePath(runId, workspace.toString());
+
+      // ── V182 PATCH-mode dispatch ───────────────────────────────────────
+      // Bench services (swebench / programbench) submit runs with
+      // RunMode.PATCH and own the workspace setup themselves (docker cp +
+      // bind-mount). Skip everything build-mode does — codemap, assessment,
+      // classifier, planner, executor, reviewer, validation report — and
+      // dispatch the whole user request to a single PatchAgent loop.
+      // Product entry points stay on RunMode.BUILD by default and fall
+      // through to the unchanged build-mode flow below.
+      {
+        PipelineRun modeProbe = runRepo.findById(runId).orElse(null);
+        if (modeProbe != null
+            && com.navneet.executespec.state.RunMode.isPatch(modeProbe.getRunMode())) {
+          runPatchPipeline(runId, provider, modeProbe, userRequest, rootCtx, startedAt);
+          return;
+        }
+      }
 
       // ── 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
       // runs (PRO / MAX / ENTERPRISE). Adds one PLANNING-tier LLM call before
@@ -1142,6 +1236,14 @@ public class RunOrchestrator {
       updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
+      // 2026-05-08 — programbench runs need more reviewer iters to bisect library link
+      // errors. Default cap is 50 (per ReviewerAgent.DEFAULT_MAX_ITER_PER_PASS); cmatrix
+      // gemini run 84252898 hit ITERATION_LIMIT_EXCEEDED with the build still unfixed.
+      // Bumped to 80 for programbench-mode runs only — non-programbench runs unchanged.
+      Integer reviewerMaxIter =
+          programBenchContainerStore != null && programBenchContainerStore.get(runId) != null
+              ? 80
+              : null;
       try {
         reviewResult =
             reviewer.review(
@@ -1151,6 +1253,7 @@ public class RunOrchestrator {
                     .context(rootCtx)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
+                    .maxIterationsPerPass(reviewerMaxIter)
                     .build());
         persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).
@@ -1319,6 +1422,235 @@ public class RunOrchestrator {
       if (workspace != null) {
         log.info("RunOrchestrator run={} workspace at {}", runId, workspace);
       }
+    }
+  }
+
+  // ─── V182 PATCH-mode pipeline ──────────────────────────────────────────
+
+  /**
+   * Default per-run cost cap when bench services don't supply one. Bumped 2026-05-08 from $4 to $8
+   * after the hard SWE-bench matrix showed Gemini hitting BUDGET_EXCEEDED at $4.06-$4.18 on
+   * heavy-reasoning sqlfluff instances — within $0.20 of the cap, meaning $4 was strangling runs
+   * that were close to completion. $8 gives Gemini Pro on hard SWE-bench instances enough headroom
+   * to finish (observed peak $4.84 in the f79252b1 pyvista budget-exceeded case from the medium
+   * matrix). Real protection against runaway loops is now ITER_LIMIT (120 iters) + Lever A
+   * force-edit watchdog + Lever B salvage; the cost cap is a final defence-in-depth. Operator can
+   * still override per-run via RunRequest.userCostCap if a tighter ceiling is desired for
+   * cost-sensitive workloads.
+   */
+  private static final double DEFAULT_PATCH_HARD_CAP_USD = 8.0;
+
+  /**
+   * V182 — patch-mode dispatch. Skips planner, executor, reviewer, and the validation report; the
+   * artefact is the workspace diff captured by the bench service's {@code captureOnTerminalAsync}
+   * path. Idempotent against the run row, terminal-event-aware, and writes a status_reason that
+   * downstream notifiers / dashboards can render meaningfully.
+   *
+   * <p>Cost cap: PatchAgent threads through to {@link com.navneet.executespec.agent.WorkerAgent}'s
+   * iter-3 budget guard, which reads {@code pipeline_run.hard_cap_usd}. We default that to {@link
+   * #DEFAULT_PATCH_HARD_CAP_USD} when unset so a runaway patch agent stops without manual
+   * intervention.
+   *
+   * <p>Outcome → terminal status mapping:
+   *
+   * <ul>
+   *   <li>{@code COMPLETED} / {@code COMPLETED_BY_STAGNATION} / {@code STOPPED_WITHOUT_COMPLETE} →
+   *       {@code COMPLETE}. The diff is whatever's in the workspace at exit; the bench eval decides
+   *       correctness, not us.
+   *   <li>{@code ITERATION_LIMIT_EXCEEDED} / {@code BUDGET_EXCEEDED} → {@code PARTIAL}. The agent
+   *       was making progress but ran out of headroom.
+   *   <li>{@code ERROR} or any uncaught exception → {@code FAILED}.
+   * </ul>
+   */
+  private void runPatchPipeline(
+      String runId,
+      String provider,
+      PipelineRun run,
+      String userRequest,
+      ExecutionContext rootCtx,
+      Instant startedAt) {
+
+    // 2026-05-08 — BYOK cost-cap exemption. When the run's user is on an OWN_KEYS org
+    // (pure BYOK — they're paying their own API bill), skip the platform's default $4 cap. We
+    // shouldn't hard-stop a customer's run on OUR cost limit when WE'RE not paying. HYBRID and
+    // SYSTEM stay capped because either path can fall back to platform spend mid-run.
+    if (apiKeyResolver.isOwnKeysMode(run.getCreatedByUserId())) {
+      log.info(
+          "PATCH run={} BYOK exempt — skipping default hardCapUsd (org keySourceMode=OWN_KEYS)",
+          runId);
+    } else if (run.getHardCapUsd() == null || run.getHardCapUsd() <= 0) {
+      run.setHardCapUsd(DEFAULT_PATCH_HARD_CAP_USD);
+      runRepo.save(run);
+      log.info(
+          "PATCH run={} hardCapUsd default ${}",
+          runId,
+          String.format("%.2f", DEFAULT_PATCH_HARD_CAP_USD));
+    }
+
+    // Patch mode runs on PLANNING-tier (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview).
+    // submitRun stamped that on `plannerModel` when isPatch was true; fall back to the
+    // run-level worker default if for some reason it's null.
+    String model = run.getPlannerModel();
+    if (model == null || model.isBlank()) model = run.getWorkerModel();
+
+    // V182 layer-1 — read userRequest from the run row (not the param) so the
+    // bench services' RunStarted-time updates flow through. SwebenchTaskService
+    // captures the failing-test output inside the container and prepends it to
+    // userRequest before the async pipeline thread picks the row up; this is
+    // the read-back point where the prefixed request takes effect.
+    String userRequestLive = run.getUserRequest();
+    if (userRequestLive == null || userRequestLive.isBlank()) userRequestLive = userRequest;
+
+    log.info(
+        "PATCH dispatch run={} provider={} model={} userRequestLen={}",
+        runId,
+        provider,
+        model,
+        userRequestLive == null ? 0 : userRequestLive.length());
+    broadcaster.emit(
+        runId, RunEvent.log(runId, "patch", "Patch-mode agent starting (single-loop)"));
+
+    perky.start(runId, "WORKING");
+    runRepo
+        .findById(runId)
+        .ifPresent(
+            r -> {
+              r.setStatus("WORKING");
+              runRepo.save(r);
+            });
+
+    com.navneet.executespec.agent.WorkerResult result;
+    try {
+      result = patchAgent.run(provider, model, userRequestLive, rootCtx);
+    } catch (Exception e) {
+      log.error("PATCH run={} dispatch threw", runId, e);
+      runRepo
+          .findById(runId)
+          .ifPresent(
+              r -> {
+                r.setStatus("FAILED");
+                r.setStatusReason("PATCH_AGENT_ERROR");
+                r.setCompletedAt(Instant.now());
+                runRepo.save(r);
+              });
+      eventPublisher.publishEvent(
+          new PipelineEvent.RunFailed(runId, "patch agent error: " + e.getClass().getSimpleName()));
+      broadcaster.emit(runId, RunEvent.complete(runId, "FAILED", "PATCH_AGENT_ERROR"));
+      return;
+    }
+
+    // Map outcome → terminal status + reason.
+    final String terminalStatus;
+    final String terminalReason;
+    switch (result.outcome()) {
+      case COMPLETED -> {
+        terminalStatus = "COMPLETE";
+        terminalReason = "CLEAN_COMPLETION";
+      }
+      case COMPLETED_BY_STAGNATION -> {
+        terminalStatus = "COMPLETE";
+        terminalReason = "PATCH_STAGNATION";
+      }
+      case STOPPED_WITHOUT_COMPLETE -> {
+        terminalStatus = "COMPLETE";
+        terminalReason = "PATCH_STOPPED_WITHOUT_COMPLETE";
+      }
+      case ITERATION_LIMIT_EXCEEDED -> {
+        terminalStatus = "PARTIAL";
+        terminalReason = "PATCH_ITER_LIMIT";
+      }
+      case BUDGET_EXCEEDED -> {
+        terminalStatus = "PARTIAL";
+        terminalReason = "PATCH_BUDGET_EXCEEDED";
+      }
+      case ERROR -> {
+        terminalStatus = "FAILED";
+        terminalReason = "PATCH_AGENT_ERROR";
+      }
+      default -> {
+        terminalStatus = "FAILED";
+        terminalReason = "PATCH_UNKNOWN_OUTCOME";
+      }
+    }
+
+    // Snapshot cost + tokens BEFORE flipping to terminal so dashboards reflect the
+    // patch agent's actual spend. The build-mode flow attributes per-phase under
+    // persistPhaseTokens; patch mode has no phases to attribute against, so the
+    // run row reads directly from the tracker's accumulator.
+    RunCostTracker.Snapshot patchCost = costTracker.snapshot(runId);
+    runRepo
+        .findById(runId)
+        .ifPresent(
+            r -> {
+              r.setStatus(terminalStatus);
+              r.setStatusReason(terminalReason);
+              r.setCompletedAt(Instant.now());
+              if (patchCost.costUsd() > 0d) {
+                r.setActualCostUsd(patchCost.costUsd());
+              } else if (r.getActualCostUsd() == null) {
+                r.setActualCostUsd(0d);
+              }
+              int persistedIn = r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens();
+              int persistedOut = r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens();
+              if (patchCost.inputTokens() > persistedIn) {
+                r.setTotalInputTokens(patchCost.inputTokens());
+              }
+              if (patchCost.outputTokens() > persistedOut) {
+                r.setTotalOutputTokens(patchCost.outputTokens());
+              }
+              runRepo.save(r);
+            });
+
+    log.info(
+        "PATCH terminal run={} status={} reason={} iter={} toolCalls={} latencyMs={}"
+            + " in={} out={} ${}",
+        runId,
+        terminalStatus,
+        terminalReason,
+        result.iterations(),
+        result.toolCallsDispatched(),
+        result.totalLatencyMs(),
+        patchCost.inputTokens(),
+        patchCost.outputTokens(),
+        String.format("%.4f", patchCost.costUsd()));
+
+    // V183 (2026-05-08) — finding-triggered patch runs are project-mode (PR review autofix,
+    // tech debt fix, code review autofix, CI auto-fix). They live on a real customer
+    // project + repo and want their workspace diff pushed to the remote — same way build
+    // mode does. Bench sources (`swebench`, `programbench`) are bench-mode and the bench
+    // services capture the diff via `docker exec git diff` themselves, so we skip the
+    // push for them. The discriminator is the source field the FindingPatchSubmitter
+    // stamps as `finding:<TYPE>`.
+    if (("COMPLETE".equals(terminalStatus) || "PARTIAL".equals(terminalStatus))
+        && run.getSourceType() != null
+        && run.getSourceType().startsWith("finding:")) {
+      try {
+        PipelineRun fresh = runRepo.findById(runId).orElse(null);
+        if (fresh != null) {
+          scmPushService.push(fresh);
+          log.info(
+              "PATCH run={} auto-pushed to SCM (finding-triggered={})", runId, run.getSourceType());
+        }
+      } catch (Exception pushEx) {
+        // Manual re-push via /runs/{id}/push-github is still available; log and continue.
+        log.warn(
+            "PATCH run={} auto-push failed (manual push still works): {}",
+            runId,
+            pushEx.getMessage());
+      }
+    }
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            "patch",
+            "Patch-mode complete: " + result.outcome() + " in " + result.iterations() + " iters"));
+    broadcaster.emit(runId, RunEvent.complete(runId, terminalStatus, terminalReason));
+
+    if ("COMPLETE".equals(terminalStatus)) {
+      eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+    } else {
+      eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, terminalReason));
     }
   }
 
@@ -3066,7 +3398,22 @@ public class RunOrchestrator {
               r.setCostEstimateHigh(est.highUsd());
               r.setCreditsCharged(est.credits());
               // GA-readiness P3.2 — honour customer-supplied cost cap (P3.2 helper).
-              r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
+              // 2026-05-08 — BYOK cost-cap exemption. When the user's org is OWN_KEYS, skip
+              // OUR platform cap entirely; the customer pays their own API bill so we shouldn't
+              // hard-stop them on ours. BUT we still honour their EXPLICIT userCostCap (typed
+              // into NewRunModal) — that's their voluntary ceiling, not ours.
+              //
+              // Decision matrix:
+              //   BYOK    + userCostCap set    → userCostCap   (customer's voluntary cap honoured)
+              //   BYOK    + userCostCap null   → null          (no cap; fully BYOK)
+              //   non-BYOK + (any)             → clamp(platform, userCostCap) (existing behaviour)
+              boolean byok = apiKeyResolver.isOwnKeysMode(r.getCreatedByUserId());
+              if (byok) {
+                Double userCap = r.getUserCostCap();
+                r.setHardCapUsd(userCap != null && userCap > 0 ? userCap : null);
+              } else {
+                r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
+              }
               runRepo.save(r);
             });
     log.info(

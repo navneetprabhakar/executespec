@@ -407,6 +407,8 @@ public class SequentialExecutor {
                 req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
             .temperature(0.0)
             .maxTokensPerCall(cfg.maxTokens)
+            .stagnationWarnAfter(cfg.stagnationWarnAfter)
+            .stagnationForceAfter(cfg.stagnationForceAfter)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -641,6 +643,12 @@ public class SequentialExecutor {
         smoke.exitCode());
 
     // ONE retry with the build error injected.
+    // 2026-05-08 — set requireBuildVerification on the RETRY only. The first attempt keeps
+    // today's behaviour (no gate, since some legit early scaffold tasks naturally don't have
+    // a building project yet). On retry though, the build error is the explicit spec — the
+    // worker MUST re-run buildProject and see exit=0 before claiming done. Without this gate
+    // the retry can call completeTask after a single editFile and we get the same regression
+    // path that produced the 16/22 FINAL_BUILD_FAILED rate over the last 30 days.
     String retryPrompt = composeUserPrompt(task, smoke.output());
     WorkerResult retry =
         worker.run(
@@ -654,6 +662,9 @@ public class SequentialExecutor {
                     req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
                 .temperature(0.0)
                 .maxTokensPerCall(cfg.maxTokens)
+                .stagnationWarnAfter(cfg.stagnationWarnAfter)
+                .stagnationForceAfter(cfg.stagnationForceAfter)
+                .requireBuildVerification(true)
                 .build());
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
@@ -734,6 +745,71 @@ public class SequentialExecutor {
           .build();
     }
 
+    // 2026-05-08 — HIGH-complexity tasks get a SECOND retry with the latest build error.
+    // Spring Boot multi-file scaffolds and similar heavy work occasionally need 2 build-error
+    // feedback loops to converge (LOW/MEDIUM tasks rarely benefit; their state space is small
+    // enough that retry-1 is decisive). retry-2 reuses the same requireBuildVerification gate
+    // so the worker MUST run buildProject and see exit=0 before claiming done. Cost ceiling
+    // is the per-run cost cap which absorbs the extra retry budget.
+    if (task.complexity() == PlannedTask.Complexity.HIGH) {
+      log.warn(
+          "Executor task={} HIGH-complexity, smoke still fails after retry-1; attempting retry-2",
+          task.id());
+      String retry2Prompt = composeUserPrompt(task, retrySmoke.output());
+      WorkerResult retry2 =
+          worker.run(
+              WorkerTaskRequest.builder()
+                  .provider(cfg.provider)
+                  .model(cfg.model)
+                  .systemPrompt(systemPrompt)
+                  .userPrompt(retry2Prompt)
+                  .context(taskCtx)
+                  .maxIterations(
+                      req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
+                  .temperature(0.0)
+                  .maxTokensPerCall(cfg.maxTokens)
+                  .stagnationWarnAfter(cfg.stagnationWarnAfter)
+                  .stagnationForceAfter(cfg.stagnationForceAfter)
+                  .requireBuildVerification(true)
+                  .build());
+      int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
+      if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
+        SmokeTestResult retry2Smoke = runSmokeTest(taskCtx, plan.buildCommand());
+        if (retry2Smoke.passed()) {
+          log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
+          persistTaskStatus(runId, task.id(), "COMPLETE");
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          return TaskOutcome.builder()
+              .taskId(task.id())
+              .taskTitle(task.title())
+              .status(TaskOutcome.Status.SUCCESS_AFTER_RETRY)
+              .workerOutcome(primary)
+              .retryAttempted(true)
+              .retryWorkerOutcome(retry2)
+              .smokeTestPassed(true)
+              .smokeTestExitCode(retry2Smoke.exitCode())
+              .smokeTestOutput(retry2Smoke.output())
+              .totalLatencyMs(System.currentTimeMillis() - taskStart)
+              .toolCallsDispatched(totalToolCalls2)
+              .dispatchedProvider(cfg.provider)
+              .dispatchedModel(cfg.model)
+              .build();
+        }
+        // retry-2 completed but smoke STILL fails → fall through to COMPLETED_WITH_WARNING
+        // below with the retry-2 smoke output as the "after retry" signal.
+        retrySmoke = retry2Smoke;
+        retry = retry2;
+        totalToolCalls = totalToolCalls2;
+      } else {
+        log.warn(
+            "Executor task={} retry-2 WORKER_FAILED outcome={}; falling through to"
+                + " COMPLETED_WITH_WARNING with retry-1 smoke as final signal",
+            task.id(),
+            retry2.outcome());
+        totalToolCalls = totalToolCalls2;
+      }
+    }
+
     log.warn("Executor task={} smoke still fails after retry; COMPLETED_WITH_WARNING", task.id());
     // 2026-05-02 — surface the smoke failure inline on the task card. Use exit code +
     // a tail of the smoke output so the user sees something like "Build smoke failed
@@ -787,13 +863,30 @@ public class SequentialExecutor {
    * match any enum value), we fall back to the run-level provider+model so the executor never
    * crashes on a planner edge case.
    */
-  private record TierConfig(String provider, String model, int maxIter, int maxTokens) {}
+  /**
+   * Per-task tuning carrier. {@code stagnationWarnAfter} / {@code stagnationForceAfter} are
+   * complexity-aware overrides forwarded into {@link WorkerTaskRequest} so the stagnation guard
+   * fires at thresholds proportional to the task's expected exploration depth. Calibrated
+   * 2026-05-08 against ProgramBench cmatrix anthropic run 9b37b099 — HIGH and MEDIUM tasks both
+   * stagnated at the static 12-iter cap before the worker could write substantive source. The new
+   * HIGH cap (18 warn / 28 force) is enough for legitimate reverse-engineering patterns: read
+   * README + man page + binary --help/--version + plan + write.
+   */
+  private record TierConfig(
+      String provider,
+      String model,
+      int maxIter,
+      int maxTokens,
+      int stagnationWarnAfter,
+      int stagnationForceAfter) {}
 
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
     AgentTier tier;
     int maxIter;
     int maxTokens;
+    int stagnationWarnAfter;
+    int stagnationForceAfter;
     switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
         // Caps bumped again 2026-04-19: 20/30/45 → 30/50/75. Observed on
         // the RN Calorie Tracker run (0a0201c7) — MEDIUM scaffold task
@@ -805,47 +898,82 @@ public class SequentialExecutor {
         // "implement 4 screens + service" on the same run) with headroom.
         // (Previous bump 12/22/35 → 20/30/45 was for multi-repo Launches;
         //  this second bump is for codegen-dense greenfield scaffolds.)
+        //
+        // 2026-05-08 — stagnation thresholds are now complexity-aware too. Static
+        // STAGNATION_WARN_AFTER_N=8 / STAGNATION_FORCE_AFTER_N=12 was calibrated
+        // for typical write-then-verify-then-stop patterns; for HIGH-complexity
+        // ProgramBench-style reverse-engineering the worker legitimately needs
+        // ~15-20 read iters before its first write, and was force-terminating
+        // at iter 12 before any source was written. Reviewer then "fixed" the
+        // empty workspace with no-op compile.sh — passing build smoke without
+        // actually compiling source. Verified on cmatrix anthropic run 9b37b099
+        // (2026-05-08) with empty workspace + 100/100 programbench score (which
+        // counted the cleanroom's original binary).
       case LOW -> {
         tier = AgentTier.LIGHTWEIGHT;
         maxIter = 30;
         maxTokens = 4096;
+        stagnationWarnAfter = 8; // matches WorkerAgent.STAGNATION_WARN_AFTER_N default
+        stagnationForceAfter = 12;
       }
       case HIGH -> {
         tier = AgentTier.PLANNING;
-        maxIter = 75;
+        // 2026-05-08 — HIGH iter cap 75 → 120 (matches PATCH mode's calibration). Pairs
+        // with WorkerAgent's Lever A force-edit watchdog (fires at 70% with zero writes)
+        // + Lever B best-guess salvage (fires on iter-limit with zero writes). Real cost
+        // ceiling is the per-run cost cap, not the iter cap. Extends headroom for genuine
+        // long-tail HIGH tasks (multi-file Spring Boot apps with deep wiring) that
+        // currently hit iter-limit at iter 75 mid-edit.
+        maxIter = 120;
         maxTokens = 16384;
+        // 2026-05-08 — tightened HIGH stagnation 22/32 → 18/26. With iter cap bumped to
+        // 120, we have more total runway, so we can afford to terminate stuck loops
+        // earlier without strangling legitimate work. The 22/32 calibration was for
+        // 75-iter cap when each non-write iter was a larger fraction of the total budget.
+        // Now: 18 iters of pure reading still gets a warn; 26 iters force-terminates.
+        // That's <22% of the 120-iter budget — safe headroom.
+        stagnationWarnAfter = 18;
+        stagnationForceAfter = 26;
       }
       default -> {
         tier = AgentTier.WORKHORSE;
         maxIter = 50;
         maxTokens = 8192;
+        stagnationWarnAfter = 12;
+        stagnationForceAfter = 20;
       }
     }
     // Project runs (Launches on an existing cloned codebase) need more
     // iterations: the worker has to readFile / searchFiles the real repo
     // before it can write, so 2× the fresh-scratch cap is the default.
     if (projectRun) maxIter *= 2;
-    // 2026-04-26 cost-control: OpenAI is markedly chattier per iter than
-    // Anthropic (Spring AI re-ships the FULL conversation history on
-    // every tool call, no prompt cache; observed 1.45M input tokens on
-    // the HIGH library spec vs Anthropic's 132K for the same spec). Cap
-    // OpenAI at 70% of the default iteration budget so we bail on stuck
-    // worker loops sooner. Quality impact: worker still has 35 iters for
-    // a non-project HIGH task (was 75) — empirically enough for the
-    // library spec which finished 4/4 tasks in the prior eval. If runs
-    // start hitting iteration-limit cleanly we'll revisit; the bigger
-    // win (sliding-window or summary-compress on the conversation
-    // history) is tracked as a follow-up under
-    // docs/plans/openai-conversation-compression.md (TBD).
-    if (runProvider != null && "openai".equalsIgnoreCase(runProvider)) {
-      maxIter = (int) Math.ceil(maxIter * 0.70);
-    }
+    // 2026-05-08 — OpenAI 0.7× cap LIFTED. Original premise (2026-04-26): "OpenAI is markedly
+    // chattier per iter than Anthropic (Spring AI re-ships the FULL conversation history on
+    // every tool call, no prompt cache); observed 1.45M input tokens on HIGH library spec vs
+    // Anthropic's 132K for the same spec." That premise is now stale on three counts:
+    //   1. V2 OpenAI does NOT go through Spring AI — uses OpenAiNativeToolClient (the native
+    //      bypass shipped in v2.6.0 to fix Spring AI 1.1.4's extra_body bug).
+    //   2. The native client preserves prefix stability AND OpenAI auto-caches prompts ≥1024
+    //      tokens silently. Empirically validated 2026-05-08 on a LOW spec: cache utilization
+    //      43.2%, 12 of 15 calls hit cache, total in=50K (vs Anthropic's 14K + 76K cacheRead).
+    //   3. Cap was a cost-control hack, but actual cost is now within 4× of Anthropic on the
+    //      same workload — well within healthy budget bounds for a fair iteration budget.
+    // Lifting the cap means HIGH non-project OpenAI tasks now get 75 iters (was 53 = ceil(75×0.7)),
+    // matching Anthropic + Gemini. This unlocks the long-tail tasks where OpenAI was stagnating
+    // out of iteration budget, not capability. Telemetry in RunCostTracker per-call logs
+    // (cacheRead=N) makes a regression visible in production.
     try {
       // v2.5.13 — enum + V2 strings now agree ("gemini"/"anthropic"/"openai")
       LlmProvider p =
           runProvider == null ? LlmProvider.OPENAI : LlmProvider.valueOf(runProvider.toUpperCase());
       ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
-      return new TierConfig(resolved.providerName(), resolved.getModel(), maxIter, maxTokens);
+      return new TierConfig(
+          resolved.providerName(),
+          resolved.getModel(),
+          maxIter,
+          maxTokens,
+          stagnationWarnAfter,
+          stagnationForceAfter);
     } catch (Exception e) {
       log.warn(
           "tierConfigFor: resolve failed for provider={} tier={} — using run-level {} / {}",
@@ -853,7 +981,8 @@ public class SequentialExecutor {
           tier,
           runProvider,
           runModel);
-      return new TierConfig(runProvider, runModel, maxIter, maxTokens);
+      return new TierConfig(
+          runProvider, runModel, maxIter, maxTokens, stagnationWarnAfter, stagnationForceAfter);
     }
   }
 
@@ -1085,12 +1214,42 @@ public class SequentialExecutor {
     sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
     sb.append(task.description());
     if (previousBuildError != null && !previousBuildError.isBlank()) {
-      sb.append("\n\n---\n")
-          .append("NOTE: A previous attempt completed but the build failed afterward. ")
-          .append("Fix the issue so the build passes. Build output:\n")
-          .append(previousBuildError);
+      // 2026-05-08 — sharpened from the generic "NOTE: previous attempt completed but build
+      // failed" framing to the SWE-bench test-as-spec pattern: the build error IS the
+      // specification of what to fix. The agent's earlier edits are still in the workspace
+      // (per-task retry doesn't reset the workspace), so this is a continuation, not a redo.
+      sb.append("\n\n---\nBUILD FAILED ON THE PREVIOUS ATTEMPT.\n\n");
+      sb.append(
+          "The error below is your spec for this retry — read it carefully, identify the "
+              + "specific files / line numbers / error messages, and fix the root cause. Don't "
+              + "refactor, don't reorganise, don't second-guess your earlier design choices. "
+              + "Your previous edits are still in place; this is a continuation. Use readFile "
+              + "to confirm the current file state where the error points, editFile to fix it, "
+              + "buildProject to verify, then completeTask.\n\n");
+      sb.append("--- BUILD ERROR (verbatim) ---\n");
+      sb.append(truncateBuildErrorForRetry(previousBuildError));
+      sb.append("\n--- END BUILD ERROR ---\n");
     }
     return sb.toString();
+  }
+
+  /**
+   * Cap the build error at 12K chars (head 8K + tail 4K) — long enough for compiler stack traces
+   * with stem+leaf, short enough that the worker's prefix stays cache-friendly on the retry. Most
+   * actionable info is in the first stack trace and the last few "BUILD FAILED" lines; the middle
+   * is repetition.
+   */
+  private static String truncateBuildErrorForRetry(String s) {
+    if (s == null) return "";
+    int cap = 12_000;
+    if (s.length() <= cap) return s;
+    int head = 8_000;
+    int omitted = s.length() - cap;
+    return s.substring(0, head)
+        + "\n\n... ["
+        + omitted
+        + " chars omitted from middle of build output] ...\n\n"
+        + s.substring(s.length() - (cap - head));
   }
 
   // ─── smoke test helpers ─────────────────────────────────────────────────

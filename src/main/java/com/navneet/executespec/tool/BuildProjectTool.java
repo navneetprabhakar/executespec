@@ -35,6 +35,11 @@ public class BuildProjectTool implements Tool {
   // Programbench tasks stash the cleanroom container ID per-runId; when set, build
   // dispatches via `docker exec` so language toolchains in the cleanroom image are used.
   private final ProgramBenchContainerStore programBenchContainers;
+  // SWE-bench tasks stash their container ID here. Same docker-exec routing as programbench but
+  // the in-container working directory is /testbed rather than /workspace, AND the no-op
+  // compile.sh detection wrapper does NOT apply (SWE-bench has no compile.sh contract — the
+  // tests are the truth).
+  private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
 
   @Override
   public String name() {
@@ -94,10 +99,31 @@ public class BuildProjectTool implements Tool {
               + msg);
     }
 
-    // Programbench branch — when this runId has a cleanroom container registered,
-    // dispatch via `docker exec` so the build hits the container's toolchain.
-    String containerId =
-        programBenchContainers != null ? programBenchContainers.get(ctx.runId()) : null;
+    // Bench-mode branch — resolve which adapter (if any) registered a container for this run.
+    // Programbench: workdir=/workspace, applies the compile.sh hash-check wrapper.
+    // SWE-bench:    workdir=/testbed,    NO compile.sh wrapper (tests are truth, not compile).
+    String containerId = null;
+    String workdir = null;
+    boolean applyCompileCheckWrapper = false;
+    if (swebenchContainers != null) {
+      String swCid = swebenchContainers.get(ctx.runId());
+      if (swCid != null) {
+        containerId = swCid;
+        workdir = com.navneet.executespec.swebench.SwebenchContainerStore.WORKDIR;
+        applyCompileCheckWrapper = false;
+      }
+    }
+    if (containerId == null && programBenchContainers != null) {
+      String pbCid = programBenchContainers.get(ctx.runId());
+      if (pbCid != null) {
+        containerId = pbCid;
+        workdir = "/workspace";
+        applyCompileCheckWrapper = true; // see Bug G — programbench-only no-op compile.sh guard
+      }
+    }
+
+    String effectiveCmd =
+        applyCompileCheckWrapper ? wrapForExecutableCompileCheck(bc.command()) : bc.command();
 
     try {
       ProcessBuilder pb;
@@ -105,16 +131,9 @@ public class BuildProjectTool implements Tool {
         pb =
             new ProcessBuilder(
                 List.of(
-                    "docker",
-                    "exec",
-                    "-w",
-                    "/workspace",
-                    containerId,
-                    "/bin/sh",
-                    "-c",
-                    bc.command()));
+                    "docker", "exec", "-w", workdir, containerId, "/bin/sh", "-c", effectiveCmd));
       } else {
-        pb = new ProcessBuilder(List.of("/bin/sh", "-c", bc.command()));
+        pb = new ProcessBuilder(List.of("/bin/sh", "-c", effectiveCmd));
         pb.directory(ctx.workspaceRoot().toFile());
       }
       Map<String, String> env = pb.environment();
@@ -166,6 +185,41 @@ public class BuildProjectTool implements Tool {
       Thread.currentThread().interrupt();
       return ToolResult.err(ToolResult.ErrorKind.INTERNAL, "interrupted");
     }
+  }
+
+  /**
+   * Wrap the build command with a "did compile.sh actually compile" guard. Captures the executable
+   * hash before, runs the command, captures the hash after; fails the build if executable is
+   * missing post-run OR if the hash is unchanged (= no new compilation happened, agent is gaming
+   * the smoke against the cleanroom's pre-existing binary).
+   *
+   * <p>Implementation note: built as a single shell pipeline so the original command's exit code is
+   * preserved (passing through unless one of our guards fires). The {@code stash-restore-trap}
+   * gives the agent's mid-task buildProject calls a chance to recover — if compile.sh fails to
+   * produce a binary, the original is restored so the next iteration can still run {@code
+   * ./executable --help} for behavior inspection.
+   *
+   * <p>Visible-for-test so the wrapping logic can be pinned by unit tests without standing up a
+   * full docker container.
+   */
+  static String wrapForExecutableCompileCheck(String userCommand) {
+    return "ORIG_HASH=$(sha256sum ./executable 2>/dev/null | awk '{print $1}'); "
+        + "USER_RC=0; { "
+        + userCommand
+        + "; } || USER_RC=$?; "
+        + "if [ ! -f ./executable ]; then "
+        + "  echo '[programbench] BUILD FAIL: compile.sh did not produce ./executable. Your "
+        + "compile.sh must compile your source files into a fresh /workspace/executable.'; "
+        + "  exit 1; "
+        + "fi; "
+        + "NEW_HASH=$(sha256sum ./executable 2>/dev/null | awk '{print $1}'); "
+        + "if [ -n \"$ORIG_HASH\" ] && [ \"$NEW_HASH\" = \"$ORIG_HASH\" ]; then "
+        + "  echo '[programbench] BUILD FAIL: compile.sh did not produce a NEW ./executable "
+        + "(hash unchanged). compile.sh must compile your source code into a fresh executable, "
+        + "not just verify the existing one.'; "
+        + "  exit 1; "
+        + "fi; "
+        + "exit $USER_RC";
   }
 
   private static String truncate(String s) {

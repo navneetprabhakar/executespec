@@ -44,6 +44,7 @@ public class CodeReviewController {
 
   private final CodeReviewService service;
   private final ProjectAccessGuard projectAccessGuard;
+  private final CodeReviewAutofixService autofixService;
 
   // ── Submit / fetch ─────────────────────────────────────────────────────────
 
@@ -78,6 +79,39 @@ public class CodeReviewController {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, e.getMessage());
     }
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(CodeReviewScanDto.from(row));
+  }
+
+  /** Body for {@link #autofix}. */
+  public record AutofixRequest(String severity) {}
+
+  /** Response for {@link #autofix}. */
+  public record AutofixResponse(String runId, String findingKey, String outcome) {}
+
+  /**
+   * Phase 4 (V183) — dispatch a patch-mode run that addresses every OPEN issue of the named
+   * severity bucket from a code review scan. One PR per severity so reviewers can grade
+   * independently. Idempotent server-side: an in-flight run for the same (scan, severity) returns
+   * the existing run with {@code outcome=REUSED_ACTIVE}.
+   */
+  @PostMapping("/api/code-reviews/{id}/autofix")
+  public ResponseEntity<AutofixResponse> autofix(
+      @PathVariable UUID id,
+      @RequestBody AutofixRequest req,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
+    if (userDetails == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
+    }
+    CodeReviewScan scan = service.findScan(id);
+    if (scan == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such scan");
+    }
+    projectAccessGuard.assertCanRead(scan.getProjectId(), userDetails);
+
+    var result =
+        autofixService.dispatchFixForSeverity(
+            id, req == null ? null : req.severity(), userDetails.getUser());
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(new AutofixResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }
 
   /** Get a single scan by id (with issues inlined for convenience). */

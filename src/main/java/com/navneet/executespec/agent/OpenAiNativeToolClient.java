@@ -279,10 +279,14 @@ public class OpenAiNativeToolClient {
       // OpenAI auto-discounts cached tokens (~50% on gpt-4o family). The cached_tokens count
       // is INCLUDED in prompt_tokens (subset, not addition) — RunCostTracker.priceCall handles
       // the subtraction in its OpenAI branch.
+      //
+      // 2026-05-08 — set the metadata key UNCONDITIONALLY (even when 0) so the per-call log line
+      // in RunCostTracker consistently reports cacheRead. This makes "auto-cache fired 0 times"
+      // (real signal that the prefix isn't matching) distinguishable from "OpenAI returned no
+      // metadata" (older API path / parser bug). OpenAI auto-caches prefixes ≥1024 tokens, so 0
+      // hits on a multi-iteration task is a flag that the prefix is mutating.
       int cachedTokens = usage.path("prompt_tokens_details").path("cached_tokens").asInt(0);
-      if (cachedTokens > 0) {
-        metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
-      }
+      metaBuilder.keyValue("cache_read_input_tokens", cachedTokens);
     }
     return new ChatResponse(generations, metaBuilder.build());
   }

@@ -5,8 +5,10 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -27,7 +29,11 @@ import com.navneet.executespec.tool.ToolRegistry;
 import com.navneet.executespec.tool.ToolResult;
 
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.SystemMessage;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.ai.chat.model.Generation;
 
@@ -220,6 +226,188 @@ class WorkerAgentStagnationTest {
         WorkerAgent.STAGNATION_FORCE_AFTER_N - WorkerAgent.STAGNATION_WARN_AFTER_N >= 2,
         "There should be at least 2 post-warning iterations of grace so a slow model still"
             + " has a chance to react.");
+  }
+
+  /**
+   * Per-task override builder — used by the complexity-aware tests below. Allows the caller to
+   * raise the warn / force thresholds per-call (SequentialExecutor's tier config sets these to 8/12
+   * for LOW, 12/18 for MEDIUM, 18/28 for HIGH).
+   */
+  private static WorkerTaskRequest reqWithStagnation(
+      int maxIter, Integer warnAfter, Integer forceAfter) {
+    return WorkerTaskRequest.builder()
+        .provider("anthropic")
+        .model("claude-haiku-4-5-20251001")
+        .systemPrompt("system")
+        .userPrompt("do thing")
+        .context(new ExecutionContext("run-1", "T1", Path.of("/tmp/ws-stagnation")))
+        .maxIterations(maxIter)
+        .temperature(0.0)
+        .maxTokensPerCall(4096)
+        .stagnationWarnAfter(warnAfter)
+        .stagnationForceAfter(forceAfter)
+        .build();
+  }
+
+  @Test
+  void per_task_override_extends_force_threshold_for_HIGH_complexity_tasks() {
+    // 25 consecutive readFile calls. Default force threshold is 12 (would terminate); HIGH
+    // complexity sets force=28, so the worker should NOT have terminated by iter 25.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 25; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"done\"}")));
+    Fixture f = newWorker(seq);
+
+    // HIGH-complexity thresholds from SequentialExecutor.tierConfigFor.
+    WorkerResult result = f.worker.run(reqWithStagnation(40, 18, 28));
+
+    assertEquals(
+        WorkerResult.Outcome.COMPLETED,
+        result.outcome(),
+        "With force=28 the worker should NOT have stagnated at iter 12 — should reach"
+            + " completeTask at iter 26.");
+    assertEquals(26, result.iterations());
+  }
+
+  @Test
+  void per_task_override_force_threshold_still_terminates_when_actually_exceeded() {
+    // 30 consecutive readFile calls — exceeds even HIGH's force=28.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 30; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(reqWithStagnation(40, 18, 28));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    assertEquals(28, result.iterations(), "Should terminate exactly at the override force=28.");
+  }
+
+  @Test
+  void invalid_override_falls_back_to_static_defaults() {
+    // forceAfter <= warnAfter is invalid → fallback to the static
+    // STAGNATION_WARN_AFTER_N=8 / STAGNATION_FORCE_AFTER_N=12 pair.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 20; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    Fixture f = newWorker(seq);
+
+    // warn=10, force=5 (force < warn — invalid)
+    WorkerResult result = f.worker.run(reqWithStagnation(40, 10, 5));
+
+    assertEquals(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, result.outcome());
+    // Falls back to max(STAGNATION_FORCE_AFTER_N=12, warnAfter+4=14) = 14
+    assertEquals(
+        14,
+        result.iterations(),
+        "Invalid forceAfter (≤ warnAfter) should fall back to max(12, warnAfter+4)=14.");
+  }
+
+  /**
+   * 2026-05-08 — pins that the stagnation PROGRESS-CHECK warning is appended as a {@link
+   * UserMessage}, not a {@link SystemMessage}. This is a Gemini-cache correctness fix: {@code
+   * GeminiNativeToolClient.buildRequestBody} concatenates every SystemMessage in the history into
+   * the {@code systemInstruction} field. Adding a SystemMessage mid-task mutates that prefix and
+   * invalidates implicit prompt caching for every subsequent iteration — which on a multi-iteration
+   * build-mode run can mean 5-10× extra input tokens billed.
+   *
+   * <p>Anthropic and OpenAI handle SystemMessages as message-list entries (no concatenation), so
+   * they're unaffected by this change. The UserMessage shape works identically across all three
+   * providers — the warning is semantically a message in the conversation flow, not a permanent
+   * system instruction.
+   */
+  @Test
+  void stagnation_warning_uses_UserMessage_not_SystemMessage_to_keep_gemini_cache_prefix_stable() {
+    // 13 readFile calls — crosses STAGNATION_WARN_AFTER_N=8 (warning fires after iter 8) but
+    // stops short of STAGNATION_FORCE_AFTER_N=12 (oh wait, 13 > 12 so it'll force-terminate).
+    // That's fine — what matters is we capture the LlmRequest after the warning fires.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 13; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    Fixture f = newWorker(seq);
+
+    f.worker.run(req(40));
+
+    ArgumentCaptor<LlmRequest> reqCap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(reqCap.capture());
+    List<LlmRequest> capturedRequests = reqCap.getAllValues();
+
+    // Pre-fix bug: starting at the iteration after warning fires (iter 9+), every captured
+    // request had TWO SystemMessages in its history (the original system prompt + the
+    // PROGRESS CHECK warning). Post-fix: every request has exactly ONE SystemMessage.
+    int maxSystemMessageCount = 0;
+    int requestsWithProgressCheckUserMessage = 0;
+    for (LlmRequest captured : capturedRequests) {
+      long systemCount =
+          captured.messages().stream().filter(m -> m instanceof SystemMessage).count();
+      maxSystemMessageCount = (int) Math.max(maxSystemMessageCount, systemCount);
+      boolean hasProgressCheckAsUserMsg =
+          captured.messages().stream()
+              .anyMatch(
+                  m -> m instanceof UserMessage um && um.getText().startsWith("PROGRESS CHECK:"));
+      if (hasProgressCheckAsUserMsg) requestsWithProgressCheckUserMessage++;
+    }
+
+    assertEquals(
+        1,
+        maxSystemMessageCount,
+        "After stagnation warning fires, the history must still contain exactly ONE"
+            + " SystemMessage (the initial system prompt). Multiple SystemMessages would"
+            + " mutate Gemini's systemInstruction and invalidate implicit prompt caching."
+            + " This is the regression case for the 2026-05-08 cache-prefix bug.");
+
+    // Sanity: the warning is delivered (just as a UserMessage instead). Without this, the test
+    // could pass trivially if the stagnation guard never fired. We expect the warning to appear
+    // in at least one captured request (the one made AFTER the warning was added to history).
+    assertTrue(
+        requestsWithProgressCheckUserMessage > 0,
+        "The PROGRESS CHECK warning must still be delivered — just as a UserMessage instead"
+            + " of a SystemMessage. Saw zero UserMessages with the warning text.");
+  }
+
+  /**
+   * 2026-05-08 — companion test: verify the prefix that goes into Gemini's systemInstruction is
+   * byte-identical across iterations. Stagnation aside, the systemInstruction should be exactly
+   * {@code req.systemPrompt()} on every call. Any drift here breaks cache reuse.
+   */
+  @Test
+  void system_message_text_is_byte_identical_across_iterations() {
+    // 13 readFile calls (same shape as above — stagnation will fire and force-terminate).
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 13; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    Fixture f = newWorker(seq);
+
+    f.worker.run(req(40));
+
+    ArgumentCaptor<LlmRequest> reqCap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(reqCap.capture());
+
+    String firstSystemText = null;
+    for (LlmRequest captured : reqCap.getAllValues()) {
+      String thisSystemText =
+          captured.messages().stream()
+              .filter(m -> m instanceof SystemMessage)
+              .map(Message::getText)
+              .findFirst()
+              .orElse(null);
+      if (firstSystemText == null) {
+        firstSystemText = thisSystemText;
+      } else {
+        assertEquals(
+            firstSystemText,
+            thisSystemText,
+            "SystemMessage text must be byte-identical across all iterations of a worker run."
+                + " Any change here invalidates Gemini implicit-cache prefix matching and"
+                + " forces a full re-read on every subsequent call.");
+      }
+    }
   }
 
   @Test

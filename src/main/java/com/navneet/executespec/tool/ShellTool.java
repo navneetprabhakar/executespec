@@ -40,11 +40,19 @@ public class ShellTool implements Tool {
   // For normal runs, this is always null and behavior is unchanged.
   private final ProgramBenchContainerStore programBenchContainers;
 
+  // SWE-bench tasks stash their container ID here. Same routing semantics as programbench but
+  // the in-container working directory is /testbed (per SWE-bench's image WORKDIR convention)
+  // rather than /workspace.
+  private final com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers;
+
   @Autowired
   public ShellTool(
-      ShellSandboxPolicy sandboxPolicy, ProgramBenchContainerStore programBenchContainers) {
+      ShellSandboxPolicy sandboxPolicy,
+      ProgramBenchContainerStore programBenchContainers,
+      com.navneet.executespec.swebench.SwebenchContainerStore swebenchContainers) {
     this.sandboxPolicy = sandboxPolicy;
     this.programBenchContainers = programBenchContainers;
+    this.swebenchContainers = swebenchContainers;
   }
 
   @Override
@@ -100,20 +108,35 @@ public class ShellTool implements Tool {
           ToolResult.ErrorKind.FORBIDDEN, "command blocked by sandbox: " + validation.reason());
     }
 
-    // Programbench branch — when this runId has a cleanroom container registered,
+    // Bench-mode branch — when this runId has a cleanroom container registered,
     // dispatch via `docker exec` so build/run commands hit the container's toolchain
-    // (gcc, cargo, go, etc.) which the host typically doesn't have.
-    String containerId =
-        programBenchContainers != null ? programBenchContainers.get(ctx.runId()) : null;
+    // (gcc, cargo, go, etc.) which the host typically doesn't have. The two bench
+    // adapters (programbench, swebench) use different in-container working directories;
+    // resolve which one applies.
+    String containerId = null;
+    String workdir = null;
+    if (swebenchContainers != null) {
+      String swCid = swebenchContainers.get(ctx.runId());
+      if (swCid != null) {
+        containerId = swCid;
+        workdir = com.navneet.executespec.swebench.SwebenchContainerStore.WORKDIR;
+      }
+    }
+    if (containerId == null && programBenchContainers != null) {
+      String pbCid = programBenchContainers.get(ctx.runId());
+      if (pbCid != null) {
+        containerId = pbCid;
+        workdir = "/workspace";
+      }
+    }
 
     try {
       ProcessBuilder pb;
       if (containerId != null) {
-        // Container has --network none + bind-mounted /workspace; cd to it on entry.
+        // Container has --network none + bind-mounted workspace; cd to its workdir on entry.
         pb =
             new ProcessBuilder(
-                List.of(
-                    "docker", "exec", "-w", "/workspace", containerId, "/bin/sh", "-c", command));
+                List.of("docker", "exec", "-w", workdir, containerId, "/bin/sh", "-c", command));
         // pb.directory() left as inherited — docker exec doesn't care about the
         // host-side cwd; the -w flag controls the in-container cwd.
       } else {

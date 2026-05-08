@@ -113,11 +113,60 @@ public class WorkerAgent {
   public static final int STAGNATION_FORCE_AFTER_N = 12;
 
   /**
+   * V182 layer-3 — within how many iterations of {@code completeTask} must a successful {@code
+   * runTests} call have occurred? When {@link WorkerTaskRequest#requireTestVerification()} is true,
+   * the dispatch loop refuses {@code completeTask} unless the agent ran tests within this window. 5
+   * is calibrated to be tight enough that the agent can't claim "I ran the tests 30 iters ago and
+   * they passed" but loose enough to allow a few post-test polishing iterations (re-read the
+   * output, double-check the diff).
+   */
+  public static final int TEST_VERIFICATION_RECENCY_ITERS = 5;
+
+  /**
+   * Name of the structured pytest tool ({@link com.navneet.executespec.tool.RunTestsTool}). Used by
+   * the layer-3 verification gate to identify the call that satisfies it.
+   */
+  static final String RUN_TESTS_TOOL_NAME = "runTests";
+
+  /**
+   * Name of the project-build tool ({@link com.navneet.executespec.tool.BuildProjectTool}). Used by
+   * the 2026-05-08 build-verification gate (mirrors the test-verification gate from V182 layer-3)
+   * to identify the call that satisfies it.
+   */
+  static final String BUILD_PROJECT_TOOL_NAME = "buildProject";
+
+  /**
+   * 2026-05-08 — within how many iterations of {@code completeTask} must a successful {@code
+   * buildProject} call (exit=0) have occurred? When {@link
+   * WorkerTaskRequest#requireBuildVerification()} is true, the dispatch loop refuses {@code
+   * completeTask} unless the agent ran a passing build within this window. 5 matches the
+   * test-verification gate — tight enough that the agent can't claim "I built it 20 edits ago" but
+   * loose enough for a few post-fix polishing iters.
+   */
+  public static final int BUILD_VERIFICATION_RECENCY_ITERS = 5;
+
+  /**
    * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
-   * shell don't reset the counter — only file mutations.
+   * shell don't reset the counter — only file mutations and explicit build attempts.
+   *
+   * <p>{@code buildProject} added 2026-05-08: cmatrix gemini run 84252898 stagnated despite the
+   * agent legitimately alternating between read + write + build cycles, because the build calls
+   * didn't reset the counter. Build attempts ARE deliberate forward motion (especially in
+   * programbench mode where {@link com.navneet.executespec.tool.BuildProjectTool}'s wrapper fails
+   * any no-op compile.sh — so spam-build can't game the guard, every successful build implies real
+   * source compiled).
    */
   private static final java.util.Set<String> WRITE_CLASS_TOOLS =
-      java.util.Set.of("writeFile", "editFile");
+      java.util.Set.of("writeFile", "editFile", "buildProject");
+
+  /**
+   * Per-call HTTP read-timeout override applied to every worker LLM call. Honoured by {@link
+   * GeminiNativeToolClient} (where the static default 60s is too tight for thinking-model worker
+   * calls); ignored by Anthropic + OpenAI clients (Spring AI manages their HTTP timeouts).
+   * Calibrated 2026-05-08 from cmatrix gemini run 84252898 — task T3 timed out after a 17-min
+   * worker phase with 122k input tokens.
+   */
+  private static final int WORKER_HTTP_READ_TIMEOUT_SECONDS = 120;
 
   public WorkerResult run(WorkerTaskRequest req) {
     return run(req, null);
@@ -192,8 +241,46 @@ public class WorkerAgent {
 
     // Stagnation guard state — counts consecutive iterations without a
     // write-class tool call. Reset to 0 on any writeFile / editFile.
+    // Per-task override (req.stagnationWarnAfter / req.stagnationForceAfter): SequentialExecutor
+    // sets these per complexity (LOW=8/12 default, MEDIUM=12/18, HIGH=18/28) so that legitimate
+    // reverse-engineering / multi-file-read iterations on HIGH tasks (e.g. ProgramBench cmatrix)
+    // don't trip the guard before the worker can write. Falls through to the static defaults
+    // when null, preserving prior behaviour for callers that don't set the override.
+    final int stagnationWarnAfter =
+        req.stagnationWarnAfter() != null && req.stagnationWarnAfter() > 0
+            ? req.stagnationWarnAfter()
+            : STAGNATION_WARN_AFTER_N;
+    final int stagnationForceAfter =
+        req.stagnationForceAfter() != null && req.stagnationForceAfter() > stagnationWarnAfter
+            ? req.stagnationForceAfter()
+            : Math.max(STAGNATION_FORCE_AFTER_N, stagnationWarnAfter + 4);
     int stagnantIters = 0;
     boolean stagnationWarned = false;
+
+    // V182 layer-3 — last iteration on which a runTests call returned an ok envelope.
+    // -1 means "never". Refreshed inside the per-tool-call dispatch when name=runTests
+    // and the envelope JSON starts with `{"ok":true`. The completeTask gate consults
+    // this before allowing termination.
+    int lastTestRunIter = -1;
+    final boolean gateOn = Boolean.TRUE.equals(req.requireTestVerification());
+
+    // 2026-05-08 — last iteration on which a buildProject tool returned an ok envelope WITH
+    // exit=0 in its content. Mirrors lastTestRunIter; consulted by the completeTask gate when
+    // requireBuildVerification is true (set by ReviewerAgent when entering a pass on a
+    // build-failing workspace).
+    int lastBuildPassIter = -1;
+    final boolean buildGateOn = Boolean.TRUE.equals(req.requireBuildVerification());
+
+    // 2026-05-08 — Lever A: force-edit watchdog. Counts total write-class tool calls (writeFile,
+    // editFile) across the whole run. When the worker passes 70% of maxIter without any write,
+    // we inject a one-shot UserMessage that breaks investigation paralysis: "you've read enough,
+    // commit to an edit now or empty patch is automatic failure." This targets the SWE-bench
+    // empty-patch failure mode (sqlfluff-1733 et al) where the agent reads 60+ files without
+    // ever writing one. Stagnation guard catches consecutive non-write streaks; this watchdog
+    // catches the slower "always-investigating" pattern across the whole run.
+    int totalWriteCalls = 0;
+    boolean forceEditNudged = false;
+    final int forceEditAtIter = Math.max(5, (int) Math.round(maxIter * 0.7));
 
     if (!isResume) {
       log.info(
@@ -218,12 +305,38 @@ public class WorkerAgent {
         double spent = costTracker.snapshot(runId).costUsd();
         if (spent >= hardCapUsd) {
           log.warn(
-              "WorkerAgent BUDGET_EXCEEDED run={} task={} iter={} spent=${} cap=${}",
+              "WorkerAgent BUDGET_EXCEEDED run={} task={} iter={} spent=${} cap=${} totalWrites={}",
               runId,
               req.context().taskId(),
               iter,
               String.format("%.4f", spent),
-              String.format("%.4f", hardCapUsd));
+              String.format("%.4f", hardCapUsd),
+              totalWriteCalls);
+          // 2026-05-08 — extend Lever B salvage to BUDGET_EXCEEDED path. Previously only
+          // ITERATION_LIMIT_EXCEEDED triggered runSalvageCall; a BUDGET_EXCEEDED with zero
+          // writes also produced an empty patch (observed Gemini sqlfluff-1733/1517 hitting
+          // $4 cap with 0 edits). One extra LLM call is ~$0.10-0.50, acceptable spend over
+          // the cap to convert "empty patch = automatic failure" into "best-guess patch =
+          // possible resolve." For BYOK runs cap is null so this branch never fires anyway.
+          if (totalWriteCalls == 0) {
+            try {
+              WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
+              if (salvage != null) {
+                // Mark salvage outcome distinct from clean BUDGET_EXCEEDED so downstream sees
+                // we DID produce output despite hitting cap. Reuses the iter-limit salvage
+                // path which returns COMPLETED on a successful write.
+                log.info(
+                    "WorkerAgent BUDGET_EXCEEDED salvage produced output run={}",
+                    req.context().runId());
+                return salvage;
+              }
+            } catch (Exception e) {
+              log.warn(
+                  "WorkerAgent BUDGET salvage failed run={}: {}",
+                  req.context().runId(),
+                  e.getMessage());
+            }
+          }
           recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
           // P3.1 (GA-readiness, 2026-05-06) — return outcome=BUDGET_EXCEEDED so the executor
           // sees the budget signal directly. Previously this path called errorResult(...) which
@@ -260,6 +373,15 @@ public class WorkerAgent {
                     // Strip gitCommit from the worker's tool authorities. See
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
                     .toolsOverride(toolRegistry.bindForWorker(req.context()))
+                    // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
+                    // calibrated to fail fast on stalled worker calls. But gemini-3-pro-preview
+                    // (thinking model) regularly takes 60-90s on dense tool-call iterations,
+                    // tripping the timeout mid-task. Cmatrix run 84252898 task T3 FAILED with
+                    // ResourceAccessException I/O error after the worker burned 17m of work.
+                    // 120s gives 2× headroom while still detecting genuinely stuck calls within
+                    // 2 minutes. Anthropic + OpenAI clients ignore the field (Spring AI manages
+                    // their HTTP timeouts).
+                    .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
                     .build());
       } catch (Exception e) {
         log.error("WorkerAgent router failure at iter={}", iter, e);
@@ -334,6 +456,92 @@ public class WorkerAgent {
       for (AssistantMessage.ToolCall tc : calls) {
         toolsDispatched++;
         if (CompleteTaskTool.NAME.equals(tc.name())) {
+          // V182 layer-3 verification gate. When the request opted in (patch mode),
+          // refuse completeTask unless a runTests call landed within the last
+          // TEST_VERIFICATION_RECENCY_ITERS iterations. The agent gets the refusal
+          // envelope in tool history and can react by calling runTests next iter.
+          // Build mode (gateOn=false) keeps today's behaviour — completeTask always
+          // succeeds because build mode has its own smoke gate downstream.
+          if (gateOn) {
+            int sinceLastTest = lastTestRunIter < 0 ? Integer.MAX_VALUE : iter - lastTestRunIter;
+            if (sinceLastTest > TEST_VERIFICATION_RECENCY_ITERS) {
+              String reason;
+              if (lastTestRunIter < 0) {
+                reason =
+                    "completeTask refused — you have not called the `runTests` tool"
+                        + " in this conversation. Run the failing test (using runTests"
+                        + " with the FAIL_TO_PASS test ids from the user message) and"
+                        + " confirm it passes before calling completeTask. The bench"
+                        + " harness will not score your patch unless the failing test"
+                        + " actually passes.";
+              } else {
+                reason =
+                    "completeTask refused — last successful runTests was "
+                        + sinceLastTest
+                        + " iterations ago (gate window: "
+                        + TEST_VERIFICATION_RECENCY_ITERS
+                        + "). Re-run the failing test now to confirm your patch still"
+                        + " works against the live workspace, then call completeTask"
+                        + " again.";
+              }
+              String refused = errEnvelope("FORBIDDEN", reason);
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → REFUSED (no recent runTests)");
+              log.info(
+                  "WorkerAgent completeTask GATED run={} task={} iter={} sinceLastTest={}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  sinceLastTest == Integer.MAX_VALUE ? "never" : sinceLastTest);
+              // Don't return — fall through; the rest of this iter's tool calls (if any)
+              // still dispatch normally, and the next iter the agent sees the refusal
+              // in history.
+              continue;
+            }
+          }
+          // 2026-05-08 build-verification gate. Symmetric to the test-verification gate above:
+          // when the reviewer entered with finalBuildPassed=false, it sets
+          // requireBuildVerification.
+          // We refuse completeTask unless the agent has run buildProject and seen exit=0 within
+          // BUILD_VERIFICATION_RECENCY_ITERS. Without this, the reviewer often calls completeTask
+          // after a few exploratory edits without re-running the build — leaving the workspace
+          // in PARTIAL/FINAL_BUILD_FAILED. Targets the dominant 30-day failure mode (16/22).
+          if (buildGateOn) {
+            int sinceLastBuild =
+                lastBuildPassIter < 0 ? Integer.MAX_VALUE : iter - lastBuildPassIter;
+            if (sinceLastBuild > BUILD_VERIFICATION_RECENCY_ITERS) {
+              String reason;
+              if (lastBuildPassIter < 0) {
+                reason =
+                    "completeTask refused — the build was failing entering this review pass"
+                        + " and you have not yet seen a successful `buildProject` call (exit=0)"
+                        + " in this conversation. Make whatever edits are needed to fix the"
+                        + " build error, then call buildProject and confirm exit=0 before"
+                        + " calling completeTask. A reviewer pass that ends with a still-failing"
+                        + " build is the dominant cause of PARTIAL runs in production.";
+              } else {
+                reason =
+                    "completeTask refused — last passing buildProject (exit=0) was "
+                        + sinceLastBuild
+                        + " iterations ago (gate window: "
+                        + BUILD_VERIFICATION_RECENCY_ITERS
+                        + "). You may have edited files since then. Re-run buildProject now"
+                        + " to confirm the build still passes, then call completeTask again.";
+              }
+              String refused = errEnvelope("FORBIDDEN", reason);
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → REFUSED (no recent buildProject pass)");
+              log.info(
+                  "WorkerAgent completeTask BUILD-GATED run={} task={} iter={} sinceLastBuild={}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  sinceLastBuild == Integer.MAX_VALUE ? "never" : sinceLastBuild);
+              continue;
+            }
+          }
           completionSummary = extractSummary(tc.arguments());
           String envelope = okEnvelope("task marked complete: " + completionSummary);
           toolResponses.add(
@@ -358,6 +566,33 @@ public class WorkerAgent {
         }
         metrics.recordToolCall(tc.name());
         String envelope = dispatchOne(tc, req);
+        // V182 layer-3 — track successful runTests for the completeTask gate.
+        // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
+        // "runTests tool was called." Empirical motivation: 3 of 5 OpenAI hard-matrix failures
+        // produced thin (1-2K token) wrong-fix patches because the agent ran tests, saw FAIL,
+        // and called completeTask anyway — the gate let it through because it was scoped to
+        // "tool was invoked" not "tests passed." Now: require the envelope to contain the
+        // pytest-pass markers `"failed":[]` AND `"errored":[]` AND `"exit_code":0` to satisfy
+        // the gate. Until those are present, completeTask remains REFUSED.
+        if (RUN_TESTS_TOOL_NAME.equals(tc.name())
+            && envelope != null
+            && envelope.startsWith("{\"ok\":true")
+            && envelope.contains("\\\"failed\\\":[]")
+            && envelope.contains("\\\"errored\\\":[]")
+            && envelope.contains("\\\"exit_code\\\":0")) {
+          lastTestRunIter = iter;
+        }
+        // 2026-05-08 — track successful buildProject (exit=0) for the build-verification gate.
+        // BuildProjectTool's content includes a "\nexit=<n>\n" line; in the JSON-encoded ok
+        // envelope this becomes the literal substring `\\nexit=0\\n`. Match conservatively to
+        // avoid false-positive on output text that happens to contain "exit=0" without the
+        // newline framing (e.g. compiler messages quoting source).
+        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name())
+            && envelope != null
+            && envelope.startsWith("{\"ok\":true")
+            && envelope.contains("\\nexit=0\\n")) {
+          lastBuildPassIter = iter;
+        }
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
         toolLog.add(tc.name() + "(" + previewArgs(tc.arguments()) + ")");
@@ -379,33 +614,71 @@ public class WorkerAgent {
       boolean wroteThisIter = calls.stream().anyMatch(tc -> WRITE_CLASS_TOOLS.contains(tc.name()));
       if (wroteThisIter) {
         stagnantIters = 0;
+        // 2026-05-08 Lever A — count writes across the whole run for the force-edit watchdog.
+        for (AssistantMessage.ToolCall tc : calls) {
+          if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) totalWriteCalls++;
+        }
       } else {
         stagnantIters++;
       }
-      if (!stagnationWarned && stagnantIters >= STAGNATION_WARN_AFTER_N) {
+      // 2026-05-08 Lever A: force-edit nudge. If we've crossed the 70% iter threshold with
+      // ZERO writes total (not just this iter — investigation paralysis pattern from SWE-bench
+      // sqlfluff-1733: 75 iter cap, 0 edits, empty patch), inject a one-shot UserMessage telling
+      // the agent to commit to ANY edit. UserMessage (not SystemMessage) for the same Gemini
+      // cache-prefix reason as the stagnation warning above.
+      if (!forceEditNudged && iter >= forceEditAtIter && totalWriteCalls == 0) {
         log.info(
-            "WorkerAgent STAGNATION_WARN run={} task={} iter={} stagnantIters={}",
+            "WorkerAgent FORCE_EDIT_NUDGE run={} task={} iter={}/{} totalWrites=0",
             req.context().runId(),
             req.context().taskId(),
             iter,
-            stagnantIters);
+            maxIter);
         history.add(
-            new SystemMessage(
+            new UserMessage(
+                "INVESTIGATION PHASE OVER. You've used "
+                    + iter
+                    + " of "
+                    + maxIter
+                    + " iterations reading files without writing anything. An empty patch"
+                    + " is automatic failure — even a wrong-file edit is better than zero."
+                    + " Pick the file that most likely contains the bug based on what you've"
+                    + " read, edit it, and call buildProject (build mode) or runTests (patch"
+                    + " mode) to verify. Do NOT do another round of reads — commit to an"
+                    + " edit on your VERY NEXT response."));
+        forceEditNudged = true;
+      }
+      if (!stagnationWarned && stagnantIters >= stagnationWarnAfter) {
+        log.info(
+            "WorkerAgent STAGNATION_WARN run={} task={} iter={} stagnantIters={} threshold={}",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            stagnantIters,
+            stagnationWarnAfter);
+        // 2026-05-08 — must be a UserMessage, NOT a SystemMessage. GeminiNativeToolClient
+        // concatenates every SystemMessage into systemInstruction (see GeminiNativeToolClient.java
+        // ~line 240); appending one mid-run mutates the cache prefix and invalidates implicit
+        // prompt caching for the rest of the task. UserMessage stays in the contents[] list
+        // where Gemini treats it as a normal turn — cache prefix preserved. Anthropic + OpenAI
+        // honour the warning equally well as a user turn.
+        history.add(
+            new UserMessage(
                 "PROGRESS CHECK: "
-                    + STAGNATION_WARN_AFTER_N
+                    + stagnationWarnAfter
                     + " consecutive iterations with no new file writes. If your task is done,"
                     + " call completeTask now. If a build error blocks you, fix the file. Do"
                     + " NOT re-read files you have already verified, do NOT re-inspect git"
                     + " state, do NOT add 'one more verification' round-trips."));
         stagnationWarned = true;
       }
-      if (stagnantIters >= STAGNATION_FORCE_AFTER_N) {
+      if (stagnantIters >= stagnationForceAfter) {
         log.warn(
-            "WorkerAgent STAGNATION_FORCE run={} task={} iter={} stagnantIters={}",
+            "WorkerAgent STAGNATION_FORCE run={} task={} iter={} stagnantIters={} threshold={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
-            stagnantIters);
+            stagnantIters,
+            stagnationForceAfter);
         recordTerminal(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, req, iter);
         return WorkerResult.builder()
             .outcome(WorkerResult.Outcome.COMPLETED_BY_STAGNATION)
@@ -426,10 +699,32 @@ public class WorkerAgent {
     }
 
     log.warn(
-        "WorkerAgent ITERATION LIMIT run={} task={} iters={}",
+        "WorkerAgent ITERATION LIMIT run={} task={} iters={} totalWrites={}",
         req.context().runId(),
         req.context().taskId(),
-        maxIter);
+        maxIter,
+        totalWriteCalls);
+
+    // 2026-05-08 Lever B: best-guess salvage. We hit the iter cap with zero writes — the agent
+    // exhausted the budget on investigation without committing to any edit. Make ONE final LLM
+    // call asking for the best-guess edit, with explicit forcing function. The salvage call
+    // gets a much shorter system prompt (just "you're out of iters, dump your best guess as a
+    // writeFile/editFile call now") and runs with reduced maxIter=2 (the salvage call itself +
+    // one iter for tool dispatch). Even a wrong-file edit produces SOMETHING in the diff —
+    // empty diff is automatic failure on the SWE-bench evaluator.
+    if (totalWriteCalls == 0) {
+      try {
+        WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
+        if (salvage != null) return salvage;
+      } catch (Exception e) {
+        log.warn(
+            "WorkerAgent SALVAGE call failed run={} task={}: {}",
+            req.context().runId(),
+            req.context().taskId(),
+            e.getMessage());
+      }
+    }
+
     recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIter);
     return WorkerResult.builder()
         .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
@@ -439,6 +734,119 @@ public class WorkerAgent {
         .toolCallLog(toolLog)
         .totalLatencyMs(System.currentTimeMillis() - start)
         .build();
+  }
+
+  /**
+   * 2026-05-08 Lever B salvage. Make one final LLM call with the worker's full conversation history
+   * + a forcing function ("you're out of iters, write SOMETHING now"). If the LLM emits a
+   * write-class tool call (writeFile / editFile), dispatch it once and return COMPLETED; otherwise
+   * return null and the caller falls through to ITERATION_LIMIT_EXCEEDED.
+   *
+   * <p>Why this beats just letting the iter cap fire: the worker's history has all the
+   * investigation context (every readFile output, every searchFiles result). The LLM at this point
+   * has built a mental model of the bug — the salvage prompt asks it to dump that into a patch
+   * instead of abandoning it. Even a wrong-file edit produces a non-empty diff which is better than
+   * nothing on the SWE-bench evaluator (won't resolve, but doesn't fail at the empty-patch
+   * precondition).
+   */
+  private WorkerResult runSalvageCall(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start) {
+    log.info(
+        "WorkerAgent SALVAGE attempting run={} task={} historyLen={}",
+        req.context().runId(),
+        req.context().taskId(),
+        history.size());
+
+    history.add(
+        new UserMessage(
+            "ITER LIMIT REACHED. You've explored extensively but haven't written any code. This is"
+                + " your last call. Based on everything you've read, output ONE writeFile or"
+                + " editFile tool call with your best-guess fix. Even a wrong-file edit beats an"
+                + " empty patch (empty = automatic failure). Do NOT think out loud, do NOT call"
+                + " readFile or any other tool first — emit the write tool call DIRECTLY. If"
+                + " genuinely impossible to guess, call completeTask with summary='salvage: no fix"
+                + " identified' to exit cleanly."));
+
+    ChatResponse resp;
+    try {
+      resp =
+          router.call(
+              LlmRequest.builder()
+                  .provider(req.provider())
+                  .model(req.model())
+                  .messages(history)
+                  .context(req.context())
+                  .temperature(0.0)
+                  .maxTokens(req.maxTokensPerCall())
+                  .toolsOverride(toolRegistry.bindForWorker(req.context()))
+                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .build());
+    } catch (Exception e) {
+      log.warn("WorkerAgent SALVAGE router error: {}", e.getMessage());
+      return null;
+    }
+
+    if (resp == null || resp.getResults() == null || resp.getResults().isEmpty()) return null;
+    AssistantMessage assistant = resp.getResults().get(0).getOutput();
+    List<AssistantMessage.ToolCall> calls = assistant.getToolCalls();
+    if (calls == null || calls.isEmpty()) {
+      log.info("WorkerAgent SALVAGE no tool calls produced — falling through to iter-limit");
+      return null;
+    }
+
+    // Dispatch each tool call from the salvage response. We accept writeFile, editFile, AND
+    // completeTask (the agent admitting it can't guess). Other tools dispatched but ignored
+    // (unlikely to fire at this stage given the prompt).
+    boolean wroteAnything = false;
+    String salvageSummary = null;
+    for (AssistantMessage.ToolCall tc : calls) {
+      if (CompleteTaskTool.NAME.equals(tc.name())) {
+        salvageSummary = "salvage path: " + extractSummary(tc.arguments());
+        log.info("WorkerAgent SALVAGE got completeTask: {}", salvageSummary);
+        recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIterOf(req));
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
+            .iterations(maxIterOf(req))
+            .toolCallsDispatched(toolsDispatched)
+            .completionSummary(salvageSummary)
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
+      if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
+        String env = dispatchOne(tc, req);
+        toolLog.add(
+            "SALVAGE "
+                + tc.name()
+                + " -> "
+                + (env != null && env.startsWith("{\"ok\":true") ? "OK" : "ERR"));
+        if (env != null && env.startsWith("{\"ok\":true")) wroteAnything = true;
+      }
+    }
+
+    if (wroteAnything) {
+      log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED");
+      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterOf(req));
+      return WorkerResult.builder()
+          .outcome(WorkerResult.Outcome.COMPLETED)
+          .iterations(maxIterOf(req))
+          .toolCallsDispatched(toolsDispatched + calls.size())
+          .completionSummary("salvage: best-guess edit produced after iter-limit")
+          .toolCallLog(toolLog)
+          .totalLatencyMs(System.currentTimeMillis() - start)
+          .build();
+    }
+    return null;
+  }
+
+  private static int maxIterOf(WorkerTaskRequest req) {
+    return req.maxIterations() != null && req.maxIterations() > 0
+        ? req.maxIterations()
+        : DEFAULT_MAX_ITER;
   }
 
   /** Emit worker outcome + iterations metrics at every terminal path. */

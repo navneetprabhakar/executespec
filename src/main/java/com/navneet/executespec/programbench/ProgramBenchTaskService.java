@@ -166,7 +166,27 @@ public class ProgramBenchTaskService {
       if (startResult.exit() != 0) {
         throw new RuntimeException("docker run failed: " + startResult.output());
       }
-      String containerId = startResult.output().trim();
+      // Extract the container ID from the LAST non-blank line of output. On arm64 hosts
+      // (Apple Silicon dev macs) running an amd64 cleanroom image, docker emits a
+      // "WARNING: requested image's platform (linux/amd64) does not match the detected host
+      // platform (linux/arm64/v8)..." line on stderr that's merged into stdout BEFORE the
+      // cid. A naive `output().trim()` then captures the warning as the cid, every
+      // subsequent `docker exec <warning>` returns "404 page not found", and the agent
+      // can't run any shell command. Caught locally 2026-05-07 against the Gemini fix
+      // verification — worker stagnated trying to invoke shell while the container was
+      // actually running fine under its `--name pb-run-...` alias.
+      String[] outLines = startResult.output().trim().split("\\r?\\n");
+      String containerId = "";
+      for (int i = outLines.length - 1; i >= 0; i--) {
+        if (!outLines[i].trim().isEmpty()) {
+          containerId = outLines[i].trim();
+          break;
+        }
+      }
+      if (containerId.isEmpty()) {
+        throw new RuntimeException(
+            "docker run produced no container id; output=" + startResult.output());
+      }
       log.info(
           "ProgramBench: container {} ({}) ready for run {}, workspace={}",
           recipe.containerName(),
@@ -231,13 +251,25 @@ public class ProgramBenchTaskService {
     // but the human-readable --name we use for `docker rm -f` is stable across both call sites).
     String containerName = "pb-run-" + UUID.randomUUID().toString().substring(0, 8);
 
+    // 2026-05-08 — pre-discover the cleanroom toolchain (libraries, headers, package-config
+    // entries, language toolchains) and inject the inventory into the user prompt. Cmatrix runs
+    // 2026-05-07 had Anthropic + Gemini producing real cmatrix.c source code with ncursesw
+    // linking, but their compile.sh failed inside the eval container (probably missing
+    // pkg-config or wrong -l flag). Surfacing what's actually available before the agent picks
+    // its build approach should close the gap. Pull is idempotent — the listener does it
+    // again as a no-op. Discovery runs in a throwaway --rm container so no state leaks.
+    String toolchainInventory = discoverToolchain(image);
+
     // Stash recipe → submitRun → V2 ensureRunWorkspace → RunStarted event → listener does
     // docker pull/create/cp/run with workspaceHost = <agent.workspace>/<runId> (= same host
     // dir V2's worker tools write to). After listener returns, async pipeline starts.
-    String userRequest = synthesizeUserRequest(meta);
+    String userRequest = synthesizeUserRequest(meta, toolchainInventory);
     PipelineRun run;
     PENDING.set(new SetupRecipe(image, containerName, taskId));
     try {
+      // V182 — runMode=PATCH so the orchestrator dispatches a single
+      // PatchAgent loop instead of fragmenting the reverse-engineer
+      // task across classifier / planner / executor / reviewer phases.
       run =
           orchestrator.submitRun(
               userRequest,
@@ -253,7 +285,13 @@ public class ProgramBenchTaskService {
               /* createdByUserId */ props.getBenchUserId(),
               /* orgId */ props.getBenchOrgId(),
               /* projectId */ props.getBenchProjectId(),
-              /* executionMode */ "PROTOTYPE");
+              /* executionMode */ "PROTOTYPE",
+              /* selectedRepoIds */ java.util.List.of(),
+              /* figmaUrl */ null,
+              /* tddMode */ false,
+              /* branchOverride */ null,
+              /* prReviewComments */ null,
+              /* runMode */ com.navneet.executespec.state.RunMode.PATCH);
     } catch (Exception e) {
       // submitRun failed — the listener may or may not have fired (depends on where it failed).
       // Best-effort: remove any container the listener may have started.
@@ -374,57 +412,129 @@ public class ProgramBenchTaskService {
     return props.getDockerOrg() + "/" + taskId.replace("__", "_1776_") + ":task_cleanroom";
   }
 
-  private String synthesizeUserRequest(TaskMeta m) {
+  private String synthesizeUserRequest(TaskMeta m, String toolchainInventory) {
+    String inventoryBlock =
+        toolchainInventory == null || toolchainInventory.isBlank()
+            ? "(toolchain inventory unavailable — discover via dpkg / pkg-config / which once your"
+                + " worker container is up)"
+            : toolchainInventory.trim();
     return String.format(
         """
-        Reimplement the compiled program at /workspace from scratch in %s, matching its
-        observable behavior as closely as possible. The original repository was %s at commit %s
-        but you do NOT have internet access — you cannot look it up.
+Reimplement the compiled program at /workspace from scratch in %s, matching its
+observable behavior as closely as possible. The original repository was %s at commit %s
+but you do NOT have internet access — you cannot look it up.
 
-        # Build contract — IMPORTANT
+# Cleanroom toolchain inventory (pre-discovered for this task)
 
-        The evaluation harness builds your submission by running:
-            chmod +x ./compile.sh && ./compile.sh
+Use this list when picking your build approach. Don't link against a library that
+isn't here. Don't `apt install` (--network none). If a header you need is missing,
+choose a different language path.
 
-        from /workspace. Your submission MUST contain a `compile.sh` at /workspace root that
-        builds your sources to /workspace/executable. Examples:
+%s
 
-            # C
-            #!/bin/bash
-            set -e
-            cd $(dirname $0)
-            gcc *.c -o executable -lncursesw
+# Build contract — IMPORTANT
 
-            # Rust
-            #!/bin/bash
-            set -e
-            cd $(dirname $0)
-            cargo build --release --offline
-            cp target/release/<binname> executable
+The evaluation harness builds your submission by running:
+    chmod +x ./compile.sh && ./compile.sh
 
-            # Go
-            #!/bin/bash
-            set -e
-            cd $(dirname $0)
-            go build -o executable .
+from /workspace. Your submission MUST contain a `compile.sh` at /workspace root that
+builds your sources to /workspace/executable. The eval WIPES /workspace before running
+compile.sh and then extracts your submission tar — so compile.sh must produce a FRESH
+executable from your source. ExecuteSpec's build smoke also enforces this (a no-op
+compile.sh that leaves the cleanroom binary untouched fails fast).
 
-        # How to work
+Examples (pick one matching your source language and the inventory above):
 
-        1. Explore /workspace — README, man pages, --help / --version output, examples
-        2. Run the binary with representative inputs to understand behavior, output format,
-           edge cases, and especially error paths (invalid arguments, --help, --version)
-        3. Write source files in /workspace using the language's standard project layout
-        4. Write compile.sh and verify it produces a working executable matching the original
-        5. Test edge cases: invalid args, --help / --version, exit codes — these matter
-        6. Iterate until your binary's behavior matches the original on representative inputs
+    # C with ncursesw (check the inventory: pkg-config --libs ncursesw / libncursesw5-dev)
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    gcc *.c -o executable $(pkg-config --cflags --libs ncursesw 2>/dev/null || echo "-lncursesw")
 
-        # Constraints
+    # Rust
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    cargo build --release --offline
+    cp target/release/<binname> executable
 
-        - Cleanroom: --network none. curl/wget/git clone/pip install all FAIL — don't try.
-        - The /workspace tree at completion time is your submission.
-        - Don't write source files outside /workspace.
-        """,
-        m.language(), m.repository(), m.commit());
+    # Go
+    #!/bin/bash
+    set -e
+    cd $(dirname $0)
+    go build -o executable .
+
+# How to work
+
+1. Confirm the toolchain inventory above matches what you find via `dpkg -l | grep <lib>`
+   or `pkg-config --list-all` if anything is unclear.
+2. Explore /workspace — README, man pages, --help / --version output, examples.
+3. Run the binary with representative inputs to understand behavior, output format,
+   edge cases, and especially error paths (invalid arguments, --help, --version).
+4. Write source files in /workspace using the language's standard project layout.
+5. Write compile.sh, picking link flags from the inventory. RUN it via buildProject
+   and verify the executable was rebuilt and the build smoke passes.
+6. Test edge cases: invalid args, --help / --version, exit codes — these matter.
+7. Iterate until your binary's behavior matches the original on representative inputs.
+
+# Constraints
+
+- Cleanroom: --network none. curl/wget/git clone/pip install all FAIL — don't try.
+- The /workspace tree at completion time is your submission.
+- Don't write source files outside /workspace.
+""",
+        m.language(), m.repository(), m.commit(), inventoryBlock);
+  }
+
+  /**
+   * Pre-discover the cleanroom toolchain by running a short diagnostic script in a throwaway
+   * container off the task image. The output is injected into the user prompt so the agent picks
+   * the correct {@code -l<lib>} / {@code pkg-config} invocation from iter 1 instead of guessing.
+   *
+   * <p>Best-effort — on any failure (image pull, docker run, timeout) returns an empty inventory
+   * and the agent falls back to discovering it themselves. Wall-bounded at 60s to keep the
+   * synchronous submit path fast even on cold-cache pulls.
+   */
+  String discoverToolchain(String image) {
+    String discoveryScript =
+        // dpkg lib + dev packages (1-line each)
+        "echo '## installed -dev / lib packages';"
+            + " dpkg -l 2>/dev/null | awk '/^ii/ && $2 ~ /(^lib|-dev$)/ {print $2 \" \" $3}' "
+            + " | head -50 || true; "
+            + "echo '';"
+            + " echo '## pkg-config entries';"
+            + " pkg-config --list-all 2>/dev/null | sort | head -30 || true;"
+            + " echo '';"
+            + " echo '## language toolchains';"
+            + " for t in gcc clang cc make cmake cargo rustc go python3 ruby node npm java javac"
+            + " mvn lua perl ghc; do"
+            + " V=$(\"$t\" --version 2>/dev/null | head -1); [ -n \"$V\" ] && echo \"$t: $V\";"
+            + " done;"
+            + " echo '';"
+            + " echo '## /usr/include top-level';"
+            + " ls /usr/include 2>/dev/null | head -40 || true;";
+    String runCmd =
+        "docker run --rm --network none --entrypoint /bin/sh "
+            + image
+            + " -c "
+            + "'"
+            + discoveryScript.replace("'", "'\\''")
+            + "'";
+    ShellResult r = run(runCmd, 60);
+    if (r.exit() != 0) {
+      log.warn(
+          "ProgramBench: toolchain discovery failed (exit={}, output={}); proceeding without"
+              + " inventory",
+          r.exit(),
+          r.output().substring(0, Math.min(200, r.output().length())));
+      return "";
+    }
+    String out = r.output();
+    // Cap inventory at 4 KB so the user prompt stays bounded.
+    if (out.length() > 4_000) {
+      out = out.substring(0, 4_000) + "\n[truncated " + (out.length() - 4_000) + " more chars]\n";
+    }
+    return out;
   }
 
   private record TaskMeta(
