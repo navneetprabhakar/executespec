@@ -745,6 +745,71 @@ public class SequentialExecutor {
           .build();
     }
 
+    // 2026-05-08 — HIGH-complexity tasks get a SECOND retry with the latest build error.
+    // Spring Boot multi-file scaffolds and similar heavy work occasionally need 2 build-error
+    // feedback loops to converge (LOW/MEDIUM tasks rarely benefit; their state space is small
+    // enough that retry-1 is decisive). retry-2 reuses the same requireBuildVerification gate
+    // so the worker MUST run buildProject and see exit=0 before claiming done. Cost ceiling
+    // is the per-run cost cap which absorbs the extra retry budget.
+    if (task.complexity() == PlannedTask.Complexity.HIGH) {
+      log.warn(
+          "Executor task={} HIGH-complexity, smoke still fails after retry-1; attempting retry-2",
+          task.id());
+      String retry2Prompt = composeUserPrompt(task, retrySmoke.output());
+      WorkerResult retry2 =
+          worker.run(
+              WorkerTaskRequest.builder()
+                  .provider(cfg.provider)
+                  .model(cfg.model)
+                  .systemPrompt(systemPrompt)
+                  .userPrompt(retry2Prompt)
+                  .context(taskCtx)
+                  .maxIterations(
+                      req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
+                  .temperature(0.0)
+                  .maxTokensPerCall(cfg.maxTokens)
+                  .stagnationWarnAfter(cfg.stagnationWarnAfter)
+                  .stagnationForceAfter(cfg.stagnationForceAfter)
+                  .requireBuildVerification(true)
+                  .build());
+      int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
+      if (retry2.outcome() == WorkerResult.Outcome.COMPLETED) {
+        SmokeTestResult retry2Smoke = runSmokeTest(taskCtx, plan.buildCommand());
+        if (retry2Smoke.passed()) {
+          log.info("Executor task={} SUCCESS_AFTER_RETRY2 (HIGH complexity)", task.id());
+          persistTaskStatus(runId, task.id(), "COMPLETE");
+          broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "COMPLETE"));
+          return TaskOutcome.builder()
+              .taskId(task.id())
+              .taskTitle(task.title())
+              .status(TaskOutcome.Status.SUCCESS_AFTER_RETRY)
+              .workerOutcome(primary)
+              .retryAttempted(true)
+              .retryWorkerOutcome(retry2)
+              .smokeTestPassed(true)
+              .smokeTestExitCode(retry2Smoke.exitCode())
+              .smokeTestOutput(retry2Smoke.output())
+              .totalLatencyMs(System.currentTimeMillis() - taskStart)
+              .toolCallsDispatched(totalToolCalls2)
+              .dispatchedProvider(cfg.provider)
+              .dispatchedModel(cfg.model)
+              .build();
+        }
+        // retry-2 completed but smoke STILL fails → fall through to COMPLETED_WITH_WARNING
+        // below with the retry-2 smoke output as the "after retry" signal.
+        retrySmoke = retry2Smoke;
+        retry = retry2;
+        totalToolCalls = totalToolCalls2;
+      } else {
+        log.warn(
+            "Executor task={} retry-2 WORKER_FAILED outcome={}; falling through to"
+                + " COMPLETED_WITH_WARNING with retry-1 smoke as final signal",
+            task.id(),
+            retry2.outcome());
+        totalToolCalls = totalToolCalls2;
+      }
+    }
+
     log.warn("Executor task={} smoke still fails after retry; COMPLETED_WITH_WARNING", task.id());
     // 2026-05-02 — surface the smoke failure inline on the task card. Use exit code +
     // a tail of the smoke output so the user sees something like "Build smoke failed
@@ -853,18 +918,22 @@ public class SequentialExecutor {
       }
       case HIGH -> {
         tier = AgentTier.PLANNING;
-        maxIter = 75;
+        // 2026-05-08 — HIGH iter cap 75 → 120 (matches PATCH mode's calibration). Pairs
+        // with WorkerAgent's Lever A force-edit watchdog (fires at 70% with zero writes)
+        // + Lever B best-guess salvage (fires on iter-limit with zero writes). Real cost
+        // ceiling is the per-run cost cap, not the iter cap. Extends headroom for genuine
+        // long-tail HIGH tasks (multi-file Spring Boot apps with deep wiring) that
+        // currently hit iter-limit at iter 75 mid-edit.
+        maxIter = 120;
         maxTokens = 16384;
-        // 2026-05-08 — bumped 18/28 → 22/32 after cmatrix gemini run 84252898 still
-        // stagnated at the 18-iter warn even with HIGH thresholds. Gemini's thinking-model
-        // dispatch produces fewer write-class tool calls per iter than Anthropic/OpenAI
-        // (more reasoning, less editing per round-trip). buildProject was also added to
-        // WRITE_CLASS_TOOLS so reverse-engineering loops that alternate read+build+write
-        // count buildProject as forward motion (it can't be gamed — the smoke wrapper
-        // requires a fresh executable hash, so every successful build implies real
-        // compilation).
-        stagnationWarnAfter = 22;
-        stagnationForceAfter = 32;
+        // 2026-05-08 — tightened HIGH stagnation 22/32 → 18/26. With iter cap bumped to
+        // 120, we have more total runway, so we can afford to terminate stuck loops
+        // earlier without strangling legitimate work. The 22/32 calibration was for
+        // 75-iter cap when each non-write iter was a larger fraction of the total budget.
+        // Now: 18 iters of pure reading still gets a warn; 26 iters force-terminates.
+        // That's <22% of the 120-iter budget — safe headroom.
+        stagnationWarnAfter = 18;
+        stagnationForceAfter = 26;
       }
       default -> {
         tier = AgentTier.WORKHORSE;

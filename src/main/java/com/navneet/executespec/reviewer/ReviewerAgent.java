@@ -279,8 +279,20 @@ public class ReviewerAgent {
     } catch (IllegalArgumentException e) {
       reviewerProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
     }
+    // 2026-05-08 — Gemini reviewer-on-Pro fix. Empirically the reviewer's prefix (system prompt
+    // + tools) is ~2-3K tokens, BELOW gemini-3-pro-preview's 4096-token implicit-cache threshold.
+    // Result: 0% cache hit rate on every reviewer call (validated 2026-05-08, 0/14 reviewer
+    // calls hit cache). Switching the reviewer to gemini-3-flash-preview (WORKHORSE tier, 1024
+    // threshold) lets implicit cache fire AND drops per-call cost ~5×. Flash is less capable
+    // than Pro on multi-step reasoning, but reviewer work is inspect-and-fix not novel-design,
+    // and the build-error injection (today's earlier fix) gives the reviewer a concrete spec
+    // anyway. Anthropic + OpenAI reviewers stay on PLANNING tier (cache works fine there).
+    com.navneet.executespec.router.AgentTier reviewerTier =
+        reviewerProvider == com.navneet.executespec.router.LlmProvider.GEMINI
+            ? com.navneet.executespec.router.AgentTier.WORKHORSE
+            : com.navneet.executespec.router.AgentTier.PLANNING;
     com.navneet.executespec.router.ResolvedModel resolved =
-        modelResolver.resolve("ReviewerAgent", reviewerProvider);
+        modelResolver.resolve("ReviewerAgent", reviewerProvider, reviewerTier);
     String reviewerModel = resolved.getModel();
     String reviewerProviderName = resolved.getActualProvider().name().toLowerCase();
     String userPrompt = composeReviewerUserPrompt(preBuildError);
