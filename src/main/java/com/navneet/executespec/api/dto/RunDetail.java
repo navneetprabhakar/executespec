@@ -163,6 +163,20 @@ public class RunDetail {
   /** Which harness produced this run: "v1" (default) or "v2". Null for pre-V76 rows. */
   String harnessVersion;
 
+  /**
+   * V183 (2026-05-08) — pipeline shape: {@code BUILD} (default; planner + executor + reviewer) or
+   * {@code PATCH} (single thin-agent loop, used by SWE-bench / autofix runs). The frontend renders
+   * different evidence chips per mode so PATCH runs aren't judged against build-mode signals (build
+   * pass / reviewer verdict / endpoint coverage) that don't apply.
+   */
+  String runMode;
+
+  /**
+   * V183 — finding source key for autofix-triggered patch runs. {@code <TYPE>:<id>}. Null
+   * otherwise.
+   */
+  String triggeredByFinding;
+
   // ── Retry tracking ──────────────────────────────────────────────────────
   /** True if this run is a retry of a previous run. */
   Boolean isRetry;

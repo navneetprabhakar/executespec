@@ -51,6 +51,29 @@ public class PipelineRun {
   private String harnessVersion = "v1";
 
   /**
+   * V182 (2026-05-08) — which V2 pipeline shape this run uses. See {@link
+   * com.navneet.executespec.state.RunMode} for the authoritative spelling. {@code BUILD} is the
+   * default product flow (planner + executor + reviewer); {@code PATCH} is the single thin-agent
+   * loop used by the swebench + programbench bench services. Stored as a string for convention
+   * parity with {@code harness_version} / {@code execution_mode} / {@code status}. NOT NULL with
+   * DEFAULT 'BUILD' on the SQL side, so legacy rows + rows persisted before this column existed
+   * read as BUILD without breaking dispatch.
+   */
+  @Column(name = "run_mode", length = 16, nullable = false)
+  @lombok.Builder.Default
+  private String runMode = com.navneet.executespec.state.RunMode.BUILD;
+
+  /**
+   * V183 (2026-05-08) — when a patch-mode run is dispatched in response to a project-side finding
+   * (PR review, tech debt, code review, CI failure), this column stamps the originating finding id
+   * so the dashboard can render "Triggered by ..." instead of an orphan run + the {@link
+   * com.navneet.executespec.finding.FindingPatchSubmitter} can dedupe re-dispatch. Format {@code
+   * <TYPE>:<id>}.
+   */
+  @Column(name = "triggered_by_finding", length = 128)
+  private String triggeredByFinding;
+
+  /**
    * Count of boot-time resume attempts for this run (incremented by {@code StartupRunResumer}).
    * Capped at 3 in code — past the cap a run is permanently FAILED with reason "resume limit
    * reached". Prevents infinite resume loops across repeated deploys.

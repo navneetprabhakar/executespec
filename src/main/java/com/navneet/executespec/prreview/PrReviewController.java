@@ -40,6 +40,7 @@ public class PrReviewController {
 
   private final PrReviewService service;
   private final ProjectAccessGuard projectAccessGuard;
+  private final PrReviewAutofixService autofixService;
 
   // ── Submit / fetch ─────────────────────────────────────────────────────────
 
@@ -82,6 +83,37 @@ public class PrReviewController {
       throw new ResponseStatusException(HttpStatus.BAD_GATEWAY, e.getMessage());
     }
     return ResponseEntity.status(HttpStatus.ACCEPTED).body(PrReviewDto.from(row));
+  }
+
+  /** Body for {@link #autofix}. */
+  public record AutofixResponse(String runId, String findingKey, String outcome) {}
+
+  /**
+   * Phase 1 (V183) — dispatch a patch-mode run that addresses every comment on a PR review. Returns
+   * 202 + the run id so the frontend can navigate to {@code /runs/{id}} and watch progress.
+   * Idempotent: a fresh dispatch when there's already an active run for this review returns the
+   * existing run with {@code outcome=REUSED_ACTIVE}; the caller surfaces the same UI either way
+   * (link to the in-flight run).
+   *
+   * <p>Pre-conditions: review must be COMPLETE, verdict must not be APPROVE, the review's repo must
+   * be linked to the project, GitHub must return a head branch (PR not closed unmerged). Each guard
+   * maps to a distinct 4xx for clear UX.
+   */
+  @PostMapping("/api/pr-reviews/{id}/autofix")
+  public ResponseEntity<AutofixResponse> autofix(
+      @PathVariable UUID id, @AuthenticationPrincipal AppUserDetails userDetails) {
+    if (userDetails == null) {
+      throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "authentication required");
+    }
+    PrReview review = service.findById(id);
+    if (review == null) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "PR review not found");
+    }
+    projectAccessGuard.assertCanRead(review.getProjectId(), userDetails);
+
+    var result = autofixService.dispatch(id, userDetails.getUser());
+    return ResponseEntity.status(HttpStatus.ACCEPTED)
+        .body(new AutofixResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }
 
   /** Get a single review by id (with comments inlined for convenience). */

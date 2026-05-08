@@ -298,6 +298,7 @@ public class LlmRouter {
             .maxOutputTokens(r.maxTokens())
             .forceToolCall(forceToolCall)
             .apiKey(apiKey)
+            .readTimeoutSeconds(r.readTimeoutSeconds())
             .build());
   }
 

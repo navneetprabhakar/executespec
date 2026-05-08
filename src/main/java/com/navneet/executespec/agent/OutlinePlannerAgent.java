@@ -102,6 +102,14 @@ public class OutlinePlannerAgent {
    */
   private static final long PLANNER_LLM_WALL_TIMEOUT_SECONDS = 8 * 60;
 
+  /**
+   * Per-call HTTP read-timeout override propagated through {@code LlmRequest.readTimeoutSeconds}.
+   * Currently honoured only by {@link GeminiNativeToolClient} — Anthropic + OpenAI manage their
+   * HTTP timeouts via Spring AI. 240s (4 minutes) gives Gemini's thinking models enough headroom
+   * for a single multi-task plan call while staying well under the wall timeout (480s).
+   */
+  private static final int PLANNER_HTTP_READ_TIMEOUT_SECONDS = 240;
+
   /** v2.5.11 — gates strict v3 planner behaviour (requirement enumeration + validation). */
   private static final String FLAG_V3_STRICT = "validation.v3-strict";
 
@@ -305,6 +313,17 @@ public class OutlinePlannerAgent {
                           .temperature(0.0)
                           .maxTokens(maxTokens)
                           .toolsOverride(List.of(submitOutline))
+                          // 2026-05-07 — Gemini's HTTP read-timeout default is 60s, but
+                          // gemini-3-pro-preview is a thinking model and a single multi-task
+                          // plan call can take 90-120s wall on warm-cache, much longer on
+                          // cold-cache. The 60s ceiling tripped on cmatrix run a0b81542
+                          // (gemini, 2026-05-07) — error "Request timed out: null" — and the
+                          // outline-failure fallback at RunOrchestrator emitted a 1-task
+                          // SINGLE_SHOT plan that the LIGHTWEIGHT worker then stagnated on.
+                          // 240s gives 4× headroom while staying well under the wall timeout
+                          // (480s). Anthropic + OpenAI clients ignore the field today; only
+                          // Gemini is wired to read it.
+                          .readTimeoutSeconds(PLANNER_HTTP_READ_TIMEOUT_SECONDS)
                           .build()));
       resp = fut.get(PLANNER_LLM_WALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     } catch (TimeoutException te) {
