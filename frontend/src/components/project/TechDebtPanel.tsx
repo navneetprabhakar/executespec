@@ -51,7 +51,15 @@ export default function TechDebtPanel({projectId}: {projectId: string}) {
   // the user clicks "Fix N security issues" and gets a "Watch run →" link inline. State
   // is per-mount; nothing persisted client-side because the run id is the durable handle.
   const [fixState, setFixState] = useState<
-    Record<string, {state: 'idle' | 'dispatching' | 'done' | 'error'; runId?: string; error?: string; outcome?: 'DISPATCHED' | 'REUSED_ACTIVE'}>
+    Record<
+      string,
+      {
+        state: 'idle' | 'dispatching' | 'done' | 'error';
+        runId?: string;
+        error?: string;
+        outcome?: 'DISPATCHED' | 'REUSED_ACTIVE';
+      }
+    >
   >({});
 
   async function handleFix(category: string) {
@@ -196,23 +204,15 @@ export default function TechDebtPanel({projectId}: {projectId: string}) {
           the user can watch progress without leaving the dashboard. */}
       {Object.keys(report.issuesByCategory).length > 0 && (
         <div>
-          <div className='text-[11px] uppercase tracking-wide text-muted mb-1'>
-            Fix by category
-          </div>
+          <div className='text-[11px] uppercase tracking-wide text-muted mb-1'>Fix by category</div>
           <div className='space-y-1'>
             {Object.entries(report.issuesByCategory)
               .sort((a, b) => b[1] - a[1])
               .map(([cat, count]) => {
                 const s = fixState[cat] ?? {state: 'idle'};
                 return (
-                  <div
-                    key={cat}
-                    className='flex items-center justify-between gap-2 text-xs'
-                  >
-                    <span
-                      className='font-mono'
-                      style={{color: catColor(cat)}}
-                    >
+                  <div key={cat} className='flex items-center justify-between gap-2 text-xs'>
+                    <span className='font-mono' style={{color: catColor(cat)}}>
                       {cat}
                     </span>
                     <span className='flex-1 text-right text-muted text-[10px]'>{count}</span>
