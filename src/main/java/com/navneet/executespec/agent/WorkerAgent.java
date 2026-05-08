@@ -129,6 +129,23 @@ public class WorkerAgent {
   static final String RUN_TESTS_TOOL_NAME = "runTests";
 
   /**
+   * Name of the project-build tool ({@link com.navneet.executespec.tool.BuildProjectTool}). Used by
+   * the 2026-05-08 build-verification gate (mirrors the test-verification gate from V182 layer-3)
+   * to identify the call that satisfies it.
+   */
+  static final String BUILD_PROJECT_TOOL_NAME = "buildProject";
+
+  /**
+   * 2026-05-08 — within how many iterations of {@code completeTask} must a successful {@code
+   * buildProject} call (exit=0) have occurred? When {@link
+   * WorkerTaskRequest#requireBuildVerification()} is true, the dispatch loop refuses {@code
+   * completeTask} unless the agent ran a passing build within this window. 5 matches the
+   * test-verification gate — tight enough that the agent can't claim "I built it 20 edits ago" but
+   * loose enough for a few post-fix polishing iters.
+   */
+  public static final int BUILD_VERIFICATION_RECENCY_ITERS = 5;
+
+  /**
    * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
    * shell don't reset the counter — only file mutations and explicit build attempts.
    *
@@ -246,6 +263,13 @@ public class WorkerAgent {
     // this before allowing termination.
     int lastTestRunIter = -1;
     final boolean gateOn = Boolean.TRUE.equals(req.requireTestVerification());
+
+    // 2026-05-08 — last iteration on which a buildProject tool returned an ok envelope WITH
+    // exit=0 in its content. Mirrors lastTestRunIter; consulted by the completeTask gate when
+    // requireBuildVerification is true (set by ReviewerAgent when entering a pass on a
+    // build-failing workspace).
+    int lastBuildPassIter = -1;
+    final boolean buildGateOn = Boolean.TRUE.equals(req.requireBuildVerification());
 
     if (!isResume) {
       log.info(
@@ -439,6 +463,48 @@ public class WorkerAgent {
               continue;
             }
           }
+          // 2026-05-08 build-verification gate. Symmetric to the test-verification gate above:
+          // when the reviewer entered with finalBuildPassed=false, it sets
+          // requireBuildVerification.
+          // We refuse completeTask unless the agent has run buildProject and seen exit=0 within
+          // BUILD_VERIFICATION_RECENCY_ITERS. Without this, the reviewer often calls completeTask
+          // after a few exploratory edits without re-running the build — leaving the workspace
+          // in PARTIAL/FINAL_BUILD_FAILED. Targets the dominant 30-day failure mode (16/22).
+          if (buildGateOn) {
+            int sinceLastBuild =
+                lastBuildPassIter < 0 ? Integer.MAX_VALUE : iter - lastBuildPassIter;
+            if (sinceLastBuild > BUILD_VERIFICATION_RECENCY_ITERS) {
+              String reason;
+              if (lastBuildPassIter < 0) {
+                reason =
+                    "completeTask refused — the build was failing entering this review pass"
+                        + " and you have not yet seen a successful `buildProject` call (exit=0)"
+                        + " in this conversation. Make whatever edits are needed to fix the"
+                        + " build error, then call buildProject and confirm exit=0 before"
+                        + " calling completeTask. A reviewer pass that ends with a still-failing"
+                        + " build is the dominant cause of PARTIAL runs in production.";
+              } else {
+                reason =
+                    "completeTask refused — last passing buildProject (exit=0) was "
+                        + sinceLastBuild
+                        + " iterations ago (gate window: "
+                        + BUILD_VERIFICATION_RECENCY_ITERS
+                        + "). You may have edited files since then. Re-run buildProject now"
+                        + " to confirm the build still passes, then call completeTask again.";
+              }
+              String refused = errEnvelope("FORBIDDEN", reason);
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → REFUSED (no recent buildProject pass)");
+              log.info(
+                  "WorkerAgent completeTask BUILD-GATED run={} task={} iter={} sinceLastBuild={}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  sinceLastBuild == Integer.MAX_VALUE ? "never" : sinceLastBuild);
+              continue;
+            }
+          }
           completionSummary = extractSummary(tc.arguments());
           String envelope = okEnvelope("task marked complete: " + completionSummary);
           toolResponses.add(
@@ -470,6 +536,17 @@ public class WorkerAgent {
             && envelope != null
             && envelope.startsWith("{\"ok\":true")) {
           lastTestRunIter = iter;
+        }
+        // 2026-05-08 — track successful buildProject (exit=0) for the build-verification gate.
+        // BuildProjectTool's content includes a "\nexit=<n>\n" line; in the JSON-encoded ok
+        // envelope this becomes the literal substring `\\nexit=0\\n`. Match conservatively to
+        // avoid false-positive on output text that happens to contain "exit=0" without the
+        // newline framing (e.g. compiler messages quoting source).
+        if (BUILD_PROJECT_TOOL_NAME.equals(tc.name())
+            && envelope != null
+            && envelope.startsWith("{\"ok\":true")
+            && envelope.contains("\\nexit=0\\n")) {
+          lastBuildPassIter = iter;
         }
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));

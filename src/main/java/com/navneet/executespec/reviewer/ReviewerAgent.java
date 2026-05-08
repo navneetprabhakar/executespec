@@ -129,13 +129,29 @@ public class ReviewerAgent {
             ? DEFAULT_MAX_ITER_PER_PASS
             : req.maxIterationsPerPass();
 
+    // ── Pre-review build smoke (2026-05-08) ──────────────────────────────
+    // Capture the build state going INTO the reviewer. When the per-task pipeline ended with
+    // partial / build-failing tasks, the reviewer's job changes: it's no longer "scan for subtle
+    // bugs" — it's "make this thing compile, here's the exact error." Without this signal the
+    // reviewer fishes generically through the codebase, often emits an empty completionSummary,
+    // and the run flips to PARTIAL/FINAL_BUILD_FAILED.
+    //
+    // Empirical motivation: 30-day failure rollup (2026-05-08) shows FINAL_BUILD_FAILED is
+    // 16/22 of all PARTIAL runs. Drilled-into example (Spring Boot run 77a1bf15): both reviewer
+    // passes returned empty generalPassSummary + wiringPassSummary while finalBuildExitCode=1.
+    //
+    // SWE-bench parallel: gold tests are the spec for patch-mode; the build error is the spec
+    // for build-mode. Inject it verbatim into the user prompt and the LLM has a concrete target.
+    String preReviewBuildError = capturePreReviewBuildError(req);
+
     log.info(
-        "ReviewerAgent START run={} task={} provider={} model={} skipWiring={}",
+        "ReviewerAgent START run={} task={} provider={} model={} skipWiring={} preBuildFailing={}",
         req.context().runId(),
         req.context().taskId(),
         req.provider(),
         req.model(),
-        req.skipWiringPass());
+        req.skipWiringPass(),
+        preReviewBuildError != null);
 
     // ── General pass ─────────────────────────────────────────────────────
     // A pass that hits the iteration cap has typically done meaningful fixes
@@ -149,7 +165,8 @@ public class ReviewerAgent {
             maxIter,
             "reviewer-general",
             loadPrompt("prompts/reviewer-general.md"),
-            GENERAL_PASS_TIMEOUT_SECONDS);
+            GENERAL_PASS_TIMEOUT_SECONDS,
+            preReviewBuildError);
     if (general.outcome() == WorkerResult.Outcome.ERROR) {
       log.warn("ReviewerAgent general pass errored: {}", general.outcome());
       return ReviewerResult.builder()
@@ -168,13 +185,21 @@ public class ReviewerAgent {
     // ── Wiring pass ──────────────────────────────────────────────────────
     WorkerResult wiring = null;
     if (!req.skipWiringPass()) {
+      // Re-capture build state before the wiring pass — the general pass may have already fixed
+      // the build, in which case wiring shouldn't be told "build was failing." Conversely if the
+      // general pass made things worse, wiring needs to know.
+      String preWiringBuildError =
+          (preReviewBuildError == null)
+              ? null // build was clean coming in; assume general pass didn't break it
+              : capturePreReviewBuildError(req);
       wiring =
           runPassWithTimeout(
               req,
               maxIter,
               "reviewer-wiring",
               loadPrompt("prompts/reviewer-wiring.md"),
-              WIRING_PASS_TIMEOUT_SECONDS);
+              WIRING_PASS_TIMEOUT_SECONDS,
+              preWiringBuildError);
       if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
         log.warn("ReviewerAgent wiring pass errored: {}", wiring.outcome());
         return ReviewerResult.builder()
@@ -235,7 +260,11 @@ public class ReviewerAgent {
   // ─── helpers ─────────────────────────────────────────────────────────────
 
   private WorkerResult runPass(
-      ReviewerRequest req, int maxIter, String taskIdSuffix, String systemPrompt) {
+      ReviewerRequest req,
+      int maxIter,
+      String taskIdSuffix,
+      String systemPrompt,
+      String preBuildError) {
     ExecutionContext passCtx =
         new ExecutionContext(
             req.context().runId(),
@@ -254,19 +283,97 @@ public class ReviewerAgent {
         modelResolver.resolve("ReviewerAgent", reviewerProvider);
     String reviewerModel = resolved.getModel();
     String reviewerProviderName = resolved.getActualProvider().name().toLowerCase();
+    String userPrompt = composeReviewerUserPrompt(preBuildError);
     return worker.run(
         WorkerTaskRequest.builder()
             .provider(reviewerProviderName)
             .model(reviewerModel)
             .systemPrompt(systemPrompt)
-            .userPrompt(
-                "Begin your review now. Use the tools to inspect, fix, build, "
-                    + "and then call completeTask.")
+            .userPrompt(userPrompt)
             .context(passCtx)
             .maxIterations(maxIter)
             .temperature(0.0)
             .maxTokensPerCall(8192)
+            // 2026-05-08 — when build is failing pre-review, force completeTask gate to require
+            // a successful buildProject call before terminating. Mirrors PatchAgent's gold-test
+            // gate (V182 layer-3). Without this, reviewer can call completeTask after a few
+            // edits without verifying — leaves run in PARTIAL/FINAL_BUILD_FAILED.
+            .requireBuildVerification(preBuildError != null)
             .build());
+  }
+
+  /**
+   * Builds the user-facing kickoff message for a reviewer pass. When {@code preBuildError} is
+   * non-null, the build was failing entering the reviewer — prepend the verbatim error so the LLM
+   * has a concrete target rather than a generic "look around for issues" prompt.
+   */
+  static String composeReviewerUserPrompt(String preBuildError) {
+    if (preBuildError == null || preBuildError.isBlank()) {
+      return "Begin your review now. Use the tools to inspect, fix, build, "
+          + "and then call completeTask.";
+    }
+    return """
+           BUILD IS CURRENTLY FAILING. Your job is to make it pass.
+
+           The build error below is your spec. Read it carefully — the specific files,
+           line numbers, and error messages name the exact problem. Match the fix to
+           the error: don't refactor unrelated code, don't reorganise; identify the
+           root cause, edit the affected files, run buildProject, and only call
+           completeTask after the build returns exit=0.
+
+           --- BUILD ERROR (verbatim, captured before this review pass) ---
+           """
+        + truncateBuildError(preBuildError)
+        + """
+
+--- END BUILD ERROR ---
+
+Begin now. Use readFile / editFile to fix the source files, then call
+buildProject to verify. Do NOT call completeTask before buildProject reports
+exit=0 — the harness will reject premature completions.
+""";
+  }
+
+  /**
+   * Cap the build error at 12K chars (head 8K + tail 4K) — long enough for compiler stack traces
+   * with stem+leaf, short enough that the reviewer's prefix stays cache-friendly. Real build errors
+   * over 12K usually have the actionable info in the first stack trace and the last few "BUILD
+   * FAILED" lines; the middle is repetition.
+   */
+  private static String truncateBuildError(String s) {
+    if (s == null) return "";
+    int cap = 12_000;
+    if (s.length() <= cap) return s;
+    int head = 8_000;
+    int omitted = s.length() - cap;
+    return s.substring(0, head)
+        + "\n\n... ["
+        + omitted
+        + " chars omitted from middle of build output] ...\n\n"
+        + s.substring(s.length() - (cap - head));
+  }
+
+  /**
+   * Run the build smoke once before any review pass to capture the entering build state. Returns
+   * null when the build passes (clean entry), the verbatim build output when it fails. Also returns
+   * null on any tool error — we don't want a flaky build infrastructure to falsely trip the
+   * build-failing path; the run-end final smoke will catch a real failure either way.
+   */
+  private String capturePreReviewBuildError(ReviewerRequest req) {
+    try {
+      ObjectNode buildArgs = objectMapper.createObjectNode();
+      if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
+        buildArgs.put("plannerCommand", req.buildCommand());
+      }
+      ToolResult result = buildProjectTool.execute(buildArgs, req.context());
+      if (!(result instanceof ToolResult.Ok ok)) return null;
+      String output = ok.content();
+      int exit = extractExitCode(output);
+      return exit == 0 ? null : output;
+    } catch (Exception e) {
+      log.debug("capturePreReviewBuildError failed: {}", e.getMessage());
+      return null;
+    }
   }
 
   /**
@@ -282,9 +389,10 @@ public class ReviewerAgent {
       int maxIter,
       String taskIdSuffix,
       String systemPrompt,
-      long timeoutSeconds) {
+      long timeoutSeconds,
+      String preBuildError) {
     Future<WorkerResult> future =
-        passExecutor.submit(() -> runPass(req, maxIter, taskIdSuffix, systemPrompt));
+        passExecutor.submit(() -> runPass(req, maxIter, taskIdSuffix, systemPrompt, preBuildError));
     try {
       return future.get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException te) {

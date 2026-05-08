@@ -34,6 +34,14 @@ import lombok.Builder;
  *     WorkerAgent#TEST_VERIFICATION_RECENCY_ITERS} iterations. Set by {@link PatchAgent} so bug-fix
  *     runs can't claim completion without observing tests run; build-mode workers leave this
  *     null/false (build-mode has its own smoke gate downstream of the loop).
+ * @param requireBuildVerification 2026-05-08 reviewer-engagement gate. When true, {@link
+ *     com.navneet.executespec.tool.CompleteTaskTool} calls are refused unless the agent has made at
+ *     least one successful {@code buildProject} call (exit=0) within {@link
+ *     WorkerAgent#BUILD_VERIFICATION_RECENCY_ITERS} iterations. Set by {@link
+ *     com.navneet.executespec.reviewer.ReviewerAgent} when entering a review pass on a workspace
+ *     whose build is currently failing — without this the reviewer often calls completeTask after a
+ *     few exploratory edits without re-running the build, leaving the run in
+ *     PARTIAL/FINAL_BUILD_FAILED. Mirrors the {@code requireTestVerification} pattern.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -47,7 +55,8 @@ public record WorkerTaskRequest(
     Integer maxTokensPerCall,
     Integer stagnationWarnAfter,
     Integer stagnationForceAfter,
-    Boolean requireTestVerification) {
+    Boolean requireTestVerification,
+    Boolean requireBuildVerification) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())
