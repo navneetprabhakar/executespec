@@ -192,6 +192,15 @@ public class RunOrchestrator {
   private final com.navneet.executespec.agent.RunKeyContextStore keyContextStore;
 
   /**
+   * 2026-05-08 — programbench-mode discriminator. Used at the reviewer step to bump the iteration
+   * cap for ProgramBench runs (where the reviewer has to bisect library link errors across multiple
+   * files and the default 50 iters is tight). Null for non-programbench runs; cmatrix run 84252898
+   * had reviewer outcome ITERATION_LIMIT_EXCEEDED with the build still unfixed.
+   */
+  private final com.navneet.executespec.programbench.ProgramBenchContainerStore
+      programBenchContainerStore;
+
+  /**
    * R-162 — referral hook. Wired here so that when a referee's first run reaches a successful
    * terminal status, the inviting Free user gets +5 lifetime credits granted automatically.
    * Idempotent on the service side (uses pending-invite presence as the once-only marker until V153
@@ -1142,6 +1151,14 @@ public class RunOrchestrator {
       updateStatus(runId, "REVIEWING");
       perky.start(runId, "REVIEWING");
       ReviewerResult reviewResult = null;
+      // 2026-05-08 — programbench runs need more reviewer iters to bisect library link
+      // errors. Default cap is 50 (per ReviewerAgent.DEFAULT_MAX_ITER_PER_PASS); cmatrix
+      // gemini run 84252898 hit ITERATION_LIMIT_EXCEEDED with the build still unfixed.
+      // Bumped to 80 for programbench-mode runs only — non-programbench runs unchanged.
+      Integer reviewerMaxIter =
+          programBenchContainerStore != null && programBenchContainerStore.get(runId) != null
+              ? 80
+              : null;
       try {
         reviewResult =
             reviewer.review(
@@ -1151,6 +1168,7 @@ public class RunOrchestrator {
                     .context(rootCtx)
                     .buildCommand(plan.buildCommand())
                     .skipWiringPass(false)
+                    .maxIterationsPerPass(reviewerMaxIter)
                     .build());
         persistReview(runId, reviewResult);
         // Phase 3 delta: tokens spent by reviewer (general + wiring passes).

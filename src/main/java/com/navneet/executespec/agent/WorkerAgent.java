@@ -114,10 +114,26 @@ public class WorkerAgent {
 
   /**
    * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
-   * shell don't reset the counter — only file mutations.
+   * shell don't reset the counter — only file mutations and explicit build attempts.
+   *
+   * <p>{@code buildProject} added 2026-05-08: cmatrix gemini run 84252898 stagnated despite the
+   * agent legitimately alternating between read + write + build cycles, because the build calls
+   * didn't reset the counter. Build attempts ARE deliberate forward motion (especially in
+   * programbench mode where {@link com.navneet.executespec.tool.BuildProjectTool}'s wrapper fails
+   * any no-op compile.sh — so spam-build can't game the guard, every successful build implies real
+   * source compiled).
    */
   private static final java.util.Set<String> WRITE_CLASS_TOOLS =
-      java.util.Set.of("writeFile", "editFile");
+      java.util.Set.of("writeFile", "editFile", "buildProject");
+
+  /**
+   * Per-call HTTP read-timeout override applied to every worker LLM call. Honoured by {@link
+   * GeminiNativeToolClient} (where the static default 60s is too tight for thinking-model worker
+   * calls); ignored by Anthropic + OpenAI clients (Spring AI manages their HTTP timeouts).
+   * Calibrated 2026-05-08 from cmatrix gemini run 84252898 — task T3 timed out after a 17-min
+   * worker phase with 122k input tokens.
+   */
+  private static final int WORKER_HTTP_READ_TIMEOUT_SECONDS = 120;
 
   public WorkerResult run(WorkerTaskRequest req) {
     return run(req, null);
@@ -273,6 +289,15 @@ public class WorkerAgent {
                     // Strip gitCommit from the worker's tool authorities. See
                     // ToolRegistry#WORKER_DENY_TOOLS for the rationale.
                     .toolsOverride(toolRegistry.bindForWorker(req.context()))
+                    // 2026-05-08 — Gemini's static GeminiNativeToolClient.READ_TIMEOUT is 60s,
+                    // calibrated to fail fast on stalled worker calls. But gemini-3-pro-preview
+                    // (thinking model) regularly takes 60-90s on dense tool-call iterations,
+                    // tripping the timeout mid-task. Cmatrix run 84252898 task T3 FAILED with
+                    // ResourceAccessException I/O error after the worker burned 17m of work.
+                    // 120s gives 2× headroom while still detecting genuinely stuck calls within
+                    // 2 minutes. Anthropic + OpenAI clients ignore the field (Spring AI manages
+                    // their HTTP timeouts).
+                    .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
                     .build());
       } catch (Exception e) {
         log.error("WorkerAgent router failure at iter={}", iter, e);
