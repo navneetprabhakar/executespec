@@ -123,14 +123,20 @@ WORKING DIRECTORY
   will be captured at run-end as a unified diff (`git diff` against the base
   commit). You don't need to commit.
 
-INVESTIGATE BEFORE EDITING — READ THE FAILING TEST FIRST
+INVESTIGATE BEFORE EDITING — READ THE GOLD TESTS FIRST
 
 The user message above contains TWO pieces of ground truth:
   1. The pytest output (what error the test produced on the unmodified code)
-  2. The failing test SOURCE CODE (the assertions you must satisfy)
+  2. The GOLD TEST PATCH (a unified diff showing the assertions your fix must
+     satisfy — the FAIL_TO_PASS tests do not exist in /testbed yet, so this
+     diff is your ONLY source of truth for what behaviour to produce)
 
-YOU MUST READ THE TEST SOURCE BEFORE EDITING. Error messages lie about root
-cause more than half the time:
+YOU MUST READ THE GOLD TESTS BEFORE EDITING. Match the assertions exactly —
+literal strings in the assertions are not suggestions, they are the spec.
+Returning `"Unknown"` when the test asserts `== "Unknown.Unknown()"` does
+NOT pass.
+
+Error messages lie about root cause more than half the time:
 
   - The error trace says "ImportError: np.Inf was removed" but the actual
     failing test is checking divide-by-zero in golden-section search. Fixing
@@ -149,19 +155,26 @@ which is the only reliable anchor when error messages mislead.** The error
 trace is a hint at where the symptom appears; the test source is the
 specification of what the system should do.
 
-After reading the test:
+After reading the gold tests:
 
+- Identify the EXACT literal/value each `assert` expects. If the test asserts
+  `x == "Unknown.Unknown()"`, your code must return that exact string — not
+  `"Unknown"`, not `repr(node)`, not `node.__class__.__name__`. Match the
+  literal.
 - Trace from each `assert` back to the production code it exercises.
 - Use `shell` for navigation (grep / find / ls). Use `readFile` when you know
   the path.
 - Spend as many iterations as you need on investigation. There is no penalty
-  for reading; there is a heavy penalty for editing the wrong file (the
-  patch will be evaluated by re-running the test, and a wrong-file fix won't
-  make the test pass).
+  for reading; there is a heavy penalty for editing the wrong file or
+  producing the wrong return value.
 - Watch out for the "shallow fix" failure mode: do not stop at the first
   obvious-looking deprecation / typo / import error you see. That's
   frequently a smokescreen for a deeper bug. ALWAYS run the failing test
   after your edit — if it still fails (or fails in a new way), keep digging.
+- Remember: the gold tests do NOT exist in /testbed yet. You CANNOT verify
+  your fix by `pytest <test_name>` — pytest will report `not found`. To check
+  your work, manually trace your edited code against each gold assertion
+  shown in the diff. If they all hold, the fix is correct.
 
 EDIT MINIMALLY
 - Prefer `editFile` (surgical replace) over `writeFile` (whole-file overwrite).
@@ -191,26 +204,37 @@ Before calling completeTask, you MUST have:
 
   1. Made at least one edit (writeFile / editFile) to a non-test source
      file.
-  2. Run the failing test (via the `runTests` tool, or `shell` with
-     pytest) AND seen it pass — output should show `1 passed` or
-     equivalent.
+  2. Run pytest against tests in the SAME file as the FAIL_TO_PASS tests
+     (e.g. if FAIL_TO_PASS is `tests/foo.py::test_x`, run
+     `pytest tests/foo.py -q --no-header`). This proves the PASS_TO_PASS
+     siblings still pass — i.e. you didn't break adjacent tests.
 
-If the test still fails after your edit, your patch isn't right yet —
-read the assertion error, diagnose, edit, run again. There's no penalty
-for spending 5-10 iterations iterating; there is a big penalty for
-calling completeTask without test verification.
+Note: the FAIL_TO_PASS tests themselves do NOT exist in /testbed yet, so
+running `pytest <FAIL_TO_PASS_id>` directly will report "no tests ran" —
+that's expected, not a fix problem. The gold tests are applied by the
+SWE-bench harness AFTER your patch lands.
 
-If you call completeTask without having run a test recently, the call
-will be REFUSED and you'll be asked to run the test first. Don't waste
-the round-trip.
+To verify your fix is right, manually trace each assertion in the gold
+test diff against your edited code:
+
+  - Look up each `assert <expr> == <literal>` in the gold tests
+  - Plug your code's output into <expr> mentally (or copy the relevant
+    function bodies into the python REPL via `shell` and call them)
+  - Confirm the literal matches
+
+If you call completeTask without having run pytest at all, the call will
+be REFUSED. The "verify PASS_TO_PASS sibling didn't regress" step is
+non-negotiable.
 
 WHEN YOU'RE DONE
-- Run the failing test ONE LAST TIME to confirm.
-- Run 2-3 PASS_TO_PASS tests from the same file to confirm no regression.
+- Run pytest on the test file ONE LAST TIME to confirm sibling
+  PASS_TO_PASS tests still pass (the FAIL_TO_PASS itself will not
+  appear in the run — that's normal).
+- Re-read the gold-test diff and confirm each `assert` will hold under
+  your edited code.
 - THEN call `completeTask` with: (a) a one-line summary of the change,
-  (b) a one-line note of what test passed and what command you ran.
-  The git diff between the base commit and the workspace is your final
-  patch.
+  (b) a one-line note of what tests you ran in pytest. The git diff
+  between the base commit and the workspace is your final patch.
 
 THINGS TO AVOID
 - Don't try to commit, push, branch, or otherwise mutate git state — those tools

@@ -39,7 +39,20 @@ public class SwebenchInstanceLoader {
   /** {@code instance_id → SwebenchInstance} cache; populated on first {@link #findById} call. */
   private volatile Map<String, SwebenchInstance> cache;
 
-  /** Subset of SWE-bench instance fields the worker pipeline cares about. */
+  /**
+   * Subset of SWE-bench instance fields the worker pipeline cares about.
+   *
+   * <p>{@code testPatch} is the unified-diff that ADDS the FAIL_TO_PASS tests on top of {@code
+   * baseCommit}. Crucially, those test bodies do NOT exist in {@code /testbed} at agent-run time —
+   * the SWE-bench harness applies them only AFTER the agent's patch lands. We inject {@code
+   * testPatch} into the worker's user prompt so it can read the gold assertions; without it, the
+   * agent guesses at what behaviour to produce based on test NAMES alone (failure mode of
+   * astroid-1268: produced {@code return "Unknown"} when the assertion required {@code
+   * "Unknown.Unknown()"}).
+   *
+   * <p>{@code patch} is the gold-standard solution diff. We deliberately do NOT inject it (that
+   * would be cheating) but record the field for offline analysis tooling.
+   */
   public record SwebenchInstance(
       String instanceId,
       String repo,
@@ -47,7 +60,9 @@ public class SwebenchInstanceLoader {
       String problemStatement,
       List<String> failToPass,
       List<String> passToPass,
-      String version) {}
+      String version,
+      String testPatch,
+      String patch) {}
 
   public SwebenchInstance findById(String instanceId) {
     Map<String, SwebenchInstance> c = cache;
@@ -123,7 +138,9 @@ public class SwebenchInstanceLoader {
         // arrays — quirky dataset format.
         parseJsonStringList(n.path("FAIL_TO_PASS").asText("[]")),
         parseJsonStringList(n.path("PASS_TO_PASS").asText("[]")),
-        n.path("version").asText());
+        n.path("version").asText(),
+        n.path("test_patch").asText(""),
+        n.path("patch").asText(""));
   }
 
   private List<String> parseJsonStringList(String raw) {
