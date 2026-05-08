@@ -848,8 +848,16 @@ public class SequentialExecutor {
         tier = AgentTier.PLANNING;
         maxIter = 75;
         maxTokens = 16384;
-        stagnationWarnAfter = 18;
-        stagnationForceAfter = 28;
+        // 2026-05-08 — bumped 18/28 → 22/32 after cmatrix gemini run 84252898 still
+        // stagnated at the 18-iter warn even with HIGH thresholds. Gemini's thinking-model
+        // dispatch produces fewer write-class tool calls per iter than Anthropic/OpenAI
+        // (more reasoning, less editing per round-trip). buildProject was also added to
+        // WRITE_CLASS_TOOLS so reverse-engineering loops that alternate read+build+write
+        // count buildProject as forward motion (it can't be gamed — the smoke wrapper
+        // requires a fresh executable hash, so every successful build implies real
+        // compilation).
+        stagnationWarnAfter = 22;
+        stagnationForceAfter = 32;
       }
       default -> {
         tier = AgentTier.WORKHORSE;
