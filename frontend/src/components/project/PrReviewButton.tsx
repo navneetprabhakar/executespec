@@ -21,9 +21,11 @@ import {
   getPrReview,
   listPrReviewsForPr,
   submitPrReview,
+  dispatchPrReviewAutofix,
 } from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {cn, errMsg} from '@/lib/utils';
+import {Link} from 'react-router-dom';
 
 const PAID_TIERS = new Set(['PRO', 'TEAM', 'MAX', 'ENTERPRISE']);
 
@@ -44,6 +46,12 @@ export default function PrReviewButton({projectId, repoFullName, prNumber}: PrRe
   const [showPopover, setShowPopover] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const pollTimer = useRef<number | null>(null);
+  // V183 — Phase 1 autofix state. When dispatched, surfaces the run id as a deep-link
+  // so the user can watch the patch-mode run that's addressing their review's comments.
+  const [autofixDispatching, setAutofixDispatching] = useState(false);
+  const [autofixRunId, setAutofixRunId] = useState<string | null>(null);
+  const [autofixOutcome, setAutofixOutcome] = useState<'DISPATCHED' | 'REUSED_ACTIVE' | null>(null);
+  const [autofixError, setAutofixError] = useState<string | null>(null);
 
   // Initial load — fetch any existing review for this PR.
   useEffect(() => {
@@ -215,6 +223,53 @@ export default function PrReviewButton({projectId, repoFullName, prNumber}: PrRe
               )}
             </div>
           )}
+          {/* V183 Phase 1 — autofix dispatch. Visible when the review is COMPLETE +
+              the verdict is actionable (not APPROVE) + we know about comments. Click
+              kicks off a patch-mode run that addresses every comment in-place on the
+              PR's head branch. The pop-over swaps to a run-id deep-link on success. */}
+          {latest &&
+            latest.status === 'COMPLETE' &&
+            latest.verdict !== 'APPROVE' &&
+            detail &&
+            detail.comments.length > 0 && (
+              <div className='mt-1.5 pt-1.5 border-t border-[var(--border-default)] space-y-1.5'>
+                {!autofixRunId && (
+                  <button
+                    type='button'
+                    disabled={autofixDispatching}
+                    onClick={async (e) => {
+                      e.stopPropagation();
+                      setAutofixDispatching(true);
+                      setAutofixError(null);
+                      try {
+                        const r = await dispatchPrReviewAutofix(latest.id);
+                        setAutofixRunId(r.runId);
+                        setAutofixOutcome(r.outcome);
+                      } catch (err) {
+                        setAutofixError(errMsg(err));
+                      } finally {
+                        setAutofixDispatching(false);
+                      }
+                    }}
+                    className='w-full px-2 py-1 text-[11px] font-medium rounded bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50 transition-colors'
+                  >
+                    {autofixDispatching
+                      ? 'Dispatching…'
+                      : `Autofix ${detail.comments.length} comment${detail.comments.length === 1 ? '' : 's'}`}
+                  </button>
+                )}
+                {autofixRunId && (
+                  <Link
+                    to={`/runs/${autofixRunId}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className='block w-full text-center px-2 py-1 text-[11px] font-medium rounded bg-status-success/10 text-status-success hover:bg-status-success/20'
+                  >
+                    {autofixOutcome === 'REUSED_ACTIVE' ? 'View in-flight run →' : 'Watch autofix run →'}
+                  </Link>
+                )}
+                {autofixError && <div className='text-status-error text-[10px]'>{autofixError}</div>}
+              </div>
+            )}
         </div>
       )}
     </span>

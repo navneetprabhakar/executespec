@@ -1591,6 +1591,33 @@ public class RunOrchestrator {
         patchCost.inputTokens(),
         patchCost.outputTokens(),
         String.format("%.4f", patchCost.costUsd()));
+
+    // V183 (2026-05-08) — finding-triggered patch runs are project-mode (PR review autofix,
+    // tech debt fix, code review autofix, CI auto-fix). They live on a real customer
+    // project + repo and want their workspace diff pushed to the remote — same way build
+    // mode does. Bench sources (`swebench`, `programbench`) are bench-mode and the bench
+    // services capture the diff via `docker exec git diff` themselves, so we skip the
+    // push for them. The discriminator is the source field the FindingPatchSubmitter
+    // stamps as `finding:<TYPE>`.
+    if (("COMPLETE".equals(terminalStatus) || "PARTIAL".equals(terminalStatus))
+        && run.getSourceType() != null
+        && run.getSourceType().startsWith("finding:")) {
+      try {
+        PipelineRun fresh = runRepo.findById(runId).orElse(null);
+        if (fresh != null) {
+          scmPushService.push(fresh);
+          log.info(
+              "PATCH run={} auto-pushed to SCM (finding-triggered={})",
+              runId, run.getSourceType());
+        }
+      } catch (Exception pushEx) {
+        // Manual re-push via /runs/{id}/push-github is still available; log and continue.
+        log.warn(
+            "PATCH run={} auto-push failed (manual push still works): {}",
+            runId,
+            pushEx.getMessage());
+      }
+    }
     broadcaster.emit(
         runId,
         RunEvent.log(

@@ -3296,6 +3296,21 @@ export const listPrReviewsForPr = (repoFullName: string, prNumber: number) =>
 export const listPrReviewsForProject = (projectId: string) =>
   req<PrReviewDto[]>(`/projects/${projectId}/pr-reviews`);
 
+export interface PrReviewAutofixResponse {
+  runId: string;
+  findingKey: string;
+  outcome: 'DISPATCHED' | 'REUSED_ACTIVE';
+}
+
+/**
+ * Phase 1 (V183) — dispatch a patch-mode run that addresses every comment on a PR
+ * review. Returns the run id so the UI can navigate to `/runs/{id}` and watch
+ * progress. Idempotent server-side: a fresh dispatch when there's already an active
+ * run for this review returns the existing run with `outcome=REUSED_ACTIVE`.
+ */
+export const dispatchPrReviewAutofix = (reviewId: string) =>
+  req<PrReviewAutofixResponse>(`/pr-reviews/${reviewId}/autofix`, {method: 'POST'});
+
 export interface CodeReviewScanDto {
   id: string;
   projectId: string;
