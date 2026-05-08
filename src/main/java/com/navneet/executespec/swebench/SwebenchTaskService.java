@@ -179,22 +179,34 @@ public class SwebenchTaskService {
       try {
         SwebenchInstanceLoader.SwebenchInstance instance = loader.findById(recipe.instanceId());
         String testOutput = captureFailingTestOutput(recipe.containerName(), instance);
-        if (!testOutput.isEmpty()) {
+        // 2026-05-08 — Layer 1 enhancement #2: also pull the failing test SOURCE code from
+        // the container. The pytest output alone tells the agent WHAT broke, but reading the
+        // test logic tells the agent WHAT BEHAVIOR is being verified — which is the
+        // semantic anchor needed when error traces lie about root cause (e.g. pvlib-1606
+        // where the np.Inf import error masked the actual golden-section divide-by-zero
+        // bug; Anthropic's agent fixed the import + missed the underlying bug).
+        String testSource = captureFailingTestSource(recipe.containerName(), instance);
+        if (!testOutput.isEmpty() || !testSource.isEmpty()) {
+          final String testOutputF = testOutput;
+          final String testSourceF = testSource;
           runRepo
               .findById(runId)
               .ifPresent(
                   row -> {
-                    row.setUserRequest(prefixWithFailingTestOutput(testOutput, row.getUserRequest()));
+                    row.setUserRequest(
+                        prefixWithFailingTestOutput(testOutputF, testSourceF, row.getUserRequest()));
                     runRepo.save(row);
                   });
           log.info(
-              "SWE-bench: prefixed userRequest for run {} with {}-char failing-test capture",
+              "SWE-bench: prefixed userRequest for run {} with {}-char failing-test capture +"
+                  + " {}-char test source",
               runId,
-              testOutput.length());
+              testOutput.length(),
+              testSource.length());
         } else {
           log.warn(
-              "SWE-bench: failing-test capture for run {} returned empty output (will use raw"
-                  + " userRequest)",
+              "SWE-bench: failing-test capture for run {} returned empty output AND empty source"
+                  + " (will use raw userRequest)",
               runId);
         }
       } catch (Exception captureEx) {
@@ -503,21 +515,111 @@ public class SwebenchTaskService {
   }
 
   /**
-   * Layer-1 helper: prepend the failing-test capture to the synthesised user request as
-   * "ground truth — actual output observed". Phrased so the agent treats it as authoritative
-   * test data rather than a hypothesis it might second-guess.
+   * Layer-1 helper: read the FAIL_TO_PASS tests' source code from inside the container.
+   *
+   * <p>The pytest output (captureFailingTestOutput) tells the agent WHAT broke; the test
+   * source tells the agent WHAT BEHAVIOR is being verified. Without the source, the agent
+   * tends to surface-fix on the error message (e.g. fix the {@code np.Inf} deprecation
+   * the import error mentions) without realising that's just unblocking test collection
+   * and the actual bug is somewhere else. With the source, the agent can trace from the
+   * test's assertions to the production code that needs to change.
+   *
+   * <p>Strategy: parse each FAIL_TO_PASS test id (e.g. {@code path/to/test.py::test_name})
+   * to extract the file path, then read each unique file and embed it. Caps:
+   *
+   * <ul>
+   *   <li>Up to 3 unique test files (most instances are single-file)
+   *   <li>Each file capped at 8KB head; over-cap files get a head + tail snippet
+   *   <li>Total injected source capped at 20KB (defensive — keeps the prompt under ~30KB
+   *       with the rest of the context)
+   * </ul>
    */
-  private String prefixWithFailingTestOutput(String testOutput, String originalUserRequest) {
-    return "# Failing test output (ground truth — captured BEFORE any fix)\n\n"
-        + "Below is the verbatim output of running the FAIL_TO_PASS tests inside the\n"
-        + "container against the unmodified codebase. This is what's currently broken.\n"
-        + "Use the assertion errors / tracebacks to guide your fix — don't re-derive\n"
-        + "what's failing; it's right here.\n\n"
-        + "```\n"
-        + testOutput
-        + "\n```\n\n"
-        + "---\n\n"
-        + (originalUserRequest == null ? "" : originalUserRequest);
+  private String captureFailingTestSource(
+      String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
+    if (instance == null || instance.failToPass() == null || instance.failToPass().isEmpty()) {
+      return "";
+    }
+    java.util.LinkedHashSet<String> testFiles = new java.util.LinkedHashSet<>();
+    for (String testId : instance.failToPass()) {
+      if (testId == null || testId.isBlank()) continue;
+      // pytest id format: <path>::<test_name>[::<subtest>]
+      int sep = testId.indexOf("::");
+      String file = sep < 0 ? testId.trim() : testId.substring(0, sep).trim();
+      if (!file.isEmpty()) testFiles.add(file);
+      if (testFiles.size() >= 3) break;
+    }
+    if (testFiles.isEmpty()) return "";
+
+    StringBuilder sb = new StringBuilder();
+    int totalCap = 20_000;
+    int written = 0;
+    for (String file : testFiles) {
+      if (written >= totalCap) break;
+      // Defence: pytest test paths shouldn't have shell metachars; refuse if they do.
+      if (file.contains(";") || file.contains("&") || file.contains("|") || file.contains("$")
+          || file.contains("`")) {
+        continue;
+      }
+      String cmd =
+          "docker exec " + containerName
+              + " bash -lc '"
+              + "if [ -f /testbed/" + file + " ]; then cat /testbed/" + file + "; fi"
+              + "'";
+      ShellResult r = run(cmd, 30);
+      if (r.exit() != 0) continue;
+      String content = r.output() == null ? "" : r.output();
+      if (content.isBlank()) continue;
+      // Cap per file at 8KB; for over-cap files keep head 6KB + tail 2KB so the test
+      // function bodies typically near the end stay visible.
+      int perFileCap = Math.min(8000, totalCap - written);
+      if (content.length() > perFileCap) {
+        int head = Math.max(1000, perFileCap - 2000);
+        int omitted = content.length() - perFileCap;
+        content = content.substring(0, head)
+            + "\n\n... [" + omitted + " chars omitted from middle] ...\n\n"
+            + content.substring(content.length() - (perFileCap - head));
+      }
+      sb.append("\n## ").append(file).append("\n\n```python\n").append(content).append("\n```\n");
+      written += content.length();
+    }
+    return sb.toString();
+  }
+
+  /**
+   * Layer-1 helper: prepend the failing-test capture (output + source) to the synthesised
+   * user request as ground truth. The test SOURCE is the most-load-bearing addition — it
+   * shows the agent what assertions are being checked, which is the only reliable
+   * anchor when error messages mislead about root cause.
+   */
+  private String prefixWithFailingTestOutput(
+      String testOutput, String testSource, String originalUserRequest) {
+    StringBuilder sb = new StringBuilder();
+    sb.append("# Failing test output (ground truth — captured BEFORE any fix)\n\n");
+    sb.append("Below is the verbatim output of running the FAIL_TO_PASS tests inside the\n");
+    sb.append("container against the unmodified codebase. This is what's currently broken.\n");
+    sb.append("Use the assertion errors / tracebacks to guide your fix — don't re-derive\n");
+    sb.append("what's failing; it's right here.\n\n");
+    if (testOutput == null || testOutput.isBlank()) {
+      sb.append("```\n(empty — see the test source below for the failing assertions)\n```\n\n");
+    } else {
+      sb.append("```\n").append(testOutput).append("\n```\n\n");
+    }
+    if (testSource != null && !testSource.isBlank()) {
+      sb.append("# Failing test SOURCE — the assertions you must satisfy\n\n");
+      sb.append("Below is the verbatim source of the test files containing the FAIL_TO_PASS\n");
+      sb.append("tests. **Read these FIRST.** The error trace above tells you what broke; the\n");
+      sb.append("test source tells you what behavior is being verified — and that's the only\n");
+      sb.append("reliable anchor when error messages mislead about root cause.\n\n");
+      sb.append("Common failure mode: the error trace mentions a deprecation / import error /\n");
+      sb.append("typo, but fixing that just unblocks the test from running — the actual bug is\n");
+      sb.append("somewhere else. Read the test logic. Trace from each `assert` back to the\n");
+      sb.append("production code it exercises. THAT is where to focus your edit.\n");
+      sb.append(testSource);
+      sb.append("\n");
+    }
+    sb.append("---\n\n");
+    sb.append(originalUserRequest == null ? "" : originalUserRequest);
+    return sb.toString();
   }
 
   private record ShellResult(int exit, String output) {}

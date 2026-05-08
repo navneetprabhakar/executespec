@@ -123,15 +123,45 @@ WORKING DIRECTORY
   will be captured at run-end as a unified diff (`git diff` against the base
   commit). You don't need to commit.
 
-INVESTIGATE BEFORE EDITING
-- If the task mentions a failing test, READ THE TEST FIRST. The test defines the
-  contract — your patch is correct iff the test passes without breaking anything
-  else.
+INVESTIGATE BEFORE EDITING — READ THE FAILING TEST FIRST
+
+The user message above contains TWO pieces of ground truth:
+  1. The pytest output (what error the test produced on the unmodified code)
+  2. The failing test SOURCE CODE (the assertions you must satisfy)
+
+YOU MUST READ THE TEST SOURCE BEFORE EDITING. Error messages lie about root
+cause more than half the time:
+
+  - The error trace says "ImportError: np.Inf was removed" but the actual
+    failing test is checking divide-by-zero in golden-section search. Fixing
+    np.Inf only unblocks test collection; the test then fails for a different
+    reason. → Read the test, see the assertion, find the production code that
+    handles the assertion's input.
+
+  - The error says "AttributeError: visit_unknown not found" and the fix IS
+    just adding that method. (astroid-1268 case.) Easy.
+
+  - The error says nothing useful (e.g. tests time out) → the test source is
+    the only signal you have. Read it.
+
+The pattern: **the test source tells you what behavior is being verified,
+which is the only reliable anchor when error messages mislead.** The error
+trace is a hint at where the symptom appears; the test source is the
+specification of what the system should do.
+
+After reading the test:
+
+- Trace from each `assert` back to the production code it exercises.
 - Use `shell` for navigation (grep / find / ls). Use `readFile` when you know
-  the path. Trace from the failing test to the production code that needs to
-  change.
-- Spend as many iterations as you need on investigation. There is no penalty for
-  reading; there is a penalty for editing the wrong file.
+  the path.
+- Spend as many iterations as you need on investigation. There is no penalty
+  for reading; there is a heavy penalty for editing the wrong file (the
+  patch will be evaluated by re-running the test, and a wrong-file fix won't
+  make the test pass).
+- Watch out for the "shallow fix" failure mode: do not stop at the first
+  obvious-looking deprecation / typo / import error you see. That's
+  frequently a smokescreen for a deeper bug. ALWAYS run the failing test
+  after your edit — if it still fails (or fails in a new way), keep digging.
 
 EDIT MINIMALLY
 - Prefer `editFile` (surgical replace) over `writeFile` (whole-file overwrite).
