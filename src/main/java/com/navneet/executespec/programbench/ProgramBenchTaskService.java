@@ -267,6 +267,9 @@ public class ProgramBenchTaskService {
     PipelineRun run;
     PENDING.set(new SetupRecipe(image, containerName, taskId));
     try {
+      // V182 — runMode=PATCH so the orchestrator dispatches a single
+      // PatchAgent loop instead of fragmenting the reverse-engineer
+      // task across classifier / planner / executor / reviewer phases.
       run =
           orchestrator.submitRun(
               userRequest,
@@ -282,7 +285,13 @@ public class ProgramBenchTaskService {
               /* createdByUserId */ props.getBenchUserId(),
               /* orgId */ props.getBenchOrgId(),
               /* projectId */ props.getBenchProjectId(),
-              /* executionMode */ "PROTOTYPE");
+              /* executionMode */ "PROTOTYPE",
+              /* selectedRepoIds */ java.util.List.of(),
+              /* figmaUrl */ null,
+              /* tddMode */ false,
+              /* branchOverride */ null,
+              /* prReviewComments */ null,
+              /* runMode */ com.navneet.executespec.state.RunMode.PATCH);
     } catch (Exception e) {
       // submitRun failed — the listener may or may not have fired (depends on where it failed).
       // Best-effort: remove any container the listener may have started.

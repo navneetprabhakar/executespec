@@ -256,6 +256,8 @@ public class RunMapper {
         .batchProgressTotal(r.getBatchProgressTotal())
         .aiProvider(r.getAiProvider())
         .harnessVersion(r.getHarnessVersion())
+        .runMode(r.getRunMode())
+        .triggeredByFinding(r.getTriggeredByFinding())
         .isRetry(r.getSourceRunId() != null)
         .sourceRunId(r.getSourceRunId())
         .runRetryCount(r.getRunRetryCount())

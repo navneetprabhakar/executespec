@@ -129,13 +129,29 @@ public class ReviewerAgent {
             ? DEFAULT_MAX_ITER_PER_PASS
             : req.maxIterationsPerPass();
 
+    // ── Pre-review build smoke (2026-05-08) ──────────────────────────────
+    // Capture the build state going INTO the reviewer. When the per-task pipeline ended with
+    // partial / build-failing tasks, the reviewer's job changes: it's no longer "scan for subtle
+    // bugs" — it's "make this thing compile, here's the exact error." Without this signal the
+    // reviewer fishes generically through the codebase, often emits an empty completionSummary,
+    // and the run flips to PARTIAL/FINAL_BUILD_FAILED.
+    //
+    // Empirical motivation: 30-day failure rollup (2026-05-08) shows FINAL_BUILD_FAILED is
+    // 16/22 of all PARTIAL runs. Drilled-into example (Spring Boot run 77a1bf15): both reviewer
+    // passes returned empty generalPassSummary + wiringPassSummary while finalBuildExitCode=1.
+    //
+    // SWE-bench parallel: gold tests are the spec for patch-mode; the build error is the spec
+    // for build-mode. Inject it verbatim into the user prompt and the LLM has a concrete target.
+    String preReviewBuildError = capturePreReviewBuildError(req);
+
     log.info(
-        "ReviewerAgent START run={} task={} provider={} model={} skipWiring={}",
+        "ReviewerAgent START run={} task={} provider={} model={} skipWiring={} preBuildFailing={}",
         req.context().runId(),
         req.context().taskId(),
         req.provider(),
         req.model(),
-        req.skipWiringPass());
+        req.skipWiringPass(),
+        preReviewBuildError != null);
 
     // ── General pass ─────────────────────────────────────────────────────
     // A pass that hits the iteration cap has typically done meaningful fixes
@@ -149,7 +165,8 @@ public class ReviewerAgent {
             maxIter,
             "reviewer-general",
             loadPrompt("prompts/reviewer-general.md"),
-            GENERAL_PASS_TIMEOUT_SECONDS);
+            GENERAL_PASS_TIMEOUT_SECONDS,
+            preReviewBuildError);
     if (general.outcome() == WorkerResult.Outcome.ERROR) {
       log.warn("ReviewerAgent general pass errored: {}", general.outcome());
       return ReviewerResult.builder()
@@ -168,13 +185,21 @@ public class ReviewerAgent {
     // ── Wiring pass ──────────────────────────────────────────────────────
     WorkerResult wiring = null;
     if (!req.skipWiringPass()) {
+      // Re-capture build state before the wiring pass — the general pass may have already fixed
+      // the build, in which case wiring shouldn't be told "build was failing." Conversely if the
+      // general pass made things worse, wiring needs to know.
+      String preWiringBuildError =
+          (preReviewBuildError == null)
+              ? null // build was clean coming in; assume general pass didn't break it
+              : capturePreReviewBuildError(req);
       wiring =
           runPassWithTimeout(
               req,
               maxIter,
               "reviewer-wiring",
               loadPrompt("prompts/reviewer-wiring.md"),
-              WIRING_PASS_TIMEOUT_SECONDS);
+              WIRING_PASS_TIMEOUT_SECONDS,
+              preWiringBuildError);
       if (wiring.outcome() == WorkerResult.Outcome.ERROR) {
         log.warn("ReviewerAgent wiring pass errored: {}", wiring.outcome());
         return ReviewerResult.builder()
@@ -235,7 +260,11 @@ public class ReviewerAgent {
   // ─── helpers ─────────────────────────────────────────────────────────────
 
   private WorkerResult runPass(
-      ReviewerRequest req, int maxIter, String taskIdSuffix, String systemPrompt) {
+      ReviewerRequest req,
+      int maxIter,
+      String taskIdSuffix,
+      String systemPrompt,
+      String preBuildError) {
     ExecutionContext passCtx =
         new ExecutionContext(
             req.context().runId(),
@@ -250,23 +279,113 @@ public class ReviewerAgent {
     } catch (IllegalArgumentException e) {
       reviewerProvider = com.navneet.executespec.router.LlmProvider.ANTHROPIC;
     }
+    // 2026-05-08 — Gemini reviewer-on-Pro fix. Empirically the reviewer's prefix (system prompt
+    // + tools) is ~2-3K tokens, BELOW gemini-3-pro-preview's 4096-token implicit-cache threshold.
+    // Result: 0% cache hit rate on every reviewer call (validated 2026-05-08, 0/14 reviewer
+    // calls hit cache). Switching the reviewer to gemini-3-flash-preview (WORKHORSE tier, 1024
+    // threshold) lets implicit cache fire AND drops per-call cost ~5×. Flash is less capable
+    // than Pro on multi-step reasoning, but reviewer work is inspect-and-fix not novel-design,
+    // and the build-error injection (today's earlier fix) gives the reviewer a concrete spec
+    // anyway. Anthropic + OpenAI reviewers stay on PLANNING tier (cache works fine there).
+    com.navneet.executespec.router.AgentTier reviewerTier =
+        reviewerProvider == com.navneet.executespec.router.LlmProvider.GEMINI
+            ? com.navneet.executespec.router.AgentTier.WORKHORSE
+            : com.navneet.executespec.router.AgentTier.PLANNING;
     com.navneet.executespec.router.ResolvedModel resolved =
-        modelResolver.resolve("ReviewerAgent", reviewerProvider);
+        modelResolver.resolve("ReviewerAgent", reviewerProvider, reviewerTier);
     String reviewerModel = resolved.getModel();
     String reviewerProviderName = resolved.getActualProvider().name().toLowerCase();
+    String userPrompt = composeReviewerUserPrompt(preBuildError);
     return worker.run(
         WorkerTaskRequest.builder()
             .provider(reviewerProviderName)
             .model(reviewerModel)
             .systemPrompt(systemPrompt)
-            .userPrompt(
-                "Begin your review now. Use the tools to inspect, fix, build, "
-                    + "and then call completeTask.")
+            .userPrompt(userPrompt)
             .context(passCtx)
             .maxIterations(maxIter)
             .temperature(0.0)
             .maxTokensPerCall(8192)
+            // 2026-05-08 — when build is failing pre-review, force completeTask gate to require
+            // a successful buildProject call before terminating. Mirrors PatchAgent's gold-test
+            // gate (V182 layer-3). Without this, reviewer can call completeTask after a few
+            // edits without verifying — leaves run in PARTIAL/FINAL_BUILD_FAILED.
+            .requireBuildVerification(preBuildError != null)
             .build());
+  }
+
+  /**
+   * Builds the user-facing kickoff message for a reviewer pass. When {@code preBuildError} is
+   * non-null, the build was failing entering the reviewer — prepend the verbatim error so the LLM
+   * has a concrete target rather than a generic "look around for issues" prompt.
+   */
+  static String composeReviewerUserPrompt(String preBuildError) {
+    if (preBuildError == null || preBuildError.isBlank()) {
+      return "Begin your review now. Use the tools to inspect, fix, build, "
+          + "and then call completeTask.";
+    }
+    return """
+           BUILD IS CURRENTLY FAILING. Your job is to make it pass.
+
+           The build error below is your spec. Read it carefully — the specific files,
+           line numbers, and error messages name the exact problem. Match the fix to
+           the error: don't refactor unrelated code, don't reorganise; identify the
+           root cause, edit the affected files, run buildProject, and only call
+           completeTask after the build returns exit=0.
+
+           --- BUILD ERROR (verbatim, captured before this review pass) ---
+           """
+        + truncateBuildError(preBuildError)
+        + """
+
+--- END BUILD ERROR ---
+
+Begin now. Use readFile / editFile to fix the source files, then call
+buildProject to verify. Do NOT call completeTask before buildProject reports
+exit=0 — the harness will reject premature completions.
+""";
+  }
+
+  /**
+   * Cap the build error at 12K chars (head 8K + tail 4K) — long enough for compiler stack traces
+   * with stem+leaf, short enough that the reviewer's prefix stays cache-friendly. Real build errors
+   * over 12K usually have the actionable info in the first stack trace and the last few "BUILD
+   * FAILED" lines; the middle is repetition.
+   */
+  private static String truncateBuildError(String s) {
+    if (s == null) return "";
+    int cap = 12_000;
+    if (s.length() <= cap) return s;
+    int head = 8_000;
+    int omitted = s.length() - cap;
+    return s.substring(0, head)
+        + "\n\n... ["
+        + omitted
+        + " chars omitted from middle of build output] ...\n\n"
+        + s.substring(s.length() - (cap - head));
+  }
+
+  /**
+   * Run the build smoke once before any review pass to capture the entering build state. Returns
+   * null when the build passes (clean entry), the verbatim build output when it fails. Also returns
+   * null on any tool error — we don't want a flaky build infrastructure to falsely trip the
+   * build-failing path; the run-end final smoke will catch a real failure either way.
+   */
+  private String capturePreReviewBuildError(ReviewerRequest req) {
+    try {
+      ObjectNode buildArgs = objectMapper.createObjectNode();
+      if (req.buildCommand() != null && !req.buildCommand().isBlank()) {
+        buildArgs.put("plannerCommand", req.buildCommand());
+      }
+      ToolResult result = buildProjectTool.execute(buildArgs, req.context());
+      if (!(result instanceof ToolResult.Ok ok)) return null;
+      String output = ok.content();
+      int exit = extractExitCode(output);
+      return exit == 0 ? null : output;
+    } catch (Exception e) {
+      log.debug("capturePreReviewBuildError failed: {}", e.getMessage());
+      return null;
+    }
   }
 
   /**
@@ -282,9 +401,10 @@ public class ReviewerAgent {
       int maxIter,
       String taskIdSuffix,
       String systemPrompt,
-      long timeoutSeconds) {
+      long timeoutSeconds,
+      String preBuildError) {
     Future<WorkerResult> future =
-        passExecutor.submit(() -> runPass(req, maxIter, taskIdSuffix, systemPrompt));
+        passExecutor.submit(() -> runPass(req, maxIter, taskIdSuffix, systemPrompt, preBuildError));
     try {
       return future.get(timeoutSeconds, TimeUnit.SECONDS);
     } catch (TimeoutException te) {
@@ -317,15 +437,68 @@ public class ReviewerAgent {
     }
   }
 
+  /** Verdict the reviewer prompt asks the agent to emit on the first line of `completeTask`. */
+  private enum PassVerdict {
+    CLEAN,
+    FIXED_ISSUES,
+    UNRESOLVED,
+    /** No verdict prefix found — fall back to free-text heuristic for backward compat. */
+    UNPARSED
+  }
+
+  /**
+   * Parse the {@code VERDICT: <CLEAN|FIXED_ISSUES|UNRESOLVED>} prefix on the first line of the
+   * worker's completion summary. Both reviewer prompts (general + wiring) require this prefix as of
+   * 2026-05-08. Pre-prompt-update runs return UNPARSED, in which case {@link #determineOverall}
+   * falls back to the legacy substring heuristic.
+   */
+  private static PassVerdict parsePassVerdict(WorkerResult result) {
+    if (result == null) return PassVerdict.UNPARSED;
+    String summary = result.completionSummary();
+    if (summary == null || summary.isBlank()) return PassVerdict.UNPARSED;
+    // Take only the first line so subsequent prose can mention any verdict word freely.
+    int nl = summary.indexOf('\n');
+    String firstLine = (nl < 0 ? summary : summary.substring(0, nl)).trim();
+    String upper = firstLine.toUpperCase();
+    if (!upper.startsWith("VERDICT:")) return PassVerdict.UNPARSED;
+    String tail = upper.substring("VERDICT:".length()).trim();
+    if (tail.startsWith("CLEAN")) return PassVerdict.CLEAN;
+    if (tail.startsWith("FIXED_ISSUES") || tail.startsWith("FIXED")) {
+      return PassVerdict.FIXED_ISSUES;
+    }
+    if (tail.startsWith("UNRESOLVED")) return PassVerdict.UNRESOLVED;
+    return PassVerdict.UNPARSED;
+  }
+
   private ReviewerResult.Overall determineOverall(
       WorkerResult general, WorkerResult wiring, boolean buildPassed) {
+    PassVerdict gV = parsePassVerdict(general);
+    PassVerdict wV = wiring == null ? PassVerdict.CLEAN : parsePassVerdict(wiring);
+
+    // Structured-verdict path: both reviewer passes emitted a parseable VERDICT: prefix.
+    if (gV != PassVerdict.UNPARSED && wV != PassVerdict.UNPARSED) {
+      // UNRESOLVED on either pass dominates. Build failure also dominates regardless of
+      // what the agent claimed (the build is the ground truth).
+      if (gV == PassVerdict.UNRESOLVED || wV == PassVerdict.UNRESOLVED || !buildPassed) {
+        return ReviewerResult.Overall.UNRESOLVED_ISSUES;
+      }
+      // Both CLEAN + build OK → CLEAN.
+      if (gV == PassVerdict.CLEAN && wV == PassVerdict.CLEAN) {
+        return ReviewerResult.Overall.CLEAN;
+      }
+      // At least one FIXED_ISSUES (the other may be CLEAN), build OK → FIXED_ISSUES.
+      return ReviewerResult.Overall.FIXED_ISSUES;
+    }
+
+    // Backward-compat: pre-prompt-update runs land here. Fall back to the legacy
+    // free-text substring match. Removing this branch is safe once every deployed
+    // reviewer prompt emits the VERDICT: prefix; tracked under doc-refresh.
     String gSum =
         general.completionSummary() == null ? "" : general.completionSummary().toLowerCase();
     String wSum =
         wiring == null || wiring.completionSummary() == null
             ? ""
             : wiring.completionSummary().toLowerCase();
-    // "no issues" / "no in-scope issues" / "no wiring issues" → clean signal
     boolean generalClean =
         gSum.contains("no issues") || gSum.contains("no in-scope") || gSum.contains("found 0");
     boolean wiringClean =

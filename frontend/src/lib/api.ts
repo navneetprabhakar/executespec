@@ -175,6 +175,10 @@ export interface RunSummary {
   sourceRunId?: string | null;
   /** Which harness produced this run: "v1" (default) or "v2". */
   harnessVersion?: string | null;
+  /** V183 — 'BUILD' (default planner+executor+reviewer flow) or 'PATCH' (thin single-agent loop, autofix / bench runs). */
+  runMode?: 'BUILD' | 'PATCH' | null;
+  /** V183 — finding source key for autofix-triggered patch runs. `<TYPE>:<id>`. */
+  triggeredByFinding?: string | null;
   /** v2.5.8 — total USD spent on LLM calls for this run. Null until terminal. */
   actualCostUsd?: number | null;
   /**
@@ -2442,6 +2446,24 @@ export interface TechDebtReport {
 export const getTechDebt = (projectId: string, sinceDays?: number) =>
   req<TechDebtReport>(`/projects/${projectId}/tech-debt${sinceDays ? `?since=${sinceDays}` : ''}`);
 
+export interface TechDebtFixResponse {
+  runId: string;
+  findingKey: string;
+  outcome: 'DISPATCHED' | 'REUSED_ACTIVE';
+}
+
+/**
+ * Phase 2 (V183) — dispatch a patch-mode run that fixes every issue of the named
+ * category across the project's linked repos. One PR per category. Idempotent
+ * server-side: an in-flight run for the same (project, category) returns the
+ * existing run with `outcome=REUSED_ACTIVE`.
+ */
+export const dispatchTechDebtFix = (projectId: string, category: string) =>
+  req<TechDebtFixResponse>(`/projects/${projectId}/tech-debt/fix`, {
+    method: 'POST',
+    body: JSON.stringify({category}),
+  });
+
 // v2.5.2 — heuristic pre-submit Launch estimate (no LLM call).
 export interface LaunchEstimate {
   estimatedTasksLow: number;
@@ -3296,6 +3318,21 @@ export const listPrReviewsForPr = (repoFullName: string, prNumber: number) =>
 export const listPrReviewsForProject = (projectId: string) =>
   req<PrReviewDto[]>(`/projects/${projectId}/pr-reviews`);
 
+export interface PrReviewAutofixResponse {
+  runId: string;
+  findingKey: string;
+  outcome: 'DISPATCHED' | 'REUSED_ACTIVE';
+}
+
+/**
+ * Phase 1 (V183) — dispatch a patch-mode run that addresses every comment on a PR
+ * review. Returns the run id so the UI can navigate to `/runs/{id}` and watch
+ * progress. Idempotent server-side: a fresh dispatch when there's already an active
+ * run for this review returns the existing run with `outcome=REUSED_ACTIVE`.
+ */
+export const dispatchPrReviewAutofix = (reviewId: string) =>
+  req<PrReviewAutofixResponse>(`/pr-reviews/${reviewId}/autofix`, {method: 'POST'});
+
 export interface CodeReviewScanDto {
   id: string;
   projectId: string;
@@ -3358,6 +3395,27 @@ export const getLatestCodeReviewForRepo = (projectId: string, repoFullName: stri
  * "Open report" link and for the Code Quality tab's Download button.
  */
 export const codeReviewReportDownloadUrl = (id: string) => `${BASE}/code-reviews/${id}/report`;
+
+export interface CodeReviewAutofixResponse {
+  runId: string;
+  findingKey: string;
+  outcome: 'DISPATCHED' | 'REUSED_ACTIVE';
+}
+
+/**
+ * Phase 4 (V183) — dispatch a patch-mode run that addresses every OPEN issue of the
+ * named severity bucket from a code review scan. One PR per severity. Idempotent
+ * server-side: an in-flight run for the same (scan, severity) returns the existing
+ * run with `outcome=REUSED_ACTIVE`.
+ */
+export const dispatchCodeReviewAutofix = (
+  scanId: string,
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO',
+) =>
+  req<CodeReviewAutofixResponse>(`/code-reviews/${scanId}/autofix`, {
+    method: 'POST',
+    body: JSON.stringify({severity}),
+  });
 
 // ── V175 — external project sharing (invites + public share links) ──────────────
 
