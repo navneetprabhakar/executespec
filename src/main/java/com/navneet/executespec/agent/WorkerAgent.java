@@ -305,12 +305,38 @@ public class WorkerAgent {
         double spent = costTracker.snapshot(runId).costUsd();
         if (spent >= hardCapUsd) {
           log.warn(
-              "WorkerAgent BUDGET_EXCEEDED run={} task={} iter={} spent=${} cap=${}",
+              "WorkerAgent BUDGET_EXCEEDED run={} task={} iter={} spent=${} cap=${} totalWrites={}",
               runId,
               req.context().taskId(),
               iter,
               String.format("%.4f", spent),
-              String.format("%.4f", hardCapUsd));
+              String.format("%.4f", hardCapUsd),
+              totalWriteCalls);
+          // 2026-05-08 — extend Lever B salvage to BUDGET_EXCEEDED path. Previously only
+          // ITERATION_LIMIT_EXCEEDED triggered runSalvageCall; a BUDGET_EXCEEDED with zero
+          // writes also produced an empty patch (observed Gemini sqlfluff-1733/1517 hitting
+          // $4 cap with 0 edits). One extra LLM call is ~$0.10-0.50, acceptable spend over
+          // the cap to convert "empty patch = automatic failure" into "best-guess patch =
+          // possible resolve." For BYOK runs cap is null so this branch never fires anyway.
+          if (totalWriteCalls == 0) {
+            try {
+              WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
+              if (salvage != null) {
+                // Mark salvage outcome distinct from clean BUDGET_EXCEEDED so downstream sees
+                // we DID produce output despite hitting cap. Reuses the iter-limit salvage
+                // path which returns COMPLETED on a successful write.
+                log.info(
+                    "WorkerAgent BUDGET_EXCEEDED salvage produced output run={}",
+                    req.context().runId());
+                return salvage;
+              }
+            } catch (Exception e) {
+              log.warn(
+                  "WorkerAgent BUDGET salvage failed run={}: {}",
+                  req.context().runId(),
+                  e.getMessage());
+            }
+          }
           recordTerminal(WorkerResult.Outcome.BUDGET_EXCEEDED, req, iter);
           // P3.1 (GA-readiness, 2026-05-06) — return outcome=BUDGET_EXCEEDED so the executor
           // sees the budget signal directly. Previously this path called errorResult(...) which

@@ -1427,8 +1427,18 @@ public class RunOrchestrator {
 
   // ─── V182 PATCH-mode pipeline ──────────────────────────────────────────
 
-  /** Default per-run cost cap when bench services don't supply one. */
-  private static final double DEFAULT_PATCH_HARD_CAP_USD = 4.0;
+  /**
+   * Default per-run cost cap when bench services don't supply one. Bumped 2026-05-08 from $4 to $8
+   * after the hard SWE-bench matrix showed Gemini hitting BUDGET_EXCEEDED at $4.06-$4.18 on
+   * heavy-reasoning sqlfluff instances — within $0.20 of the cap, meaning $4 was strangling runs
+   * that were close to completion. $8 gives Gemini Pro on hard SWE-bench instances enough headroom
+   * to finish (observed peak $4.84 in the f79252b1 pyvista budget-exceeded case from the medium
+   * matrix). Real protection against runaway loops is now ITER_LIMIT (120 iters) + Lever A
+   * force-edit watchdog + Lever B salvage; the cost cap is a final defence-in-depth. Operator can
+   * still override per-run via RunRequest.userCostCap if a tighter ceiling is desired for
+   * cost-sensitive workloads.
+   */
+  private static final double DEFAULT_PATCH_HARD_CAP_USD = 8.0;
 
   /**
    * V182 — patch-mode dispatch. Skips planner, executor, reviewer, and the validation report; the
