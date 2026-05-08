@@ -88,10 +88,10 @@ public class CodeReviewController {
   public record AutofixResponse(String runId, String findingKey, String outcome) {}
 
   /**
-   * Phase 4 (V183) — dispatch a patch-mode run that addresses every OPEN issue of the
-   * named severity bucket from a code review scan. One PR per severity so reviewers can
-   * grade independently. Idempotent server-side: an in-flight run for the same
-   * (scan, severity) returns the existing run with {@code outcome=REUSED_ACTIVE}.
+   * Phase 4 (V183) — dispatch a patch-mode run that addresses every OPEN issue of the named
+   * severity bucket from a code review scan. One PR per severity so reviewers can grade
+   * independently. Idempotent server-side: an in-flight run for the same (scan, severity) returns
+   * the existing run with {@code outcome=REUSED_ACTIVE}.
    */
   @PostMapping("/api/code-reviews/{id}/autofix")
   public ResponseEntity<AutofixResponse> autofix(
@@ -107,7 +107,9 @@ public class CodeReviewController {
     }
     projectAccessGuard.assertCanRead(scan.getProjectId(), userDetails);
 
-    var result = autofixService.dispatchFixForSeverity(id, req == null ? null : req.severity(), userDetails.getUser());
+    var result =
+        autofixService.dispatchFixForSeverity(
+            id, req == null ? null : req.severity(), userDetails.getUser());
     return ResponseEntity.status(HttpStatus.ACCEPTED)
         .body(new AutofixResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }

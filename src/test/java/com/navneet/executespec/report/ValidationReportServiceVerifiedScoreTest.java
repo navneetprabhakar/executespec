@@ -9,17 +9,16 @@ import com.navneet.executespec.config.featureflag.FeatureFlagService;
 import org.junit.jupiter.api.Test;
 
 /**
- * 2026-05-08 — multiplicative re-shape of {@code computeVerifiedScore}. Pins the new
- * conjunctive shape that replaced the additive weighted-sum formula. The shape change is
- * substantive: a failed build now collapses the headline number (was: −20 off a base 100;
- * now: 0). A run with no tests captured is strongly damped (was: −20 off; now: ×0.5). A
- * cliff at 95% endpoint coverage is gone (was: 0/+10; now: linear 0–1.0).
+ * 2026-05-08 — multiplicative re-shape of {@code computeVerifiedScore}. Pins the new conjunctive
+ * shape that replaced the additive weighted-sum formula. The shape change is substantive: a failed
+ * build now collapses the headline number (was: −20 off a base 100; now: 0). A run with no tests
+ * captured is strongly damped (was: −20 off; now: ×0.5). A cliff at 95% endpoint coverage is gone
+ * (was: 0/+10; now: linear 0–1.0).
  *
- * <p>Each test documents the factor breakdown so the formula stays transparent under
- * future tuning. Persisted historical scores are NOT migrated — old runs read whatever
- * the additive formula produced; new runs use the new shape. The frontend's VerdictPill
- * (Plan 1 #3) is the customer-facing summary; the numeric score is now diagnostic detail
- * for ops + API consumers.
+ * <p>Each test documents the factor breakdown so the formula stays transparent under future tuning.
+ * Persisted historical scores are NOT migrated — old runs read whatever the additive formula
+ * produced; new runs use the new shape. The frontend's VerdictPill (Plan 1 #3) is the
+ * customer-facing summary; the numeric score is now diagnostic detail for ops + API consumers.
  */
 class ValidationReportServiceVerifiedScoreTest {
 

@@ -60,11 +60,11 @@ public class CiFailureAutoFixService {
   private final FeatureFlagService featureFlagService;
 
   /**
-   * V183 — feature flag gating the auto-fire webhook path. Default OFF until the
-   * SWE-bench matrix data confirms patch-mode resolved% is high enough to trust the
-   * bot. Operators flip to true via {@code PUT /api/feature-flags/ci.autofix.enabled}.
-   * The other phases (PR Review autofix, Tech Debt, Code Review) are user-clicked so
-   * they don't need the gate; only the unattended webhook path does.
+   * V183 — feature flag gating the auto-fire webhook path. Default OFF until the SWE-bench matrix
+   * data confirms patch-mode resolved% is high enough to trust the bot. Operators flip to true via
+   * {@code PUT /api/feature-flags/ci.autofix.enabled}. The other phases (PR Review autofix, Tech
+   * Debt, Code Review) are user-clicked so they don't need the gate; only the unattended webhook
+   * path does.
    */
   static final String FEATURE_FLAG = "ci.autofix.enabled";
 

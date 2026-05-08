@@ -113,18 +113,18 @@ public class WorkerAgent {
   public static final int STAGNATION_FORCE_AFTER_N = 12;
 
   /**
-   * V182 layer-3 — within how many iterations of {@code completeTask} must a successful
-   * {@code runTests} call have occurred? When {@link WorkerTaskRequest#requireTestVerification()}
-   * is true, the dispatch loop refuses {@code completeTask} unless the agent ran tests
-   * within this window. 5 is calibrated to be tight enough that the agent can't claim
-   * "I ran the tests 30 iters ago and they passed" but loose enough to allow a few
-   * post-test polishing iterations (re-read the output, double-check the diff).
+   * V182 layer-3 — within how many iterations of {@code completeTask} must a successful {@code
+   * runTests} call have occurred? When {@link WorkerTaskRequest#requireTestVerification()} is true,
+   * the dispatch loop refuses {@code completeTask} unless the agent ran tests within this window. 5
+   * is calibrated to be tight enough that the agent can't claim "I ran the tests 30 iters ago and
+   * they passed" but loose enough to allow a few post-test polishing iterations (re-read the
+   * output, double-check the diff).
    */
   public static final int TEST_VERIFICATION_RECENCY_ITERS = 5;
 
   /**
-   * Name of the structured pytest tool ({@link com.navneet.executespec.tool.RunTestsTool}).
-   * Used by the layer-3 verification gate to identify the call that satisfies it.
+   * Name of the structured pytest tool ({@link com.navneet.executespec.tool.RunTestsTool}). Used by
+   * the layer-3 verification gate to identify the call that satisfies it.
    */
   static final String RUN_TESTS_TOOL_NAME = "runTests";
 
@@ -402,8 +402,7 @@ public class WorkerAgent {
           // Build mode (gateOn=false) keeps today's behaviour — completeTask always
           // succeeds because build mode has its own smoke gate downstream.
           if (gateOn) {
-            int sinceLastTest =
-                lastTestRunIter < 0 ? Integer.MAX_VALUE : iter - lastTestRunIter;
+            int sinceLastTest = lastTestRunIter < 0 ? Integer.MAX_VALUE : iter - lastTestRunIter;
             if (sinceLastTest > TEST_VERIFICATION_RECENCY_ITERS) {
               String reason;
               if (lastTestRunIter < 0) {
@@ -426,8 +425,7 @@ public class WorkerAgent {
               }
               String refused = errEnvelope("FORBIDDEN", reason);
               toolResponses.add(
-                  new ToolResponseMessage.ToolResponse(
-                      safeId(tc.id()), tc.name(), refused));
+                  new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), refused));
               toolLog.add(tc.name() + " → REFUSED (no recent runTests)");
               log.info(
                   "WorkerAgent completeTask GATED run={} task={} iter={} sinceLastTest={}",

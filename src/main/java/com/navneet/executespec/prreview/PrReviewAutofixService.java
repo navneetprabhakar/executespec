@@ -8,14 +8,14 @@ import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.finding.Finding;
 import com.navneet.executespec.finding.FindingPatchSubmitter;
 import com.navneet.executespec.finding.FindingType;
-import com.navneet.executespec.prreview.entity.PrReview;
-import com.navneet.executespec.prreview.entity.PrReviewComment;
-import com.navneet.executespec.prreview.repository.PrReviewCommentRepository;
-import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.project.entity.ProjectRepo;
 import com.navneet.executespec.project.entity.ProjectRepoLink;
 import com.navneet.executespec.project.repository.ProjectRepoLinkRepository;
 import com.navneet.executespec.project.repository.ProjectRepoRepository;
+import com.navneet.executespec.prreview.entity.PrReview;
+import com.navneet.executespec.prreview.entity.PrReviewComment;
+import com.navneet.executespec.prreview.repository.PrReviewCommentRepository;
+import com.navneet.executespec.prreview.repository.PrReviewRepository;
 import com.navneet.executespec.repo.GitHubRepoService;
 
 import org.springframework.http.HttpStatus;
@@ -26,27 +26,26 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Phase 1 (FindingPatchSubmitter rollout) — dispatches a patch-mode run to address every
- * comment on a PR review. Owns the adapter logic between {@link PrReview} +
- * {@link PrReviewComment} domain objects and the generic {@link Finding} contract:
+ * Phase 1 (FindingPatchSubmitter rollout) — dispatches a patch-mode run to address every comment on
+ * a PR review. Owns the adapter logic between {@link PrReview} + {@link PrReviewComment} domain
+ * objects and the generic {@link Finding} contract:
  *
  * <ol>
  *   <li>Looks the review + its comments up.
- *   <li>Resolves the project's linked repo for the review's repo, so the patch run's
- *       multi-repo clone path picks up the right workspace.
- *   <li>Calls {@link GitHubRepoService#getPullRequestSnapshot} to discover the PR's
- *       head branch — the commit will be pushed onto this branch via
- *       {@code branchOverride}, so addressing review comments lands on the same PR
- *       instead of opening a new one.
- *   <li>Synthesises a focused user prompt that lists every comment with its file +
- *       line + body so the agent can iterate per finding.
- *   <li>Hands off to {@link FindingPatchSubmitter} which dedupes against any active run
- *       for the same review id and dispatches when needed.
+ *   <li>Resolves the project's linked repo for the review's repo, so the patch run's multi-repo
+ *       clone path picks up the right workspace.
+ *   <li>Calls {@link GitHubRepoService#getPullRequestSnapshot} to discover the PR's head branch —
+ *       the commit will be pushed onto this branch via {@code branchOverride}, so addressing review
+ *       comments lands on the same PR instead of opening a new one.
+ *   <li>Synthesises a focused user prompt that lists every comment with its file + line + body so
+ *       the agent can iterate per finding.
+ *   <li>Hands off to {@link FindingPatchSubmitter} which dedupes against any active run for the
+ *       same review id and dispatches when needed.
  * </ol>
  *
- * <p>Tier gating: the original PR Review submission already enforced PRO+ tier; this
- * service piggybacks on the existing review row's existence (FREE tier never sees one).
- * For belt-and-braces, the controller checks the user owns the review's project too.
+ * <p>Tier gating: the original PR Review submission already enforced PRO+ tier; this service
+ * piggybacks on the existing review row's existence (FREE tier never sees one). For
+ * belt-and-braces, the controller checks the user owns the review's project too.
  */
 @Service
 @RequiredArgsConstructor
@@ -74,8 +73,7 @@ public class PrReviewAutofixService {
     }
     if ("APPROVE".equals(review.getVerdict())) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "Verdict is APPROVE — nothing to autofix.");
+          HttpStatus.CONFLICT, "Verdict is APPROVE — nothing to autofix.");
     }
 
     List<PrReviewComment> comments =
@@ -101,8 +99,7 @@ public class PrReviewAutofixService {
     }
     if ("closed".equalsIgnoreCase(snap.state()) && !snap.merged()) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "PR is closed without merge — autofix would have nowhere to push.");
+          HttpStatus.CONFLICT, "PR is closed without merge — autofix would have nowhere to push.");
     }
 
     String prompt = buildPrompt(review, comments, snap);
@@ -148,15 +145,13 @@ public class PrReviewAutofixService {
   }
 
   /**
-   * Produces a focused user prompt that lists every comment with file + line + body. The
-   * agent reads it as ground truth: each comment is a finding it must address, the
-   * suggested fix (when present) is a hint, and the failing-test capture isn't relevant
-   * for review-driven runs (no test infra needed beyond the project's own).
+   * Produces a focused user prompt that lists every comment with file + line + body. The agent
+   * reads it as ground truth: each comment is a finding it must address, the suggested fix (when
+   * present) is a hint, and the failing-test capture isn't relevant for review-driven runs (no test
+   * infra needed beyond the project's own).
    */
   private String buildPrompt(
-      PrReview review,
-      List<PrReviewComment> comments,
-      GitHubRepoService.PullRequestSnapshot snap) {
+      PrReview review, List<PrReviewComment> comments, GitHubRepoService.PullRequestSnapshot snap) {
     StringBuilder sb = new StringBuilder();
     sb.append("Address the following PR review comments on ")
         .append(review.getRepoFullName())
@@ -187,28 +182,20 @@ public class PrReviewAutofixService {
       sb.append("\n   ").append(c.getBody().replace("\n", "\n   ")).append("\n\n");
     }
     sb.append("# How to work\n\n");
-    sb.append(
-        "1. Read each cited file at the cited line. Understand the comment's intent\n");
-    sb.append(
-        "   — the reviewer is right unless the suggestion is technically incorrect.\n");
+    sb.append("1. Read each cited file at the cited line. Understand the comment's intent\n");
+    sb.append("   — the reviewer is right unless the suggestion is technically incorrect.\n");
     sb.append("2. Apply the minimum edit that addresses the comment.\n");
-    sb.append(
-        "3. Run the project's tests via `runTests` to confirm no regression. If the\n");
-    sb.append(
-        "   project doesn't use pytest, fall back to `shell` with the project's test\n");
+    sb.append("3. Run the project's tests via `runTests` to confirm no regression. If the\n");
+    sb.append("   project doesn't use pytest, fall back to `shell` with the project's test\n");
     sb.append("   runner.\n");
-    sb.append(
-        "4. Commit will be pushed automatically to the existing PR branch on completion;\n");
+    sb.append("4. Commit will be pushed automatically to the existing PR branch on completion;\n");
     sb.append("   do not branch / push yourself.\n");
     sb.append("5. Call completeTask once every comment has been addressed and verified.\n\n");
     sb.append("# Constraints\n\n");
-    sb.append(
-        "- Do NOT reply to the comments inline — your job is to produce the fix, not the\n");
+    sb.append("- Do NOT reply to the comments inline — your job is to produce the fix, not the\n");
     sb.append("  conversation.\n");
-    sb.append(
-        "- Do NOT touch unrelated files. Reviewers don't want to see drive-by changes.\n");
-    sb.append(
-        "- Do NOT modify tests unless a comment explicitly says to. Tests may be the\n");
+    sb.append("- Do NOT touch unrelated files. Reviewers don't want to see drive-by changes.\n");
+    sb.append("- Do NOT modify tests unless a comment explicitly says to. Tests may be the\n");
     sb.append("  reviewer's signal of intent.\n");
     return sb.toString();
   }

@@ -326,10 +326,10 @@ public class ProjectDashboardController {
   public record FixTechDebtResponse(String runId, String findingKey, String outcome) {}
 
   /**
-   * Phase 2 (V183) — dispatch a patch-mode run that fixes every issue of the named
-   * category across the project's linked repos. One PR per category keeps diffs coherent.
-   * Idempotent: an in-flight run for the same (project, category) returns the existing
-   * run with {@code outcome=REUSED_ACTIVE} instead of dispatching a duplicate.
+   * Phase 2 (V183) — dispatch a patch-mode run that fixes every issue of the named category across
+   * the project's linked repos. One PR per category keeps diffs coherent. Idempotent: an in-flight
+   * run for the same (project, category) returns the existing run with {@code
+   * outcome=REUSED_ACTIVE} instead of dispatching a duplicate.
    */
   @org.springframework.web.bind.annotation.PostMapping("/api/projects/{projectId}/tech-debt/fix")
   public ResponseEntity<FixTechDebtResponse> fixTechDebt(
@@ -349,7 +349,8 @@ public class ProjectDashboardController {
     var result =
         techDebtFixService.dispatchFixForCategory(projectId, req.category(), userDetails.getUser());
     return ResponseEntity.status(org.springframework.http.HttpStatus.ACCEPTED)
-        .body(new FixTechDebtResponse(result.runId(), result.findingKey(), result.outcome().name()));
+        .body(
+            new FixTechDebtResponse(result.runId(), result.findingKey(), result.outcome().name()));
   }
 
   /** v2.5.2 — dismiss the post-merge banner (user clicked the CTA or X). */

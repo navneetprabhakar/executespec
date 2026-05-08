@@ -194,7 +194,8 @@ public class SwebenchTaskService {
               .ifPresent(
                   row -> {
                     row.setUserRequest(
-                        prefixWithFailingTestOutput(testOutputF, testSourceF, row.getUserRequest()));
+                        prefixWithFailingTestOutput(
+                            testOutputF, testSourceF, row.getUserRequest()));
                     runRepo.save(row);
                   });
           log.info(
@@ -466,14 +467,14 @@ public class SwebenchTaskService {
   /**
    * Layer-1 helper: run the FAIL_TO_PASS tests inside the container and capture pytest output.
    *
-   * <p>Runs up to 5 of the failing tests with concise traceback (`--tb=short`). Cap matters
-   * because some SWE-bench instances list 50+ FAIL_TO_PASS tests and we only need the
-   * agent to see the shape of what's failing — once it understands ONE assertion error,
-   * the rest are usually variations.
+   * <p>Runs up to 5 of the failing tests with concise traceback (`--tb=short`). Cap matters because
+   * some SWE-bench instances list 50+ FAIL_TO_PASS tests and we only need the agent to see the
+   * shape of what's failing — once it understands ONE assertion error, the rest are usually
+   * variations.
    *
-   * <p>Output is truncated to ~6 KB (head 5500 + tail 500) so even a noisy test suite
-   * fits in the user prompt without blowing context budget. Returns empty string on
-   * docker-exec failure or when the test list is empty.
+   * <p>Output is truncated to ~6 KB (head 5500 + tail 500) so even a noisy test suite fits in the
+   * user prompt without blowing context budget. Returns empty string on docker-exec failure or when
+   * the test list is empty.
    */
   private String captureFailingTestOutput(
       String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
@@ -517,32 +518,32 @@ public class SwebenchTaskService {
   /**
    * Layer-1 helper: build the source-of-truth test snippet for the worker prompt.
    *
-   * <p>The pytest output (captureFailingTestOutput) tells the agent WHAT broke; the test
-   * source tells the agent WHAT BEHAVIOR is being verified. Without the source, the agent
-   * surface-fixes on the error message (e.g. patches the deprecation the import error
-   * mentions) without realising that's just unblocking test collection.
+   * <p>The pytest output (captureFailingTestOutput) tells the agent WHAT broke; the test source
+   * tells the agent WHAT BEHAVIOR is being verified. Without the source, the agent surface-fixes on
+   * the error message (e.g. patches the deprecation the import error mentions) without realising
+   * that's just unblocking test collection.
    *
-   * <p><b>Why we read from {@code test_patch}, not {@code /testbed}:</b> the FAIL_TO_PASS
-   * tests do NOT exist in the base commit. The SWE-bench harness applies the gold test
-   * patch AFTER the agent's solution lands; the test bodies the agent's edit must satisfy
-   * are a superset of (and often disjoint from) what's in {@code /testbed} at run-time.
-   * Astroid-1268 is the canonical demonstration: agent saw {@code unittest_nodes.py} from
-   * base — which has zero {@code test_as_string_unknown} text — and produced {@code
-   * return "Unknown"} when the gold assertion required {@code "Unknown.Unknown()"}.
+   * <p><b>Why we read from {@code test_patch}, not {@code /testbed}:</b> the FAIL_TO_PASS tests do
+   * NOT exist in the base commit. The SWE-bench harness applies the gold test patch AFTER the
+   * agent's solution lands; the test bodies the agent's edit must satisfy are a superset of (and
+   * often disjoint from) what's in {@code /testbed} at run-time. Astroid-1268 is the canonical
+   * demonstration: agent saw {@code unittest_nodes.py} from base — which has zero {@code
+   * test_as_string_unknown} text — and produced {@code return "Unknown"} when the gold assertion
+   * required {@code "Unknown.Unknown()"}.
    *
    * <p>Strategy:
    *
    * <ul>
-   *   <li>Primary path: parse the {@code test_patch} unified diff. Emit it as-is (with diff
-   *       markers preserved so the model can distinguish added test code from neighbouring
-   *       context). The diff is small (typically &lt;5KB) and load-bearing.
-   *   <li>Fallback path: if {@code test_patch} is empty (older dataset format / corrupted
-   *       row), fall back to {@code docker exec cat /testbed/<file>} per FAIL_TO_PASS file
-   *       so we still emit something useful.
+   *   <li>Primary path: parse the {@code test_patch} unified diff. Emit it as-is (with diff markers
+   *       preserved so the model can distinguish added test code from neighbouring context). The
+   *       diff is small (typically &lt;5KB) and load-bearing.
+   *   <li>Fallback path: if {@code test_patch} is empty (older dataset format / corrupted row),
+   *       fall back to {@code docker exec cat /testbed/<file>} per FAIL_TO_PASS file so we still
+   *       emit something useful.
    * </ul>
    *
-   * <p>Caps: total snippet 20KB. Test patches over 20KB get head 14KB + tail 6KB so both
-   * the modified-file-headers (top) and any added test bodies (bottom) survive.
+   * <p>Caps: total snippet 20KB. Test patches over 20KB get head 14KB + tail 6KB so both the
+   * modified-file-headers (top) and any added test bodies (bottom) survive.
    */
   private String captureFailingTestSource(
       String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
@@ -557,11 +558,11 @@ public class SwebenchTaskService {
   /**
    * Format the gold {@code test_patch} for inclusion in the worker prompt.
    *
-   * <p>We emit the diff verbatim inside a fenced ```diff block so the agent can read both
-   * the test bodies (added lines) and the surrounding file context (unchanged lines, header
-   * lines starting with {@code @@}). Stripping the diff markers would lose information —
-   * the model uses {@code +}/{@code -} prefixes to distinguish "this test must pass" from
-   * "this is the file's existing structure". Keep the markers.
+   * <p>We emit the diff verbatim inside a fenced ```diff block so the agent can read both the test
+   * bodies (added lines) and the surrounding file context (unchanged lines, header lines starting
+   * with {@code @@}). Stripping the diff markers would lose information — the model uses {@code
+   * +}/{@code -} prefixes to distinguish "this test must pass" from "this is the file's existing
+   * structure". Keep the markers.
    */
   private String formatTestPatchSnippet(String testPatch) {
     int cap = 20_000;
@@ -569,22 +570,27 @@ public class SwebenchTaskService {
     if (body.length() > cap) {
       int head = 14_000;
       int omitted = body.length() - cap;
-      body = body.substring(0, head)
-          + "\n\n... [" + omitted + " chars omitted from middle] ...\n\n"
-          + body.substring(body.length() - (cap - head));
+      body =
+          body.substring(0, head)
+              + "\n\n... ["
+              + omitted
+              + " chars omitted from middle] ...\n\n"
+              + body.substring(body.length() - (cap - head));
     }
     return "\n## Gold test patch (the assertions your fix must satisfy)\n\n"
         + "Below is the unified diff of test files that the SWE-bench harness applies AFTER\n"
         + "your fix lands. The `+` lines are the FAIL_TO_PASS test bodies — read them carefully\n"
         + "to see exactly what return values / behaviour the production code must produce.\n\n"
-        + "```diff\n" + body + "\n```\n";
+        + "```diff\n"
+        + body
+        + "\n```\n";
   }
 
   /**
-   * Fallback when {@code test_patch} is empty: read the FAIL_TO_PASS test FILES from the
-   * cleanroom container and embed them. This is strictly inferior to the test_patch path
-   * (the gold tests usually aren't in the base file yet) but preserves coverage on dataset
-   * rows that lack the {@code test_patch} field.
+   * Fallback when {@code test_patch} is empty: read the FAIL_TO_PASS test FILES from the cleanroom
+   * container and embed them. This is strictly inferior to the test_patch path (the gold tests
+   * usually aren't in the base file yet) but preserves coverage on dataset rows that lack the
+   * {@code test_patch} field.
    */
   private String captureFailingTestFilesFallback(
       String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
@@ -604,14 +610,22 @@ public class SwebenchTaskService {
     int written = 0;
     for (String file : testFiles) {
       if (written >= totalCap) break;
-      if (file.contains(";") || file.contains("&") || file.contains("|") || file.contains("$")
+      if (file.contains(";")
+          || file.contains("&")
+          || file.contains("|")
+          || file.contains("$")
           || file.contains("`")) {
         continue;
       }
       String cmd =
-          "docker exec " + containerName
+          "docker exec "
+              + containerName
               + " bash -lc '"
-              + "if [ -f /testbed/" + file + " ]; then cat /testbed/" + file + "; fi"
+              + "if [ -f /testbed/"
+              + file
+              + " ]; then cat /testbed/"
+              + file
+              + "; fi"
               + "'";
       ShellResult r = run(cmd, 30);
       if (r.exit() != 0) continue;
@@ -621,22 +635,29 @@ public class SwebenchTaskService {
       if (content.length() > perFileCap) {
         int head = Math.max(1000, perFileCap - 2000);
         int omitted = content.length() - perFileCap;
-        content = content.substring(0, head)
-            + "\n\n... [" + omitted + " chars omitted from middle] ...\n\n"
-            + content.substring(content.length() - (perFileCap - head));
+        content =
+            content.substring(0, head)
+                + "\n\n... ["
+                + omitted
+                + " chars omitted from middle] ...\n\n"
+                + content.substring(content.length() - (perFileCap - head));
       }
-      sb.append("\n## ").append(file).append(" (base-commit copy — gold tests applied later)\n\n")
-          .append("```python\n").append(content).append("\n```\n");
+      sb.append("\n## ")
+          .append(file)
+          .append(" (base-commit copy — gold tests applied later)\n\n")
+          .append("```python\n")
+          .append(content)
+          .append("\n```\n");
       written += content.length();
     }
     return sb.toString();
   }
 
   /**
-   * Layer-1 helper: prepend the failing-test capture (output + source) to the synthesised
-   * user request as ground truth. The test SOURCE is the most-load-bearing addition — it
-   * shows the agent what assertions are being checked, which is the only reliable
-   * anchor when error messages mislead about root cause.
+   * Layer-1 helper: prepend the failing-test capture (output + source) to the synthesised user
+   * request as ground truth. The test SOURCE is the most-load-bearing addition — it shows the agent
+   * what assertions are being checked, which is the only reliable anchor when error messages
+   * mislead about root cause.
    */
   private String prefixWithFailingTestOutput(
       String testOutput, String testSource, String originalUserRequest) {
@@ -658,7 +679,8 @@ public class SwebenchTaskService {
       sb.append("are the only reliable anchor when error messages mislead about root cause.\n\n");
       sb.append("These tests do NOT exist in /testbed yet — the SWE-bench harness adds them\n");
       sb.append("AFTER your fix lands. So `cat /testbed/<test>.py` will not show them; the\n");
-      sb.append("source below is the ONLY copy you have access to. Match its assertions exactly.\n\n");
+      sb.append(
+          "source below is the ONLY copy you have access to. Match its assertions exactly.\n\n");
       sb.append("Common failure mode: the error trace mentions a deprecation / import error /\n");
       sb.append("typo, but fixing that just unblocks the test from running — the actual bug is\n");
       sb.append("somewhere else. Read the assertions. Trace from each `assert` back to the\n");

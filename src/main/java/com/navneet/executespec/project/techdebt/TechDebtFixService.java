@@ -26,19 +26,18 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Phase 2 (FindingPatchSubmitter rollout) — dispatches a patch-mode run that fixes every
- * issue of one category across the project's linked repos.
+ * Phase 2 (FindingPatchSubmitter rollout) — dispatches a patch-mode run that fixes every issue of
+ * one category across the project's linked repos.
  *
- * <p>Categories follow ReviewerAgent's contract (LOGIC / SECURITY / TEST / STYLE /
- * PERFORMANCE / ARCHITECTURE / WIRING). One patch per category keeps each PR coherent —
- * reviewers can grade "fixed all the SECURITY findings" independently of "fixed all the
- * STYLE findings."
+ * <p>Categories follow ReviewerAgent's contract (LOGIC / SECURITY / TEST / STYLE / PERFORMANCE /
+ * ARCHITECTURE / WIRING). One patch per category keeps each PR coherent — reviewers can grade
+ * "fixed all the SECURITY findings" independently of "fixed all the STYLE findings."
  *
- * <p>Issue source: every {@link ValidationReport} stores an {@code issuesJson} array
- * with {@code category, severity, file, description}. We merge issues across the
- * project's report history (within the same lookback window {@link TechDebtService}
- * uses), filter by category, and embed the file + description list in the user prompt
- * so the patch agent has concrete targets to read + edit.
+ * <p>Issue source: every {@link ValidationReport} stores an {@code issuesJson} array with {@code
+ * category, severity, file, description}. We merge issues across the project's report history
+ * (within the same lookback window {@link TechDebtService} uses), filter by category, and embed the
+ * file + description list in the user prompt so the patch agent has concrete targets to read +
+ * edit.
  */
 @Service
 @RequiredArgsConstructor
@@ -118,8 +117,7 @@ public class TechDebtFixService {
             objectMapper.readValue(json, new TypeReference<List<Map<String, Object>>>() {});
         for (Map<String, Object> issue : issues) {
           Object cat = issue.get("category");
-          if (cat instanceof String s
-              && s.trim().toUpperCase(Locale.ROOT).equals(category)) {
+          if (cat instanceof String s && s.trim().toUpperCase(Locale.ROOT).equals(category)) {
             matching.add(issue);
           }
         }
@@ -132,7 +130,8 @@ public class TechDebtFixService {
     // inflate the issue count.
     Map<String, Map<String, Object>> dedup = new HashMap<>();
     for (Map<String, Object> issue : matching) {
-      String key = String.valueOf(issue.get("file")) + "::" + String.valueOf(issue.get("description"));
+      String key =
+          String.valueOf(issue.get("file")) + "::" + String.valueOf(issue.get("description"));
       dedup.putIfAbsent(key, issue);
     }
     return new ArrayList<>(dedup.values());
