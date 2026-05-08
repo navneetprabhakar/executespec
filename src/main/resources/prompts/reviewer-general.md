@@ -28,11 +28,32 @@ Inspect for these classes of issues only. Do NOT rewrite code for style, naming,
 2. `readFile` the main source files to understand the code.
 3. If you identify an issue in scope, fix it with `editFile` (or `writeFile` for new files if genuinely needed).
 4. After fixes (or if nothing was fixed), call `buildProject` once to verify the project still builds.
-5. Call `completeTask` with a concise summary: number of issues found, number fixed, and one-line descriptions. If no issues, summary = "no in-scope issues found".
+5. Call `completeTask` with the structured verdict header described below.
+
+# `completeTask` summary format — REQUIRED
+
+The first line of your `completeTask` summary MUST be exactly one of:
+
+- `VERDICT: CLEAN` — you found zero in-scope issues.
+- `VERDICT: FIXED_ISSUES` — you found issues and applied fixes; build still passes.
+- `VERDICT: UNRESOLVED` — you found issues you could not fix (or didn't have time to fix).
+
+Subsequent lines describe what you found / fixed in human-readable form: count of issues, file paths touched, one-line descriptions.
+
+The downstream scoring pipeline parses the `VERDICT:` prefix as the authoritative signal — substring-matching of free prose used to drive the verdict and was brittle to model phrasing variation. The prefix is the contract; everything after it is descriptive context.
+
+Example:
+
+```
+VERDICT: FIXED_ISSUES
+Found 2 issues, fixed both:
+- src/auth.ts:42 — null deref when token cookie missing → added null guard
+- src/router.ts:88 — wrong status code for unauthenticated → 401 instead of 500
+```
 
 # Output rules
 
-- Do NOT emit narrative text. Use tools directly.
+- Do NOT emit narrative text outside `completeTask`. Use tools directly.
 - If unsure whether an issue is in-scope, err on the side of NOT fixing it. Over-fixing creates more bugs than it solves.
 - Make each `editFile` minimal — no drive-by changes.
-- The summary in `completeTask` is what downstream consumers see. Keep it structured: `"Found N issues, fixed M. Issues: ...".
+- The `VERDICT:` line on the FIRST line of the `completeTask` summary is required. Without it the run's score / status_reason will fall back to a heuristic that reads less reliably.

@@ -35,10 +35,31 @@ Check for these patterns based on the project type (inferred from the file tree)
 3. Scan source files for the patterns relevant to that project type (use `searchFiles` for annotations/decorators).
 4. Fix any wiring gaps with `editFile` or `writeFile`.
 5. Call `buildProject` once at the end.
-6. Call `completeTask` with a summary of wiring issues found + fixed.
+6. Call `completeTask` with the structured verdict header described below.
+
+# `completeTask` summary format — REQUIRED
+
+The first line of your `completeTask` summary MUST be exactly one of:
+
+- `VERDICT: CLEAN` — wiring is complete; no gaps found.
+- `VERDICT: FIXED_ISSUES` — found wiring gaps and applied fixes; build still passes.
+- `VERDICT: UNRESOLVED` — found wiring gaps you could not fix.
+
+Subsequent lines list each fix in human-readable form (e.g. `wired UserController into ApiModule`).
+
+The downstream scoring pipeline parses the `VERDICT:` prefix as the authoritative signal — substring-matching of free prose used to drive the verdict and was brittle to model phrasing variation. The prefix is the contract; everything after it is descriptive context.
+
+Example:
+
+```
+VERDICT: FIXED_ISSUES
+Wired 3 components:
+- mod auth; added to src/lib.rs
+- ProductController moved into com.example.api scan path
+- /webhook route registered in app.use(...)
+```
 
 # Output rules
 
 - Do NOT rewrite code for style or unrelated logic — this is WIRING ONLY.
-- If wiring is complete, call `completeTask` with "no wiring issues found".
-- Summary should list each fix as "wired X into Y" for clarity.
+- The `VERDICT:` line on the FIRST line of the `completeTask` summary is required.
