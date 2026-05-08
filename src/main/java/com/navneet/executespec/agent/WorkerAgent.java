@@ -271,6 +271,17 @@ public class WorkerAgent {
     int lastBuildPassIter = -1;
     final boolean buildGateOn = Boolean.TRUE.equals(req.requireBuildVerification());
 
+    // 2026-05-08 — Lever A: force-edit watchdog. Counts total write-class tool calls (writeFile,
+    // editFile) across the whole run. When the worker passes 70% of maxIter without any write,
+    // we inject a one-shot UserMessage that breaks investigation paralysis: "you've read enough,
+    // commit to an edit now or empty patch is automatic failure." This targets the SWE-bench
+    // empty-patch failure mode (sqlfluff-1733 et al) where the agent reads 60+ files without
+    // ever writing one. Stagnation guard catches consecutive non-write streaks; this watchdog
+    // catches the slower "always-investigating" pattern across the whole run.
+    int totalWriteCalls = 0;
+    boolean forceEditNudged = false;
+    final int forceEditAtIter = Math.max(5, (int) Math.round(maxIter * 0.7));
+
     if (!isResume) {
       log.info(
           "WorkerAgent START run={} task={} provider={} model={} maxIter={}",
@@ -569,8 +580,38 @@ public class WorkerAgent {
       boolean wroteThisIter = calls.stream().anyMatch(tc -> WRITE_CLASS_TOOLS.contains(tc.name()));
       if (wroteThisIter) {
         stagnantIters = 0;
+        // 2026-05-08 Lever A — count writes across the whole run for the force-edit watchdog.
+        for (AssistantMessage.ToolCall tc : calls) {
+          if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) totalWriteCalls++;
+        }
       } else {
         stagnantIters++;
+      }
+      // 2026-05-08 Lever A: force-edit nudge. If we've crossed the 70% iter threshold with
+      // ZERO writes total (not just this iter — investigation paralysis pattern from SWE-bench
+      // sqlfluff-1733: 75 iter cap, 0 edits, empty patch), inject a one-shot UserMessage telling
+      // the agent to commit to ANY edit. UserMessage (not SystemMessage) for the same Gemini
+      // cache-prefix reason as the stagnation warning above.
+      if (!forceEditNudged && iter >= forceEditAtIter && totalWriteCalls == 0) {
+        log.info(
+            "WorkerAgent FORCE_EDIT_NUDGE run={} task={} iter={}/{} totalWrites=0",
+            req.context().runId(),
+            req.context().taskId(),
+            iter,
+            maxIter);
+        history.add(
+            new UserMessage(
+                "INVESTIGATION PHASE OVER. You've used "
+                    + iter
+                    + " of "
+                    + maxIter
+                    + " iterations reading files without writing anything. An empty patch"
+                    + " is automatic failure — even a wrong-file edit is better than zero."
+                    + " Pick the file that most likely contains the bug based on what you've"
+                    + " read, edit it, and call buildProject (build mode) or runTests (patch"
+                    + " mode) to verify. Do NOT do another round of reads — commit to an"
+                    + " edit on your VERY NEXT response."));
+        forceEditNudged = true;
       }
       if (!stagnationWarned && stagnantIters >= stagnationWarnAfter) {
         log.info(
@@ -624,10 +665,32 @@ public class WorkerAgent {
     }
 
     log.warn(
-        "WorkerAgent ITERATION LIMIT run={} task={} iters={}",
+        "WorkerAgent ITERATION LIMIT run={} task={} iters={} totalWrites={}",
         req.context().runId(),
         req.context().taskId(),
-        maxIter);
+        maxIter,
+        totalWriteCalls);
+
+    // 2026-05-08 Lever B: best-guess salvage. We hit the iter cap with zero writes — the agent
+    // exhausted the budget on investigation without committing to any edit. Make ONE final LLM
+    // call asking for the best-guess edit, with explicit forcing function. The salvage call
+    // gets a much shorter system prompt (just "you're out of iters, dump your best guess as a
+    // writeFile/editFile call now") and runs with reduced maxIter=2 (the salvage call itself +
+    // one iter for tool dispatch). Even a wrong-file edit produces SOMETHING in the diff —
+    // empty diff is automatic failure on the SWE-bench evaluator.
+    if (totalWriteCalls == 0) {
+      try {
+        WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
+        if (salvage != null) return salvage;
+      } catch (Exception e) {
+        log.warn(
+            "WorkerAgent SALVAGE call failed run={} task={}: {}",
+            req.context().runId(),
+            req.context().taskId(),
+            e.getMessage());
+      }
+    }
+
     recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIter);
     return WorkerResult.builder()
         .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
@@ -637,6 +700,119 @@ public class WorkerAgent {
         .toolCallLog(toolLog)
         .totalLatencyMs(System.currentTimeMillis() - start)
         .build();
+  }
+
+  /**
+   * 2026-05-08 Lever B salvage. Make one final LLM call with the worker's full conversation history
+   * + a forcing function ("you're out of iters, write SOMETHING now"). If the LLM emits a
+   * write-class tool call (writeFile / editFile), dispatch it once and return COMPLETED; otherwise
+   * return null and the caller falls through to ITERATION_LIMIT_EXCEEDED.
+   *
+   * <p>Why this beats just letting the iter cap fire: the worker's history has all the
+   * investigation context (every readFile output, every searchFiles result). The LLM at this point
+   * has built a mental model of the bug — the salvage prompt asks it to dump that into a patch
+   * instead of abandoning it. Even a wrong-file edit produces a non-empty diff which is better than
+   * nothing on the SWE-bench evaluator (won't resolve, but doesn't fail at the empty-patch
+   * precondition).
+   */
+  private WorkerResult runSalvageCall(
+      WorkerTaskRequest req,
+      List<Message> history,
+      int toolsDispatched,
+      List<String> toolLog,
+      long start) {
+    log.info(
+        "WorkerAgent SALVAGE attempting run={} task={} historyLen={}",
+        req.context().runId(),
+        req.context().taskId(),
+        history.size());
+
+    history.add(
+        new UserMessage(
+            "ITER LIMIT REACHED. You've explored extensively but haven't written any code. This is"
+                + " your last call. Based on everything you've read, output ONE writeFile or"
+                + " editFile tool call with your best-guess fix. Even a wrong-file edit beats an"
+                + " empty patch (empty = automatic failure). Do NOT think out loud, do NOT call"
+                + " readFile or any other tool first — emit the write tool call DIRECTLY. If"
+                + " genuinely impossible to guess, call completeTask with summary='salvage: no fix"
+                + " identified' to exit cleanly."));
+
+    ChatResponse resp;
+    try {
+      resp =
+          router.call(
+              LlmRequest.builder()
+                  .provider(req.provider())
+                  .model(req.model())
+                  .messages(history)
+                  .context(req.context())
+                  .temperature(0.0)
+                  .maxTokens(req.maxTokensPerCall())
+                  .toolsOverride(toolRegistry.bindForWorker(req.context()))
+                  .readTimeoutSeconds(WORKER_HTTP_READ_TIMEOUT_SECONDS)
+                  .build());
+    } catch (Exception e) {
+      log.warn("WorkerAgent SALVAGE router error: {}", e.getMessage());
+      return null;
+    }
+
+    if (resp == null || resp.getResults() == null || resp.getResults().isEmpty()) return null;
+    AssistantMessage assistant = resp.getResults().get(0).getOutput();
+    List<AssistantMessage.ToolCall> calls = assistant.getToolCalls();
+    if (calls == null || calls.isEmpty()) {
+      log.info("WorkerAgent SALVAGE no tool calls produced — falling through to iter-limit");
+      return null;
+    }
+
+    // Dispatch each tool call from the salvage response. We accept writeFile, editFile, AND
+    // completeTask (the agent admitting it can't guess). Other tools dispatched but ignored
+    // (unlikely to fire at this stage given the prompt).
+    boolean wroteAnything = false;
+    String salvageSummary = null;
+    for (AssistantMessage.ToolCall tc : calls) {
+      if (CompleteTaskTool.NAME.equals(tc.name())) {
+        salvageSummary = "salvage path: " + extractSummary(tc.arguments());
+        log.info("WorkerAgent SALVAGE got completeTask: {}", salvageSummary);
+        recordTerminal(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED, req, maxIterOf(req));
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED)
+            .iterations(maxIterOf(req))
+            .toolCallsDispatched(toolsDispatched)
+            .completionSummary(salvageSummary)
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
+      if ("writeFile".equals(tc.name()) || "editFile".equals(tc.name())) {
+        String env = dispatchOne(tc, req);
+        toolLog.add(
+            "SALVAGE "
+                + tc.name()
+                + " -> "
+                + (env != null && env.startsWith("{\"ok\":true") ? "OK" : "ERR"));
+        if (env != null && env.startsWith("{\"ok\":true")) wroteAnything = true;
+      }
+    }
+
+    if (wroteAnything) {
+      log.info("WorkerAgent SALVAGE produced an edit — returning COMPLETED");
+      recordTerminal(WorkerResult.Outcome.COMPLETED, req, maxIterOf(req));
+      return WorkerResult.builder()
+          .outcome(WorkerResult.Outcome.COMPLETED)
+          .iterations(maxIterOf(req))
+          .toolCallsDispatched(toolsDispatched + calls.size())
+          .completionSummary("salvage: best-guess edit produced after iter-limit")
+          .toolCallLog(toolLog)
+          .totalLatencyMs(System.currentTimeMillis() - start)
+          .build();
+    }
+    return null;
+  }
+
+  private static int maxIterOf(WorkerTaskRequest req) {
+    return req.maxIterations() != null && req.maxIterations() > 0
+        ? req.maxIterations()
+        : DEFAULT_MAX_ITER;
   }
 
   /** Emit worker outcome + iterations metrics at every terminal path. */

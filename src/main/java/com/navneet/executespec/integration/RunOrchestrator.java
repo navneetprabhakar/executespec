@@ -164,6 +164,7 @@ public class RunOrchestrator {
   private final FeatureAssessmentService featureAssessmentService;
   private final RunCodeMapService runCodeMapService;
   private final AppUserRepository appUserRepository;
+  private final com.navneet.executespec.agent.ApiKeyResolver apiKeyResolver;
   private final com.navneet.executespec.memory.ProjectMemoryProvider projectMemoryProvider;
   private final com.navneet.executespec.codeintel.ProjectBriefService projectBriefService;
   private final com.navneet.executespec.codeintel.StalenessService stalenessService;
@@ -1459,7 +1460,15 @@ public class RunOrchestrator {
       ExecutionContext rootCtx,
       Instant startedAt) {
 
-    if (run.getHardCapUsd() == null || run.getHardCapUsd() <= 0) {
+    // 2026-05-08 — BYOK cost-cap exemption. When the run's user is on an OWN_KEYS org
+    // (pure BYOK — they're paying their own API bill), skip the platform's default $4 cap. We
+    // shouldn't hard-stop a customer's run on OUR cost limit when WE'RE not paying. HYBRID and
+    // SYSTEM stay capped because either path can fall back to platform spend mid-run.
+    if (apiKeyResolver.isOwnKeysMode(run.getCreatedByUserId())) {
+      log.info(
+          "PATCH run={} BYOK exempt — skipping default hardCapUsd (org keySourceMode=OWN_KEYS)",
+          runId);
+    } else if (run.getHardCapUsd() == null || run.getHardCapUsd() <= 0) {
       run.setHardCapUsd(DEFAULT_PATCH_HARD_CAP_USD);
       runRepo.save(run);
       log.info(
@@ -3379,7 +3388,15 @@ public class RunOrchestrator {
               r.setCostEstimateHigh(est.highUsd());
               r.setCreditsCharged(est.credits());
               // GA-readiness P3.2 — honour customer-supplied cost cap (P3.2 helper).
-              r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
+              // 2026-05-08 — BYOK cost-cap exemption. When the user's org is OWN_KEYS, skip
+              // setting hardCapUsd entirely so the WorkerAgent budget guard never fires.
+              // Customer pays their own API bill; we shouldn't hard-stop them on ours.
+              boolean byok = apiKeyResolver.isOwnKeysMode(r.getCreatedByUserId());
+              if (byok) {
+                r.setHardCapUsd(null);
+              } else {
+                r.setHardCapUsd(clampHardCap(est.hardCapUsd(), r.getUserCostCap()));
+              }
               runRepo.save(r);
             });
     log.info(
