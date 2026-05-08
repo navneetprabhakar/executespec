@@ -1138,12 +1138,42 @@ public class SequentialExecutor {
     sb.append("Task ").append(task.id()).append(": ").append(task.title()).append("\n\n");
     sb.append(task.description());
     if (previousBuildError != null && !previousBuildError.isBlank()) {
-      sb.append("\n\n---\n")
-          .append("NOTE: A previous attempt completed but the build failed afterward. ")
-          .append("Fix the issue so the build passes. Build output:\n")
-          .append(previousBuildError);
+      // 2026-05-08 — sharpened from the generic "NOTE: previous attempt completed but build
+      // failed" framing to the SWE-bench test-as-spec pattern: the build error IS the
+      // specification of what to fix. The agent's earlier edits are still in the workspace
+      // (per-task retry doesn't reset the workspace), so this is a continuation, not a redo.
+      sb.append("\n\n---\nBUILD FAILED ON THE PREVIOUS ATTEMPT.\n\n");
+      sb.append(
+          "The error below is your spec for this retry — read it carefully, identify the "
+              + "specific files / line numbers / error messages, and fix the root cause. Don't "
+              + "refactor, don't reorganise, don't second-guess your earlier design choices. "
+              + "Your previous edits are still in place; this is a continuation. Use readFile "
+              + "to confirm the current file state where the error points, editFile to fix it, "
+              + "buildProject to verify, then completeTask.\n\n");
+      sb.append("--- BUILD ERROR (verbatim) ---\n");
+      sb.append(truncateBuildErrorForRetry(previousBuildError));
+      sb.append("\n--- END BUILD ERROR ---\n");
     }
     return sb.toString();
+  }
+
+  /**
+   * Cap the build error at 12K chars (head 8K + tail 4K) — long enough for compiler stack traces
+   * with stem+leaf, short enough that the worker's prefix stays cache-friendly on the retry. Most
+   * actionable info is in the first stack trace and the last few "BUILD FAILED" lines; the middle
+   * is repetition.
+   */
+  private static String truncateBuildErrorForRetry(String s) {
+    if (s == null) return "";
+    int cap = 12_000;
+    if (s.length() <= cap) return s;
+    int head = 8_000;
+    int omitted = s.length() - cap;
+    return s.substring(0, head)
+        + "\n\n... ["
+        + omitted
+        + " chars omitted from middle of build output] ...\n\n"
+        + s.substring(s.length() - (cap - head));
   }
 
   // ─── smoke test helpers ─────────────────────────────────────────────────
