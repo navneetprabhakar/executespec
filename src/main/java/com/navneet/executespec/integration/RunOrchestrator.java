@@ -129,6 +129,13 @@ public class RunOrchestrator {
   private final ReviewerAgent reviewer;
 
   /**
+   * V182 (2026-05-08) — patch-mode entry. Used by the {@code runPatchPipeline} branch when {@link
+   * PipelineRun#getRunMode()} is {@code RunMode.PATCH}. Build-mode runs never call this — the
+   * existing planner / executor / reviewer flow is untouched.
+   */
+  private final com.navneet.executespec.agent.PatchAgent patchAgent;
+
+  /**
    * 2026-05-07 — deterministic auto-formatter pass between executor and reviewer. Runs prettier /
    * spotless / black / gofmt / cargo fmt against the workspace before the LLM reviewer sees it.
    * Cuts ~3K tokens per task off the reviewer's input by absorbing trailing-comma / indent /
@@ -476,10 +483,8 @@ public class RunOrchestrator {
 
   /**
    * Fix M (2026-05-03) — full signature with {@code branchOverride} + {@code prReviewComments}.
-   * When {@code branchOverride} is non-null, every selected repo is cloned with {@code git clone -b
-   * <branchOverride>} instead of the repo's default branch (and the post-run push lands commits on
-   * that branch — no new PR). When {@code prReviewComments} is non-null, the planner receives them
-   * as advisory context via the {@code {{PR_REVIEW_COMMENTS}}} prompt placeholder.
+   * Forwarder for backwards compatibility — defaults {@code runMode = BUILD} so every existing
+   * caller keeps the planner / executor / reviewer flow.
    */
   public PipelineRun submitRun(
       String userRequest,
@@ -501,6 +506,56 @@ public class RunOrchestrator {
       boolean tddMode,
       String branchOverride,
       String prReviewComments) {
+    return submitRun(
+        userRequest,
+        source,
+        repoUrl,
+        repoMode,
+        githubPat,
+        githubOwner,
+        skipApproval,
+        autoMerge,
+        modelName,
+        aiProvider,
+        createdByUserId,
+        orgId,
+        projectId,
+        executionMode,
+        selectedRepoIds,
+        figmaUrl,
+        tddMode,
+        branchOverride,
+        prReviewComments,
+        com.navneet.executespec.state.RunMode.BUILD);
+  }
+
+  /**
+   * V182 (2026-05-08) — full signature with {@code runMode}. Bench services (swebench /
+   * programbench) call this overload directly with {@code RunMode.PATCH} to opt into the thin
+   * single-agent loop. Every product entry point uses the 19-arg forwarder above and stays on
+   * {@code RunMode.BUILD} (the existing planner / executor / reviewer flow).
+   */
+  public PipelineRun submitRun(
+      String userRequest,
+      String source,
+      String repoUrl,
+      String repoMode,
+      String githubPat,
+      String githubOwner,
+      boolean skipApproval,
+      boolean autoMerge,
+      String modelName,
+      String aiProvider,
+      String createdByUserId,
+      String orgId,
+      String projectId,
+      String executionMode,
+      List<UUID> selectedRepoIds,
+      String figmaUrl,
+      boolean tddMode,
+      String branchOverride,
+      String prReviewComments,
+      String runMode) {
     String runId = UUID.randomUUID().toString();
     String provider = normalizeProvider(aiProvider, projectId, runId);
     String model =
@@ -515,9 +570,17 @@ public class RunOrchestrator {
     // will actually call, not the run-level worker default — adversarial-test
     // Finding 14. If a user-supplied modelName was provided (rare BYOK path),
     // honour it for all three roles to preserve the override contract.
+    //
+    // V182 PATCH-mode override: a patch run never invokes the planner or
+    // reviewer, but it *must* run on PLANNING-tier (Sonnet 4.6 / GPT-5.4 /
+    // Gemini 3 Pro Preview) regardless of any caller-supplied modelName.
+    // PatchAgent picks `plannerDbModel` as the model passed to WorkerAgent.
+    // See PatchAgent javadoc — the reasoning gap between Haiku-class and
+    // Sonnet-class is bigger than any harness improvement on bug-fix shapes.
     String plannerDbModel = model;
     String reviewerDbModel = model;
-    if (modelName == null || modelName.isBlank()) {
+    boolean isPatch = com.navneet.executespec.state.RunMode.isPatch(runMode);
+    if (modelName == null || modelName.isBlank() || isPatch) {
       try {
         com.navneet.executespec.router.LlmProvider p =
             com.navneet.executespec.router.LlmProvider.valueOf(provider.toUpperCase());
@@ -548,6 +611,10 @@ public class RunOrchestrator {
             .userRequest(userRequest)
             .status("PLANNING")
             .harnessVersion("v2")
+            .runMode(
+                runMode == null || runMode.isBlank()
+                    ? com.navneet.executespec.state.RunMode.BUILD
+                    : runMode)
             .sourceType(source != null ? source : "MANUAL")
             .repoUrl(repoUrl)
             .repoMode(repoMode)
@@ -813,6 +880,23 @@ public class RunOrchestrator {
 
       ExecutionContext rootCtx = new ExecutionContext(runId, "__root__", workspace.toRealPath());
       setWorkspacePath(runId, workspace.toString());
+
+      // ── V182 PATCH-mode dispatch ───────────────────────────────────────
+      // Bench services (swebench / programbench) submit runs with
+      // RunMode.PATCH and own the workspace setup themselves (docker cp +
+      // bind-mount). Skip everything build-mode does — codemap, assessment,
+      // classifier, planner, executor, reviewer, validation report — and
+      // dispatch the whole user request to a single PatchAgent loop.
+      // Product entry points stay on RunMode.BUILD by default and fall
+      // through to the unchanged build-mode flow below.
+      {
+        PipelineRun modeProbe = runRepo.findById(runId).orElse(null);
+        if (modeProbe != null
+            && com.navneet.executespec.state.RunMode.isPatch(modeProbe.getRunMode())) {
+          runPatchPipeline(runId, provider, modeProbe, userRequest, rootCtx, startedAt);
+          return;
+        }
+      }
 
       // ── 0b. Pilot v3.0 follow-up: per-run codemap for paid existing-repo
       // runs (PRO / MAX / ENTERPRISE). Adds one PLANNING-tier LLM call before
@@ -1337,6 +1421,162 @@ public class RunOrchestrator {
       if (workspace != null) {
         log.info("RunOrchestrator run={} workspace at {}", runId, workspace);
       }
+    }
+  }
+
+  // ─── V182 PATCH-mode pipeline ──────────────────────────────────────────
+
+  /** Default per-run cost cap when bench services don't supply one. */
+  private static final double DEFAULT_PATCH_HARD_CAP_USD = 4.0;
+
+  /**
+   * V182 — patch-mode dispatch. Skips planner, executor, reviewer, and the validation report; the
+   * artefact is the workspace diff captured by the bench service's {@code captureOnTerminalAsync}
+   * path. Idempotent against the run row, terminal-event-aware, and writes a status_reason that
+   * downstream notifiers / dashboards can render meaningfully.
+   *
+   * <p>Cost cap: PatchAgent threads through to {@link
+   * com.navneet.executespec.agent.WorkerAgent}'s iter-3 budget guard, which reads {@code
+   * pipeline_run.hard_cap_usd}. We default that to {@link #DEFAULT_PATCH_HARD_CAP_USD} when
+   * unset so a runaway patch agent stops without manual intervention.
+   *
+   * <p>Outcome → terminal status mapping:
+   *
+   * <ul>
+   *   <li>{@code COMPLETED} / {@code COMPLETED_BY_STAGNATION} / {@code STOPPED_WITHOUT_COMPLETE} →
+   *       {@code COMPLETE}. The diff is whatever's in the workspace at exit; the bench eval
+   *       decides correctness, not us.
+   *   <li>{@code ITERATION_LIMIT_EXCEEDED} / {@code BUDGET_EXCEEDED} → {@code PARTIAL}. The agent
+   *       was making progress but ran out of headroom.
+   *   <li>{@code ERROR} or any uncaught exception → {@code FAILED}.
+   * </ul>
+   */
+  private void runPatchPipeline(
+      String runId,
+      String provider,
+      PipelineRun run,
+      String userRequest,
+      ExecutionContext rootCtx,
+      Instant startedAt) {
+
+    if (run.getHardCapUsd() == null || run.getHardCapUsd() <= 0) {
+      run.setHardCapUsd(DEFAULT_PATCH_HARD_CAP_USD);
+      runRepo.save(run);
+      log.info(
+          "PATCH run={} hardCapUsd default ${}",
+          runId, String.format("%.2f", DEFAULT_PATCH_HARD_CAP_USD));
+    }
+
+    // Patch mode runs on PLANNING-tier (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview).
+    // submitRun stamped that on `plannerModel` when isPatch was true; fall back to the
+    // run-level worker default if for some reason it's null.
+    String model = run.getPlannerModel();
+    if (model == null || model.isBlank()) model = run.getWorkerModel();
+
+    log.info(
+        "PATCH dispatch run={} provider={} model={} userRequestLen={}",
+        runId, provider, model, userRequest == null ? 0 : userRequest.length());
+    broadcaster.emit(
+        runId, RunEvent.log(runId, "patch", "Patch-mode agent starting (single-loop)"));
+
+    perky.start(runId, "WORKING");
+    runRepo
+        .findById(runId)
+        .ifPresent(
+            r -> {
+              r.setStatus("WORKING");
+              runRepo.save(r);
+            });
+
+    com.navneet.executespec.agent.WorkerResult result;
+    try {
+      result = patchAgent.run(provider, model, userRequest, rootCtx);
+    } catch (Exception e) {
+      log.error("PATCH run={} dispatch threw", runId, e);
+      runRepo
+          .findById(runId)
+          .ifPresent(
+              r -> {
+                r.setStatus("FAILED");
+                r.setStatusReason("PATCH_AGENT_ERROR");
+                r.setCompletedAt(Instant.now());
+                runRepo.save(r);
+              });
+      eventPublisher.publishEvent(
+          new PipelineEvent.RunFailed(
+              runId, "patch agent error: " + e.getClass().getSimpleName()));
+      broadcaster.emit(runId, RunEvent.complete(runId, "FAILED", "PATCH_AGENT_ERROR"));
+      return;
+    }
+
+    // Map outcome → terminal status + reason.
+    final String terminalStatus;
+    final String terminalReason;
+    switch (result.outcome()) {
+      case COMPLETED -> {
+        terminalStatus = "COMPLETE";
+        terminalReason = "CLEAN_COMPLETION";
+      }
+      case COMPLETED_BY_STAGNATION -> {
+        terminalStatus = "COMPLETE";
+        terminalReason = "PATCH_STAGNATION";
+      }
+      case STOPPED_WITHOUT_COMPLETE -> {
+        terminalStatus = "COMPLETE";
+        terminalReason = "PATCH_STOPPED_WITHOUT_COMPLETE";
+      }
+      case ITERATION_LIMIT_EXCEEDED -> {
+        terminalStatus = "PARTIAL";
+        terminalReason = "PATCH_ITER_LIMIT";
+      }
+      case BUDGET_EXCEEDED -> {
+        terminalStatus = "PARTIAL";
+        terminalReason = "PATCH_BUDGET_EXCEEDED";
+      }
+      case ERROR -> {
+        terminalStatus = "FAILED";
+        terminalReason = "PATCH_AGENT_ERROR";
+      }
+      default -> {
+        terminalStatus = "FAILED";
+        terminalReason = "PATCH_UNKNOWN_OUTCOME";
+      }
+    }
+
+    runRepo
+        .findById(runId)
+        .ifPresent(
+            r -> {
+              r.setStatus(terminalStatus);
+              r.setStatusReason(terminalReason);
+              r.setCompletedAt(Instant.now());
+              runRepo.save(r);
+            });
+
+    log.info(
+        "PATCH terminal run={} status={} reason={} iter={} toolCalls={} latencyMs={}",
+        runId,
+        terminalStatus,
+        terminalReason,
+        result.iterations(),
+        result.toolCallsDispatched(),
+        result.totalLatencyMs());
+    broadcaster.emit(
+        runId,
+        RunEvent.log(
+            runId,
+            "patch",
+            "Patch-mode complete: "
+                + result.outcome()
+                + " in "
+                + result.iterations()
+                + " iters"));
+    broadcaster.emit(runId, RunEvent.complete(runId, terminalStatus, terminalReason));
+
+    if ("COMPLETE".equals(terminalStatus)) {
+      eventPublisher.publishEvent(new PipelineEvent.RunCompleted(runId));
+    } else {
+      eventPublisher.publishEvent(new PipelineEvent.RunFailed(runId, terminalReason));
     }
   }
 

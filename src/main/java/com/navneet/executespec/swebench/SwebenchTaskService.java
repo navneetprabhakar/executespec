@@ -218,6 +218,9 @@ public class SwebenchTaskService {
     PipelineRun run;
     PENDING.set(new SetupRecipe(image, containerName, instanceId));
     try {
+      // V182 — call the 20-arg submitRun overload directly with runMode=PATCH
+      // so the orchestrator skips classifier / planner / executor / reviewer
+      // and dispatches the whole problem statement to a single PatchAgent loop.
       run =
           orchestrator.submitRun(
               userRequest,
@@ -233,7 +236,13 @@ public class SwebenchTaskService {
               /* createdByUserId */ props.getBenchUserId(),
               /* orgId */ props.getBenchOrgId(),
               /* projectId */ props.getBenchProjectId(),
-              /* executionMode */ "PROTOTYPE");
+              /* executionMode */ "PROTOTYPE",
+              /* selectedRepoIds */ java.util.List.of(),
+              /* figmaUrl */ null,
+              /* tddMode */ false,
+              /* branchOverride */ null,
+              /* prReviewComments */ null,
+              /* runMode */ com.navneet.executespec.state.RunMode.PATCH);
     } catch (Exception e) {
       run("docker rm -f " + containerName, 30);
       throw new ResponseStatusException(
