@@ -643,6 +643,12 @@ public class SequentialExecutor {
         smoke.exitCode());
 
     // ONE retry with the build error injected.
+    // 2026-05-08 — set requireBuildVerification on the RETRY only. The first attempt keeps
+    // today's behaviour (no gate, since some legit early scaffold tasks naturally don't have
+    // a building project yet). On retry though, the build error is the explicit spec — the
+    // worker MUST re-run buildProject and see exit=0 before claiming done. Without this gate
+    // the retry can call completeTask after a single editFile and we get the same regression
+    // path that produced the 16/22 FINAL_BUILD_FAILED rate over the last 30 days.
     String retryPrompt = composeUserPrompt(task, smoke.output());
     WorkerResult retry =
         worker.run(
@@ -658,6 +664,7 @@ public class SequentialExecutor {
                 .maxTokensPerCall(cfg.maxTokens)
                 .stagnationWarnAfter(cfg.stagnationWarnAfter)
                 .stagnationForceAfter(cfg.stagnationForceAfter)
+                .requireBuildVerification(true)
                 .build());
 
     int totalToolCalls = primary.toolCallsDispatched() + retry.toolCallsDispatched();
