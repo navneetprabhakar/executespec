@@ -105,6 +105,25 @@ public class ApiKeyResolver {
   }
 
   /**
+   * 2026-05-08 — true when the org's keySourceMode is OWN_KEYS, i.e. the customer is paying their
+   * own LLM bill (BYOK). Used by the cost-cap path: a BYOK customer shouldn't be hard-stopped at
+   * the platform's $4 default cap because the spend isn't on us. Returns false on
+   * null/HYBRID/SYSTEM — HYBRID can fall back to platform keys mid-run, so we still cap; SYSTEM is
+   * platform-paid by definition. Only OWN_KEYS = pure BYOK = cap exempt.
+   *
+   * @param userId the run's createdByUserId; null returns false (system runs use platform spend)
+   * @return true iff the user's org explicitly set keySourceMode=OWN_KEYS
+   */
+  public boolean isOwnKeysMode(String userId) {
+    if (userId == null) return false;
+    AppUser user = userRepo.findById(userId).orElse(null);
+    if (user == null || user.getOrgId() == null) return false;
+    Org org = orgRepo.findById(user.getOrgId()).orElse(null);
+    if (org == null) return false;
+    return "OWN_KEYS".equals(org.getKeySourceMode());
+  }
+
+  /**
    * Pre-flight validation: in OWN_KEYS mode at least one provider must have a key. Called before
    * submitting a run so the user gets an immediate 400 instead of a runtime failure. HYBRID mode
    * (the default) silently falls back to platform keys when no user/org keys are configured.
