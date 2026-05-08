@@ -819,42 +819,40 @@ public class ValidationReportService {
   }
 
   /**
-   * 2026-05-08 — multiplicative re-shape. Previous additive formula treated 4 conjunctive
-   * signals (build / tests / reviewer / endpoints) as if they were independent contributors:
-   * a build failure could only knock 20 points off a "perfect 100", which produced
-   * misleading scores like 55/100 on runs that didn't compile. Multiplicative shape
-   * collapses the headline number cleanly when any critical dimension is missing — a failed
-   * build → near-zero, a clean comprehensive run → ~100. Bug-class double-counting between
-   * synth-issues and the dimension bonuses they restate goes away naturally because we no
-   * longer subtract penalties on top of dimension factors.
+   * 2026-05-08 — multiplicative re-shape. Previous additive formula treated 4 conjunctive signals
+   * (build / tests / reviewer / endpoints) as if they were independent contributors: a build
+   * failure could only knock 20 points off a "perfect 100", which produced misleading scores like
+   * 55/100 on runs that didn't compile. Multiplicative shape collapses the headline number cleanly
+   * when any critical dimension is missing — a failed build → near-zero, a clean comprehensive run
+   * → ~100. Bug-class double-counting between synth-issues and the dimension bonuses they restate
+   * goes away naturally because we no longer subtract penalties on top of dimension factors.
    *
    * <p>Each factor is in [0, 1.0], with documented interpretations:
    *
    * <ul>
-   *   <li><b>buildFactor</b> — 1.0 if {@code finalBuildPassed=true}, else 0.0. Build is
-   *       binary at the project level; partial credit isn't meaningful.
-   *   <li><b>testFactor</b> — testsPassed/testsTotal when tests ran; 0.5 ("unknown,
-   *       neutral") when no tests were captured. We don't punish runs that have no test
-   *       infra (covered by the v3 UI's "testsTotal>0" headline gate, see R-132), but we
-   *       also don't reward them.
+   *   <li><b>buildFactor</b> — 1.0 if {@code finalBuildPassed=true}, else 0.0. Build is binary at
+   *       the project level; partial credit isn't meaningful.
+   *   <li><b>testFactor</b> — testsPassed/testsTotal when tests ran; 0.5 ("unknown, neutral") when
+   *       no tests were captured. We don't punish runs that have no test infra (covered by the v3
+   *       UI's "testsTotal>0" headline gate, see R-132), but we also don't reward them.
    *   <li><b>reviewerFactor</b> — CLEAN=1.0, FIXED_ISSUES=0.85, UNRESOLVED_ISSUES=0.4,
-   *       REVIEW_FAILED=0.2, null=0.5. Captures the qualitative reviewer signal as a
-   *       multiplicative damper.
-   *   <li><b>endpointFactor</b> — endpointCoveragePercent / 100, with null treated as 1.0
-   *       (no spec endpoints means the coverage signal isn't applicable). Linear scaling
-   *       replaces the previous binary-at-95% cliff that gave 1pp difference 10pp of score.
-   *   <li><b>criticalDamper</b> — 1.0 when no unfixed criticals; drops 5% per critical
-   *       (to a floor of 0.5). Replaces the additive 5×N penalty that double-counted with
-   *       SYNTH-BUILD/SYNTH-REV (which themselves restate the build/reviewer factors).
+   *       REVIEW_FAILED=0.2, null=0.5. Captures the qualitative reviewer signal as a multiplicative
+   *       damper.
+   *   <li><b>endpointFactor</b> — endpointCoveragePercent / 100, with null treated as 1.0 (no spec
+   *       endpoints means the coverage signal isn't applicable). Linear scaling replaces the
+   *       previous binary-at-95% cliff that gave 1pp difference 10pp of score.
+   *   <li><b>criticalDamper</b> — 1.0 when no unfixed criticals; drops 5% per critical (to a floor
+   *       of 0.5). Replaces the additive 5×N penalty that double-counted with SYNTH-BUILD/SYNTH-REV
+   *       (which themselves restate the build/reviewer factors).
    * </ul>
    *
-   * <p>Result: {@code raw = 100 * buildFactor * testFactor * reviewerFactor *
-   * endpointFactor * criticalDamper}, rounded + clamped to [0, 100].
+   * <p>Result: {@code raw = 100 * buildFactor * testFactor * reviewerFactor * endpointFactor *
+   * criticalDamper}, rounded + clamped to [0, 100].
    *
-   * <p>Backward compat: the {@code Boolean computeVerifiedScore(...)} 6-arg signature
-   * stays — call sites don't change. Persisted scores from the old formula remain in the
-   * database; only new runs get the new shape. The shift is observable in the dashboard
-   * (Verified N drops sharply on broken runs) but no migration is required.
+   * <p>Backward compat: the {@code Boolean computeVerifiedScore(...)} 6-arg signature stays — call
+   * sites don't change. Persisted scores from the old formula remain in the database; only new runs
+   * get the new shape. The shift is observable in the dashboard (Verified N drops sharply on broken
+   * runs) but no migration is required.
    */
   int computeVerifiedScoreMultiplicative(
       Boolean finalBuildPassed,
@@ -872,8 +870,7 @@ public class ValidationReportService {
       // pill on testsTotal>0 so this neutral 0.5 doesn't turn into a misleading "verified".
       testFactor = 0.5;
     } else {
-      testFactor =
-          Math.max(0.0, Math.min(1.0, (double) testsPassed / Math.max(1, testsTotal)));
+      testFactor = Math.max(0.0, Math.min(1.0, (double) testsPassed / Math.max(1, testsTotal)));
     }
 
     double reviewerFactor;
@@ -894,24 +891,17 @@ public class ValidationReportService {
     if (endpointCoveragePercent == null) {
       endpointFactor = 1.0; // signal not applicable (e.g. CLI / library spec, no HTTP)
     } else {
-      endpointFactor =
-          Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
+      endpointFactor = Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
     }
 
     // Each unfixed critical knocks 5% off, floored at 0.5. Substantially weaker than the
     // old 5×N additive penalty because the dimension factors above already reflect the
     // build / reviewer signals; the damper is for issues the dimensions don't already
     // catch (e.g. real LLM-flagged bugs that didn't tip the verdict).
-    double criticalDamper =
-        Math.max(0.5, 1.0 - 0.05 * Math.max(0, unfixedCriticalCount));
+    double criticalDamper = Math.max(0.5, 1.0 - 0.05 * Math.max(0, unfixedCriticalCount));
 
     double raw =
-        100.0
-            * buildFactor
-            * testFactor
-            * reviewerFactor
-            * endpointFactor
-            * criticalDamper;
+        100.0 * buildFactor * testFactor * reviewerFactor * endpointFactor * criticalDamper;
     return (int) Math.max(0, Math.min(100, Math.round(raw)));
   }
 

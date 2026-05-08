@@ -24,25 +24,24 @@ import lombok.extern.slf4j.Slf4j;
  *   <li>{@code CiAutoFixListener} — Phase 3: webhook-triggered fix on failed PR check (planned)
  * </ul>
  *
- * <p>Each caller adapts its source data into a {@link Finding} and calls {@link
- * #submit(Finding)}. The submitter:
+ * <p>Each caller adapts its source data into a {@link Finding} and calls {@link #submit(Finding)}.
+ * The submitter:
  *
  * <ol>
- *   <li>Dedupes against any existing active patch run for the same {@link
- *       Finding#findingKey()}. If one is in-flight, returns it without dispatching a
- *       duplicate (prevents double-PRs from impatient operators or duplicate webhooks).
- *   <li>Calls {@link RunOrchestrator#submitRun} with {@code runMode=PATCH} +
- *       {@code source} = {@code "finding:<TYPE>"} so the orchestrator's terminal-time
- *       push logic can distinguish project-mode finding patches (push to remote) from
- *       bench-mode runs (no push — bench services capture the diff themselves).
- *   <li>Stamps {@code triggered_by_finding} on the run row immediately after persistence
- *       so the dedupe lookup, the dashboard ribbon, and per-finding cost telemetry can
- *       all read it before the async pipeline thread reaches a checkpoint.
+ *   <li>Dedupes against any existing active patch run for the same {@link Finding#findingKey()}. If
+ *       one is in-flight, returns it without dispatching a duplicate (prevents double-PRs from
+ *       impatient operators or duplicate webhooks).
+ *   <li>Calls {@link RunOrchestrator#submitRun} with {@code runMode=PATCH} + {@code source} =
+ *       {@code "finding:<TYPE>"} so the orchestrator's terminal-time push logic can distinguish
+ *       project-mode finding patches (push to remote) from bench-mode runs (no push — bench
+ *       services capture the diff themselves).
+ *   <li>Stamps {@code triggered_by_finding} on the run row immediately after persistence so the
+ *       dedupe lookup, the dashboard ribbon, and per-finding cost telemetry can all read it before
+ *       the async pipeline thread reaches a checkpoint.
  * </ol>
  *
- * <p>Tier checks live in the calling service (each surface has its own tier matrix on
- * tier_config). The submitter assumes the caller has already enforced "user can dispatch
- * this kind of finding."
+ * <p>Tier checks live in the calling service (each surface has its own tier matrix on tier_config).
+ * The submitter assumes the caller has already enforced "user can dispatch this kind of finding."
  */
 @Service
 @Slf4j
@@ -54,10 +53,9 @@ public class FindingPatchSubmitter {
   private final AppUserRepository userRepo;
 
   /**
-   * Result of {@link #submit(Finding)}. Either {@link Outcome#DISPATCHED} (a fresh run
-   * was created) or {@link Outcome#REUSED_ACTIVE} (an existing in-flight run was
-   * returned). Callers surface the {@code runId} either way so the user can navigate to
-   * {@code /runs/{id}} and watch progress.
+   * Result of {@link #submit(Finding)}. Either {@link Outcome#DISPATCHED} (a fresh run was created)
+   * or {@link Outcome#REUSED_ACTIVE} (an existing in-flight run was returned). Callers surface the
+   * {@code runId} either way so the user can navigate to {@code /runs/{id}} and watch progress.
    */
   public record SubmitResult(Outcome outcome, String runId, String findingKey) {
     public enum Outcome {
@@ -67,8 +65,8 @@ public class FindingPatchSubmitter {
   }
 
   /**
-   * Dispatch a patch-mode run for the supplied finding, deduping against any active run
-   * already targeting the same finding key.
+   * Dispatch a patch-mode run for the supplied finding, deduping against any active run already
+   * targeting the same finding key.
    */
   public SubmitResult submit(Finding finding) {
     String key = finding.findingKey();

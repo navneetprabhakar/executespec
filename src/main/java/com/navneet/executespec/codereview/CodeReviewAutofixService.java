@@ -26,23 +26,21 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Phase 4 (FindingPatchSubmitter rollout) — dispatches a patch-mode run that fixes
- * every OPEN issue of one severity bucket from a {@link CodeReviewScan}. The
- * {@code CodeReviewAgent} produces a markdown report; this service makes that report
- * actionable.
+ * Phase 4 (FindingPatchSubmitter rollout) — dispatches a patch-mode run that fixes every OPEN issue
+ * of one severity bucket from a {@link CodeReviewScan}. The {@code CodeReviewAgent} produces a
+ * markdown report; this service makes that report actionable.
  *
- * <p>Per-severity batching is deliberate: a single PR-per-severity is easier for
- * reviewers to grade than "300 issues across 4 categories in one PR", and it lets
- * customers prioritise — landing the CRITICAL bucket fast while MINOR / INFO follow on
- * a slower cadence. The user prompt embeds up to {@link #MAX_ISSUES_IN_PROMPT} issues
- * verbatim (file + line + message + suggested-fix); over-cap, the agent gets a
- * "long tail" hint so it knows there's more to come in a follow-up run.
+ * <p>Per-severity batching is deliberate: a single PR-per-severity is easier for reviewers to grade
+ * than "300 issues across 4 categories in one PR", and it lets customers prioritise — landing the
+ * CRITICAL bucket fast while MINOR / INFO follow on a slower cadence. The user prompt embeds up to
+ * {@link #MAX_ISSUES_IN_PROMPT} issues verbatim (file + line + message + suggested-fix); over-cap,
+ * the agent gets a "long tail" hint so it knows there's more to come in a follow-up run.
  *
- * <p>Risk control: build-mode-style smoke is not yet integrated into patch mode (the
- * agent runs tests via {@code runTests} per-iteration but there's no terminal build
- * gate). Severity buckets ship cleanly because the diff is bounded by the number of
- * issues (≤ MAX_ISSUES_IN_PROMPT × per-issue edit), but the auto-pushed PR is opened
- * as a draft so the user can grade before merging.
+ * <p>Risk control: build-mode-style smoke is not yet integrated into patch mode (the agent runs
+ * tests via {@code runTests} per-iteration but there's no terminal build gate). Severity buckets
+ * ship cleanly because the diff is bounded by the number of issues (≤ MAX_ISSUES_IN_PROMPT ×
+ * per-issue edit), but the auto-pushed PR is opened as a draft so the user can grade before
+ * merging.
  */
 @Service
 @RequiredArgsConstructor
@@ -92,8 +90,7 @@ public class CodeReviewAutofixService {
             .toList();
     if (issues.isEmpty()) {
       throw new ResponseStatusException(
-          HttpStatus.CONFLICT,
-          "Scan has no OPEN " + severity + " issues — nothing to autofix.");
+          HttpStatus.CONFLICT, "Scan has no OPEN " + severity + " issues — nothing to autofix.");
     }
 
     UUID linkedRepoId = resolveLinkedRepoId(scan.getProjectId(), scan.getRepoFullName());
@@ -145,9 +142,10 @@ public class CodeReviewAutofixService {
 
   private String buildPrompt(CodeReviewScan scan, String severity, List<CodeReviewIssue> issues) {
     int total = issues.size();
-    List<CodeReviewIssue> shown = issues.size() > MAX_ISSUES_IN_PROMPT
-        ? new ArrayList<>(issues.subList(0, MAX_ISSUES_IN_PROMPT))
-        : issues;
+    List<CodeReviewIssue> shown =
+        issues.size() > MAX_ISSUES_IN_PROMPT
+            ? new ArrayList<>(issues.subList(0, MAX_ISSUES_IN_PROMPT))
+            : issues;
 
     StringBuilder sb = new StringBuilder();
     sb.append("Address the ").append(total).append(" OPEN ").append(severity);
@@ -199,8 +197,7 @@ public class CodeReviewAutofixService {
     sb.append("1. Group the issues by file. Read each file once + apply every fix in it\n");
     sb.append("   in the same edit pass to keep the diff coherent.\n");
     sb.append("2. The static-analysis suggested fix (when present) is a strong hint, but\n");
-    sb.append(
-        "   not gospel — sanity-check it against the surrounding code before applying.\n");
+    sb.append("   not gospel — sanity-check it against the surrounding code before applying.\n");
     sb.append("3. Run the project's tests via `runTests` to confirm no regression.\n");
     sb.append("4. Commit will be auto-pushed to a fresh `executespec/<runShort>` branch +\n");
     sb.append("   draft PR opened on completion.\n");

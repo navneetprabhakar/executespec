@@ -303,10 +303,10 @@ public interface PipelineRunRepository
   int softDeleteByUserId(@Param("userId") String userId, @Param("now") Instant now);
 
   /**
-   * V183 (2026-05-08) — find an active patch-mode run already dispatched for a finding.
-   * Used by {@code FindingPatchSubmitter} to dedupe: if a finding has a non-terminal run,
-   * the submit endpoint returns it instead of dispatching a duplicate (saves credits +
-   * prevents double-PRs on the same comment list).
+   * V183 (2026-05-08) — find an active patch-mode run already dispatched for a finding. Used by
+   * {@code FindingPatchSubmitter} to dedupe: if a finding has a non-terminal run, the submit
+   * endpoint returns it instead of dispatching a duplicate (saves credits + prevents double-PRs on
+   * the same comment list).
    *
    * <p>Active = status NOT IN COMPLETE / FAILED / PARTIAL / CANCELLED / ABORTED.
    */

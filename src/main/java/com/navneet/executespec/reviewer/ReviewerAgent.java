@@ -327,10 +327,10 @@ public class ReviewerAgent {
   }
 
   /**
-   * Parse the {@code VERDICT: <CLEAN|FIXED_ISSUES|UNRESOLVED>} prefix on the first line of
-   * the worker's completion summary. Both reviewer prompts (general + wiring) require this
-   * prefix as of 2026-05-08. Pre-prompt-update runs return UNPARSED, in which case
-   * {@link #determineOverall} falls back to the legacy substring heuristic.
+   * Parse the {@code VERDICT: <CLEAN|FIXED_ISSUES|UNRESOLVED>} prefix on the first line of the
+   * worker's completion summary. Both reviewer prompts (general + wiring) require this prefix as of
+   * 2026-05-08. Pre-prompt-update runs return UNPARSED, in which case {@link #determineOverall}
+   * falls back to the legacy substring heuristic.
    */
   private static PassVerdict parsePassVerdict(WorkerResult result) {
     if (result == null) return PassVerdict.UNPARSED;

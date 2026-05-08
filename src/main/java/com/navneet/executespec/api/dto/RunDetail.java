@@ -164,15 +164,17 @@ public class RunDetail {
   String harnessVersion;
 
   /**
-   * V183 (2026-05-08) — pipeline shape: {@code BUILD} (default; planner + executor +
-   * reviewer) or {@code PATCH} (single thin-agent loop, used by SWE-bench / autofix
-   * runs). The frontend renders different evidence chips per mode so PATCH runs aren't
-   * judged against build-mode signals (build pass / reviewer verdict / endpoint coverage)
-   * that don't apply.
+   * V183 (2026-05-08) — pipeline shape: {@code BUILD} (default; planner + executor + reviewer) or
+   * {@code PATCH} (single thin-agent loop, used by SWE-bench / autofix runs). The frontend renders
+   * different evidence chips per mode so PATCH runs aren't judged against build-mode signals (build
+   * pass / reviewer verdict / endpoint coverage) that don't apply.
    */
   String runMode;
 
-  /** V183 — finding source key for autofix-triggered patch runs. {@code <TYPE>:<id>}. Null otherwise. */
+  /**
+   * V183 — finding source key for autofix-triggered patch runs. {@code <TYPE>:<id>}. Null
+   * otherwise.
+   */
   String triggeredByFinding;
 
   // ── Retry tracking ──────────────────────────────────────────────────────

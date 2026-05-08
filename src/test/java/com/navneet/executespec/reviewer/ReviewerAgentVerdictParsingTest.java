@@ -6,21 +6,19 @@ import java.lang.reflect.Method;
 import java.util.List;
 
 import com.navneet.executespec.agent.WorkerResult;
-import com.navneet.executespec.tool.ExecutionContext;
 
 import org.junit.jupiter.api.Test;
 
 /**
- * 2026-05-08 — pins the structured {@code VERDICT:} prefix parsing on the reviewer's
- * {@code completeTask} summary. Replaces the legacy substring heuristic ({@code
- * .contains("no issues")} / {@code .contains("found 0")}) which was brittle to model
- * phrasing variation. The reviewer prompts (general + wiring) now require the prefix as
- * the first line; this test class pins both the structured-path and the backward-compat
- * heuristic-path behaviour.
+ * 2026-05-08 — pins the structured {@code VERDICT:} prefix parsing on the reviewer's {@code
+ * completeTask} summary. Replaces the legacy substring heuristic ({@code .contains("no issues")} /
+ * {@code .contains("found 0")}) which was brittle to model phrasing variation. The reviewer prompts
+ * (general + wiring) now require the prefix as the first line; this test class pins both the
+ * structured-path and the backward-compat heuristic-path behaviour.
  *
- * <p>Reflection is used to drive the private {@code determineOverall} method directly —
- * mocking the full {@link ReviewerAgent} dependency graph is overkill for what's logically
- * a pure function on the worker results + build flag.
+ * <p>Reflection is used to drive the private {@code determineOverall} method directly — mocking the
+ * full {@link ReviewerAgent} dependency graph is overkill for what's logically a pure function on
+ * the worker results + build flag.
  */
 class ReviewerAgentVerdictParsingTest {
 
@@ -49,9 +47,9 @@ class ReviewerAgentVerdictParsingTest {
   }
 
   /**
-   * Constructs a ReviewerAgent with all-null deps — {@code determineOverall} doesn't touch
-   * any field, so the constructor's @RequiredArgsConstructor accepts the nulls and we can
-   * unit-test the private helper without a Spring context.
+   * Constructs a ReviewerAgent with all-null deps — {@code determineOverall} doesn't touch any
+   * field, so the constructor's @RequiredArgsConstructor accepts the nulls and we can unit-test the
+   * private helper without a Spring context.
    */
   private static ReviewerAgent agent() {
     return new ReviewerAgent(null, null, null, null, null);
@@ -82,7 +80,8 @@ class ReviewerAgentVerdictParsingTest {
 
   @Test
   void general_unresolved_dominates_returns_unresolved() throws Exception {
-    var g = workerWithSummary("VERDICT: UNRESOLVED\nFound bug in auth, can't fix without more info.");
+    var g =
+        workerWithSummary("VERDICT: UNRESOLVED\nFound bug in auth, can't fix without more info.");
     var w = workerWithSummary("VERDICT: CLEAN\n");
     assertEquals(ReviewerResult.Overall.UNRESOLVED_ISSUES, determineOverall(agent(), g, w, true));
   }

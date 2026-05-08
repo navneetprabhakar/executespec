@@ -28,8 +28,8 @@ import lombok.extern.slf4j.Slf4j;
  * </ul>
  *
  * <p>Tools available are exactly {@link com.navneet.executespec.tool.ToolRegistry#bindForWorker}
- * (everything except gitCommit). The git-diff capture happens at run-end inside the bench
- * services' {@code captureOnTerminalAsync} path; the agent never commits.
+ * (everything except gitCommit). The git-diff capture happens at run-end inside the bench services'
+ * {@code captureOnTerminalAsync} path; the agent never commits.
  *
  * <p>This class deliberately stays small: ~80 LOC of orchestration + one prompt template.
  * Improvements (better navigation primitives, retrieval, self-consistency vote) layer on top
@@ -58,16 +58,15 @@ public class PatchAgent {
   /**
    * Stagnation thresholds set to MAX_ITERATIONS so the guard never fires in patch mode. The
    * downstream cost cap and the iteration cap itself are the authoritative stop conditions.
-   * Investigation-heavy tasks need this — premature force-terminate at iter 12 was the failure
-   * mode that motivated the patch-mode rewrite.
+   * Investigation-heavy tasks need this — premature force-terminate at iter 12 was the failure mode
+   * that motivated the patch-mode rewrite.
    */
   private static final int STAGNATION_DISABLED = MAX_ITERATIONS;
 
   private final WorkerAgent workerAgent;
 
   /** Run a single thin-agent patch loop. Blocks until the worker terminates. */
-  public WorkerResult run(
-      String provider, String model, String userRequest, ExecutionContext ctx) {
+  public WorkerResult run(String provider, String model, String userRequest, ExecutionContext ctx) {
 
     log.info(
         "PatchAgent START run={} provider={} model={} maxIter={}",
@@ -108,10 +107,9 @@ public class PatchAgent {
   }
 
   /**
-   * Patch-mode system prompt. Test-driven: the first investigation step is always the failing
-   * test (when the request mentions one). Minimal-change discipline: PASS_TO_PASS regression is the
-   * dominant SWE-bench failure mode, so the prompt explicitly directs surgical edits over
-   * rewrites.
+   * Patch-mode system prompt. Test-driven: the first investigation step is always the failing test
+   * (when the request mentions one). Minimal-change discipline: PASS_TO_PASS regression is the
+   * dominant SWE-bench failure mode, so the prompt explicitly directs surgical edits over rewrites.
    */
   private String buildSystemPrompt() {
     return """

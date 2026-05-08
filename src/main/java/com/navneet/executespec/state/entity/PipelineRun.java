@@ -64,11 +64,11 @@ public class PipelineRun {
   private String runMode = com.navneet.executespec.state.RunMode.BUILD;
 
   /**
-   * V183 (2026-05-08) — when a patch-mode run is dispatched in response to a project-side
-   * finding (PR review, tech debt, code review, CI failure), this column stamps the originating
-   * finding id so the dashboard can render "Triggered by ..." instead of an orphan run + the
-   * {@link com.navneet.executespec.finding.FindingPatchSubmitter} can dedupe re-dispatch. Format
-   * {@code <TYPE>:<id>}.
+   * V183 (2026-05-08) — when a patch-mode run is dispatched in response to a project-side finding
+   * (PR review, tech debt, code review, CI failure), this column stamps the originating finding id
+   * so the dashboard can render "Triggered by ..." instead of an orphan run + the {@link
+   * com.navneet.executespec.finding.FindingPatchSubmitter} can dedupe re-dispatch. Format {@code
+   * <TYPE>:<id>}.
    */
   @Column(name = "triggered_by_finding", length = 128)
   private String triggeredByFinding;

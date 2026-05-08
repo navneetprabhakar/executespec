@@ -1435,17 +1435,17 @@ public class RunOrchestrator {
    * path. Idempotent against the run row, terminal-event-aware, and writes a status_reason that
    * downstream notifiers / dashboards can render meaningfully.
    *
-   * <p>Cost cap: PatchAgent threads through to {@link
-   * com.navneet.executespec.agent.WorkerAgent}'s iter-3 budget guard, which reads {@code
-   * pipeline_run.hard_cap_usd}. We default that to {@link #DEFAULT_PATCH_HARD_CAP_USD} when
-   * unset so a runaway patch agent stops without manual intervention.
+   * <p>Cost cap: PatchAgent threads through to {@link com.navneet.executespec.agent.WorkerAgent}'s
+   * iter-3 budget guard, which reads {@code pipeline_run.hard_cap_usd}. We default that to {@link
+   * #DEFAULT_PATCH_HARD_CAP_USD} when unset so a runaway patch agent stops without manual
+   * intervention.
    *
    * <p>Outcome → terminal status mapping:
    *
    * <ul>
    *   <li>{@code COMPLETED} / {@code COMPLETED_BY_STAGNATION} / {@code STOPPED_WITHOUT_COMPLETE} →
-   *       {@code COMPLETE}. The diff is whatever's in the workspace at exit; the bench eval
-   *       decides correctness, not us.
+   *       {@code COMPLETE}. The diff is whatever's in the workspace at exit; the bench eval decides
+   *       correctness, not us.
    *   <li>{@code ITERATION_LIMIT_EXCEEDED} / {@code BUDGET_EXCEEDED} → {@code PARTIAL}. The agent
    *       was making progress but ran out of headroom.
    *   <li>{@code ERROR} or any uncaught exception → {@code FAILED}.
@@ -1464,7 +1464,8 @@ public class RunOrchestrator {
       runRepo.save(run);
       log.info(
           "PATCH run={} hardCapUsd default ${}",
-          runId, String.format("%.2f", DEFAULT_PATCH_HARD_CAP_USD));
+          runId,
+          String.format("%.2f", DEFAULT_PATCH_HARD_CAP_USD));
     }
 
     // Patch mode runs on PLANNING-tier (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview).
@@ -1483,7 +1484,10 @@ public class RunOrchestrator {
 
     log.info(
         "PATCH dispatch run={} provider={} model={} userRequestLen={}",
-        runId, provider, model, userRequestLive == null ? 0 : userRequestLive.length());
+        runId,
+        provider,
+        model,
+        userRequestLive == null ? 0 : userRequestLive.length());
     broadcaster.emit(
         runId, RunEvent.log(runId, "patch", "Patch-mode agent starting (single-loop)"));
 
@@ -1511,8 +1515,7 @@ public class RunOrchestrator {
                 runRepo.save(r);
               });
       eventPublisher.publishEvent(
-          new PipelineEvent.RunFailed(
-              runId, "patch agent error: " + e.getClass().getSimpleName()));
+          new PipelineEvent.RunFailed(runId, "patch agent error: " + e.getClass().getSimpleName()));
       broadcaster.emit(runId, RunEvent.complete(runId, "FAILED", "PATCH_AGENT_ERROR"));
       return;
     }
@@ -1607,8 +1610,7 @@ public class RunOrchestrator {
         if (fresh != null) {
           scmPushService.push(fresh);
           log.info(
-              "PATCH run={} auto-pushed to SCM (finding-triggered={})",
-              runId, run.getSourceType());
+              "PATCH run={} auto-pushed to SCM (finding-triggered={})", runId, run.getSourceType());
         }
       } catch (Exception pushEx) {
         // Manual re-push via /runs/{id}/push-github is still available; log and continue.
@@ -1623,11 +1625,7 @@ public class RunOrchestrator {
         RunEvent.log(
             runId,
             "patch",
-            "Patch-mode complete: "
-                + result.outcome()
-                + " in "
-                + result.iterations()
-                + " iters"));
+            "Patch-mode complete: " + result.outcome() + " in " + result.iterations() + " iters"));
     broadcaster.emit(runId, RunEvent.complete(runId, terminalStatus, terminalReason));
 
     if ("COMPLETE".equals(terminalStatus)) {

@@ -21,15 +21,14 @@ import org.springframework.stereotype.Component;
 import lombok.extern.slf4j.Slf4j;
 
 /**
- * Structured pytest tool for patch-mode (SWE-bench / generic Python). Takes a list of pytest
- * test ids, runs them inside the bench container (or host workspace if no container is
- * registered for this run), and returns a parsed pass/fail summary instead of raw stdout.
+ * Structured pytest tool for patch-mode (SWE-bench / generic Python). Takes a list of pytest test
+ * ids, runs them inside the bench container (or host workspace if no container is registered for
+ * this run), and returns a parsed pass/fail summary instead of raw stdout.
  *
- * <p>Why structured: with {@code shell} the agent had to parse pytest output itself —
- * count "passed" / "failed" lines, extract assertion errors from indented blocks. Models
- * sometimes mis-counted, sometimes treated a single-test-failed run as "everything failed,"
- * sometimes claimed a passing test based on a misread. A typed envelope removes that
- * parsing burden:
+ * <p>Why structured: with {@code shell} the agent had to parse pytest output itself — count
+ * "passed" / "failed" lines, extract assertion errors from indented blocks. Models sometimes
+ * mis-counted, sometimes treated a single-test-failed run as "everything failed," sometimes claimed
+ * a passing test based on a misread. A typed envelope removes that parsing burden:
  *
  * <pre>{@code
  * {
@@ -44,14 +43,14 @@ import lombok.extern.slf4j.Slf4j;
  * }
  * }</pre>
  *
- * <p>Routing: same dispatch tree as {@link ShellTool} — consult the SWE-bench container
- * store first, then the ProgramBench store. If neither has a cid for this run, falls back
- * to running pytest in the host workspace via {@code /bin/sh -c}.
+ * <p>Routing: same dispatch tree as {@link ShellTool} — consult the SWE-bench container store
+ * first, then the ProgramBench store. If neither has a cid for this run, falls back to running
+ * pytest in the host workspace via {@code /bin/sh -c}.
  *
- * <p>Doubles as the gate for {@code completeTask} verification (see Layer 3 in
- * {@code WorkerAgent}). Calling {@code runTests} successfully marks the conversation as
- * "test-verified" in the loop's local state; the agent must call this within a small
- * window of completing or {@code completeTask} is refused.
+ * <p>Doubles as the gate for {@code completeTask} verification (see Layer 3 in {@code
+ * WorkerAgent}). Calling {@code runTests} successfully marks the conversation as "test-verified" in
+ * the loop's local state; the agent must call this within a small window of completing or {@code
+ * completeTask} is refused.
  */
 @Component
 @Slf4j
@@ -99,27 +98,27 @@ public class RunTestsTool implements Tool {
   @Override
   public String inputSchema() {
     return """
-           {
-             "type": "object",
-             "properties": {
-               "test_ids": {
-                 "type": "array",
-                 "items": {"type": "string"},
-                 "description": "pytest test ids, e.g. ['test/foo.py::test_a', 'test/bar.py::test_b']. Max 20 per call.",
-                 "minItems": 1,
-                 "maxItems": 20
-               },
-               "timeoutSeconds": {
-                 "type": "integer",
-                 "description": "Optional timeout (default 240, max 600).",
-                 "minimum": 1,
-                 "maximum": 600
-               }
-             },
-             "required": ["test_ids"],
-             "additionalProperties": false
-           }
-           """;
+{
+  "type": "object",
+  "properties": {
+    "test_ids": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "pytest test ids, e.g. ['test/foo.py::test_a', 'test/bar.py::test_b']. Max 20 per call.",
+      "minItems": 1,
+      "maxItems": 20
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "description": "Optional timeout (default 240, max 600).",
+      "minimum": 1,
+      "maximum": 600
+    }
+  },
+  "required": ["test_ids"],
+  "additionalProperties": false
+}
+""";
   }
 
   @Override
@@ -150,8 +149,7 @@ public class RunTestsTool implements Tool {
           || id.indexOf('`') >= 0
           || id.contains("\n")) {
         return ToolResult.err(
-            ToolResult.ErrorKind.INVALID_ARGS,
-            "test_id contains forbidden shell metachars: " + id);
+            ToolResult.ErrorKind.INVALID_ARGS, "test_id contains forbidden shell metachars: " + id);
       }
       testIds.add(id);
     }
@@ -219,7 +217,9 @@ public class RunTestsTool implements Tool {
         proc.destroyForcibly();
         return ToolResult.err(
             ToolResult.ErrorKind.TIMEOUT,
-            "pytest exceeded " + timeout + "s timeout for "
+            "pytest exceeded "
+                + timeout
+                + "s timeout for "
                 + testIds.size()
                 + " test(s). Try fewer ids per call or raise timeoutSeconds.");
       }
@@ -227,7 +227,10 @@ public class RunTestsTool implements Tool {
       int exit = proc.exitValue();
       log.info(
           "runTests run={} ids={} exit={} outBytes={}",
-          ctx.runId(), testIds.size(), exit, output.length());
+          ctx.runId(),
+          testIds.size(),
+          exit,
+          output.length());
       String envelope = parseAndEnvelope(testIds, exit, output);
       return ToolResult.ok(envelope);
     } catch (IOException ioe) {
@@ -250,12 +253,13 @@ public class RunTestsTool implements Tool {
    *   PASSED test/foo.py::test_a
    * </pre>
    *
-   * We extract those into a structured envelope. Failing tests' assertion lines are pulled
-   * from the {@code FAILED ... - <error>} suffix when present; otherwise we leave the
-   * message blank and let the LLM read raw_tail.
+   * We extract those into a structured envelope. Failing tests' assertion lines are pulled from the
+   * {@code FAILED ... - <error>} suffix when present; otherwise we leave the message blank and let
+   * the LLM read raw_tail.
    */
   private static final Pattern PYTEST_FAILED_LINE =
       Pattern.compile("(?m)^FAILED\\s+(\\S+)(?:\\s+-\\s+(.*))?$");
+
   private static final Pattern PYTEST_PASSED_LINE = Pattern.compile("(?m)^PASSED\\s+(\\S+)\\s*$");
   private static final Pattern PYTEST_SUMMARY_LINE =
       Pattern.compile("(?m)^=+\\s*(.*?passed.*?|.*?failed.*?|.*?error.*?)\\s*=+\\s*$");

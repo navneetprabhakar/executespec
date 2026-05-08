@@ -89,15 +89,15 @@ public class PrReviewController {
   public record AutofixResponse(String runId, String findingKey, String outcome) {}
 
   /**
-   * Phase 1 (V183) — dispatch a patch-mode run that addresses every comment on a PR
-   * review. Returns 202 + the run id so the frontend can navigate to {@code /runs/{id}}
-   * and watch progress. Idempotent: a fresh dispatch when there's already an active run
-   * for this review returns the existing run with {@code outcome=REUSED_ACTIVE}; the
-   * caller surfaces the same UI either way (link to the in-flight run).
+   * Phase 1 (V183) — dispatch a patch-mode run that addresses every comment on a PR review. Returns
+   * 202 + the run id so the frontend can navigate to {@code /runs/{id}} and watch progress.
+   * Idempotent: a fresh dispatch when there's already an active run for this review returns the
+   * existing run with {@code outcome=REUSED_ACTIVE}; the caller surfaces the same UI either way
+   * (link to the in-flight run).
    *
-   * <p>Pre-conditions: review must be COMPLETE, verdict must not be APPROVE, the review's
-   * repo must be linked to the project, GitHub must return a head branch (PR not closed
-   * unmerged). Each guard maps to a distinct 4xx for clear UX.
+   * <p>Pre-conditions: review must be COMPLETE, verdict must not be APPROVE, the review's repo must
+   * be linked to the project, GitHub must return a head branch (PR not closed unmerged). Each guard
+   * maps to a distinct 4xx for clear UX.
    */
   @PostMapping("/api/pr-reviews/{id}/autofix")
   public ResponseEntity<AutofixResponse> autofix(

@@ -29,11 +29,11 @@ import lombok.Builder;
  *     null, falls through to {@link WorkerAgent#STAGNATION_FORCE_AFTER_N}. Should be ≥
  *     stagnationWarnAfter + 4 so the worker has at least 4 iterations after the warn to recover.
  * @param requireTestVerification V182 layer-3 gate. When true, {@link
- *     com.navneet.executespec.tool.CompleteTaskTool} calls are refused unless the agent has made
- *     at least one successful {@code runTests} call within {@link
- *     WorkerAgent#TEST_VERIFICATION_RECENCY_ITERS} iterations. Set by {@link PatchAgent} so
- *     bug-fix runs can't claim completion without observing tests run; build-mode workers leave
- *     this null/false (build-mode has its own smoke gate downstream of the loop).
+ *     com.navneet.executespec.tool.CompleteTaskTool} calls are refused unless the agent has made at
+ *     least one successful {@code runTests} call within {@link
+ *     WorkerAgent#TEST_VERIFICATION_RECENCY_ITERS} iterations. Set by {@link PatchAgent} so bug-fix
+ *     runs can't claim completion without observing tests run; build-mode workers leave this
+ *     null/false (build-mode has its own smoke gate downstream of the loop).
  */
 @Builder
 public record WorkerTaskRequest(
