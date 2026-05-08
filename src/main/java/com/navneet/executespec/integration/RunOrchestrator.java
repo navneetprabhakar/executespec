@@ -1473,9 +1473,17 @@ public class RunOrchestrator {
     String model = run.getPlannerModel();
     if (model == null || model.isBlank()) model = run.getWorkerModel();
 
+    // V182 layer-1 — read userRequest from the run row (not the param) so the
+    // bench services' RunStarted-time updates flow through. SwebenchTaskService
+    // captures the failing-test output inside the container and prepends it to
+    // userRequest before the async pipeline thread picks the row up; this is
+    // the read-back point where the prefixed request takes effect.
+    String userRequestLive = run.getUserRequest();
+    if (userRequestLive == null || userRequestLive.isBlank()) userRequestLive = userRequest;
+
     log.info(
         "PATCH dispatch run={} provider={} model={} userRequestLen={}",
-        runId, provider, model, userRequest == null ? 0 : userRequest.length());
+        runId, provider, model, userRequestLive == null ? 0 : userRequestLive.length());
     broadcaster.emit(
         runId, RunEvent.log(runId, "patch", "Patch-mode agent starting (single-loop)"));
 
@@ -1490,7 +1498,7 @@ public class RunOrchestrator {
 
     com.navneet.executespec.agent.WorkerResult result;
     try {
-      result = patchAgent.run(provider, model, userRequest, rootCtx);
+      result = patchAgent.run(provider, model, userRequestLive, rootCtx);
     } catch (Exception e) {
       log.error("PATCH run={} dispatch threw", runId, e);
       runRepo

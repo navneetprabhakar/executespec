@@ -113,6 +113,22 @@ public class WorkerAgent {
   public static final int STAGNATION_FORCE_AFTER_N = 12;
 
   /**
+   * V182 layer-3 — within how many iterations of {@code completeTask} must a successful
+   * {@code runTests} call have occurred? When {@link WorkerTaskRequest#requireTestVerification()}
+   * is true, the dispatch loop refuses {@code completeTask} unless the agent ran tests
+   * within this window. 5 is calibrated to be tight enough that the agent can't claim
+   * "I ran the tests 30 iters ago and they passed" but loose enough to allow a few
+   * post-test polishing iterations (re-read the output, double-check the diff).
+   */
+  public static final int TEST_VERIFICATION_RECENCY_ITERS = 5;
+
+  /**
+   * Name of the structured pytest tool ({@link com.navneet.executespec.tool.RunTestsTool}).
+   * Used by the layer-3 verification gate to identify the call that satisfies it.
+   */
+  static final String RUN_TESTS_TOOL_NAME = "runTests";
+
+  /**
    * Tool names that count as "real progress" for the stagnation guard. Reads / git inspection /
    * shell don't reset the counter — only file mutations and explicit build attempts.
    *
@@ -223,6 +239,13 @@ public class WorkerAgent {
             : Math.max(STAGNATION_FORCE_AFTER_N, stagnationWarnAfter + 4);
     int stagnantIters = 0;
     boolean stagnationWarned = false;
+
+    // V182 layer-3 — last iteration on which a runTests call returned an ok envelope.
+    // -1 means "never". Refreshed inside the per-tool-call dispatch when name=runTests
+    // and the envelope JSON starts with `{"ok":true`. The completeTask gate consults
+    // this before allowing termination.
+    int lastTestRunIter = -1;
+    final boolean gateOn = Boolean.TRUE.equals(req.requireTestVerification());
 
     if (!isResume) {
       log.info(
@@ -372,6 +395,52 @@ public class WorkerAgent {
       for (AssistantMessage.ToolCall tc : calls) {
         toolsDispatched++;
         if (CompleteTaskTool.NAME.equals(tc.name())) {
+          // V182 layer-3 verification gate. When the request opted in (patch mode),
+          // refuse completeTask unless a runTests call landed within the last
+          // TEST_VERIFICATION_RECENCY_ITERS iterations. The agent gets the refusal
+          // envelope in tool history and can react by calling runTests next iter.
+          // Build mode (gateOn=false) keeps today's behaviour — completeTask always
+          // succeeds because build mode has its own smoke gate downstream.
+          if (gateOn) {
+            int sinceLastTest =
+                lastTestRunIter < 0 ? Integer.MAX_VALUE : iter - lastTestRunIter;
+            if (sinceLastTest > TEST_VERIFICATION_RECENCY_ITERS) {
+              String reason;
+              if (lastTestRunIter < 0) {
+                reason =
+                    "completeTask refused — you have not called the `runTests` tool"
+                        + " in this conversation. Run the failing test (using runTests"
+                        + " with the FAIL_TO_PASS test ids from the user message) and"
+                        + " confirm it passes before calling completeTask. The bench"
+                        + " harness will not score your patch unless the failing test"
+                        + " actually passes.";
+              } else {
+                reason =
+                    "completeTask refused — last successful runTests was "
+                        + sinceLastTest
+                        + " iterations ago (gate window: "
+                        + TEST_VERIFICATION_RECENCY_ITERS
+                        + "). Re-run the failing test now to confirm your patch still"
+                        + " works against the live workspace, then call completeTask"
+                        + " again.";
+              }
+              String refused = errEnvelope("FORBIDDEN", reason);
+              toolResponses.add(
+                  new ToolResponseMessage.ToolResponse(
+                      safeId(tc.id()), tc.name(), refused));
+              toolLog.add(tc.name() + " → REFUSED (no recent runTests)");
+              log.info(
+                  "WorkerAgent completeTask GATED run={} task={} iter={} sinceLastTest={}",
+                  req.context().runId(),
+                  req.context().taskId(),
+                  iter,
+                  sinceLastTest == Integer.MAX_VALUE ? "never" : sinceLastTest);
+              // Don't return — fall through; the rest of this iter's tool calls (if any)
+              // still dispatch normally, and the next iter the agent sees the refusal
+              // in history.
+              continue;
+            }
+          }
           completionSummary = extractSummary(tc.arguments());
           String envelope = okEnvelope("task marked complete: " + completionSummary);
           toolResponses.add(
@@ -396,6 +465,14 @@ public class WorkerAgent {
         }
         metrics.recordToolCall(tc.name());
         String envelope = dispatchOne(tc, req);
+        // V182 layer-3 — track successful runTests for the completeTask gate. Treat
+        // any ok envelope as evidence of a verification step, even if the listed tests
+        // failed; the agent has at least observed the test run and can iterate.
+        if (RUN_TESTS_TOOL_NAME.equals(tc.name())
+            && envelope != null
+            && envelope.startsWith("{\"ok\":true")) {
+          lastTestRunIter = iter;
+        }
         toolResponses.add(
             new ToolResponseMessage.ToolResponse(safeId(tc.id()), tc.name(), envelope));
         toolLog.add(tc.name() + "(" + previewArgs(tc.arguments()) + ")");

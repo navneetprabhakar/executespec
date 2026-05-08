@@ -169,6 +169,42 @@ public class SwebenchTaskService {
           runId,
           workspaceHost);
       containerStore.put(runId, containerId);
+
+      // V182 layer-1 — capture the FAIL_TO_PASS pytest output BEFORE the agent
+      // starts so the agent's first user message contains the actual assertion
+      // error as ground truth. This is the single biggest signal-injection in
+      // the SWE-bench harness literature (SWE-agent does it; mini-swe-agent
+      // doesn't). The agent doesn't have to guess what's currently broken —
+      // it sees the exact stack trace + expected-vs-actual diff.
+      try {
+        SwebenchInstanceLoader.SwebenchInstance instance = loader.findById(recipe.instanceId());
+        String testOutput = captureFailingTestOutput(recipe.containerName(), instance);
+        if (!testOutput.isEmpty()) {
+          runRepo
+              .findById(runId)
+              .ifPresent(
+                  row -> {
+                    row.setUserRequest(prefixWithFailingTestOutput(testOutput, row.getUserRequest()));
+                    runRepo.save(row);
+                  });
+          log.info(
+              "SWE-bench: prefixed userRequest for run {} with {}-char failing-test capture",
+              runId,
+              testOutput.length());
+        } else {
+          log.warn(
+              "SWE-bench: failing-test capture for run {} returned empty output (will use raw"
+                  + " userRequest)",
+              runId);
+        }
+      } catch (Exception captureEx) {
+        // Non-fatal — fall back to the un-prefixed userRequest. The agent still
+        // gets the problem statement + FAIL_TO_PASS / PASS_TO_PASS lists.
+        log.warn(
+            "SWE-bench: failing-test capture for run {} threw; agent will use raw userRequest: {}",
+            runId,
+            captureEx.getMessage());
+      }
     } catch (Exception e) {
       log.error(
           "SWE-bench: cleanroom setup FAILED for runId={} instance={} — pipeline will run without"
@@ -413,6 +449,75 @@ public class SwebenchTaskService {
         "- Do NOT modify test files (the harness re-applies the gold tests after your patch).\n");
     sb.append("- Edit only source files. Your final submission = git diff HEAD of /testbed.\n");
     return sb.toString();
+  }
+
+  /**
+   * Layer-1 helper: run the FAIL_TO_PASS tests inside the container and capture pytest output.
+   *
+   * <p>Runs up to 5 of the failing tests with concise traceback (`--tb=short`). Cap matters
+   * because some SWE-bench instances list 50+ FAIL_TO_PASS tests and we only need the
+   * agent to see the shape of what's failing — once it understands ONE assertion error,
+   * the rest are usually variations.
+   *
+   * <p>Output is truncated to ~6 KB (head 5500 + tail 500) so even a noisy test suite
+   * fits in the user prompt without blowing context budget. Returns empty string on
+   * docker-exec failure or when the test list is empty.
+   */
+  private String captureFailingTestOutput(
+      String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
+    if (instance == null || instance.failToPass() == null || instance.failToPass().isEmpty()) {
+      return "";
+    }
+    int sampleSize = Math.min(5, instance.failToPass().size());
+    String testIds =
+        String.join(" ", instance.failToPass().subList(0, sampleSize).stream().toList());
+    // SWE-bench images activate their conda env (`testbed`) via /etc/bash.bashrc, so a
+    // bare `sh -c "python -m pytest"` runs against the base /opt/miniconda3/bin/python
+    // that doesn't have pytest installed. `bash -lc` sources /etc/profile → bashrc →
+    // conda activate, so `python -m pytest` resolves to the testbed env's pytest 8.x.
+    String cmd =
+        "docker exec "
+            + containerName
+            + " bash -lc '"
+            + "cd /testbed && python -m pytest "
+            + testIds
+            + " --tb=short --no-header -q 2>&1 | tail -200"
+            + "'";
+    ShellResult result = run(cmd, 180);
+    if (result.exit() == -1 || result.exit() == -2 || result.exit() == -3) {
+      // docker exec itself errored (timeout, IO, interrupt) — return empty so caller
+      // falls back gracefully rather than feeding garbage into the prompt.
+      return "";
+    }
+    String output = result.output() == null ? "" : result.output();
+    if (output.length() > 6000) {
+      int omitted = output.length() - 6000;
+      output =
+          output.substring(0, 5500)
+              + "\n\n... ["
+              + omitted
+              + " chars omitted from middle] ...\n\n"
+              + output.substring(output.length() - 500);
+    }
+    return output;
+  }
+
+  /**
+   * Layer-1 helper: prepend the failing-test capture to the synthesised user request as
+   * "ground truth — actual output observed". Phrased so the agent treats it as authoritative
+   * test data rather than a hypothesis it might second-guess.
+   */
+  private String prefixWithFailingTestOutput(String testOutput, String originalUserRequest) {
+    return "# Failing test output (ground truth — captured BEFORE any fix)\n\n"
+        + "Below is the verbatim output of running the FAIL_TO_PASS tests inside the\n"
+        + "container against the unmodified codebase. This is what's currently broken.\n"
+        + "Use the assertion errors / tracebacks to guide your fix — don't re-derive\n"
+        + "what's failing; it's right here.\n\n"
+        + "```\n"
+        + testOutput
+        + "\n```\n\n"
+        + "---\n\n"
+        + (originalUserRequest == null ? "" : originalUserRequest);
   }
 
   private record ShellResult(int exit, String output) {}
