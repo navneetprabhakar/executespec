@@ -49,11 +49,17 @@ public class PatchAgent {
 
   /**
    * Iteration cap. Calibrated against mini-swe-agent's published runs — most SWE-bench Lite tasks
-   * resolve in 25-50 iterations; the long tail benefits from headroom to 75. Combined with the
-   * per-run hard-cap (default $4 in the bench services), this caps total cost without strangling
-   * the long-tail problems.
+   * resolve in 25-50 iterations; the long tail benefits from headroom. Combined with the per-run
+   * hard-cap (default $4 in the bench services) AND the new Lever A/B watchdog+salvage path, this
+   * caps total cost without strangling the long-tail problems.
+   *
+   * <p>2026-05-08 — bumped 75 → 120. 7-day production data showed PATCH_ITER_LIMIT failures at avg
+   * $1.55 (Anthropic) / $2.30 (Gemini) — well within the $4 cost cap. With Lever A (force-edit
+   * watchdog at 70%) catching investigation paralysis EARLIER and Lever B (best-guess salvage)
+   * catching the residual zero-write iter-limit case, we have headroom to extend cap for genuine
+   * "need more time" runs without runaway cost. Real ceiling stays the cost cap.
    */
-  private static final int MAX_ITERATIONS = 75;
+  private static final int MAX_ITERATIONS = 120;
 
   /**
    * Stagnation thresholds set to MAX_ITERATIONS so the guard never fires in patch mode. The
