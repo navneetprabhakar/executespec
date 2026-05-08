@@ -1543,6 +1543,11 @@ public class RunOrchestrator {
       }
     }
 
+    // Snapshot cost + tokens BEFORE flipping to terminal so dashboards reflect the
+    // patch agent's actual spend. The build-mode flow attributes per-phase under
+    // persistPhaseTokens; patch mode has no phases to attribute against, so the
+    // run row reads directly from the tracker's accumulator.
+    RunCostTracker.Snapshot patchCost = costTracker.snapshot(runId);
     runRepo
         .findById(runId)
         .ifPresent(
@@ -1550,17 +1555,34 @@ public class RunOrchestrator {
               r.setStatus(terminalStatus);
               r.setStatusReason(terminalReason);
               r.setCompletedAt(Instant.now());
+              if (patchCost.costUsd() > 0d) {
+                r.setActualCostUsd(patchCost.costUsd());
+              } else if (r.getActualCostUsd() == null) {
+                r.setActualCostUsd(0d);
+              }
+              int persistedIn = r.getTotalInputTokens() == null ? 0 : r.getTotalInputTokens();
+              int persistedOut = r.getTotalOutputTokens() == null ? 0 : r.getTotalOutputTokens();
+              if (patchCost.inputTokens() > persistedIn) {
+                r.setTotalInputTokens(patchCost.inputTokens());
+              }
+              if (patchCost.outputTokens() > persistedOut) {
+                r.setTotalOutputTokens(patchCost.outputTokens());
+              }
               runRepo.save(r);
             });
 
     log.info(
-        "PATCH terminal run={} status={} reason={} iter={} toolCalls={} latencyMs={}",
+        "PATCH terminal run={} status={} reason={} iter={} toolCalls={} latencyMs={}"
+            + " in={} out={} ${}",
         runId,
         terminalStatus,
         terminalReason,
         result.iterations(),
         result.toolCallsDispatched(),
-        result.totalLatencyMs());
+        result.totalLatencyMs(),
+        patchCost.inputTokens(),
+        patchCost.outputTokens(),
+        String.format("%.4f", patchCost.costUsd()));
     broadcaster.emit(
         runId,
         RunEvent.log(
