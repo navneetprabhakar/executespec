@@ -871,21 +871,21 @@ public class SequentialExecutor {
     // iterations: the worker has to readFile / searchFiles the real repo
     // before it can write, so 2× the fresh-scratch cap is the default.
     if (projectRun) maxIter *= 2;
-    // 2026-04-26 cost-control: OpenAI is markedly chattier per iter than
-    // Anthropic (Spring AI re-ships the FULL conversation history on
-    // every tool call, no prompt cache; observed 1.45M input tokens on
-    // the HIGH library spec vs Anthropic's 132K for the same spec). Cap
-    // OpenAI at 70% of the default iteration budget so we bail on stuck
-    // worker loops sooner. Quality impact: worker still has 35 iters for
-    // a non-project HIGH task (was 75) — empirically enough for the
-    // library spec which finished 4/4 tasks in the prior eval. If runs
-    // start hitting iteration-limit cleanly we'll revisit; the bigger
-    // win (sliding-window or summary-compress on the conversation
-    // history) is tracked as a follow-up under
-    // docs/plans/openai-conversation-compression.md (TBD).
-    if (runProvider != null && "openai".equalsIgnoreCase(runProvider)) {
-      maxIter = (int) Math.ceil(maxIter * 0.70);
-    }
+    // 2026-05-08 — OpenAI 0.7× cap LIFTED. Original premise (2026-04-26): "OpenAI is markedly
+    // chattier per iter than Anthropic (Spring AI re-ships the FULL conversation history on
+    // every tool call, no prompt cache); observed 1.45M input tokens on HIGH library spec vs
+    // Anthropic's 132K for the same spec." That premise is now stale on three counts:
+    //   1. V2 OpenAI does NOT go through Spring AI — uses OpenAiNativeToolClient (the native
+    //      bypass shipped in v2.6.0 to fix Spring AI 1.1.4's extra_body bug).
+    //   2. The native client preserves prefix stability AND OpenAI auto-caches prompts ≥1024
+    //      tokens silently. Empirically validated 2026-05-08 on a LOW spec: cache utilization
+    //      43.2%, 12 of 15 calls hit cache, total in=50K (vs Anthropic's 14K + 76K cacheRead).
+    //   3. Cap was a cost-control hack, but actual cost is now within 4× of Anthropic on the
+    //      same workload — well within healthy budget bounds for a fair iteration budget.
+    // Lifting the cap means HIGH non-project OpenAI tasks now get 75 iters (was 53 = ceil(75×0.7)),
+    // matching Anthropic + Gemini. This unlocks the long-tail tasks where OpenAI was stagnating
+    // out of iteration budget, not capability. Telemetry in RunCostTracker per-call logs
+    // (cacheRead=N) makes a regression visible in production.
     try {
       // v2.5.13 — enum + V2 strings now agree ("gemini"/"anthropic"/"openai")
       LlmProvider p =
