@@ -2,8 +2,130 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
-> **2026-05-08 — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces on
-> `feature/swebench-adapter` (PR #88, NOT yet merged).** 8 commits, ~3000 LOC.
+> **2026-05-08 (evening) — pipeline reliability + cost / cache audit batch on
+> `feature/swebench-adapter` (PR #88, NOT yet merged).** 14 additional commits
+> on top of the morning's 8-commit batch. Validated empirically across two
+> SWE-bench Lite matrices (5 medium × 3 providers + 5 hard × 3 providers).
+>
+> **Empty-patch + FINAL_BUILD_FAILED kill-chain.** 30-day production data
+> showed FINAL_BUILD_FAILED dominating PARTIAL outcomes (16/22). RCA: the
+> reviewer was running but emitting empty completionSummary because it had
+> no concrete spec to fix against. Three layered fixes:
+>
+> - `91779ccd` — `ReviewerAgent` captures pre-pass build state; when failing,
+>   prepends the verbatim build error to the user prompt as the SWE-bench
+>   "test_patch is the spec" pattern. Adds `requireBuildVerification` gate
+>   on `WorkerTaskRequest`: refuses `completeTask` unless `buildProject`
+>   returned exit=0 within `BUILD_VERIFICATION_RECENCY_ITERS=5` (mirrors
+>   the V182 layer-3 `requireTestVerification` gate from PATCH mode).
+> - `fbaa30be` — per-task RETRY in `SequentialExecutor` now sets
+>   `requireBuildVerification=true` on the second attempt (the build error
+>   is the explicit spec on retry; first attempt unchanged).
+> - `e9d0b6e8` — HIGH-complexity tasks gain a 2nd retry attempt when
+>   retry-1 still fails. `LOW`/`MEDIUM` keep 1-retry budget.
+>
+> **Empty-patch fix layer (Lever A + B).** SWE-bench data showed
+> sqlfluff-1733 producing 0-byte patches across baseline + 2 reruns
+> (75-iter cap exhausted on investigation, never wrote anything). Two
+> watchdogs in `WorkerAgent`:
+>
+> - **Lever A — force-edit watchdog**: at `0.7 × maxIter` with
+>   `totalWriteCalls == 0`, inject a `UserMessage` ("investigation phase
+>   over, commit to ANY edit now"). UserMessage (NOT SystemMessage) so
+>   Gemini's implicit cache prefix isn't invalidated. Targets
+>   investigation paralysis without growing iter budget.
+> - **Lever B — best-guess salvage**: when iter-limit OR budget-exceeded
+>   fires AND `totalWriteCalls == 0`, make ONE final LLM call asking for
+>   "the single best-guess writeFile/editFile, even wrong-file beats
+>   empty patch." Validated: hard SWE-bench matrix's only zero-write
+>   failure (sqlfluff-1733/Gemini hit budget at $4) is now the exact
+>   case the new BUDGET_EXCEEDED salvage path catches.
+>
+> **Per-provider cost gap (validated empirically 2026-05-08).** SWE-bench
+> input-token data revealed Gemini consumes 20-100× more input vs Anthropic
+> on identical work. Three fixes:
+>
+> - `dda33577` — Gemini cache prefix preservation. Stagnation warning is
+>   now `UserMessage` instead of `SystemMessage`. `GeminiNativeToolClient`
+>   concatenates every SystemMessage into `systemInstruction`; appending
+>   one mid-task mutates the cache prefix and invalidates implicit prompt
+>   caching. UserMessage stays in `contents[]`. Empirically:
+>   `gemini-3-pro-preview` patch-mode now hits 41-49% implicit cache
+>   (was 0% pre-fix). Plus always-on `cache_read_input_tokens` metadata
+>   on Gemini + OpenAI clients so `RunCostTracker` per-call logs
+>   consistently show `cacheRead=N` for all 3 providers.
+> - `c2a36d2b` — OpenAI 0.7× iteration cap LIFTED. Original premise
+>   (Spring AI re-shipping history every call, no auto-cache) is stale —
+>   V2 OpenAI uses `OpenAiNativeToolClient` which preserves prefix
+>   stability; auto-cache validated at 43% utilization on production
+>   runs. HIGH non-project tasks back at 75 iters (was 53 = ceil(75 ×
+>   0.7)).
+> - `e9d0b6e8` (Gemini reviewer→Flash) — `ReviewerAgent.runPass` now
+>   resolves Gemini provider's reviewer to WORKHORSE tier
+>   (`gemini-3-flash-preview`, 1024-token implicit-cache threshold)
+>   instead of PLANNING tier (`gemini-3-pro-preview`, 4096 threshold).
+>   Fixes the 0% Pro-reviewer cache hit rate empirical observation.
+>   Anthropic + OpenAI reviewers stay on PLANNING.
+>
+> **Iteration cap calibration.**
+>
+> - `e9d0b6e8` — PATCH mode + BUILD HIGH iter cap 75 → 120. HIGH
+>   stagnation thresholds tightened 22/32 → 18/26. Real ceiling is the
+>   per-run cost cap; iter cap becomes defense-in-depth alongside Lever
+>   A/B.
+> - **Per-provider tuning** (post-hard-matrix RCA): Anthropic 150,
+>   OpenAI 100, Gemini 120. Derived from output-token distribution —
+>   Anthropic uses iters efficiently (32-67K output), OpenAI thin-output
+>   terminates early regardless (1-2K), Gemini middle. Per-provider cap
+>   in `PatchAgent.iterCapFor(provider)`.
+>
+> **Cost-cap policy.**
+>
+> - `36bf9c14` — `DEFAULT_PATCH_HARD_CAP_USD` $4 → $8. Hard-matrix data
+>   showed Gemini hitting BUDGET_EXCEEDED at $4.06-$4.18 (within $0.20
+>   of cap, strangling near-completion runs). $8 gives Pro-class models
+>   real headroom on hard SWE-bench instances; protection against
+>   runaway loops is now ITER_LIMIT (120) + Lever A + Lever B.
+> - `d5198f8a` + `a258466c` — BYOK cost-cap exemption.
+>   `ApiKeyResolver.isOwnKeysMode(userId)` returns true when the org's
+>   `keySourceMode=OWN_KEYS`. When true, `RunOrchestrator.persistEstimate`
+>   AND `runPatchPipeline` skip setting `hardCapUsd` (customer pays
+>   their own API bill; we shouldn't cap on ours). HYBRID + SYSTEM still
+>   capped (can fall back to platform spend mid-run). Customer's
+>   voluntary `userCostCap` (typed in NewRunModal) IS still honoured —
+>   their explicit choice.
+>
+> **Patch-mode test-verification gate strengthened.** WorkerAgent
+> previously counted "runTests was called with `ok:true` envelope" as
+> satisfying the V182 layer-3 gate. RCA on hard matrix showed 3/5 OpenAI
+> failures running tests, seeing FAIL, then calling completeTask anyway —
+> gate let it through. Tightened: gate now requires the envelope to
+> contain `"failed":[]` AND `"errored":[]` AND `"exit_code":0` (i.e.
+> tests ACTUALLY passed). 2026-05-08.
+>
+> **Empirical results (2 matrices, ~$45 spend total):**
+>
+> | Matrix | Anthropic | OpenAI | Gemini | Combined |
+> | :-- | :-- | :-- | :-- | :-- |
+> | Medium (5 instances × 3 providers) | 60% | 60% | 80% | 67% (10/15) |
+> | Hard (5 instances × 3 providers) | 80% | 40% | 60% | 60% (9/15) |
+>
+> sqlfluff-1733 (the canonical 0/3 baseline empty-patch case) → 1/3
+> RESOLVED on Anthropic post-fix. pyvista-4315 was 0/3 in BOTH matrices
+> — universally hard, documented as out-of-scope for current pipeline.
+> Test-verification-tightened gate would have caught all 3 OpenAI
+> wrong-fix failures (post-fix; not yet validated).
+>
+> **Telegram bridge.** Operator-only bidirectional messaging via Telegram
+> bot (chat_id=6475810501, bot 8489535450). Push: heartbeat every 600s
+> + on every status-count change. Pull: `getUpdates` polled every 120s,
+> writes to `/tmp/tg-inbox.log`. Used as out-of-band channel for
+> long-running matrix tracking. Operator-only; no production user-facing
+> integration.
+>
+> **2026-05-08 (morning) — SWE-bench adapter + patch-mode pipeline + 4
+> autofix surfaces on `feature/swebench-adapter` (PR #88, NOT yet
+> merged).** 8 commits, ~3000 LOC.
 > Validated: Anthropic Sonnet 4.6 + new patch-mode pipeline RESOLVES
 > `pylint-dev__astroid-1268` on the official SWE-bench evaluator (first time
 > ExecuteSpec scored on a public SWE benchmark). 10×3 cross-provider matrix

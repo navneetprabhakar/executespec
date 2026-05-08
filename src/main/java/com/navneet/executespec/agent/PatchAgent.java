@@ -48,18 +48,39 @@ public class PatchAgent {
   private static final int MAX_TOKENS_PER_CALL = 16_000;
 
   /**
-   * Iteration cap. Calibrated against mini-swe-agent's published runs — most SWE-bench Lite tasks
-   * resolve in 25-50 iterations; the long tail benefits from headroom. Combined with the per-run
-   * hard-cap (default $4 in the bench services) AND the new Lever A/B watchdog+salvage path, this
-   * caps total cost without strangling the long-tail problems.
-   *
-   * <p>2026-05-08 — bumped 75 → 120. 7-day production data showed PATCH_ITER_LIMIT failures at avg
-   * $1.55 (Anthropic) / $2.30 (Gemini) — well within the $4 cost cap. With Lever A (force-edit
-   * watchdog at 70%) catching investigation paralysis EARLIER and Lever B (best-guess salvage)
-   * catching the residual zero-write iter-limit case, we have headroom to extend cap for genuine
-   * "need more time" runs without runaway cost. Real ceiling stays the cost cap.
+   * Default iteration cap. Per-provider overrides apply (see {@link #iterCapFor}). Real ceiling
+   * stays the cost cap; iter cap is defense-in-depth.
    */
-  private static final int MAX_ITERATIONS = 120;
+  private static final int DEFAULT_MAX_ITERATIONS = 120;
+
+  /**
+   * 2026-05-08 — per-provider iteration cap tuning, derived from hard-matrix output-token
+   * distribution. Empirical observation across 15 hard SWE-bench runs:
+   *
+   * <ul>
+   *   <li><b>Anthropic claude-sonnet-4-6</b>: rich 32-67K output tokens per run, edits efficiently,
+   *       benefits from longest runway. Cap: 150.
+   *   <li><b>OpenAI gpt-5.4</b>: thin 1-2K output tokens regardless of cap, terminates early with
+   *       wrong-fix patches. Bigger cap doesn't help; smaller cap saves cost on stuck runs without
+   *       quality loss. Cap: 100.
+   *   <li><b>Gemini gemini-3-pro-preview</b>: medium 13-67K output, $1-4 typical spend. Default.
+   *       Cap: 120.
+   * </ul>
+   *
+   * Anthropic 150 unlocks long-tail "needs more time" runs; OpenAI 100 trims cost on the
+   * thin-output failure mode (a stuck OpenAI run hits cap 33% sooner = same quality + $0.50-1.00
+   * less burn). Gemini stays at 120 default — its peak was 24K output on sqlfluff-1733 fits well
+   * within 120-iter envelope.
+   */
+  private static int iterCapFor(String provider) {
+    if (provider == null) return DEFAULT_MAX_ITERATIONS;
+    return switch (provider.toLowerCase()) {
+      case "anthropic" -> 150;
+      case "openai" -> 100;
+      case "gemini", "google" -> 120;
+      default -> DEFAULT_MAX_ITERATIONS;
+    };
+  }
 
   /**
    * Stagnation thresholds set to MAX_ITERATIONS so the guard never fires in patch mode. The
@@ -67,19 +88,20 @@ public class PatchAgent {
    * Investigation-heavy tasks need this — premature force-terminate at iter 12 was the failure mode
    * that motivated the patch-mode rewrite.
    */
-  private static final int STAGNATION_DISABLED = MAX_ITERATIONS;
-
   private final WorkerAgent workerAgent;
 
   /** Run a single thin-agent patch loop. Blocks until the worker terminates. */
   public WorkerResult run(String provider, String model, String userRequest, ExecutionContext ctx) {
+
+    int maxIterations = iterCapFor(provider);
+    int stagnationDisabled = maxIterations;
 
     log.info(
         "PatchAgent START run={} provider={} model={} maxIter={}",
         ctx.runId(),
         provider,
         model,
-        MAX_ITERATIONS);
+        maxIterations);
 
     WorkerTaskRequest req =
         WorkerTaskRequest.builder()
@@ -88,14 +110,16 @@ public class PatchAgent {
             .systemPrompt(buildSystemPrompt())
             .userPrompt(userRequest)
             .context(ctx)
-            .maxIterations(MAX_ITERATIONS)
+            .maxIterations(maxIterations)
             .temperature(0.0)
             .maxTokensPerCall(MAX_TOKENS_PER_CALL)
-            .stagnationWarnAfter(STAGNATION_DISABLED)
-            .stagnationForceAfter(STAGNATION_DISABLED)
+            .stagnationWarnAfter(stagnationDisabled)
+            .stagnationForceAfter(stagnationDisabled)
             // V182 layer-3 — refuse completeTask in patch mode unless runTests was called
             // recently. Without this, prompt-only "verify before finishing" guidance can be
             // ignored or over-applied; the gate enforces test execution programmatically.
+            // 2026-05-08 strengthened: gate now requires tests to PASS (failed:[] +
+            // errored:[] + exit_code:0) not just be run — see WorkerAgent line ~470.
             .requireTestVerification(true)
             .build();
 

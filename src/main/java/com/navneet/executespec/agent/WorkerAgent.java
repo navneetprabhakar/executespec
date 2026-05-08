@@ -566,12 +566,20 @@ public class WorkerAgent {
         }
         metrics.recordToolCall(tc.name());
         String envelope = dispatchOne(tc, req);
-        // V182 layer-3 — track successful runTests for the completeTask gate. Treat
-        // any ok envelope as evidence of a verification step, even if the listed tests
-        // failed; the agent has at least observed the test run and can iterate.
+        // V182 layer-3 — track successful runTests for the completeTask gate.
+        // 2026-05-08 strengthened: only count runs where tests ACTUALLY PASSED, not just
+        // "runTests tool was called." Empirical motivation: 3 of 5 OpenAI hard-matrix failures
+        // produced thin (1-2K token) wrong-fix patches because the agent ran tests, saw FAIL,
+        // and called completeTask anyway — the gate let it through because it was scoped to
+        // "tool was invoked" not "tests passed." Now: require the envelope to contain the
+        // pytest-pass markers `"failed":[]` AND `"errored":[]` AND `"exit_code":0` to satisfy
+        // the gate. Until those are present, completeTask remains REFUSED.
         if (RUN_TESTS_TOOL_NAME.equals(tc.name())
             && envelope != null
-            && envelope.startsWith("{\"ok\":true")) {
+            && envelope.startsWith("{\"ok\":true")
+            && envelope.contains("\\\"failed\\\":[]")
+            && envelope.contains("\\\"errored\\\":[]")
+            && envelope.contains("\\\"exit_code\\\":0")) {
           lastTestRunIter = iter;
         }
         // 2026-05-08 — track successful buildProject (exit=0) for the build-verification gate.
