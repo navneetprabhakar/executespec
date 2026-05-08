@@ -515,34 +515,83 @@ public class SwebenchTaskService {
   }
 
   /**
-   * Layer-1 helper: read the FAIL_TO_PASS tests' source code from inside the container.
+   * Layer-1 helper: build the source-of-truth test snippet for the worker prompt.
    *
    * <p>The pytest output (captureFailingTestOutput) tells the agent WHAT broke; the test
    * source tells the agent WHAT BEHAVIOR is being verified. Without the source, the agent
-   * tends to surface-fix on the error message (e.g. fix the {@code np.Inf} deprecation
-   * the import error mentions) without realising that's just unblocking test collection
-   * and the actual bug is somewhere else. With the source, the agent can trace from the
-   * test's assertions to the production code that needs to change.
+   * surface-fixes on the error message (e.g. patches the deprecation the import error
+   * mentions) without realising that's just unblocking test collection.
    *
-   * <p>Strategy: parse each FAIL_TO_PASS test id (e.g. {@code path/to/test.py::test_name})
-   * to extract the file path, then read each unique file and embed it. Caps:
+   * <p><b>Why we read from {@code test_patch}, not {@code /testbed}:</b> the FAIL_TO_PASS
+   * tests do NOT exist in the base commit. The SWE-bench harness applies the gold test
+   * patch AFTER the agent's solution lands; the test bodies the agent's edit must satisfy
+   * are a superset of (and often disjoint from) what's in {@code /testbed} at run-time.
+   * Astroid-1268 is the canonical demonstration: agent saw {@code unittest_nodes.py} from
+   * base — which has zero {@code test_as_string_unknown} text — and produced {@code
+   * return "Unknown"} when the gold assertion required {@code "Unknown.Unknown()"}.
+   *
+   * <p>Strategy:
    *
    * <ul>
-   *   <li>Up to 3 unique test files (most instances are single-file)
-   *   <li>Each file capped at 8KB head; over-cap files get a head + tail snippet
-   *   <li>Total injected source capped at 20KB (defensive — keeps the prompt under ~30KB
-   *       with the rest of the context)
+   *   <li>Primary path: parse the {@code test_patch} unified diff. Emit it as-is (with diff
+   *       markers preserved so the model can distinguish added test code from neighbouring
+   *       context). The diff is small (typically &lt;5KB) and load-bearing.
+   *   <li>Fallback path: if {@code test_patch} is empty (older dataset format / corrupted
+   *       row), fall back to {@code docker exec cat /testbed/<file>} per FAIL_TO_PASS file
+   *       so we still emit something useful.
    * </ul>
+   *
+   * <p>Caps: total snippet 20KB. Test patches over 20KB get head 14KB + tail 6KB so both
+   * the modified-file-headers (top) and any added test bodies (bottom) survive.
    */
   private String captureFailingTestSource(
       String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
-    if (instance == null || instance.failToPass() == null || instance.failToPass().isEmpty()) {
-      return "";
+    if (instance == null) return "";
+    String testPatch = instance.testPatch();
+    if (testPatch != null && !testPatch.isBlank()) {
+      return formatTestPatchSnippet(testPatch);
     }
+    return captureFailingTestFilesFallback(containerName, instance);
+  }
+
+  /**
+   * Format the gold {@code test_patch} for inclusion in the worker prompt.
+   *
+   * <p>We emit the diff verbatim inside a fenced ```diff block so the agent can read both
+   * the test bodies (added lines) and the surrounding file context (unchanged lines, header
+   * lines starting with {@code @@}). Stripping the diff markers would lose information —
+   * the model uses {@code +}/{@code -} prefixes to distinguish "this test must pass" from
+   * "this is the file's existing structure". Keep the markers.
+   */
+  private String formatTestPatchSnippet(String testPatch) {
+    int cap = 20_000;
+    String body = testPatch;
+    if (body.length() > cap) {
+      int head = 14_000;
+      int omitted = body.length() - cap;
+      body = body.substring(0, head)
+          + "\n\n... [" + omitted + " chars omitted from middle] ...\n\n"
+          + body.substring(body.length() - (cap - head));
+    }
+    return "\n## Gold test patch (the assertions your fix must satisfy)\n\n"
+        + "Below is the unified diff of test files that the SWE-bench harness applies AFTER\n"
+        + "your fix lands. The `+` lines are the FAIL_TO_PASS test bodies — read them carefully\n"
+        + "to see exactly what return values / behaviour the production code must produce.\n\n"
+        + "```diff\n" + body + "\n```\n";
+  }
+
+  /**
+   * Fallback when {@code test_patch} is empty: read the FAIL_TO_PASS test FILES from the
+   * cleanroom container and embed them. This is strictly inferior to the test_patch path
+   * (the gold tests usually aren't in the base file yet) but preserves coverage on dataset
+   * rows that lack the {@code test_patch} field.
+   */
+  private String captureFailingTestFilesFallback(
+      String containerName, SwebenchInstanceLoader.SwebenchInstance instance) {
+    if (instance.failToPass() == null || instance.failToPass().isEmpty()) return "";
     java.util.LinkedHashSet<String> testFiles = new java.util.LinkedHashSet<>();
     for (String testId : instance.failToPass()) {
       if (testId == null || testId.isBlank()) continue;
-      // pytest id format: <path>::<test_name>[::<subtest>]
       int sep = testId.indexOf("::");
       String file = sep < 0 ? testId.trim() : testId.substring(0, sep).trim();
       if (!file.isEmpty()) testFiles.add(file);
@@ -555,7 +604,6 @@ public class SwebenchTaskService {
     int written = 0;
     for (String file : testFiles) {
       if (written >= totalCap) break;
-      // Defence: pytest test paths shouldn't have shell metachars; refuse if they do.
       if (file.contains(";") || file.contains("&") || file.contains("|") || file.contains("$")
           || file.contains("`")) {
         continue;
@@ -569,8 +617,6 @@ public class SwebenchTaskService {
       if (r.exit() != 0) continue;
       String content = r.output() == null ? "" : r.output();
       if (content.isBlank()) continue;
-      // Cap per file at 8KB; for over-cap files keep head 6KB + tail 2KB so the test
-      // function bodies typically near the end stay visible.
       int perFileCap = Math.min(8000, totalCap - written);
       if (content.length() > perFileCap) {
         int head = Math.max(1000, perFileCap - 2000);
@@ -579,7 +625,8 @@ public class SwebenchTaskService {
             + "\n\n... [" + omitted + " chars omitted from middle] ...\n\n"
             + content.substring(content.length() - (perFileCap - head));
       }
-      sb.append("\n## ").append(file).append("\n\n```python\n").append(content).append("\n```\n");
+      sb.append("\n## ").append(file).append(" (base-commit copy — gold tests applied later)\n\n")
+          .append("```python\n").append(content).append("\n```\n");
       written += content.length();
     }
     return sb.toString();
@@ -605,14 +652,16 @@ public class SwebenchTaskService {
       sb.append("```\n").append(testOutput).append("\n```\n\n");
     }
     if (testSource != null && !testSource.isBlank()) {
-      sb.append("# Failing test SOURCE — the assertions you must satisfy\n\n");
-      sb.append("Below is the verbatim source of the test files containing the FAIL_TO_PASS\n");
-      sb.append("tests. **Read these FIRST.** The error trace above tells you what broke; the\n");
-      sb.append("test source tells you what behavior is being verified — and that's the only\n");
-      sb.append("reliable anchor when error messages mislead about root cause.\n\n");
+      sb.append("# Gold tests (the SPEC your fix must satisfy)\n\n");
+      sb.append("**Read this FIRST and most carefully.** The error trace above tells you what\n");
+      sb.append("broke; the test bodies below tell you what behaviour is being verified — they\n");
+      sb.append("are the only reliable anchor when error messages mislead about root cause.\n\n");
+      sb.append("These tests do NOT exist in /testbed yet — the SWE-bench harness adds them\n");
+      sb.append("AFTER your fix lands. So `cat /testbed/<test>.py` will not show them; the\n");
+      sb.append("source below is the ONLY copy you have access to. Match its assertions exactly.\n\n");
       sb.append("Common failure mode: the error trace mentions a deprecation / import error /\n");
       sb.append("typo, but fixing that just unblocks the test from running — the actual bug is\n");
-      sb.append("somewhere else. Read the test logic. Trace from each `assert` back to the\n");
+      sb.append("somewhere else. Read the assertions. Trace from each `assert` back to the\n");
       sb.append("production code it exercises. THAT is where to focus your edit.\n");
       sb.append(testSource);
       sb.append("\n");
