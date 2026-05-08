@@ -2,6 +2,78 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 >
+> **2026-05-08 — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces on
+> `feature/swebench-adapter` (PR #88, NOT yet merged).** 8 commits, ~3000 LOC.
+> Validated: Anthropic Sonnet 4.6 + new patch-mode pipeline RESOLVES
+> `pylint-dev__astroid-1268` on the official SWE-bench evaluator (first time
+> ExecuteSpec scored on a public SWE benchmark). 10×3 cross-provider matrix
+> in flight on dev set.
+>
+> **What it adds:**
+>
+> 1. **SWE-bench adapter** (`swebench/` package) — submits SWE-bench Lite
+>    instances as PipelineRuns, captures `git diff HEAD` from the cleanroom
+>    container, emits `preds.json` for the official harness. SUPER_ADMIN-gated
+>    `POST /api/admin/swebench/run`.
+>
+> 2. **Patch mode** (`RunMode.PATCH` + `agent/PatchAgent`) — second pipeline
+>    shape on V2. Single thin-agent loop, 75-iter cap, forced PLANNING tier
+>    (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro). Skips classifier / planner /
+>    executor / reviewer entirely. Build mode (`RunMode.BUILD`, the default)
+>    untouched — every product entry point keeps the existing flow.
+>
+> 3. **Three structural layers** on patch mode:
+>    - **Layer 1 — failing-test injection**: SwebenchTaskService runs FAIL_TO_PASS
+>      pytest in container at `onRunStarted`, prepends verbatim output to
+>      `userRequest` as ground truth. `bash -lc` for conda env activation.
+>      Single biggest signal-injection in the harness literature (SWE-agent
+>      does this; mini-swe-agent doesn't).
+>    - **Layer 2 — `RunTestsTool`** (new tool): structured pytest with parsed
+>      envelope (`{summary, passed:[], failed:[{test_id,message}], errored:[],
+>      raw_tail}`). Routes via container store same as ShellTool.
+>    - **Layer 3 — `completeTask` gate**: `WorkerTaskRequest.requireTestVerification`
+>      flag; PatchAgent sets it true. WorkerAgent loop tracks `lastTestRunIter`
+>      and refuses `completeTask` if outside `TEST_VERIFICATION_RECENCY_ITERS=5`.
+>      Programmatic enforcement, not prompt nudge.
+>
+> 4. **Four customer-facing autofix surfaces** — all routed through one shared
+>    `FindingPatchSubmitter` (`finding/` package + V183 `triggered_by_finding`
+>    column). The submitter dedupes per finding key, dispatches with
+>    `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline`
+>    auto-pushes via `scmPushService.push()` on terminal:
+>
+>    | Phase | Surface | UX |
+>    |-------|---------|-----|
+>    | 1 — `prreview/PrReviewAutofixService` | PR Review verdict popover | "Autofix N comments" → patch pushes to PR head branch via `branchOverride` |
+>    | 2 — `project/techdebt/TechDebtFixService` | TechDebtPanel category rows | "Fix" per category → fresh PR per category |
+>    | 4 — `codereview/CodeReviewAutofixService` | CodeQualityPanel severity chips | "N CRITICAL" / "N MAJOR" / etc. → one PR per severity |
+>    | 3 — `project/pr/CiFailureAutoFixService` (refactored) | GitHub `check_run` webhook | Auto-fires on PR CI failure (flag-gated `ci.autofix.enabled`, default OFF; max 3 attempts/PR) |
+>
+>    Phase 3's webhook stays OFF until SWE-bench matrix data confirms patch-
+>    mode resolved% is high enough to trust the unattended bot path.
+>
+> 5. **UX fixes** on `RunDetailPage` (V3) addressing operator notes from
+>    watching live patch-mode runs:
+>    - Files refresh every 5s while non-terminal (was: only on RUN_STATUS SSE)
+>    - Folder tree replaces flat list of changed files (existing `FileTree`
+>      reused)
+>    - Goal/userRequest expand-able (V2 `<line-clamp-8>` removed; V3 new
+>      `RunSpecBlock` with line/char counts + Show all + Copy)
+>
+> Tests: `mvn test` 1047/1047 green throughout. Frontend build 3672 modules
+> clean. PR #88 has the full breakdown + empirical numbers.
+>
+> **Key entry points:**
+> - Bench-mode: `POST /api/admin/swebench/run` + `POST /api/admin/programbench/run`
+> - Patch-mode dispatch: `RunOrchestrator#submitRun` (20-arg overload with
+>   `runMode` parameter)
+> - Autofix surfaces: see [phase table above]
+> - Patch flow: `RunOrchestrator.runPatchPipeline` (skips planner/reviewer)
+> - Patch agent: `agent/PatchAgent`
+> - Tools registry: `tool/ToolRegistry.bindForWorker(ctx)` (excludes
+>   `gitCommit`)
+> - Finding submitter: `finding/FindingPatchSubmitter#submit(Finding)`
+>
 > **2026-05-07 — ProgramBench RCA fix batch on
 > `fix/programbench-workspace-path-and-classifier`, NOT yet merged.**
 > 3 cmatrix runs against ExecuteSpec V2 on dev (anthropic, 2026-05-07
