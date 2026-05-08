@@ -3392,6 +3392,27 @@ export const getLatestCodeReviewForRepo = (projectId: string, repoFullName: stri
  */
 export const codeReviewReportDownloadUrl = (id: string) => `${BASE}/code-reviews/${id}/report`;
 
+export interface CodeReviewAutofixResponse {
+  runId: string;
+  findingKey: string;
+  outcome: 'DISPATCHED' | 'REUSED_ACTIVE';
+}
+
+/**
+ * Phase 4 (V183) — dispatch a patch-mode run that addresses every OPEN issue of the
+ * named severity bucket from a code review scan. One PR per severity. Idempotent
+ * server-side: an in-flight run for the same (scan, severity) returns the existing
+ * run with `outcome=REUSED_ACTIVE`.
+ */
+export const dispatchCodeReviewAutofix = (
+  scanId: string,
+  severity: 'CRITICAL' | 'MAJOR' | 'MINOR' | 'INFO',
+) =>
+  req<CodeReviewAutofixResponse>(`/code-reviews/${scanId}/autofix`, {
+    method: 'POST',
+    body: JSON.stringify({severity}),
+  });
+
 // ── V175 — external project sharing (invites + public share links) ──────────────
 
 export type ProjectInviteRole = 'PROJECT_ADMIN' | 'PROJECT_DEVELOPER' | 'PROJECT_VIEWER';
