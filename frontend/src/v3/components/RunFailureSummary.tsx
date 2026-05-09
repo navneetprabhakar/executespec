@@ -84,7 +84,10 @@ export default function RunFailureSummary({detail, report}: RunFailureSummaryPro
       <ul style={{margin: 0, padding: '0 0 8px 18px', fontSize: 12.5, color: 'var(--v3-text)'}}>
         {buildFailed && (
           <li style={{marginBottom: 4}}>
-            The final build did not pass. Open the Logs tab for the last few stderr lines.
+            {/* I2-A (audit-2026-05-09 iter2) — was "Logs tab" but the v3
+             *  RunSidePanel labels the tab "Log" (singular). The mismatch
+             *  made users hunt for a tab that didn't exist. */}
+            The final build did not pass. Open the Log tab for the last few stderr lines.
           </li>
         )}
         {testsFailed && (

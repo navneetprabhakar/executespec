@@ -780,8 +780,13 @@ function ActivityCard({
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
                 }}
+                title={e.summary || e.eventType}
               >
-                {e.summary || e.eventType}
+                {/* I2-B (audit-2026-05-09 iter2) — was rendering raw 50+
+                 *  char GitHub URLs. Now substitutes them with "PR #110"
+                 *  shorthand at render time so the row stays scannable.
+                 *  Full URL preserved via title= for hover. */}
+                {prettifyActivityText(e.summary || e.eventType)}
               </span>
             </li>
           ))}
@@ -835,4 +840,22 @@ function timeAgoShort(iso: string): string {
   const days = Math.round(h / 24);
   if (days < 7) return `${days}d`;
   return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+}
+
+/**
+ * I2-B (audit-2026-05-09 iter2) — collapse raw GitHub URLs in activity
+ * summaries to the "owner/repo PR #110" shorthand so a 50-char URL
+ * doesn't dominate the rollup row. Preserves the full URL via the
+ * caller's `title` attribute on the parent so hover-to-inspect still
+ * works. Idempotent: text without GitHub URLs passes through unchanged.
+ */
+function prettifyActivityText(text: string): string {
+  if (!text) return text;
+  // https://github.com/<owner>/<repo>/pull/<n>?<query>?#anchor?
+  const prRe = /https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/pull\/(\d+)(?:[?#][^\s]*)?/gi;
+  // https://github.com/<owner>/<repo>/issues/<n>
+  const issueRe = /https?:\/\/github\.com\/([\w.-]+)\/([\w.-]+)\/issues\/(\d+)(?:[?#][^\s]*)?/gi;
+  return text
+    .replace(prRe, (_m, _owner, repo, num) => `${repo} PR #${num}`)
+    .replace(issueRe, (_m, _owner, repo, num) => `${repo} issue #${num}`);
 }
