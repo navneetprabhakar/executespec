@@ -465,6 +465,37 @@ export default function RunDetailPage() {
             )}
           </div>
 
+          {/* U-21 fix (2026-05-09) — post-completion micro-CTA. Surfaces
+              the next-step hint right above the action row when the run
+              has terminated, so the operator's eye lands on "what to do
+              next" instead of having to figure it out from the ambient
+              chrome. Three shapes:
+                READY → "Open PR or start your next spec"
+                NEEDS_REVIEW → "Review issues + apply via Chat tab"
+                FAILED → "See failure summary above + retry / re-prompt" */}
+          {(verdict === 'READY' || verdict === 'NEEDS_REVIEW' || verdict === 'FAILED') && (
+            <div
+              role='note'
+              style={{
+                marginTop: 4,
+                padding: '6px 10px',
+                fontSize: 11.5,
+                lineHeight: 1.5,
+                color: 'var(--v3-text-muted)',
+                background: 'var(--v3-bg)',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 6,
+              }}
+            >
+              {verdict === 'READY' &&
+                'Run shipped. Open the PR to review the diff, or head back to the project to start your next spec.'}
+              {verdict === 'NEEDS_REVIEW' &&
+                'Review the issues above, then apply or iterate via the Chat tab on the right.'}
+              {verdict === 'FAILED' &&
+                'Build / tests / reviewer flagged a blocker. Retry the failed task above, re-prompt, or open the PR to inspect the partial change.'}
+            </div>
+          )}
+
           {/* Action row */}
           <div style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
             {/* Multi-repo aware PR action.
