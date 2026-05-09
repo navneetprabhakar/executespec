@@ -179,6 +179,7 @@ public class RunController {
    * current user's runs (within org visibility).
    */
   @GetMapping
+  @org.springframework.transaction.annotation.Transactional(readOnly = true)
   public ResponseEntity<Map<String, Object>> list(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestParam(required = false) String status,
@@ -219,8 +220,17 @@ public class RunController {
             "hasPrevious", runs.hasPrevious()));
   }
 
-  /** Get a single run with task details. */
+  /**
+   * Get a single run with task details.
+   *
+   * <p>B-16 fix (2026-05-09) — `@Transactional(readOnly=true)` so Hibernate enables read-only
+   * mode (skips dirty-checking, allows replica routing if configured, and lets the JDBC driver
+   * use a connection from the read pool when AbstractRoutingDataSource is wired up). Pre-fix,
+   * the method ran without a transaction; every JPA read opened+closed its own RESOURCE_LOCAL
+   * tx with no readOnly hint. On a hot path this is the most-called GET in the app.
+   */
   @GetMapping("/{runId}")
+  @org.springframework.transaction.annotation.Transactional(readOnly = true)
   public ResponseEntity<RunDetail> get(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     PipelineRun run = guard.requireRunAccess(runId, userDetails);
