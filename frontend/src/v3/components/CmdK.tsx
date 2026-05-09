@@ -22,6 +22,20 @@ import {GLOSSARY} from '../lib/glossary';
  * navigable by ↑↓ + Enter, Esc closes. Focus-trapped on the input.
  */
 
+// U-50 fix (2026-05-09) — shared <kbd> chip style for the keyboard-shortcuts
+// sheet rendered in `?` help mode.
+const KBD_STYLE: React.CSSProperties = {
+  display: 'inline-block',
+  padding: '1px 6px',
+  fontSize: 10.5,
+  fontFamily: 'var(--v3-mono, ui-monospace, SFMono-Regular, monospace)',
+  background: 'var(--v3-bg)',
+  color: 'var(--v3-text)',
+  border: '1px solid var(--v3-border)',
+  borderRadius: 3,
+  whiteSpace: 'nowrap',
+};
+
 interface Action {
   id: string;
   label: string;
@@ -332,6 +346,54 @@ export default function CmdK() {
                 }}
               >
                 No glossary entries match. Try clearing the search.
+              </li>
+            )}
+            {/* U-50 fix (2026-05-09) — keyboard shortcut sheet rendered
+                inside the existing `?`-mode help palette so users get the
+                same `Press ? for help` cue + immediately see the
+                shortcuts without a new modal / new screen. Only appears
+                when the user hasn't typed anything beyond `?`. */}
+            {query === '?' && (
+              <li
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 6,
+                  borderBottom: '1px dashed var(--v3-border)',
+                  background: 'rgba(91,141,239,0.08)',
+                }}
+              >
+                <div
+                  style={{
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--v3-text-muted)',
+                    textTransform: 'uppercase',
+                    letterSpacing: 0.5,
+                    marginBottom: 6,
+                  }}
+                >
+                  Keyboard shortcuts
+                </div>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'auto 1fr',
+                    gap: '4px 12px',
+                    fontSize: 12,
+                    color: 'var(--v3-text)',
+                  }}
+                >
+                  <kbd style={KBD_STYLE}>⌘ K</kbd>
+                  <span>Open this command palette</span>
+                  <kbd style={KBD_STYLE}>?</kbd>
+                  <span>Open glossary + this help sheet</span>
+                  <kbd style={KBD_STYLE}>Esc</kbd>
+                  <span>Close any modal / palette</span>
+                  <kbd style={KBD_STYLE}>↑ ↓</kbd>
+                  <span>Navigate command results</span>
+                  <kbd style={KBD_STYLE}>↵</kbd>
+                  <span>Run highlighted action</span>
+                </div>
               </li>
             )}
             {glossaryEntries.map(([key, entry]) => (
