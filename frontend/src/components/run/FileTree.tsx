@@ -1,4 +1,20 @@
 import {useState, useMemo} from 'react';
+import {
+  Folder,
+  FolderOpen,
+  FileText,
+  FileCode,
+  FileJson,
+  FileCog,
+  FileType2,
+  FileTerminal,
+  FileImage,
+  Database,
+  Container,
+  Globe,
+  Palette,
+  type LucideIcon,
+} from 'lucide-react';
 
 /**
  * `status` (V169-companion 2026-05-02) — git-derived per-file change marker so the file tree
@@ -67,7 +83,10 @@ function TreeNodeView({
 }) {
   const [expanded, setExpanded] = useState(depth < 2); // auto-expand first 2 levels
 
-  const icon = node.isDirectory ? (expanded ? '\u{1F4C2}' : '\u{1F4C1}') : getFileIcon(node.name);
+  const fileGlyph = node.isDirectory
+    ? {Icon: expanded ? FolderOpen : Folder, color: 'var(--accent-blue, #5B8DEF)'}
+    : getFileIcon(node.name);
+  const FileIconCmp = fileGlyph.Icon;
 
   // V169-companion 2026-05-02 — leaf nodes show an A/M chip for added/modified files.
   // Directory nodes show a small colored dot when any descendant has changed (so the user can
@@ -90,7 +109,12 @@ function TreeNodeView({
           }
         }}
       >
-        <span className='text-xs'>{icon}</span>
+        <FileIconCmp
+          size={14}
+          strokeWidth={1.75}
+          style={{color: fileGlyph.color, flexShrink: 0}}
+          aria-hidden='true'
+        />
         <span className='truncate flex-1'>{node.name}</span>
         {dirDot}
         {leafBadge}
@@ -204,31 +228,115 @@ function renderStatusDot(status: FileChangeStatus) {
   );
 }
 
-function getFileIcon(name: string): string {
-  const ext = name.split('.').pop()?.toLowerCase();
-  const icons: Record<string, string> = {
-    java: '\u2615',
-    kt: '\u{1F7E3}',
-    py: '\u{1F40D}',
-    js: '\u{1F7E8}',
-    jsx: '\u269B\uFE0F',
-    ts: '\u{1F537}',
-    tsx: '\u269B\uFE0F',
-    html: '\u{1F310}',
-    css: '\u{1F3A8}',
-    json: '\u{1F4CB}',
-    yml: '\u2699\uFE0F',
-    yaml: '\u2699\uFE0F',
-    xml: '\u{1F4C4}',
-    md: '\u{1F4DD}',
-    sql: '\u{1F5C4}\uFE0F',
-    sh: '\u{1F5A5}\uFE0F',
-    dockerfile: '\u{1F433}',
-    toml: '\u2699\uFE0F',
-    rs: '\u{1F980}',
-    go: '\u{1F439}',
-    rb: '\u{1F48E}',
-    gradle: '\u{1F418}',
-  };
-  return icons[ext || ''] || '\u{1F4C4}';
+/**
+ * R-04 fix (2026-05-09) \u2014 replaced the emoji map with lucide-react icons
+ * tinted by extension. The previous emojis collided ('\uD83D\uDFE1 kt' / '\uD83D\uDFE8 js'
+ * were colour-only with no language association; jsx + tsx both rendered
+ * '\u269B\uFE0F'; yml/toml/sh all became '\u2699\uFE0F'). The new map uses semantic icons
+ * (FileCode for source, FileJson for data, FileTerminal for shell, etc.)
+ * with per-language colour tints so files are skimmable at a glance.
+ */
+type FileGlyph = {Icon: LucideIcon; color: string};
+
+// Tailwind-friendly raw hex tints. Picked to read on both dark and light
+// themes and to match what most editors / GitHub render.
+const TINT = {
+  ts: '#3178C6', // TypeScript blue
+  js: '#F7DF1E', // JS yellow
+  py: '#3776AB', // Python blue
+  java: '#B07219',
+  kt: '#A97BFF', // Kotlin purple
+  rs: '#D2691E', // Rust orange
+  go: '#00ADD8', // Go cyan
+  rb: '#CC342D', // Ruby red
+  html: '#E34C26',
+  css: '#264DE4',
+  json: '#A0AEC0',
+  config: '#94A3B8', // YAML / TOML / INI
+  shell: '#4EAA25',
+  sql: '#9333EA',
+  docker: '#0DB7ED',
+  md: '#6B7280',
+  img: '#10B981',
+  fallback: 'var(--v3-text-subtle, #94A3B8)',
+} as const;
+
+function getFileIcon(name: string): FileGlyph {
+  const lower = name.toLowerCase();
+  if (lower === 'dockerfile' || lower.endsWith('.dockerfile')) {
+    return {Icon: Container, color: TINT.docker};
+  }
+  const ext = lower.split('.').pop() ?? '';
+  switch (ext) {
+    case 'ts':
+    case 'tsx':
+    case 'mts':
+    case 'cts':
+      return {Icon: FileCode, color: TINT.ts};
+    case 'js':
+    case 'jsx':
+    case 'mjs':
+    case 'cjs':
+      return {Icon: FileCode, color: TINT.js};
+    case 'py':
+      return {Icon: FileCode, color: TINT.py};
+    case 'java':
+      return {Icon: FileCode, color: TINT.java};
+    case 'kt':
+    case 'kts':
+      return {Icon: FileCode, color: TINT.kt};
+    case 'rs':
+      return {Icon: FileCode, color: TINT.rs};
+    case 'go':
+      return {Icon: FileCode, color: TINT.go};
+    case 'rb':
+      return {Icon: FileCode, color: TINT.rb};
+    case 'html':
+    case 'htm':
+      return {Icon: Globe, color: TINT.html};
+    case 'css':
+    case 'scss':
+    case 'sass':
+    case 'less':
+      return {Icon: Palette, color: TINT.css};
+    case 'json':
+    case 'jsonc':
+      return {Icon: FileJson, color: TINT.json};
+    case 'yml':
+    case 'yaml':
+    case 'toml':
+    case 'ini':
+    case 'env':
+    case 'properties':
+      return {Icon: FileCog, color: TINT.config};
+    case 'xml':
+      return {Icon: FileType2, color: TINT.config};
+    case 'md':
+    case 'markdown':
+    case 'mdx':
+    case 'rst':
+    case 'txt':
+      return {Icon: FileText, color: TINT.md};
+    case 'sql':
+      return {Icon: Database, color: TINT.sql};
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+    case 'fish':
+    case 'ps1':
+      return {Icon: FileTerminal, color: TINT.shell};
+    case 'gradle':
+    case 'kts': // already covered above; left for readability
+      return {Icon: FileCog, color: TINT.config};
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+    case 'gif':
+    case 'svg':
+    case 'webp':
+    case 'ico':
+      return {Icon: FileImage, color: TINT.img};
+    default:
+      return {Icon: FileText, color: TINT.fallback};
+  }
 }
