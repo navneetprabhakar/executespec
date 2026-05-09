@@ -76,6 +76,16 @@ public class StartupRunResumer {
   private final SseBroadcaster broadcaster;
 
   /**
+   * B-22 fix (2026-05-09) — base workspace dir so we can verify the run's workspace is still on
+   * disk before salvaging. If the directory is gone (GCE disk wiped, container ephemerally
+   * destroyed, ops cleanup), the executor's "completion" is meaningless — there's no code to
+   * preview / deploy / inspect. Better to fail the run honestly than mark it COMPLETE and leave
+   * the user staring at "no files yet."
+   */
+  @org.springframework.beans.factory.annotation.Value("${agent.workspace:}")
+  private String workspaceBase;
+
+  /**
    * 2026-05-04 — lazy {@link RunOrchestrator} reference. Direct constructor injection would create
    * a bean-init cycle (RunOrchestrator already depends on many beans that could transitively reach
    * back here). {@link ObjectProvider} defers the lookup until {@link #scanAndRecover} actually
@@ -232,6 +242,24 @@ public class StartupRunResumer {
           || "PARTIAL".equals(s)
           || "FAILED".equals(s)
           || "BLOCKED".equals(s))) {
+        return false;
+      }
+    }
+    // B-22 fix (2026-05-09) — workspace-on-disk precheck. Tasks may all be in
+    // terminal status, but if the workspace dir was wiped (GCE disk gone, ops
+    // cleanup, ephemeral container teardown) the "salvage to COMPLETE" outcome
+    // is wrong — there's no code to preview/deploy. Fail the run cleanly so
+    // the user sees "interrupted, please re-run" instead of "complete, but no
+    // files." Skip the check if `agent.workspace` is unconfigured (mostly
+    // tests; production always has it).
+    if (workspaceBase != null && !workspaceBase.isBlank()) {
+      java.nio.file.Path wsDir = java.nio.file.Paths.get(workspaceBase, runId);
+      if (!java.nio.file.Files.isDirectory(wsDir)) {
+        log.warn(
+            "[StartupRunResumer] run={} tasks-terminal but workspace gone (path={}) — "
+                + "refusing to salvage; will fail-clean instead",
+            runId,
+            wsDir);
         return false;
       }
     }
