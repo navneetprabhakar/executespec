@@ -121,6 +121,13 @@ export default function RunConversation({runId}: Props) {
   const [applyingFixes, setApplyingFixes] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  // 2026-05-09 — scroll-pin: only auto-scroll when the user is already
+  // near the bottom (read: actively following the conversation). If they
+  // scrolled up to read history, leave them alone — yanking them back
+  // mid-read on every assistant token is the daily-cut UX gripe the
+  // audit flagged.
+  const isPinnedRef = useRef(true);
   const {setActiveRunId: _setActiveRunId, fetchRuns: _fetchRuns} = useRunStore();
   const activeRun = useRunStore((s) => s.activeRun);
   const {addToast, setPendingNewRunConfig} = useUiStore();
@@ -157,10 +164,18 @@ export default function RunConversation({runId}: Props) {
     if (messages.length > 0) runChatCache.set(runId, messages);
   }, [runId, messages]);
 
-  // Auto-scroll to bottom whenever messages change
+  // Auto-scroll to bottom whenever messages change — but ONLY if the
+  // user is already pinned to the bottom (within 80px). Otherwise we'd
+  // yank them away from history they're reading.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({behavior: 'smooth'});
+    if (isPinnedRef.current) bottomRef.current?.scrollIntoView({behavior: 'smooth'});
   }, [messages]);
+
+  const handleScrollerScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isPinnedRef.current = distance < 80;
+  };
 
   // Fetch validation report when run is terminal AND report is ready — avoids 404 noise
   const reportReady = useSseStore((s) => s.entries).some(
@@ -223,6 +238,11 @@ export default function RunConversation({runId}: Props) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Don't fire on Enter mid-IME composition (CJK / Korean / Japanese
+    // inputs) — `e.nativeEvent.isComposing` is true while a candidate
+    // window is open. Without this guard the user's partial input gets
+    // committed AND sent on Enter.
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -355,7 +375,21 @@ export default function RunConversation({runId}: Props) {
           <div className='flex items-center gap-2'>
             <MessageSquare className='h-4 w-4 text-accent-blue' />
             <span className='text-sm font-medium text-primary'>Run Copilot</span>
-            <span className='text-[10px] text-muted font-mono'>sonnet</span>
+            {/* 2026-05-09 — drop the hardcoded "sonnet" chip. Surface the
+                ACTUAL resolved model the chat is using. Falls through to
+                the run's planner/worker/reviewer model when the chat
+                model isn't explicitly distinct. */}
+            {(activeRun?.workerModel || activeRun?.plannerModel) && (
+              <span
+                className='text-[10px] text-muted font-mono truncate max-w-[140px]'
+                title={`Model: ${activeRun.workerModel || activeRun.plannerModel}`}
+              >
+                {(activeRun.workerModel || activeRun.plannerModel || '').replace(
+                  /^claude-/,
+                  '',
+                )}
+              </span>
+            )}
             <button
               onClick={() => setCopilotMaximized(!copilotMaximized)}
               className='ml-1 p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
@@ -671,7 +705,11 @@ export default function RunConversation({runId}: Props) {
       </AnimatePresence>
 
       {/* Messages area */}
-      <div className='flex-1 overflow-y-auto px-4 py-4 space-y-4'>
+      <div
+        ref={scrollerRef}
+        onScroll={handleScrollerScroll}
+        className='flex-1 overflow-y-auto px-4 py-4 space-y-4'
+      >
         {/* Empty state */}
         {!hasConversation && (
           <div className='flex flex-col items-center justify-center h-full text-center space-y-4 py-8'>

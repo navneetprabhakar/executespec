@@ -2260,9 +2260,19 @@ function ChatPane({
     .filter((c) => c.status === 'ADDRESSED' || c.status === 'DISMISSED')
     .slice(0, 3);
 
-  // Auto-scroll thread on each new message.
+  // 2026-05-09 — scroll-pin: only follow new messages if the user is
+  // already at the bottom; if they scrolled up to read history, don't
+  // yank them back on every reply or thinking-indicator tick.
+  const isPinnedRef = useRef(true);
+  const handleThreadScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isPinnedRef.current = distance < 80;
+  };
   useEffect(() => {
-    threadRef.current?.scrollTo({top: threadRef.current.scrollHeight, behavior: 'smooth'});
+    if (isPinnedRef.current) {
+      threadRef.current?.scrollTo({top: threadRef.current.scrollHeight, behavior: 'smooth'});
+    }
   }, [messages, busy]);
 
   // Build a single-shot context preface every time we send so the
@@ -2518,6 +2528,7 @@ function ChatPane({
 
       <div
         ref={threadRef}
+        onScroll={handleThreadScroll}
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -2780,6 +2791,14 @@ function ChatPane({
           type='text'
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            // Swallow Enter mid-IME composition so CJK candidate
+            // selection doesn't accidentally submit the form.
+            if (e.key === 'Enter' && e.nativeEvent.isComposing) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
           placeholder={messages.length === 0 ? 'Ask about this run…' : 'Reply…'}
           disabled={busy || !detail}
           style={{
