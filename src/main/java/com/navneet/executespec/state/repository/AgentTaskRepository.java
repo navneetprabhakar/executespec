@@ -48,4 +48,23 @@ public interface AgentTaskRepository extends JpaRepository<AgentTask, String> {
       @Param("model") String model,
       @Param("branch") String branch,
       @Param("now") Instant now);
+
+  /**
+   * B-19 fix (2026-05-09) — atomic flush of accumulated tokens to the AgentTask row at phase
+   * boundaries (between primary worker and retry worker, after retry, etc.) so a pod crash mid-
+   * smoke-test doesn't lose the tokens spent up to that point.
+   *
+   * <p>Pre-fix, AgentTask.input/output_tokens were only written by RunTokenAttributor at run-end.
+   * Crashes during the second smoke test or between phases meant the tokens stayed in
+   * RunCostTracker's in-memory accumulator and were never persisted; resume started fresh and
+   * the under-attributed cost surfaced as a billing discrepancy.
+   *
+   * <p>Identified by row id (the prefixed form, e.g. "abc12345_T2"), not the bare taskId, to
+   * match how SequentialExecutor + RunTokenAttributor refer to the row.
+   */
+  @Modifying(clearAutomatically = true)
+  @Query(
+      "UPDATE AgentTask t SET t.inputTokens = :inp, t.outputTokens = :out WHERE t.id = :rowId")
+  int writeTokens(
+      @Param("rowId") String rowId, @Param("inp") int inp, @Param("out") int out);
 }

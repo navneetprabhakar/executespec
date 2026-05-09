@@ -309,6 +309,29 @@ public class SequentialExecutor {
   }
 
   /**
+   * B-19 fix (2026-05-09) — flush the task's accumulated tokens (from the in-memory
+   * RunCostTracker) to its AgentTask row so a mid-task crash doesn't lose them. Called at
+   * phase boundaries inside {@code executeOne}: between primary worker and retry, and after
+   * retry before the re-smoke. Cheap atomic UPDATE; the run-end RunTokenAttributor
+   * overwrite path still writes the final reconciled value at terminate.
+   *
+   * <p>Best-effort: a Redis hiccup or DB blip leaves the row at the previous value rather
+   * than losing newer data, and never blocks the executor.
+   */
+  private void flushTaskTokens(String runId, String taskId) {
+    try {
+      var snap = costTracker.snapshotTask(runId, taskId);
+      if (snap.inputTokens() == 0 && snap.outputTokens() == 0) return;
+      String idPrefix = runId.substring(0, 8) + "_";
+      String rowId = idPrefix + taskId;
+      taskRepo.writeTokens(rowId, snap.inputTokens(), snap.outputTokens());
+    } catch (Exception e) {
+      log.debug(
+          "[B-19] flushTaskTokens failed run={} task={}: {}", runId, taskId, e.getMessage());
+    }
+  }
+
+  /**
    * Build a synthetic {@link TaskOutcome} for a task that was already terminal at resume time. The
    * summary aggregator uses this to compute total latency / success counts; we zero out
    * worker-specific fields since we don't have a worker result for it (the original work happened
@@ -642,6 +665,15 @@ public class SequentialExecutor {
         task.id(),
         smoke.exitCode());
 
+    // B-19 fix (2026-05-09) — flush primary-attempt tokens to the AgentTask row
+    // BEFORE the retry runs. RunTokenAttributor only writes per-task tokens at
+    // run-end; if the pod crashes during the retry's worker loop or the
+    // re-smoke build, the primary attempt's tokens (which are already in
+    // RunCostTracker's in-memory accumulator) would otherwise be lost on
+    // resume. Cheap atomic UPDATE; no harm if the retry succeeds (final write
+    // at run-end overwrites with the larger sum).
+    flushTaskTokens(req.runId(), task.id());
+
     // ONE retry with the build error injected.
     // 2026-05-08 — set requireBuildVerification on the RETRY only. The first attempt keeps
     // today's behaviour (no gate, since some legit early scaffold tasks naturally don't have
@@ -691,6 +723,11 @@ public class SequentialExecutor {
     }
 
     // Retry completed — re-smoke.
+    // B-19 fix (2026-05-09) — flush retry-attempt tokens to the AgentTask row
+    // before the re-smoke runs. Same reasoning as the pre-retry flush above:
+    // if the pod crashes during runSmokeTest, the retry tokens stay in the
+    // in-memory accumulator and never make it to DB on resume.
+    flushTaskTokens(req.runId(), task.id());
     SmokeTestResult retrySmoke = runSmokeTest(taskCtx, plan.buildCommand());
     if (retrySmoke.passed()) {
       log.info("Executor task={} SUCCESS_AFTER_RETRY", task.id());
