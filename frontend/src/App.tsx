@@ -158,6 +158,8 @@ import EmptyProjectPage from '@/v3/pages/EmptyProjectPage';
 // OptInGate pattern from R-342).
 
 import {useAuthStore} from '@/stores/useAuthStore';
+import {useRunStore} from '@/stores/useRunStore';
+import {useMetricsStore} from '@/stores/useMetricsStore';
 import {useKeyboardScroll} from '@/hooks/useKeyboardScroll';
 import {initAnalytics, identify, page, reset as resetAnalytics} from '@/lib/analytics';
 
@@ -199,6 +201,43 @@ export default function App() {
     window.addEventListener('popstate', handler);
     return () => window.removeEventListener('popstate', handler);
   }, []);
+
+  // F-09 fix (2026-05-09) — refresh user-scoped data when the tab returns
+  // to the foreground after >60s away. Pre-fix, runs / metrics / cost
+  // tickers / "last updated" timestamps all froze whenever the user
+  // backgrounded the tab (most browsers throttle setInterval to 1/min on
+  // hidden tabs). A finance lead leaving the dashboard open for 5 hours
+  // and coming back to a 5-hour-old snapshot was making real budget calls
+  // on stale data. Throttled to 60s so quickly toggling tabs doesn't
+  // trigger a refetch storm.
+  useEffect(() => {
+    if (!user?.id) return;
+    let lastHidden = 0;
+    function onVisChange() {
+      if (document.visibilityState === 'hidden') {
+        lastHidden = Date.now();
+        return;
+      }
+      // visibilityState === 'visible'
+      if (lastHidden === 0 || Date.now() - lastHidden < 60_000) return;
+      // Refetch the slices that go stale fastest. Each store no-ops
+      // gracefully if it has nothing loaded yet (see fetchRuns/fetchAll).
+      try {
+        useRunStore.getState().fetchRuns();
+      } catch {
+        /* network blip — next visibility change will retry */
+      }
+      try {
+        if (useMetricsStore.getState().metrics) {
+          useMetricsStore.getState().fetchAll();
+        }
+      } catch {
+        /* same */
+      }
+    }
+    document.addEventListener('visibilitychange', onVisChange);
+    return () => document.removeEventListener('visibilitychange', onVisChange);
+  }, [user?.id]);
 
   return (
     <>
