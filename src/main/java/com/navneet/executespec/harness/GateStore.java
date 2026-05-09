@@ -128,24 +128,30 @@ public class GateStore {
       return true; // can't detect race, behave as before
     }
     if (updated == 0) {
-      boolean missing = gateRepository.findById(key).isEmpty();
-      if (missing) {
-        // No pending row — either opening-gate was skipped (legacy run) or race
-        // with an INSERT. Insert-then-claim, matching the pre-existing idempotent
-        // behaviour rather than blocking the caller.
+      // B-04 fix (2026-05-09) — pre-fix had two branches: "row missing → insert
+      // + retry" and "row exists → assume resolved, return false". The latter
+      // was a false-loser bug: if caller B inserted a PENDING row a few ms
+      // earlier but hasn't called tryResolveIfPending yet, caller A's findById
+      // would see the row exists, assume it was already resolved, and return
+      // false — even though the row was still PENDING and A could legitimately
+      // claim it.
+      //
+      // The atomic UPDATE WHERE status='PENDING' is the only race-safe arbiter,
+      // so collapse both branches into "ensure row exists, retry claim, retry
+      // result decides". If the retry returns 0, we know for certain the row
+      // was already resolved (by someone else) and A is a true loser. If 1,
+      // A wins.
+      if (gateRepository.findById(key).isEmpty()) {
         openPlanGate(runId);
-        try {
-          updated =
-              gateRepository.tryResolveIfPending(
-                  key, approved ? "APPROVED" : "REJECTED", Instant.now());
-        } catch (Exception ignore) {
-          /* fall through */
-        }
-        if (updated == 0) return false;
-      } else {
-        // Row exists but already resolved — loser.
-        return false;
       }
+      try {
+        updated =
+            gateRepository.tryResolveIfPending(
+                key, approved ? "APPROVED" : "REJECTED", Instant.now());
+      } catch (Exception ignore) {
+        /* fall through; updated stays 0 */
+      }
+      if (updated == 0) return false;
     }
     // We won the race — propagate via Redis + in-memory future.
     try {
