@@ -38,6 +38,19 @@ public class SpaFallbackController {
   /** First-segment names that must never be shadowed by the SPA fallback. */
   private static final Set<String> BACKEND_PREFIXES = Set.of("api", "actuator", "webhooks");
 
+  /**
+   * 2026-05-09 — favicon.ico fallback. The frontend's index.html already declares {@code <link
+   * rel="icon" href="/logo.png">}, but browsers (esp. Chromium) still issue a hard-coded fallback
+   * GET to {@code /favicon.ico} on every page load. Pre-fix: that 404'd in the user's console. We
+   * redirect to /logo.png so the same asset serves both, no separate .ico file needed.
+   */
+  @GetMapping("/favicon.ico")
+  public ResponseEntity<Void> favicon() {
+    return ResponseEntity.status(HttpStatus.MOVED_PERMANENTLY)
+        .header("Location", "/logo.png")
+        .build();
+  }
+
   /** Root path / */
   @GetMapping("/")
   public ResponseEntity<Resource> root() {
@@ -61,6 +74,32 @@ public class SpaFallbackController {
   /** Three-level paths: /org/projects/123, etc. */
   @GetMapping("/{a:[^\\.]*}/{b:[^\\.]*}/{path:[^\\.]*}")
   public ResponseEntity<Resource> spaLevel3(HttpServletRequest request) {
+    rejectBackendPrefix(request);
+    return serveIndex();
+  }
+
+  /**
+   * Four-level paths: /projects/{id}/runs/{id}, /org/projects/{id}/team, etc.
+   *
+   * <p>2026-05-09 RCA on hard-reload 404: deep-linked v3 SPA routes like {@code
+   * /projects/<projectId>/runs/<runId>} were 404'ing on browser refresh because the controller only
+   * handled up to 3 segments. The user's reported console error ({@code GET
+   * /projects/<id>/runs/<id> 404 Not Found}) was the 4-segment path falling through to Spring's
+   * default error handler instead of being rewritten to {@code /index.html} for React Router. Same
+   * regex contract — extension-less segments only, backend prefixes still rejected.
+   */
+  @GetMapping("/{a:[^\\.]*}/{b:[^\\.]*}/{c:[^\\.]*}/{path:[^\\.]*}")
+  public ResponseEntity<Resource> spaLevel4(HttpServletRequest request) {
+    rejectBackendPrefix(request);
+    return serveIndex();
+  }
+
+  /**
+   * Five-level paths: future-proofing for routes like {@code /org/projects/{id}/runs/{id}/tab}.
+   * Costs nothing to add; saves another silent 404 regression when a deeper route lands.
+   */
+  @GetMapping("/{a:[^\\.]*}/{b:[^\\.]*}/{c:[^\\.]*}/{d:[^\\.]*}/{path:[^\\.]*}")
+  public ResponseEntity<Resource> spaLevel5(HttpServletRequest request) {
     rejectBackendPrefix(request);
     return serveIndex();
   }
