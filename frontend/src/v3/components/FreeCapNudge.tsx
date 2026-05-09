@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
+import {X} from 'lucide-react';
 import {getV3Entitlements, sendV3Referral, type V3Entitlements} from '../lib/api';
 import {useV3Ui} from '../stores/useV3Ui';
 import {trackV3, V3_EVENTS} from '../lib/events';
@@ -154,6 +155,22 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
     }
   }, [open]);
 
+  // F-23 fix (2026-05-09) — Esc handler. Pre-fix the only ways to
+  // close were backdrop-click (easy to mis-click on mobile and dismiss
+  // accidentally) and the Upgrade button (commits the user). Esc is
+  // the standard modal-close affordance and was missing entirely.
+  useEffect(() => {
+    if (!open) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [open, onClose]);
+
   // R-09 lint cleanup — useState must be called unconditionally before the
   // early return below. Pre-fix this hook sat after `if (!open || !cap)
   // return null` which violated rules-of-hooks (the hook order changed
@@ -210,8 +227,34 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
           border: '1px solid var(--v3-border-strong)',
           borderRadius: 10,
           padding: 20,
+          position: 'relative',
         }}
       >
+        {/* F-23 fix (2026-05-09) — top-right close affordance. The audit
+            flagged this modal had no X button — only backdrop-click and
+            Upgrade-CTA exits. */}
+        <button
+          type='button'
+          onClick={onClose}
+          aria-label='Close'
+          style={{
+            position: 'absolute',
+            top: 10,
+            right: 10,
+            width: 28,
+            height: 28,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: 'transparent',
+            color: 'var(--v3-text-subtle)',
+            border: 'none',
+            borderRadius: 4,
+            cursor: 'pointer',
+          }}
+        >
+          <X size={16} aria-hidden='true' />
+        </button>
         <h2
           style={{
             margin: '0 0 6px',
@@ -271,6 +314,7 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder='friend@example.com'
+                aria-label='Invite a friend by email'
                 style={{
                   flex: 1,
                   padding: '8px 10px',

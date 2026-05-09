@@ -156,15 +156,19 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
           }}
         >
           <div>
-            <div
+            {/* F-22 fix (2026-05-09) — modal title was a styled <div>;
+                semantic <h2> so screen readers announce the dialog's
+                purpose on focus. */}
+            <h2
               style={{
                 fontSize: 14,
                 fontWeight: 600,
                 color: 'var(--v3-text)',
+                margin: 0,
               }}
             >
               Refine with assistant
-            </div>
+            </h2>
             <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)', marginTop: 2}}>
               Clarify scope, tech, integrations — then ship a tighter spec to the planner.
             </div>
@@ -310,6 +314,15 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
             onChange={(e) => setInput(e.target.value)}
             placeholder={
               messages.length === 0 ? 'What do you want to build?' : 'Reply or ask a follow-up…'
+            }
+            // F-23 fix (2026-05-09) — input had a placeholder but no
+            // <label> or aria-label; SR users couldn't tell what the
+            // field was for. aria-label here keeps the visual layout
+            // unchanged while giving SR/voice-control users a name.
+            aria-label={
+              messages.length === 0
+                ? 'Initial message to assistant'
+                : 'Reply or follow-up to assistant'
             }
             disabled={busy}
             autoFocus

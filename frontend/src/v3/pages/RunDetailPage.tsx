@@ -365,9 +365,14 @@ export default function RunDetailPage() {
             <Pill tone={headerTone}>
               {verdict ? VERDICT_LABELS[verdict] : (STATUS_LABELS[detail.status] ?? detail.status)}
             </Pill>
-            <span style={{fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
+            {/* F-22 fix (2026-05-09) — happy-path RunDetail had no <h1>;
+                screen readers couldn't get a page-structure entry point.
+                Run title is the right anchor: it identifies what the
+                page is about and reads naturally as "Page heading: ..."
+                in screen-reader linear nav. */}
+            <h1 style={{fontSize: 14, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>
               {detail.runTitle ?? 'Untitled run'}
-            </span>
+            </h1>
             <span style={{fontSize: 11, color: 'var(--v3-text-subtle)'}}>
               · {runId.slice(0, 8)} ·{' '}
               {detail.completedAt
