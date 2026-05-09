@@ -1,9 +1,10 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {X} from 'lucide-react';
 import {getV3Entitlements, sendV3Referral, type V3Entitlements} from '../lib/api';
 import {useV3Ui} from '../stores/useV3Ui';
 import {trackV3, V3_EVENTS} from '../lib/events';
+import {useModalA11y} from '@/hooks/useModalA11y';
 
 /**
  * R-163 — free-cap upgrade-or-invite nudge.
@@ -155,27 +156,18 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
     }
   }, [open]);
 
-  // F-23 fix (2026-05-09) — Esc handler. Pre-fix the only ways to
-  // close were backdrop-click (easy to mis-click on mobile and dismiss
-  // accidentally) and the Upgrade button (commits the user). Esc is
-  // the standard modal-close affordance and was missing entirely.
-  useEffect(() => {
-    if (!open) return;
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation();
-        onClose();
-      }
-    };
-    document.addEventListener('keydown', handler);
-    return () => document.removeEventListener('keydown', handler);
-  }, [open, onClose]);
+  // Esc handling moved to useModalA11y above (F-01).
 
   // R-09 lint cleanup — useState must be called unconditionally before the
   // early return below. Pre-fix this hook sat after `if (!open || !cap)
   // return null` which violated rules-of-hooks (the hook order changed
   // once cap loaded).
   const [inviteError, setInviteError] = useState<string | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // F-01 fix (2026-05-09) — focus trap + body scroll lock + Esc-close
+  // (replaces the inline Esc handler added in F-23) + focus restore on
+  // close.
+  useModalA11y(open, onClose, {panelRef});
 
   if (!open || !cap) return null;
 
@@ -221,6 +213,7 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
       }}
     >
       <div
+        ref={panelRef}
         style={{
           width: 'min(440px, 92vw)',
           background: 'var(--v3-surface)',

@@ -80,6 +80,7 @@ import {
 } from '@/lib/api';
 import {useSseStore} from '@/stores/useSseStore';
 import {errMsg} from '@/lib/utils';
+import {useModalA11y} from '@/hooks/useModalA11y';
 import ConsolePanel from '@/components/runs/ConsolePanel';
 import MobilePreviewPanel from '@/components/runs/MobilePreviewPanel';
 
@@ -1205,12 +1206,16 @@ function EnvConfigDialog({
     return defaults;
   });
   const [showSecrets, setShowSecrets] = useState<Record<string, boolean>>({});
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // F-01 fix (2026-05-09) — focus trap + Esc + body lock + focus restore.
+  useModalA11y(true, onClose, {panelRef});
 
   const dbInfo = analysis.databaseType ? DB_LABELS[analysis.databaseType] : null;
   const secretVars = analysis.requiredEnvVars.filter((v) => v.category === 'SECRET');
 
   return (
     <div
+      ref={panelRef}
       role='dialog'
       aria-modal='true'
       aria-label='Third-party API keys'

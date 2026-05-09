@@ -3,6 +3,7 @@ import {useNavigate} from 'react-router-dom';
 import {useUiStore} from '@/stores/useUiStore';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
+import {useModalA11y} from '@/hooks/useModalA11y';
 import {useV3Ui} from '../stores/useV3Ui';
 import {GLOSSARY} from '../lib/glossary';
 
@@ -40,6 +41,7 @@ export default function CmdK() {
   const [query, setQuery] = useState('');
   const [cursor, setCursor] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const navigate = useNavigate();
   const {theme, toggleTheme} = useUiStore();
   const user = useAuthStore((s) => s.user);
@@ -224,6 +226,13 @@ export default function CmdK() {
     }
   }, [open]);
 
+  // F-01 fix (2026-05-09) — body scroll lock + focus restore + focus
+  // trap. The pre-existing global keyboard listener already handles
+  // Esc-to-close (so the user can press Esc with the global `?` shortcut
+  // bound), so we don't need the hook to redundantly fire — but the
+  // hook is idempotent and harmless here.
+  useModalA11y(open, closeCmdK, {panelRef});
+
   // Reset cursor when filter changes
   useEffect(() => {
     setCursor(0);
@@ -250,6 +259,7 @@ export default function CmdK() {
 
   return (
     <div
+      ref={panelRef}
       role='dialog'
       aria-modal='true'
       aria-label='Command palette'

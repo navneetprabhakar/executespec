@@ -2,6 +2,7 @@ import {useEffect, useRef, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {conversationChat, type ConversationMessage} from '@/lib/api';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
+import {useModalA11y} from '@/hooks/useModalA11y';
 
 /**
  * Pre-run "Refine with assistant" chat modal.
@@ -37,6 +38,11 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  // F-01 fix (2026-05-09) — focus trap + body scroll lock + Esc-close +
+  // focus restore on close. Disabled when busy so the user can't kill
+  // an in-flight request mid-stream by hitting Esc accidentally.
+  useModalA11y(true, () => !busy && onClose(), {panelRef, disableDismiss: busy});
 
   // Kick off the assistant's first reply if we seeded with the user's
   // textarea text. Without this the modal opens to a thread with the
@@ -53,14 +59,8 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
     threadRef.current?.scrollTo({top: threadRef.current.scrollHeight, behavior: 'smooth'});
   }, [messages, busy]);
 
-  // Esc closes — dialog convention.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !busy) onClose();
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [busy, onClose]);
+  // Esc handling moved to useModalA11y above (also gives focus trap +
+  // body scroll lock + focus restore).
 
   async function send(thread: Msg[]) {
     setBusy(true);
@@ -129,6 +129,7 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
       }}
     >
       <div
+        ref={panelRef}
         style={{
           width: '100%',
           maxWidth: 720,

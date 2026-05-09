@@ -1,6 +1,7 @@
 import {errMsg} from '@/lib/utils';
-import {useEffect, useMemo, useState} from 'react';
+import {useEffect, useMemo, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
+import {useModalA11y} from '@/hooks/useModalA11y';
 import {
   listGitHubRepos,
   createRepo,
@@ -174,15 +175,11 @@ export default function RepoAttachPopover({
     setOversizedRepo(null);
   }, [open]);
 
-  // Esc to close
-  useEffect(() => {
-    if (!open) return;
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose();
-    }
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
+  // F-01 fix (2026-05-09) — Esc + body scroll lock + focus trap + focus
+  // restore on close. Pre-fix only Esc was wired (inline effect, now
+  // removed). panelRef + useModalA11y added at top of component.
+  const panelRef = useRef<HTMLDivElement | null>(null);
+  useModalA11y(open, onClose, {panelRef});
 
   // R-321 — test PAT against GitHub before save. Mirrors SettingsPage.
   async function onTestPat() {
@@ -314,6 +311,7 @@ export default function RepoAttachPopover({
 
   return (
     <div
+      ref={panelRef}
       role='dialog'
       aria-modal='true'
       aria-label='Connect a GitHub repo'
