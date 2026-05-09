@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Link, useNavigate, useParams} from 'react-router-dom';
+import {Link, useLocation, useNavigate, useParams} from 'react-router-dom';
 import {ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus, Sparkles} from 'lucide-react';
 import {useProjectStore} from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
@@ -114,6 +114,7 @@ const TAB_LABELS: {key: TabKey; label: string}[] = [
 export default function ProjectDashboardPage() {
   const {projectId} = useParams<{projectId: string}>();
   const navigate = useNavigate();
+  const location = useLocation();
   const drawer = useDrawerState();
 
   // P-06 (UX audit, 2026-05-03) — when OrgProjectsPage routes here with
@@ -199,6 +200,27 @@ export default function ProjectDashboardPage() {
     setCodeSubRaw(s);
     writeViewToUrl({tab, runsSub, codeSub: s});
   };
+
+  // R-01 fix (2026-05-09) — re-derive tab/sub from URL when location.search
+  // changes. The original `initial` useMemo had an empty deps array so
+  // `?tab=code` set via in-app `<Link>` while already on `/projects/:id` never
+  // updated state. Same-tab clicks (e.g. RepoContextPanel "Open Architecture")
+  // are now honoured. Browser back/forward also work because react-router
+  // updates `location.search` on history nav.
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const legacy = sp.get('tab');
+    const mapped = legacyTabToNew(legacy);
+    const subParam = sp.get('sub') as RunsSubTab | null;
+    const codeSubParam = sp.get('codeSub') as CodeSubTab | null;
+    const nextTab = mapped.tab;
+    const nextSub = subParam ?? mapped.sub ?? 'launches';
+    const nextCodeSub = codeSubParam ?? mapped.codeSub ?? 'architecture';
+    if (nextTab !== tab) setTabRaw(nextTab);
+    if (nextSub !== runsSub) setRunsSubRaw(nextSub);
+    if (nextCodeSub !== codeSub) setCodeSubRaw(nextCodeSub);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.search]);
   const [project, setProject] = useState<api.ProjectDto | null>(null);
   const [projectLookup, setProjectLookup] = useState<'pending' | 'found' | 'missing'>('pending');
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);

@@ -115,7 +115,7 @@ export default function RepoContextPanel({projectId}: Props) {
           </span>
         </button>
         <Link
-          to={`/projects/${projectId}/dashboard?tab=code`}
+          to={`/projects/${projectId}?tab=code&codeSub=architecture`}
           style={{
             fontSize: 11.5,
             color: 'var(--v3-text-subtle)',
