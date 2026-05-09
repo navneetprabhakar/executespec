@@ -257,10 +257,15 @@
  * large empty band below.
  *
  * 60px ≈ TopBar height (.v3-topbar = 56px desktop / 52px mobile, plus
- * 1px border). The slight 4px overshoot is intentional — better to
- * have a tiny scrollbar than a hairline gap below the page. */
+ * 1px border).
+ *
+ * R-02 fix (2026-05-09) — was `min-height`, which let inner content
+ * (e.g., a long Project Chat thread) grow the main container past
+ * viewport and cause page-level scroll instead of internal pane
+ * scroll. Switched to `height` so flex-1 + min-h-0 children scroll
+ * inside the bounded main, not outside it. */
 .v3-main--fill {
-  min-height: calc(100vh - 60px);
+  height: calc(100vh - 60px);
   display: flex;
   flex-direction: column;
 }
