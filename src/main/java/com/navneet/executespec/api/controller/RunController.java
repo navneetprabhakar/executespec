@@ -30,8 +30,6 @@ import com.navneet.executespec.state.StateStore;
 import com.navneet.executespec.state.entity.AgentMessage;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.state.entity.RunRecovery;
-import com.navneet.executespec.state.repository.AgentMessageRepository;
-import com.navneet.executespec.state.repository.RunRecoveryRepository;
 
 import org.springframework.core.io.FileSystemResource;
 import org.springframework.core.io.Resource;
@@ -59,11 +57,11 @@ public class RunController {
   private final ScmPushService scmPushService;
   private final StateStore stateStore;
   private final RunMapper mapper;
-  private final RunRecoveryRepository recoveryRepository;
+  // B-17 fix (2026-05-09) — repository imports removed; recovery + agent-message
+  // reads now go through StateStore.getRecoveryHistory / getAgentMessages.
   private final WorkspaceExportService workspaceExportService;
   private final WorkspaceFileService workspaceFileService;
   private final GcsWorkspaceStore gcsWorkspaceStore;
-  private final AgentMessageRepository agentMessageRepository;
   private final TierEnforcementService tierEnforcementService;
   private final UsageTrackingService usageTrackingService;
   private final RunVisibilitySpec runVisibilitySpec;
@@ -886,8 +884,7 @@ public class RunController {
   public ResponseEntity<List<RecoveryResponse>> getRecovery(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
-    List<RunRecovery> recoveries =
-        recoveryRepository.findByOriginalRunIdOrRestartRunId(runId, runId);
+    List<RunRecovery> recoveries = stateStore.getRecoveryHistory(runId);
     List<RecoveryResponse> response =
         recoveries.stream()
             .map(
@@ -911,7 +908,7 @@ public class RunController {
   public ResponseEntity<List<MessageResponse>> getMessages(
       @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireRunAccess(runId, userDetails);
-    List<AgentMessage> all = agentMessageRepository.findByRunIdOrderBySentAt(runId);
+    List<AgentMessage> all = stateStore.getAgentMessages(runId);
     int start = Math.max(0, all.size() - 200);
     List<MessageResponse> response =
         all.subList(start, all.size()).stream()

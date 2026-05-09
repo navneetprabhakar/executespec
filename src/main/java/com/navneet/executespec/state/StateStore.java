@@ -2054,6 +2054,23 @@ public class StateStore {
             });
   }
 
+  /**
+   * B-17 fix (2026-05-09) — read-side accessors so controllers don't import repositories
+   * directly. Pre-fix, RunController bypassed the service layer for both `/runs/{id}/recovery`
+   * and `/runs/{id}/messages` and called {@code RunRecoveryRepository.findByOriginalRunIdOr…}
+   * + {@code AgentMessageRepository.findByRunIdOrderBySentAt} from the controller body. That
+   * leaked entity types into the HTTP layer + tightly coupled the controller to repo
+   * interface signatures. Now the controller asks StateStore (the canonical state layer) and
+   * stays at the controller-→-service-→-repo seam.
+   */
+  public List<com.navneet.executespec.state.entity.RunRecovery> getRecoveryHistory(String runId) {
+    return recoveryRepo.findByOriginalRunIdOrRestartRunId(runId, runId);
+  }
+
+  public List<com.navneet.executespec.state.entity.AgentMessage> getAgentMessages(String runId) {
+    return messageRepo.findByRunIdOrderBySentAt(runId);
+  }
+
   private String toJson(Object obj) {
     try {
       return mapper.writeValueAsString(obj);
