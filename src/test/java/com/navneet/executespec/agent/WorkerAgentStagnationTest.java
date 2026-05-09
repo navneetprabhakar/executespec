@@ -426,4 +426,113 @@ class WorkerAgentStagnationTest {
         result.outcome() == WorkerResult.Outcome.COMPLETED_BY_STAGNATION,
         "An empty-toolcalls response is not stagnation — exit should be STOPPED_WITHOUT_COMPLETE.");
   }
+
+  /**
+   * 2026-05-09 — Lever B salvage on STAGNATION_FORCE. RCA on run 4421cc6e/T9 (Debt Resolution
+   * R3+R4): a LOW BUILD task spent 12 iters reading without writing, hit stagnation force, was
+   * marked FAILED with no recovery attempt — a tier-3 regression because the user's project lost 1
+   * task to "trivial 1-line edit, agent stuck reading." Lever B already existed for
+   * ITERATION_LIMIT_EXCEEDED + BUDGET_EXCEEDED; this third path completes the salvage triangle.
+   *
+   * <p>Test shape: 12 stagnant readFile calls trigger STAGNATION_FORCE at iter 12 with
+   * totalWriteCalls=0. The salvage call (iteration 13's response) returns a writeFile, which the
+   * worker dispatches and returns COMPLETED — NOT COMPLETED_BY_STAGNATION. This proves the salvage
+   * path was taken AND that it actually rescued the task from FAILED outcome.
+   */
+  @Test
+  void
+      stagnation_force_with_zero_writes_invokes_salvage_and_returns_COMPLETED_when_salvage_writes() {
+    // 12 readFile calls (forces stagnation at iter 12) + 1 writeFile (the salvage response).
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(req(40));
+
+    assertEquals(
+        WorkerResult.Outcome.COMPLETED,
+        result.outcome(),
+        "Salvage on STAGNATION_FORCE with zero writes must rescue the task — outcome should"
+            + " flip to COMPLETED via the salvage write, not stay COMPLETED_BY_STAGNATION."
+            + " Saw: "
+            + result.outcome());
+  }
+
+  /**
+   * 2026-05-09 — companion: salvage is gated on totalWriteCalls==0. If the worker DID write during
+   * the run but later got stuck in a read loop, salvage is skipped (no point — the user's diff
+   * already has writes; another guess might overwrite them with junk). The stagnation-force
+   * terminal path is taken as before, returning COMPLETED_BY_STAGNATION.
+   */
+  @Test
+  void stagnation_force_with_prior_writes_skips_salvage_and_returns_stagnation_outcome() {
+    // 1 writeFile (sets totalWriteCalls=1) + 12 stagnant readFile calls (triggers force at
+    // 12+1=13).
+    List<ChatResponse> seq = new ArrayList<>();
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    for (int i = 0; i < 12; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    Fixture f = newWorker(seq);
+
+    WorkerResult result = f.worker.run(req(40));
+
+    assertEquals(
+        WorkerResult.Outcome.COMPLETED_BY_STAGNATION,
+        result.outcome(),
+        "When the worker already wrote at least one file, stagnation force should NOT trigger"
+            + " salvage — the prior write is the user's actual artefact and a salvage guess"
+            + " could clobber it. Outcome stays COMPLETED_BY_STAGNATION.");
+  }
+
+  /**
+   * 2026-05-09 — Lever A force-edit nudge threshold is now clamped to fire BEFORE
+   * stagnationForceAfter, not just at 70% of maxIter. Pre-fix: forceEditAtIter for a LOW project
+   * run (maxIter=60, stagForce=12) was 42 — the worker was already dead at iter 12. Post-fix:
+   * forceEditAtIter = max(5, min(0.7×maxIter, stagnationForceAfter - 1)) so the nudge always lands
+   * at least one iter before stagnation force kills.
+   */
+  @Test
+  void force_edit_nudge_threshold_clamps_to_below_stagnation_force_for_low_complexity() {
+    // LOW BUILD per-tier config: maxIter=30, stagForce=12 → forceEditAtIter should be
+    // max(5, min(21, 11)) = 11. So at iter 11 we expect a FORCE_EDIT_NUDGE UserMessage in
+    // the captured request that goes out for iter 12. Use 13 readFile calls so we hit force.
+    List<ChatResponse> seq = new ArrayList<>();
+    for (int i = 0; i < 13; i++) {
+      seq.add(responseWithCalls(toolCall("readFile", "{\"path\":\"x\"}")));
+    }
+    seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"y\",\"content\":\"z\"}")));
+    Fixture f = newWorker(seq);
+
+    // Use the per-tier override mirroring SequentialExecutor's LOW config.
+    f.worker.run(reqWithStagnation(30, 8, 12));
+
+    // Capture every LlmRequest. The FORCE_EDIT_NUDGE UserMessage should appear in the history
+    // of at least one captured request after iter 11.
+    ArgumentCaptor<LlmRequest> reqCap = ArgumentCaptor.forClass(LlmRequest.class);
+    verify(f.router, atLeastOnce()).call(reqCap.capture());
+
+    boolean sawForceEditNudge = false;
+    for (LlmRequest captured : reqCap.getAllValues()) {
+      boolean hasNudge =
+          captured.messages().stream()
+              .anyMatch(
+                  m ->
+                      m instanceof UserMessage um
+                          && um.getText().startsWith("INVESTIGATION PHASE OVER"));
+      if (hasNudge) {
+        sawForceEditNudge = true;
+        break;
+      }
+    }
+
+    assertTrue(
+        sawForceEditNudge,
+        "Lever A force-edit nudge MUST fire on a LOW BUILD task (maxIter=30, stagForce=12)"
+            + " before the stagnation guard kills the worker. Pre-fix this was dead code on"
+            + " LOW because forceEditAtIter=21 was past the stagForce=12 kill point.");
+  }
 }
