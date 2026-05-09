@@ -23,7 +23,18 @@ import {
   getPreviewStatus,
   type TestPlanData,
   type LocalPreviewStatus,
+  // 2026-05-09 — RunChat regression fix: re-import the v2 chat-action endpoints
+  // (applyToRun / iterateRun + ValidationReport for the unresolved-issues helper)
+  // so the v3 ChatPane can mount the same Apply / Fix / Iterate affordances the
+  // v2 RunDetailTabs Chat tab has had since 2026-04. Backend (RunConversationController +
+  // ApplyService) was preserved through the v3 cutover; the regression was frontend-only.
+  applyToRun,
+  iterateRun,
+  getValidationReport,
+  type ValidationReportData,
+  type ReportIssue,
 } from '@/lib/api';
+import {useNavigate} from 'react-router-dom';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore, type LogEntry} from '@/stores/useSseStore';
 import PlanCard from './PlanCard';
@@ -2131,6 +2142,40 @@ function GeneratedTestsCard({
 // rebuild the seed context from `detail` on every send so a stale tab
 // can't drift away from the truth.
 
+/**
+ * 2026-05-09 — shared style for the v3 chat action buttons (Apply / Fix / Iterate).
+ * Keeps the row visually coherent with the v3 design tokens: rounded pill, mono
+ * label sized like a chip, tone-coded background. The {@code busy} flag drops
+ * opacity + flips cursor so the user gets feedback even before the toast lands.
+ */
+function chatActionButtonStyle(
+  tone: 'success' | 'warning' | 'brand',
+  busy: boolean,
+): CSSProperties {
+  const accent =
+    tone === 'success'
+      ? 'var(--v3-success, #10B981)'
+      : tone === 'warning'
+        ? 'var(--v3-warning, #F59E0B)'
+        : 'var(--v3-brand, #5B8DEF)';
+  return {
+    display: 'inline-flex',
+    alignItems: 'center',
+    gap: 6,
+    padding: '6px 11px',
+    background: `color-mix(in srgb, ${accent} 14%, transparent)`,
+    color: accent,
+    border: `1px solid color-mix(in srgb, ${accent} 36%, transparent)`,
+    borderRadius: 999,
+    fontSize: 11.5,
+    fontFamily: 'inherit',
+    fontWeight: 600,
+    cursor: busy ? 'progress' : 'pointer',
+    opacity: busy ? 0.7 : 1,
+    whiteSpace: 'nowrap',
+  };
+}
+
 function ChatPane({
   detail,
   prComments,
@@ -2140,14 +2185,46 @@ function ChatPane({
   prComments: PrCommentInboxDto[];
   onPrCommentChanged: () => void;
 }) {
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionToast, setActionToast] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
   // Phase P2 — track per-comment apply state so the user gets feedback while
   // the new run kicks off + the GitHub branch updates.
   const [applyingId, setApplyingId] = useState<number | null>(null);
+  // 2026-05-09 — re-add the v2 chat-action affordances (Apply / Fix / Iterate)
+  // that the v3 ChatPane shipped without. Each action is a single button with
+  // its own busy state so the user can fire one without locking the others.
+  const [applyingChat, setApplyingChat] = useState(false);
+  const [fixingIssues, setFixingIssues] = useState(false);
+  const [iteratingRun, setIteratingRun] = useState(false);
+  // ValidationReport drives the "Fix N issues" button copy + payload. Fetched
+  // lazily on first render of a terminal run so the cost is amortised across
+  // chat use.
+  const [report, setReport] = useState<ValidationReportData | null>(null);
+  const TERMINAL = useMemo(
+    () => new Set(['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED']),
+    [],
+  );
+  const isTerminal = !!detail && TERMINAL.has(detail.status);
+  useEffect(() => {
+    if (!detail || !isTerminal) return;
+    let cancelled = false;
+    void getValidationReport(detail.runId)
+      .then((r) => {
+        if (!cancelled) setReport(r);
+      })
+      .catch(() => {
+        // Validation report can legitimately be null on FAILED/CANCELLED runs;
+        // swallow so the chat still works without the Fix N Issues button.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail, isTerminal]);
 
   const pendingComments = prComments.filter((c) => c.status === 'PENDING');
   const recentlyAddressed = prComments
@@ -2270,6 +2347,115 @@ function ChatPane({
       : 'PR-level';
     const quoted = `> @${c.author} on ${anchor}:\n> ${c.body.replace(/\n/g, '\n> ')}\n\n`;
     setInput((prev) => (prev.trim() ? `${prev}\n\n${quoted}` : quoted));
+  }
+
+  // 2026-05-09 — Apply / Fix / Iterate handlers. Restored from the v2 RunConversation
+  // surface. Each one targets a different post-run improvement intent:
+  //
+  //   Apply to Run    — user clicks after the assistant proposed a concrete change in chat;
+  //                     we forward the latest assistant turn as the apply prompt. Spawns
+  //                     an apply-run that pushes its diff to the PR's branch.
+  //   Fix N Issues    — auto-builds a prompt from validation_report.issues (CRITICAL +
+  //                     MAJOR severity, capped) and dispatches a single apply for them.
+  //   Iterate as New  — takes the latest assistant turn (or all messages if none) as
+  //                     the spec for a brand-new run. Useful when chat goes off-spec.
+  //
+  // Compile as Spec is intentionally omitted from this restoration — it relied on a v2
+  // popover flow that's incompatible with the v3 side-panel shape; tracked as a follow-up
+  // if user requests it.
+  const lastAssistantText = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if (messages[i].role === 'assistant') return messages[i].content;
+    }
+    return null;
+  }, [messages]);
+  // Mirrors v2 RunConversation.unresolvedIssues — every reviewer-flagged finding
+  // EXCEPT lint-only issues (those auto-resolve via the executor's lint pass).
+  const unresolvedIssues = useMemo<ReportIssue[]>(() => {
+    if (!report?.issues) return [];
+    return report.issues.filter(
+      (it) =>
+        it.severity === 'WOULD_BREAK_BUILD' ||
+        it.severity === 'WOULD_FAIL_REVIEW' ||
+        it.severity === 'WOULD_CAUSE_BUG',
+    );
+  }, [report]);
+
+  async function onApplyToRun() {
+    if (!detail?.runId || applyingChat || !lastAssistantText) return;
+    setApplyingChat(true);
+    setError(null);
+    setActionToast(null);
+    try {
+      const result = await applyToRun(detail.runId, lastAssistantText, 'COPILOT');
+      setActionToast(
+        `Apply queued — ${result.taskCount ?? 1} change${(result.taskCount ?? 1) === 1 ? '' : 's'} dispatched. Watch the live log.`,
+      );
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Apply failed.');
+    } finally {
+      setApplyingChat(false);
+    }
+  }
+
+  async function onFixIssues() {
+    if (!detail?.runId || fixingIssues || unresolvedIssues.length === 0) return;
+    setFixingIssues(true);
+    setError(null);
+    setActionToast(null);
+    const prompt = unresolvedIssues
+      .slice(0, 8)
+      .map(
+        (it, i) =>
+          `${i + 1}. [${it.severity}] ${it.filePath ?? '(no file)'}${it.fix ? ` — suggested fix: ${it.fix}` : ''}: ${it.description}`,
+      )
+      .join('\n');
+    try {
+      const result = await applyToRun(
+        detail.runId,
+        `Fix the following review issues from this run:\n\n${prompt}`,
+        'REVIEW',
+      );
+      setActionToast(
+        `Fixing ${unresolvedIssues.length} issue${unresolvedIssues.length === 1 ? '' : 's'} — ${result.taskCount ?? 1} task${(result.taskCount ?? 1) === 1 ? '' : 's'} dispatched.`,
+      );
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Could not start the fix-issues run.');
+    } finally {
+      setFixingIssues(false);
+    }
+  }
+
+  async function onIterateAsNewRun() {
+    if (!detail?.runId || iteratingRun) return;
+    // Pick the most useful spec text: latest assistant turn if available, else the
+    // joined chat history, else the original user request as a fallback.
+    const seedSpec =
+      lastAssistantText ??
+      messages.map((m) => `${m.role === 'user' ? '' : 'Assistant: '}${m.content}`).join('\n\n') ??
+      detail.userRequest ??
+      '';
+    if (!seedSpec.trim()) {
+      setError('Nothing to iterate from yet — start the conversation first.');
+      return;
+    }
+    setIteratingRun(true);
+    setError(null);
+    setActionToast(null);
+    try {
+      const {runId: newRunId} = await iterateRun(detail.runId, seedSpec);
+      setActionToast('New run created — opening it…');
+      // Tiny delay so the user sees the toast flash before navigation.
+      window.setTimeout(() => {
+        navigate(
+          detail.projectId ? `/projects/${detail.projectId}/runs/${newRunId}` : `/runs/${newRunId}`,
+        );
+      }, 600);
+    } catch (e) {
+      setError((e as Error)?.message ?? 'Could not start the new run.');
+    } finally {
+      setIteratingRun(false);
+    }
   }
 
   // Quick-question chips help users start a conversation without
@@ -2455,6 +2641,90 @@ function ChatPane({
               {q}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* 2026-05-09 — chat action toast (transient) above the action row + input.
+          One slot for both the success line ("Apply queued — N tasks dispatched")
+          and the error line so layout doesn't jump. */}
+      {actionToast && !error && (
+        <div
+          style={{
+            margin: '0 12px 6px',
+            padding: '6px 10px',
+            background: 'color-mix(in srgb, var(--v3-success, #10B981) 12%, transparent)',
+            border: '1px solid color-mix(in srgb, var(--v3-success, #10B981) 36%, transparent)',
+            borderRadius: 6,
+            fontSize: 12,
+            color: 'var(--v3-text)',
+          }}
+        >
+          {actionToast}
+        </div>
+      )}
+
+      {/* 2026-05-09 — chat action row. Mirrors the v2 RunDetailTabs Chat tab
+          actions (Apply / Fix N Issues / Iterate as New Run). Only renders for
+          terminal runs — pre-terminal runs can't be applied to (worker still
+          holds the workspace) and can't be iterated until the diff is final.
+          Compile-as-Spec deliberately deferred — its v2 popover flow doesn't
+          fit the v3 side-panel shape; tracked as a follow-up if user wants it. */}
+      {isTerminal && (
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 6,
+            padding: '0 12px 8px',
+            borderTop: '1px solid var(--v3-border)',
+            paddingTop: 8,
+          }}
+        >
+          {lastAssistantText && (
+            <button
+              type='button'
+              onClick={() => void onApplyToRun()}
+              disabled={applyingChat || fixingIssues || iteratingRun}
+              title={
+                "Apply the assistant's last suggestion as a follow-up run. The diff" +
+                ' pushes to the same PR branch.'
+              }
+              style={chatActionButtonStyle('success', applyingChat)}
+            >
+              <Wrench className='h-3 w-3' />
+              {applyingChat ? 'Applying…' : 'Apply to Run'}
+            </button>
+          )}
+          {unresolvedIssues.length > 0 && (
+            <button
+              type='button'
+              onClick={() => void onFixIssues()}
+              disabled={applyingChat || fixingIssues || iteratingRun}
+              title={`Auto-build a fix prompt from ${unresolvedIssues.length} unresolved review issue${
+                unresolvedIssues.length === 1 ? '' : 's'
+              } and dispatch as one apply-run.`}
+              style={chatActionButtonStyle('warning', fixingIssues)}
+            >
+              <Shield className='h-3 w-3' />
+              {fixingIssues
+                ? 'Dispatching…'
+                : `Fix ${unresolvedIssues.length} Issue${unresolvedIssues.length === 1 ? '' : 's'}`}
+            </button>
+          )}
+          <button
+            type='button'
+            onClick={() => void onIterateAsNewRun()}
+            disabled={applyingChat || fixingIssues || iteratingRun || messages.length === 0}
+            title={
+              messages.length === 0
+                ? 'Start a conversation first — iterate uses the latest assistant turn as the spec.'
+                : 'Spawn a brand-new run using the latest assistant turn as the spec.'
+            }
+            style={chatActionButtonStyle('brand', iteratingRun)}
+          >
+            <ArrowUpCircle className='h-3 w-3' />
+            {iteratingRun ? 'Creating…' : 'Iterate as New Run'}
+          </button>
         </div>
       )}
 
