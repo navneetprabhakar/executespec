@@ -30,6 +30,12 @@ public class FeatureFlagService implements MessageListener {
   private final FeatureFlagRepository repository;
   private final StringRedisTemplate redisTemplate;
   private final RedisMessageListenerContainer redisMessageListenerContainer;
+  // B-13 fix (2026-05-09) — terminate active SSE streams on force-logout.
+  // ObjectProvider so Spring doesn't tightly couple boot order between
+  // featureflag and sse packages.
+  private final org.springframework.beans.factory.ObjectProvider<
+          com.navneet.executespec.sse.SseBroadcaster>
+      sseBroadcasterProvider;
 
   private final Map<String, String> cache = new ConcurrentHashMap<>();
 
@@ -85,6 +91,20 @@ public class FeatureFlagService implements MessageListener {
       String epoch = Instant.now().toString();
       upsertFlag("force_logout_epoch", epoch, "Force logout timestamp", userId);
       log.info("Force logout activated — all JWTs issued before {} are now invalid", epoch);
+      // B-13 fix (2026-05-09) — JWT-epoch check fires only on the next read of the
+      // token, but EventSource is server→client (no client-originated reads), so
+      // active SSE streams kept delivering events for up to 5 min after force-logout.
+      // Terminate every emitter on this instance now. Cross-instance: each instance
+      // independently runs this branch when it picks up the flag toggle via Redis
+      // pub/sub (handled by the existing FeatureFlagService listener).
+      try {
+        var broadcaster = sseBroadcasterProvider.getIfAvailable();
+        if (broadcaster != null) {
+          broadcaster.completeAll();
+        }
+      } catch (Exception e) {
+        log.warn("[force-logout] SseBroadcaster.completeAll failed: {}", e.getMessage());
+      }
     }
 
     log.info("Feature flag updated: {} = {} (by userId={})", key, value, userId);
@@ -122,6 +142,20 @@ public class FeatureFlagService implements MessageListener {
     log.debug("Redis feature-flag-update received for key: {}", flagKey);
     // Reload just this key from DB
     repository.findByFlagKey(flagKey).ifPresent(f -> cache.put(f.getFlagKey(), f.getFlagValue()));
+    // B-13 fix (2026-05-09) — cross-instance force-logout SSE termination. The
+    // upsertFlag(...) path on the originating instance closes its own emitters
+    // immediately; sibling instances learn about the flip only through this Redis
+    // pub/sub handler, so they need to mirror the closeAll() here.
+    if ("force_logout".equals(flagKey) && "true".equalsIgnoreCase(cache.get(flagKey))) {
+      try {
+        var broadcaster = sseBroadcasterProvider.getIfAvailable();
+        if (broadcaster != null) {
+          broadcaster.completeAll();
+        }
+      } catch (Exception e) {
+        log.warn("[force-logout/cross-instance] SseBroadcaster.completeAll failed: {}", e.getMessage());
+      }
+    }
   }
 
   // ── Scheduled full reload fallback ───────────────────────────────────────

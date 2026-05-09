@@ -238,6 +238,41 @@ public class SseBroadcaster {
     }
   }
 
+  /**
+   * B-13 fix (2026-05-09) — terminate every live SSE emitter on this instance.
+   *
+   * <p>Pre-fix, the JWT force-logout epoch was checked at message-read time only. Since
+   * EventSource is server→client (no client-originated messages on the open connection),
+   * the JWT-epoch check NEVER FIRED on an active SSE stream — the user kept receiving
+   * events for up to 5 minutes (scoped SSE token TTL) after force-logout was activated.
+   *
+   * <p>This method is called by {@link
+   * com.navneet.executespec.config.featureflag.FeatureFlagService} when the
+   * {@code force_logout} flag flips to true. Closes every emitter on THIS instance; cross-
+   * instance broadcast handled separately (force_logout itself is replicated via Redis
+   * pub/sub by FeatureFlagService — every instance independently runs this).
+   */
+  public void completeAll() {
+    int closed = 0;
+    for (Map.Entry<String, CopyOnWriteArrayList<SseEmitter>> entry : emitters.entrySet()) {
+      List<SseEmitter> clients = entry.getValue();
+      for (SseEmitter emitter : clients) {
+        try {
+          emitter.complete();
+          closed++;
+        } catch (Throwable t) {
+          log.debug(
+              "SSE force-logout complete failed for run {} ({})",
+              entry.getKey(),
+              t.getMessage());
+        }
+      }
+    }
+    emitters.clear();
+    totalEmitterCount.set(0);
+    log.warn("[SseBroadcaster] force-logout — closed {} active SSE emitter(s)", closed);
+  }
+
   // ── Private helpers ───────────────────────────────────────────────────────
 
   private void deliverLocal(String runId, String json, long seqNum) {
