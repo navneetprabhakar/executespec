@@ -194,7 +194,7 @@ export default function OrgAdminDashboard() {
               className={cn(
                 'px-3 py-1.5 text-xs font-medium transition-colors',
                 period === p.value
-                  ? 'bg-[#8B5CF6]/20 text-[#8B5CF6]'
+                  ? 'bg-accent-blue/20 text-accent-blue'
                   : 'text-muted hover:text-secondary hover:bg-[var(--gray-200)]',
               )}
             >
@@ -641,7 +641,7 @@ export default function OrgAdminDashboard() {
                         ? 'bg-rose-500'
                         : billing.periodUsage / billing.runLimit > 0.7
                           ? 'bg-status-waiting'
-                          : 'bg-[#8B5CF6]',
+                          : 'bg-accent-blue',
                     )}
                     style={{
                       width: `${Math.min(100, (billing.periodUsage / billing.runLimit) * 100)}%`,

@@ -34,8 +34,8 @@ export default function ProtectedRoute() {
 
   if (isLoading) {
     return (
-      <div className='flex h-screen items-center justify-center bg-[#0f1117]'>
-        <div className='h-8 w-8 animate-spin rounded-full border-4 border-purple-500 border-t-transparent' />
+      <div className='flex h-screen items-center justify-center bg-[var(--gray-100)]'>
+        <div className='h-8 w-8 animate-spin rounded-full border-4 border-accent-blue border-t-transparent' />
       </div>
     );
   }

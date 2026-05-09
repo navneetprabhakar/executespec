@@ -162,7 +162,7 @@ export default function PricingManager() {
                           <button
                             onClick={() => handleSave(r)}
                             disabled={saving === key(r)}
-                            className='inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-[#8B5CF6]/20 text-[#8B5CF6] hover:bg-[#8B5CF6]/30 disabled:opacity-50'
+                            className='inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-medium bg-accent-blue/20 text-accent-blue hover:bg-accent-blue/30 disabled:opacity-50'
                           >
                             {saving === key(r) ? (
                               <Loader2 className='h-3 w-3 animate-spin' />
