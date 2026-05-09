@@ -1,5 +1,8 @@
 package com.navneet.executespec.tool;
 
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.LinkOption;
 import java.nio.file.Path;
 import java.util.Set;
 
@@ -125,6 +128,53 @@ public class FileSandboxPolicy {
     if (workspaceRoot == null || target == null) {
       return Decision.allow(); // degenerate inputs — existing FileSystemTool handles them
     }
+
+    // B-02 fix (2026-05-09) — symlink traversal guard. Runs at EVERY guardrail
+    // level (including LOW, the default), because a worker writing to
+    // /etc/passwd via a workspace symlink is universally bad regardless of
+    // configured policy level.
+    //
+    // Pre-fix: `Path.relativize()` worked on logical paths only. A worker that
+    // first ran `ln -s /etc/passwd src/config.json` could then call
+    // `writeFile("src/config.json")` — relativize returned `src/config.json`
+    // (well-formed and inside MEDIUM_ALLOWED_DIRS), and the actual write
+    // landed at /etc/passwd because Java's Files.write follows symlinks by
+    // default.
+    //
+    // Two checks:
+    //   (a) if the target itself is an existing symlink, refuse — the worker
+    //       shouldn't be writing through a symlink even when the link target
+    //       sits in-workspace.
+    //   (b) resolve the parent's realPath and confirm it sits under the
+    //       workspace's realPath. Catches the case where an intermediate
+    //       directory in the path is a symlink that escapes the workspace.
+    //
+    // Both checks are best-effort: if toRealPath/exists throw IOException
+    // (e.g. permission denied on a sibling), we fall through and let the
+    // existing relativize check do its thing — never silently allow.
+    try {
+      if (Files.exists(target, LinkOption.NOFOLLOW_LINKS) && Files.isSymbolicLink(target)) {
+        return recordAndBlock("symlink traversal: target path is a symbolic link");
+      }
+      Path parent = target.getParent();
+      if (parent != null && Files.exists(parent)) {
+        Path realParent = parent.toRealPath();
+        Path realRoot = workspaceRoot.toRealPath();
+        if (!realParent.startsWith(realRoot)) {
+          return recordAndBlock(
+              "symlink traversal: parent directory resolves outside workspace");
+        }
+      }
+    } catch (IOException ioe) {
+      // Path resolution failed — fail closed only if the partial info we
+      // have already shows escape; otherwise let the relativize check below
+      // be authoritative. Logging here so this isn't silent.
+      log.warn(
+          "FileSandboxPolicy: realPath resolution failed for target={} (cause={}); falling through to logical check",
+          target,
+          ioe.getMessage());
+    }
+
     if (!effective.atLeastMedium()) {
       return Decision.allow();
     }
