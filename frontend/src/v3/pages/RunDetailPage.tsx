@@ -374,12 +374,22 @@ export default function RunDetailPage() {
             <h1 style={{fontSize: 14, fontWeight: 600, color: 'var(--v3-text)', margin: 0}}>
               {detail.runTitle ?? 'Untitled run'}
             </h1>
-            <span style={{fontSize: 11, color: 'var(--v3-text-subtle)'}}>
-              · {runId.slice(0, 8)} ·{' '}
-              {detail.completedAt
-                ? new Date(detail.completedAt).toLocaleString()
-                : new Date(detail.startedAt).toLocaleString()}
-            </span>
+            {/* U-52 fix (2026-05-09) — timestamp renders in viewer's local
+                tz via toLocaleString but never labels the tz. Add a `title`
+                tooltip with the UTC ISO string so support / cross-tz teams
+                can disambiguate without guessing the operator's timezone. */}
+            {(() => {
+              const ts = detail.completedAt ?? detail.startedAt;
+              const d = new Date(ts);
+              return (
+                <span
+                  style={{fontSize: 11, color: 'var(--v3-text-subtle)'}}
+                  title={`UTC: ${d.toISOString()}`}
+                >
+                  · {runId.slice(0, 8)} · {d.toLocaleString()}
+                </span>
+              );
+            })()}
           </div>
 
           {/* Evidence chip row.
