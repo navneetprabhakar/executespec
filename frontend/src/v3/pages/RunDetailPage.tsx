@@ -227,13 +227,23 @@ export default function RunDetailPage() {
   // Files actually changed by the run (ADDED + MODIFIED, with vendored paths filtered out).
   const VENDORED_PATTERN =
     /(^|\/)(node_modules|venv|\.venv|dist|build|target|\.next|\.gradle|__pycache__|\.idea|\.vscode|coverage)\//;
+  // 2026-05-09 — restore multi-repo browse mode. The 'Changed' default still strips
+  // UNCHANGED so the diff stays focused (the May 2 user ask), but on multi-repo
+  // project runs the user couldn't browse the rest of the workspace to verify
+  // changes across repos that the worker hadn't yet edited. New 'All' mode shows
+  // every workspace file (still filtered through VENDORED_PATTERN), with A/M
+  // chips on the changed ones via the existing FileTree status field.
+  const [fileScope, setFileScope] = useState<'changed' | 'all'>('changed');
   const changedFiles = useMemo<FileWithStatus[]>(() => {
     if (!filesWithStatus) return [];
+    if (fileScope === 'all') {
+      return filesWithStatus.filter((f) => !VENDORED_PATTERN.test(f.path));
+    }
     return filesWithStatus.filter(
       (f) => (f.status === 'ADDED' || f.status === 'MODIFIED') && !VENDORED_PATTERN.test(f.path),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filesWithStatus]);
+  }, [filesWithStatus, fileScope]);
 
   // Auto-pick the first changed file (skip lockfiles when we have a non-lockfile alternative).
   useEffect(() => {
@@ -636,21 +646,81 @@ export default function RunDetailPage() {
           <div
             style={{
               padding: '4px 6px 8px',
-              fontSize: 11,
-              fontWeight: 600,
-              color: 'var(--v3-text-subtle)',
-              letterSpacing: 0.5,
-              textTransform: 'uppercase',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
             }}
           >
-            Changed files {filesWithStatus ? `(${changedFiles.length})` : ''}
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--v3-text-subtle)',
+                letterSpacing: 0.5,
+                textTransform: 'uppercase',
+              }}
+            >
+              {fileScope === 'changed' ? 'Changed files' : 'All files'}{' '}
+              {filesWithStatus ? `(${changedFiles.length})` : ''}
+            </div>
+            {/* 2026-05-09 — Changed / All scope toggle. RCA on the multi-repo
+                regression report: the v3 page filtered to ADDED/MODIFIED only,
+                which hid every repo with zero edits — including ones the user
+                wanted to browse for cross-checking. 'All' shows the entire
+                workspace (still vendored-pattern filtered) with A/M chips on
+                changed files. Default stays 'Changed' so the diff focus the May
+                2 user ask preserved. */}
+            {filesWithStatus && (
+              <div
+                role='radiogroup'
+                aria-label='File scope'
+                style={{
+                  display: 'inline-flex',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 999,
+                  overflow: 'hidden',
+                  background: 'var(--v3-bg)',
+                  flexShrink: 0,
+                }}
+              >
+                {(['changed', 'all'] as const).map((s) => {
+                  const selected = fileScope === s;
+                  return (
+                    <button
+                      key={s}
+                      type='button'
+                      role='radio'
+                      aria-checked={selected}
+                      onClick={() => setFileScope(s)}
+                      style={{
+                        padding: '3px 9px',
+                        fontSize: 10.5,
+                        fontFamily: 'var(--v3-font-mono)',
+                        textTransform: 'uppercase',
+                        letterSpacing: 0.4,
+                        background: selected ? 'var(--v3-brand)' : 'transparent',
+                        color: selected ? 'var(--v3-text-on-brand, #fff)' : 'var(--v3-text-muted)',
+                        border: 0,
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                      }}
+                    >
+                      {s === 'changed' ? 'Changed' : 'All'}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
           </div>
           {!filesWithStatus && (
             <div style={{padding: 8, fontSize: 12, color: 'var(--v3-text-subtle)'}}>Loading…</div>
           )}
           {filesWithStatus && changedFiles.length === 0 && (
             <div style={{padding: 8, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
-              No file changes detected for this run.
+              {fileScope === 'changed'
+                ? 'No file changes detected for this run. Switch to All to browse the workspace.'
+                : 'No files in workspace yet — the worker may still be cloning repos.'}
             </div>
           )}
           {filesWithStatus && (
