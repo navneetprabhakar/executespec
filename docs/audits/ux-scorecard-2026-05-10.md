@@ -8,6 +8,66 @@
 
 ---
 
+## Methodology — read this first
+
+> **The scores are single-evaluator heuristic judgement, not measured UX.**
+> Treat them as a directional signal, not an absolute score.
+
+### What this rubric is based on
+
+- **Nielsen's 10 usability heuristics** (1994, refreshed 2020) — visibility of system status, match between system & real world, consistency, error prevention, recognition over recall, etc.
+  My 6 dimensions roughly collapse those 10 into a smaller grid.
+- **ISO 9241-11** ergonomics-of-interaction standard — effectiveness, efficiency, satisfaction.
+  My Clarity / Efficiency / Polish loosely map; Accessibility / Error-handling / Consistency are added because the audit explicitly flagged them.
+
+The per-cell ratings came from: walking each surface as that persona, comparing against the audit-report findings, noting which iter1–3 fixes resolved which dimensions, and gut-feel 1–5 grading.
+
+### What the scores are NOT based on
+
+| Real UX signal | Status |
+|---|:--:|
+| Conversion funnel (signup → first run → first merged PR) | Not consulted (PostHog is wired but not analysed for this report) |
+| Task-completion time | Not measured |
+| Task-completion rate (%) | Not measured |
+| **SUS** (System Usability Scale, 10-question instrument → 0–100) | Not run |
+| **SEQ** (Single Ease Question, 1–7 per task) | Not run |
+| **NPS** / CSAT | Not collected |
+| User-session recordings / heatmaps | None |
+| A/B test results | None |
+| Multi-evaluator heuristic eval (Nielsen recommends 3–5) | Single evaluator |
+| Severity ratings per finding (cosmetic/minor/major/catastrophic) | Not applied |
+| Automated a11y scan (axe, Lighthouse, pa11y) | Not run for this report |
+| WCAG conformance audit (A / AA / AAA) | Partial — F-15/16/17 status mentioned in the audit but not formally re-checked |
+| Real-device mobile testing | Used the preview tool's desktop + 1 mobile preset |
+| User-research interviews | None |
+
+### How to read the composite numbers
+
+Arithmetic-meaning subjective 1–5 ratings gives decimals like `3.94` that *look* like two-significant-digit measurement. There isn't any. The fair reading is a **band** (FREE is "low-4", ENTERPRISE is "low-4 with admin-side weakness") — not a point estimate. The decimal precision is an artefact of the formula, not signal.
+
+### What this rubric IS useful for
+
+- **Directional signal**: did the iter1–3 batch move things in the right direction? (Yes — every fixed daily-cut clearly moved at least one cell.)
+- **Surface comparison**: is FREE worse than ENT? (Roughly equal; admin tables drag both.)
+- **Heuristic regression detection**: re-running the same evaluator with the same rubric next iteration will catch obvious regressions.
+- **Prioritisation framing**: the four named follow-ups (U-44 confidence framing, U-02 sample-spec gallery, U-35/36 admin tables, composer ergonomics) are the items that would touch the most cells, judged dimensionally.
+
+### What real measurement would replace this with
+
+The combination below gets defensible numbers for ~2 weeks of work:
+
+| Method | Cost | Output |
+|---|---|---|
+| **PostHog funnel** (already wired — `EventTrackingService` emits SIGNUP → PROJECT_CREATED → SPEC_SUBMITTED → PLAN_APPROVED → RUN_COMPLETE → PR_MERGED) | ~$0 — already collecting | Conversion rate per persona, task-completion %, drop-off heatmap |
+| **SUS questionnaire** sent to 20–50 active users | ~1 day to wire + 1 week to collect | Single 0–100 number per persona, industry benchmark (>68 = above average) |
+| **Lighthouse / axe** a11y scan in CI on representative routes | ~half day | A11y score per surface 0–100 with concrete WCAG violations |
+| **3-evaluator heuristic eval** with severity ratings + consensus | ~1 week × 3 people | Validated findings with kappa > 0.6 inter-rater agreement |
+| **Moderated user test** (5 users × 60 min) | ~1 week × 5 sessions | Task-completion times + SEQ per task + qualitative quotes |
+
+Until those land, this scorecard is the placeholder. The composite numbers should be regarded as "iter-3 baseline against the same evaluator" so the *next* iteration's deltas (rather than the absolute number) carry the signal.
+
+---
+
 ## Dimension definitions
 
 | # | Dimension | What it measures |
