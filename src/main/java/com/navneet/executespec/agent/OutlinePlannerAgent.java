@@ -7,8 +7,11 @@ import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.config.featureflag.FeatureFlagService;
@@ -101,6 +104,32 @@ public class OutlinePlannerAgent {
    * planner OR mark the run FAILED with a clear reason instead of hanging indefinitely.
    */
   private static final long PLANNER_LLM_WALL_TIMEOUT_SECONDS = 8 * 60;
+
+  /**
+   * B-21 fix (2026-05-09) — dedicated bounded executor for the planner LLM call. Pre-fix used
+   * {@code CompletableFuture.supplyAsync(supplier)} which dispatches to {@link
+   * java.util.concurrent.ForkJoinPool#commonPool}. The common pool is shared with every
+   * parallelStream() and other JDK utilities across the JVM; an LLM call that hangs blocks a
+   * common-pool worker for up to 8 minutes (the wall timeout above), which under load can
+   * starve unrelated parallel-stream code paths (e.g. read-only codeintel queries).
+   *
+   * <p>Bounded at 4 threads — planner calls are rare (~1 per run pre-plan-approval), so 4
+   * gives enough concurrency for a small burst of submissions without wedging the JVM. Daemon
+   * threads so they don't block JVM shutdown.
+   */
+  private static final Executor PLANNER_LLM_EXEC =
+      Executors.newFixedThreadPool(
+          4,
+          new java.util.concurrent.ThreadFactory() {
+            private final AtomicInteger n = new AtomicInteger();
+
+            @Override
+            public Thread newThread(Runnable r) {
+              Thread t = new Thread(r, "planner-llm-" + n.incrementAndGet());
+              t.setDaemon(true);
+              return t;
+            }
+          });
 
   /**
    * Per-call HTTP read-timeout override propagated through {@code LlmRequest.readTimeoutSeconds}.
@@ -324,7 +353,9 @@ public class OutlinePlannerAgent {
                           // (480s). Anthropic + OpenAI clients ignore the field today; only
                           // Gemini is wired to read it.
                           .readTimeoutSeconds(PLANNER_HTTP_READ_TIMEOUT_SECONDS)
-                          .build()));
+                          .build()),
+              // B-21 — dedicated PLANNER_LLM_EXEC, no longer ForkJoinPool.commonPool().
+              PLANNER_LLM_EXEC);
       resp = fut.get(PLANNER_LLM_WALL_TIMEOUT_SECONDS, TimeUnit.SECONDS);
     } catch (TimeoutException te) {
       log.error(
