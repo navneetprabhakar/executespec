@@ -216,7 +216,25 @@ public class ShellSandboxPolicy {
           // scratch dirs. The remaining dirs are kernel + system + boot critical with no
           // legitimate workspace overlap.
           Pattern.compile(
-              "\\bchmod\\b[^\\n]*\\s/(?:etc|usr|root|boot|sbin|bin|sys|proc|dev|run)\\b"));
+              "\\bchmod\\b[^\\n]*\\s/(?:etc|usr|root|boot|sbin|bin|sys|proc|dev|run)\\b"),
+
+          // B-01 fix (2026-05-09) — sandbox bypass via indirect shell invocation. The
+          // first-token allowlist already excludes `sh`/`bash`/`zsh` directly, but worker
+          // commands can still launch them via `-exec`-style flags on allowlisted binaries
+          // or via stdin pipes. The three patterns below close the documented vectors:
+          //
+          //   - `xargs sh -c "..."`         — pipe-to-shell escape
+          //   - `find ... -exec sh "{}" \;` — find's exec calls arbitrary binaries
+          //   - `bash <(curl ...)` etc.     — process substitution
+          //
+          // Direct `sh -c` / `bash -c` / `zsh -c` would already be blocked by the first-token
+          // check (sh/bash/zsh aren't allowlisted), but listed here too as defence-in-depth
+          // in case a future allowlist edit accidentally lets them in.
+          Pattern.compile("\\b(?:sh|bash|zsh|ash|dash)\\s+-c\\b"),
+          Pattern.compile("\\bxargs\\b[^|]*\\b(?:sh|bash|zsh|ash|dash)\\b"),
+          Pattern.compile("\\bfind\\b.*-(?:exec|execdir)\\s+(?:sh|bash|zsh|ash|dash)\\b"),
+          Pattern.compile("<\\(\\s*(?:curl|wget|fetch)\\b") // process substitution from network
+          );
 
   // Docker subcommands that are safe — all others are blocked
   private static final Set<String> ALLOWED_DOCKER_SUBCOMMANDS =
