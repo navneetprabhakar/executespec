@@ -28,6 +28,18 @@ export function useSse(runId: string | null) {
   // close the socket).
   const lastEventTsRef = useRef<number>(Date.now());
   const watchdogRef = useRef<ReturnType<typeof setInterval>>();
+  // F-02 fix (2026-05-09) — track the last seq received so reconnects
+  // resume from the right point (server replays from lastEventId+1) and
+  // we never apply the same event twice. Backed by SseBroadcaster's
+  // append-to-Redis-list replay path; the broadcaster already emits
+  // SseEmitter.event().id(seqNum), so EventSource exposes ev.lastEventId
+  // as the seq string.
+  const lastEventIdRef = useRef<string | null>(null);
+  // Local short-cycle dedup: if we replay a seq we already saw, skip the
+  // delivery. Bounded size — the last 200 seqs are enough for any
+  // reasonable reconnect window because the broadcaster caps replay at 500.
+  const seenSeqsRef = useRef<Set<string>>(new Set());
+  const seenSeqsOrderRef = useRef<string[]>([]);
 
   useEffect(() => {
     if (!runId) {
@@ -83,6 +95,16 @@ export function useSse(runId: string | null) {
       } catch {
         console.warn('Failed to obtain scoped SSE token, connecting without auth');
       }
+      // F-02 — pass lastEventId so the backend replays from there (it's
+      // the same value the SseBroadcaster.subscribe(runId, lastEventId)
+      // path already accepts). Dedup below catches anything the server
+      // re-sends that we somehow already applied.
+      if (lastEventIdRef.current) {
+        sseUrl +=
+          (sseUrl.includes('?') ? '&' : '?') +
+          'lastEventId=' +
+          encodeURIComponent(lastEventIdRef.current);
+      }
       const es = new EventSource(sseUrl);
       esRef.current = es;
 
@@ -98,6 +120,27 @@ export function useSse(runId: string | null) {
       es.onmessage = (ev) => {
         // F-06 — every received event resets the stall watchdog.
         lastEventTsRef.current = Date.now();
+
+        // F-02 — short-cycle dedup. SseBroadcaster's replay log can re-emit
+        // events the client already saw on a reconnect (especially after a
+        // watchdog-forced reconnect that fires inside the replay window).
+        // Skip events whose seq we've already applied; without this, the
+        // RUN_DETAIL re-application can roll the store backward to an
+        // older snapshot.
+        const seq = ev.lastEventId;
+        if (seq) {
+          if (seenSeqsRef.current.has(seq)) {
+            return;
+          }
+          seenSeqsRef.current.add(seq);
+          seenSeqsOrderRef.current.push(seq);
+          // Bounded — keep at most 200 (broadcaster replay caps at 500).
+          if (seenSeqsOrderRef.current.length > 200) {
+            const evicted = seenSeqsOrderRef.current.shift();
+            if (evicted) seenSeqsRef.current.delete(evicted);
+          }
+          lastEventIdRef.current = seq;
+        }
         try {
           const data = JSON.parse(ev.data);
 
