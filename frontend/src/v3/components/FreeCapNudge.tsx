@@ -297,6 +297,11 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
             fontSize: 13,
             fontWeight: 600,
             fontFamily: 'inherit',
+            // F-19 fix (2026-05-09) — wrap on <360px so the button text
+            // ("Upgrade to Pro — $20 / month") doesn't overflow the
+            // min(440px, 92vw) modal width on small phones.
+            whiteSpace: 'normal',
+            lineHeight: 1.3,
           }}
         >
           Upgrade to Pro — $20 / month
