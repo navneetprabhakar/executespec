@@ -1,4 +1,4 @@
-import {useCallback, useEffect, useRef, useState, useReducer} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState, useReducer} from 'react';
 import * as Tabs from '@radix-ui/react-tabs';
 import {useUiStore} from '@/stores/useUiStore';
 import {Glossary} from '@/components/shared/Glossary';
@@ -2363,19 +2363,31 @@ export function CodeTab({
     setContent('');
   }, [runId]);
 
-  const openFile = async (path: string) => {
-    if (selected === path) return;
-    setSelected(path);
-    setLoadingContent(true);
-    setContent('');
-    try {
-      const text = await getFile(runId, path);
-      setContent(typeof text === 'string' ? text : JSON.stringify(text, null, 2));
-    } catch (e) {
-      setContent(`// Error loading file: ${errMsg(e)}`);
-    }
-    setLoadingContent(false);
-  };
+  // F-08 fix (2026-05-09) — memoize openFile so the onSelectTreeFile
+  // useCallback below gets a stable dep. `selected` is read via a ref
+  // mirror so the callback identity stays bound to runId only — was
+  // recreated every render before, busting any future React.memo on
+  // TreeNodeView and forcing ~200 remounts on every parent state tick.
+  const selectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    selectedRef.current = selected;
+  }, [selected]);
+  const openFile = useCallback(
+    async (path: string) => {
+      if (selectedRef.current === path) return;
+      setSelected(path);
+      setLoadingContent(true);
+      setContent('');
+      try {
+        const text = await getFile(runId, path);
+        setContent(typeof text === 'string' ? text : JSON.stringify(text, null, 2));
+      } catch (e) {
+        setContent(`// Error loading file: ${errMsg(e)}`);
+      }
+      setLoadingContent(false);
+    },
+    [runId],
+  );
 
   // Convert clone URL to web URL for "View on SCM" link
   const scmWebUrl = repoUrl ? repoUrl.replace(/\.git$/, '') : null;
@@ -2427,7 +2439,23 @@ export function CodeTab({
     );
   }
 
-  const tree = buildFileTree(files);
+  // F-08 fix (2026-05-09) — memoize the tree so it's only rebuilt when
+  // `files` changes (was recomputed every render, ~200 TreeNodeView
+  // remounts on every parent state tick on a 5k-file run = 60-100ms jank
+  // on Logs↔Code tab switches).
+  const tree = useMemo(() => buildFileTree(files), [files]);
+
+  // F-08 — stable onSelect ref so TreeNodeView's prop identity doesn't
+  // change every render. Pre-fix, the inline `(path) => { openFile(path);
+  // if (isMobile) setShowTree(false); }` was a fresh closure each render,
+  // so any future React.memo on TreeNodeView would be busted by it.
+  const onSelectTreeFile = useCallback(
+    (path: string) => {
+      openFile(path);
+      if (isMobile) setShowTree(false);
+    },
+    [openFile, isMobile],
+  );
 
   const codeContent = (
     <div
@@ -2497,10 +2525,7 @@ export function CodeTab({
                 key={node.name}
                 node={node}
                 selected={selected}
-                onSelect={(path) => {
-                  openFile(path);
-                  if (isMobile) setShowTree(false);
-                }}
+                onSelect={onSelectTreeFile}
                 expandSignal={expandSignal}
                 collapseSignal={collapseSignal}
                 fileStatus={fileStatus}
