@@ -278,9 +278,21 @@ public class WorkerAgent {
     // empty-patch failure mode (sqlfluff-1733 et al) where the agent reads 60+ files without
     // ever writing one. Stagnation guard catches consecutive non-write streaks; this watchdog
     // catches the slower "always-investigating" pattern across the whole run.
+    //
+    // 2026-05-09 — RCA on run 4421cc6e/T9 (Debt Resolution R3+R4): a LOW BUILD task with
+    // maxIter=60 (project-run 2× multiplier on LOW=30) had forceEditAtIter=42, but the
+    // per-tier stagnationForceAfter=12 killed the worker at iter 12 — Lever A never had a
+    // chance to fire. Same pattern bites every LOW + MEDIUM task: stagnation force kills
+    // before 70%-of-iter ever lands. Fix: clamp the threshold so it fires BEFORE the
+    // stagnation force, not after. We use `min(0.7×maxIter, stagnationForceAfter - 1)` so the
+    // nudge always lands at least one iter before the worker is force-terminated, AND we keep
+    // the original 70%-of-iter ceiling for HIGH/PATCH where the iter cap is the binding
+    // constraint (e.g. PATCH maxIter=120, stagnationForce=disabled → forceEditAtIter=84).
     int totalWriteCalls = 0;
     boolean forceEditNudged = false;
-    final int forceEditAtIter = Math.max(5, (int) Math.round(maxIter * 0.7));
+    final int forceEditAtIter =
+        Math.max(
+            5, Math.min((int) Math.round(maxIter * 0.7), Math.max(1, stagnationForceAfter - 1)));
 
     if (!isResume) {
       log.info(
@@ -673,12 +685,41 @@ public class WorkerAgent {
       }
       if (stagnantIters >= stagnationForceAfter) {
         log.warn(
-            "WorkerAgent STAGNATION_FORCE run={} task={} iter={} stagnantIters={} threshold={}",
+            "WorkerAgent STAGNATION_FORCE run={} task={} iter={} stagnantIters={} threshold={}"
+                + " totalWrites={}",
             req.context().runId(),
             req.context().taskId(),
             iter,
             stagnantIters,
-            stagnationForceAfter);
+            stagnationForceAfter,
+            totalWriteCalls);
+        // 2026-05-09 Lever B extension — salvage on STAGNATION_FORCE with zero writes.
+        // RCA on run 4421cc6e/T9 (Debt Resolution R3+R4): LOW BUILD task spent 12 iters
+        // reading without writing, hit stagnation force, was marked FAILED with no recovery
+        // attempt. Lever B existed for ITERATION_LIMIT_EXCEEDED + BUDGET_EXCEEDED but not
+        // for STAGNATION_FORCE — this third path completes the salvage triangle. Same
+        // contract as the iter-limit branch: one extra LLM call, ~$0.05-0.20 spend, "wrong
+        // file edit beats empty patch." If salvage produces an edit, the smoke gate
+        // downstream decides final task status (PASS → COMPLETE, FAIL → retry / PARTIAL).
+        // If salvage fails too, fall through to the original COMPLETED_BY_STAGNATION return.
+        if (totalWriteCalls == 0) {
+          try {
+            WorkerResult salvage = runSalvageCall(req, history, toolsDispatched, toolLog, start);
+            if (salvage != null) {
+              log.info(
+                  "WorkerAgent STAGNATION salvage produced output run={} task={}",
+                  req.context().runId(),
+                  req.context().taskId());
+              return salvage;
+            }
+          } catch (Exception e) {
+            log.warn(
+                "WorkerAgent STAGNATION salvage failed run={} task={}: {}",
+                req.context().runId(),
+                req.context().taskId(),
+                e.getMessage());
+          }
+        }
         recordTerminal(WorkerResult.Outcome.COMPLETED_BY_STAGNATION, req, iter);
         return WorkerResult.builder()
             .outcome(WorkerResult.Outcome.COMPLETED_BY_STAGNATION)
