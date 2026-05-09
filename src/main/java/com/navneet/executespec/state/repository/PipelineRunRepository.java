@@ -48,6 +48,30 @@ public interface PipelineRunRepository
   void subtractTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
   /**
+   * B-12 fix (2026-05-09) — atomic conditional UPDATE that flips a run to CANCELLED only if it
+   * is still in a non-terminal status. Returns the number of rows affected (0 = run already
+   * terminal, 1 = we won the race and the row is now CANCELLED).
+   *
+   * <p>Pre-fix, {@code RunOrchestrator.cancel} did findById → check non-terminal in Java →
+   * setStatus → save. Between the check and the save, the pipeline thread could complete
+   * normally and write COMPLETE / FAILED. cancel's save then overwrote with CANCELLED — the
+   * run actually completed but the UI showed CANCELLED. Silent data corruption.
+   *
+   * <p>The single-statement UPDATE WHERE status NOT IN (...) is the only race-safe arbiter;
+   * Postgres serialises concurrent UPDATEs on the same row under READ COMMITTED.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.status = 'CANCELLED', r.completedAt = :now, "
+          + "r.failureReason = COALESCE(r.failureReason, :reason) "
+          + "WHERE r.runId = :runId AND r.status NOT IN ('COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED')")
+  int cancelIfActive(
+      @Param("runId") String runId,
+      @Param("now") java.time.Instant now,
+      @Param("reason") String reason);
+
+  /**
    * Atomic status update that only touches status + currentGate — avoids overwriting concurrent
    * field changes.
    */

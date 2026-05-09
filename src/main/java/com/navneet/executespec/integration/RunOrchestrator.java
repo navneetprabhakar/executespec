@@ -1850,10 +1850,10 @@ public class RunOrchestrator {
     var opt = runRepo.findById(runId);
     if (opt.isEmpty()) return false;
     var run = opt.get();
-    String status = run.getStatus();
-    if (isTerminal(status)) return false;
+    String prevStatus = run.getStatus();
+    if (isTerminal(prevStatus)) return false;
 
-    log.info("RunOrchestrator cancel: run={} prev={}", runId, status);
+    log.info("RunOrchestrator cancel: run={} prev={}", runId, prevStatus);
 
     // Wake a thread blocked on the plan gate (reject path).
     try {
@@ -1862,14 +1862,26 @@ public class RunOrchestrator {
       log.debug("cancel: plan gate signal failed (likely no gate open): {}", e.getMessage());
     }
 
-    // Persist + SSE so the UI reflects the cancel immediately, even if the
-    // pipeline thread hasn't unwound yet.
-    run.setStatus("CANCELLED");
-    run.setCompletedAt(Instant.now());
-    if (run.getFailureReason() == null) {
-      run.setFailureReason("Cancelled by user from status " + status);
+    // B-12 fix (2026-05-09) — atomic CAS: flip to CANCELLED only if the run
+    // is STILL non-terminal at the DB. Pre-fix, between the findById check
+    // above and the runRepo.save below, the pipeline thread could complete
+    // normally and write COMPLETE/FAILED. cancel's save then overwrote with
+    // CANCELLED — the run had actually completed but UI showed CANCELLED.
+    // Silent data corruption. Atomic UPDATE WHERE status NOT IN (terminal_set)
+    // serialises with the pipeline thread's terminal writes via Postgres
+    // row-level locks.
+    int updated =
+        runRepo.cancelIfActive(
+            runId, Instant.now(), "Cancelled by user from status " + prevStatus);
+    if (updated == 0) {
+      log.info(
+          "RunOrchestrator cancel: run={} already terminated by pipeline thread between"
+              + " check and CAS — no-op",
+          runId);
+      // Pipeline thread won the race; nothing to undo. Return false so the
+      // caller (controller) returns 409 / NOT_CANCELLABLE rather than 200.
+      return false;
     }
-    runRepo.save(run);
     broadcaster.emit(runId, RunEvent.runStatus(runId, "CANCELLED"));
     broadcaster.emit(runId, RunEvent.complete(runId, "CANCELLED"));
     broadcaster.complete(runId);
@@ -1877,7 +1889,8 @@ public class RunOrchestrator {
 
     // Interrupt the pipeline thread as a backstop. The pipeline itself is
     // not cancellation-aware at every step, so it may continue briefly —
-    // but its terminal writes are no-ops because the run is already terminal.
+    // but its terminal writes are no-ops because the run is already terminal
+    // (the same atomic CAS applies to every terminal-write path).
     Future<?> future = activeRuns.remove(runId);
     if (future != null) future.cancel(true);
     return true;
