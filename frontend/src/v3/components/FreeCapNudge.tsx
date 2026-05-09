@@ -173,7 +173,13 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
 
   function onUpgrade() {
     trackV3(V3_EVENTS.TIER_UPGRADED, {fromTier: 'FREE', toTier: 'PRO', source: 'cap_modal'});
-    navigate('/billing');
+    // U-30 fix (2026-05-09) — route to /pricing (not /billing) so the user sees
+    // tier comparison first; tag with from + consumed so PricingPage can light
+    // up "your usage fits here" callout on the PRO card and pre-position the
+    // page on the right tier. Pre-fix landed users straight at /billing
+    // checkout with no comparison + no breadcrumb back.
+    const consumed = cap ? Math.max(0, cap.cap - cap.balance) : 0;
+    navigate(`/pricing?from=cap-block&consumed=${consumed}`);
     onClose();
   }
 
@@ -258,6 +264,19 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
         >
           That was your last free run.
         </h2>
+        {/* U-30 fix (2026-05-09) — surface concrete usage so the upgrade
+            decision is grounded ("you've used all 9 of 9") instead of
+            abstract ("you're out of free runs"). */}
+        <p
+          style={{
+            margin: '0 0 4px',
+            fontSize: 11.5,
+            color: 'var(--v3-text-subtle)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          You've used <strong>{Math.max(0, cap.cap - cap.balance)}</strong> of {cap.cap} free runs.
+        </p>
         <p style={{margin: 0, fontSize: 12.5, color: 'var(--v3-text-muted)', lineHeight: 1.55}}>
           Get unlimited runs for $20/month — cancel any time. Or invite a friend; you both get +5
           runs.
@@ -281,6 +300,38 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
           }}
         >
           Upgrade to Pro — $20 / month
+        </button>
+
+        {/* U-30 fix (2026-05-09) — surface plan comparison as a secondary
+            CTA. Pre-fix, the only options were "Upgrade to Pro" (commits
+            user to $20 PRO) and "invite a friend" (refer-and-earn) — but
+            the pricing page also shows TEAM, MAX, ENTERPRISE; users with
+            multi-seat / BYOK / custom needs had no surfaced path to the
+            right tier. Link goes through the same routing as Upgrade so
+            the page lands with full context. */}
+        <button
+          type='button'
+          onClick={() => {
+            const consumed = Math.max(0, cap.cap - cap.balance);
+            navigate(`/pricing?from=cap-block&consumed=${consumed}`);
+            onClose();
+          }}
+          style={{
+            display: 'block',
+            width: '100%',
+            marginTop: 8,
+            padding: '4px 0',
+            background: 'transparent',
+            color: 'var(--v3-text-muted)',
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 11.5,
+            fontFamily: 'inherit',
+            textDecoration: 'underline',
+            textUnderlineOffset: 3,
+          }}
+        >
+          Compare all plans →
         </button>
 
         <div
