@@ -1,8 +1,10 @@
 package com.navneet.executespec.router;
 
 import java.time.Duration;
+import java.util.List;
 
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
 import io.micrometer.core.instrument.Counter;
@@ -43,6 +45,49 @@ public class ProviderHealthTracker {
 
   private final StringRedisTemplate redis;
   private final MeterRegistry meterRegistry;
+
+  /**
+   * B-11 fix (2026-05-09) — atomic INCR + EXPIRE + threshold-check + health SET via Lua.
+   *
+   * <p>Pre-fix, recordFailure() did three independent Redis round-trips:
+   *
+   * <pre>
+   *   1. INCR failures
+   *   2. EXPIRE failures TTL
+   *   3. (if count >= threshold) GET + SET health UNHEALTHY TTL
+   * </pre>
+   *
+   * <p>A pod could crash between steps 1 and 2, leaving the failures counter without a TTL —
+   * circuit could stick open forever (well, until a successful call cleared it). Worse: with
+   * three pods racing on the same provider, INCRs interleave and the threshold check fires on
+   * a count that disagrees with what the other pods see. Across pods, circuit could
+   * mark-then-clear-then-mark in unexpected order.
+   *
+   * <p>Lua keeps all four operations on a single Redis round-trip executed atomically by the
+   * Redis server — no inter-step interleave possible.
+   *
+   * <p>Returns the new failure count (Long) so the caller can decide whether to log the
+   * "circuit opened" message. The script always returns a Long; null means the script failed
+   * (Redis down) and the caller falls through to the fail-open path.
+   */
+  private static final DefaultRedisScript<Long> RECORD_FAILURE_SCRIPT;
+
+  static {
+    String lua =
+        "local failures_key = KEYS[1] "
+            + "local health_key  = KEYS[2] "
+            + "local failure_ttl = tonumber(ARGV[1]) "
+            + "local recovery_ttl = tonumber(ARGV[2]) "
+            + "local threshold = tonumber(ARGV[3]) "
+            + "local unhealthy_value = ARGV[4] "
+            + "local count = redis.call('INCR', failures_key) "
+            + "redis.call('EXPIRE', failures_key, failure_ttl) "
+            + "if count >= threshold then "
+            + "  redis.call('SET', health_key, unhealthy_value, 'EX', recovery_ttl) "
+            + "end "
+            + "return count";
+    RECORD_FAILURE_SCRIPT = new DefaultRedisScript<>(lua, Long.class);
+  }
 
   /**
    * Returns true if the provider is healthy (circuit closed). Absent key = healthy. Redis errors
@@ -92,31 +137,40 @@ public class ProviderHealthTracker {
   /**
    * Records a failed call — increments consecutive failure counter. If threshold reached, sets the
    * unhealthy key with TTL-based auto-recovery.
+   *
+   * <p>B-11 fix (2026-05-09) — INCR + EXPIRE + threshold-check + health SET now run as a
+   * single atomic Lua script (RECORD_FAILURE_SCRIPT above). Previously they were separate
+   * Redis round-trips that could interleave across pods or crash mid-sequence.
    */
   public void recordFailure(LlmProvider provider) {
     try {
-      Long count = redis.opsForValue().increment(failureKey(provider));
-      redis.expire(failureKey(provider), FAILURE_COUNTER_TTL);
+      // Pre-check the unhealthy state BEFORE running the script so we know whether to log
+      // "circuit OPENED" exactly once across pods. This GET is a separate round-trip but it's
+      // log-only — if it disagrees with the post-script state under racing pods, the worst
+      // case is a duplicate or missed log line, not a state corruption.
+      boolean alreadyUnhealthy =
+          UNHEALTHY_VALUE.equals(redis.opsForValue().get(healthKey(provider)));
 
-      if (count != null && count >= UNHEALTHY_THRESHOLD) {
-        // Check if already marked unhealthy to avoid redundant logging
-        boolean alreadyUnhealthy =
-            UNHEALTHY_VALUE.equals(redis.opsForValue().get(healthKey(provider)));
+      Long count =
+          redis.execute(
+              RECORD_FAILURE_SCRIPT,
+              List.of(failureKey(provider), healthKey(provider)),
+              String.valueOf(FAILURE_COUNTER_TTL.toSeconds()),
+              String.valueOf(RECOVERY_WINDOW.toSeconds()),
+              String.valueOf(UNHEALTHY_THRESHOLD),
+              UNHEALTHY_VALUE);
 
-        redis.opsForValue().set(healthKey(provider), UNHEALTHY_VALUE, RECOVERY_WINDOW);
-
-        if (!alreadyUnhealthy) {
-          log.warn(
-              "Provider {} circuit OPENED after {} consecutive failures — "
-                  + "will auto-recover in {}s",
-              provider,
-              count,
-              RECOVERY_WINDOW.toSeconds());
-          Counter.builder("executespec.provider.circuit_opened")
-              .tag("provider", provider.name())
-              .register(meterRegistry)
-              .increment();
-        }
+      if (count != null && count >= UNHEALTHY_THRESHOLD && !alreadyUnhealthy) {
+        log.warn(
+            "Provider {} circuit OPENED after {} consecutive failures — "
+                + "will auto-recover in {}s",
+            provider,
+            count,
+            RECOVERY_WINDOW.toSeconds());
+        Counter.builder("executespec.provider.circuit_opened")
+            .tag("provider", provider.name())
+            .register(meterRegistry)
+            .increment();
       }
     } catch (Exception e) {
       log.debug("Redis error recording failure for {}", provider, e);
