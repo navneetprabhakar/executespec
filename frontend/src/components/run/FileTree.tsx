@@ -1,4 +1,22 @@
 import {useState, useMemo} from 'react';
+import type {LucideIcon} from 'lucide-react';
+import {
+  Folder,
+  FolderOpen,
+  FileCode2,
+  FileText,
+  FileJson,
+  FileType,
+  Database,
+  Terminal,
+  Container,
+  Settings,
+  Image as ImageIcon,
+  Lock,
+  GitBranch,
+  Package,
+  File,
+} from 'lucide-react';
 
 /**
  * `status` (V169-companion 2026-05-02) — git-derived per-file change marker so the file tree
@@ -67,7 +85,11 @@ function TreeNodeView({
 }) {
   const [expanded, setExpanded] = useState(depth < 2); // auto-expand first 2 levels
 
-  const icon = node.isDirectory ? (expanded ? '\u{1F4C2}' : '\u{1F4C1}') : getFileIcon(node.name);
+  const {Icon, colorClass} = node.isDirectory
+    ? expanded
+      ? {Icon: FolderOpen, colorClass: 'text-accent-blue/80'}
+      : {Icon: Folder, colorClass: 'text-muted'}
+    : getFileIcon(node.name);
 
   // V169-companion 2026-05-02 — leaf nodes show an A/M chip for added/modified files.
   // Directory nodes show a small colored dot when any descendant has changed (so the user can
@@ -90,7 +112,7 @@ function TreeNodeView({
           }
         }}
       >
-        <span className='text-xs'>{icon}</span>
+        <Icon className={`h-3.5 w-3.5 shrink-0 ${colorClass}`} aria-hidden='true' />
         <span className='truncate flex-1'>{node.name}</span>
         {dirDot}
         {leafBadge}
@@ -204,31 +226,140 @@ function renderStatusDot(status: FileChangeStatus) {
   );
 }
 
-function getFileIcon(name: string): string {
-  const ext = name.split('.').pop()?.toLowerCase();
-  const icons: Record<string, string> = {
-    java: '\u2615',
-    kt: '\u{1F7E3}',
-    py: '\u{1F40D}',
-    js: '\u{1F7E8}',
-    jsx: '\u269B\uFE0F',
-    ts: '\u{1F537}',
-    tsx: '\u269B\uFE0F',
-    html: '\u{1F310}',
-    css: '\u{1F3A8}',
-    json: '\u{1F4CB}',
-    yml: '\u2699\uFE0F',
-    yaml: '\u2699\uFE0F',
-    xml: '\u{1F4C4}',
-    md: '\u{1F4DD}',
-    sql: '\u{1F5C4}\uFE0F',
-    sh: '\u{1F5A5}\uFE0F',
-    dockerfile: '\u{1F433}',
-    toml: '\u2699\uFE0F',
-    rs: '\u{1F980}',
-    go: '\u{1F439}',
-    rb: '\u{1F48E}',
-    gradle: '\u{1F418}',
-  };
-  return icons[ext || ''] || '\u{1F4C4}';
+/**
+ * Lucide-icon mapping per file extension. Returns a (component, colour-class) pair so
+ * the tree can render a uniformly-sized 14px SVG with a semantic tint.
+ *
+ * Pre-fix this returned emoji codepoints (\u2615 for Java, \uD83D\uDFE3 for Kotlin, \uD83D\uDC39 for Go, \uD83D\uDC8E for
+ * Ruby, \uD83D\uDC33 for Docker, etc). Three problems with that:
+ *   1. Emoji renders OS-dependent \u2014 different size, baseline, and colour on macOS / Windows
+ *      / Linux / Android, so the tree looked uneven.
+ *   2. Several picks were obscure (purple circle for Kotlin? hamster for Go?) and required
+ *      memorisation.
+ *   3. It clashed with the rest of the UI which uses Lucide line-icons throughout.
+ *
+ * The replacement uses a small palette of Lucide icons (FileCode2 for source, FileText for
+ * docs, FileJson for structured config, Settings for *.toml/*.ini/*.env/*.yml, Database for
+ * SQL, Terminal for shell, Container for Dockerfile, Package for lockfiles, Lock for
+ * key/secret-suffixed paths, Image for binary assets, GitBranch for VCS metadata) with a
+ * tint class so green=stylesheet, blue=script-source, amber=config, gray=docs/unknown.
+ * Same icon shape for the common cases (every code file is FileCode2) keeps scan-ability
+ * high while colour gives the at-a-glance language hint.
+ */
+function getFileIcon(name: string): {Icon: LucideIcon; colorClass: string} {
+  const lower = name.toLowerCase();
+  // Filename-based matches before extension-based ones (Dockerfile, Makefile, lockfiles etc).
+  if (lower === 'dockerfile' || lower.endsWith('.dockerfile') || lower.startsWith('dockerfile.')) {
+    return {Icon: Container, colorClass: 'text-accent-blue/80'};
+  }
+  if (lower === 'makefile') return {Icon: Settings, colorClass: 'text-accent-amber'};
+  if (lower === 'package-lock.json' || lower === 'yarn.lock' || lower === 'pnpm-lock.yaml')
+    return {Icon: Package, colorClass: 'text-muted'};
+  if (lower === '.gitignore' || lower === '.gitattributes' || lower === '.gitmodules')
+    return {Icon: GitBranch, colorClass: 'text-muted'};
+  if (lower === '.env' || lower.startsWith('.env.'))
+    return {Icon: Lock, colorClass: 'text-accent-amber'};
+
+  const ext = lower.split('.').pop() ?? '';
+  switch (ext) {
+    // Code (uniform: FileCode2). Tinted by language family so the colour does the
+    // mnemonic work without needing ten different icon shapes.
+    case 'ts':
+    case 'tsx':
+    case 'js':
+    case 'jsx':
+    case 'mjs':
+    case 'cjs':
+      return {Icon: FileCode2, colorClass: 'text-accent-blue'};
+    case 'java':
+    case 'kt':
+    case 'kts':
+    case 'scala':
+    case 'groovy':
+    case 'gradle':
+      return {Icon: FileCode2, colorClass: 'text-accent-amber'};
+    case 'py':
+    case 'pyi':
+    case 'rb':
+    case 'php':
+      return {Icon: FileCode2, colorClass: 'text-status-success'};
+    case 'go':
+    case 'rs':
+    case 'c':
+    case 'cpp':
+    case 'cxx':
+    case 'h':
+    case 'hpp':
+    case 'cs':
+    case 'swift':
+    case 'm':
+    case 'mm':
+      return {Icon: FileCode2, colorClass: 'text-status-thinking'};
+    // Markup / styles
+    case 'html':
+    case 'htm':
+    case 'xml':
+    case 'svg':
+    case 'vue':
+    case 'svelte':
+      return {Icon: FileType, colorClass: 'text-accent-amber'};
+    case 'css':
+    case 'scss':
+    case 'sass':
+    case 'less':
+    case 'styl':
+      return {Icon: FileType, colorClass: 'text-status-success'};
+    // Structured config
+    case 'json':
+    case 'json5':
+      return {Icon: FileJson, colorClass: 'text-accent-amber'};
+    case 'yml':
+    case 'yaml':
+    case 'toml':
+    case 'ini':
+    case 'conf':
+    case 'cfg':
+    case 'properties':
+      return {Icon: Settings, colorClass: 'text-muted'};
+    // Docs
+    case 'md':
+    case 'mdx':
+    case 'rst':
+    case 'txt':
+    case 'adoc':
+      return {Icon: FileText, colorClass: 'text-secondary'};
+    // Data
+    case 'sql':
+    case 'csv':
+    case 'tsv':
+    case 'parquet':
+    case 'db':
+    case 'sqlite':
+      return {Icon: Database, colorClass: 'text-accent-blue/70'};
+    // Shell
+    case 'sh':
+    case 'bash':
+    case 'zsh':
+    case 'fish':
+    case 'ps1':
+      return {Icon: Terminal, colorClass: 'text-status-success'};
+    // Binary assets
+    case 'png':
+    case 'jpg':
+    case 'jpeg':
+    case 'gif':
+    case 'webp':
+    case 'ico':
+    case 'avif':
+      return {Icon: ImageIcon, colorClass: 'text-muted'};
+    // Secrets
+    case 'pem':
+    case 'key':
+    case 'crt':
+    case 'cert':
+      return {Icon: Lock, colorClass: 'text-accent-amber'};
+    // Default
+    default:
+      return {Icon: File, colorClass: 'text-muted'};
+  }
 }

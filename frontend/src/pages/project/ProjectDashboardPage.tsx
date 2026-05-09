@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useState} from 'react';
-import {Link, useNavigate, useParams} from 'react-router-dom';
+import {Link, useLocation, useNavigate, useParams} from 'react-router-dom';
 import {ArrowLeft, FolderGit2, Rocket, MoreHorizontal, Plus, Sparkles} from 'lucide-react';
 import {useProjectStore} from '@/stores/useProjectStore';
 import * as api from '@/lib/api';
@@ -69,6 +69,8 @@ function legacyTabToNew(legacy: string | null): {
   drawer?: DrawerPanel;
 } {
   switch (legacy) {
+    // Legacy aliases (pre-v2.6.4 IA cleanup) — bookmarked URLs from older
+    // builds + cross-link emitters that still ship those names.
     case 'overview':
       return {tab: 'pulse'};
     case 'launches':
@@ -79,11 +81,6 @@ function legacyTabToNew(legacy: string | null): {
       return {tab: 'runs', sub: 'detail'};
     case 'architecture':
       return {tab: 'code', codeSub: 'architecture'};
-    case 'repos':
-      // v2.7.2: Repos is now top-level, no codeSub needed.
-      return {tab: 'repos'};
-    case 'chat':
-      return {tab: 'chat'};
     case 'docs':
       return {tab: 'pulse', drawer: 'docs'};
     case 'memory':
@@ -92,12 +89,24 @@ function legacyTabToNew(legacy: string | null): {
       return {tab: 'pulse', drawer: 'activity'};
     case 'team':
       return {tab: 'pulse', drawer: 'team'};
+    // Canonical TabKey identities — keep ?tab=<canonical> working so
+    // emitters like RepoContextPanel "Open Architecture →" linking to
+    // ?tab=code don't fall through to the default.
     case 'compose':
       return {tab: 'compose'};
+    case 'pulse':
+      return {tab: 'pulse'};
+    case 'repos':
+      return {tab: 'repos'};
+    case 'runs':
+      return {tab: 'runs'};
+    case 'code':
+      return {tab: 'code'};
+    case 'chat':
+      return {tab: 'chat'};
     default:
       // Single-surface retirement (2026-05-06): default landing is
-      // Compose (chat-thread + composer). Users explicitly asking for
-      // ?tab=pulse/repos/code/chat get those views unchanged.
+      // Compose (chat-thread + composer).
       return {tab: 'compose'};
   }
 }
@@ -114,6 +123,7 @@ const TAB_LABELS: {key: TabKey; label: string}[] = [
 export default function ProjectDashboardPage() {
   const {projectId} = useParams<{projectId: string}>();
   const navigate = useNavigate();
+  const location = useLocation();
   const drawer = useDrawerState();
 
   // P-06 (UX audit, 2026-05-03) — when OrgProjectsPage routes here with
@@ -271,6 +281,30 @@ export default function ProjectDashboardPage() {
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
+  // 2026-05-09 — same-route `<Link>` propagation. React Router updates
+  // location.search when a Link navigates within the current route, but
+  // popstate doesn't fire (it's not a history pop) and the mount-time
+  // useMemo only runs once. Without this, cross-component links like
+  // RepoContextPanel's "Open Architecture →" (Link to ?tab=code) update
+  // the URL but the tab state stays where it was → "click does nothing".
+  // Effect re-derives tab/sub/codeSub from URL whenever the search string
+  // changes; the writeViewToUrl path is idempotent (replaceState with the
+  // same string is a no-op) so this doesn't loop.
+  useEffect(() => {
+    const sp = new URLSearchParams(location.search);
+    const legacy = sp.get('tab');
+    const mapped = legacyTabToNew(legacy);
+    const subParam = sp.get('sub') as RunsSubTab | null;
+    const codeSubParam = sp.get('codeSub') as CodeSubTab | null;
+    const nextTab = mapped.tab;
+    const nextRunsSub = subParam ?? mapped.sub ?? 'launches';
+    const nextCodeSub = codeSubParam ?? mapped.codeSub ?? 'architecture';
+    // Only setState when something actually changed — keeps render churn low.
+    setTabRaw((curr) => (curr === nextTab ? curr : nextTab));
+    setRunsSubRaw((curr) => (curr === nextRunsSub ? curr : nextRunsSub));
+    setCodeSubRaw((curr) => (curr === nextCodeSub ? curr : nextCodeSub));
+  }, [location.search]);
 
   // R-09 lint cleanup — wrap `tasks` in useMemo so the auto-select useEffect
   // below has a stable dependency. Without the memo the `?? []` literal
