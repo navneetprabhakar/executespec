@@ -6,12 +6,28 @@ import {refreshUsageBadge} from '@/components/billing/UsageBadge';
 
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
+// F-06 fix (2026-05-09) — silent-stall watchdog. The scoped SSE token has a
+// 5-minute backend TTL; on a long-running run the open EventSource keeps
+// streaming until either the token is rejected (server-side close → onerror
+// fires → connect() retries with a fresh token) OR the server silently stops
+// pushing events (token expired but socket stayed open at the proxy layer →
+// no onerror, log appears to freeze).
+// Watchdog: if no event arrives within STALL_THRESHOLD_MS, force-close +
+// reconnect, which fetches a fresh token. Proven defense against the
+// "live-log frozen for 5 min on a 12-min run" failure mode.
+const STALL_THRESHOLD_MS = 60_000;
+
 export function useSse(runId: string | null) {
   const {setStatus, addEntry, clearEntries, setRunId} = useSseStore();
   const {patchRunStatus, fetchRun} = useRunStore();
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
   const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  // F-06 fix (2026-05-09) — last-event timestamp + watchdog interval, used
+  // to detect silent stalls (token expired server-side but proxy didn't
+  // close the socket).
+  const lastEventTsRef = useRef<number>(Date.now());
+  const watchdogRef = useRef<ReturnType<typeof setInterval>>();
 
   useEffect(() => {
     if (!runId) {
@@ -80,6 +96,8 @@ export function useSse(runId: string | null) {
       };
 
       es.onmessage = (ev) => {
+        // F-06 — every received event resets the stall watchdog.
+        lastEventTsRef.current = Date.now();
         try {
           const data = JSON.parse(ev.data);
 
@@ -159,13 +177,38 @@ export function useSse(runId: string | null) {
         attemptRef.current++;
         timeoutRef.current = setTimeout(connect, delay);
       };
+
+      // F-06 — reset watchdog timestamp on successful connect.
+      lastEventTsRef.current = Date.now();
     }
 
     connect();
 
+    // F-06 — silent-stall watchdog. Runs every 15s; if last event was >60s
+    // ago AND the run is still non-terminal, force-reconnect to pull a
+    // fresh SSE token + a fresh socket. Skips terminal runs because no
+    // events should arrive on those — silence isn't a failure.
+    watchdogRef.current = setInterval(() => {
+      const stalled = Date.now() - lastEventTsRef.current > STALL_THRESHOLD_MS;
+      if (!stalled) return;
+      const active = useRunStore.getState().activeRun;
+      const status = active?.status ?? '';
+      const TERMINAL = new Set(['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED']);
+      if (TERMINAL.has(status)) return;
+      console.warn('[useSse] silent stall detected; forcing reconnect');
+      esRef.current?.close();
+      esRef.current = null;
+      lastEventTsRef.current = Date.now();
+      // Reset attempt counter so we reconnect immediately rather than
+      // accumulating exponential backoff from the previous gap.
+      attemptRef.current = 0;
+      connect();
+    }, 15_000);
+
     return () => {
       esRef.current?.close();
       clearTimeout(timeoutRef.current);
+      clearInterval(watchdogRef.current);
       setStatus('DISCONNECTED');
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
