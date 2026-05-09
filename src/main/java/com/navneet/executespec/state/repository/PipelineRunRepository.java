@@ -28,6 +28,26 @@ public interface PipelineRunRepository
   void addTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
 
   /**
+   * B-03 fix (2026-05-09) — atomic token-counter subtraction, mirror of {@link #addTokens}.
+   * Pre-fix, {@link com.navneet.executespec.state.StateStore#markRetryingWithFeedback} did
+   * `findById → run.setTotalInputTokens(total - oldIn) → save` which is a read-modify-write
+   * with no row lock; concurrent task retries on the same run could interleave between read
+   * and write and lose / double-count tokens. Cost reports drifted from actual cost.
+   *
+   * Uses GREATEST(0, ...) on each column so an under-attributed task can't push the total
+   * negative on a defensive subtract.
+   */
+  @Modifying
+  @Transactional
+  @Query(
+      "UPDATE PipelineRun r SET r.totalInputTokens = "
+          + "  CASE WHEN r.totalInputTokens > :inp THEN r.totalInputTokens - :inp ELSE 0 END, "
+          + "r.totalOutputTokens = "
+          + "  CASE WHEN r.totalOutputTokens > :out THEN r.totalOutputTokens - :out ELSE 0 END "
+          + "WHERE r.runId = :runId")
+  void subtractTokens(@Param("runId") String runId, @Param("inp") int inp, @Param("out") int out);
+
+  /**
    * Atomic status update that only touches status + currentGate — avoids overwriting concurrent
    * field changes.
    */

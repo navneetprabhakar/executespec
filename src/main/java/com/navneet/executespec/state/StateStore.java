@@ -326,20 +326,15 @@ public class StateStore {
         .findById(taskId)
         .ifPresent(
             task -> {
-              // Subtract old token counts from run totals before resetting (prevents
-              // double-counting)
+              // B-03 fix (2026-05-09) — atomic subtract so concurrent retries on the
+              // same run don't race read-modify-write and double-count or lose tokens.
+              // Mirrors the addTokens(...) pattern already used by every phase
+              // accumulator. Pre-fix: findById → setTotal(total-oldIn) → save with no
+              // row lock; two retries firing within milliseconds drifted the run total.
               int oldIn = task.getInputTokens() != null ? task.getInputTokens() : 0;
               int oldOut = task.getOutputTokens() != null ? task.getOutputTokens() : 0;
               if (oldIn > 0 || oldOut > 0) {
-                runRepo
-                    .findById(runId)
-                    .ifPresent(
-                        run -> {
-                          run.setTotalInputTokens(Math.max(0, run.getTotalInputTokens() - oldIn));
-                          run.setTotalOutputTokens(
-                              Math.max(0, run.getTotalOutputTokens() - oldOut));
-                          runRepo.save(run);
-                        });
+                runRepo.subtractTokens(runId, oldIn, oldOut);
               }
               task.setInputTokens(0);
               task.setOutputTokens(0);
