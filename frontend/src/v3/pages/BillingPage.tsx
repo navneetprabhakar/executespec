@@ -1,5 +1,5 @@
-import {useEffect, useState} from 'react';
-import {Link} from 'react-router-dom';
+import {useEffect, useMemo, useState} from 'react';
+import {Link, useSearchParams} from 'react-router-dom';
 import {getV3Entitlements, type V3Entitlements} from '../lib/api';
 import PricingGrid from '../components/PricingGrid';
 import Pill from './../components/Pill';
@@ -28,6 +28,18 @@ export default function BillingPage() {
   // not from /api/v3/entitlements which can lag behind for users whose
   // backing org has no real subscription record.
   const meTier = useAuthStore((s) => s.user?.tier ?? null);
+
+  // U-31 fix (2026-05-09) — read cap-block context so the page can render
+  // a "you got here because…" hint above the tier grid. Closes the loop
+  // FreeCapBlockingModal opens when it routes to /billing?from=cap-block&consumed=N.
+  const [searchParams] = useSearchParams();
+  const fromCapBlock = searchParams.get('from') === 'cap-block';
+  const consumed = useMemo(() => {
+    const raw = searchParams.get('consumed');
+    if (!raw) return null;
+    const n = Number.parseInt(raw, 10);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  }, [searchParams]);
 
   useEffect(() => {
     let cancelled = false;
@@ -135,6 +147,30 @@ export default function BillingPage() {
               >
                 Pick what fits — change any time.
               </p>
+              {/* U-31 fix (2026-05-09) — cap-block context banner. When
+                  the user lands here from FreeCapBlockingModal the route
+                  carries `?from=cap-block&consumed=N`. Surface a one-line
+                  "you got here because…" hint so the user understands why
+                  this page is suddenly relevant + sees their consumed
+                  count without going back. */}
+              {fromCapBlock && (
+                <div
+                  role='note'
+                  style={{
+                    marginTop: 8,
+                    padding: '8px 12px',
+                    background: 'rgba(245,158,11,0.10)',
+                    border: '1px solid rgba(245,158,11,0.32)',
+                    borderRadius: 6,
+                    fontSize: 12,
+                    color: 'var(--v3-text)',
+                  }}
+                >
+                  You hit your free-tier cap
+                  {consumed != null ? ` after ${consumed} runs` : ''} — pick a paid plan
+                  below to keep going.
+                </div>
+              )}
             </div>
             {/* Task 4: Pricing-grid "Current" badge sources from canonical tier
              * (me.tier) so PRO users see the Pro card highlighted instead of

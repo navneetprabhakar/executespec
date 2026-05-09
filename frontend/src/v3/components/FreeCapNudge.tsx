@@ -179,7 +179,7 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
     // page on the right tier. Pre-fix landed users straight at /billing
     // checkout with no comparison + no breadcrumb back.
     const consumed = cap ? Math.max(0, cap.cap - cap.balance) : 0;
-    navigate(`/pricing?from=cap-block&consumed=${consumed}`);
+    navigate(`/billing?from=cap-block&consumed=${consumed}`);
     onClose();
   }
 
@@ -313,7 +313,7 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
           type='button'
           onClick={() => {
             const consumed = Math.max(0, cap.cap - cap.balance);
-            navigate(`/pricing?from=cap-block&consumed=${consumed}`);
+            navigate(`/billing?from=cap-block&consumed=${consumed}`);
             onClose();
           }}
           style={{
