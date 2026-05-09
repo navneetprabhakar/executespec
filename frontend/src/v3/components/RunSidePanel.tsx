@@ -2180,6 +2180,67 @@ function chatActionButtonStyle(
   };
 }
 
+/**
+ * U-23 fix (2026-05-09) — small icon-button that copies the run's spec
+ * text to the clipboard with visual feedback. Renders inside the chat
+ * panel's run-summary header next to the truncated spec preview.
+ *
+ * Why a primitive instead of a one-shot inline copy: this pattern will
+ * surface in the upcoming "Copy plan" + "Copy report" affordances too;
+ * factor it once.
+ */
+function CopySpecButton({text}: {text: string}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type='button'
+      title='Copy spec to clipboard'
+      aria-label='Copy spec to clipboard'
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          // Older browsers / non-https — fall back to a textarea exec hack.
+          const ta = document.createElement('textarea');
+          ta.value = text;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          try {
+            // eslint-disable-next-line @typescript-eslint/no-deprecated
+            document.execCommand('copy');
+            setCopied(true);
+            setTimeout(() => setCopied(false), 1500);
+          } catch {
+            /* give up; user can drag-select */
+          } finally {
+            document.body.removeChild(ta);
+          }
+        }
+      }}
+      style={{
+        flexShrink: 0,
+        padding: '2px 6px',
+        fontSize: 10,
+        fontWeight: 600,
+        textTransform: 'uppercase',
+        letterSpacing: '0.05em',
+        color: copied ? 'var(--v3-success)' : 'var(--v3-text-subtle)',
+        background: 'transparent',
+        border: '1px solid var(--v3-border)',
+        borderRadius: 4,
+        cursor: 'pointer',
+        fontFamily: 'inherit',
+      }}
+    >
+      {copied ? 'Copied' : 'Copy'}
+    </button>
+  );
+}
+
 function ChatPane({
   detail,
   prComments,
@@ -2573,19 +2634,29 @@ function ChatPane({
             )}
           </div>
           {detail.userRequest && (
-            <div
-              style={{
-                fontSize: 11.5,
-                color: 'var(--v3-text-muted)',
-                lineHeight: 1.4,
-                display: '-webkit-box',
-                WebkitLineClamp: 2,
-                WebkitBoxOrient: 'vertical',
-                overflow: 'hidden',
-              }}
-              title={detail.userRequest}
-            >
-              {detail.userRequest}
+            <div style={{display: 'flex', alignItems: 'flex-start', gap: 6}}>
+              <div
+                style={{
+                  flex: 1,
+                  fontSize: 11.5,
+                  color: 'var(--v3-text-muted)',
+                  lineHeight: 1.4,
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                }}
+                title={detail.userRequest}
+              >
+                {detail.userRequest}
+              </div>
+              {/* U-23 fix (2026-05-09) — Copy spec affordance. Operators
+                  iterating on a run regularly need to paste the spec
+                  into Slack / a follow-up issue / a teammate's chat;
+                  pre-fix they had to drag-select inside the truncated
+                  preview which often lost the trailing text. Inline
+                  copy button surfaces the full spec text. */}
+              <CopySpecButton text={detail.userRequest} />
             </div>
           )}
         </div>
