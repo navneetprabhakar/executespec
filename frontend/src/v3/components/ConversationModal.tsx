@@ -134,11 +134,13 @@ export default function ConversationModal({initialText, onUseSpec, onClose}: Pro
           width: '100%',
           maxWidth: 720,
           maxHeight: '85vh',
-          // Use an opaque surface stepped one rung above the page bg so
-          // the modal box itself pops against the blurred backdrop. Strong
-          // shadow + lifted border keep the edge crisp.
-          background: 'var(--c-graphite-2, var(--v3-surface))',
-          border: '1px solid var(--c-graphite-4, var(--v3-border))',
+          // F-26 (2026-05-09) — switched from raw --c-graphite-2 / -4 to the
+          // v3-surface tokens so the light-theme paper-* cascade fires
+          // correctly on this modal too. The "stepped one rung above the
+          // page bg" intent is preserved (--v3-surface IS one rung above
+          // --v3-bg in the dark cascade and one rung above paper-0 in light).
+          background: 'var(--v3-surface)',
+          border: '1px solid var(--v3-border)',
           borderRadius: 12,
           display: 'flex',
           flexDirection: 'column',

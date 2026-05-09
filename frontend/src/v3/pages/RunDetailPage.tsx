@@ -342,13 +342,14 @@ export default function RunDetailPage() {
         </Link>
       )}
 
-      {/* Status header */}
+      {/* Status header — F-26 (2026-05-09): swapped raw inline style for the
+          v3-card primitive so light-theme + paper-* surfaces cascade cleanly
+          and so the radius / shadow stay in lockstep with PulseTab + the
+          rest of the v3 surface set. */}
       {detail && (
         <div
+          className='v3-card'
           style={{
-            background: 'var(--v3-surface)',
-            border: '1px solid var(--v3-border)',
-            borderRadius: 8,
             padding: 14,
             marginBottom: 16,
           }}

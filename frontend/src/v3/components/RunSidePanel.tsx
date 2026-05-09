@@ -164,10 +164,12 @@ export default function RunSidePanel({
 
   return (
     <aside
+      // F-26 (2026-05-09) — v3-card primitive (radius 10, soft shadow,
+      // light-theme paper-* cascade) instead of the old raw surface +
+      // hand-rolled border. Side panel now visually matches PulseTab,
+      // BillingPage, RunsListPage, etc.
+      className='v3-card'
       style={{
-        background: 'var(--v3-surface)',
-        border: '1px solid var(--v3-border)',
-        borderRadius: 8,
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
