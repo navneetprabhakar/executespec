@@ -1,6 +1,7 @@
 import {useEffect, useState} from 'react';
 import {errMsg} from '@/lib/utils';
 import {getWorkspaceHealth, analyseProject, type WorkspaceHealthReport} from '@/lib/api';
+import {useUiStore} from '@/stores/useUiStore';
 
 /**
  * v2.5.2 — per-repo health summary for the Project Overview tab.
@@ -38,6 +39,12 @@ export default function WorkspaceHealthPanel({projectId}: {projectId: string}) {
     try {
       await analyseProject(projectId);
       await load();
+      // F-20 fix (2026-05-09) — confirmation toast. Pre-fix the button
+      // simply re-loaded the panel; users couldn't tell if the call
+      // landed unless they noticed staleness counts changing.
+      useUiStore
+        .getState()
+        .addToast({type: 'success', message: 'Workspace analysed — codemaps refreshed'});
     } catch (e) {
       setError(e instanceof Error ? errMsg(e) : String(e));
     } finally {

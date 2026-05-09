@@ -26,6 +26,7 @@ import {
 import type {ProjectRepoLink} from '@/types/project';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {cn, errMsg} from '@/lib/utils';
+import {useUiStore} from '@/stores/useUiStore';
 
 interface ChatMessage {
   id: string;
@@ -150,6 +151,10 @@ export default function ProjectChatPanel({
     try {
       await clearProjectChat(projectId);
       setMessages([]);
+      // F-20 fix (2026-05-09) — surface a confirmation toast. Pre-fix the
+      // chat just emptied silently; users couldn't tell if the click landed
+      // or if the empty state was a render-stall.
+      useUiStore.getState().addToast({type: 'success', message: 'Chat history cleared'});
     } catch (e) {
       setError(e instanceof Error ? errMsg(e) : 'Reset failed');
     } finally {
