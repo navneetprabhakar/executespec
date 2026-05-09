@@ -9,6 +9,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 import java.util.zip.GZIPOutputStream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -114,26 +115,40 @@ public class ProjectExportService {
                       + "see linked repos as proxy via contracts/index.json")));
 
       // 4. contracts/index.json — cross-repo contract registry
-      List<Map<String, Object>> contracts = new ArrayList<>();
-      for (ProjectRepoLink link : linkRepo.findByProjectId(projectId)) {
-        for (ContractRegistry c : contractRepo.findByRepoId(link.getRepoId())) {
-          contracts.add(
-              Map.of(
-                  "id", nv(c.getId() == null ? null : c.getId().toString()),
-                  "name", nv(c.getName()),
-                  "type", c.typeEnum().name(),
-                  "version",
-                      c.getCurrentRegistryVersion() == null ? 0 : c.getCurrentRegistryVersion(),
-                  "contentHash", nv(c.getCurrentContentHash()),
-                  "detectionMethod", c.detectionMethodEnum().name(),
-                  "repoId", nv(c.getRepoId() == null ? null : c.getRepoId().toString()),
-                  "repoFullName",
-                      projectRepoRepo
-                          .findById(c.getRepoId())
-                          .map(r -> r.getGithubRepoFullName())
-                          .orElse("(unknown)"),
-                  "detectedPath", c.getDetectedPath() == null ? "" : c.getDetectedPath()));
-        }
+      // B-14 fix (2026-05-09) — was N+1: outer loop over project repos,
+      // inner loop over contracts, then ANOTHER findById per contract for
+      // the repo-name lookup. On a 50-repo project that's 50 + (contracts
+      // × 50) round-trips, every export. Now: one findByProjectId, one
+      // findAllByRepoIdIn (a single IN-clause query) for ALL contracts,
+      // and one in-memory map for repo-name lookups.
+      List<ProjectRepoLink> projectLinks = linkRepo.findByProjectId(projectId);
+      List<UUID> repoIds =
+          projectLinks.stream().map(ProjectRepoLink::getRepoId).distinct().toList();
+      Map<UUID, String> repoNameById =
+          repoIds.isEmpty()
+              ? Map.of()
+              : projectRepoRepo.findAllById(repoIds).stream()
+                  .collect(
+                      java.util.stream.Collectors.toMap(
+                          r -> r.getId(),
+                          r -> r.getGithubRepoFullName() == null ? "(unknown)" : r.getGithubRepoFullName(),
+                          (a, b) -> a));
+      List<ContractRegistry> allContracts =
+          repoIds.isEmpty() ? List.of() : contractRepo.findAllByRepoIdIn(repoIds);
+      List<Map<String, Object>> contracts = new ArrayList<>(allContracts.size());
+      for (ContractRegistry c : allContracts) {
+        contracts.add(
+            Map.of(
+                "id", nv(c.getId() == null ? null : c.getId().toString()),
+                "name", nv(c.getName()),
+                "type", c.typeEnum().name(),
+                "version",
+                    c.getCurrentRegistryVersion() == null ? 0 : c.getCurrentRegistryVersion(),
+                "contentHash", nv(c.getCurrentContentHash()),
+                "detectionMethod", c.detectionMethodEnum().name(),
+                "repoId", nv(c.getRepoId() == null ? null : c.getRepoId().toString()),
+                "repoFullName", repoNameById.getOrDefault(c.getRepoId(), "(unknown)"),
+                "detectedPath", c.getDetectedPath() == null ? "" : c.getDetectedPath()));
       }
       tar.putFile(
           "contracts/index.json",

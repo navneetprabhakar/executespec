@@ -14,4 +14,11 @@ public interface ContractRegistryRepository extends JpaRepository<ContractRegist
 
   /** Look up by stable identity — used by E2.2 to detect re-runs. */
   Optional<ContractRegistry> findByRepoIdAndName(UUID repoId, String name);
+
+  /**
+   * B-14 fix (2026-05-09) — single IN-clause query that replaces N per-repo
+   * findByRepoId calls in ProjectExportService.composeBundle. On a 50-repo
+   * project this collapses 50 round-trips into 1.
+   */
+  List<ContractRegistry> findAllByRepoIdIn(List<UUID> repoIds);
 }
