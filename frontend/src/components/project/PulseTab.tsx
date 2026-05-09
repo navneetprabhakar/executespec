@@ -122,6 +122,13 @@ export default function PulseTab({
   const accuracy = report?.accuracyScore ?? lastRun.score ?? null;
   const heroScore = verified ?? accuracy;
 
+  // U-49 fix (2026-05-09) — "since you were away" digest. localStorage
+  // tracks the last visit timestamp per project; if non-zero runs / PRs
+  // moved status since then, surface a one-line banner so returning
+  // users immediately see what changed. Cleared on dismiss + on a 24-hr
+  // window so a daily-active user doesn't see a perpetual banner.
+  const sinceLastVisit = useSinceLastVisit(projectId, recentTasks, recentPrs);
+
   return (
     <div
       style={{
@@ -132,6 +139,44 @@ export default function PulseTab({
         // (`p-3 sm:p-4`); duplicating it here would double-pad the pane.
       }}
     >
+      {sinceLastVisit && (
+        <div
+          role='note'
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            padding: 'var(--v3-pad-2) var(--v3-pad-4)',
+            background: 'rgba(91,141,239,0.10)',
+            border: '1px solid rgba(91,141,239,0.32)',
+            borderRadius: 'var(--v3-radius)',
+            fontSize: 12,
+            color: 'var(--v3-text)',
+          }}
+        >
+          <span>
+            <span style={{color: 'var(--v3-text-subtle)', marginRight: 6}}>Since you were away</span>
+            {sinceLastVisit.summary}
+          </span>
+          <button
+            type='button'
+            onClick={sinceLastVisit.dismiss}
+            aria-label='Dismiss'
+            style={{
+              padding: '2px 8px',
+              fontSize: 11,
+              background: 'transparent',
+              color: 'var(--v3-text-muted)',
+              border: 'none',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
       {/* v2.7.2 — inline "no repos linked" banner. Renders only when the
           parent passes onLinkRepo (which is only when repoCount === 0).
           Click pops AddRepoModal directly via the shared openAddRepoFlow
@@ -835,4 +880,101 @@ function timeAgoShort(iso: string): string {
   const days = Math.round(h / 24);
   if (days < 7) return `${days}d`;
   return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
+}
+
+/**
+ * U-49 fix (2026-05-09) — "since you were away" digest hook.
+ *
+ * <p>Tracks per-project last-visit timestamp in localStorage. On mount,
+ * counts runs completed + PRs merged AFTER the stored timestamp; if the
+ * count is non-zero, returns a `{summary, dismiss}` object so the
+ * caller renders a banner. Otherwise returns null and the caller
+ * renders nothing.
+ *
+ * <p>Updates the stored timestamp:
+ *   - on first visit (no stored ts) → just stamp now, no banner.
+ *   - on dismiss → stamp now + hide.
+ *   - on >24h ago → stamp now + show banner (so the banner doesn't
+ *     stick around forever between visits).
+ */
+function useSinceLastVisit(
+  projectId: string,
+  recentTasks: TaskSummary[],
+  recentPrs: PrSummary[],
+): {summary: string; dismiss: () => void} | null {
+  const KEY = `executespec.pulse.lastVisit.${projectId}`;
+  const [snapshot, setSnapshot] = useState<{summary: string; dismiss: () => void} | null>(null);
+
+  useEffect(() => {
+    let stamped: number | null = null;
+    try {
+      const raw = localStorage.getItem(KEY);
+      stamped = raw ? Number.parseInt(raw, 10) : null;
+    } catch {
+      stamped = null;
+    }
+    const now = Date.now();
+    // First visit ever → stamp + no banner.
+    if (!stamped || Number.isNaN(stamped)) {
+      try {
+        localStorage.setItem(KEY, String(now));
+      } catch {
+        /* ignore */
+      }
+      setSnapshot(null);
+      return;
+    }
+    // Last visit < 1h ago → user is actively using the app, no banner.
+    if (now - stamped < 60 * 60 * 1000) {
+      setSnapshot(null);
+      return;
+    }
+    const completedSince = recentTasks.filter((t) => {
+      const ts = t.completedAt ? +new Date(t.completedAt) : 0;
+      return ts > (stamped ?? 0) && (t.status === 'COMPLETE' || t.status === 'PARTIAL');
+    }).length;
+    const mergedSince = recentPrs.filter((p) => {
+      const ts = p.mergedAt ? +new Date(p.mergedAt) : 0;
+      return ts > (stamped ?? 0);
+    }).length;
+    const parts: string[] = [];
+    if (completedSince > 0) {
+      parts.push(`${completedSince} run${completedSince === 1 ? '' : 's'} completed`);
+    }
+    if (mergedSince > 0) {
+      parts.push(`${mergedSince} PR${mergedSince === 1 ? '' : 's'} merged`);
+    }
+    if (parts.length === 0) {
+      // Visited recently but nothing happened — restamp + no banner.
+      try {
+        localStorage.setItem(KEY, String(now));
+      } catch {
+        /* ignore */
+      }
+      setSnapshot(null);
+      return;
+    }
+    const summary = parts.join(' · ');
+    const dismiss = () => {
+      try {
+        localStorage.setItem(KEY, String(Date.now()));
+      } catch {
+        /* ignore */
+      }
+      setSnapshot(null);
+    };
+    setSnapshot({summary, dismiss});
+    // Stamp NOW so a refresh on the same page doesn't keep showing the same
+    // banner — the user has now seen it, count from this point forward.
+    try {
+      localStorage.setItem(KEY, String(now));
+    } catch {
+      /* ignore */
+    }
+    // Intentionally only depend on projectId + the input arrays' lengths
+    // so we don't rerun on every re-render or partial-state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, recentTasks.length, recentPrs.length]);
+
+  return snapshot;
 }
