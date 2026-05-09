@@ -98,7 +98,16 @@ export default function NotificationPanel({onClose, onRead, onReadAll}: Props) {
           </div>
         )}
         {!loading && items.length === 0 && (
-          <div className='py-8 text-center text-xs text-muted'>No notifications yet</div>
+          // U-45 fix (2026-05-09) — actionable empty state instead of a
+          // dead-end "No notifications yet". Tells the user what would
+          // populate this list so they know what to expect, not just
+          // what they don't have right now.
+          <div className='py-8 px-4 text-center'>
+            <p className='text-xs font-medium text-secondary'>You're all caught up</p>
+            <p className='text-[11px] text-muted mt-1'>
+              Run completions, plan-approval gates, PR merges, and budget alerts will land here.
+            </p>
+          </div>
         )}
         {items.map((n) => (
           <button

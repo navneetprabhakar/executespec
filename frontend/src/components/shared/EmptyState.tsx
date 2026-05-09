@@ -14,6 +14,18 @@ interface EmptyStateProps {
    * page level.
    */
   compact?: boolean;
+  /**
+   * U-45 fix (2026-05-09) — when no concrete `action` is available (e.g. the
+   * primitive sits in a read-only list), pass a one-line hint describing
+   * what would populate the list. Renders below the description in a
+   * subdued tone. Helps the user form a mental model of "what is this for"
+   * instead of just "this is empty."
+   *
+   * Examples: "Run completions and PR merges land here." /
+   * "Invite a teammate and they'll appear in this list." /
+   * "Generate the architecture doc to populate this view."
+   */
+  actionHint?: string;
 }
 
 export default function EmptyState({
@@ -22,6 +34,7 @@ export default function EmptyState({
   action,
   icon: Icon = Rocket,
   compact = false,
+  actionHint,
 }: EmptyStateProps) {
   if (compact) {
     return (
@@ -30,6 +43,9 @@ export default function EmptyState({
         <div>
           <p className='text-xs font-medium text-secondary'>{title}</p>
           {description && <p className='text-xs text-muted mt-0.5'>{description}</p>}
+          {actionHint && !action && (
+            <p className='text-[11px] text-muted mt-1 max-w-xs mx-auto'>{actionHint}</p>
+          )}
         </div>
         {action && <div className='mt-1'>{action}</div>}
       </div>
@@ -43,6 +59,9 @@ export default function EmptyState({
       <div>
         <p className='text-base font-semibold text-primary'>{title}</p>
         <p className='text-sm text-muted mt-1'>{description}</p>
+        {actionHint && !action && (
+          <p className='text-xs text-muted mt-2 max-w-md mx-auto'>{actionHint}</p>
+        )}
       </div>
       {action && <div className='mt-2'>{action}</div>}
     </div>
