@@ -100,9 +100,9 @@ public class SlackIntegrationController {
   }
 
   /**
-   * Maps an OAuth-callback exception to a small, allowlisted error code the frontend can
-   * translate to user-facing copy. New cases are added explicitly so a future stack trace can't
-   * silently leak through. Defaults to {@code unknown}.
+   * Maps an OAuth-callback exception to a small, allowlisted error code the frontend can translate
+   * to user-facing copy. New cases are added explicitly so a future stack trace can't silently leak
+   * through. Defaults to {@code unknown}.
    */
   private String errorCodeFor(Exception e) {
     String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();

@@ -66,11 +66,7 @@ function ProjectDashboardRedirect() {
   if (!sp.has('tab')) sp.set('tab', 'pulse');
   const search = sp.toString();
   return (
-    <Navigate
-      to={`..${search ? '?' + search : ''}${location.hash}`}
-      replace
-      relative='path'
-    />
+    <Navigate to={`..${search ? '?' + search : ''}${location.hash}`} replace relative='path' />
   );
 }
 
@@ -421,10 +417,7 @@ export default function App() {
                 canonical one. We default to `?tab=pulse` so users with
                 explicit dashboard intent keep landing on the dense
                 inspection view they wanted. */}
-            <Route
-              path='projects/:projectId/dashboard'
-              element={<ProjectDashboardRedirect />}
-            />
+            <Route path='projects/:projectId/dashboard' element={<ProjectDashboardRedirect />} />
             <Route
               path='projects/:projectId/activity'
               element={<Navigate to='..?tab=pulse&drawer=activity' replace relative='path' />}

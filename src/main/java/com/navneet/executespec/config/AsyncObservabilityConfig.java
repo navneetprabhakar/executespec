@@ -4,12 +4,12 @@ import java.lang.reflect.Method;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
-import io.micrometer.core.instrument.Counter;
-import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.aop.interceptor.AsyncUncaughtExceptionHandler;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.annotation.AsyncConfigurer;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -26,15 +26,14 @@ import lombok.extern.slf4j.Slf4j;
  * <p>This handler:
  *
  * <ul>
- *   <li>Logs the exception at ERROR with the bean + method that threw, so the dump is
- *       grep-able.
+ *   <li>Logs the exception at ERROR with the bean + method that threw, so the dump is grep-able.
  *   <li>Increments a Micrometer counter {@code executespec.async.uncaught.exception} tagged with
  *       the throwing class + method, so dashboards + alerts can fire on the rate.
  * </ul>
  *
  * <p>The MeterRegistry reference is held in an {@link AtomicReference} because Spring constructs
- * the {@link AsyncConfigurer} bean before the {@code MeterRegistry} bean is available in some
- * test profiles; we resolve lazily on first call. If no registry was ever published, we just log
+ * the {@link AsyncConfigurer} bean before the {@code MeterRegistry} bean is available in some test
+ * profiles; we resolve lazily on first call. If no registry was ever published, we just log
  * (degraded mode) — never NPE the caller's @Async work.
  */
 @Configuration
@@ -42,7 +41,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class AsyncObservabilityConfig implements AsyncConfigurer {
 
-  private final org.springframework.beans.factory.ObjectProvider<MeterRegistry> meterRegistryProvider;
+  private final org.springframework.beans.factory.ObjectProvider<MeterRegistry>
+      meterRegistryProvider;
   private final ConcurrentMap<String, Counter> counterByKey = new ConcurrentHashMap<>();
 
   @Override

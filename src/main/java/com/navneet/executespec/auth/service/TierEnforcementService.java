@@ -663,12 +663,14 @@ public class TierEnforcementService {
    * B-08 (audit, 2026-05-09) — N+1-free predicate for the monthly cron. Caller pre-loads every
    * active subscription once via {@link
    * com.navneet.executespec.billing.repository.BillingSubscriptionRepository#findAllActiveOrPastDue()},
-   * builds a {@code Map<userId, BillingSubscription>}, and passes the per-user lookup in. We
-   * skip the {@code subscriptionRepo.findActiveByUserId} round-trip and fall back to the
-   * calendar-month boundary when the map has no entry for this user.
+   * builds a {@code Map<userId, BillingSubscription>}, and passes the per-user lookup in. We skip
+   * the {@code subscriptionRepo.findActiveByUserId} round-trip and fall back to the calendar-month
+   * boundary when the map has no entry for this user.
    */
   public boolean shouldResetUserCounterForJob(
-      AppUser user, java.util.Map<String, com.navneet.executespec.billing.entity.BillingSubscription> activeByUser) {
+      AppUser user,
+      java.util.Map<String, com.navneet.executespec.billing.entity.BillingSubscription>
+          activeByUser) {
     var sub = activeByUser.get(user.getId());
     if (sub != null) {
       return shouldResetForSubscription(sub, user.getRunCountResetAt());
@@ -676,9 +678,13 @@ public class TierEnforcementService {
     return isNewCalendarMonth(user.getRunCountResetAt());
   }
 
-  /** B-08 — same shape as {@link #shouldResetUserCounterForJob(AppUser, java.util.Map)} for orgs. */
+  /**
+   * B-08 — same shape as {@link #shouldResetUserCounterForJob(AppUser, java.util.Map)} for orgs.
+   */
   public boolean shouldResetOrgCounterForJob(
-      Org org, java.util.Map<String, com.navneet.executespec.billing.entity.BillingSubscription> activeByUser) {
+      Org org,
+      java.util.Map<String, com.navneet.executespec.billing.entity.BillingSubscription>
+          activeByUser) {
     var sub = activeByUser.get(org.getCreatedByUserId());
     if (sub != null) {
       return shouldResetForSubscription(sub, org.getRunCountResetAt());
