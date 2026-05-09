@@ -13,6 +13,8 @@ interface MetricsStore {
   fetchModelComparison: (days?: number) => Promise<void>;
   fetchUserRunsSummary: (days?: number) => Promise<void>;
   fetchAll: () => Promise<void>;
+  // F-07 fix (2026-05-09) — full reset, used by useAuthStore.logout.
+  reset: () => void;
 }
 
 export const useMetricsStore = create<MetricsStore>((set, get) => ({
@@ -62,4 +64,13 @@ export const useMetricsStore = create<MetricsStore>((set, get) => ({
       get().fetchUserRunsSummary(d),
     ]);
   },
+
+  reset: () =>
+    set({
+      metrics: null,
+      modelComparison: null,
+      userRunsSummary: null,
+      loading: false,
+      days: 30,
+    }),
 }));

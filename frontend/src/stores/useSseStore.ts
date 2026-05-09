@@ -17,6 +17,8 @@ interface SseStore {
   setRunId: (id: string | null) => void;
   addEntry: (e: LogEntry) => void;
   clearEntries: () => void;
+  // F-07 fix (2026-05-09) — full reset, used by useAuthStore.logout.
+  reset: () => void;
 }
 
 export const useSseStore = create<SseStore>((set) => ({
@@ -28,4 +30,5 @@ export const useSseStore = create<SseStore>((set) => ({
   setRunId: (currentRunId) => set({currentRunId}),
   addEntry: (e) => set((state) => ({entries: [...state.entries.slice(-500), e]})),
   clearEntries: () => set({entries: []}),
+  reset: () => set({status: 'DISCONNECTED', entries: [], currentRunId: null}),
 }));

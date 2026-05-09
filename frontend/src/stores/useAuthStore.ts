@@ -2,6 +2,25 @@ import {create} from 'zustand';
 import * as api from '@/lib/api';
 import type {TierPermissions} from '@/hooks/useTierPermissions';
 import {useUiStore} from './useUiStore';
+import {useRunStore} from './useRunStore';
+import {useSseStore} from './useSseStore';
+import {useMetricsStore} from './useMetricsStore';
+import {useProjectStore} from './useProjectStore';
+
+/**
+ * F-07 fix (2026-05-09) — clear every user-scoped Zustand store on logout.
+ * Pre-fix, only useAuthStore was cleared, so the next user logging in on
+ * the same machine briefly saw the previous user's runs / project / cost
+ * metrics flash before the new fetches landed. UI prefs (useUiStore) are
+ * intentionally preserved across users — they're machine-local, not
+ * user-scoped (theme, sidebar collapse state, etc.).
+ */
+function resetAllUserScopedStores() {
+  useRunStore.getState().reset();
+  useSseStore.getState().reset();
+  useMetricsStore.getState().reset();
+  useProjectStore.getState().reset();
+}
 
 interface AuthStore {
   user: api.AuthUser | null;
@@ -56,6 +75,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
     }
     localStorage.removeItem('access_token');
     set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+    resetAllUserScopedStores();
   },
 
   register: async (email, firstName, lastName, password, attribution) => {
@@ -120,6 +140,7 @@ export const useAuthStore = create<AuthStore>((set, get) => ({
   clearAuth: () => {
     localStorage.removeItem('access_token');
     set({accessToken: null, user: null, isAuthenticated: false, permissions: null});
+    resetAllUserScopedStores();
   },
 }));
 

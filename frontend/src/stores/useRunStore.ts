@@ -62,9 +62,13 @@ interface RunStore {
   pauseRun: (id: string) => Promise<void>;
   resumeRun: (runId: string) => Promise<void>;
   patchRunStatus: (runId: string, status: string) => void;
+
+  // F-07 fix (2026-05-09) — full reset, used by useAuthStore.logout to
+  // prevent the previous user's runs flashing into a fresh session.
+  reset: () => void;
 }
 
-export const useRunStore = create<RunStore>((set, get) => ({
+const RUN_STORE_INITIAL = {
   runs: [],
   activeRunId: null,
   activeRun: null,
@@ -74,14 +78,16 @@ export const useRunStore = create<RunStore>((set, get) => ({
   projectFilter: null,
   scopeFilter: 'mine',
   archivedFilter: false,
-
-  // Pagination defaults
   page: 0,
   pageSize: 20,
   totalElements: 0,
   totalPages: 0,
   hasNext: false,
   hasPrevious: false,
+} as const;
+
+export const useRunStore = create<RunStore>((set, get) => ({
+  ...RUN_STORE_INITIAL,
 
   setStatusFilter: (s) => {
     set({statusFilter: s, page: 0}); // Reset to first page on filter change
@@ -201,4 +207,6 @@ export const useRunStore = create<RunStore>((set, get) => ({
       activeRun: state.activeRun?.runId === runId ? {...state.activeRun, status} : state.activeRun,
     }));
   },
+
+  reset: () => set({...RUN_STORE_INITIAL}),
 }));
