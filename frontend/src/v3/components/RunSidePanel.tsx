@@ -11,9 +11,11 @@ import {
   type RunDetail,
   type TaskSummary,
   type ConversationMessage,
+  type RunChatMessage,
   retryTask,
   getLiveCost,
-  conversationChat,
+  getRunChat,
+  sendRunChatMessage,
   getPrComments,
   dismissPrComment,
   applyPrComment,
@@ -2187,6 +2189,7 @@ function ChatPane({
 }) {
   const navigate = useNavigate();
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  const [hydrated, setHydrated] = useState(false);
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -2231,6 +2234,33 @@ function ChatPane({
     .filter((c) => c.status === 'ADDRESSED' || c.status === 'DISMISSED')
     .slice(0, 3);
 
+  // R-03 fix (2026-05-09) — hydrate persisted chat on mount so the thread
+  // survives tab switches, panel remounts, and full page reloads. The v2
+  // RunDetailTabs ChatTab uses the same `/api/runs/{id}/chat` endpoint;
+  // v3 ChatPane was incorrectly wired to the stateless `/conversation`
+  // path, so every remount started from zero. Backend is V2ChatService
+  // (wired 2026-04-19) — same source of truth as v2.
+  useEffect(() => {
+    if (!detail?.runId) return;
+    let cancelled = false;
+    setHydrated(false);
+    void getRunChat(detail.runId)
+      .then((history: RunChatMessage[]) => {
+        if (cancelled) return;
+        setMessages(history.map((m) => ({role: m.role, content: m.content})));
+        setHydrated(true);
+      })
+      .catch(() => {
+        // Endpoint may legitimately 404 / 410 on legacy / pre-V2-chat runs.
+        // Fall through to empty thread; sending still works because
+        // sendRunChatMessage starts the persisted conversation server-side.
+        if (!cancelled) setHydrated(true);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail?.runId]);
+
   // Auto-scroll thread on each new message.
   useEffect(() => {
     threadRef.current?.scrollTo({top: threadRef.current.scrollHeight, behavior: 'smooth'});
@@ -2265,43 +2295,41 @@ function ChatPane({
   }, [detail]);
 
   async function send(userText: string) {
+    if (!detail?.runId) {
+      setError('Run not loaded yet');
+      return;
+    }
     setBusy(true);
     setError(null);
+    // Optimistic append so the user sees their message immediately.
+    const optimistic: ConversationMessage[] = [
+      ...messages,
+      {role: 'user', content: userText},
+    ];
+    setMessages(optimistic);
     try {
-      const isFirst = messages.length === 0;
-      // On the first turn we synthesise a seeded thread so the
-      // assistant has run context before the user's first question.
-      // Subsequent turns just append to the running thread.
-      const thread: ConversationMessage[] = isFirst
-        ? [
-            {role: 'user', content: seedContext},
-            {
-              role: 'assistant',
-              content:
-                'Got it — I have the run context. What would you like to know about this run?',
-            },
-            {role: 'user', content: userText},
-          ]
-        : [...messages, {role: 'user', content: userText}];
-      const res = await conversationChat(thread);
-      // For the first turn we drop the seed pair from the rendered
-      // thread (keep them in conversationChat's internal context only)
-      // so the user sees a clean "Q → A" without the synthesised
-      // preface. The seedContext effect rebuilds it fresh on every
-      // call, so this is safe.
-      const visible: ConversationMessage[] = isFirst
-        ? [
-            {role: 'user', content: userText},
-            {role: 'assistant', content: res.reply},
-          ]
-        : [...thread, {role: 'assistant', content: res.reply}];
-      setMessages(visible);
+      // R-03 fix (2026-05-09) — switched from stateless `conversationChat`
+      // to per-run `sendRunChatMessage` so the backend persists the thread.
+      // Seed-context is now backend-managed (V2ChatService prepends the
+      // run state on the first turn); we don't need the client-side
+      // seed-then-strip dance anymore.
+      const res = await sendRunChatMessage(detail.runId, userText);
+      setMessages([...optimistic, {role: 'assistant', content: res.reply}]);
     } catch (e) {
+      // Roll back the optimistic append on error so the input the user
+      // typed isn't visually committed to a thread that didn't actually
+      // get a reply.
+      setMessages(messages);
       setError((e as Error)?.message ?? 'Chat failed');
     } finally {
       setBusy(false);
     }
   }
+
+  // seedContext is no longer wired into send(), but keep it as a
+  // reference comment for what the V2ChatService backend builds
+  // server-side. Underscored to silence the unused-var lint.
+  void seedContext;
 
   async function onSubmit(e?: React.FormEvent) {
     e?.preventDefault();
@@ -2478,6 +2506,88 @@ function ChatPane({
         minHeight: 0,
       }}
     >
+      {/* R-03 fix (2026-05-09) — run-summary header. The v2 RunDetailTabs
+          ChatTab lived alongside the run header, so status / cost / PR
+          were always visible while chatting. v3 ChatPane is a side-pane
+          tab with no surrounding context, so the operator was chatting
+          blind. This compact header surfaces the same signals inline. */}
+      {detail && (
+        <div
+          style={{
+            flexShrink: 0,
+            padding: '10px 14px 8px',
+            borderBottom: '1px solid var(--v3-border)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              flexWrap: 'wrap',
+              fontSize: 11,
+              color: 'var(--v3-text-muted)',
+            }}
+          >
+            <span
+              className='v3-mono'
+              style={{
+                fontSize: 10,
+                textTransform: 'uppercase',
+                letterSpacing: '0.06em',
+                color: 'var(--v3-text)',
+                fontWeight: 600,
+              }}
+            >
+              {detail.status ?? 'UNKNOWN'}
+            </span>
+            {detail.aiProvider && <span>· {detail.aiProvider}</span>}
+            {detail.actualCostUsd != null && (
+              <span>· ${detail.actualCostUsd.toFixed(4)}</span>
+            )}
+            {detail.tasks && detail.tasks.length > 0 && (
+              <span>
+                ·{' '}
+                {detail.tasks.filter((t) => t.status === 'COMPLETE').length}/
+                {detail.tasks.length} tasks
+              </span>
+            )}
+            {detail.githubPrUrl && (
+              <a
+                href={detail.githubPrUrl}
+                target='_blank'
+                rel='noreferrer'
+                style={{
+                  marginLeft: 'auto',
+                  color: 'var(--v3-link)',
+                  textDecoration: 'none',
+                }}
+              >
+                PR ↗
+              </a>
+            )}
+          </div>
+          {detail.userRequest && (
+            <div
+              style={{
+                fontSize: 11.5,
+                color: 'var(--v3-text-muted)',
+                lineHeight: 1.4,
+                display: '-webkit-box',
+                WebkitLineClamp: 2,
+                WebkitBoxOrient: 'vertical',
+                overflow: 'hidden',
+              }}
+              title={detail.userRequest}
+            >
+              {detail.userRequest}
+            </div>
+          )}
+        </div>
+      )}
       <div
         ref={threadRef}
         style={{
