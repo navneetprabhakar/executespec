@@ -98,9 +98,7 @@ export default function RunConversation({runId}: Props) {
   // Seed from the module-level cache so a tab-switch-back doesn't flash empty
   // for the duration of the refetch. The fetch still runs and replaces the
   // list (so server-side compaction / new messages from another window land).
-  const [messages, setMessages] = useState<RunChatMessage[]>(
-    () => runChatCache.get(runId) ?? [],
-  );
+  const [messages, setMessages] = useState<RunChatMessage[]>(() => runChatCache.get(runId) ?? []);
   const [userCount, setUserCount] = useState(
     () => (runChatCache.get(runId) ?? []).filter((m) => m.role === 'user').length,
   );
@@ -384,10 +382,7 @@ export default function RunConversation({runId}: Props) {
                 className='text-[10px] text-muted font-mono truncate max-w-[140px]'
                 title={`Model: ${activeRun.workerModel || activeRun.plannerModel}`}
               >
-                {(activeRun.workerModel || activeRun.plannerModel || '').replace(
-                  /^claude-/,
-                  '',
-                )}
+                {(activeRun.workerModel || activeRun.plannerModel || '').replace(/^claude-/, '')}
               </span>
             )}
             <button

@@ -123,8 +123,8 @@ class FileSystemToolTest {
      * out-of-workspace data. The hardened safeResolve runs {@code toRealPath()} on every existing
      * ancestor and re-checks containment — so this test must observe ACCESS DENIED.
      *
-     * <p>Skipped on filesystems that don't permit symlinks (e.g. the test runner's temp on
-     * Windows without the right privileges).
+     * <p>Skipped on filesystems that don't permit symlinks (e.g. the test runner's temp on Windows
+     * without the right privileges).
      */
     @Test
     @DisplayName("symlink escape is blocked (B-02)")

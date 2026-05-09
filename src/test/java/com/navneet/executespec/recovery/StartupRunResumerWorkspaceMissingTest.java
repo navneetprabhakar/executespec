@@ -14,10 +14,10 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 /**
  * B-22 (audit, 2026-05-09) regression coverage. The salvage path used to mark interrupted runs
- * COMPLETE based purely on the per-task terminal-status check, even when the workspace dir had
- * been wiped during the interruption. This left the user with a "complete" run whose preview /
- * chat / file downloads all 404'd. The hardened resumer adds {@code workspaceMissing(runId)} as
- * a precheck.
+ * COMPLETE based purely on the per-task terminal-status check, even when the workspace dir had been
+ * wiped during the interruption. This left the user with a "complete" run whose preview / chat /
+ * file downloads all 404'd. The hardened resumer adds {@code workspaceMissing(runId)} as a
+ * precheck.
  */
 @DisplayName("StartupRunResumer — workspace-gone precheck")
 class StartupRunResumerWorkspaceMissingTest {

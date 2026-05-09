@@ -80,8 +80,8 @@ public class StartupRunResumer {
   /**
    * 2026-05-09 (B-22 fix from audit) — workspace root for the workspace-gone precheck. Read from
    * {@code agent.workspace} so dev / prod / test profiles all align. Optional via property
-   * placeholder so unit tests that construct the bean without Spring don't NPE; when null we
-   * skip the precheck (lexical salvage proceeds as before).
+   * placeholder so unit tests that construct the bean without Spring don't NPE; when null we skip
+   * the precheck (lexical salvage proceeds as before).
    */
   @org.springframework.beans.factory.annotation.Value("${agent.workspace:}")
   private String workspaceRoot;
@@ -246,9 +246,9 @@ public class StartupRunResumer {
    * B-22 (audit, 2026-05-09) — true if the run's workspace directory does not exist. Salvaging a
    * run whose workspace has been wiped (deploy cleaned scratch, `rm -rf` ran during interruption,
    * pod scratch volume detached) leaves the user staring at a "COMPLETE" run with no preview, no
-   * chat context, and broken file downloads. Detecting it lets us fail with a clear reason
-   * instead. Returns false (i.e. "don't block salvage") when {@code agent.workspace} isn't
-   * configured (e.g. unit-test paths without Spring) so legacy behaviour is preserved.
+   * chat context, and broken file downloads. Detecting it lets us fail with a clear reason instead.
+   * Returns false (i.e. "don't block salvage") when {@code agent.workspace} isn't configured (e.g.
+   * unit-test paths without Spring) so legacy behaviour is preserved.
    */
   private boolean workspaceMissing(String runId) {
     if (workspaceRoot == null || workspaceRoot.isBlank()) return false;
