@@ -9,6 +9,7 @@ import {UsageBadge} from '@/components/billing/UsageBadge';
 // agnostic (they poll the existing /api/notifications endpoint and
 // render a styled flyout) so they fit the v3 chrome unchanged.
 import NotificationBell from '@/components/layout/NotificationBell';
+import {useAuthStore} from '@/stores/useAuthStore';
 
 /**
  * R-101 — top-bar shell.
@@ -146,6 +147,13 @@ export default function TopBar() {
       )}
 
       <div className='v3-topbar__right' style={{display: 'flex', alignItems: 'center', gap: 12}}>
+        {/* I1-04 (audit-2026-05-09 iter1) — explicit tier indicator. The
+            UsageBadge alone implies tier via the run quota, but unlimited
+            tiers (TEAM/ENTERPRISE) hide the badge entirely, leaving paid
+            users with no visible signal of which plan they're on. The
+            chip self-hides for SUPER_ADMIN (who isn't tier-bound) and
+            for users without a resolved tier. */}
+        <TierChip />
         {/* [IA-Q4] quota chip — visible on both desktop and mobile.
             UsageBadge self-hides for TEAM/ENTERPRISE/SUPER_ADMIN. */}
         <UsageBadge />
@@ -253,5 +261,66 @@ export default function TopBar() {
         </>
       )}
     </header>
+  );
+}
+
+/**
+ * I1-04 (audit-2026-05-09 iter1) — small, glance-able tier label.
+ * Pulls tier from the auth store (set at login + refresh). Hides when
+ * SUPER_ADMIN (operator role, not tier-bound) or when the tier is
+ * missing entirely.
+ *
+ * Visual: capsule pill matching the v3 chip palette. Tier-tinted bg so
+ * a visible tier swap is obvious if a user upgrades mid-session.
+ */
+function TierChip() {
+  const user = useAuthStore((s) => s.user);
+  const tier = (user?.tier || '').toUpperCase();
+  if (!tier) return null;
+  if (user?.globalRole === 'SUPER_ADMIN') return null;
+
+  // Tier-tinted backgrounds — defensive fallbacks so this works even
+  // before the v3 token cascade if mounted in a v2 context.
+  const tone =
+    tier === 'ENTERPRISE'
+      ? {bg: 'rgba(122,209,200,0.12)', fg: 'var(--v3-brand-2, #7AD1C8)'}
+      : tier === 'TEAM' || tier === 'MAX'
+        ? {bg: 'rgba(91,141,239,0.14)', fg: 'var(--v3-brand, #5B8DEF)'}
+        : tier === 'PRO'
+          ? {bg: 'rgba(245,158,11,0.14)', fg: 'var(--v3-warning, #F59E0B)'}
+          : {bg: 'var(--v3-surface)', fg: 'var(--v3-text-muted)'}; // FREE
+
+  const label =
+    tier === 'PRO'
+      ? 'Solo'
+      : tier === 'TEAM'
+        ? 'Team'
+        : tier === 'MAX'
+          ? 'Max'
+          : tier === 'ENTERPRISE'
+            ? 'Enterprise'
+            : 'Free';
+
+  return (
+    <span
+      title={`Plan: ${label}`}
+      aria-label={`Current plan: ${label}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '2px 8px',
+        fontSize: 11,
+        fontWeight: 600,
+        letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+        borderRadius: 999,
+        background: tone.bg,
+        color: tone.fg,
+        border: `1px solid color-mix(in srgb, ${tone.fg} 30%, transparent)`,
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {label}
+    </span>
   );
 }
