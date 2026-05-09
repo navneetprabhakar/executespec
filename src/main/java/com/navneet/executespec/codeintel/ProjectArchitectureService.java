@@ -81,6 +81,10 @@ public class ProjectArchitectureService {
           com.navneet.executespec.project.pr.PullRequestRecordService>
       prRecordServiceProvider;
 
+  // B-09 fix (2026-05-09) — codemap publish failures were silent. Add a
+  // metric counter so ops can alert on a sustained failure rate.
+  private final io.micrometer.core.instrument.MeterRegistry meterRegistry;
+
   /**
    * Regenerate codemaps for every linked repo, then synthesise a fresh architecture doc. Versioned:
    * existing docs are preserved.
@@ -550,7 +554,17 @@ public class ProjectArchitectureService {
           }
         }
       } catch (Exception ex) {
+        // B-09 fix (2026-05-09) — log+swallow + emit a metric so ops can
+        // alert on a sustained failure rate instead of grep'ing logs.
         log.warn("[{}] codemap publish to {} failed: {}", projectId, fullName, ex.getMessage());
+        try {
+          io.micrometer.core.instrument.Counter.builder("executespec.codeintel.publish_failed")
+              .tag("cause", ex.getClass().getSimpleName())
+              .register(meterRegistry)
+              .increment();
+        } catch (Exception metricEx) {
+          // Defensive: never let a metric failure cascade.
+        }
       }
     }
   }

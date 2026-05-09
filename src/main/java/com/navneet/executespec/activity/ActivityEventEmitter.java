@@ -9,6 +9,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.navneet.executespec.auth.entity.ActivityAudit;
 import com.navneet.executespec.auth.service.ActivityAuditService;
 
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 
@@ -48,6 +50,10 @@ public class ActivityEventEmitter {
   private final ActivityFeedEntryRepository feedRepo;
   private final ActivityAuditService auditService;
   private final ObjectMapper objectMapper;
+  // B-09 fix (2026-05-09) — surface async failures as a metric so ops can
+  // see when the activity-feed writer is silently dropping events. Used to
+  // be a log.warn only; nothing alerted on it.
+  private final MeterRegistry meterRegistry;
 
   /**
    * Emit an event. Returns immediately; the persist runs on the configured async executor (or
@@ -91,12 +97,21 @@ public class ActivityEventEmitter {
     } catch (Exception ex) {
       // Non-blocking by contract — log + swallow. Losing an event is
       // strictly better than failing the calling action.
+      // B-09 fix (2026-05-09) — also bump a Prometheus counter so ops can
+      // alert on a sustained drop rate instead of relying on an operator
+      // grep'ing logs. Tagged by event type + cause class so the dashboard
+      // shows which surface is failing (Postgres / serialization / Redis).
       log.warn(
           "[ActivityEventEmitter] event {} for project {} failed to persist: {}",
           type,
           projectId,
           ex.getMessage(),
           ex);
+      Counter.builder("executespec.activity.emit_failed")
+          .tag("type", type.name())
+          .tag("cause", ex.getClass().getSimpleName())
+          .register(meterRegistry)
+          .increment();
     }
   }
 
