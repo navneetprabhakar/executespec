@@ -1,6 +1,8 @@
 package com.navneet.executespec.auth.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
@@ -53,29 +55,40 @@ public class MonthlyRunCounterResetJob {
   @Transactional
   public void resetMonthlyCounters() {
     Instant startedAt = Instant.now();
-    long userScanned = 0, userReset = 0;
+    Instant now = Instant.now();
+
+    // B-08 fix (2026-05-09) — was N+1: per-user save() opened N transactions and
+    // triggered N flushes, taking minutes at 10K+ users and blocking concurrent
+    // quota checks reading mid-job state. Now: scan once in-memory to collect IDs
+    // approved by the per-tier predicate, then fire a single bulk UPDATE per
+    // table. Predicate logic preserved (subscribed users still anchor to their
+    // billing-cycle period).
+    List<String> userIdsToReset = new ArrayList<>();
+    long userScanned = 0;
     for (AppUser user : userRepo.findAll()) {
       userScanned++;
-      // FREE users use a lifetime limit — no reset path for them.
       String tier = user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
       if ("FREE".equals(tier)) continue;
       if (tierEnforcement.shouldResetUserCounterForJob(user)) {
-        user.setPersonalRunCount(0);
-        user.setRunCountResetAt(Instant.now());
-        userRepo.save(user);
-        userReset++;
+        userIdsToReset.add(user.getId());
       }
     }
+    int userReset = 0;
+    if (!userIdsToReset.isEmpty()) {
+      userReset = userRepo.bulkResetPersonalRunCount(userIdsToReset, now);
+    }
 
-    long orgScanned = 0, orgReset = 0;
+    List<String> orgIdsToReset = new ArrayList<>();
+    long orgScanned = 0;
     for (Org org : orgRepo.findAll()) {
       orgScanned++;
       if (tierEnforcement.shouldResetOrgCounterForJob(org)) {
-        org.setMonthlyRunCount(0);
-        org.setRunCountResetAt(Instant.now());
-        orgRepo.save(org);
-        orgReset++;
+        orgIdsToReset.add(org.getId());
       }
+    }
+    int orgReset = 0;
+    if (!orgIdsToReset.isEmpty()) {
+      orgReset = orgRepo.bulkResetMonthlyRunCount(orgIdsToReset, now);
     }
 
     log.info(
