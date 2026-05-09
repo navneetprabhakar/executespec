@@ -220,9 +220,9 @@ export default function PulseTab({
               marginBottom: 'var(--v3-pad-2)',
             }}
           >
-            <h3 style={{margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--v3-text)'}}>
+            <h2 style={{margin: 0, fontSize: 13, fontWeight: 600, color: 'var(--v3-text)'}}>
               Recent pull requests
-            </h3>
+            </h2>
             <button
               type='button'
               onClick={() => onSwitchTab('runs')}
@@ -520,9 +520,9 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
     <div className='v3-rollup-cell'>
       <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6}}>
         <Heart className='h-3.5 w-3.5' style={{color: 'var(--v3-success)'}} />
-        <h3 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
+        <h2 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
           Health &amp; debt
-        </h3>
+        </h2>
       </div>
       {!health ? (
         <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>Loading…</div>
@@ -662,9 +662,9 @@ function KnowledgeCard({projectId}: {projectId: string}) {
     <div className='v3-rollup-cell'>
       <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6}}>
         <BookOpen className='h-3.5 w-3.5' style={{color: 'var(--v3-brand-hover)'}} />
-        <h3 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
+        <h2 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
           Knowledge
-        </h3>
+        </h2>
       </div>
       {!archReady ? (
         <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)', lineHeight: 1.5}}>
@@ -737,9 +737,9 @@ function ActivityCard({
     <div className='v3-rollup-cell'>
       <div style={{display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6}}>
         <Activity className='h-3.5 w-3.5' style={{color: 'var(--v3-brand-hover)'}} />
-        <h3 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
+        <h2 style={{margin: 0, fontSize: 12, fontWeight: 600, color: 'var(--v3-text)'}}>
           Activity
-        </h3>
+        </h2>
       </div>
       {loading ? (
         <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>Loading…</div>
