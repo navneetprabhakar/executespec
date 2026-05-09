@@ -1,5 +1,6 @@
 import {useEffect, useState} from 'react';
 import {Link} from 'react-router-dom';
+import {AlertTriangle, Check} from 'lucide-react';
 import {getProjectSummary, getArchitectureStaleness, type StalenessReport} from '@/lib/api';
 
 /**
@@ -95,6 +96,10 @@ export default function RepoContextPanel({projectId}: Props) {
         >
           <span style={{color: 'var(--v3-text-subtle)'}}>{collapsed ? '▸' : '▾'}</span>
           <span>What I see in your repo</span>
+          {/* F-21 fix (2026-05-09) — colour-only chip wasn't readable for
+              red/green colour-blind users. Added a leading lucide glyph
+              that encodes the same semantics (AlertTriangle for stale,
+              Check for fresh) so the signal lands without colour. */}
           <span
             style={{
               fontSize: 11,
@@ -102,6 +107,9 @@ export default function RepoContextPanel({projectId}: Props) {
               borderRadius: 3,
               background: stale > 0 ? 'rgba(245,158,11,0.16)' : 'rgba(34,197,94,0.12)',
               color: stale > 0 ? 'var(--v3-warning)' : 'var(--v3-success, #22c55e)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
             }}
             title={
               stale > 0
@@ -109,6 +117,11 @@ export default function RepoContextPanel({projectId}: Props) {
                 : 'All codemaps match the latest origin HEAD.'
             }
           >
+            {stale > 0 ? (
+              <AlertTriangle size={11} strokeWidth={2.5} aria-hidden='true' />
+            ) : (
+              <Check size={11} strokeWidth={2.5} aria-hidden='true' />
+            )}
             {stale > 0
               ? `${fresh}/${staleness.totalCount} fresh · ${stale} stale`
               : `${staleness.totalCount} repo${staleness.totalCount === 1 ? '' : 's'} · fresh`}
