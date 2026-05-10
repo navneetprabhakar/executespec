@@ -394,6 +394,53 @@ public class ScmPushService {
             "https://github.com/" + c.repo().getGithubRepoFullName(), c.prNumber(), body, pat);
       }
     }
+
+    // 2026-05-10 — persist a representative PR url on `pipeline_run.github_pr_url`. The
+    // single-repo path (lines 200–212 above) already does this when its single PR succeeds,
+    // but pushMultiRepo previously left the column null. Net effect on dev run 61c9fffa
+    // (3-repo project): two PRs were opened (pplai-api/pull/23, frontend/pull/21) and
+    // persisted to `pull_request_record`, but the v3 RunSidePanel reads
+    // `detail.githubPrUrl` as the primary signal — null → no "Open PR" button visible to
+    // the user, even though the PRs existed on GitHub. Pick the first PR as the
+    // representative URL (matches the cross-link summary order); the full per-repo list
+    // is still available via `GET /api/runs/{id}/prs`.
+    if (!created.isEmpty()) {
+      String firstPrUrl = created.get(0).prUrl();
+      try {
+        PipelineRun freshRun = stateStore.findRun(run.getRunId()).orElse(run);
+        if (freshRun.getGithubPrUrl() == null || freshRun.getGithubPrUrl().isBlank()) {
+          freshRun.setGithubPrUrl(firstPrUrl);
+        }
+        if (freshRun.getScmPrUrl() == null || freshRun.getScmPrUrl().isBlank()) {
+          freshRun.setScmPrUrl(firstPrUrl);
+        }
+        if (freshRun.getScmProvider() == null) {
+          freshRun.setScmProvider("GITHUB");
+        }
+        stateStore.save(freshRun);
+        // Mirror onto the in-memory `run` reference so callers (e.g. test code,
+        // event listeners) see the same value without a re-read.
+        if (run.getGithubPrUrl() == null || run.getGithubPrUrl().isBlank()) {
+          run.setGithubPrUrl(firstPrUrl);
+        }
+        if (run.getScmPrUrl() == null || run.getScmPrUrl().isBlank()) {
+          run.setScmPrUrl(firstPrUrl);
+        }
+        if (run.getScmProvider() == null) {
+          run.setScmProvider("GITHUB");
+        }
+        log.info(
+            "[{}] persisted representative PR url on run row: {} (total {} PRs)",
+            run.getRunId(),
+            firstPrUrl,
+            created.size());
+      } catch (Exception persistEx) {
+        log.warn(
+            "[{}] failed to persist representative PR url: {}",
+            run.getRunId(),
+            persistEx.getMessage());
+      }
+    }
   }
 
   private List<java.util.UUID> parseRepoIds(String json) {
