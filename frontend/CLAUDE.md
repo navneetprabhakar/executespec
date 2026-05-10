@@ -1,8 +1,68 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-05-10 (mobile-responsive sweep + InlineRunDetail
+> Last updated: 2026-05-10 iter-3 (mobile sweep round-3:
+> wordmark hide + portaled drawer + scroll-fade indicator on
+> `fix/mobile-tablet-comprehensive-2026-05-10`).
+>
+> **2026-05-10 iter-3 — comprehensive mobile + tablet sweep
+> (`fix/mobile-tablet-comprehensive-2026-05-10`, NOT yet merged):**
+>
+> The previous two mobile passes addressed specific surfaces flagged
+> by the user but left systemic issues — (a) the topbar wordmark
+> stayed wide enough on 375px to push ProjectSwitcher into a 2-line
+> ellipsis, (b) horizontally-scrollable rails (tab strips, summary
+> bars, admin tables) had `overflow-x-auto + scrollbar-hide` but no
+> visual cue that there was content past the right edge so users read
+> "Cha…" / "Tier C…" / "ACTI" as bugs, and (c) the mobile nav drawer
+> was rendered inside `<header className='v3-topbar'>`, which has
+> `backdrop-filter: blur(8px)` — and per CSS spec, `backdrop-filter`
+> creates a containing block for fixed-positioned descendants. The
+> drawer's `position: fixed; right: 0; top: 0; bottom: 0` was scoped
+> to the 52px-tall topbar, rendering off-canvas. Hamburger appeared
+> to do nothing on mobile.
+>
+> Five structural fixes:
+>
+> 1. **TopBar wordmark hides below 480px** — only the `ES` logo mark
+>    stays. Logo + ARIA label preserve brand recognition. Frees ~120px
+>    on phones for ProjectSwitcher.
+> 2. **ProjectSwitcher trigger sized to fit** — `maxWidth: 100%` +
+>    `minWidth: 0` (was `maxWidth: 280` hardcoded) so the trigger
+>    shrinks under the brand + hamburger pressure on 320px viewports.
+> 3. **`v3-scroll-fade-x` utility class** in `v3.css` — `mask-image`
+>    gradient that fades the right 24px so users see "more to scroll"
+>    instead of a hard cut-off. Disabled at `min-width: 768px` (no
+>    fade on tablets/desktop). Applied to: ProjectDashboardPage's
+>    top-tab strip + Runs sub-tab strip + SummaryBar pill row;
+>    CodeTab's sub-tab strip; AdminPage's top-tab strip and every
+>    `overflow-x-auto` table wrapper (7 sites); TierLifecyclePage,
+>    FeatureFlagsPage, IntegrationsPage, OrgSettingsPage scroll
+>    wrappers.
+> 4. **Mobile drawer portaled to `document.body`** via
+>    `createPortal` — escapes the `.v3-topbar` containing block so
+>    `position: fixed` is now relative to the viewport (the user's
+>    expected behaviour). Pre-fix: drawer panel rendered off-canvas
+>    inside the 52px-tall header, scrim invisible, hamburger
+>    appeared broken.
+> 5. **v3 design tokens hoisted to `:root`** in `v3.css` — the
+>    drawer (and any future React portal that lands in
+>    `document.body`) can now resolve `var(--v3-surface)`,
+>    `var(--v3-border)`, `var(--v3-text)`, etc. Previously these
+>    were scoped to `.v3-root`, so the portaled drawer's
+>    `background: var(--v3-surface)` evaluated to
+>    `rgba(0,0,0,0)` — invisible. Drawer scrim also strengthened
+>    `rgba(0,0,0,0.5)` → `rgba(0,0,0,0.7)` + 2px backdrop-blur for
+>    a clearer modal-layer feel.
+>
+> Verified live at `http://localhost:5173` against
+> `https://dev.executespec.ai` backend, mobile (375×812) +
+> tablet (768×1024) viewports, every authenticated surface a
+> super admin can reach (38 routes captured) plus the unauthenticated
+> login + website landing. No layout regressions on tablet/desktop.
+>
+> **2026-05-10 — mobile-responsive sweep + InlineRunDetail
 > layout fix + single-score collapse + website softening on
-> `fix/mobile-responsive-ui-2026-05-10` / PR #95).
+> `fix/mobile-responsive-ui-2026-05-10` / PR #95.**
 >
 > **2026-05-10 — mobile-responsive + run-detail UX batch (PR #95):**
 >
