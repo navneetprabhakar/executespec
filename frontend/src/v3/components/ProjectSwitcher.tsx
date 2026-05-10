@@ -1,6 +1,6 @@
 import {errMsg} from '@/lib/utils';
 import {useEffect, useMemo, useRef, useState} from 'react';
-import {useNavigate, useParams} from 'react-router-dom';
+import {useLocation, useNavigate, useParams} from 'react-router-dom';
 import {getProjects, type ProjectDto} from '@/lib/api';
 import {useAuthStore} from '@/stores/useAuthStore';
 import {PROVIDER_DISPLAY} from '../lib/terminology';
@@ -80,16 +80,28 @@ export default function ProjectSwitcher() {
     if (open) setTimeout(() => inputRef.current?.focus(), 0);
   }, [open]);
 
+  // 2026-05-10 — derive the current project from the URL pathname directly
+  // instead of from `params.slug`. The v3 routes use `:projectId` (and the
+  // run-detail route uses `:projectId` AND `:runShort`); a top-level
+  // `useParams` call here can't reach those nested params, so `params.slug`
+  // was always undefined and `current` always null → the switcher always
+  // rendered "Pick a project" even on `/projects/{id}` and
+  // `/projects/{id}/runs/{runShort}`. Parsing pathname is robust against
+  // route-layout reshuffles.
+  const location = useLocation();
+  const projectIdFromPath = useMemo<string | null>(() => {
+    const m = location.pathname.match(/^\/projects\/([0-9a-fA-F-]{8,})(?:\/|$)/);
+    return m ? m[1] : null;
+  }, [location.pathname]);
+
   const current = useMemo(() => {
-    if (!projects || !params.slug) return null;
-    // v3 uses {slug} which we'll alias to project.id for now (real
-    // slug-as-handle lands later). Match either id-prefix or full id.
+    if (!projects) return null;
+    const slug = projectIdFromPath ?? params.slug ?? null;
+    if (!slug) return null;
     return (
-      projects.find((p) => p.id === params.slug) ??
-      projects.find((p) => p.id.startsWith(params.slug ?? '')) ??
-      null
+      projects.find((p) => p.id === slug) ?? projects.find((p) => p.id.startsWith(slug)) ?? null
     );
-  }, [projects, params.slug]);
+  }, [projects, projectIdFromPath, params.slug]);
 
   const filtered = useMemo(() => {
     if (!projects) return [];
