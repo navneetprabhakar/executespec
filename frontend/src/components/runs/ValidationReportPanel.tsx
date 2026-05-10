@@ -568,14 +568,25 @@ export default function ValidationReportPanel({
             {/* Reviewer markdown narrative */}
             {report.reportMarkdown && <MarkdownContent content={report.reportMarkdown} />}
 
-            {/* All individual issues */}
+            {/* All individual issues — split into reviewer-flagged (authoritative)
+                and accuracy-LLM-derived (advisory). Pre-fix: every issue rendered
+                in one flat "All issues" list, so the dashboard panel showed
+                ACCURACY_LLM hallucinations next to deterministic reviewer findings
+                with the same visual weight. The user couldn't tell which were
+                trustworthy. Post-fix: separate sections, distinct headings, an
+                explicit "advisory" caveat on the LLM section. The backend already
+                stamps `stage='ACCURACY_LLM'` on SYNTH-ACC-* derived rows in
+                ValidationReportService.extractIssues. */}
             {report.issues && report.issues.length > 0 && (
-              <div className='space-y-1.5 pt-2 border-t border-[var(--border-default)]'>
-                <h4 className='text-[10px] font-mono font-medium uppercase tracking-wider text-secondary'>
-                  All issues ({report.issues.length})
-                </h4>
-                <div className='space-y-1'>
-                  {report.issues.map((issue: ReportIssue, i: number) => {
+              <>
+                {(() => {
+                  const reviewerIssues = report.issues.filter(
+                    (i: ReportIssue) => i.stage !== 'ACCURACY_LLM',
+                  );
+                  const accuracyIssues = report.issues.filter(
+                    (i: ReportIssue) => i.stage === 'ACCURACY_LLM',
+                  );
+                  const renderIssue = (issue: ReportIssue, i: number) => {
                     const cfg =
                       SEVERITY_CONFIG[issue.severity] ?? SEVERITY_CONFIG.WOULD_FAIL_REVIEW;
                     return (
@@ -610,9 +621,37 @@ export default function ValidationReportPanel({
                         </span>
                       </div>
                     );
-                  })}
-                </div>
-              </div>
+                  };
+                  return (
+                    <>
+                      {reviewerIssues.length > 0 && (
+                        <div className='space-y-1.5 pt-2 border-t border-[var(--border-default)]'>
+                          <h4 className='text-[10px] font-mono font-medium uppercase tracking-wider text-secondary'>
+                            Reviewer findings ({reviewerIssues.length})
+                          </h4>
+                          <div className='space-y-1'>{reviewerIssues.map(renderIssue)}</div>
+                        </div>
+                      )}
+                      {accuracyIssues.length > 0 && (
+                        <div className='space-y-1.5 pt-2 border-t border-[var(--border-default)]'>
+                          <h4 className='text-[10px] font-mono font-medium uppercase tracking-wider text-muted flex items-center gap-2'>
+                            <span>Spec adherence advisory ({accuracyIssues.length})</span>
+                          </h4>
+                          <p className='text-[10px] text-muted leading-relaxed'>
+                            LLM-derived. The accuracy assessor compares the spec against a sampled
+                            snippet of the workspace; entries here may include false positives when
+                            the implementing file wasn't read. Treat as informational, not as
+                            authoritative findings.
+                          </p>
+                          <div className='space-y-1 opacity-80'>
+                            {accuracyIssues.map(renderIssue)}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  );
+                })()}
+              </>
             )}
 
             {/* Checks passed */}
