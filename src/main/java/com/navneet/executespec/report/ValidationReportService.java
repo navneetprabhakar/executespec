@@ -840,7 +840,11 @@ public class ValidationReportService {
    *       damper.
    *   <li><b>endpointFactor</b> — endpointCoveragePercent / 100, with null treated as 1.0 (no spec
    *       endpoints means the coverage signal isn't applicable). Linear scaling replaces the
-   *       previous binary-at-95% cliff that gave 1pp difference 10pp of score.
+   *       previous binary-at-95% cliff that gave 1pp difference 10pp of score. <b>2026-05-10
+   *       trust gate:</b> when reviewer is CLEAN or FIXED_ISSUES, endpointFactor is floored at
+   *       reviewerFactor to prevent the assessment LLM's read-budget-limited count from
+   *       overriding the reviewer's wiring-pass verdict on the same dimension. See dev run
+   *       7483896a analysis (PR #95) for the false-positive class this closes.
    *   <li><b>criticalDamper</b> — 1.0 when no unfixed criticals; drops 5% per critical (to a floor
    *       of 0.5). Replaces the additive 5×N penalty that double-counted with SYNTH-BUILD/SYNTH-REV
    *       (which themselves restate the build/reviewer factors).
@@ -892,6 +896,35 @@ public class ValidationReportService {
       endpointFactor = 1.0; // signal not applicable (e.g. CLI / library spec, no HTTP)
     } else {
       endpointFactor = Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
+    }
+
+    // 2026-05-10 — endpoint-coverage trust gate.
+    //
+    // Root cause from dev run 7483896a (ppl-ai, PR #95 analysis): the
+    // `endpointCoveragePercent` field on AccuracyReport is documented as
+    // "deterministic" (a count of expected vs implemented endpoints from
+    // the spec) but the count is RELATIVE TO THE LLM'S READ BUDGET. When
+    // the assessment LLM only reads 6 of N source files, it
+    // under-counts implemented endpoints and reports e.g. 40% coverage
+    // even when the reviewer's wiring pass found every endpoint
+    // correctly registered. Result: the multiplicative formula compounds
+    // the false-low coverage signal — verifiedScore on 7483896a came out
+    // 17/100 with `100 × 1.0 × 0.5 × 0.85 × 0.4 × 1.0 = 17` even though
+    // every concrete pipeline signal was healthy (build PASSED, reviewer
+    // CLEAN/FIXED_ISSUES, no real unfixed criticals).
+    //
+    // The reviewer's wiring pass IS the deterministic check on endpoint
+    // correctness — it walks the route tables of every supported
+    // framework (Spring component-scan, Express routers, FastAPI route
+    // decorators, etc.). When the reviewer's verdict is CLEAN or
+    // FIXED_ISSUES, trust THAT signal over the LLM's read-budget-limited
+    // endpoint count: floor endpointFactor at reviewerFactor so a strong
+    // reviewer signal can't be overridden by an LLM hallucination on the
+    // same dimension. UNRESOLVED_ISSUES / REVIEW_FAILED stays
+    // un-floored — those verdicts mean the wiring pass wasn't decisive,
+    // so the LLM signal is the only check we have.
+    if ("CLEAN".equals(reviewerVerdictName) || "FIXED_ISSUES".equals(reviewerVerdictName)) {
+      endpointFactor = Math.max(endpointFactor, reviewerFactor);
     }
 
     // Each unfixed critical knocks 5% off, floored at 0.5. Substantially weaker than the
