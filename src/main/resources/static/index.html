@@ -18,7 +18,17 @@
     <link rel="apple-touch-icon" href="/logo.png" />
     <!-- 2026-05-10 — JetBrains Mono everywhere (body + mono) for the
          developer-tool / terminal-style aesthetic. Marketing site uses
-         the same family so landing → product typography is identical. -->
+         the same family so landing → product typography is identical.
+
+         Mobile-sharpness fix (iter-3, 2026-05-10): the CSS link below
+         was being blocked by the prod CSP (`style-src 'self'
+         'unsafe-inline' https://cdn.jsdelivr.net` did not include
+         fonts.googleapis.com). On mobile the font silently fell back
+         to ui-monospace / SF Mono / Menlo — none of which are tuned
+         for the body chain and render fuzzily on iOS Safari at 2x/3x
+         DPR. The `style-src` directive in
+         backend/SecurityProperties.java now allows
+         fonts.googleapis.com so the @font-face block resolves. -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
@@ -26,8 +36,8 @@
       rel="stylesheet"
     />
     <title>ExecuteSpec</title>
-    <script type="module" crossorigin src="/assets/index-DrH8cCd8.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-CPYgyRLZ.css">
+    <script type="module" crossorigin src="/assets/index-BLfTQCvj.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-aLS68h_Z.css">
   </head>
   <body>
     <div id="root"></div>
