@@ -307,7 +307,7 @@ function TabBar({
       // intrinsic width and the strip scrolls. scrollbar-hide ensures the
       // touch hint stays invisible until the user swipes. Below 720px the
       // tabs auto-shrink to keep four-five visible without scrolling.
-      className='scrollbar-hide'
+      className='scrollbar-hide v3-scroll-fade-x'
       style={{
         display: 'flex',
         borderBottom: '1px solid var(--v3-border)',
