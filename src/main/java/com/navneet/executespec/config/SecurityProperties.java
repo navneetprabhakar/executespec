@@ -32,13 +32,12 @@ public class SecurityProperties {
             // render blurry on iOS Safari at 2x/3x DPR. font-src already allowed
             // fonts.gstatic.com (the actual .woff2 files), so this single domain
             // addition closes the gap without widening the surface meaningfully.
-            + "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
-            + "img-src 'self' data:; "
-            + "connect-src 'self' wss: https://cdn.jsdelivr.net; "
-            + "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-            + "worker-src 'self' blob:; "
-            + "frame-src 'self' https://*.run.app https://*.executespec.ai; "
-            + "frame-ancestors 'self' https://*.executespec.ai https://*.run.app";
+            + "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+            + " https://fonts.googleapis.com; img-src 'self' data:; connect-src 'self' wss:"
+            + " https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com"
+            + " https://cdn.jsdelivr.net; worker-src 'self' blob:; frame-src 'self'"
+            + " https://*.run.app https://*.executespec.ai; frame-ancestors 'self'"
+            + " https://*.executespec.ai https://*.run.app";
   }
 
   @Data
