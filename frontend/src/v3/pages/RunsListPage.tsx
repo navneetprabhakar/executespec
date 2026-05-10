@@ -357,7 +357,23 @@ export default function RunsListPage() {
                 }}
               >
                 <div style={{minWidth: 0}}>
-                  <div style={{display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4}}>
+                  {/* 2026-05-10 (mobile audit) — child row was `display: flex
+                      gap: 8` with no flex-wrap, so on 375px the project name
+                      span shrank and re-wrapped each word onto its own line
+                      while the status pill + runId stayed compact. New shape:
+                      flex-wrap with `min-width: 0` + `flex: 0 1 auto` on the
+                      project-name span so it truncates instead of wrapping
+                      vertically. */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 8,
+                      marginBottom: 4,
+                      minWidth: 0,
+                    }}
+                  >
                     <span
                       style={{
                         fontFamily: 'var(--v3-font-mono)',
@@ -368,6 +384,7 @@ export default function RunsListPage() {
                         color: tone.fg,
                         border: `1px solid ${tone.bd}`,
                         fontWeight: 600,
+                        flexShrink: 0,
                       }}
                     >
                       {(r.status ?? 'UNKNOWN').replace(/_/g, ' ')}
@@ -378,6 +395,11 @@ export default function RunsListPage() {
                           fontFamily: 'var(--v3-font-mono)',
                           fontSize: 11,
                           color: 'var(--v3-text-subtle)',
+                          minWidth: 0,
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
                         }}
                       >
                         {r.projectName ?? projectName(projectId)}
@@ -388,6 +410,7 @@ export default function RunsListPage() {
                         fontFamily: 'var(--v3-font-mono)',
                         fontSize: 11,
                         color: 'var(--v3-text-subtle)',
+                        flexShrink: 0,
                       }}
                     >
                       · {runShort}
