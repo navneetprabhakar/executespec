@@ -67,19 +67,18 @@ export default function NotificationPanel({onClose, onRead, onReadAll}: Props) {
   return (
     <div
       className={cn(
-        // Mobile (< sm 640px): pin to viewport, right-anchored with 8px gutter,
-        // width = viewport - 16px (both gutters), below the 56px (h-14) header.
-        //
-        // Previously the panel used `absolute right-0 top-full` with
-        // `w-[calc(100vw-1rem)]`, which anchored the panel to the tiny bell
-        // button. `right-0` = right edge of the bell (not viewport). On a 390px
-        // screen the 374px-wide panel then extended ~16px past the LEFT edge of
-        // the viewport. `fixed` detaches from the bell. `right-2` + the calc()
-        // width makes the panel span the viewport with symmetric gutters.
-        'fixed right-2 top-14 mt-1 w-[calc(100vw-1rem)] max-w-sm',
+        // Mobile (< sm 640px): pin to viewport with 16px gutters on both sides,
+        // below the 56px (h-14) header. 2026-05-10 (mobile audit): tightened
+        // gutters from 8px → 16px (`right-4` + `w-[calc(100vw-2rem)]`) so the
+        // panel doesn't visually clip against the screen edge on iPhone SE
+        // (320px) — at 8px the rounded-lg corner sat behind the device bezel
+        // when in a stand. max-h capped to the viewport height (minus header
+        // and gutter) so the list never runs off the bottom on landscape.
+        'fixed right-4 top-14 mt-1 w-[calc(100vw-2rem)] max-w-sm',
+        'max-h-[calc(100vh-5rem)]',
         // Desktop: revert to the original dropdown-from-bell behaviour.
-        'sm:absolute sm:right-0 sm:top-full sm:mt-1 sm:w-80',
-        'max-h-96 rounded-lg border border-[var(--border-default)] bg-[var(--geist-bg)] shadow-lg overflow-hidden z-50',
+        'sm:absolute sm:right-0 sm:top-full sm:mt-1 sm:w-80 sm:max-h-96',
+        'rounded-lg border border-[var(--border-default)] bg-[var(--geist-bg)] shadow-lg overflow-hidden z-50',
       )}
     >
       <div className='flex items-center justify-between px-3 py-2 border-b border-[var(--border-default)]'>
@@ -91,7 +90,7 @@ export default function NotificationPanel({onClose, onRead, onReadAll}: Props) {
           <CheckCheck className='h-3 w-3' /> Mark all read
         </button>
       </div>
-      <div className='overflow-y-auto max-h-80'>
+      <div className='overflow-y-auto max-h-[calc(100vh-9rem)] sm:max-h-80'>
         {loading && (
           <div className='flex items-center justify-center py-8'>
             <Loader2 className='h-4 w-4 animate-spin text-muted' />

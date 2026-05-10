@@ -162,6 +162,13 @@ export default function RunSidePanel({
 
   return (
     <aside
+      // 2026-05-10 (mobile audit) — sizing now lives in the v3-rundetail-side
+      // class (defined in v3.css) so a min-width: 768px media query can drop
+      // both the calc()-based maxHeight and the 480px minHeight on mobile.
+      // On the stacked mobile layout the side panel is the bottom-most pane;
+      // capping it there cropped half the chat thread off-screen, and the
+      // 480px floor forced inflated whitespace on a Plan tab with 1 task.
+      className='v3-rundetail-side'
       style={{
         background: 'var(--v3-surface)',
         border: '1px solid var(--v3-border)',
@@ -169,14 +176,6 @@ export default function RunSidePanel({
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        // 2026-05-07 — Issue 2: cap the side panel against the viewport so its
-        // body scrolls internally instead of growing the parent grid row.
-        // Mirrors the file-tree aside on the same page (also `calc(100vh -
-        // 320px)`). Without the cap, the LogPane's recent[] (up to 300 rows)
-        // pushes the grid row taller and taller, dragging the diff editor
-        // off-screen with it.
-        minHeight: 480,
-        maxHeight: 'calc(100vh - 320px)',
       }}
       aria-label='Run side panel'
     >
@@ -301,10 +300,19 @@ function TabBar({
   return (
     <div
       role='tablist'
+      // 2026-05-10 (mobile audit) — 7 tabs (Overview / Plan / Timeline / Log /
+      // Tests / Preview / Chat) cannot fit at flex:1 on a 320-360px viewport
+      // (each label needs ~50-60px @ 11.5px font, total ~420px). Switched to
+      // horizontal-scroll with `flex: 0 0 auto` per tab so tabs keep their
+      // intrinsic width and the strip scrolls. scrollbar-hide ensures the
+      // touch hint stays invisible until the user swipes. Below 720px the
+      // tabs auto-shrink to keep four-five visible without scrolling.
+      className='scrollbar-hide'
       style={{
         display: 'flex',
         borderBottom: '1px solid var(--v3-border)',
         background: 'var(--v3-bg)',
+        overflowX: 'auto',
       }}
     >
       {items.map((it) => {
@@ -317,8 +325,9 @@ function TabBar({
             aria-selected={isActive}
             onClick={() => onChange(it.key)}
             style={{
-              flex: 1,
-              padding: '10px 6px',
+              flex: '1 1 auto',
+              minWidth: 'max-content',
+              padding: '10px 12px',
               fontSize: 11.5,
               fontWeight: isActive ? 600 : 500,
               whiteSpace: 'nowrap',
@@ -2780,7 +2789,10 @@ function ChatPane({
       <form
         onSubmit={onSubmit}
         style={{
+          // 2026-05-10 (mobile audit) — paddingBottom respects iOS safe-area
+          // so the composer sits above the home-indicator bar on iPhones.
           padding: '10px 12px',
+          paddingBottom: 'max(10px, env(safe-area-inset-bottom))',
           borderTop: '1px solid var(--v3-border)',
           display: 'flex',
           gap: 6,
@@ -2802,8 +2814,13 @@ function ChatPane({
           placeholder={messages.length === 0 ? 'Ask about this run…' : 'Reply…'}
           disabled={busy || !detail}
           style={{
+            // 2026-05-10 (mobile audit) — minHeight 44 satisfies WCAG /
+            // Apple HIG tap-target floor; was 30px (7+7+font-line) which is
+            // too small for thumb input on phones.
             flex: 1,
-            padding: '7px 10px',
+            minWidth: 0,
+            minHeight: 44,
+            padding: '10px 12px',
             background: 'var(--v3-surface)',
             color: 'var(--v3-text)',
             border: '1px solid var(--v3-border)',
@@ -2816,7 +2833,10 @@ function ChatPane({
           type='submit'
           disabled={!input.trim() || busy || !detail}
           style={{
-            padding: '7px 14px',
+            // 2026-05-10 (mobile audit) — match input minHeight so the
+            // composer is one consistent 44px row on phones.
+            minHeight: 44,
+            padding: '10px 16px',
             fontSize: 12.5,
             fontWeight: 600,
             background: input.trim() && !busy ? 'var(--v3-brand)' : 'var(--v3-surface-elevated)',
@@ -2825,6 +2845,7 @@ function ChatPane({
             borderRadius: 6,
             cursor: input.trim() && !busy ? 'pointer' : 'not-allowed',
             fontFamily: 'inherit',
+            flexShrink: 0,
           }}
         >
           Send
