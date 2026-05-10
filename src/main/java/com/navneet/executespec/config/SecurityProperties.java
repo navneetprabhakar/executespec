@@ -25,19 +25,19 @@ public class SecurityProperties {
     private String policy =
         "default-src 'self'; "
             + "script-src 'self' https://cdn.jsdelivr.net https://static.cloudflareinsights.com; "
-            + "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
-            + "img-src 'self' data:; "
-            // Fix K (2026-05-03): allow Monaco editor sourcemap + WASM fetches from
-            // jsdelivr CDN. Without this the browser console fills with "Connecting to
-            // 'https://cdn.jsdelivr.net/.../monaco-editor@0.52.2/min-maps/...' violates
-            // the following Content Security Policy directive: connect-src 'self' wss:"
-            // — cosmetic but noisy, and operators reading prod console logs were paging
-            // on harmless sourcemap blocks.
-            + "connect-src 'self' wss: https://cdn.jsdelivr.net; "
-            + "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net; "
-            + "worker-src 'self' blob:; "
-            + "frame-src 'self' https://*.run.app https://*.executespec.ai; "
-            + "frame-ancestors 'self' https://*.executespec.ai https://*.run.app";
+            // 2026-05-10 mobile sweep iter-3 — `https://fonts.googleapis.com` added
+            // to style-src so the JetBrains Mono stylesheet loaded by index.html
+            // resolves. Pre-fix the CSP blocked the CSS file, the font @font-face
+            // never registered, and every page fell back to system fonts that
+            // render blurry on iOS Safari at 2x/3x DPR. font-src already allowed
+            // fonts.gstatic.com (the actual .woff2 files), so this single domain
+            // addition closes the gap without widening the surface meaningfully.
+            + "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net"
+            + " https://fonts.googleapis.com; img-src 'self' data:; connect-src 'self' wss:"
+            + " https://cdn.jsdelivr.net; font-src 'self' https://fonts.gstatic.com"
+            + " https://cdn.jsdelivr.net; worker-src 'self' blob:; frame-src 'self'"
+            + " https://*.run.app https://*.executespec.ai; frame-ancestors 'self'"
+            + " https://*.executespec.ai https://*.run.app";
   }
 
   @Data

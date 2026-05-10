@@ -294,6 +294,28 @@ public class WorkerAgent {
         Math.max(
             5, Math.min((int) Math.round(maxIter * 0.7), Math.max(1, stagnationForceAfter - 1)));
 
+    // 2026-05-10 — Lever C: completion-gate nudge. T8 on dev run a59f9798 wrote 10 files,
+    // emitted "Excellent! The implementation is complete and correct. Let me create a summary…",
+    // and stopped without ever calling completeTask. The model went into "summary mode" instead
+    // of invoking the tool — no iter-cap, stagnation, or budget signal could rescue it because
+    // the loop's exit condition is "model returned no tool calls" and the model gave us text-only.
+    //
+    // Lever C fires once per task: when the assistant emits a final text-only response containing
+    // a summary keyword (case-insensitive: summary, complete, done, finished, all set,
+    // implementation is complete, ready) AND the worker has written at least one file AND the
+    // iter is past 0.5×maxIter, inject a UserMessage telling the model to call completeTask now
+    // (with the summary text as completionNotes) or list the next concrete edit. Mirrors Lever A's
+    // shape but for the completion gate, not the investigation gate.
+    boolean completionNudgeFired = false;
+
+    // 2026-05-10 — per-task wall-clock budget. Sibling of maxIter — whichever fires first wins.
+    // Default to a reasonable per-tier ceiling when not provided so callers that haven't migrated
+    // (e.g. ReviewerAgent's two passes) still get the new safety net. Zero/null = unbounded.
+    final long wallClockMillisCap =
+        req.wallClockSeconds() != null && req.wallClockSeconds() > 0
+            ? req.wallClockSeconds() * 1000L
+            : 0L;
+
     if (!isResume) {
       log.info(
           "WorkerAgent START run={} task={} provider={} model={} maxIter={}",
@@ -311,6 +333,30 @@ public class WorkerAgent {
         pipelineRunRepository.findById(runId).map(r -> r.getHardCapUsd()).orElse(null);
 
     for (int iter = startIter; iter <= maxIter; iter++) {
+      // 2026-05-10 — wall-clock cap check. Top-of-iter so we never start a new LLM call once
+      // we've blown past the budget. In-flight LLM calls are not interrupted (the stop happens
+      // on the next iter boundary), so the actual termination time is "wall-clock cap +
+      // current LLM call latency" — typically <60s tail.
+      if (wallClockMillisCap > 0 && (System.currentTimeMillis() - start) >= wallClockMillisCap) {
+        log.warn(
+            "WorkerAgent WALL_CLOCK_EXCEEDED run={} task={} iter={} elapsedMs={} capMs={}"
+                + " totalWrites={}",
+            runId,
+            req.context().taskId(),
+            iter,
+            System.currentTimeMillis() - start,
+            wallClockMillisCap,
+            totalWriteCalls);
+        recordTerminal(WorkerResult.Outcome.WALL_CLOCK_EXCEEDED, req, iter);
+        return WorkerResult.builder()
+            .outcome(WorkerResult.Outcome.WALL_CLOCK_EXCEEDED)
+            .iterations(iter)
+            .toolCallsDispatched(toolsDispatched)
+            .finalAssistantText(lastText)
+            .toolCallLog(toolLog)
+            .totalLatencyMs(System.currentTimeMillis() - start)
+            .build();
+      }
       if (hardCapUsd != null
           && hardCapUsd > 0
           && (iter == 1 || iter % BUDGET_CHECK_EVERY_N_ITERATIONS == 0)) {
@@ -447,6 +493,46 @@ public class WorkerAgent {
 
       // No tool calls → model is done (either text-only stop or stopped early).
       if (calls.isEmpty()) {
+        // 2026-05-10 — Lever C: completion-gate nudge. T8 on dev run a59f9798 wrote 10 files
+        // and emitted "Excellent! The implementation is complete and correct. ## Summary…" but
+        // never invoked completeTask. The model effectively produced a status report instead of
+        // closing the loop. Cost: full task counted as STOPPED_WITHOUT_COMPLETE → soft-PARTIAL.
+        // Lever C fires once per task. Conditions: text-only response + writes happened + iter
+        // past 0.5×maxIter + assistant text contains a "summary/complete/done" keyword. We
+        // append the assistant turn AND a UserMessage telling the model to call completeTask
+        // with the summary as completionNotes (or list the next concrete edit if it isn't
+        // actually done). Then continue the loop — the model gets one more iter to do the
+        // right thing. STOPPED_WITHOUT_COMPLETE still kicks in if the next iter also returns
+        // text-only (we don't fire the nudge twice).
+        if (!completionNudgeFired
+            && totalWriteCalls > 0
+            && iter >= Math.max(3, (int) Math.round(maxIter * 0.5))
+            && looksLikeSummary(assistantText)) {
+          completionNudgeFired = true;
+          log.info(
+              "WorkerAgent LEVER_C completionNudge run={} task={} iter={} writes={}"
+                  + " textPreview={}",
+              runId,
+              req.context().taskId(),
+              iter,
+              totalWriteCalls,
+              previewThought(assistantText));
+          history.add(new AssistantMessage(assistantText));
+          history.add(
+              new UserMessage(
+                  "COMPLETION GATE — you have written "
+                      + totalWriteCalls
+                      + " file"
+                      + (totalWriteCalls == 1 ? "" : "s")
+                      + " and your last message reads like a status summary, but you did NOT"
+                      + " call the `completeTask` tool. The pipeline scores tasks based on that"
+                      + " tool call. If you genuinely believe the work is done, call"
+                      + " `completeTask` now and pass your summary as the `completionNotes`"
+                      + " argument. If something is still missing, list the next concrete edit"
+                      + " (writeFile/editFile) you intend to make and execute it. Do not produce"
+                      + " another text-only response."));
+          continue; // Re-enter the loop; iter increments; model gets another shot.
+        }
         history.add(new AssistantMessage(assistantText));
         recordTerminal(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, req, iter);
         return WorkerResult.builder()
@@ -1055,5 +1141,45 @@ public class WorkerAgent {
   private static String truncate(String s, int max) {
     if (s == null) return "";
     return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+  }
+
+  /**
+   * Heuristic for the "model emitted a status report instead of calling completeTask" pattern.
+   *
+   * <p>Used by Lever C: when an assistant turn returns no tool calls and we want to decide whether
+   * to fire a one-shot completion nudge or accept the early termination. Match is intentionally
+   * loose — we want the false-positive rate (nudge a model that genuinely had nothing left to say)
+   * far higher than the false-negative rate (let a finished task fall through to PARTIAL).
+   *
+   * <p>Keywords cribbed from real T8 final assistant text on dev run a59f9798 ("Excellent! The
+   * implementation is complete and correct. Let me create a summary of what was done") plus the
+   * standard "summary / done / finished / all set / ready" cluster that Anthropic Sonnet and OpenAI
+   * GPT both default to when wrapping up a task.
+   */
+  static boolean looksLikeSummary(String text) {
+    if (text == null || text.length() < 12) return false;
+    String lower = text.toLowerCase(java.util.Locale.ROOT);
+    // Single-shot indicator phrases. Any one match → fire the nudge.
+    String[] needles = {
+      "## summary",
+      "summary of changes",
+      "summary of what",
+      "implementation is complete",
+      "task is complete",
+      "task complete",
+      "all done",
+      "all set",
+      "i've completed",
+      "i have completed",
+      "i've successfully",
+      "i have successfully",
+      "everything is in place",
+      "ready for review",
+      "ready to ship"
+    };
+    for (String n : needles) {
+      if (lower.contains(n)) return true;
+    }
+    return false;
   }
 }
