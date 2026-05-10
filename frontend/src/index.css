@@ -67,7 +67,13 @@ body {
 body {
   background: var(--geist-bg);
   color: var(--text-primary);
+  /* 2026-05-10 — DM Sans is the marketing-site body font (Tour section
+   * + Project Workspace mockup). Leading the chain with it keeps the
+   * landing → product typography identical. Geist Sans stays as a
+   * second-position fallback for the brief window before Google Fonts
+   * resolves. */
   font-family:
+    'DM Sans',
     'Geist Sans',
     ui-sans-serif,
     system-ui,
@@ -189,7 +195,7 @@ optgroup {
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
   border-radius: var(--radius-sm);
-  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+  font-family: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;

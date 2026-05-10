@@ -100,12 +100,16 @@
    * Centralising the canonical stacks here lets every consumer write
    * `fontFamily: 'var(--v3-font-sans)'` or `var(--v3-font-mono)` and
    * stay aligned automatically. The sans chain matches `body` in
-   * `index.css`; the mono chain leads with `'Geist Mono'` (the only
-   * registered mono face) before falling to system mono. */
+   * `index.css`.
+   *
+   * 2026-05-10 — DM Sans + JetBrains Mono lead the chain to match the
+   * marketing-site Tour section + Project Workspace mockup. Geist
+   * stays as a second-position fallback for the brief Google-Fonts
+   * load window. */
   --v3-font-sans:
-    'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
-  --v3-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    'DM Sans', 'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+    'Segoe UI', sans-serif;
+  --v3-font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   background: var(--v3-bg);
   color: var(--v3-text);
