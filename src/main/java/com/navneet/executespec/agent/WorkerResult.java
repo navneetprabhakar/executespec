@@ -45,6 +45,14 @@ public record WorkerResult(
      * workspace (otherwise we'd see writes); the worker is just being indecisive. The smoke gate
      * downstream decides whether the change set actually compiles.
      */
-    COMPLETED_BY_STAGNATION
+    COMPLETED_BY_STAGNATION,
+    /**
+     * Worker exceeded its per-task wall-clock budget (see {@link
+     * com.navneet.executespec.agent.WorkerTaskRequest#wallClockSeconds}). Mirrors {@link
+     * #ITERATION_LIMIT_EXCEEDED} but bounded on real time instead of LLM-call count — protects
+     * against expensive long-tail tasks where a slow model burns through the iter budget very fast,
+     * AND against tasks where a verbose model uses too many "thin" iterations per write.
+     */
+    WALL_CLOCK_EXCEEDED
   }
 }
