@@ -78,11 +78,11 @@ export default {
         dvh: '100dvh',
       },
       fontFamily: {
-        // 2026-05-10 — DM Sans / JetBrains Mono align the app with the
-        // marketing-site Tour section + Project Workspace mockup so the
-        // landing → product typography is identical. Geist Sans / Mono
-        // stay as second-position fallbacks until Google Fonts resolves.
-        sans: ['DM Sans', 'Geist Sans', 'system-ui', 'sans-serif'],
+        // 2026-05-10 (test variant) — both `sans` and `mono` aliases
+        // resolve to JetBrains Mono so the entire surface renders in
+        // mono. Revert `sans` to ['DM Sans', ...] to drop the mono-
+        // everywhere experiment.
+        sans: ['JetBrains Mono', 'Geist Sans', 'ui-monospace', 'monospace'],
         mono: ['JetBrains Mono', 'Geist Mono', 'ui-monospace', 'monospace'],
       },
       spacing: {

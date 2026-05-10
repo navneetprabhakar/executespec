@@ -102,13 +102,12 @@
    * stay aligned automatically. The sans chain matches `body` in
    * `index.css`.
    *
-   * 2026-05-10 — DM Sans + JetBrains Mono lead the chain to match the
-   * marketing-site Tour section + Project Workspace mockup. Geist
-   * stays as a second-position fallback for the brief Google-Fonts
-   * load window. */
-  --v3-font-sans:
-    'DM Sans', 'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
-    'Segoe UI', sans-serif;
+   * 2026-05-10 (test variant) — both sans + mono use JetBrains Mono.
+   * The "everywhere mono" look is being trialled; revert by swapping
+   * JetBrains Mono back to 'DM Sans' on the sans chain if the
+   * experiment isn't kept. Geist + system fallbacks remain so the
+   * page renders during the Google-Fonts load window. */
+  --v3-font-sans: 'JetBrains Mono', 'Geist Sans', ui-monospace, SFMono-Regular, Menlo, monospace;
   --v3-font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   background: var(--v3-bg);

@@ -86,7 +86,7 @@ function DefaultFallback({error, onReset}: {error: Error; onReset: () => void}) 
         color: '#ECEEF2',
         background: 'transparent',
         fontFamily:
-          '"DM Sans", "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+          '"JetBrains Mono", "Geist Sans", ui-monospace, SFMono-Regular, Menlo, monospace',
       }}
     >
       <div style={{textAlign: 'center', maxWidth: 480}}>
