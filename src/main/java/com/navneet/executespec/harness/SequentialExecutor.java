@@ -1058,7 +1058,19 @@ public class SequentialExecutor {
         }
       }
       if (failureReason != null && !failureReason.isBlank()) {
-        t.setLastLlmFailure(failureReason);
+        // 2026-05-10 (V184 companion) — defensive cap on the persistence
+        // boundary even though the column is TEXT. Reasons routed here
+        // can include a 240-char finalAssistantText tail PLUS a stack
+        // trace if a tool blew up in an exception path; capping at 4000
+        // is enough to keep the failure cause readable in the DB while
+        // keeping row sizes predictable. Truncate marker is a literal
+        // suffix so a future reader knows the value was clipped, not
+        // that the worker terminated mid-thought.
+        String reason = failureReason;
+        if (reason.length() > 4000) {
+          reason = reason.substring(0, 4000) + "… [truncated]";
+        }
+        t.setLastLlmFailure(reason);
       }
       taskRepo.saveAndFlush(t);
       log.info(
