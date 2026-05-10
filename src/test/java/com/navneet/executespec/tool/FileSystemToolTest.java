@@ -115,5 +115,37 @@ class FileSystemToolTest {
       // safeResolve() blocks path escape — returns "ACCESS DENIED: Path escape attempt"
       assertThat(result).startsWith("ACCESS DENIED");
     }
+
+    /**
+     * B-02 (audit, 2026-05-09) — symlink traversal regression. A symlink inside the workspace
+     * pointing at a path outside the workspace would lexically pass {@code startsWith(ws)} (the
+     * symlink itself sits inside the workspace), but reading through it would expose
+     * out-of-workspace data. The hardened safeResolve runs {@code toRealPath()} on every existing
+     * ancestor and re-checks containment — so this test must observe ACCESS DENIED.
+     *
+     * <p>Skipped on filesystems that don't permit symlinks (e.g. the test runner's temp on Windows
+     * without the right privileges).
+     */
+    @Test
+    @DisplayName("symlink escape is blocked (B-02)")
+    void symlinkEscape() throws IOException {
+      Path runWs = tempDir.resolve("test-run");
+      // Create a sibling directory OUTSIDE the workspace + a sensitive file in it.
+      Path outside = tempDir.resolveSibling("outside-real");
+      Files.createDirectories(outside);
+      Path secret = outside.resolve("secret.txt");
+      Files.writeString(secret, "TOPSECRET");
+      // Drop a symlink inside the workspace pointing at the outside dir.
+      Path link = runWs.resolve("escape-link");
+      try {
+        Files.createSymbolicLink(link, outside);
+      } catch (UnsupportedOperationException | IOException e) {
+        // Filesystem doesn't support symlinks — bail out gracefully.
+        return;
+      }
+      String result = fsTool.readFile("test-run", "escape-link/secret.txt");
+      assertThat(result).startsWith("ACCESS DENIED");
+      assertThat(result).doesNotContain("TOPSECRET");
+    }
   }
 }
