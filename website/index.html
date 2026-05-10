@@ -2,7 +2,12 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- 2026-05-10 (mobile audit) — `viewport-fit=cover` opts the page into
+         iOS Safari's safe-area inset support so the body draws under the
+         notch / home-indicator and we can offset content with
+         env(safe-area-inset-*). Pairs with the safe-area rules added in
+         the global stylesheet below. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>ExecuteSpec — AI that ships pull requests, plus a catalog of 28 readymade solutions + 11 modernization recipes</title>
     
     <!-- Google Analytics (GA4) -->
@@ -579,6 +584,46 @@
         a { color: inherit; text-decoration: none; }
         .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; width: 100%; }
 
+        /* 2026-05-10 (mobile audit) — anchor-link offset.
+         * The fixed nav is 60-80px tall on mobile; scrolling to #section
+         * anchors via the in-page nav landed the section header BEHIND the
+         * sticky nav bar. scroll-margin-top reserves space so anchored
+         * sections appear with their header visible. Limited to [id]
+         * sections + h2 nodes so unrelated layouts aren't affected. */
+        section[id], h2[id] { scroll-margin-top: 88px; }
+        @media (max-width: 640px) {
+            section[id], h2[id] { scroll-margin-top: 76px; }
+        }
+
+        /* 2026-05-10 (mobile audit) — iOS Safari auto-zooms any focused
+         * form control whose font-size is < 16px. The hero composer's
+         * textarea was 15.2px, so tapping it caused a tiny zoom that
+         * never reset. Force a 16px floor on every form control across
+         * the page; doesn't visibly change desktop typography because
+         * the existing rules already settle ≥ 0.95rem (15.2px) and the
+         * !important is gated to the iOS engine via @supports. */
+        @supports (-webkit-touch-callout: none) {
+            input, textarea, select {
+                font-size: max(16px, 1em) !important;
+            }
+        }
+
+        /* 2026-05-10 (mobile audit) — safe-area inset for the fixed nav so
+         * on iPhone X+ the brand mark / hamburger don't sit under the
+         * notch / Dynamic Island when the page draws under it (now
+         * enabled via viewport-fit=cover above). The default 20px top
+         * padding stays as the floor; max() ensures the nav opens up
+         * extra room only on devices that report a non-zero inset. */
+        nav#navbar {
+            padding-top: max(20px, env(safe-area-inset-top));
+            padding-left: max(0px, env(safe-area-inset-left));
+            padding-right: max(0px, env(safe-area-inset-right));
+        }
+        .mobile-drawer {
+            padding-top: max(80px, calc(64px + env(safe-area-inset-top)));
+            padding-bottom: max(24px, env(safe-area-inset-bottom));
+        }
+
         /* Typography — responsive font sizes use clamp() with a small
            lower bound so they actually shrink on phones (was clamp(3rem,…)
            which floored at 48px and wouldn't go any smaller no matter how
@@ -1035,7 +1080,33 @@
         .tm-app-cta { margin-top: auto; background: var(--blue); color: #fff; text-align: center; padding: 10px; border-radius: 10px; font-weight: 600; font-size: 0.88rem; }
 
         /* ── Comparison table ────────────────────────────────────────────────── */
-        .compare-wrap { overflow-x: auto; margin-top: 32px; border-radius: 14px; border: 1px solid var(--surface-border); background: var(--surface); }
+        /* 2026-05-10 (mobile audit) — `position: relative` so the right-
+         * edge fade hint can absolutely-position over the table on
+         * narrow viewports where horizontal scroll is needed. The
+         * background mirrors the surface tint so the fade appears to
+         * darken the right ~32px of the table. Only renders below the
+         * 720px min-width threshold the table itself enforces. */
+        .compare-wrap {
+            overflow-x: auto;
+            margin-top: 32px;
+            border-radius: 14px;
+            border: 1px solid var(--surface-border);
+            background: var(--surface);
+            position: relative;
+            -webkit-overflow-scrolling: touch;
+        }
+        @media (max-width: 720px) {
+            .compare-wrap::after {
+                content: '';
+                position: absolute;
+                top: 0; right: 0; bottom: 0;
+                width: 32px;
+                pointer-events: none;
+                background: linear-gradient(to right, transparent 0%, var(--surface) 100%);
+                border-top-right-radius: 14px;
+                border-bottom-right-radius: 14px;
+            }
+        }
         .compare-table { width: 100%; min-width: 720px; border-collapse: collapse; }
         .compare-table thead th { background: var(--surface-alt, #1a1a1a); padding: 16px 14px; text-align: left; font-size: 0.82rem; font-weight: 600; color: var(--text-muted); border-bottom: 1px solid var(--surface-border); font-family: var(--font-mono); letter-spacing: 0.04em; }
         .compare-table thead th.is-us { color: var(--blue-light); background: rgba(91,141,239,0.08); }
@@ -1098,9 +1169,17 @@
             <h1 class="h1" style="margin-top: 64px;">
                 AI-written PRs you can <span style="color: var(--accent-warm);">actually merge</span>.
             </h1>
+            <!-- 2026-05-10 — softened sub-headline. Earlier copy named two
+                 specific competitors in a disparaging way, which is a legal
+                 risk (trademark misuse + comparative-advertising claims that
+                 we'd have to substantiate). Replaced with a positive product
+                 statement that says what ExecuteSpec does without taking
+                 names. The "ship Ready" verdict + ~80% number is the same
+                 proof point the rest of the page leans on. -->
             <p style="margin: 18px auto 0; max-width: 620px; font-size: 1.08rem; color: var(--text-secondary); line-height: 1.5;">
-                Built because Cursor's diffs lie about whether they build,
-                and Devin's $500 demo doesn't survive your test suite.
+                Plan, build, test, review, and open a real pull request — with a
+                <span style="color: var(--text-main); font-weight: 600;">Ready / Needs review / Failed</span>
+                verdict on every run. ~80% of real runs land Ready.
             </p>
 
             <!-- Chat-first composer + sample prompts + live stats card.
@@ -2567,7 +2646,7 @@
                 <details class="faq-item">
                     <summary>What does "AI-written PRs you can actually merge" mean — what's the proof?</summary>
                     <div class="faq-answer">
-                        Every run goes through the same validation pipeline: planner emits a structured plan → you approve it → executor writes the code → reviewer reads the diff → final build + test gate → PR opens with a Ready / Needs review / Failed verdict attached. The verdict is computed from real signals — build status, test pass-rate, reviewer outcome (CLEAN / FIXED / UNRESOLVED / FAILED), and adherence to the original request. Across the platform, ~80% of real runs land Ready. <a href="https://dev.executespec.ai/exec-demo" target="_blank">See the live anonymized 30-day snapshot →</a>. Cursor, Devin, and v0 don't publish a comparable number because they don't have the validation surface to measure it.
+                        Every run goes through the same validation pipeline: planner emits a structured plan → you approve it → executor writes the code → reviewer reads the diff → final build + test gate → PR opens with a Ready / Needs review / Failed verdict attached. The verdict is computed from real signals — build status, test pass-rate, reviewer outcome (CLEAN / FIXED / UNRESOLVED / FAILED), and adherence to the original request. Across the platform, ~80% of real runs land Ready. <a href="https://dev.executespec.ai/exec-demo" target="_blank">See the live anonymized 30-day snapshot →</a>
                     </div>
                 </details>
                 <details class="faq-item">
@@ -2677,13 +2756,18 @@
                         </a>
                     </div>
                     <div class="founder-block-role">Founder · ExecuteSpec</div>
+                    <!-- 2026-05-10 — softened. Earlier copy named two
+                         competitors in a disparaging way; legal risk on
+                         comparative-advertising claims. Replaced with a
+                         positive product statement that says what ExecuteSpec
+                         exists to do, without taking names. -->
                     <p class="founder-block-why">
-                        I built this because I kept watching Cursor confidently
-                        ship diffs that didn't compile, and Devin demos that
-                        couldn't survive a real test suite. The pipeline you
-                        see here is the one I wanted as a developer: plan,
-                        approve, run, validate, ship. Email me if any of this
-                        resonates — or doesn't.
+                        I built this because I kept watching AI tools confidently
+                        ship diffs that didn't compile and demos that couldn't
+                        survive a real test suite. The pipeline you see here is
+                        the one I wanted as a developer: plan, approve, run,
+                        validate, ship. Email me if any of this resonates — or
+                        doesn't.
                     </p>
                 </div>
             </div>

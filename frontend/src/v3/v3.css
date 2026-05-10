@@ -277,10 +277,19 @@
  * 1px border). The slight 4px overshoot is intentional — better to
  * have a tiny scrollbar than a hairline gap below the page. */
 .v3-main--fill {
+  /* 2026-05-10 (mobile audit) — switched to dvh so iOS Safari's collapsing
+   * URL bar doesn't push the bottom 60px under the address bar mid-scroll
+   * (the 100vh fallback caused the composer to be cropped on iPhone whenever
+   * the toolbar was visible). Layered fallback: 100vh first for older
+   * browsers, then 100dvh on the same property so newer engines pick the
+   * dynamic-viewport value. Padding-top respects iOS notch / Dynamic Island
+   * safe area; max() guards against UAs that report 0 there. */
   height: calc(100vh - 60px);
+  height: calc(100dvh - 60px);
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-top: max(env(safe-area-inset-top, 0px), 0px);
 }
 .v3-main--fill > * {
   flex: 1;
@@ -295,6 +304,13 @@
 @media (max-width: 640px) {
   .v3-main {
     padding: var(--v3-pad-4) var(--v3-pad-3);
+  }
+  /* 2026-05-10 (mobile audit) — match v3-main--fill height to the smaller
+   * topbar (52px) on small viewports so the page chrome doesn't cause a
+   * 4px scroll bleed at the bottom of the viewport. */
+  .v3-main--fill {
+    height: calc(100vh - 53px);
+    height: calc(100dvh - 53px);
   }
 
   /* R-170 — TopBar: shrink the project switcher trigger so the
@@ -335,13 +351,73 @@
   }
 }
 
+/* 2026-05-10 (mobile audit) — extra cushion for sub-420px phones (iPhone
+ * SE 1st-gen at 320×568, older Android pre-Pixel-3). Tightens horizontal
+ * padding so the topbar's brand + tier chip + UsageBadge + hamburger fit
+ * without overflow. */
+@media (max-width: 420px) {
+  .v3-main {
+    padding: var(--v3-pad-3) var(--v3-pad-2);
+  }
+  .v3-topbar {
+    padding: 0 var(--v3-pad-2);
+    gap: 4px;
+  }
+}
+
 /* R-170 — when an iOS user taps the composer, raise it above the
    bottom edge so the keyboard doesn't cover it. The browser handles
    most of this via `position: sticky` already; this rule just bumps
    the textarea min-height on focus so the user sees they have room
-   to type. */
+   to type.
+   2026-05-10 (mobile audit) — original 80px floor fought the on-screen
+   keyboard on small phones in landscape (568px viewport - ~280px keyboard
+   leaves ~280px for the composer + thread; an 80px expanded textarea
+   ate over a quarter of that). Cap with a max-height so the textarea
+   can't run off the bottom; on coarse pointers (mobile/tablet) the
+   floor drops to 56px so it stays one comfortable line of mono text. */
 .v3-root textarea:focus {
   min-height: 80px;
+  max-height: 40vh;
+}
+@media (pointer: coarse) {
+  .v3-root textarea:focus {
+    min-height: 56px;
+    max-height: 30vh;
+  }
+}
+
+/* 2026-05-10 (mobile audit) — RunDetailPage right-pane sizing.
+ *
+ * Desktop (≥768px): cap maxHeight against viewport so log/chat overflow
+ * doesn't stretch the grid row and shove the file diff off-screen.
+ * minHeight 480 keeps the panel comfortably tall when sparsely populated.
+ *
+ * Mobile (<768px): the page collapses to single-column, the side panel is
+ * the bottom pane, so capping it just hides content. Drop both bounds and
+ * let it flow naturally; the surrounding page handles scroll. */
+.v3-rundetail-side {
+  min-height: 480px;
+  max-height: calc(100vh - 320px);
+}
+@media (max-width: 768px) {
+  .v3-rundetail-side {
+    min-height: 0;
+    max-height: none;
+  }
+}
+
+/* File tree on the same RunDetailPage. Desktop caps height vs the viewport
+ * so the tree scrolls internally instead of competing with the diff editor;
+ * mobile (single-column stacked layout) lets the tree cap at ~50vh so the
+ * diff still gets enough breathing room below. */
+.v3-rundetail-files {
+  max-height: calc(100vh - 320px);
+}
+@media (max-width: 768px) {
+  .v3-rundetail-files {
+    max-height: 50vh;
+  }
 }
 
 /* Generic placeholder so first-paint pages have something honest. */
