@@ -119,24 +119,25 @@ class ValidationReportServiceVerifiedScoreTest {
 
   @Test
   void endpoint_coverage_linear_no_cliff_at_95() {
-    // 100% → 1.0 factor; 95% → 0.95; 94% → 0.94. Identical formula, no jump.
-    int s100 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 100);
-    int s95 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 95);
-    int s94 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 94);
-    int s50 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 50);
-    int s0 = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 0);
+    // 2026-05-10 — exercised against UNRESOLVED_ISSUES reviewer so the
+    // 2026-05-10 trust-gate floor (which lifts endpointFactor to
+    // reviewerFactor when reviewer ∈ {CLEAN, FIXED_ISSUES}) doesn't
+    // mask the linear-no-cliff property of endpointFactor itself.
+    // UNRESOLVED_ISSUES has reviewerFactor=0.4 — well below every
+    // endpoint percent we sample here (0..100), so the endpoint
+    // signal flows through unmodified.
+    //
+    // 100% → 1.0 factor; 95% → 0.95; 94% → 0.94. Linear, no cliff.
+    int s100 = svc.computeVerifiedScore(true, 50, 50, "UNRESOLVED_ISSUES", 0, 100);
+    int s95 = svc.computeVerifiedScore(true, 50, 50, "UNRESOLVED_ISSUES", 0, 95);
+    int s94 = svc.computeVerifiedScore(true, 50, 50, "UNRESOLVED_ISSUES", 0, 94);
+    int s50 = svc.computeVerifiedScore(true, 50, 50, "UNRESOLVED_ISSUES", 0, 50);
 
-    // 100%: 1*1*1*1.0*1 = 100
-    assertEquals(100, s100);
-    // 95%: 1*1*1*0.95*1 = 95
-    assertEquals(95, s95);
-    // 94%: 1*1*1*0.94*1 = 94 (no cliff — this is the whole point)
-    assertEquals(94, s94);
-    // 50%: 1*1*1*0.50*1 = 50
-    assertEquals(50, s50);
-    // 0%: factor 0 → score 0 (build/tests/reviewer all perfect, but no endpoints
-    // delivered means the spec is unfulfilled — multiplicative collapse is correct)
-    assertEquals(0, s0);
+    // build=1, test=1, reviewer=0.4, endpoint=N, damper=1.
+    assertEquals(40, s100); // 100 × 1 × 1 × 0.4 × 1.0 × 1 = 40
+    assertEquals(38, s95); //  100 × 1 × 1 × 0.4 × 0.95 × 1 = 38
+    assertEquals(38, s94); //  100 × 1 × 1 × 0.4 × 0.94 × 1 = 37.6 → 38
+    assertEquals(20, s50); //  100 × 1 × 1 × 0.4 × 0.50 × 1 = 20
 
     // Pin the no-cliff property explicitly:
     assertTrue(
@@ -201,5 +202,71 @@ class ValidationReportServiceVerifiedScoreTest {
     // verifying the implementation behaves correctly.
     int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, 100);
     assertEquals(43, score);
+  }
+
+  // ── 2026-05-10 endpoint trust gate (PR #95 follow-up) ─────────────────
+  // Floors endpointFactor at reviewerFactor when reviewer ∈ {CLEAN, FIXED_ISSUES}
+  // so the assessment LLM's read-budget-limited endpoint count cannot
+  // override the reviewer's wiring-pass verdict on the same dimension.
+
+  @Test
+  void run_7483896a_dev_run_with_clean_reviewer_isnt_dragged_by_low_endpoint_count() {
+    // Pre-fix: 100 × 1.0 × 0.5 × 0.85 × 0.4 × 1.0 = 17. The 0.4 came from
+    // the assessment LLM seeing only 6 source files and reporting 40%
+    // endpoint coverage; the reviewer's wiring pass had already declared
+    // VERDICT: CLEAN. Post-fix: endpointFactor floored at reviewerFactor
+    // (0.85 for FIXED_ISSUES) → 100 × 1.0 × 0.5 × 0.85 × 0.85 × 1.0 = 36.
+    // Still capped by the 0.5 testFactor (no tests) — the trust gate fixes
+    // the LLM-hallucination overrun, not the no-tests honest signal.
+    int score = svc.computeVerifiedScore(true, 0, 0, "FIXED_ISSUES", 0, 40);
+    assertEquals(36, score);
+  }
+
+  @Test
+  void clean_reviewer_with_low_endpoint_count_floored_at_reviewer_signal() {
+    // CLEAN reviewer + tests pass + 30% endpoint coverage. Pre-fix the LLM's
+    // 30% would have collapsed an otherwise-perfect run to 30. Post-fix the
+    // CLEAN reviewer's 1.0 factor floors endpointFactor at 1.0, score stays
+    // at 100. Reviewer's wiring pass IS the deterministic check on
+    // endpoint correctness; trust it over the LLM's read-budget signal.
+    int score = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 30);
+    assertEquals(100, score);
+  }
+
+  @Test
+  void unresolved_reviewer_does_not_floor_endpoint_factor() {
+    // UNRESOLVED_ISSUES means the reviewer pass wasn't decisive, so the LLM's
+    // endpoint signal is the only read on that dimension — keep it. With
+    // build pass + tests pass + UNRESOLVED + 30% endpoints + 0 critical:
+    // 100 × 1 × 1 × 0.4 × 0.3 × 1 = 12. The trust gate doesn't kick in.
+    int score = svc.computeVerifiedScore(true, 50, 50, "UNRESOLVED_ISSUES", 0, 30);
+    assertEquals(12, score);
+  }
+
+  @Test
+  void review_failed_does_not_floor_endpoint_factor() {
+    // REVIEW_FAILED: reviewer threw, no signal at all on that dimension.
+    // 100 × 1 × 1 × 0.2 × 0.3 × 1 = 6.
+    int score = svc.computeVerifiedScore(true, 50, 50, "REVIEW_FAILED", 0, 30);
+    assertEquals(6, score);
+  }
+
+  @Test
+  void high_endpoint_count_with_clean_reviewer_isnt_capped_by_floor() {
+    // The floor only kicks in when endpointFactor < reviewerFactor. When
+    // endpoints = 100% and reviewer is CLEAN (1.0), nothing changes.
+    int score = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 100);
+    assertEquals(100, score);
+  }
+
+  @Test
+  void clean_reviewer_with_zero_endpoints_floored_to_clean_signal() {
+    // 0% endpoint coverage from the LLM + CLEAN reviewer: floor lifts
+    // endpointFactor from 0.0 to 1.0 (CLEAN reviewerFactor). The LLM
+    // saying "no endpoints found" alongside the reviewer saying "wiring
+    // is clean" is a definitive read-budget false negative; trust the
+    // reviewer. With tests pass: 1×1×1×1×1 = 100.
+    int score = svc.computeVerifiedScore(true, 50, 50, "CLEAN", 0, 0);
+    assertEquals(100, score);
   }
 }
