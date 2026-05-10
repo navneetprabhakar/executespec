@@ -53,9 +53,16 @@ public class CodeAbuseScanner {
           Pattern.compile("curl\\s+.*--data-binary\\s+@"),
           Pattern.compile("wget\\s+.*--post-file"),
           Pattern.compile("\\bfetch\\s*\\(.*document\\.cookie", Pattern.CASE_INSENSITIVE),
-          // DNS exfiltration
-          Pattern.compile("\\bdig\\b.*\\$\\("),
-          Pattern.compile("\\bnslookup\\b.*\\$\\("),
+          // DNS exfiltration — B-26 (audit, 2026-05-09): narrowed from
+          // `\\b(dig|nslookup)\\b.*\\$\\(` (which also flagged the legitimate
+          // `nslookup $(whoami)` debugging snippet) to require a remote
+          // attacker-controlled host as the lookup target. The "exfiltration"
+          // shape is `dig <command-substituted-data>.<attacker-domain>` —
+          // the trailing dotted-host segment is what makes it exfil rather
+          // than ad-hoc debugging. Shell sandbox separately validates the
+          // `$(...)` substitution itself.
+          Pattern.compile("\\b(dig|nslookup|host)\\b\\s+\\S*\\$\\([^)]+\\)\\S*\\.\\w+"),
+          Pattern.compile("\\bdig\\b\\s+@\\S+\\s+\\S*\\$\\("),
           Pattern.compile("\\bburpcollaborator\\.net\\b", Pattern.CASE_INSENSITIVE),
           Pattern.compile("\\binteractsh\\.com\\b", Pattern.CASE_INSENSITIVE),
           Pattern.compile("\\boast\\.(fun|pro|me)\\b", Pattern.CASE_INSENSITIVE));

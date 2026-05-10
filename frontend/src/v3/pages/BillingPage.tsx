@@ -271,9 +271,16 @@ function PlanCard({ent, meTier}: {ent: V3Entitlements; meTier: string | null}) {
 // ─── Usage card ─────────────────────────────────────────────────────────────
 
 function UsageCard({ent}: {ent: V3Entitlements}) {
-  // Suppress the "soft budget" banner entirely on unlimited tiers — the
-  // strict-review fix.
-  const showBudget = !ent.isUnlimited && ent.softCostBudgetUsd != null;
+  // I1-09 (audit-2026-05-09 iter1) — also suppress the "soft budget" stat
+  // for FREE tier. FREE is gated by run count, not by spend; showing
+  // "Soft budget $10.00" on the FREE billing page implies they have a
+  // spend-based cap they don't actually have, which confuses users
+  // (they wonder if they'll be charged when they hit it). The original
+  // strict-review fix only excluded `isUnlimited` (which catches
+  // ENTERPRISE) but missed the lower bound.
+  const tier = (ent.tierKey || '').toUpperCase();
+  const isFree = tier === 'FREE';
+  const showBudget = !ent.isUnlimited && !isFree && ent.softCostBudgetUsd != null;
   return (
     <section className='v3-card'>
       <h2 style={{margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>

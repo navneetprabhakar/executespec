@@ -20,6 +20,15 @@ public interface BillingSubscriptionRepository extends JpaRepository<BillingSubs
           + " 'ACTIVE', 'PAST_DUE')")
   Optional<BillingSubscription> findActiveByUserId(@Param("userId") String userId);
 
+  /**
+   * B-08 (audit, 2026-05-09) — bulk variant for the monthly-counter cron. Per-user {@code
+   * findActiveByUserId} fired one SELECT per app_user row at midnight IST, which on a 50k-user DB
+   * took the cron above the lock window. The cron now loads every active subscription in one SELECT
+   * and matches in memory.
+   */
+  @Query("SELECT s FROM BillingSubscription s WHERE s.status IN ('FREE', 'ACTIVE', 'PAST_DUE')")
+  List<BillingSubscription> findAllActiveOrPastDue();
+
   Optional<BillingSubscription> findByGatewaySubscriptionId(String gatewaySubscriptionId);
 
   @Query(

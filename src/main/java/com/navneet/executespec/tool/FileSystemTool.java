@@ -61,12 +61,48 @@ public class FileSystemTool {
     return Path.of(workspaceRoot, runId).toAbsolutePath().normalize();
   }
 
-  /** Guard: all paths must stay inside the run's workspace directory. */
+  /**
+   * Guard: all paths must stay inside the run's workspace directory. Two layers:
+   *
+   * <ol>
+   *   <li><b>Lexical containment</b> — `normalize()` collapses `..` segments and `startsWith(ws)`
+   *       rejects path traversal via dots. This stops `../../etc/passwd` and similar.
+   *   <li><b>Symlink containment</b> (B-02 fix, 2026-05-09) — `toRealPath()` follows symlinks on
+   *       every existing ancestor and re-checks containment against the workspace's own real path.
+   *       This stops the case where the workspace contains a symlink (e.g. `link → /etc`) and the
+   *       worker writes via `link/passwd`. Without this layer the lexical check passes (path
+   *       lexically lives under the workspace) but the actual file lives elsewhere on disk.
+   * </ol>
+   *
+   * <p>For write ops the file may not exist yet, so we resolve the deepest existing ancestor and
+   * re-check; new files only land where their parent directory's real path is inside the workspace.
+   */
   private Path safeResolve(String runId, String relativePath) {
     Path ws = workspace(runId);
     Path resolved = ws.resolve(relativePath).normalize();
     if (!resolved.startsWith(ws)) {
       throw new SecurityException("Path escape attempt: " + relativePath);
+    }
+    // Symlink containment: walk up until we find an existing ancestor, real-path that, and check
+    // it sits inside the workspace's real path. `toRealPath()` requires the path to exist, hence
+    // the climb. The workspace itself must exist (callers create it in WorkspaceInitService).
+    try {
+      Path wsReal = ws.toRealPath();
+      Path ancestor = resolved;
+      while (ancestor != null && !Files.exists(ancestor)) {
+        ancestor = ancestor.getParent();
+      }
+      if (ancestor != null) {
+        Path ancestorReal = ancestor.toRealPath();
+        if (!ancestorReal.startsWith(wsReal)) {
+          throw new SecurityException(
+              "Symlink escape attempt: " + relativePath + " resolves outside workspace");
+        }
+      }
+    } catch (IOException e) {
+      // toRealPath failure (e.g. workspace deleted mid-flight) — fall through to the lexical
+      // check we already passed; this is a degraded state but the lexical guard still holds.
+      log.debug("safeResolve toRealPath failed for {}: {}", resolved, e.getMessage());
     }
     return resolved;
   }

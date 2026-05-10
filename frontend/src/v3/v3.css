@@ -100,12 +100,15 @@
    * Centralising the canonical stacks here lets every consumer write
    * `fontFamily: 'var(--v3-font-sans)'` or `var(--v3-font-mono)` and
    * stay aligned automatically. The sans chain matches `body` in
-   * `index.css`; the mono chain leads with `'Geist Mono'` (the only
-   * registered mono face) before falling to system mono. */
-  --v3-font-sans:
-    'Geist Sans', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI',
-    sans-serif;
-  --v3-font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+   * `index.css`.
+   *
+   * 2026-05-10 (test variant) — both sans + mono use JetBrains Mono.
+   * The "everywhere mono" look is being trialled; revert by swapping
+   * JetBrains Mono back to 'DM Sans' on the sans chain if the
+   * experiment isn't kept. Geist + system fallbacks remain so the
+   * page renders during the Google-Fonts load window. */
+  --v3-font-sans: 'JetBrains Mono', 'Geist Sans', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --v3-font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   background: var(--v3-bg);
   color: var(--v3-text);
@@ -256,13 +259,28 @@
  * collapse to their natural content height and the page bg leaves a
  * large empty band below.
  *
+ * 2026-05-09 — switched min-height → height so the parent is BOUNDED,
+ * not just floored. With min-height + display:flex, children with
+ * intrinsic content (chat threads, file lists) could push the parent
+ * past the viewport, which forced the page itself to scroll instead of
+ * the inner overflow-y-auto containers. Result: project chat threaded
+ * the whole page instead of staying inside the panel; messages at the
+ * bottom required scrolling the entire layout (incl. topbar shadow).
+ *
+ * height: calc(100vh - 60px) caps the layout to one viewport minus
+ * topbar, then display:flex + child {flex:1; min-height:0} cascades a
+ * definite height down to the message-list overflow container so it
+ * scrolls in place. Same fix unblocks chat persistence in ComposeTab,
+ * RunDetailPage's 3-pane layout, and the chat panel in run detail.
+ *
  * 60px ≈ TopBar height (.v3-topbar = 56px desktop / 52px mobile, plus
  * 1px border). The slight 4px overshoot is intentional — better to
  * have a tiny scrollbar than a hairline gap below the page. */
 .v3-main--fill {
-  min-height: calc(100vh - 60px);
+  height: calc(100vh - 60px);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
 }
 .v3-main--fill > * {
   flex: 1;
