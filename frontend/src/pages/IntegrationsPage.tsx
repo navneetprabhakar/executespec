@@ -1305,34 +1305,36 @@ export default function IntegrationsPage() {
           <div className='px-4 py-3 border-b border-[var(--border-default)]'>
             <h3 className='text-sm font-semibold text-primary'>Integration-triggered Runs</h3>
           </div>
-          <table className='w-full text-sm'>
-            <thead>
-              <tr className='border-b border-[var(--border-default)]'>
-                {['Run ID', 'Status', 'Goal', 'Created'].map((h) => (
-                  <th key={h} className='text-left px-4 py-2.5 text-xs font-medium text-muted'>
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {runs.slice(0, 20).map((r) => (
-                <tr
-                  key={r.runId}
-                  className='border-b border-[var(--border-default)] hover:bg-[var(--gray-100)]'
-                >
-                  <td className='px-4 py-2.5 font-mono text-xs text-secondary'>
-                    {r.runId.slice(0, 12)}
-                  </td>
-                  <td className='px-4 py-2.5 text-xs text-secondary'>{r.status}</td>
-                  <td className='px-4 py-2.5 text-xs text-secondary max-w-xs truncate'>
-                    {(r.userRequest ?? '').slice(0, 60)}
-                  </td>
-                  <td className='px-4 py-2.5 text-xs text-muted'>{relativeTime(r.startedAt)}</td>
+          <div className='overflow-x-auto'>
+            <table className='w-full text-sm min-w-[560px] md:min-w-0'>
+              <thead>
+                <tr className='border-b border-[var(--border-default)]'>
+                  {['Run ID', 'Status', 'Goal', 'Created'].map((h) => (
+                    <th key={h} className='text-left px-4 py-2.5 text-xs font-medium text-muted'>
+                      {h}
+                    </th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.slice(0, 20).map((r) => (
+                  <tr
+                    key={r.runId}
+                    className='border-b border-[var(--border-default)] hover:bg-[var(--gray-100)]'
+                  >
+                    <td className='px-4 py-2.5 font-mono text-xs text-secondary'>
+                      {r.runId.slice(0, 12)}
+                    </td>
+                    <td className='px-4 py-2.5 text-xs text-secondary'>{r.status}</td>
+                    <td className='px-4 py-2.5 text-xs text-secondary max-w-xs truncate'>
+                      {(r.userRequest ?? '').slice(0, 60)}
+                    </td>
+                    <td className='px-4 py-2.5 text-xs text-muted'>{relativeTime(r.startedAt)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </GlassPanel>
       )}
     </PageShell>

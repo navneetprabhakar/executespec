@@ -881,59 +881,65 @@ function AdminPageInner() {
               Set the default monthly run limits for each tier. Changes take effect immediately for
               new runs.
             </p>
+            {/* 2026-05-10 (mobile audit) — overflow-x-auto so the 4-column tier
+                config table can scroll horizontally on narrow viewports.
+                min-w-[560px] forces the columns to keep their intrinsic width
+                (Tier name + Monthly Limit input + Note text + actions cluster). */}
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-              <table className='w-full text-sm'>
-                <thead className='bg-[var(--gray-100)] text-muted text-xs'>
-                  <tr>
-                    <th className='px-4 py-3 text-left font-medium'>Tier</th>
-                    <th className='px-4 py-3 text-left font-medium'>Monthly Limit</th>
-                    <th className='px-4 py-3 text-left font-medium'>Note</th>
-                    <th className='px-4 py-3' />
-                  </tr>
-                </thead>
-                <tbody className='divide-y divide-[var(--border-default)]'>
-                  {tierConfigs.map((tc) => {
-                    const editing = editingTiers[tc.tier];
-                    return (
-                      <tr key={tc.tier} className='hover:bg-[var(--gray-100)]'>
-                        <td className='px-4 py-3'>
-                          <span className='font-medium text-primary'>
-                            {tc.displayName ?? tierLabel(tc.tier)}
-                          </span>
-                          {tc.isFixed && (
-                            <span className='ml-2 text-xs text-muted'>(default fixed)</span>
-                          )}
-                        </td>
-                        <td className='px-4 py-3'>
-                          <div className='flex items-center gap-2'>
-                            <input
-                              type='number'
-                              value={editing !== undefined ? editing : tc.monthlyRunLimit}
-                              onChange={(e) =>
-                                setEditingTiers((p) => ({...p, [tc.tier]: e.target.value}))
-                              }
-                              className='w-24 bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-secondary focus:outline-none focus:border-accent-blue/40'
-                            />
-                            {editing !== undefined && (
-                              <button
-                                onClick={() => saveTierLimit(tc.tier)}
-                                className='p-1.5 bg-accent-green/15 text-accent-green rounded-sm hover:bg-accent-green/25'
-                              >
-                                <Check className='h-3.5 w-3.5' />
-                              </button>
+              <div className='overflow-x-auto'>
+                <table className='w-full text-sm min-w-[560px] md:min-w-0'>
+                  <thead className='bg-[var(--gray-100)] text-muted text-xs'>
+                    <tr>
+                      <th className='px-4 py-3 text-left font-medium'>Tier</th>
+                      <th className='px-4 py-3 text-left font-medium'>Monthly Limit</th>
+                      <th className='px-4 py-3 text-left font-medium'>Note</th>
+                      <th className='px-4 py-3' />
+                    </tr>
+                  </thead>
+                  <tbody className='divide-y divide-[var(--border-default)]'>
+                    {tierConfigs.map((tc) => {
+                      const editing = editingTiers[tc.tier];
+                      return (
+                        <tr key={tc.tier} className='hover:bg-[var(--gray-100)]'>
+                          <td className='px-4 py-3'>
+                            <span className='font-medium text-primary'>
+                              {tc.displayName ?? tierLabel(tc.tier)}
+                            </span>
+                            {tc.isFixed && (
+                              <span className='ml-2 text-xs text-muted'>(default fixed)</span>
                             )}
-                          </div>
-                        </td>
-                        <td className='px-4 py-3 text-muted text-xs'>
-                          {tc.tier === 'ENTERPRISE'
-                            ? 'Override; ENTERPRISE orgs with API keys get unlimited'
-                            : tc.description}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td className='px-4 py-3'>
+                            <div className='flex items-center gap-2'>
+                              <input
+                                type='number'
+                                value={editing !== undefined ? editing : tc.monthlyRunLimit}
+                                onChange={(e) =>
+                                  setEditingTiers((p) => ({...p, [tc.tier]: e.target.value}))
+                                }
+                                className='w-24 bg-[var(--gray-100)] border border-[var(--border-default)] rounded px-2 py-1.5 text-sm text-secondary focus:outline-none focus:border-accent-blue/40'
+                              />
+                              {editing !== undefined && (
+                                <button
+                                  onClick={() => saveTierLimit(tc.tier)}
+                                  className='p-1.5 bg-accent-green/15 text-accent-green rounded-sm hover:bg-accent-green/25'
+                                >
+                                  <Check className='h-3.5 w-3.5' />
+                                </button>
+                              )}
+                            </div>
+                          </td>
+                          <td className='px-4 py-3 text-muted text-xs'>
+                            {tc.tier === 'ENTERPRISE'
+                              ? 'Override; ENTERPRISE orgs with API keys get unlimited'
+                              : tc.description}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
             <p className='text-xs text-muted'>
               Enterprise orgs with <strong className='text-secondary'>API Keys Provided</strong>{' '}

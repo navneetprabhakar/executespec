@@ -124,95 +124,97 @@ function TierLifecyclePageInner() {
         {loading ? (
           <p className='text-xs text-muted py-4 text-center'>Loading…</p>
         ) : (
-          <table className='w-full text-sm'>
-            <thead>
-              <tr className='text-[10px] text-muted uppercase tracking-wider border-b border-[var(--border-default)]'>
-                <th className='text-left py-2 px-2'>Tier</th>
-                <th className='text-left py-2 px-2'>State</th>
-                <th className='text-right py-2 px-2'>Subscribers</th>
-                <th className='text-right py-2 px-2'>MRR (USD)</th>
-                <th className='text-left py-2 px-2'>Changed</th>
-                <th className='text-right py-2 px-2'>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tiers.map((t) => {
-                const mrr = (t.monthlyRecurringRevenueUsdCents / 100).toFixed(0);
-                const changedAt = t.changedAt ? new Date(t.changedAt).toLocaleDateString() : '—';
-                return (
-                  <tr
-                    key={t.tier}
-                    className='border-b border-[var(--border-default)]/50 text-secondary'
-                  >
-                    <td className='py-2 px-2'>
-                      <div className='font-medium text-primary'>{t.displayName ?? t.tier}</div>
-                      <div className='text-[10px] text-muted font-mono'>{t.tier}</div>
-                    </td>
-                    <td className='py-2 px-2'>
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
-                          t.state === 'LISTED'
-                            ? 'bg-status-success/15 text-status-success'
-                            : t.state === 'HIDDEN'
-                              ? 'bg-status-waiting/15 text-status-waiting'
-                              : 'bg-status-error/15 text-status-error'
-                        }`}
-                      >
-                        {t.state}
-                      </span>
-                    </td>
-                    <td className='py-2 px-2 text-right font-mono'>{t.activeSubscribers}</td>
-                    <td className='py-2 px-2 text-right font-mono'>${mrr}</td>
-                    {/* F-20 (round-3 audit) — show date only by default,
+          <div className='overflow-x-auto'>
+            <table className='w-full text-sm min-w-[640px] md:min-w-0'>
+              <thead>
+                <tr className='text-[10px] text-muted uppercase tracking-wider border-b border-[var(--border-default)]'>
+                  <th className='text-left py-2 px-2'>Tier</th>
+                  <th className='text-left py-2 px-2'>State</th>
+                  <th className='text-right py-2 px-2'>Subscribers</th>
+                  <th className='text-right py-2 px-2'>MRR (USD)</th>
+                  <th className='text-left py-2 px-2'>Changed</th>
+                  <th className='text-right py-2 px-2'>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {tiers.map((t) => {
+                  const mrr = (t.monthlyRecurringRevenueUsdCents / 100).toFixed(0);
+                  const changedAt = t.changedAt ? new Date(t.changedAt).toLocaleDateString() : '—';
+                  return (
+                    <tr
+                      key={t.tier}
+                      className='border-b border-[var(--border-default)]/50 text-secondary'
+                    >
+                      <td className='py-2 px-2'>
+                        <div className='font-medium text-primary'>{t.displayName ?? t.tier}</div>
+                        <div className='text-[10px] text-muted font-mono'>{t.tier}</div>
+                      </td>
+                      <td className='py-2 px-2'>
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
+                            t.state === 'LISTED'
+                              ? 'bg-status-success/15 text-status-success'
+                              : t.state === 'HIDDEN'
+                                ? 'bg-status-waiting/15 text-status-waiting'
+                                : 'bg-status-error/15 text-status-error'
+                          }`}
+                        >
+                          {t.state}
+                        </span>
+                      </td>
+                      <td className='py-2 px-2 text-right font-mono'>{t.activeSubscribers}</td>
+                      <td className='py-2 px-2 text-right font-mono'>${mrr}</td>
+                      {/* F-20 (round-3 audit) — show date only by default,
                         reason moved to hover. The previous inline-truncated
                         reason ("TEAM tier reinstated (V144) — pro...")
                         leaked migration-version churn into screenshots
                         whenever a screen-cap of this admin view escaped
                         SUPER_ADMIN scope. The full reason stays accessible
                         via tooltip for operators who actually need it. */}
-                    <td className='py-2 px-2 text-[11px] text-muted'>
-                      <span
-                        title={t.reason || undefined}
-                        className={
-                          t.reason
-                            ? 'border-b border-dashed border-[var(--border-default)] cursor-help'
-                            : ''
-                        }
-                      >
-                        {changedAt}
-                      </span>
-                    </td>
-                    <td className='py-2 px-2 text-right space-x-1'>
-                      {t.state !== 'LISTED' && (
-                        <button
-                          onClick={() => openTransition(t, 'LISTED')}
-                          className='px-2 py-1 text-[11px] bg-[var(--gray-300)] text-primary rounded-sm hover:bg-[var(--gray-400)]'
+                      <td className='py-2 px-2 text-[11px] text-muted'>
+                        <span
+                          title={t.reason || undefined}
+                          className={
+                            t.reason
+                              ? 'border-b border-dashed border-[var(--border-default)] cursor-help'
+                              : ''
+                          }
                         >
-                          List
-                        </button>
-                      )}
-                      {t.state !== 'HIDDEN' && (
-                        <button
-                          onClick={() => openTransition(t, 'HIDDEN')}
-                          className='px-2 py-1 text-[11px] bg-[var(--gray-300)] text-primary rounded-sm hover:bg-[var(--gray-400)]'
-                        >
-                          Hide
-                        </button>
-                      )}
-                      {t.state === 'HIDDEN' && (
-                        <button
-                          onClick={() => openTransition(t, 'SUNSETTING')}
-                          className='px-2 py-1 text-[11px] bg-status-error/15 text-status-error rounded-sm hover:bg-status-error/25'
-                        >
-                          Sunset
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                          {changedAt}
+                        </span>
+                      </td>
+                      <td className='py-2 px-2 text-right space-x-1'>
+                        {t.state !== 'LISTED' && (
+                          <button
+                            onClick={() => openTransition(t, 'LISTED')}
+                            className='px-2 py-1 text-[11px] bg-[var(--gray-300)] text-primary rounded-sm hover:bg-[var(--gray-400)]'
+                          >
+                            List
+                          </button>
+                        )}
+                        {t.state !== 'HIDDEN' && (
+                          <button
+                            onClick={() => openTransition(t, 'HIDDEN')}
+                            className='px-2 py-1 text-[11px] bg-[var(--gray-300)] text-primary rounded-sm hover:bg-[var(--gray-400)]'
+                          >
+                            Hide
+                          </button>
+                        )}
+                        {t.state === 'HIDDEN' && (
+                          <button
+                            onClick={() => openTransition(t, 'SUNSETTING')}
+                            className='px-2 py-1 text-[11px] bg-status-error/15 text-status-error rounded-sm hover:bg-status-error/25'
+                          >
+                            Sunset
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </GlassPanel>
 
