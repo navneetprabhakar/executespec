@@ -2141,6 +2141,15 @@ function GeneratedTestsCard({
 // `/api/conversation` is stateless from the backend's perspective; we
 // rebuild the seed context from `detail` on every send so a stale tab
 // can't drift away from the truth.
+//
+// 2026-05-09 — module-scoped cache so ChatPane re-mounts (every Tab
+// switch on the side panel unmounts the inactive pane) restore the
+// last conversation instantly instead of starting empty. The backend
+// is stateless, so without this the user's chat history vanishes the
+// moment they peek at the Code tab + come back. Cache is per-runId
+// because different runs have different contexts.
+
+const v3RunChatCache = new Map<string, ConversationMessage[]>();
 
 /**
  * 2026-05-09 — shared style for the v3 chat action buttons (Apply / Fix / Iterate).
@@ -2186,9 +2195,29 @@ function ChatPane({
   onPrCommentChanged: () => void;
 }) {
   const navigate = useNavigate();
-  const [messages, setMessages] = useState<ConversationMessage[]>([]);
+  // Seed from the cache so a tab-switch round-trip re-renders the prior
+  // thread immediately (see v3RunChatCache comment). The cache is keyed
+  // by runId, so opening a different run still gets a clean slate.
+  const cacheKey = detail?.runId ?? '__no_run__';
+  const [messages, setMessages] = useState<ConversationMessage[]>(
+    () => v3RunChatCache.get(cacheKey) ?? [],
+  );
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
+
+  // Keep the cache in lockstep so the next mount sees fresh data — incl.
+  // the trailing assistant turn, action toasts (which don't change
+  // messages but might be triggered alongside), and any iteration the
+  // user has already kicked off.
+  useEffect(() => {
+    if (messages.length > 0) v3RunChatCache.set(cacheKey, messages);
+  }, [cacheKey, messages]);
+
+  // If the user navigates between runs without leaving the panel, sync
+  // the visible thread to the new run's cache (or empty if first visit).
+  useEffect(() => {
+    setMessages(v3RunChatCache.get(cacheKey) ?? []);
+  }, [cacheKey]);
   const [error, setError] = useState<string | null>(null);
   const [actionToast, setActionToast] = useState<string | null>(null);
   const threadRef = useRef<HTMLDivElement | null>(null);
@@ -2231,9 +2260,19 @@ function ChatPane({
     .filter((c) => c.status === 'ADDRESSED' || c.status === 'DISMISSED')
     .slice(0, 3);
 
-  // Auto-scroll thread on each new message.
+  // 2026-05-09 — scroll-pin: only follow new messages if the user is
+  // already at the bottom; if they scrolled up to read history, don't
+  // yank them back on every reply or thinking-indicator tick.
+  const isPinnedRef = useRef(true);
+  const handleThreadScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isPinnedRef.current = distance < 80;
+  };
   useEffect(() => {
-    threadRef.current?.scrollTo({top: threadRef.current.scrollHeight, behavior: 'smooth'});
+    if (isPinnedRef.current) {
+      threadRef.current?.scrollTo({top: threadRef.current.scrollHeight, behavior: 'smooth'});
+    }
   }, [messages, busy]);
 
   // Build a single-shot context preface every time we send so the
@@ -2478,8 +2517,18 @@ function ChatPane({
         minHeight: 0,
       }}
     >
+      {/* 2026-05-09 — run-context banner so the chat tab has visible
+       *  anchoring to the run being discussed (status / title / repo /
+       *  age / cost / PR-link). Without this the chat opens cold and
+       *  the user has to remember which run / repo they're on — feedback
+       *  was "Run Chat is supposed to have details about the Run as well".
+       *  Only renders when we have a detail object; the placeholder run
+       *  during initial fetch is hidden so the panel doesn't flash. */}
+      {detail && <ChatRunContextBanner run={detail} />}
+
       <div
         ref={threadRef}
+        onScroll={handleThreadScroll}
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -2742,6 +2791,14 @@ function ChatPane({
           type='text'
           value={input}
           onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            // Swallow Enter mid-IME composition so CJK candidate
+            // selection doesn't accidentally submit the form.
+            if (e.key === 'Enter' && e.nativeEvent.isComposing) {
+              e.preventDefault();
+              e.stopPropagation();
+            }
+          }}
           placeholder={messages.length === 0 ? 'Ask about this run…' : 'Reply…'}
           disabled={busy || !detail}
           style={{
@@ -3044,4 +3101,181 @@ function RunSpecBlock({content}: {content: string}) {
       </div>
     </div>
   );
+}
+
+/**
+ * Compact run-context banner for the v3 ChatPane. Shows what the chat is
+ * scoped to (status pill / title-or-spec / repo / age / cost / PR link)
+ * without spending vertical space on labels. Two rows: the first is the
+ * primary identity (badge + title + meta chips), the second is the repo
+ * + PR slug. Both rows hide when there's no data so an empty run doesn't
+ * render placeholders.
+ */
+function ChatRunContextBanner({run}: {run: RunDetail}) {
+  const TERMINAL = new Set(['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED']);
+  const isTerminal = TERMINAL.has(run.status);
+  const titleText =
+    run.runTitle?.trim() ||
+    (run.userRequest && run.userRequest.length > 90
+      ? run.userRequest.slice(0, 87).trimEnd() + '…'
+      : run.userRequest) ||
+    `Run ${run.runId.slice(0, 8)}`;
+  const repoFull =
+    run.repoUrl?.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '') ?? null;
+  const startedRel = run.startedAt ? formatRelative(run.startedAt) : null;
+  const completedRel = run.completedAt ? formatRelative(run.completedAt) : null;
+  const durationStr =
+    run.startedAt && run.completedAt
+      ? formatDuration(new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime())
+      : run.startedAt && !isTerminal
+        ? formatDuration(Date.now() - new Date(run.startedAt).getTime())
+        : null;
+  const prUrl = run.scmPrUrl ?? run.githubPrUrl ?? null;
+  const cost = run.actualCostUsd ?? null;
+
+  // Status tone mirrors Pill — keep colour selection in lockstep with
+  // the rest of v3 so a glance at the panel + a glance at the header
+  // tell the same story.
+  const statusTone: 'ok' | 'warn' | 'err' | 'neutral' =
+    run.status === 'COMPLETE'
+      ? 'ok'
+      : run.status === 'PARTIAL'
+        ? 'warn'
+        : run.status === 'FAILED' || run.status === 'CANCELLED' || run.status === 'ABORTED'
+          ? 'err'
+          : 'neutral';
+
+  return (
+    <div
+      style={{
+        padding: '8px 14px',
+        borderBottom: '1px solid var(--v3-border)',
+        background: 'color-mix(in srgb, var(--v3-surface) 60%, transparent)',
+        flexShrink: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 4,
+      }}
+      title={run.userRequest ?? undefined}
+    >
+      <div style={{display: 'flex', alignItems: 'center', gap: 8, minWidth: 0}}>
+        <Pill tone={statusTone} size='sm' dot>
+          {run.status}
+        </Pill>
+        <span
+          style={{
+            fontSize: 12.5,
+            color: 'var(--v3-text)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            flex: 1,
+            minWidth: 0,
+          }}
+        >
+          {titleText}
+        </span>
+        <span
+          style={{
+            fontSize: 10.5,
+            color: 'var(--v3-text-subtle)',
+            fontFamily: 'var(--v3-font-mono, ui-monospace, monospace)',
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
+          }}
+          title={`Run ID: ${run.runId}`}
+        >
+          {run.runId.slice(0, 8)}
+        </span>
+      </div>
+      {(repoFull || startedRel || durationStr || cost != null || prUrl) && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            fontSize: 11,
+            color: 'var(--v3-text-muted)',
+            fontFamily: 'var(--v3-font-mono, ui-monospace, monospace)',
+            flexWrap: 'wrap',
+          }}
+        >
+          {repoFull && (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 4,
+                maxWidth: 280,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+              title={run.repoUrl ?? ''}
+            >
+              <GitCommit className='h-3 w-3' />
+              <span style={{overflow: 'hidden', textOverflow: 'ellipsis'}}>{repoFull}</span>
+            </span>
+          )}
+          {startedRel && (
+            <span
+              title={`Started: ${run.startedAt}${run.completedAt ? `\nCompleted: ${run.completedAt}` : ''}`}
+            >
+              {isTerminal && completedRel ? completedRel : startedRel}
+            </span>
+          )}
+          {durationStr && <span title='Duration'>{durationStr}</span>}
+          {cost != null && cost > 0 && <span title='Total cost (USD)'>${cost.toFixed(2)}</span>}
+          {prUrl && (
+            <a
+              href={prUrl}
+              target='_blank'
+              rel='noreferrer'
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                color: 'var(--v3-brand)',
+                textDecoration: 'none',
+              }}
+              title='Open the pull request opened by this run'
+            >
+              PR ↗
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/** Small relative-time helper. Self-contained so the banner has no
+ *  cross-file dependency. */
+function formatRelative(iso: string): string {
+  const then = new Date(iso).getTime();
+  const diff = Date.now() - then;
+  if (diff < 0) return 'just now';
+  const sec = Math.floor(diff / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.floor(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.floor(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.floor(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+/** Compact ms → `1h 4m` / `4m 12s` / `12s`. Matches the cadence the
+ *  v2 fmtMs helper uses but without the cross-import. */
+function formatDuration(ms: number): string {
+  if (ms < 1000) return `${ms}ms`;
+  const sec = Math.floor(ms / 1000);
+  if (sec < 60) return `${sec}s`;
+  const min = Math.floor(sec / 60);
+  const remSec = sec % 60;
+  if (min < 60) return remSec > 0 ? `${min}m ${remSec}s` : `${min}m`;
+  const hr = Math.floor(min / 60);
+  const remMin = min % 60;
+  return remMin > 0 ? `${hr}h ${remMin}m` : `${hr}h`;
 }

@@ -420,23 +420,41 @@ export default function SettingsPage() {
       <GlassPanel className='px-5 py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3'>
         <div className='flex items-center gap-3'>
           {(() => {
-            // v2.5.8 — billing is the source of truth; fall back to JWT tier when
-            // the billing call hasn't returned yet (or the user has no subscription).
-            // Tier-coherence: 4-tier ladder (FREE / PRO / TEAM / ENTERPRISE).
-            // Legacy MAX was renamed to TEAM in V141 — checks updated to match.
-            const planTier = billing?.plan?.tier ?? user?.tier ?? 'FREE';
+            // I3-A (audit-2026-05-09 iter3) — INVERTED the priority. Was
+            // `billing?.plan?.tier ?? user?.tier`, but `/api/billing/status`
+            // returns FREE for any user without an active paid
+            // subscription row even when their `app_user.tier` is paid
+            // (test accounts, mid-rollout, ENTERPRISE users via
+            // role-overrides, etc). That made TEAM users see "Free /
+            // 5 runs / month" on the Settings plan card while the
+            // Billing page correctly said "You're on Team. Unlimited
+            // runs". Trust JWT tier first; fall through to billing
+            // only when JWT is blank.
+            const planTier =
+              user?.tier && user.tier !== 'FREE'
+                ? user.tier
+                : (billing?.plan?.tier ?? user?.tier ?? 'FREE');
             // V176 (2026-05-06) renamed PRO display_name "Pro" → "Solo".
             // The TierKey enum is still 'PRO' (the DB PK didn't change) but
             // user-facing copy + the badge letter use the Solo branding.
-            const planName =
-              billing?.plan?.name ??
-              (planTier === 'ENTERPRISE'
+            //
+            // I3-A — when planTier was driven from JWT (test account
+            // with no paid subscription row), `billing.plan.name` is
+            // stale ("Free") even though JWT tier says TEAM/PRO/etc.
+            // Prefer the tier-derived display name in that case so
+            // the heading agrees with the badge.
+            const tierDerivedName =
+              planTier === 'ENTERPRISE'
                 ? 'Enterprise Plan'
                 : planTier === 'TEAM'
                   ? 'Team Plan'
                   : planTier === 'PRO'
                     ? 'Solo Plan'
-                    : 'Free Plan');
+                    : 'Free Plan';
+            const billingTierMatchesJwt = billing?.plan?.tier && billing.plan.tier === planTier;
+            const planName = billingTierMatchesJwt
+              ? (billing?.plan?.name ?? tierDerivedName)
+              : tierDerivedName;
             const badge =
               planTier === 'ENTERPRISE'
                 ? {cls: 'bg-accent-amber/20 text-accent-amber', letter: 'E'}

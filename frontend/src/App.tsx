@@ -42,6 +42,34 @@ function LegacyUrlRedirect() {
   return <Navigate to={path + location.search + location.hash} replace />;
 }
 
+/**
+ * 2026-05-09 — `/projects/:projectId/dashboard` legacy redirect that
+ * preserves the caller's query string. Replaces the previous
+ * `<Navigate to="..?tab=pulse">` which hard-stripped any query the
+ * caller had passed.
+ *
+ * Six call sites in the codebase navigate to `/dashboard?tab=...`
+ * (PostMergeBar, InlineRunDetail, RunDetail, OrgProjectsPage,
+ * RepoContextPanel "Open Architecture →", PrReviewButton). Pre-fix
+ * all six landed on Pulse regardless of intent — the "Open
+ * Architecture" link being the most visible offender ("does
+ * nothing" from the user's POV).
+ *
+ * Strategy: forward `location.search` onto the canonical
+ * `/projects/:id` URL. If the caller didn't supply a `tab=`,
+ * default to `pulse` so dashboard-intent users (the V2 muscle
+ * memory) still land on the dense inspection view.
+ */
+function ProjectDashboardRedirect() {
+  const location = useLocation();
+  const sp = new URLSearchParams(location.search);
+  if (!sp.has('tab')) sp.set('tab', 'pulse');
+  const search = sp.toString();
+  return (
+    <Navigate to={`..${search ? '?' + search : ''}${location.hash}`} replace relative='path' />
+  );
+}
+
 // Main app pages
 // Single-surface retirement (2026-05-06) — RunsPage deleted. The flat
 // run list across all projects belonged to the v2 sidebar surface;
@@ -389,10 +417,7 @@ export default function App() {
                 canonical one. We default to `?tab=pulse` so users with
                 explicit dashboard intent keep landing on the dense
                 inspection view they wanted. */}
-            <Route
-              path='projects/:projectId/dashboard'
-              element={<Navigate to='..?tab=pulse' replace relative='path' />}
-            />
+            <Route path='projects/:projectId/dashboard' element={<ProjectDashboardRedirect />} />
             <Route
               path='projects/:projectId/activity'
               element={<Navigate to='..?tab=pulse&drawer=activity' replace relative='path' />}

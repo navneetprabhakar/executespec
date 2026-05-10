@@ -1,5 +1,7 @@
 package com.navneet.executespec.recovery;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -76,6 +78,15 @@ public class StartupRunResumer {
   private final SseBroadcaster broadcaster;
 
   /**
+   * 2026-05-09 (B-22 fix from audit) — workspace root for the workspace-gone precheck. Read from
+   * {@code agent.workspace} so dev / prod / test profiles all align. Optional via property
+   * placeholder so unit tests that construct the bean without Spring don't NPE; when null we skip
+   * the precheck (lexical salvage proceeds as before).
+   */
+  @org.springframework.beans.factory.annotation.Value("${agent.workspace:}")
+  private String workspaceRoot;
+
+  /**
    * 2026-05-04 — lazy {@link RunOrchestrator} reference. Direct constructor injection would create
    * a bean-init cycle (RunOrchestrator already depends on many beans that could transitively reach
    * back here). {@link ObjectProvider} defers the lookup until {@link #scanAndRecover} actually
@@ -133,7 +144,22 @@ public class StartupRunResumer {
       // status_reason) so the user keeps access to the workspace, preview,
       // chat, and retry-validation — instead of being told to re-run
       // everything from scratch.
+      //
+      // 2026-05-09 (B-22 fix) — but only if the workspace directory still
+      // exists. If the JVM died during cleanup, or a deploy wiped scratch,
+      // marking the run COMPLETE leaves the user with a useless terminal
+      // run (no preview, no chat target, broken downloads). Detect that
+      // case and fail-cleanly with a clear status_reason.
       if (isExecutorDone(run.getRunId())) {
+        if (workspaceMissing(run.getRunId())) {
+          markFailed(
+              run,
+              status,
+              "Workspace directory was lost during interruption — cannot salvage; please submit"
+                  + " a fresh run.");
+          failedInterrupted++;
+          continue;
+        }
         markSalvaged(run, status);
         salvaged++;
         continue;
@@ -214,6 +240,28 @@ public class StartupRunResumer {
         failedInterrupted,
         failedCapped,
         failedStale);
+  }
+
+  /**
+   * B-22 (audit, 2026-05-09) — true if the run's workspace directory does not exist. Salvaging a
+   * run whose workspace has been wiped (deploy cleaned scratch, `rm -rf` ran during interruption,
+   * pod scratch volume detached) leaves the user staring at a "COMPLETE" run with no preview, no
+   * chat context, and broken file downloads. Detecting it lets us fail with a clear reason instead.
+   * Returns false (i.e. "don't block salvage") when {@code agent.workspace} isn't configured (e.g.
+   * unit-test paths without Spring) so legacy behaviour is preserved.
+   */
+  private boolean workspaceMissing(String runId) {
+    if (workspaceRoot == null || workspaceRoot.isBlank()) return false;
+    try {
+      Path p = Path.of(workspaceRoot, runId);
+      return !Files.isDirectory(p);
+    } catch (Exception e) {
+      log.warn(
+          "StartupRunResumer: workspaceMissing precheck failed for run={}: {} — proceeding",
+          runId,
+          e.getMessage());
+      return false;
+    }
   }
 
   /**

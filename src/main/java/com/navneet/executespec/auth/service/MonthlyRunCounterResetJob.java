@@ -1,11 +1,18 @@
 package com.navneet.executespec.auth.service;
 
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.navneet.executespec.auth.entity.AppUser;
 import com.navneet.executespec.auth.entity.Org;
 import com.navneet.executespec.auth.repository.AppUserRepository;
 import com.navneet.executespec.auth.repository.OrgRepository;
+import com.navneet.executespec.billing.entity.BillingSubscription;
+import com.navneet.executespec.billing.repository.BillingSubscriptionRepository;
 
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -41,6 +48,7 @@ public class MonthlyRunCounterResetJob {
   private final AppUserRepository userRepo;
   private final OrgRepository orgRepo;
   private final TierEnforcementService tierEnforcement;
+  private final BillingSubscriptionRepository subscriptionRepo;
 
   /**
    * Fires at 00:00 IST on the 1st of every month. Iterates users + orgs and delegates to {@link
@@ -53,37 +61,59 @@ public class MonthlyRunCounterResetJob {
   @Transactional
   public void resetMonthlyCounters() {
     Instant startedAt = Instant.now();
-    long userScanned = 0, userReset = 0;
+    // B-08 (audit, 2026-05-09) — pre-load every active subscription once.
+    // The legacy implementation called `subscriptionRepo.findActiveByUserId`
+    // for each app_user + each org, producing 2× N round-trips at midnight
+    // IST that exceeded the lock window on 50k+ user DBs. One bulk SELECT
+    // here, in-memory match per row.
+    List<BillingSubscription> activeSubs = subscriptionRepo.findAllActiveOrPastDue();
+    Map<String, BillingSubscription> activeByUser =
+        activeSubs.stream()
+            .collect(
+                Collectors.toMap(
+                    BillingSubscription::getUserId,
+                    Function.identity(),
+                    (a, b) -> a)); // tolerate duplicates by keeping the first seen
+
+    Instant resetStamp = Instant.now();
+
+    // ── Users ─────────────────────────────────────────────────────────────
+    long userScanned = 0;
+    List<AppUser> userBatch = new ArrayList<>();
     for (AppUser user : userRepo.findAll()) {
       userScanned++;
       // FREE users use a lifetime limit — no reset path for them.
       String tier = user.getTier() != null ? user.getTier().toUpperCase() : "FREE";
       if ("FREE".equals(tier)) continue;
-      if (tierEnforcement.shouldResetUserCounterForJob(user)) {
+      if (tierEnforcement.shouldResetUserCounterForJob(user, activeByUser)) {
         user.setPersonalRunCount(0);
-        user.setRunCountResetAt(Instant.now());
-        userRepo.save(user);
-        userReset++;
+        user.setRunCountResetAt(resetStamp);
+        userBatch.add(user);
       }
     }
+    if (!userBatch.isEmpty()) userRepo.saveAll(userBatch);
 
-    long orgScanned = 0, orgReset = 0;
+    // ── Orgs ──────────────────────────────────────────────────────────────
+    long orgScanned = 0;
+    List<Org> orgBatch = new ArrayList<>();
     for (Org org : orgRepo.findAll()) {
       orgScanned++;
-      if (tierEnforcement.shouldResetOrgCounterForJob(org)) {
+      if (tierEnforcement.shouldResetOrgCounterForJob(org, activeByUser)) {
         org.setMonthlyRunCount(0);
-        org.setRunCountResetAt(Instant.now());
-        orgRepo.save(org);
-        orgReset++;
+        org.setRunCountResetAt(resetStamp);
+        orgBatch.add(org);
       }
     }
+    if (!orgBatch.isEmpty()) orgRepo.saveAll(orgBatch);
 
     log.info(
-        "[MonthlyRunCounterReset] users scanned={} reset={} · orgs scanned={} reset={} · took {}ms",
+        "[MonthlyRunCounterReset] users scanned={} reset={} · orgs scanned={} reset={} · "
+            + "active-subs prefetched={} · took {}ms",
         userScanned,
-        userReset,
+        userBatch.size(),
         orgScanned,
-        orgReset,
+        orgBatch.size(),
+        activeByUser.size(),
         java.time.Duration.between(startedAt, Instant.now()).toMillis());
   }
 }

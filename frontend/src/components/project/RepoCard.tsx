@@ -4,6 +4,7 @@ import type {ProjectRepoLink, StackInfo} from '@/types/project';
 import StackBadge from './StackBadge';
 import RepoRelationshipEditor from './RepoRelationshipEditor';
 import {installRepoWebhook} from '@/lib/api';
+import {useUiStore} from '@/stores/useUiStore';
 
 interface Props {
   link: ProjectRepoLink;
@@ -24,15 +25,23 @@ export default function RepoCard({
   const [editing, setEditing] = useState(false);
   const [installingHook, setInstallingHook] = useState(false);
 
+  const addToast = useUiStore((s) => s.addToast);
   const doInstallHook = async () => {
     if (installingHook) return;
     setInstallingHook(true);
     try {
       const r = await installRepoWebhook(repo.id);
-      if (!r.installed && r.reason) alert(r.reason);
+      if (!r.installed && r.reason) {
+        addToast({type: 'error', message: r.reason});
+      } else if (r.installed) {
+        addToast({type: 'success', message: 'Webhook installed'});
+      }
       if (onRefresh) await onRefresh();
     } catch (e) {
-      alert(`Webhook install failed: ${e instanceof Error ? errMsg(e) : String(e)}`);
+      addToast({
+        type: 'error',
+        message: `Webhook install failed: ${e instanceof Error ? errMsg(e) : String(e)}`,
+      });
     } finally {
       setInstallingHook(false);
     }
