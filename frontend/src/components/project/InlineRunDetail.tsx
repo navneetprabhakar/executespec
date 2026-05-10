@@ -3,6 +3,7 @@ import {Link} from 'react-router-dom';
 import {
   ChevronDown,
   ChevronRight,
+  ChevronUp,
   ExternalLink,
   Github,
   RefreshCw,
@@ -70,6 +71,11 @@ export default function InlineRunDetail({
   // user had to navigate to /runs/{id} for those affordances.
   const [pausing, setPausing] = useState(false);
   const [cancelling, setCancelling] = useState(false);
+  // 2026-05-10 (UX feedback) — long specs (1000+ chars on Debt-Resolution
+  // style runs) flooded the run-detail panel with a 30-line text wall and
+  // pushed the action cluster + tasks + report below the fold. Collapse to
+  // ~6 lines by default; user can expand on demand.
+  const [requestExpanded, setRequestExpanded] = useState(false);
   const addToast = useUiStore((s) => s.addToast);
   const setPendingNewRunConfig = useUiStore((s) => s.setPendingNewRunConfig);
   const setRunStoreFilter = useRunStore((s) => s.setProjectFilter);
@@ -279,137 +285,174 @@ export default function InlineRunDetail({
     }
   };
 
+  // 2026-05-10 (UX feedback) — Request collapse threshold. Anything under
+  // 320 chars renders fully (single short paragraph); over 320 collapses
+  // to ~6 lines with a Show more / Show less toggle. The cutoff is the
+  // observable point where a textarea spec becomes a wall.
+  const REQUEST_COLLAPSE_CHARS = 320;
+  const requestCollapsible = (run.userRequest || '').length > REQUEST_COLLAPSE_CHARS;
+
   return (
     <div className='space-y-3 text-xs'>
-      {/* Request + stats */}
+      {/* 2026-05-10 (UX feedback on /projects/.../runs/.../detail) — restructured
+          header. Pre-fix the layout was `flex justify-between` between the
+          REQUEST text and a 9-button action cluster. With long specs (1000+
+          chars on Debt-Resolution runs) the request flowed down 30 lines
+          while the action cluster sat compact at the top-right, leaving a
+          wide vertical bar of empty space and pushing the actual run signals
+          (status, validation, tasks) far below the fold. New shape:
+            row 1: action cluster — full width, flex-wrap, kept on top so
+                   primary affordances (Re-run, Push & PR, Open full view)
+                   are always visible without scrolling
+            row 2: stats line (Status / Tasks / Cost / Provider / VerdictPill)
+            row 3: REQUEST card — collapsed to ~6 lines by default with
+                   Show more / Show less toggle when over 320 chars */}
       <div className='space-y-2'>
-        <div className='flex items-start justify-between gap-3'>
-          <div className='flex-1 min-w-0'>
-            <div className='text-[11px] uppercase tracking-wide text-muted'>Request</div>
-            <p className='text-xs text-primary whitespace-pre-wrap'>{run.userRequest}</p>
-          </div>
-          <div className='flex items-center gap-1.5 flex-shrink-0 flex-wrap justify-end'>
-            {/* R-01 — non-terminal runs gain Pause + Cancel inline so the
+        {/* row 1 — action cluster */}
+        <div className='flex items-center gap-1.5 flex-wrap'>
+          {/* R-01 — non-terminal runs gain Pause + Cancel inline so the
                 inline view stops being a feature-gated subset of the
                 standalone run page. Mirrors RunDetail's button positions. */}
-            {isLive && (
-              <>
-                <button
-                  onClick={doPause}
-                  disabled={pausing}
-                  title='Pause this run between tasks. The run can be resumed manually from the standalone run page.'
-                  className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary disabled:opacity-50'
-                >
-                  {pausing ? (
-                    <Loader2 className='h-3 w-3 animate-spin' />
-                  ) : (
-                    <Pause className='h-3 w-3' />
-                  )}
-                  {pausing ? 'Pausing…' : 'Pause'}
-                </button>
-                <button
-                  onClick={doCancel}
-                  disabled={cancelling}
-                  title='Cancel this run. Workspace state at cancel point is preserved for inspection.'
-                  className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-status-error/40 bg-status-error/10 text-status-error hover:bg-status-error/20 disabled:opacity-50'
-                >
-                  {cancelling ? (
-                    <Loader2 className='h-3 w-3 animate-spin' />
-                  ) : (
-                    <XCircle className='h-3 w-3' />
-                  )}
-                  {cancelling ? 'Cancelling…' : 'Cancel'}
-                </button>
-              </>
-            )}
-            {/* R-01 — Re-run on terminal runs. Stuffs a NewRunConfig into
+          {isLive && (
+            <>
+              <button
+                onClick={doPause}
+                disabled={pausing}
+                title='Pause this run between tasks. The run can be resumed manually from the standalone run page.'
+                className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary disabled:opacity-50'
+              >
+                {pausing ? (
+                  <Loader2 className='h-3 w-3 animate-spin' />
+                ) : (
+                  <Pause className='h-3 w-3' />
+                )}
+                {pausing ? 'Pausing…' : 'Pause'}
+              </button>
+              <button
+                onClick={doCancel}
+                disabled={cancelling}
+                title='Cancel this run. Workspace state at cancel point is preserved for inspection.'
+                className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-status-error/40 bg-status-error/10 text-status-error hover:bg-status-error/20 disabled:opacity-50'
+              >
+                {cancelling ? (
+                  <Loader2 className='h-3 w-3 animate-spin' />
+                ) : (
+                  <XCircle className='h-3 w-3' />
+                )}
+                {cancelling ? 'Cancelling…' : 'Cancel'}
+              </button>
+            </>
+          )}
+          {/* R-01 — Re-run on terminal runs. Stuffs a NewRunConfig into
                 the UI store so /runs (or the project's run list) auto-
                 opens NewRunModal with the spec pre-filled, matching
                 RunDetail's behaviour. */}
-            {isFullyTerminal && (
-              <button
-                onClick={doReRun}
-                title='Re-launch this run with the same spec, project, and provider'
-                className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary'
-              >
-                <RotateCcw className='h-3 w-3' />
-                Re-run
-              </button>
-            )}
-            {/* R-01 — escape hatch to the full standalone run page (live
+          {isFullyTerminal && (
+            <button
+              onClick={doReRun}
+              title='Re-launch this run with the same spec, project, and provider'
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary'
+            >
+              <RotateCcw className='h-3 w-3' />
+              Re-run
+            </button>
+          )}
+          {/* R-01 — escape hatch to the full standalone run page (live
                 log tab, plan tab, full task graph). Many users still want
                 to see the full chrome — this lets them get there in one
                 click instead of remembering the URL pattern. */}
-            <Link
-              to={`/runs/${run.runId}`}
-              title='Open the full standalone run page (live log, plan, task graph)'
-              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary'
+          <Link
+            to={`/runs/${run.runId}`}
+            title='Open the full standalone run page (live log, plan, task graph)'
+            className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary'
+          >
+            <ArrowUpRight className='h-3 w-3' />
+            Open full view
+          </Link>
+          {/* 2026-05-10 — split push button into two states.
+              First push (no PR yet): primary blue "Push & open PR".
+              Re-push (PR already open): secondary "Update PR" — fires
+              the same SCM-push endpoint, which appends new commits to
+              the existing branch. GitHub re-renders the PR diff
+              automatically. This closes the gap where a per-task retry
+              writes new files to workspace but the PR stays frozen on
+              the old commit until manual push. */}
+          {terminal && !alreadyPushed && (
+            <button
+              onClick={doPush}
+              disabled={pushing}
+              title={`Push this run's workspace to ${scmLabel} and open a PR`}
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50'
             >
-              <ArrowUpRight className='h-3 w-3' />
-              Open full view
-            </Link>
-            {terminal && !alreadyPushed && (
+              {pushing ? (
+                <Loader2 className='h-3 w-3 animate-spin' />
+              ) : (
+                <Upload className='h-3 w-3' />
+              )}
+              {pushing ? 'Pushing…' : `Push & open PR`}
+            </button>
+          )}
+          {terminal && alreadyPushed && (
+            <button
+              onClick={doPush}
+              disabled={pushing}
+              title={`Re-push this run's workspace to ${scmLabel}. Appends new commits to the existing branch — GitHub auto-updates the open PR.`}
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary disabled:opacity-50'
+            >
+              {pushing ? (
+                <Loader2 className='h-3 w-3 animate-spin' />
+              ) : (
+                <Upload className='h-3 w-3' />
+              )}
+              {pushing ? 'Pushing…' : 'Update PR'}
+            </button>
+          )}
+          {terminal && (
+            <div className='inline-flex items-center gap-1 text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-1 py-0.5'>
+              <GitBranch className='h-3 w-3 text-muted' />
+              <input
+                type='text'
+                placeholder='branch'
+                value={syncBranch}
+                onChange={(e) => setSyncBranch(e.target.value)}
+                className='w-20 bg-transparent text-[11px] font-mono text-primary placeholder-muted focus:outline-none'
+                title="Branch to sync this run's workspace from. Empty = each repo's default."
+              />
               <button
-                onClick={doPush}
-                disabled={pushing}
-                title={`Push this run's workspace to ${scmLabel} and open a PR`}
-                className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20 disabled:opacity-50'
+                onClick={doSync}
+                disabled={syncing}
+                title='Hard-reset workspace from origin/<branch> — re-review against post-merge code'
+                className='inline-flex items-center gap-1 text-accent-blue hover:text-accent-blue/80 disabled:opacity-50'
               >
-                {pushing ? (
-                  <Loader2 className='h-3 w-3 animate-spin' />
-                ) : (
-                  <Upload className='h-3 w-3' />
-                )}
-                {pushing ? 'Pushing…' : `Push & open PR`}
+                {syncing ? <Loader2 className='h-3 w-3 animate-spin' /> : 'Sync'}
               </button>
-            )}
-            {terminal && (
-              <div className='inline-flex items-center gap-1 text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-1 py-0.5'>
-                <GitBranch className='h-3 w-3 text-muted' />
-                <input
-                  type='text'
-                  placeholder='branch'
-                  value={syncBranch}
-                  onChange={(e) => setSyncBranch(e.target.value)}
-                  className='w-20 bg-transparent text-[11px] font-mono text-primary placeholder-muted focus:outline-none'
-                  title="Branch to sync this run's workspace from. Empty = each repo's default."
-                />
-                <button
-                  onClick={doSync}
-                  disabled={syncing}
-                  title='Hard-reset workspace from origin/<branch> — re-review against post-merge code'
-                  className='inline-flex items-center gap-1 text-accent-blue hover:text-accent-blue/80 disabled:opacity-50'
-                >
-                  {syncing ? <Loader2 className='h-3 w-3 animate-spin' /> : 'Sync'}
-                </button>
-              </div>
-            )}
-            {terminal && (
-              <button
-                onClick={doResetToOriginal}
-                disabled={resettingOriginal}
-                title='Reset workspace to the exact commit SHAs this run cloned at start (v2.5.2+)'
-                className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-muted hover:text-primary disabled:opacity-50'
-              >
-                {resettingOriginal ? (
-                  <Loader2 className='h-3 w-3 animate-spin' />
-                ) : (
-                  'Reset to run state'
-                )}
-              </button>
-            )}
-            {onRefresh && (
-              <button
-                onClick={doRefresh}
-                disabled={refreshing}
-                title='Refresh run detail'
-                className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50'
-              >
-                <RefreshCw className={cn('h-3 w-3', refreshing && 'animate-spin')} />
-                Refresh
-              </button>
-            )}
-          </div>
+            </div>
+          )}
+          {terminal && (
+            <button
+              onClick={doResetToOriginal}
+              disabled={resettingOriginal}
+              title='Reset workspace to the exact commit SHAs this run cloned at start (v2.5.2+)'
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-muted hover:text-primary disabled:opacity-50'
+            >
+              {resettingOriginal ? (
+                <Loader2 className='h-3 w-3 animate-spin' />
+              ) : (
+                'Reset to run state'
+              )}
+            </button>
+          )}
+          {onRefresh && (
+            <button
+              onClick={doRefresh}
+              disabled={refreshing}
+              title='Refresh run detail'
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary disabled:opacity-50'
+            >
+              <RefreshCw className={cn('h-3 w-3', refreshing && 'animate-spin')} />
+              Refresh
+            </button>
+          )}
         </div>
         <div className='flex flex-wrap items-center gap-x-4 gap-y-1'>
           <Stat label='Status' value={run.status} valueClass={runStatusTextClass(run.status)} />
@@ -432,6 +475,44 @@ export default function InlineRunDetail({
           )}
           {run.aiProvider && <Stat label='Provider' value={run.aiProvider} />}
         </div>
+        {/* row 3 — REQUEST card. Collapsed to ~6 lines by default for long
+            specs; toggle expands. Bordered + subtle bg so it reads as a
+            distinct surface, not a paragraph in the page flow. */}
+        {run.userRequest && (
+          <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2'>
+            <div className='flex items-center justify-between gap-2 mb-1'>
+              <div className='text-[11px] uppercase tracking-wide font-mono text-muted'>
+                Request
+              </div>
+              {requestCollapsible && (
+                <button
+                  onClick={() => setRequestExpanded((v) => !v)}
+                  className='inline-flex items-center gap-0.5 text-[11px] text-accent-blue hover:underline'
+                  aria-expanded={requestExpanded}
+                >
+                  {requestExpanded ? (
+                    <>
+                      <ChevronUp className='h-3 w-3' /> Show less
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className='h-3 w-3' />
+                      Show all ({run.userRequest.length.toLocaleString()} chars)
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+            <p
+              className={cn(
+                'text-xs text-primary whitespace-pre-wrap leading-relaxed',
+                requestCollapsible && !requestExpanded && 'line-clamp-6',
+              )}
+            >
+              {run.userRequest}
+            </p>
+          </div>
+        )}
         {syncStatus && <div className='text-[11px] text-muted'>{syncStatus}</div>}
         {pushStatus && (
           <div

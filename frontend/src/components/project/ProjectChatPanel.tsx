@@ -261,26 +261,33 @@ export default function ProjectChatPanel({
 
   return (
     <div className='flex flex-col h-full min-h-0 bg-[var(--gray-100)]'>
-      {/* Slim header — only when conversation exists, so the empty state stays clean */}
+      {/* Slim header — only when conversation exists, so the empty state stays clean.
+          2026-05-10 (mobile audit) — header now flex-wraps so the chat-meta
+          chips (message count, token totals, context window) fall to a second
+          row before they push the Compact / Reset buttons off the right edge.
+          On phones < 420px the verbose token-count / context-window labels
+          collapse to icon-only chips via the inline `hidden sm:inline` pattern. */}
       {hasConversation && (
-        <div className='flex items-center justify-between px-4 py-2 border-b border-[var(--border-default)] flex-shrink-0'>
-          <div className='flex items-center gap-1.5 text-[11px] font-medium text-secondary'>
-            <MessageSquare className='h-3 w-3 text-accent-blue' />
-            Project Chat
-            <span className='text-muted'>
-              · {messages.length} message{messages.length === 1 ? '' : 's'}
+        <div className='flex flex-wrap items-center justify-between gap-2 px-3 sm:px-4 py-2 border-b border-[var(--border-default)] flex-shrink-0'>
+          <div className='flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-[11px] font-medium text-secondary min-w-0'>
+            <MessageSquare className='h-3 w-3 text-accent-blue flex-shrink-0' />
+            <span className='whitespace-nowrap'>Project Chat</span>
+            <span className='text-muted whitespace-nowrap'>
+              · {messages.length}{' '}
+              <span className='hidden sm:inline'>message{messages.length === 1 ? '' : 's'}</span>
+              <span className='sm:hidden'>msg</span>
             </span>
             {totalTokens > 0 && (
               <>
                 <span
-                  className='text-muted'
+                  className='text-muted whitespace-nowrap hidden sm:inline'
                   title={`Input tokens: ${totalIn.toLocaleString()} · Output tokens: ${totalOut.toLocaleString()} · Cumulative across this conversation`}
                 >
                   · {formatTokens(totalIn)} in / {formatTokens(totalOut)} out
                 </span>
                 <span
                   className={cn(
-                    'text-muted',
+                    'text-muted whitespace-nowrap',
                     tokenPercent >= 80 && 'text-accent-amber',
                     tokenPercent >= 95 && 'text-accent-red',
                   )}
@@ -294,12 +301,12 @@ export default function ProjectChatPanel({
                     `summary when answers start drifting.`
                   }
                 >
-                  · {formatTokens(contextWindow)} window
+                  · {formatTokens(contextWindow)} <span className='hidden sm:inline'>window</span>
                 </span>
               </>
             )}
           </div>
-          <div className='flex items-center gap-1.5'>
+          <div className='flex items-center gap-1.5 flex-shrink-0'>
             <button
               onClick={handleCompact}
               disabled={compacting || resetting || sending || messages.length < 10}
@@ -400,12 +407,16 @@ export default function ProjectChatPanel({
                 m.role === 'USER' ? 'items-end' : 'items-start',
               )}
             >
+              {/* 2026-05-10 (mobile audit) — added `min-w-0` + `overflow-hidden`
+                  so a long unbreakable token (URL, base64 blob) inside the
+                  bubble can't push the bubble past viewport width. The
+                  bubble's own px-3 sm:px-4 padding still shrinks on mobile. */}
               {m.role === 'USER' ? (
-                <div className='max-w-[85%] rounded-sm rounded-br-sm px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary'>
+                <div className='max-w-[85%] min-w-0 overflow-hidden rounded-sm rounded-br-sm px-3 sm:px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary'>
                   <p className='whitespace-pre-wrap break-words'>{m.content}</p>
                 </div>
               ) : (
-                <div className='max-w-[90%] rounded-sm rounded-bl-sm px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary'>
+                <div className='max-w-[92%] sm:max-w-[90%] min-w-0 overflow-hidden rounded-sm rounded-bl-sm px-3 sm:px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary'>
                   <MarkdownContent content={m.content} compact />
                 </div>
               )}
@@ -612,11 +623,15 @@ function LaunchFromChatModal({
 
   return (
     <div
-      className='fixed inset-0 z-40 bg-black/60 flex items-center justify-center'
+      // 2026-05-10 (mobile audit) — outer flex now has p-3 / sm:p-4 so the
+      // modal panel never touches the screen edge on phones. max-h cap on
+      // the panel + overflow-y-auto prevents the inner content (compiled
+      // spec textarea + repos list) from running off the bottom in landscape.
+      className='fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-3 sm:p-4'
       onClick={onClose}
     >
       <div
-        className='w-full max-w-xl rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] shadow-xl p-4 space-y-3'
+        className='w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] shadow-xl p-4 space-y-3'
         onClick={(e) => e.stopPropagation()}
       >
         <div className='flex items-center justify-between'>

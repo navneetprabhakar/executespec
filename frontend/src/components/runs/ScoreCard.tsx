@@ -99,9 +99,10 @@ export default function ScoreCard({report}: {report: ValidationReportData}) {
               {overall}
             </span>
             <span className='text-[10px] font-normal text-muted'>/ 100</span>
-            {verified != null && llmScore != null && llmScore !== verified && (
-              <span className='text-[10px] font-mono text-muted'>· Est. {llmScore}</span>
-            )}
+            {/* 2026-05-10 — single-score model. The "· Est. N" chip used to
+                 surface the LLM self-rating when it disagreed with the
+                 deterministic verifiedScore; we now show ONE number to
+                 avoid the "is the run a 92 or a 17?" confusion. */}
             {verified == null && report.accuracyGrade && (
               <span className='text-[10px] text-muted'>· {report.accuracyGrade}</span>
             )}

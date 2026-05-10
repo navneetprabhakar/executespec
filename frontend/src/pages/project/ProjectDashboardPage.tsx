@@ -521,12 +521,16 @@ export default function ProjectDashboardPage() {
             </Link>
             <button
               onClick={() => openDrawer('settings')}
-              aria-label='Open more'
+              aria-label='Open more (settings, docs, memory, activity, team)'
               title='Settings, docs, memory, activity, team'
               className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
             >
               <MoreHorizontal className='h-3.5 w-3.5' />
-              More
+              {/* 2026-05-10 (mobile audit) — text label hidden on phones so the
+                  action cluster (Repos · N / + / New / Quick spec / More) never
+                  wraps to a third row on 320px viewports. The aria-label
+                  carries the full description for screen readers. */}
+              <span className='hidden sm:inline'>More</span>
             </button>
           </div>
         </header>
@@ -548,9 +552,14 @@ export default function ProjectDashboardPage() {
         {loading && <div className='text-xs text-muted'>Loading…</div>}
         {error && <div className='text-xs text-accent-red'>{error}</div>}
 
-        {/* Top-level 4-tab strip */}
+        {/* Top-level 4-tab strip.
+            2026-05-10 (mobile audit) — `scrollbar-hide` so the horizontal
+            scroll affordance stays invisible until the user touches it; the
+            -mx-4 px-4 negative-margin pattern lets the strip bleed to the
+            page edges on mobile so the first/last tab isn't visually clipped
+            against the bordered card edge. */}
         <nav
-          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto -mx-4 px-4'
+          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide -mx-4 px-4'
           role='tablist'
           aria-label='Project sections'
         >
@@ -575,7 +584,7 @@ export default function ProjectDashboardPage() {
         {/* Runs sub-tab strip — only shown when in Runs tab */}
         {tab === 'runs' && (
           <nav
-            className='flex gap-0.5 overflow-x-auto -mx-4 px-4 pt-1'
+            className='flex gap-0.5 overflow-x-auto scrollbar-hide -mx-4 px-4 pt-1'
             role='tablist'
             aria-label='Runs sections'
           >
@@ -761,7 +770,7 @@ function SummaryBar({
     // horizontally-scrollable row so it stays one line even with 9 segments
     // (was wrapping to 5 rows on phones). Desktop keeps the wrap behaviour
     // so power users can still see everything at once.
-    <div className='flex sm:flex-wrap items-center gap-x-3 gap-y-1 text-[11px] overflow-x-auto sm:overflow-visible whitespace-nowrap sm:whitespace-normal -mx-3 px-3 sm:mx-0 sm:px-0'>
+    <div className='flex sm:flex-wrap items-center gap-x-3 gap-y-1 text-[11px] overflow-x-auto scrollbar-hide sm:overflow-visible whitespace-nowrap sm:whitespace-normal -mx-3 px-3 sm:mx-0 sm:px-0'>
       {segments.map((s, i) => (
         <span key={i} className='inline-flex items-center gap-1 flex-shrink-0'>
           {s.label && (

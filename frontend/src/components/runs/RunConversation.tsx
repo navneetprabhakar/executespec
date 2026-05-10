@@ -748,14 +748,17 @@ export default function RunConversation({runId}: Props) {
             transition={{duration: 0.2}}
             className={cn('flex', msg.role === 'user' ? 'justify-end' : 'justify-start')}
           >
+            {/* 2026-05-10 (mobile audit) — px-3 sm:px-4 + min-w-0 + overflow-hidden
+                so a long unbreakable token (URL, command, base64) inside the
+                bubble can't push the bubble past viewport width. */}
             {msg.role === 'user' ? (
               /* User message — plain text bubble */
-              <div className='max-w-[85%] rounded-sm px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary rounded-br-sm'>
+              <div className='max-w-[85%] min-w-0 overflow-hidden rounded-sm px-3 sm:px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary rounded-br-sm'>
                 <p className='whitespace-pre-wrap break-words'>{msg.content}</p>
               </div>
             ) : (
               /* Assistant message — rendered markdown */
-              <div className='max-w-[90%] rounded-sm px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary rounded-bl-sm'>
+              <div className='max-w-[92%] sm:max-w-[90%] min-w-0 overflow-hidden rounded-sm px-3 sm:px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary rounded-bl-sm'>
                 <MarkdownContent content={msg.content} compact />
               </div>
             )}
