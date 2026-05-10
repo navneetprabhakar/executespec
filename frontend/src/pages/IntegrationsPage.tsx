@@ -1305,7 +1305,7 @@ export default function IntegrationsPage() {
           <div className='px-4 py-3 border-b border-[var(--border-default)]'>
             <h3 className='text-sm font-semibold text-primary'>Integration-triggered Runs</h3>
           </div>
-          <div className='overflow-x-auto'>
+          <div className='overflow-x-auto v3-scroll-fade-x'>
             <table className='w-full text-sm min-w-[560px] md:min-w-0'>
               <thead>
                 <tr className='border-b border-[var(--border-default)]'>

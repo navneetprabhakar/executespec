@@ -67,12 +67,13 @@ body {
 body {
   background: var(--geist-bg);
   color: var(--text-primary);
-  /* 2026-05-10 (test variant) — JetBrains Mono leads the body chain to
-   * test a fully-monospace product look. Geist Sans + system fallbacks
-   * remain so the page still renders during the Google-Fonts load
-   * window. Revert by swapping JetBrains Mono back to 'DM Sans' if the
-   * mono-everywhere experiment isn't kept. */
   font-family: 'JetBrains Mono', 'Geist Sans', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Mobile-sharpness pass (2026-05-10 iter-3) — text-rendering hint
+   * pushes Safari/Chrome iOS into the optimised path that lays out
+   * kerning + ligatures on retina (2x/3x DPR) screens crisply. Without
+   * it the default `auto` mode picks `optimizeSpeed` on small viewports
+   * which renders strokes thicker / fuzzier. */
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }

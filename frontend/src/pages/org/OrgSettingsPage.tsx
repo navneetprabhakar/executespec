@@ -224,7 +224,7 @@ export default function OrgSettingsPage() {
         <div>
           <h2 className='text-lg font-semibold text-primary mb-3'>Members ({members.length})</h2>
           <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] overflow-hidden'>
-            <div className='overflow-x-auto'>
+            <div className='overflow-x-auto v3-scroll-fade-x'>
               <table className='w-full text-sm min-w-[560px] md:min-w-0'>
                 <thead className='bg-[var(--gray-300)] text-muted'>
                   <tr>

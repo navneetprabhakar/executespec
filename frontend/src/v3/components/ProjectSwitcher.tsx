@@ -123,8 +123,13 @@ export default function ProjectSwitcher() {
           display: 'inline-flex',
           alignItems: 'center',
           gap: 6,
-          maxWidth: 280,
-          padding: '5px 12px',
+          // 2026-05-10 mobile pass — width caps + flex-shrink so the trigger
+          // doesn't crowd out the logo + hamburger on 320px viewports. Old
+          // `maxWidth: 280` could push the brand off-screen. Cap at 100% of
+          // container so it shrinks first, then ellipsises the label.
+          maxWidth: '100%',
+          minWidth: 0,
+          padding: '5px 10px',
           background: 'var(--v3-surface)',
           color: 'var(--v3-text)',
           border: '1px solid var(--v3-border)',
