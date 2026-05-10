@@ -217,18 +217,30 @@ class WorkerAgentLeverCAndWallClockTest {
   }
 
   @Test
-  void lever_c_does_not_nudge_when_too_early() {
-    // Summary text emitted at iter 2 (well below 0.5×maxIter=20). Lever C threshold is
-    // max(3, round(0.5*maxIter)) = 20 here, so iter 2 falls through immediately.
+  void lever_c_fires_at_low_iter_when_writes_present_T12_regression() {
+    // 2026-05-10 — regression for dev run 61c9fffa T12 (iter 31/150) + T18 (iter 18/150).
+    // Pre-fix: Lever C had an `iter ≥ 0.5×maxIter` threshold so an early-bailout summary
+    // (model wrote a few files, hit a natural stopping point well before 50% of the iter
+    // budget) fell through to STOPPED_WITHOUT_COMPLETE → soft-completion. The threshold
+    // didn't add safety because `totalWriteCalls > 0` already gates "real work happened".
+    // Post-fix: nudge fires regardless of iter count.
+    //
+    // Scenario: 1 writeFile then summary text at iter 2 of 40. Pre-fix this fell through
+    // (threshold = 20). Post-fix it nudges at iter 2; we let iter 3 call completeTask to
+    // pin both the nudge fire AND the recovery into COMPLETED.
     List<ChatResponse> seq = new ArrayList<>();
     seq.add(responseWithCalls(toolCall("writeFile", "{\"path\":\"f\",\"content\":\"x\"}")));
-    seq.add(responseWithText("I've completed the work. ## Summary."));
+    seq.add(responseWithText("I've completed the work. ## Summary of changes."));
+    seq.add(responseWithCalls(toolCall("completeTask", "{\"summary\":\"all done\"}")));
     Fixture f = newWorker(seq);
 
     WorkerResult result = f.worker.run(req(40, null));
 
-    assertEquals(WorkerResult.Outcome.STOPPED_WITHOUT_COMPLETE, result.outcome());
-    assertEquals(2, result.iterations(), "early-iter summary should NOT fire Lever C");
+    assertEquals(
+        WorkerResult.Outcome.COMPLETED,
+        result.outcome(),
+        "Lever C must nudge even at low iter when writes are present (T12-class)");
+    assertEquals(3, result.iterations(), "completed at iter 3 (post-nudge)");
   }
 
   @Test

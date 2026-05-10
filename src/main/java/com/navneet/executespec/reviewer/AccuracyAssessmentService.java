@@ -89,6 +89,7 @@ OUTPUT FORMAT (strict JSON, no markdown fences):
   "implementedRequirements": ["<requirement text>", ...],
   "missingRequirements": ["<requirement text>", ...],
   "partialRequirements": ["<requirement text that exists but is incomplete>", ...],
+  "unknownRequirements": ["<requirement text where you have no evidence either way>", ...],
   "endpointCoverage": {
     "required": ["<METHOD /path>", ...],
     "implemented": ["<METHOD /path>", ...],
@@ -108,33 +109,66 @@ C = 70-79: Core requirements met, some features missing
 D = 60-69: Basic skeleton present, significant features absent
 F = 0-59: Major portions of the spec are not implemented
 
-RULES:
-- Base your score on the SPECIFICATION, not on what is "good enough"
-- EVIDENCE-FIRST: a requirement is IMPLEMENTED only when you can point to a specific location
-  in the KEY SOURCE FILES content that demonstrates the behaviour. Append the citation
-  inline to each implementedRequirements string, e.g. "Slug length is 7 chars [src/services/shortener.ts:22-35]".
+UNKNOWN is NOT counted as a gap. Score and grade reflect implemented + missing + partial only —
+absence of evidence is NOT evidence of absence. A spec with 8 IMPLEMENTED + 0 MISSING + 0 PARTIAL +
+4 UNKNOWN should grade A, not D, because we have no evidence anything is wrong.
+
+RULES — REQUIREMENT CLASSIFICATION (strict, four-way):
+
+  IMPLEMENTED — a requirement is IMPLEMENTED only when you can point to a specific location in the
+  KEY SOURCE FILES content that demonstrates the behaviour. Append the citation inline to each
+  implementedRequirements string, e.g.
+  "Slug length is 7 chars [src/services/shortener.ts:22-35]".
   A file name alone (without content you can read) is NOT sufficient — it's a hint, not proof.
-- A requirement is MISSING if:
-    * No KEY SOURCE FILE content supports it, OR
-    * The content you can read actively contradicts its presence (stubs, throw-not-implemented, etc.)
-  If the 6-file KEY SOURCE FILES snippet didn't include the relevant file, mark the requirement
-  as PARTIAL with a note like "likely in unread file X, cannot confirm" rather than implemented.
-- TRUNCATION HANDLING: A KEY SOURCE FILE may contain a marker of the form
-  "... [truncated N chars in the middle; file is M chars total] ..." between a head and tail
-  segment. If the file matches a requirement's structural shape (e.g., a router file when looking
-  for an endpoint) but the specific behaviour is in the truncated middle, mark the requirement as
-  PARTIAL with a note "evidence likely in truncated middle of <path>, cannot confirm" — DO NOT mark
-  it as MISSING just because the truncated middle didn't yield a citation. A truncation marker means
-  the file has more content the assessor couldn't see; it is not evidence of absence.
-- A requirement is PARTIAL if an issue flags it as incomplete (e.g., endpoint exists but validation missing),
-  or if evidence is indirect (structural hints only, no behaviour in KEY SOURCE FILES).
-- For endpointCoverage: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check
-  KEY SOURCE FILES content for the route handler — not just file names
-- README and documentation gaps count at most 5 points total toward specAdherenceScore
-- The specAdherenceScore must primarily reflect FUNCTIONAL compliance (endpoints, features, business logic)
-- If spec has no explicit endpoints (non-API project), set endpointCoverage to null
-- schemaAccuracy = HIGH if spec defines schemas and code matches them; MEDIUM if minor deviations; LOW if major mismatches
-- testCoverageLevel = based on what the spec REQUIRED (if spec says "add unit tests", assess against that)
+
+  MISSING — reserved for NEGATIVE EVIDENCE only. A requirement is MISSING when the KEY SOURCE FILES
+  content actively contradicts its presence:
+    * the function/handler exists but its body is a stub (throw new Error("not implemented"),
+      return None, pass, TODO comments, empty body)
+    * the route handler exists but ignores the spec'd input or returns hardcoded data
+    * the file containing the requirement IS in the snippet, you read it, and the behaviour is
+      not there (no comparable function, no equivalent symbol, nothing that could plausibly
+      satisfy the requirement)
+  Do NOT mark MISSING simply because you didn't see the relevant code. Use UNKNOWN for that.
+
+  PARTIAL — a requirement is PARTIAL if either:
+    * a review issue explicitly flags it as incomplete (endpoint exists, validation logic missing)
+    * the KEY SOURCE FILES show evidence the requirement is in progress: function signature
+      present but only some branches handled, validation imported but not called, route mounted
+      but no error handling, etc.
+
+  UNKNOWN — the default when you have no evidence either way. Use UNKNOWN when:
+    * no file in the KEY SOURCE FILES snippet matches the requirement's domain (e.g. you're
+      looking for "rate limit" and the snippet has no auth/middleware/limiter file)
+    * the relevant file IS in the FILE TREE but was NOT picked into the KEY SOURCE FILES snippet
+    * the relevant file IS in the snippet but the truncation marker
+      "... [truncated N chars in the middle; file is M chars total] ..." occurs at the location
+      where the requirement would live
+    * the requirement's vocabulary doesn't surface in any read file AND no review issue mentions it
+  An UNKNOWN entry should include a short note explaining what you'd need to see to confirm,
+  e.g. "Rate-limit policy — likely in middleware/, not in 6-file snippet".
+
+  When in doubt between MISSING and UNKNOWN: choose UNKNOWN. False positives on MISSING are far
+  more harmful (they tank the score and surface as critical issues to the user) than false
+  positives on UNKNOWN (which are advisory).
+
+ENDPOINT COVERAGE: extract ALL endpoints from the spec (e.g., "POST /api/users"), then check
+KEY SOURCE FILES content for the route handler — not just file names. If you cannot read the
+router file, leave coverage at the percent you can confirm and note the unread file in
+gradingNotes; do NOT default to 0%.
+
+SCORE COMPUTATION GUIDANCE:
+- Base score primarily on the IMPLEMENTED count vs the IMPLEMENTED+MISSING+PARTIAL count.
+  Formula heuristic: score ≈ 100 × (implemented + 0.5×partial) / max(1, implemented + missing + partial).
+  UNKNOWN does not enter the denominator — it's neither credit nor penalty.
+- README and documentation gaps count at most 5 points total toward specAdherenceScore.
+- The specAdherenceScore must primarily reflect FUNCTIONAL compliance (endpoints, features,
+  business logic).
+- If spec has no explicit endpoints (non-API project), set endpointCoverage to null.
+- schemaAccuracy = HIGH if spec defines schemas and code matches them; MEDIUM if minor
+  deviations; LOW if major mismatches.
+- testCoverageLevel = based on what the spec REQUIRED (if spec says "add unit tests", assess
+  against that).
 - Return valid JSON. Do not wrap in markdown fences.
 """;
 
@@ -261,13 +295,25 @@ RULES:
         report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
       }
 
+      // 2026-05-10 — Layer 3 grep-verify: programmatic anti-hallucination pass. The LLM
+      // sometimes marks requirements as MISSING because the implementing file wasn't picked
+      // into the 6/18-file KEY SOURCE FILES snippet, even with the new prompt nudging UNKNOWN
+      // for absence-of-evidence. As a defense-in-depth check, walk each missingRequirements
+      // entry, extract its distinctive tokens, and grep the workspace. If a sufficient
+      // fraction of tokens hit, the requirement is likely implemented somewhere we didn't
+      // read — move it to unknownRequirements (advisory) instead of leaving it as MISSING
+      // (which would synthesize a CRITICAL ReviewIssue and tank the score).
+      verifyMissingByGrep(runId, report);
+
       log.info(
-          "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial",
+          "[AccuracyAssessment] Complete for run {}: {} ({}/100) — {} missing, {} partial,"
+              + " {} unknown",
           runId,
           report.getOverallAccuracyGrade(),
           report.getSpecAdherenceScore(),
           report.getMissingRequirements() != null ? report.getMissingRequirements().size() : 0,
-          report.getPartialRequirements() != null ? report.getPartialRequirements().size() : 0);
+          report.getPartialRequirements() != null ? report.getPartialRequirements().size() : 0,
+          report.getUnknownRequirements() != null ? report.getUnknownRequirements().size() : 0);
 
       return report;
 
@@ -275,6 +321,220 @@ RULES:
       log.error("[AccuracyAssessment] Unexpected failure for run {}: {}", runId, e.getMessage(), e);
       return defaultReport(issues);
     }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Layer 3 — grep verification of missing-requirement claims
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Stopwords filtered out of {@link #extractKeywords(String)}. Both common English ("must",
+   * "should", "from") and "spec-shaped" filler ("requirement", "implement", "feature") that adds no
+   * signal because every spec sentence contains them.
+   */
+  private static final java.util.Set<String> KEYWORD_STOPWORDS =
+      java.util.Set.of(
+          // common English
+          "this",
+          "that",
+          "these",
+          "those",
+          "with",
+          "from",
+          "into",
+          "onto",
+          "upon",
+          "have",
+          "been",
+          "must",
+          "should",
+          "would",
+          "could",
+          "shall",
+          "will",
+          "when",
+          "while",
+          "where",
+          "what",
+          "which",
+          "such",
+          "than",
+          "then",
+          "also",
+          "each",
+          "every",
+          "some",
+          "many",
+          "more",
+          "most",
+          "other",
+          "their",
+          "there",
+          "after",
+          "before",
+          "during",
+          "between",
+          "without",
+          "across",
+          "about",
+          "above",
+          "below",
+          "again",
+          "still",
+          "however",
+          "because",
+          "since",
+          // spec/code filler
+          "spec",
+          "specification",
+          "feature",
+          "functionality",
+          "support",
+          "supports",
+          "supported",
+          "implement",
+          "implements",
+          "implemented",
+          "implementation",
+          "requirement",
+          "requirements",
+          "required",
+          "needs",
+          "needed",
+          "create",
+          "creates",
+          "created",
+          "creating",
+          "build",
+          "builds",
+          "built",
+          "building",
+          "allow",
+          "allows",
+          "allowed",
+          "ensure",
+          "ensures",
+          "ensured",
+          "provide",
+          "provides",
+          "provided",
+          "return",
+          "returns",
+          "returned",
+          "handle",
+          "handles",
+          "handled",
+          "process",
+          "processes",
+          "processed",
+          "value",
+          "values",
+          "data",
+          "list",
+          "item",
+          "items",
+          "type",
+          "types",
+          "name",
+          "names",
+          "result",
+          "results");
+
+  /**
+   * Programmatic verification of {@code missingRequirements}. For each item, extract distinctive
+   * keywords and grep the workspace. If ≥ ⌈K/2⌉ of K tokens have hits, demote the entry from
+   * MISSING to UNKNOWN with a "[grep-verified]" marker — the file likely exists but wasn't in the
+   * snippet we showed the LLM.
+   *
+   * <p>Mutates the report in-place. No-op when missingRequirements is null/empty or when {@link
+   * FileSystemTool#searchFiles} is unavailable.
+   */
+  private void verifyMissingByGrep(String runId, AccuracyReport report) {
+    java.util.List<String> missing = report.getMissingRequirements();
+    if (missing == null || missing.isEmpty()) return;
+
+    java.util.List<String> stillMissing = new java.util.ArrayList<>();
+    java.util.List<String> verifiedToUnknown = new java.util.ArrayList<>();
+
+    for (String req : missing) {
+      java.util.Set<String> tokens = extractKeywords(req);
+      if (tokens.isEmpty()) {
+        stillMissing.add(req);
+        continue;
+      }
+      int found = 0;
+      for (String tok : tokens) {
+        try {
+          String result =
+              fileSystemTool.searchFiles(runId, java.util.regex.Pattern.quote(tok), ".");
+          if (result != null
+              && !result.isBlank()
+              && !"(no matches)".equals(result.trim())
+              && !result.startsWith("Search failed")) {
+            found++;
+          }
+        } catch (Exception ex) {
+          // Don't let a single grep failure abort the whole verify pass.
+          log.debug(
+              "[AccuracyAssessment] grep-verify token search failed for run={} tok={}: {}",
+              runId,
+              tok,
+              ex.getMessage());
+        }
+      }
+      int threshold = Math.max(1, (tokens.size() + 1) / 2);
+      if (found >= threshold) {
+        verifiedToUnknown.add(
+            req
+                + " [grep-verified: "
+                + found
+                + "/"
+                + tokens.size()
+                + " tokens found in workspace]");
+      } else {
+        stillMissing.add(req);
+      }
+    }
+
+    if (!verifiedToUnknown.isEmpty()) {
+      log.info(
+          "[AccuracyAssessment] grep-verify run {}: demoted {} of {} missing → unknown"
+              + " (workspace had hits for the requirement's distinctive tokens)",
+          runId,
+          verifiedToUnknown.size(),
+          missing.size());
+      report.setMissingRequirements(stillMissing);
+
+      java.util.List<String> existingUnknown =
+          report.getUnknownRequirements() != null
+              ? new java.util.ArrayList<>(report.getUnknownRequirements())
+              : new java.util.ArrayList<>();
+      existingUnknown.addAll(verifiedToUnknown);
+      report.setUnknownRequirements(existingUnknown);
+    }
+  }
+
+  /**
+   * Tokenise a requirement string into the distinctive keywords we'll grep for. Strips inline
+   * citations like {@code [src/foo.ts:22-35]}, lowercases, splits on non-word chars, drops
+   * stopwords + numeric-only + tokens shorter than 4 chars. Caps at 6 tokens (first-N) so the
+   * verify pass never balloons the per-call latency.
+   */
+  static java.util.Set<String> extractKeywords(String requirement) {
+    if (requirement == null) return java.util.Set.of();
+    // Drop inline citations / markers — they're either file paths (which the grep would match
+    // against itself) or grep-verified markers from a prior pass.
+    String cleaned = requirement.replaceAll("\\[[^\\]]+\\]", " ");
+    String[] toks = cleaned.toLowerCase(java.util.Locale.ROOT).split("\\W+");
+    java.util.LinkedHashSet<String> out = new java.util.LinkedHashSet<>();
+    for (String t : toks) {
+      if (t.length() < 4) continue;
+      if (KEYWORD_STOPWORDS.contains(t)) continue;
+      if (t.matches("\\d+")) continue;
+      out.add(t);
+      if (out.size() >= 6) break;
+    }
+    return out;
   }
 
   // ──────────────────────────────────────────────────────────────────────────

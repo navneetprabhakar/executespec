@@ -497,17 +497,22 @@ public class WorkerAgent {
         // and emitted "Excellent! The implementation is complete and correct. ## Summary…" but
         // never invoked completeTask. The model effectively produced a status report instead of
         // closing the loop. Cost: full task counted as STOPPED_WITHOUT_COMPLETE → soft-PARTIAL.
-        // Lever C fires once per task. Conditions: text-only response + writes happened + iter
-        // past 0.5×maxIter + assistant text contains a "summary/complete/done" keyword. We
-        // append the assistant turn AND a UserMessage telling the model to call completeTask
-        // with the summary as completionNotes (or list the next concrete edit if it isn't
-        // actually done). Then continue the loop — the model gets one more iter to do the
-        // right thing. STOPPED_WITHOUT_COMPLETE still kicks in if the next iter also returns
-        // text-only (we don't fire the nudge twice).
-        if (!completionNudgeFired
-            && totalWriteCalls > 0
-            && iter >= Math.max(3, (int) Math.round(maxIter * 0.5))
-            && looksLikeSummary(assistantText)) {
+        //
+        // 2026-05-10 update — dropped the original `iter ≥ 0.5×maxIter` threshold gate. Dev run
+        // 61c9fffa T12 + T18 reproduced the same failure mode at iter 31/150 and iter 18/150
+        // (both well below the 75-iter threshold), and the soft-completion gate accepted the
+        // bypassed work. The threshold was a defensive heuristic to "let the model do real
+        // work first" — but `totalWriteCalls > 0` already gates that signal correctly. The
+        // iter check just blocked early-bailout cases without adding safety.
+        //
+        // Lever C now fires once per task on three conditions: text-only response + writes
+        // already happened + assistant text matches a summary keyword. We append the assistant
+        // turn AND a UserMessage telling the model to call completeTask with the summary as
+        // completionNotes (or list the next concrete edit if it isn't actually done). Then
+        // continue the loop — the model gets one more iter to do the right thing.
+        // STOPPED_WITHOUT_COMPLETE still kicks in if the next iter also returns text-only
+        // (we don't fire the nudge twice).
+        if (!completionNudgeFired && totalWriteCalls > 0 && looksLikeSummary(assistantText)) {
           completionNudgeFired = true;
           log.info(
               "WorkerAgent LEVER_C completionNudge run={} task={} iter={} writes={}"

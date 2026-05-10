@@ -1281,6 +1281,47 @@ public class RunOrchestrator {
       // includes an entry-point doc.
       ensureReadme(runId, workspace, userRequest, plan, execResult, reviewResult, startedAt);
 
+      // ── 4b. Pre-resolve terminal status BEFORE the validation report.
+      // 2026-05-10 — bug fix for dev run 61c9fffa where the run came back
+      // status=COMPLETE + statusReason=CLEAN_WITH_INTERMEDIATE_WARNINGS but
+      // the validation report was persisted with pipelineResult=FAILED.
+      //
+      // Cause: generateValidationReport runs at step 5; terminate (which
+      // sets status_reason on the run row) runs at step 7. ValidationReport-
+      // Service.reconcileWithRunStatus reads run.statusReason at step 5 —
+      // gets null — falls through to the per-issue heuristic — which
+      // returned FAILED because synthesiseReviewIssues had pushed unresolved
+      // CRITICAL SYNTH-ACC-* rows from the accuracy LLM into the issue
+      // list. Net effect: report says FAILED while the run says COMPLETE.
+      //
+      // Fix: resolve the terminal StatusAndReason once here, persist the
+      // statusReason onto the run row before the validation report runs,
+      // then reuse the same `sr` for terminate(). The reconcile path now
+      // reads the right value at report-time and writes a consistent
+      // pipelineResult.
+      StatusAndReason sr =
+          featureFlagService.isEnabled("scoring.v2-verified")
+              ? resolveTerminalStatus(execResult, reviewResult)
+              : new StatusAndReason(mapOverallToV1Status(execResult.overall()), null);
+      if (sr.reason() != null) {
+        try {
+          runRepo
+              .findById(runId)
+              .ifPresent(
+                  r -> {
+                    r.setStatusReason(sr.reason());
+                    runRepo.save(r);
+                  });
+        } catch (Exception statusReasonEx) {
+          // Non-fatal — terminate() will retry the same write a few lines
+          // below. Worst case: report uses the heuristic for this one run.
+          log.warn(
+              "RunOrchestrator run={} pre-stamp statusReason failed: {}",
+              runId,
+              statusReasonEx.getMessage());
+        }
+      }
+
       // ── 5. Generate validation report + kick off test generation ────
       generateValidationReport(runId, execResult, reviewResult, plan);
       // V1's test generation assumes HTTP endpoints — it runs ApiProber against a
@@ -1333,13 +1374,9 @@ public class RunOrchestrator {
       }
 
       // ── 7. Terminal status mapping ─────────────────────────────────
-      // v2.5.10 — when scoring.v2-verified is on, decide status + reason
-      // from reviewer verdict + final build + execution signals. Legacy
-      // one-line map preserved behind the flag for fast rollback.
-      StatusAndReason sr =
-          featureFlagService.isEnabled("scoring.v2-verified")
-              ? resolveTerminalStatus(execResult, reviewResult)
-              : new StatusAndReason(mapOverallToV1Status(execResult.overall()), null);
+      // `sr` was resolved up at step 4b so the validation report could
+      // see the right statusReason during reconcile. Reuse it here so
+      // terminate() flips status + persists the (idempotent) reason.
       String finalStatus = sr.status();
       String finalReason = sr.reason();
       terminate(
