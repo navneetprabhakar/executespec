@@ -569,7 +569,7 @@ function AdminPageInner() {
           Organisations / Tier Config / Escalations / Top-Up Pkgs /
           Usage Reports / Payment Audit / Webhooks) don't squish or
           word-wrap on 375px viewports. */}
-      <div className='flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide'>
+      <div className='flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x'>
         {TABS.map(({id, label, icon: Icon, count}) => (
           <button
             key={id}
@@ -626,7 +626,7 @@ function AdminPageInner() {
             </div>
 
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-              <div className='overflow-x-auto'>
+              <div className='overflow-x-auto v3-scroll-fade-x'>
                 <table className='w-full text-sm min-w-[600px] md:min-w-0'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
@@ -743,7 +743,7 @@ function AdminPageInner() {
               </button>
             </div>
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-              <div className='overflow-x-auto'>
+              <div className='overflow-x-auto v3-scroll-fade-x'>
                 <table className='w-full text-sm min-w-[600px] md:min-w-0'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
@@ -892,7 +892,7 @@ function AdminPageInner() {
                 min-w-[560px] forces the columns to keep their intrinsic width
                 (Tier name + Monthly Limit input + Note text + actions cluster). */}
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-              <div className='overflow-x-auto'>
+              <div className='overflow-x-auto v3-scroll-fade-x'>
                 <table className='w-full text-sm min-w-[560px] md:min-w-0'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
@@ -1106,7 +1106,7 @@ function AdminPageInner() {
 
             {/* Packages table */}
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-              <div className='overflow-x-auto'>
+              <div className='overflow-x-auto v3-scroll-fade-x'>
                 <table className='w-full text-sm min-w-[600px] md:min-w-0'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
@@ -1331,7 +1331,7 @@ function AdminPageInner() {
           </div>
 
           <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-            <div className='overflow-x-auto'>
+            <div className='overflow-x-auto v3-scroll-fade-x'>
               <table className='w-full text-sm min-w-[600px] md:min-w-0'>
                 <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                   <tr>
@@ -1456,7 +1456,7 @@ function AdminPageInner() {
           </div>
 
           <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-            <div className='overflow-x-auto'>
+            <div className='overflow-x-auto v3-scroll-fade-x'>
               <table className='w-full text-sm min-w-[600px] md:min-w-0'>
                 <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                   <tr>

@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {Link, NavLink} from 'react-router-dom';
 import {Menu, X} from 'lucide-react';
 import AvatarMenu from './AvatarMenu';
@@ -110,166 +111,202 @@ export default function TopBar() {
     }
   }, [drawerOpen]);
 
+  // 2026-05-10 mobile pass iter-3 — drawer is portaled to document.body so
+  // its position:fixed escapes the topbar's containing block. The topbar has
+  // `backdrop-filter: blur(8px)` which CSS spec says creates a containing
+  // block for fixed-positioned descendants, scoping the drawer's right:0/top:0
+  // to the 52px-tall header instead of the viewport. Result before fix: drawer
+  // panel rendered off-canvas inside the header, scrim invisible, hamburger
+  // appeared to do nothing. Portal sidesteps it cleanly.
+  const drawer =
+    isMobile && drawerOpen
+      ? createPortal(
+          <>
+            <div
+              onClick={() => setDrawerOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.7)',
+                zIndex: 60,
+                // Backdrop blur sells the "modal layer" feel even on
+                // bg-vs-scrim brightness near-misses.
+                backdropFilter: 'blur(2px)',
+                WebkitBackdropFilter: 'blur(2px)',
+              }}
+              aria-hidden='true'
+            />
+            <nav
+              id='v3-mobile-nav-drawer'
+              aria-label='Main navigation'
+              style={{
+                position: 'fixed',
+                top: 0,
+                right: 0,
+                bottom: 0,
+                width: 'min(85vw, 320px, calc(100vw - 32px))',
+                // 2026-05-10 mobile sweep iter-3 — `--v3-surface` reads as a
+                // distinctly lighter card vs the page bg `--v3-bg`. Old
+                // bg=`--v3-bg` made the drawer invisible against the page on
+                // dark theme. Box-shadow + thicker left border seal the
+                // "panel sliding from the right" affordance.
+                // 2026-05-10 mobile sweep iter-4 — v3 tokens are now hoisted
+                // to `:root` (see v3.css) so this portaled drawer can resolve
+                // `var(--v3-surface)` even when rendered to document.body.
+                // Pre-fix the bg evaluated to `rgba(0,0,0,0)` — invisible
+                // against the page; the surface card now reads as a
+                // distinctly-lighter slab against `var(--v3-bg)`.
+                background: 'var(--v3-surface)',
+                borderLeft: '1px solid var(--v3-border)',
+                boxShadow: '-8px 0 24px rgba(0,0,0,0.6)',
+                zIndex: 61,
+                padding: 16,
+                paddingTop: 'max(16px, env(safe-area-inset-top))',
+                paddingBottom: 'max(16px, env(safe-area-inset-bottom))',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 8,
+                overflowX: 'hidden',
+                overflowY: 'auto',
+              }}
+            >
+              <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 8}}>
+                <button
+                  type='button'
+                  onClick={() => setDrawerOpen(false)}
+                  aria-label='Close navigation menu'
+                  style={{
+                    minWidth: 44,
+                    minHeight: 44,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    background: 'transparent',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 8,
+                    color: 'var(--v3-text)',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <X size={20} aria-hidden='true' />
+                </button>
+              </div>
+              <NavLink to='/runs' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
+                Runs
+              </NavLink>
+              <NavLink to='/library' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
+                Library
+              </NavLink>
+              <NavLink
+                to='/migrations'
+                style={drawerLinkStyle}
+                onClick={() => setDrawerOpen(false)}
+              >
+                Migrations
+              </NavLink>
+              <div
+                style={{
+                  marginTop: 'auto',
+                  paddingTop: 16,
+                  borderTop: '1px solid var(--v3-border)',
+                }}
+              >
+                <AvatarMenu />
+              </div>
+            </nav>
+          </>,
+          document.body,
+        )
+      : null;
+
   return (
-    <header className='v3-topbar' role='banner'>
-      <Link to='/home' className='v3-topbar__brand' aria-label='ExecuteSpec home'>
-        <span className='v3-topbar__brand-mark' aria-hidden='true'>
-          ES
-        </span>
-        ExecuteSpec
-      </Link>
+    <>
+      <header className='v3-topbar' role='banner'>
+        <Link to='/home' className='v3-topbar__brand' aria-label='ExecuteSpec home'>
+          <span className='v3-topbar__brand-mark' aria-hidden='true'>
+            ES
+          </span>
+          {/* 2026-05-10 mobile pass — hide the wordmark below 480px so the
+            ProjectSwitcher trigger has room to breathe without ellipsis-ing
+            on every label. Logo mark + ARIA label keep the brand readable
+            and accessible. */}
+          <span className='v3-topbar__brand-text'>ExecuteSpec</span>
+        </Link>
 
-      {/* Desktop: inline center nav. Hidden on mobile. */}
-      {!isMobile && (
-        <div className='v3-topbar__center' style={{display: 'flex', alignItems: 'center', gap: 8}}>
-          <ProjectSwitcher />
-          <NavLink to='/runs' style={navLinkStyle} title='All runs across projects'>
-            Runs
-          </NavLink>
-          <NavLink to='/library' style={navLinkStyle} title='Readymade Solutions library'>
-            Library
-          </NavLink>
-          <NavLink to='/migrations' style={navLinkStyle} title='Migration recipes'>
-            Migrations
-          </NavLink>
-        </div>
-      )}
+        {/* Desktop: inline center nav. Hidden on mobile. */}
+        {!isMobile && (
+          <div
+            className='v3-topbar__center'
+            style={{display: 'flex', alignItems: 'center', gap: 8}}
+          >
+            <ProjectSwitcher />
+            <NavLink to='/runs' style={navLinkStyle} title='All runs across projects'>
+              Runs
+            </NavLink>
+            <NavLink to='/library' style={navLinkStyle} title='Readymade Solutions library'>
+              Library
+            </NavLink>
+            <NavLink to='/migrations' style={navLinkStyle} title='Migration recipes'>
+              Migrations
+            </NavLink>
+          </div>
+        )}
 
-      {/* Mobile: only ProjectSwitcher stays inline (it's the most
+        {/* Mobile: only ProjectSwitcher stays inline (it's the most
           frequently-used center surface). Other links go to drawer. */}
-      {isMobile && (
-        <div
-          className='v3-topbar__center'
-          style={{display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0}}
-        >
-          <ProjectSwitcher />
-        </div>
-      )}
+        {isMobile && (
+          <div
+            className='v3-topbar__center'
+            style={{display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0}}
+          >
+            <ProjectSwitcher />
+          </div>
+        )}
 
-      <div className='v3-topbar__right' style={{display: 'flex', alignItems: 'center', gap: 12}}>
-        {/* I1-04 (audit-2026-05-09 iter1) — explicit tier indicator. The
+        <div className='v3-topbar__right' style={{display: 'flex', alignItems: 'center', gap: 12}}>
+          {/* I1-04 (audit-2026-05-09 iter1) — explicit tier indicator. The
             UsageBadge alone implies tier via the run quota, but unlimited
             tiers (TEAM/ENTERPRISE) hide the badge entirely, leaving paid
             users with no visible signal of which plan they're on. The
             chip self-hides for SUPER_ADMIN (who isn't tier-bound) and
             for users without a resolved tier. */}
-        <TierChip />
-        {/* [IA-Q4] quota chip — visible on both desktop and mobile.
+          <TierChip />
+          {/* [IA-Q4] quota chip — visible on both desktop and mobile.
             UsageBadge self-hides for TEAM/ENTERPRISE/SUPER_ADMIN. */}
-        <UsageBadge />
-        {/* Single-surface retirement (2026-05-06) — NotificationBell
+          <UsageBadge />
+          {/* Single-surface retirement (2026-05-06) — NotificationBell
             moved here from the deleted v2 Header. The bell self-hides
             when the user is anonymous (it polls `/api/notifications`
             which 401s without auth) so it's safe on every page. */}
-        {!isMobile && <NotificationBell />}
-        {!isMobile && <AvatarMenu />}
-        {isMobile && (
-          <button
-            type='button'
-            onClick={() => setDrawerOpen(true)}
-            aria-label='Open navigation menu'
-            aria-expanded={drawerOpen}
-            aria-controls='v3-mobile-nav-drawer'
-            style={{
-              minWidth: 44,
-              minHeight: 44,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'transparent',
-              border: '1px solid var(--v3-border)',
-              borderRadius: 8,
-              color: 'var(--v3-text)',
-              cursor: 'pointer',
-            }}
-          >
-            <Menu size={20} aria-hidden='true' />
-          </button>
-        )}
-      </div>
-
-      {/* Mobile drawer — slide-from-right. */}
-      {isMobile && drawerOpen && (
-        <>
-          {/* Scrim */}
-          <div
-            onClick={() => setDrawerOpen(false)}
-            style={{
-              position: 'fixed',
-              inset: 0,
-              background: 'rgba(0,0,0,0.5)',
-              zIndex: 50,
-            }}
-            aria-hidden='true'
-          />
-          {/* Drawer panel */}
-          <nav
-            id='v3-mobile-nav-drawer'
-            aria-label='Main navigation'
-            style={{
-              position: 'fixed',
-              top: 0,
-              right: 0,
-              bottom: 0,
-              // 2026-05-10 (mobile audit) — cap drawer width so on phones < 360px
-              // (where 85vw would be < 306px) we leave a 32px margin from the
-              // left edge for the user's thumb. min(...) picks the smallest of:
-              // 85vw (large phones), 320px (medium phones), calc(100vw - 32px)
-              // (sub-360 phones). overflow-x: hidden guards any inner card with
-              // accidental fixed-width content.
-              width: 'min(85vw, 320px, calc(100vw - 32px))',
-              background: 'var(--v3-bg)',
-              borderLeft: '1px solid var(--v3-border)',
-              zIndex: 51,
-              padding: 16,
-              paddingTop: 'max(16px, env(safe-area-inset-top))',
-              paddingBottom: 'max(16px, env(safe-area-inset-bottom))',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8,
-              overflowX: 'hidden',
-              overflowY: 'auto',
-            }}
-          >
-            <div style={{display: 'flex', justifyContent: 'flex-end', marginBottom: 8}}>
-              <button
-                type='button'
-                onClick={() => setDrawerOpen(false)}
-                aria-label='Close navigation menu'
-                style={{
-                  minWidth: 44,
-                  minHeight: 44,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  background: 'transparent',
-                  border: '1px solid var(--v3-border)',
-                  borderRadius: 8,
-                  color: 'var(--v3-text)',
-                  cursor: 'pointer',
-                }}
-              >
-                <X size={20} aria-hidden='true' />
-              </button>
-            </div>
-            <NavLink to='/runs' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
-              Runs
-            </NavLink>
-            <NavLink to='/library' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
-              Library
-            </NavLink>
-            <NavLink to='/migrations' style={drawerLinkStyle} onClick={() => setDrawerOpen(false)}>
-              Migrations
-            </NavLink>
-            <div
-              style={{marginTop: 'auto', paddingTop: 16, borderTop: '1px solid var(--v3-border)'}}
+          {!isMobile && <NotificationBell />}
+          {!isMobile && <AvatarMenu />}
+          {isMobile && (
+            <button
+              type='button'
+              onClick={() => setDrawerOpen(true)}
+              aria-label='Open navigation menu'
+              aria-expanded={drawerOpen}
+              aria-controls='v3-mobile-nav-drawer'
+              style={{
+                minWidth: 44,
+                minHeight: 44,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 8,
+                color: 'var(--v3-text)',
+                cursor: 'pointer',
+              }}
             >
-              <AvatarMenu />
-            </div>
-          </nav>
-        </>
-      )}
-    </header>
+              <Menu size={20} aria-hidden='true' />
+            </button>
+          )}
+        </div>
+      </header>
+      {drawer}
+    </>
   );
 }
 

@@ -124,7 +124,7 @@ function TierLifecyclePageInner() {
         {loading ? (
           <p className='text-xs text-muted py-4 text-center'>Loading…</p>
         ) : (
-          <div className='overflow-x-auto'>
+          <div className='overflow-x-auto v3-scroll-fade-x'>
             <table className='w-full text-sm min-w-[640px] md:min-w-0'>
               <thead>
                 <tr className='text-[10px] text-muted uppercase tracking-wider border-b border-[var(--border-default)]'>
