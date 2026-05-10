@@ -474,7 +474,46 @@ exit=0 — the harness will reject premature completions.
       WorkerResult general, WorkerResult wiring, boolean buildPassed) {
     PassVerdict gV = parsePassVerdict(general);
     PassVerdict wV = wiring == null ? PassVerdict.CLEAN : parsePassVerdict(wiring);
+    ReviewerResult.Overall raw = determineOverallRaw(gV, wV, general, wiring, buildPassed);
 
+    // 2026-05-10 — write-aware downgrade. If the verdict computation lands on
+    // FIXED_ISSUES but neither pass actually performed a write-class tool call
+    // (writeFile / editFile), the reviewer didn't fix anything — it just ran
+    // through reads and decided to say "FIXED_ISSUES" anyway. Dev run 61c9fffa
+    // hit this exact mismatch: both reviewer passes were force-terminated by
+    // the stagnation watchdog with totalWrites=0, fell into the SALVAGE path,
+    // and the legacy fallback at the bottom of the verdict tree returned
+    // FIXED_ISSUES because build was passing. The downstream
+    // RunOrchestrator.synthesiseReviewIssues then has no SYNTH-REV-* row, but
+    // the verdict itself ("the reviewer fixed problems") is misleading to the
+    // user.
+    //
+    // Correct semantic: a build that passes with zero reviewer mutations means
+    // the reviewer found nothing to fix → CLEAN. The verdict downgrade only
+    // fires when build is healthy; if build is broken we keep the prior path
+    // (UNRESOLVED_ISSUES already dominates).
+    if (raw == ReviewerResult.Overall.FIXED_ISSUES
+        && buildPassed
+        && !hasWriteCalls(general)
+        && !hasWriteCalls(wiring)) {
+      log.info(
+          "ReviewerAgent verdict downgrade FIXED_ISSUES → CLEAN: zero writes across both passes,"
+              + " build passing — nothing was actually fixed");
+      return ReviewerResult.Overall.CLEAN;
+    }
+    return raw;
+  }
+
+  /**
+   * Original verdict computation, extracted so {@link #determineOverall} can layer the write-aware
+   * downgrade on top without restructuring the existing decision tree.
+   */
+  private static ReviewerResult.Overall determineOverallRaw(
+      PassVerdict gV,
+      PassVerdict wV,
+      WorkerResult general,
+      WorkerResult wiring,
+      boolean buildPassed) {
     // Structured-verdict path: both reviewer passes emitted a parseable VERDICT: prefix.
     if (gV != PassVerdict.UNPARSED && wV != PassVerdict.UNPARSED) {
       // UNRESOLVED on either pass dominates. Build failure also dominates regardless of
@@ -509,6 +548,23 @@ exit=0 — the harness will reject premature completions.
     if (generalClean && wiringClean && buildPassed) return ReviewerResult.Overall.CLEAN;
     if (buildPassed) return ReviewerResult.Overall.FIXED_ISSUES;
     return ReviewerResult.Overall.UNRESOLVED_ISSUES;
+  }
+
+  /**
+   * True iff {@code result} dispatched at least one writeFile / editFile tool call. Inspects {@link
+   * WorkerResult#toolCallLog()} which records {@code "<toolName>(<argsPreview>)"} per dispatch (see
+   * {@code WorkerAgent.run}).
+   */
+  static boolean hasWriteCalls(WorkerResult result) {
+    if (result == null || result.toolCallLog() == null) return false;
+    for (String entry : result.toolCallLog()) {
+      if (entry == null) continue;
+      // Entries are formatted as "writeFile(path=...)" / "editFile(...)" / refused-prefixed
+      // variants. startsWith() on the bare tool name covers the success path; refusals can
+      // be ignored because they don't represent a real write either way.
+      if (entry.startsWith("writeFile") || entry.startsWith("editFile")) return true;
+    }
+    return false;
   }
 
   private String loadPrompt(String path) {

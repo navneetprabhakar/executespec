@@ -62,6 +62,20 @@ public class AccuracyReport {
   @Builder.Default private List<String> partialRequirements = List.of();
 
   /**
+   * 2026-05-10 — requirements where the assessor could not find conclusive evidence of presence OR
+   * absence. The implementing file may not have been in the key-files snippet, the snippet may have
+   * been truncated past the relevant section, or the requirement's vocabulary may not surface in
+   * the code. UNKNOWN is the explicit "I don't know" outcome and is NOT counted as a gap (it does
+   * not drag {@link #specAdherenceScore} or {@link #incompleteRequirementsCount}).
+   *
+   * <p>This field exists to absorb the most common AccuracyAssessment hallucination class: the LLM
+   * defaulting to MISSING when it simply hasn't seen the relevant code. With this outcome, the
+   * prompt can reserve MISSING for cases with positive negative-evidence (stub,
+   * throw-not-implemented, empty handler) and route absence-of-evidence here instead.
+   */
+  @Builder.Default private List<String> unknownRequirements = List.of();
+
+  /**
    * API endpoint coverage breakdown (populated for API-type projects). Null for non-API projects
    * (static sites, CLI tools, etc.)
    */
@@ -129,22 +143,32 @@ public class AccuracyReport {
     return specAdherenceScore < 70;
   }
 
-  /** Total count of unimplemented or partial requirements. */
+  /**
+   * Total count of unimplemented or partial requirements. UNKNOWN entries are intentionally NOT
+   * counted — absence of evidence is not evidence of absence.
+   */
   public int incompleteRequirementsCount() {
     int missing = this.missingRequirements != null ? this.missingRequirements.size() : 0;
     int partial = this.partialRequirements != null ? this.partialRequirements.size() : 0;
     return missing + partial;
   }
 
+  /** Count of requirements where the assessor had no evidence either way. Advisory only. */
+  public int unknownRequirementsCount() {
+    return this.unknownRequirements != null ? this.unknownRequirements.size() : 0;
+  }
+
   /** Returns a one-line summary suitable for SSE/log output. */
   public String toOneLiner() {
+    int unknownCount = this.unknownRequirements != null ? this.unknownRequirements.size() : 0;
     return String.format(
-        "Accuracy: %s (%d/100) — %d req implemented, %d missing, %d partial%s",
+        "Accuracy: %s (%d/100) — %d req implemented, %d missing, %d partial%s%s",
         overallAccuracyGrade != null ? overallAccuracyGrade : "?",
         specAdherenceScore,
         implementedRequirements != null ? implementedRequirements.size() : 0,
         missingRequirements != null ? missingRequirements.size() : 0,
         partialRequirements != null ? partialRequirements.size() : 0,
+        unknownCount > 0 ? String.format(", %d unknown", unknownCount) : "",
         endpointCoverage != null
             ? String.format(", endpoints=%d%%", endpointCoverage.getCoveragePercent())
             : "");

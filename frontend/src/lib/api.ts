@@ -1840,7 +1840,14 @@ export interface ReportIssue {
   description: string;
   severity: 'WOULD_BREAK_BUILD' | 'WOULD_FAIL_REVIEW' | 'WOULD_CAUSE_BUG' | 'WOULD_FAIL_LINT';
   fix: string | null;
-  stage: 'CODE_VALIDATOR' | 'COMPILER_AGENT' | 'REVIEWER_AGENT';
+  /**
+   * Source of the issue. `ACCURACY_LLM` flags entries derived from
+   * AccuracyAssessmentService's missingRequirements / partialRequirements lists —
+   * these are LLM-inferred and may include hallucinations (Layer 1+3 mitigations
+   * in place but not perfect). The UI groups these separately + labels them
+   * advisory so users don't conflate them with reviewer-flagged findings.
+   */
+  stage: 'CODE_VALIDATOR' | 'COMPILER_AGENT' | 'REVIEWER_AGENT' | 'ACCURACY_LLM';
   filePath: string | null;
 }
 
