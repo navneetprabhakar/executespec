@@ -1138,9 +1138,35 @@ public class WorkerAgent {
     return truncate(firstLine.strip(), 120);
   }
 
-  private static String truncate(String s, int max) {
+  /**
+   * 2026-05-10 — surrogate-pair-safe truncation. Caller-visible regression: in the LiveLog,
+   * supplementary-plane emoji from the LLM's assistant text (💭 📝 💻 🔨 📦 🧠 💸 — 4-byte UTF-8,
+   * encoded in Java as a high+low surrogate pair across two {@code char} units) would render as the
+   * Unicode replacement character {@code �} (visually {@code �}) when the LLM happened to place an
+   * emoji exactly at the truncation boundary. Root cause: {@link String#length()} counts UTF-16
+   * code units, not codepoints, and the old {@code substring(0, max - 1)} happily cut between the
+   * high surrogate and its low surrogate, leaving an unpaired high surrogate that the browser
+   * couldn't decode.
+   *
+   * <p>Fix: when the cut point lands inside a surrogate pair (high at {@code end-1}, low at {@code
+   * end}), back up one {@code char} so we discard both halves of the pair before appending the
+   * ellipsis. Single-{@code char} BMP characters (incl. variation-selector compounds like {@code
+   * ✏️} or {@code ⚠️}) are unaffected — those don't use surrogate pairs.
+   *
+   * <p>Visibility is package-private so {@link
+   * com.navneet.executespec.agent.WorkerAgentTruncateTest} can pin the regression directly without
+   * reflection.
+   */
+  static String truncate(String s, int max) {
     if (s == null) return "";
-    return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    if (s.length() <= max) return s;
+    int end = max - 1;
+    if (end > 0
+        && Character.isHighSurrogate(s.charAt(end - 1))
+        && Character.isLowSurrogate(s.charAt(end))) {
+      end -= 1;
+    }
+    return s.substring(0, end) + "…";
   }
 
   /**
