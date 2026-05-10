@@ -233,16 +233,19 @@ export default function ValidationReportPanel({
 
   const resultCfg = RESULT_CONFIG[report.pipelineResult] ?? RESULT_CONFIG.PASSED;
 
-  // v2.5.10 — verifiedScore (deterministic build+tests+verdict) is primary.
-  // accuracyScore (LLM self-estimate) demoted to secondary "Est." chip.
+  // 2026-05-10 — single-score model. The dual "Verified" + "LLM estimate"
+  // display was confusing: one score is deterministic (V106 build+tests+
+  // verdict math), the other is an LLM self-rating that can disagree by
+  // 30+ points on the same run. We now show ONE number — verifiedScore
+  // when available, else accuracyScore as a legacy fallback for pre-V106
+  // rows. The secondary "Est. N" chip + "LLM estimate" tile are dropped
+  // (see further down in the panel body).
   const primaryScore =
     typeof report.verifiedScore === 'number'
       ? report.verifiedScore
       : typeof report.accuracyScore === 'number'
         ? report.accuracyScore
         : null;
-  const primaryLabel = typeof report.verifiedScore === 'number' ? 'Verified' : 'Accuracy';
-  const accuracyScore = typeof report.accuracyScore === 'number' ? report.accuracyScore : null;
   const grade = report.accuracyGrade || null;
 
   // primaryScoreCls retired with the header score-chip drop in P-19/R-03.
@@ -416,11 +419,7 @@ export default function ValidationReportPanel({
                 verified score — LLM-only scoring keeps the legacy chip view. */}
             {primaryScore != null && (
               <div className='flex flex-col sm:flex-row items-start sm:items-center gap-5 pb-3 border-b border-[var(--border-default)]'>
-                <ScoreRing
-                  score={primaryScore}
-                  label={primaryLabel === 'Verified' ? 'verified / 100' : 'accuracy / 100'}
-                  size={132}
-                />
+                <ScoreRing score={primaryScore} label='score / 100' size={132} />
                 <div className='grid grid-cols-2 gap-2 flex-1 w-full'>
                   {report.finalBuildPassed != null && (
                     <div
@@ -488,18 +487,9 @@ export default function ValidationReportPanel({
                       </div>
                     </div>
                   )}
-                  {accuracyScore != null && primaryLabel === 'Verified' && (
-                    <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2'>
-                      <div className='text-[10px] uppercase tracking-wide font-mono text-muted'>
-                        LLM estimate
-                      </div>
-                      <div className='text-sm font-medium mt-0.5 text-secondary tabular-nums'>
-                        {accuracyScore}
-                        <span className='text-[10px] text-muted ml-0.5'>/100</span>
-                        {grade && <span className='ml-1.5 text-[11px] text-muted'>· {grade}</span>}
-                      </div>
-                    </div>
-                  )}
+                  {/* 2026-05-10 — secondary "LLM estimate" tile dropped per
+                       single-score policy. The deterministic score (in the
+                       hero ScoreRing above) is the only number shown now. */}
                 </div>
               </div>
             )}
