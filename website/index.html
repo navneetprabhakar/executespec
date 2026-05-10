@@ -1169,9 +1169,17 @@
             <h1 class="h1" style="margin-top: 64px;">
                 AI-written PRs you can <span style="color: var(--accent-warm);">actually merge</span>.
             </h1>
+            <!-- 2026-05-10 — softened sub-headline. Earlier copy named two
+                 specific competitors in a disparaging way, which is a legal
+                 risk (trademark misuse + comparative-advertising claims that
+                 we'd have to substantiate). Replaced with a positive product
+                 statement that says what ExecuteSpec does without taking
+                 names. The "ship Ready" verdict + ~80% number is the same
+                 proof point the rest of the page leans on. -->
             <p style="margin: 18px auto 0; max-width: 620px; font-size: 1.08rem; color: var(--text-secondary); line-height: 1.5;">
-                Built because Cursor's diffs lie about whether they build,
-                and Devin's $500 demo doesn't survive your test suite.
+                Plan, build, test, review, and open a real pull request — with a
+                <span style="color: var(--text-main); font-weight: 600;">Ready / Needs review / Failed</span>
+                verdict on every run. ~80% of real runs land Ready.
             </p>
 
             <!-- Chat-first composer + sample prompts + live stats card.
@@ -2638,7 +2646,7 @@
                 <details class="faq-item">
                     <summary>What does "AI-written PRs you can actually merge" mean — what's the proof?</summary>
                     <div class="faq-answer">
-                        Every run goes through the same validation pipeline: planner emits a structured plan → you approve it → executor writes the code → reviewer reads the diff → final build + test gate → PR opens with a Ready / Needs review / Failed verdict attached. The verdict is computed from real signals — build status, test pass-rate, reviewer outcome (CLEAN / FIXED / UNRESOLVED / FAILED), and adherence to the original request. Across the platform, ~80% of real runs land Ready. <a href="https://dev.executespec.ai/exec-demo" target="_blank">See the live anonymized 30-day snapshot →</a>. Cursor, Devin, and v0 don't publish a comparable number because they don't have the validation surface to measure it.
+                        Every run goes through the same validation pipeline: planner emits a structured plan → you approve it → executor writes the code → reviewer reads the diff → final build + test gate → PR opens with a Ready / Needs review / Failed verdict attached. The verdict is computed from real signals — build status, test pass-rate, reviewer outcome (CLEAN / FIXED / UNRESOLVED / FAILED), and adherence to the original request. Across the platform, ~80% of real runs land Ready. <a href="https://dev.executespec.ai/exec-demo" target="_blank">See the live anonymized 30-day snapshot →</a>
                     </div>
                 </details>
                 <details class="faq-item">
@@ -2748,13 +2756,18 @@
                         </a>
                     </div>
                     <div class="founder-block-role">Founder · ExecuteSpec</div>
+                    <!-- 2026-05-10 — softened. Earlier copy named two
+                         competitors in a disparaging way; legal risk on
+                         comparative-advertising claims. Replaced with a
+                         positive product statement that says what ExecuteSpec
+                         exists to do, without taking names. -->
                     <p class="founder-block-why">
-                        I built this because I kept watching Cursor confidently
-                        ship diffs that didn't compile, and Devin demos that
-                        couldn't survive a real test suite. The pipeline you
-                        see here is the one I wanted as a developer: plan,
-                        approve, run, validate, ship. Email me if any of this
-                        resonates — or doesn't.
+                        I built this because I kept watching AI tools confidently
+                        ship diffs that didn't compile and demos that couldn't
+                        survive a real test suite. The pipeline you see here is
+                        the one I wanted as a developer: plan, approve, run,
+                        validate, ship. Email me if any of this resonates — or
+                        doesn't.
                     </p>
                 </div>
             </div>
