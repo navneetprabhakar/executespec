@@ -191,89 +191,92 @@ function FeatureFlagsPageInner() {
                 {group.label}
               </h2>
               <div className='rounded-lg border border-[var(--border-default)] overflow-hidden'>
-                <table className='w-full text-sm'>
-                  <thead>
-                    <tr className='border-b border-[var(--border-default)] bg-[var(--gray-100)]'>
-                      <th className='text-left px-4 py-2.5 text-muted font-medium'>Key</th>
-                      <th className='text-left px-4 py-2.5 text-muted font-medium w-64'>Value</th>
-                      <th className='text-left px-4 py-2.5 text-muted font-medium w-24'>Type</th>
-                      <th className='text-left px-4 py-2.5 text-muted font-medium w-24'>Scope</th>
-                      <th className='text-left px-4 py-2.5 text-muted font-medium hidden lg:table-cell'>
-                        Description
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {group.flags.map((flag) => {
-                      const editVal = edits[flag.flagKey];
-                      const isDirty = editVal !== undefined && editVal !== flag.flagValue;
+                <div className='overflow-x-auto'>
+                  <table className='w-full text-sm min-w-[640px] lg:min-w-0'>
+                    <thead>
+                      <tr className='border-b border-[var(--border-default)] bg-[var(--gray-100)]'>
+                        <th className='text-left px-4 py-2.5 text-muted font-medium'>Key</th>
+                        <th className='text-left px-4 py-2.5 text-muted font-medium w-64'>Value</th>
+                        <th className='text-left px-4 py-2.5 text-muted font-medium w-24'>Type</th>
+                        <th className='text-left px-4 py-2.5 text-muted font-medium w-24'>Scope</th>
+                        <th className='text-left px-4 py-2.5 text-muted font-medium hidden lg:table-cell'>
+                          Description
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {group.flags.map((flag) => {
+                        const editVal = edits[flag.flagKey];
+                        const isDirty = editVal !== undefined && editVal !== flag.flagValue;
 
-                      return (
-                        <tr
-                          key={flag.flagKey}
-                          className='border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--gray-100)]'
-                        >
-                          <td className='px-4 py-3 text-primary font-mono text-xs'>
-                            {flag.flagKey}
-                          </td>
-                          <td className='px-4 py-3'>
-                            {flag.valueType === 'BOOLEAN' ? (
-                              <ToggleSwitch
-                                enabled={flag.flagValue === 'true'}
-                                saving={!!saving[flag.flagKey]}
-                                onChange={(v) => handleToggle(flag, v)}
-                              />
-                            ) : (
-                              <div className='flex items-center gap-2'>
-                                <input
-                                  type={
-                                    flag.valueType === 'INTEGER' || flag.valueType === 'PERCENTAGE'
-                                      ? 'number'
-                                      : 'text'
-                                  }
-                                  value={editVal ?? flag.flagValue}
-                                  onChange={(e) =>
-                                    setEdits((p) => ({...p, [flag.flagKey]: e.target.value}))
-                                  }
-                                  className='bg-[var(--gray-200)] border border-[var(--border-default)] rounded px-2 py-1 text-xs text-primary w-full focus:outline-none focus:border-accent-blue/50'
+                        return (
+                          <tr
+                            key={flag.flagKey}
+                            className='border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--gray-100)]'
+                          >
+                            <td className='px-4 py-3 text-primary font-mono text-xs'>
+                              {flag.flagKey}
+                            </td>
+                            <td className='px-4 py-3'>
+                              {flag.valueType === 'BOOLEAN' ? (
+                                <ToggleSwitch
+                                  enabled={flag.flagValue === 'true'}
+                                  saving={!!saving[flag.flagKey]}
+                                  onChange={(v) => handleToggle(flag, v)}
                                 />
-                                {isDirty && (
-                                  <button
-                                    onClick={() => handleSave(flag)}
-                                    disabled={!!saving[flag.flagKey]}
-                                    className='text-accent-green hover:text-accent-green/80 transition-colors flex-shrink-0'
-                                  >
-                                    <Save className='h-3.5 w-3.5' />
-                                  </button>
-                                )}
-                              </div>
-                            )}
-                          </td>
-                          <td className='px-4 py-3'>
-                            <span
-                              className={cn(
-                                'text-[10px] font-mono px-1.5 py-0.5 rounded',
-                                flag.valueType === 'BOOLEAN'
-                                  ? 'bg-accent-blue/10 text-accent-blue'
-                                  : flag.valueType === 'STRING'
-                                    ? 'bg-accent-sky/10 text-accent-sky'
-                                    : flag.valueType === 'INTEGER'
-                                      ? 'bg-accent-amber/10 text-accent-amber'
-                                      : 'bg-accent-green/10 text-accent-green',
+                              ) : (
+                                <div className='flex items-center gap-2'>
+                                  <input
+                                    type={
+                                      flag.valueType === 'INTEGER' ||
+                                      flag.valueType === 'PERCENTAGE'
+                                        ? 'number'
+                                        : 'text'
+                                    }
+                                    value={editVal ?? flag.flagValue}
+                                    onChange={(e) =>
+                                      setEdits((p) => ({...p, [flag.flagKey]: e.target.value}))
+                                    }
+                                    className='bg-[var(--gray-200)] border border-[var(--border-default)] rounded px-2 py-1 text-xs text-primary w-full focus:outline-none focus:border-accent-blue/50'
+                                  />
+                                  {isDirty && (
+                                    <button
+                                      onClick={() => handleSave(flag)}
+                                      disabled={!!saving[flag.flagKey]}
+                                      className='text-accent-green hover:text-accent-green/80 transition-colors flex-shrink-0'
+                                    >
+                                      <Save className='h-3.5 w-3.5' />
+                                    </button>
+                                  )}
+                                </div>
                               )}
-                            >
-                              {flag.valueType}
-                            </span>
-                          </td>
-                          <td className='px-4 py-3 text-muted text-xs'>{flag.scope}</td>
-                          <td className='px-4 py-3 text-muted text-xs hidden lg:table-cell'>
-                            {flag.description || '-'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                            </td>
+                            <td className='px-4 py-3'>
+                              <span
+                                className={cn(
+                                  'text-[10px] font-mono px-1.5 py-0.5 rounded',
+                                  flag.valueType === 'BOOLEAN'
+                                    ? 'bg-accent-blue/10 text-accent-blue'
+                                    : flag.valueType === 'STRING'
+                                      ? 'bg-accent-sky/10 text-accent-sky'
+                                      : flag.valueType === 'INTEGER'
+                                        ? 'bg-accent-amber/10 text-accent-amber'
+                                        : 'bg-accent-green/10 text-accent-green',
+                                )}
+                              >
+                                {flag.valueType}
+                              </span>
+                            </td>
+                            <td className='px-4 py-3 text-muted text-xs'>{flag.scope}</td>
+                            <td className='px-4 py-3 text-muted text-xs hidden lg:table-cell'>
+                              {flag.description || '-'}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           ))

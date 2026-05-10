@@ -211,14 +211,23 @@ export default function TopBar() {
               top: 0,
               right: 0,
               bottom: 0,
-              width: 'min(85vw, 320px)',
+              // 2026-05-10 (mobile audit) — cap drawer width so on phones < 360px
+              // (where 85vw would be < 306px) we leave a 32px margin from the
+              // left edge for the user's thumb. min(...) picks the smallest of:
+              // 85vw (large phones), 320px (medium phones), calc(100vw - 32px)
+              // (sub-360 phones). overflow-x: hidden guards any inner card with
+              // accidental fixed-width content.
+              width: 'min(85vw, 320px, calc(100vw - 32px))',
               background: 'var(--v3-bg)',
               borderLeft: '1px solid var(--v3-border)',
               zIndex: 51,
               padding: 16,
+              paddingTop: 'max(16px, env(safe-area-inset-top))',
+              paddingBottom: 'max(16px, env(safe-area-inset-bottom))',
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
+              overflowX: 'hidden',
               overflowY: 'auto',
             }}
           >

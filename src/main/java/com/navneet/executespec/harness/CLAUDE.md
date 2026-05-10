@@ -3,6 +3,36 @@
 Core pipeline orchestration layer. Manages run lifecycle from submission to completion.
 
 > **Note (2026-04-13):** `PipelineHarness` and the V1 batch path have been deleted. The live pipeline is `integration/RunOrchestrator`. The V1 descriptions below are kept as historical reference only — see root `CLAUDE.md` "V2 pipeline" section for current behaviour.
+>
+> **2026-05-10 — `SequentialExecutor.persistTaskStatus` defensive truncation
+> + V184 column widening.** Dev run 7483896a (PR #95 / fix branch) confirmed
+> via VM journalctl that 3 of 4 problem tasks (T12 FAILED, T17 PARTIAL, T19
+> PARTIAL) were `value too long for type character varying(255)` overflows
+> on the COMPLETE/PARTIAL DB flip. The `softWarnReason` formula at
+> `executeOne` line ~513 (`"Worker stopped without completion but wrote N
+> files — " + describeWorkerFailure(primary)`) routinely exceeds 255 chars
+> when `Outcome.STOPPED_WITHOUT_COMPLETE` injects the 240-char
+> `finalAssistantText` tail. The persistence catch in `persistTaskStatus`
+> (line ~1063 try/catch around `taskRepo.saveAndFlush`) swallowed the
+> exception → orphan WORKING row → run-terminal resolver mis-marked as
+> FAILED/PARTIAL even though the worker had cleanly completed.
+>
+> Two-line fix:
+> 1. **V184** widens `agent_task.last_llm_failure` from VARCHAR(255) to
+>    TEXT (matches `taskJson` / `workerReportJson` / `completionNotes` /
+>    `meetsRequirementsJson` which are all already TEXT).
+> 2. **Defensive cap** at `persistTaskStatus`: truncate `failureReason`
+>    to 4000 chars before save with a literal `… [truncated]` suffix so
+>    a future reader knows the value was clipped, not that the worker
+>    terminated mid-thought. Belt-and-braces against router stack
+>    traces ever growing the column unbounded.
+>
+> T18 was the lone genuine soft-completion — the
+> `COMPLETED_BY_STAGNATION` outcome from the 12-iter non-write watchdog
+> (see `feature/worker-runaway-fixes` Fix B, commit `72cbf65a`,
+> 2026-05-03). The watchdog fired correctly; the file `EventContactsScreen.tsx`
+> at the spec'd mobile path simply did not exist, so the worker burned
+> 12 non-write iters searching before being force-terminated.
 
 ## Key Files (V1 historical — deleted)
 - `PipelineHarness.java` — Main orchestrator. Runs async pipeline: plan → approve → work → compile → merge → **COMPLETE** → auto-preview → background validation (review → test gen → test exec → report). Writes `.agent-context/project.json` with planner-declared project type in `initAgentContext()`.

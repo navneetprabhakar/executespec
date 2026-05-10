@@ -1,6 +1,76 @@
 # frontend/ — React Dashboard
 
-> Last updated: 2026-05-07 (website-mockup parity sweep on `feature/product-review-fixes-2026-05-06` — new v3 primitives + Shell-driven layout policy + PulseTab redesign; v2.6.4 — UX overhaul v4 IA cleanup; v2.5.12: design-system primitives)
+> Last updated: 2026-05-10 (mobile-responsive sweep + InlineRunDetail
+> layout fix + single-score collapse + website softening on
+> `fix/mobile-responsive-ui-2026-05-10` / PR #95).
+>
+> **2026-05-10 — mobile-responsive + run-detail UX batch (PR #95):**
+>
+> - **Mobile pass (sub-640px / sub-420px):** `TopBar` drawer caps at
+>   `min(85vw, 320px, 100vw - 32px)` with safe-area insets so iPhone
+>   notches and home-indicator don't crop content; `NotificationPanel`
+>   gutter widened (1rem → 2rem) + viewport-aware `max-h`;
+>   `ProjectChatPanel` header flex-wraps and message bubbles cap at
+>   `max-w-[min(85%, 320px)] min-w-0 overflow-hidden`;
+>   `LaunchFromChatModal` outer flex now has p-3/sm:p-4 + max-h on the
+>   panel; `ProjectDashboardPage` tab strip + sub-nav get `scrollbar-hide`
+>   and the "More" button text collapses to icon-only via
+>   `hidden sm:inline`; `RunSidePanel` 7-tab bar switches from `flex:1`
+>   per tab to `flex 1 1 auto + min-width: max-content + overflow-x:
+auto` so 7 tabs no longer squish on 320px; the chat composer hits
+>   the 44px tap-target floor + `safe-area-inset-bottom`;
+>   `RunDetailPage` outer wrapper gains `overflow-y: auto` so the
+>   stacked mobile layout (status / file tree / diff / side panel)
+>   scrolls instead of clipping behind `v3-main--fill`'s
+>   `overflow: hidden`. Admin tables (`AdminPage`, `FeatureFlagsPage`,
+>   `TierLifecyclePage`, `IntegrationsPage`, `OrgSettingsPage`) wrapped
+>   in `<div overflow-x-auto>` with `min-w-[Npx] md:min-w-0`. v3.css
+>   foundations: `100dvh` against iOS Safari URL-bar collapse,
+>   `safe-area-inset-top` padding, iOS textarea-focus min/max caps so
+>   the keyboard doesn't fight the composer in landscape.
+> - **InlineRunDetail layout** (commit `2e41a3b5`): restructured from
+>   `flex justify-between` (REQUEST text left + 9 buttons right with
+>   wasted vertical column on the right) to three vertical rows —
+>   action cluster up top (full-width, flex-wrap) → stats line (Status
+>   / VerdictPill / Tasks / Tokens / Cost / Provider) → bordered
+>   REQUEST card. Long specs (>320 chars) collapse to `line-clamp-6`
+>   with a `Show all (N chars)` / `Show less` toggle in the card
+>   header. **2026-05-10 follow-up**: added an `Update PR` button on
+>   already-pushed terminal runs so users can re-push to the existing
+>   branch after a per-task retry — `RunOrchestrator.retryTask` does
+>   NOT auto-push (the V2 push code only runs in the main `runPipeline`
+>   path), so the gap was that a retry would write new files to the
+>   workspace but the PR stayed frozen until a manual push.
+> - **Single-score collapse** (commit `6f6feeff`): the dual
+>   `Verified N · Est. M` display was confusing because the two
+>   numbers can disagree by 30+ points on the same run (deterministic
+>   build+tests+verdict math vs LLM self-rating).
+>   `ValidationReportPanel` hero ScoreRing label dropped from "verified
+>   / 100" to just "score / 100"; the secondary "LLM estimate" tile is
+>   gone. `ScoreCard` header dropped the `· Est. N` inline qualifier.
+>   `verifiedScore` (V106 deterministic) is preferred;
+>   `accuracyScore` is a legacy fallback for pre-V106 rows. Net
+>   user-visible effect: one number per run, no more "is this run a
+>   92 or a 17?" ambiguity. **Note**: a separate backend bug had
+>   `extractIssues` dropping the `SYNTH-ACC-*` IDs when translating
+>   `ReviewIssue` → `ReportIssueDTO`, which made dashboard issues look
+>   like reviewer-flagged criticals when they were AccuracyAssessment
+>   LLM hallucinations — fixed in the same PR by setting `source =
+"ACCURACY_LLM"` (vs `"REVIEWER_AGENT"`) on SYNTH-ACC-\* derived
+>   rows so the dashboard panel can group them.
+> - **Marketing site copy softening** (commit `f7d8c856`, deployed to
+>   Cloudflare worker `square-bar-e1dc` version `148ed763` on
+>   2026-05-10): hero sub-headline + founder block + one FAQ entry
+>   were rewritten to drop disparaging mentions of competitors
+>   (legal-risk on comparative-advertising claims). Net hero now
+>   reads: `AI-written PRs you can actually merge. · Plan, build,
+test, review, and open a real pull request — with a Ready / Needs
+review / Failed verdict on every run. ~80% of real runs land
+Ready.` Comparison table + neutral FAQ entries (with "many teams
+>   use both" framing) kept as-is; those are factual feature-comparison
+>   context, not disparagement.
+>
+> Last updated before today: 2026-05-07 (website-mockup parity sweep on `feature/product-review-fixes-2026-05-06` — new v3 primitives + Shell-driven layout policy + PulseTab redesign; v2.6.4 — UX overhaul v4 IA cleanup; v2.5.12: design-system primitives)
 >
 > **2026-05-07 — website-mockup parity sweep (`feature/product-review-fixes-2026-05-06`, NOT yet merged):**
 >

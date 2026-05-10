@@ -224,53 +224,55 @@ export default function OrgSettingsPage() {
         <div>
           <h2 className='text-lg font-semibold text-primary mb-3'>Members ({members.length})</h2>
           <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] overflow-hidden'>
-            <table className='w-full text-sm'>
-              <thead className='bg-[var(--gray-300)] text-muted'>
-                <tr>
-                  <th className='px-4 py-3 text-left'>Name</th>
-                  <th className='px-4 py-3 text-left'>Email</th>
-                  <th className='px-4 py-3 text-left'>Role</th>
-                  <th className='px-4 py-3 text-left'>Joined</th>
-                  <th className='px-4 py-3' />
-                </tr>
-              </thead>
-              <tbody className='divide-y divide-[var(--border-default)]'>
-                {members.map((m) => (
-                  <tr key={m.userId} className='hover:bg-[var(--gray-300)]/40'>
-                    <td className='px-4 py-3 text-primary'>
-                      {m.firstName} {m.lastName}
-                    </td>
-                    <td className='px-4 py-3 text-muted'>{m.email}</td>
-                    <td className='px-4 py-3'>
-                      <span className='rounded-sm bg-accent-blue/20 px-2 py-0.5 text-xs text-accent-blue'>
-                        {m.orgRole}
-                      </span>
-                    </td>
-                    <td className='px-4 py-3 text-muted'>
-                      {new Date(m.joinedAt).toLocaleDateString()}
-                    </td>
-                    <td className='px-4 py-3 flex gap-2'>
-                      {m.userId !== user?.id && (
-                        <>
-                          <button
-                            onClick={() => handleRemoveMember(m.userId)}
-                            className='text-xs text-accent-red hover:text-accent-red'
-                          >
-                            Remove
-                          </button>
-                          <button
-                            onClick={() => handleSuspendMember(m.userId, false)}
-                            className='text-xs text-accent-amber hover:text-accent-amber'
-                          >
-                            Suspend
-                          </button>
-                        </>
-                      )}
-                    </td>
+            <div className='overflow-x-auto'>
+              <table className='w-full text-sm min-w-[560px] md:min-w-0'>
+                <thead className='bg-[var(--gray-300)] text-muted'>
+                  <tr>
+                    <th className='px-4 py-3 text-left'>Name</th>
+                    <th className='px-4 py-3 text-left'>Email</th>
+                    <th className='px-4 py-3 text-left'>Role</th>
+                    <th className='px-4 py-3 text-left'>Joined</th>
+                    <th className='px-4 py-3' />
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody className='divide-y divide-[var(--border-default)]'>
+                  {members.map((m) => (
+                    <tr key={m.userId} className='hover:bg-[var(--gray-300)]/40'>
+                      <td className='px-4 py-3 text-primary'>
+                        {m.firstName} {m.lastName}
+                      </td>
+                      <td className='px-4 py-3 text-muted'>{m.email}</td>
+                      <td className='px-4 py-3'>
+                        <span className='rounded-sm bg-accent-blue/20 px-2 py-0.5 text-xs text-accent-blue'>
+                          {m.orgRole}
+                        </span>
+                      </td>
+                      <td className='px-4 py-3 text-muted'>
+                        {new Date(m.joinedAt).toLocaleDateString()}
+                      </td>
+                      <td className='px-4 py-3 flex gap-2'>
+                        {m.userId !== user?.id && (
+                          <>
+                            <button
+                              onClick={() => handleRemoveMember(m.userId)}
+                              className='text-xs text-accent-red hover:text-accent-red'
+                            >
+                              Remove
+                            </button>
+                            <button
+                              onClick={() => handleSuspendMember(m.userId, false)}
+                              className='text-xs text-accent-amber hover:text-accent-amber'
+                            >
+                              Suspend
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </div>
 

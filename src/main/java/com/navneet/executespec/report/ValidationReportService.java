@@ -274,6 +274,15 @@ public class ValidationReportService {
     List<ReportIssueDTO> issues = new ArrayList<>();
 
     // Issues from ReviewerAgentV2 (flat issue list)
+    //
+    // 2026-05-10 — distinguish reviewer-flagged issues from
+    // accuracy-LLM-synthesised ones via the `source` field. Pre-fix every
+    // issue surfaced as REVIEWER_AGENT in the dashboard panel even though
+    // the SYNTH-ACC-* rows are LLM read-budget hallucinations
+    // (RunOrchestrator.synthesiseReviewIssues stamps the prefix). Same
+    // line of reasoning that drove the V106 verifiedScore filter
+    // (CLAUDE.md P3.2): a deterministic source label lets the UI group /
+    // mute the LLM-derived ones independently from real reviewer findings.
     ReviewReport review = input.review();
     if (review != null && review.getIssues() != null) {
       for (ReviewIssue ri : review.getIssues()) {
@@ -284,13 +293,13 @@ public class ValidationReportService {
                   ? "Auto-fixed successfully"
                   : "Auto-fix failed after retry with model escalation — unresolved";
         }
+        String source =
+            (ri.getId() != null && ri.getId().startsWith("SYNTH-ACC-"))
+                ? "ACCURACY_LLM"
+                : "REVIEWER_AGENT";
         issues.add(
             new ReportIssueDTO(
-                ri.getDescription(),
-                mapSeverity(ri.getSeverity()),
-                fixNote,
-                "REVIEWER_AGENT",
-                ri.getFile()));
+                ri.getDescription(), mapSeverity(ri.getSeverity()), fixNote, source, ri.getFile()));
       }
     }
 
@@ -975,8 +984,34 @@ public class ValidationReportService {
         input.review().getIssues().stream()
             .filter(i -> i.getSeverity() == IssueSeverity.CRITICAL)
             .filter(i -> !i.isAutoFixed() || !i.isFixSucceeded())
+            // SYNTH-ACC-* prefix filter (P1.2 / GA-readiness, 2026-05-06).
             .filter(i -> i.getId() == null || !i.getId().startsWith("SYNTH-ACC-"))
+            // 2026-05-10 (defense-in-depth) — also drop CRITICALs whose id
+            // is missing AND whose description matches the exact
+            // AccuracyAssessmentService output prefixes (see
+            // RunOrchestrator.synthesiseReviewIssues line ~3636). Belt-
+            // and-braces against any future code path that emits the
+            // accuracy-derived issue without remembering the SYNTH-ACC-*
+            // id stamp. Real reviewer-flagged criticals never use these
+            // exact prefixes.
+            .filter(
+                i -> i.getId() != null || !isAccuracyHallucinationDescription(i.getDescription()))
             .count();
+  }
+
+  /**
+   * Predicate that matches the deterministic prefixes RunOrchestrator.synthesiseReviewIssues emits
+   * when translating AccuracyAssessmentService output into ReviewIssue records. Used by
+   * countUnfixedCritical as a defensive filter for any future call site that bypasses the
+   * SYNTH-ACC-* id stamp. Kept as a separate predicate so a test can pin the exact prefix list.
+   */
+  static boolean isAccuracyHallucinationDescription(String description) {
+    if (description == null) return false;
+    String d = description.stripLeading();
+    return d.startsWith("Spec requirement not implemented:")
+        || d.startsWith("Spec requirement only partially implemented:")
+        || d.startsWith("Endpoint from spec not implemented:")
+        || d.startsWith("Endpoint exists but");
   }
 
   private String truncate(String s, int maxLen) {
