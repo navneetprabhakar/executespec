@@ -418,18 +418,8 @@
  * the user scrolls.
  */
 .v3-scroll-fade-x {
-  -webkit-mask-image: linear-gradient(
-    to right,
-    black 0,
-    black calc(100% - 24px),
-    transparent 100%
-  );
-  mask-image: linear-gradient(
-    to right,
-    black 0,
-    black calc(100% - 24px),
-    transparent 100%
-  );
+  -webkit-mask-image: linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%);
+  mask-image: linear-gradient(to right, black 0, black calc(100% - 24px), transparent 100%);
 }
 @media (min-width: 768px) {
   /* Disable the fade on tablets/desktops — there's enough horizontal

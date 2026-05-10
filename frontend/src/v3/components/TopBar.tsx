@@ -222,86 +222,88 @@ export default function TopBar() {
   return (
     <>
       <header className='v3-topbar' role='banner'>
-      <Link to='/home' className='v3-topbar__brand' aria-label='ExecuteSpec home'>
-        <span className='v3-topbar__brand-mark' aria-hidden='true'>
-          ES
-        </span>
-        {/* 2026-05-10 mobile pass — hide the wordmark below 480px so the
+        <Link to='/home' className='v3-topbar__brand' aria-label='ExecuteSpec home'>
+          <span className='v3-topbar__brand-mark' aria-hidden='true'>
+            ES
+          </span>
+          {/* 2026-05-10 mobile pass — hide the wordmark below 480px so the
             ProjectSwitcher trigger has room to breathe without ellipsis-ing
             on every label. Logo mark + ARIA label keep the brand readable
             and accessible. */}
-        <span className='v3-topbar__brand-text'>ExecuteSpec</span>
-      </Link>
+          <span className='v3-topbar__brand-text'>ExecuteSpec</span>
+        </Link>
 
-      {/* Desktop: inline center nav. Hidden on mobile. */}
-      {!isMobile && (
-        <div className='v3-topbar__center' style={{display: 'flex', alignItems: 'center', gap: 8}}>
-          <ProjectSwitcher />
-          <NavLink to='/runs' style={navLinkStyle} title='All runs across projects'>
-            Runs
-          </NavLink>
-          <NavLink to='/library' style={navLinkStyle} title='Readymade Solutions library'>
-            Library
-          </NavLink>
-          <NavLink to='/migrations' style={navLinkStyle} title='Migration recipes'>
-            Migrations
-          </NavLink>
-        </div>
-      )}
+        {/* Desktop: inline center nav. Hidden on mobile. */}
+        {!isMobile && (
+          <div
+            className='v3-topbar__center'
+            style={{display: 'flex', alignItems: 'center', gap: 8}}
+          >
+            <ProjectSwitcher />
+            <NavLink to='/runs' style={navLinkStyle} title='All runs across projects'>
+              Runs
+            </NavLink>
+            <NavLink to='/library' style={navLinkStyle} title='Readymade Solutions library'>
+              Library
+            </NavLink>
+            <NavLink to='/migrations' style={navLinkStyle} title='Migration recipes'>
+              Migrations
+            </NavLink>
+          </div>
+        )}
 
-      {/* Mobile: only ProjectSwitcher stays inline (it's the most
+        {/* Mobile: only ProjectSwitcher stays inline (it's the most
           frequently-used center surface). Other links go to drawer. */}
-      {isMobile && (
-        <div
-          className='v3-topbar__center'
-          style={{display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0}}
-        >
-          <ProjectSwitcher />
-        </div>
-      )}
+        {isMobile && (
+          <div
+            className='v3-topbar__center'
+            style={{display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0}}
+          >
+            <ProjectSwitcher />
+          </div>
+        )}
 
-      <div className='v3-topbar__right' style={{display: 'flex', alignItems: 'center', gap: 12}}>
-        {/* I1-04 (audit-2026-05-09 iter1) — explicit tier indicator. The
+        <div className='v3-topbar__right' style={{display: 'flex', alignItems: 'center', gap: 12}}>
+          {/* I1-04 (audit-2026-05-09 iter1) — explicit tier indicator. The
             UsageBadge alone implies tier via the run quota, but unlimited
             tiers (TEAM/ENTERPRISE) hide the badge entirely, leaving paid
             users with no visible signal of which plan they're on. The
             chip self-hides for SUPER_ADMIN (who isn't tier-bound) and
             for users without a resolved tier. */}
-        <TierChip />
-        {/* [IA-Q4] quota chip — visible on both desktop and mobile.
+          <TierChip />
+          {/* [IA-Q4] quota chip — visible on both desktop and mobile.
             UsageBadge self-hides for TEAM/ENTERPRISE/SUPER_ADMIN. */}
-        <UsageBadge />
-        {/* Single-surface retirement (2026-05-06) — NotificationBell
+          <UsageBadge />
+          {/* Single-surface retirement (2026-05-06) — NotificationBell
             moved here from the deleted v2 Header. The bell self-hides
             when the user is anonymous (it polls `/api/notifications`
             which 401s without auth) so it's safe on every page. */}
-        {!isMobile && <NotificationBell />}
-        {!isMobile && <AvatarMenu />}
-        {isMobile && (
-          <button
-            type='button'
-            onClick={() => setDrawerOpen(true)}
-            aria-label='Open navigation menu'
-            aria-expanded={drawerOpen}
-            aria-controls='v3-mobile-nav-drawer'
-            style={{
-              minWidth: 44,
-              minHeight: 44,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              background: 'transparent',
-              border: '1px solid var(--v3-border)',
-              borderRadius: 8,
-              color: 'var(--v3-text)',
-              cursor: 'pointer',
-            }}
-          >
-            <Menu size={20} aria-hidden='true' />
-          </button>
-        )}
-      </div>
-
+          {!isMobile && <NotificationBell />}
+          {!isMobile && <AvatarMenu />}
+          {isMobile && (
+            <button
+              type='button'
+              onClick={() => setDrawerOpen(true)}
+              aria-label='Open navigation menu'
+              aria-expanded={drawerOpen}
+              aria-controls='v3-mobile-nav-drawer'
+              style={{
+                minWidth: 44,
+                minHeight: 44,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: 'transparent',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 8,
+                color: 'var(--v3-text)',
+                cursor: 'pointer',
+              }}
+            >
+              <Menu size={20} aria-hidden='true' />
+            </button>
+          )}
+        </div>
       </header>
       {drawer}
     </>
