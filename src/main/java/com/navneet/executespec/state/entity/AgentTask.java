@@ -85,7 +85,13 @@ public class AgentTask {
   @Column(name = "current_model")
   private String currentModel;
 
-  @Column(name = "last_llm_failure")
+  // 2026-05-10 (V184) — widened to TEXT after the dev-run analysis on
+  // 7483896a showed the soft-completion path's `softWarnReason` (worker
+  // stopped without completeTask + 240-char finalAssistantText tail)
+  // routinely exceeded 255 chars and broke the COMPLETE/PARTIAL DB flip.
+  // Companion defensive cap at SequentialExecutor.persistTaskStatus
+  // ensures the column never absorbs unbounded router stack traces.
+  @Column(name = "last_llm_failure", columnDefinition = "TEXT")
   private String lastLlmFailure; // LlmFailure type name or special flag
 
   @Column(name = "tenant_id", nullable = false)

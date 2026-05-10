@@ -369,6 +369,14 @@ export default function InlineRunDetail({
             <ArrowUpRight className='h-3 w-3' />
             Open full view
           </Link>
+          {/* 2026-05-10 — split push button into two states.
+              First push (no PR yet): primary blue "Push & open PR".
+              Re-push (PR already open): secondary "Update PR" — fires
+              the same SCM-push endpoint, which appends new commits to
+              the existing branch. GitHub re-renders the PR diff
+              automatically. This closes the gap where a per-task retry
+              writes new files to workspace but the PR stays frozen on
+              the old commit until manual push. */}
           {terminal && !alreadyPushed && (
             <button
               onClick={doPush}
@@ -382,6 +390,21 @@ export default function InlineRunDetail({
                 <Upload className='h-3 w-3' />
               )}
               {pushing ? 'Pushing…' : `Push & open PR`}
+            </button>
+          )}
+          {terminal && alreadyPushed && (
+            <button
+              onClick={doPush}
+              disabled={pushing}
+              title={`Re-push this run's workspace to ${scmLabel}. Appends new commits to the existing branch — GitHub auto-updates the open PR.`}
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary disabled:opacity-50'
+            >
+              {pushing ? (
+                <Loader2 className='h-3 w-3 animate-spin' />
+              ) : (
+                <Upload className='h-3 w-3' />
+              )}
+              {pushing ? 'Pushing…' : 'Update PR'}
             </button>
           )}
           {terminal && (
