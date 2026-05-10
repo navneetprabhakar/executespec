@@ -840,11 +840,11 @@ public class ValidationReportService {
    *       damper.
    *   <li><b>endpointFactor</b> — endpointCoveragePercent / 100, with null treated as 1.0 (no spec
    *       endpoints means the coverage signal isn't applicable). Linear scaling replaces the
-   *       previous binary-at-95% cliff that gave 1pp difference 10pp of score. <b>2026-05-10
-   *       trust gate:</b> when reviewer is CLEAN or FIXED_ISSUES, endpointFactor is floored at
-   *       reviewerFactor to prevent the assessment LLM's read-budget-limited count from
-   *       overriding the reviewer's wiring-pass verdict on the same dimension. See dev run
-   *       7483896a analysis (PR #95) for the false-positive class this closes.
+   *       previous binary-at-95% cliff that gave 1pp difference 10pp of score. <b>2026-05-10 trust
+   *       gate:</b> when reviewer is CLEAN or FIXED_ISSUES, endpointFactor is floored at
+   *       reviewerFactor to prevent the assessment LLM's read-budget-limited count from overriding
+   *       the reviewer's wiring-pass verdict on the same dimension. See dev run 7483896a analysis
+   *       (PR #95) for the false-positive class this closes.
    *   <li><b>criticalDamper</b> — 1.0 when no unfixed criticals; drops 5% per critical (to a floor
    *       of 0.5). Replaces the additive 5×N penalty that double-counted with SYNTH-BUILD/SYNTH-REV
    *       (which themselves restate the build/reviewer factors).
