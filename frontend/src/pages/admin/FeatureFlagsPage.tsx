@@ -191,7 +191,7 @@ function FeatureFlagsPageInner() {
                 {group.label}
               </h2>
               <div className='rounded-lg border border-[var(--border-default)] overflow-hidden'>
-                <div className='overflow-x-auto'>
+                <div className='overflow-x-auto v3-scroll-fade-x'>
                   <table className='w-full text-sm min-w-[640px] lg:min-w-0'>
                     <thead>
                       <tr className='border-b border-[var(--border-default)] bg-[var(--gray-100)]'>

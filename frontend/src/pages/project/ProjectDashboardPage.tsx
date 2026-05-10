@@ -557,9 +557,12 @@ export default function ProjectDashboardPage() {
             scroll affordance stays invisible until the user touches it; the
             -mx-4 px-4 negative-margin pattern lets the strip bleed to the
             page edges on mobile so the first/last tab isn't visually clipped
-            against the bordered card edge. */}
+            against the bordered card edge.
+            2026-05-10 sweep iter-3 — `v3-scroll-fade-x` adds a soft right-edge
+            mask on phones so users see "more tabs to the right" instead of
+            reading "Cha…" as a typo. */}
         <nav
-          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide -mx-4 px-4'
+          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x -mx-4 px-4'
           role='tablist'
           aria-label='Project sections'
         >
@@ -584,7 +587,7 @@ export default function ProjectDashboardPage() {
         {/* Runs sub-tab strip — only shown when in Runs tab */}
         {tab === 'runs' && (
           <nav
-            className='flex gap-0.5 overflow-x-auto scrollbar-hide -mx-4 px-4 pt-1'
+            className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x -mx-4 px-4 pt-1'
             role='tablist'
             aria-label='Runs sections'
           >
@@ -770,7 +773,9 @@ function SummaryBar({
     // horizontally-scrollable row so it stays one line even with 9 segments
     // (was wrapping to 5 rows on phones). Desktop keeps the wrap behaviour
     // so power users can still see everything at once.
-    <div className='flex sm:flex-wrap items-center gap-x-3 gap-y-1 text-[11px] overflow-x-auto scrollbar-hide sm:overflow-visible whitespace-nowrap sm:whitespace-normal -mx-3 px-3 sm:mx-0 sm:px-0'>
+    // 2026-05-10 mobile sweep iter-3 — add v3-scroll-fade-x so the last
+    // overflowing pill ("DON…", "SC…") reads as "more to scroll", not a bug.
+    <div className='flex sm:flex-wrap items-center gap-x-3 gap-y-1 text-[11px] overflow-x-auto scrollbar-hide v3-scroll-fade-x sm:overflow-visible sm:[mask-image:none] whitespace-nowrap sm:whitespace-normal -mx-3 px-3 sm:mx-0 sm:px-0'>
       {segments.map((s, i) => (
         <span key={i} className='inline-flex items-center gap-1 flex-shrink-0'>
           {s.label && (

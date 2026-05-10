@@ -25,6 +25,29 @@
  * cascade flows through to v3 surfaces.
  */
 
+/* 2026-05-10 mobile sweep iter-4 — hoist v3 tokens to `:root` so React
+ * portals (e.g. TopBar's mobile nav drawer, MoreDrawer in
+ * ProjectDashboardPage) that render to `document.body` (outside `.v3-root`)
+ * still resolve `var(--v3-*)`. The .v3-root selector below stays for
+ * backward-compat / specificity, but :root carries the canonical values. */
+:root {
+  --v3-bg: var(--c-graphite-0);
+  --v3-surface: var(--c-graphite-2);
+  --v3-surface-elevated: var(--c-graphite-3);
+  --v3-border: var(--c-graphite-4);
+  --v3-border-strong: var(--c-graphite-5);
+  --v3-text: var(--c-ink-100);
+  --v3-text-muted: var(--c-ink-300);
+  --v3-text-subtle: var(--c-ink-400);
+  --v3-brand: #5b8def;
+  --v3-brand-hover: #7aa5f5;
+  --v3-brand-2: var(--c-signal-teal);
+  --v3-success: var(--c-success);
+  --v3-warning: var(--c-warning);
+  --v3-error: var(--c-error);
+  --v3-info: var(--c-info);
+}
+
 .v3-root {
   --v3-bg: var(--c-graphite-0);
   --v3-surface: var(--c-graphite-2); /* was #11151B — converged with v2/website */
@@ -202,6 +225,11 @@
   font-weight: 600;
   font-size: var(--v3-fs-ui);
   text-decoration: none;
+  flex-shrink: 0;
+}
+
+.v3-topbar__brand-text {
+  white-space: nowrap;
 }
 
 .v3-topbar__brand-mark {
@@ -354,7 +382,18 @@
 /* 2026-05-10 (mobile audit) — extra cushion for sub-420px phones (iPhone
  * SE 1st-gen at 320×568, older Android pre-Pixel-3). Tightens horizontal
  * padding so the topbar's brand + tier chip + UsageBadge + hamburger fit
- * without overflow. */
+ * without overflow.
+ *
+ * 2026-05-10 mobile sweep iter-3 — also hide the wordmark below 480px so
+ * the ProjectSwitcher has room to breathe; the "ES" logo mark + ARIA label
+ * keep the brand recognisable + accessible. TierChip is also hidden below
+ * 380px (reachable in the drawer's avatar menu); hides automatically for
+ * SUPER_ADMIN. */
+@media (max-width: 480px) {
+  .v3-topbar__brand-text {
+    display: none;
+  }
+}
 @media (max-width: 420px) {
   .v3-main {
     padding: var(--v3-pad-3) var(--v3-pad-2);
@@ -362,6 +401,42 @@
   .v3-topbar {
     padding: 0 var(--v3-pad-2);
     gap: 4px;
+  }
+}
+
+/* 2026-05-10 mobile sweep iter-3 — scroll-fade utility.
+ *
+ * Apply to any horizontally scrolling container (tab strips, summary bars,
+ * tables) so users get a visual hint that there's content past the right
+ * edge. Without this hint, "Cha…" / "Tier C…" / "ACTI" cut-offs read as
+ * bugs instead of scrollable regions.
+ *
+ * The mask-image gradient is opaque-everywhere except the last 24px which
+ * fades to transparent. `mask-size: 100% 100%` keeps the fade pinned to
+ * the right edge regardless of scroll position; combine with
+ * `mask-position` toggling via JS later if we want a left-edge fade once
+ * the user scrolls.
+ */
+.v3-scroll-fade-x {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    black 0,
+    black calc(100% - 24px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    black 0,
+    black calc(100% - 24px),
+    transparent 100%
+  );
+}
+@media (min-width: 768px) {
+  /* Disable the fade on tablets/desktops — there's enough horizontal
+     space that the fade is a distraction, not a hint. */
+  .v3-scroll-fade-x {
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 }
 
