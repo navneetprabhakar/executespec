@@ -5,7 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ExecuteSpec — AI that ships pull requests, plus a catalog of 28 readymade solutions + 11 modernization recipes</title>
     
-        <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
+    <!-- Google Analytics (GA4) -->
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-Y6JSSQ2Y83"></script>
     <script>
       window.dataLayer = window.dataLayer || [];
       function gtag(){dataLayer.push(arguments);}
@@ -13,7 +14,8 @@
       gtag('config', 'G-Y6JSSQ2Y83');
     </script>
 
-        <meta name="description" content="AI that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR — ~80% of real runs land Ready. Plus a catalog of 28 readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions, …) and 11 modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, Class components→hooks, …). From $29/mo Solo; $39/seat Team with BYOK; Enterprise SOC 2 + DPA + SSO.">
+    <!-- ── Core SEO & Agentic Search Meta Tags ─────────────────────────────── -->
+    <meta name="description" content="AI that ships pull requests your team will actually merge — for one repo or for twenty. Plan, build, test, review, open a PR — ~80% of real runs land Ready. Plus a catalog of 28 readymade solutions (Stripe checkout, OAuth login, RAG with pgvector, Docker, GitHub Actions, …) and 11 modernization recipes (JS→TS, Express→Fastify, Mongoose→Prisma, Class components→hooks, …). From $29/mo Solo; $39/seat Team with BYOK; Enterprise SOC 2 + DPA + SSO.">
     <meta name="keywords" content="AI pull request automation, AI that ships PRs, merge-validated AI coding, agentic code review, AI PR reviewer, multi-repo AI coding, cross-repo AI agent, AI coding pipeline, plan-approval gate, BYOK AI coding, autonomous PR generation, AI code review tool, CI/CD validation, automated tech debt, agentic refactor, AI code templates, AI starter solutions, AI scaffold library, Stripe checkout boilerplate, OAuth login boilerplate, Razorpay checkout, Resend transactional email, RAG pgvector, AI feature scaffolding, AI codegen catalog, ai modernization recipes, ai migration tool, JavaScript to TypeScript codemod, CommonJS to ESM, Express to Fastify migration, Mongoose to Prisma migration, REST to tRPC migration, React class components to hooks, Tailwind v3 to v4 migration, Vue 2 to Vue 3 migration, Webpack to Vite migration, Mocha to Vitest migration, Pages Router to App Router, Figma to code, React Native AI codegen, Cursor alternative, Windsurf alternative, Claude Code alternative, GitHub Copilot alternative, GitHub Copilot Workspaces alternative, Lovable alternative, Bolt.new alternative, v0 alternative, Replit Agent alternative, Devin alternative, Codeium alternative, Continue.dev alternative, Sourcegraph Cody alternative, Tabnine alternative, Aider alternative, Cline alternative, JetBrains AI Assistant alternative, Amazon Q Developer alternative, emergent.sh alternative, StackBlitz Bolt alternative, Augment Code alternative">
     <meta name="author" content="ExecuteSpec">
     <meta name="publisher" content="ExecuteSpec">
@@ -23,7 +25,10 @@
     <meta name="rating" content="General">
     <meta name="referrer" content="strict-origin-when-cross-origin">
     <meta name="format-detection" content="telephone=no">
-        <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
+    <!-- R-303 (Wave 6) — both theme-color values now match --c-graphite-0
+         (#0B0D10) so the browser address-bar tint, the page background,
+         and the PWA manifest background all stop drifting. -->
+    <meta name="theme-color" content="#0B0D10" media="(prefers-color-scheme: dark)">
     <meta name="theme-color" content="#0B0D10">
     <meta name="color-scheme" content="dark">
     <meta name="apple-mobile-web-app-capable" content="yes">
@@ -38,14 +43,19 @@
     <link rel="alternate" hreflang="en" href="https://executespec.ai/">
     <link rel="alternate" hreflang="x-default" href="https://executespec.ai/">
 
-            <meta name="GPTBot" content="index, follow">
+    <!-- ── Agentic Search / LLM Crawler Policy ──────────────────────────────── -->
+    <!-- Signals to major LLM crawlers (GPTBot, ClaudeBot, PerplexityBot, Google-Extended,
+         AppleBot-Extended) that this page is cleared for indexing + snippet use in AI
+         answers. Training restrictions are set via /robots.txt (separate file). -->
+    <meta name="GPTBot" content="index, follow">
     <meta name="ClaudeBot" content="index, follow">
     <meta name="PerplexityBot" content="index, follow">
     <meta name="Google-Extended" content="index, follow">
     <meta name="AppleBot-Extended" content="index, follow">
     <meta name="CCBot" content="index, follow">
 
-        <meta property="og:site_name" content="ExecuteSpec">
+    <!-- ── Open Graph / Twitter for Social Sharing + Chatbot Previews ───────── -->
+    <meta property="og:site_name" content="ExecuteSpec">
     <meta property="og:title" content="ExecuteSpec — AI that ships pull requests your team will actually merge.">
     <meta property="og:description" content="Plan, build, test, review, open a PR — ~80% of real runs land Ready. We attach the verdict (Ready / Needs review / Failed) to every one of yours. Solo $29/mo · Team $39/seat BYOK · Enterprise SOC 2.">
     <meta property="og:type" content="website">
@@ -65,7 +75,8 @@
     <meta name="twitter:image" content="https://executespec.ai/images/og-hero.png">
     <meta name="twitter:image:alt" content="ExecuteSpec — AI that ships PRs your team will merge.">
 
-        <script type="application/ld+json">
+    <!-- Structured Data for Agentic Search (GEO/SEO) -->
+    <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
@@ -196,7 +207,8 @@
     }
     </script>
 
-        <script type="application/ld+json">
+    <!-- HowTo Schema for Agentic Search (AEO) — explains the ExecuteSpec PR-pipeline workflow -->
+    <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "HowTo",
@@ -227,7 +239,8 @@
     }
     </script>
 
-        <script type="application/ld+json">
+    <!-- Organization Schema — named-entity resolution for LLM answer engines -->
+    <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "Organization",
@@ -268,7 +281,8 @@
     }
     </script>
 
-        <script type="application/ld+json">
+    <!-- WebSite Schema — enables Google sitelinks search box + canonical entity -->
+    <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "WebSite",
@@ -281,7 +295,8 @@
     }
     </script>
 
-        <script type="application/ld+json">
+    <!-- Product Schema with per-tier Offers — gives LLMs precise pricing to cite -->
+    <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "Product",
@@ -363,7 +378,8 @@
     }
     </script>
 
-        <script type="application/ld+json">
+    <!-- BreadcrumbList — helps crawlers understand the single-page structure -->
+    <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "BreadcrumbList",
@@ -378,7 +394,10 @@
     }
     </script>
 
-        <script type="application/ld+json">
+    <!-- DefinedTermSet — glossary of terms LLMs often mis-define. Helps GEO (Generative
+         Engine Optimization) by giving answer engines our canonical definition of each
+         domain term so citations come back accurate. -->
+    <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "DefinedTermSet",
@@ -430,18 +449,45 @@
     }
     </script>
 
-        <link rel="preconnect" href="https://dev.executespec.ai" crossorigin>
+    <!-- Preconnect hints for third-party origins used on this page -->
+    <link rel="preconnect" href="https://dev.executespec.ai" crossorigin>
     <link rel="dns-prefetch" href="https://dev.executespec.ai">
     <link rel="dns-prefetch" href="https://www.googletagmanager.com">
     <link rel="dns-prefetch" href="https://www.google-analytics.com">
 
-        <link rel="preconnect" href="https://fonts.googleapis.com">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 
     <style>
-                :root {
-                        --c-graphite-0: #10131A;
+        /* R-303 (Wave 6) — every site colour now flows from the
+         * design-system primitive layer (mirrored from
+         * frontend/src/design-system/primitives.css). The website
+         * is a standalone Cloudflare Worker — it can't import the
+         * SPA's primitives.css — so the relevant primitives are
+         * inlined here verbatim. Keep this block in lock-step with
+         * the SPA primitives file: a colour change there must change
+         * here too.
+         *
+         * Three real value shifts vs pre-Wave-6:
+         *   • --red was #F26D6D → var(--c-error) #EF4444
+         *     (drift-resolved with v3 + v2 token files)
+         *   • --orange / --yellow promoted to --c-pop-orange /
+         *     --c-pop-amber semantically — same hex, but now
+         *     "brand-pop gradient pair" not just "two accent colours"
+         *   • All blacks below #0B0D10 (#000, #0a0a0a, #09090e, etc.)
+         *     elsewhere in the file — see body bg + footer — should
+         *     convert to var(--bg) (= --c-graphite-0) over time.
+         *     Wave 6 doesn't sweep them; tracking as residual debt.
+         */
+        :root {
+            /* ── Inlined design-system primitives ────────────────── */
+            /* Website refresh (2026-05-06 v3) — softened the all-black
+             * graphite ramp by warming each step ~3-5° toward a charcoal
+             * with a hint of indigo. Removes the "AI tool default flat
+             * black" feeling without losing dark-mode legibility. */
+            --c-graphite-0: #10131A;
             --c-graphite-1: #161A23;
             --c-graphite-2: #1A1F29;
             --c-graphite-3: #232936;
@@ -462,14 +508,44 @@
             --c-error: #EF4444;
             --c-info: #22D3EE;
             --c-accent-purple: #A78BFA;
-                        --c-accent-warm: #FF8E72;
-                        --c-paper: var(--c-graphite-2);
+            /* Website refresh (2026-05-06) — warm coral as the single
+             * personality color. Used sparingly on key verbs + the
+             * paper-cream proof section, breaking the all-graphite
+             * AI-tool-lookalike monotony with one human accent. */
+            --c-accent-warm: #FF8E72;
+            /* Real-example surface (2026-05-06 v3) — converted from
+             * paper-cream to a dark surface variant so the section
+             * doesn't break the dark theme rhythm. Tokens kept under
+             * the same names so existing inline styles keep working;
+             * values now resolve to dark-theme equivalents. */
+            --c-paper: var(--c-graphite-2);
             --c-paper-ink: var(--c-ink-100);
             --c-paper-ink-muted: var(--c-ink-300);
             --c-paper-border: var(--c-graphite-4);
 
-                        --orange: var(--c-accent-warm);
-            --yellow: var(--c-pop-amber);                         --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
+            /* ── Semantic layer (consumer-facing) ────────────────── */
+            --bg: var(--c-graphite-0);
+            --surface: var(--c-graphite-2);
+            --surface-2: var(--c-graphite-3);
+            --surface-border: var(--c-graphite-4);
+            --text-main: var(--c-ink-100);
+            --text-muted: var(--c-ink-300);
+            --text-secondary: var(--c-ink-200);
+            --blue: var(--c-signal-blue);
+            --blue-light: var(--c-signal-blue-hover);
+            --purple: var(--c-accent-purple);
+            /* Website refresh deeper (2026-05-06) — `--orange` semantic
+             * alias now points at the new warm coral, not the
+             * Tailwind-orange #F97316 that read "AI tool default."
+             * Every TEAM-tier marker, mode-card top-stripe, and
+             * snapshot counter inherits the softer color in one swap.
+             * `--c-pop-orange` raw token kept for the Vue-2 etc.
+             * dual-color logos that need the original hue. */
+            --orange: var(--c-accent-warm);
+            --yellow: var(--c-pop-amber);             /* brand-pop gradient end (kept) */
+            --green: var(--c-success);
+            --red: var(--c-error);                    /* was #F26D6D — drift-resolved to #EF4444 */
+            --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
             --pop-grad: linear-gradient(to right, var(--c-pop-orange), var(--c-pop-amber));
             --accent-warm: var(--c-accent-warm);
             --font-body: 'DM Sans', sans-serif;
@@ -487,19 +563,86 @@
             max-width: 100vw;
             width: 100%;
         }
-                :where(p, h1, h2, h3, h4, h5, h6, span, li, a, button, label) {
+        /* R-339 follow-up — make every block-level element respect the
+           viewport even if a child was authored with desktop-only widths.
+           The page-wide audit found that some long unbreakable words
+           ("AI-written", "<span> .text-gradient-orange") and inline-styled
+           grids were forcing horizontal overflow, which was being clipped
+           by `body { overflow-x: hidden; }` instead of wrapping properly.
+           These two rules force long words to break, hyphenate, or wrap
+           inside any text-bearing container without the author having to
+           remember every spot. */
+        :where(p, h1, h2, h3, h4, h5, h6, span, li, a, button, label) {
             overflow-wrap: anywhere;
             word-break: break-word;
         }
         a { color: inherit; text-decoration: none; }
         .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; width: 100%; }
 
-                .logo-box { width: 32px; height: 32px; background: var(--blue); border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 800; font-family: var(--font-mono); box-shadow: 0 2px 10px rgba(91,141,239,0.18);}
+        /* Typography — responsive font sizes use clamp() with a small
+           lower bound so they actually shrink on phones (was clamp(3rem,…)
+           which floored at 48px and wouldn't go any smaller no matter how
+           narrow the viewport got — the reason the H1 looked desktop-sized
+           on a 400px screen). */
+        .h1 { font-size: clamp(1.7rem, 7vw, 5rem); line-height: 1.1; font-weight: 700; letter-spacing: -0.03em; max-width: 100%; }
+        .h2 { font-size: clamp(1.4rem, 5vw, 3rem); line-height: 1.2; font-weight: 700; letter-spacing: -0.02em; margin-bottom: 1rem; max-width: 100%; }
+        .subtitle { font-size: clamp(0.95rem, 2vw, 1.25rem); color: var(--text-muted); max-width: 750px; }
+        .mono { font-family: var(--font-mono); font-size: 0.9rem; }
+
+        /* Gradients */
+        .text-gradient-blue { background: linear-gradient(to right, var(--blue), var(--purple)); -webkit-background-clip: text; color: transparent; }
+        /* `display: inline` is implicit but stating it defensively prevents
+           any future change to the parent from making the gradient span
+           inline-block (which can break line-wrap on long phrases like
+           "AI-written pull requests"). */
+        .text-gradient-orange { background: linear-gradient(to right, var(--orange), var(--yellow)); -webkit-background-clip: text; color: transparent; display: inline; }
+        /* v2.5.14 — `bg-gradient-blue` kept as legacy alias; points to new brand gradient so existing CTA markup gets the updated look. */
+        .bg-gradient-blue { background: var(--brand-grad); color: #ffffff; border: none; box-shadow: 0 4px 14px rgba(91,141,239,0.30); }
+
+        /* Navigation */
+        nav {
+            position: fixed; top: 0; width: 100%; z-index: 100; padding: 20px 0; transition: all 0.3s ease;
+            background: rgba(6, 6, 10, 0.85); backdrop-filter: blur(12px); border-bottom: 1px solid var(--surface-border);
+        }
+        .nav-inner { display: flex; justify-content: space-between; align-items: center; }
+        .logo { display: flex; align-items: center; gap: 12px; font-weight: 700; font-size: 1.2rem; }
+        /* Website refresh (2026-05-06) — solid color logo replaces the
+         * blue→teal gradient. Every "AI dev tool" SaaS uses a gradient
+         * mark today; the gradient was costing us identity not building
+         * it. Solid signal-blue with a faint glow keeps the on-brand
+         * blue but feels deliberate, not procedurally-generated. */
+        .logo-box { width: 32px; height: 32px; background: var(--blue); border-radius: 7px; display: flex; align-items: center; justify-content: center; color: #ffffff; font-weight: 800; font-family: var(--font-mono); box-shadow: 0 2px 10px rgba(91,141,239,0.18);}
         .nav-links { display: flex; gap: 32px; align-items: center; }
         .nav-links a:not(.btn) { font-size: 0.95rem; color: var(--text-muted); transition: color 0.2s; font-weight: 500;}
         .nav-links a:not(.btn):hover { color: var(--text-main); }
 
-                .hero-bg {
+        /* Buttons — v2.5.14 collapsed to 2 variants: primary gradient + ghost.
+           `btn-white` kept for secondary-CTA slots that already use it. */
+        .btn {
+            display: inline-flex; align-items: center; justify-content: center; padding: 12px 24px;
+            border-radius: 8px; font-weight: 600; font-size: 0.95rem; transition: transform 0.2s, opacity 0.2s, box-shadow 0.2s;
+            cursor: pointer; border: none; text-decoration: none;
+        }
+        .btn:hover { transform: translateY(-2px); opacity: 0.92; }
+        .btn-primary { background: var(--brand-grad); color: #ffffff; box-shadow: 0 4px 14px rgba(91,141,239,0.30); }
+        .btn-primary:hover { box-shadow: 0 6px 20px rgba(91,141,239,0.45); }
+        .btn-white { background: var(--text-main); color: var(--bg); }
+        .btn-ghost { border: 1px solid var(--surface-border); color: var(--text-main); background: transparent; }
+        .btn-ghost:hover { background: var(--surface); border-color: var(--blue); }
+
+        /* Hero */
+        .hero {
+            min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            text-align: center; position: relative; padding-top: 80px;
+        }
+        /* Website refresh deeper (2026-05-06) — hero-bg simplified.
+         * Dropped the radial-glow + 40px grid pattern (the "AI-tool
+         * starter template" hero look every dev tool ships). New
+         * version is a clean dark surface with a single very-soft
+         * accent bloom from the top-center, low alpha, no grid.
+         * Lets the H1 + composer carry the page instead of competing
+         * with chrome. */
+        .hero-bg {
             position: absolute; top: 0; left: 0; right: 0; bottom: 0;
             background:
                 radial-gradient(ellipse 60% 40% at 50% 0%, rgba(91,141,239,0.07) 0%, transparent 70%);
@@ -507,10 +650,86 @@
         }
         .hero-buttons { display: flex; gap: 16px; justify-content: center; margin-top: 40px; }
         
-                section { padding: 88px 0; border-bottom: 1px solid var(--surface-border); }
+        /* Layout — Website refresh deeper (2026-05-06).
+         * Pre-fix every section had identical 100px vertical padding
+         * + hairline border, which baked a uniform "AI tool template"
+         * rhythm into the whole page. Loosened to 88px default + per-
+         * section overrides via inline style where it matters; the
+         * bottom borders stay (they're load-bearing for the section
+         * boundaries) but the section-header bottom-margin tightens
+         * 64 → 48 so the H2 sits closer to its body content. */
+        section { padding: 88px 0; border-bottom: 1px solid var(--surface-border); }
         .section-header { margin-bottom: 48px; }
         .section-label { display: inline-block; margin-bottom: 14px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; font-size: 0.85rem;}
-                .price-card.popular {
+        /* Hand-drawn underline accent — applied to H2s where the
+         * section is supposed to feel personal (real-example,
+         * contact). Pure SVG so it scales + recolors with the
+         * surrounding text. Opt-in via class .h2-handdrawn. */
+        .h2-handdrawn { position: relative; display: inline-block; }
+        .h2-handdrawn::after {
+            content: '';
+            position: absolute;
+            left: 0; right: 0; bottom: -8px;
+            height: 8px;
+            background-image: url("data:image/svg+xml;utf8,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 8' preserveAspectRatio='none'%3E%3Cpath d='M2 5 Q 25 2, 50 4 T 100 5 T 150 4 T 198 5' stroke='%23FF8E72' stroke-width='2' fill='none' stroke-linecap='round'/%3E%3C/svg%3E");
+            background-repeat: no-repeat;
+            background-size: 100% 8px;
+        }
+
+        /* Dual Mode Comparison */
+        .dual-mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+        .mode-card {
+            background: var(--surface); border: 1px solid var(--surface-border);
+            padding: 40px; border-radius: 16px; position: relative; overflow: hidden;
+            transition: border-color 0.3s ease;
+        }
+        .mode-card:hover { border-color: var(--text-muted); }
+        .mode-icon { font-size: 2rem; margin-bottom: 24px; display: inline-block; padding: 12px; border-radius: 12px; background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); }
+        .mode-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 12px; }
+        .mode-desc { color: var(--text-muted); margin-bottom: 32px; min-height: 50px;}
+        .feature-list { list-style: none; margin: 0; padding: 0; }
+        .feature-list li { margin-bottom: 16px; display: flex; gap: 12px; color: var(--text-muted); align-items: flex-start;}
+        .feature-list li strong { color: var(--text-main); display: block;}
+        .check-icon { color: var(--green); font-weight: bold; margin-top: 2px;}
+
+        /* Terminal UI */
+        .terminal {
+            background: #0c0c12; border: 1px solid var(--surface-border); border-radius: 12px;
+            padding: 24px; font-family: var(--font-mono); font-size: 0.9rem; line-height: 1.8;
+            overflow-x: auto; box-shadow: 0 20px 40px rgba(0,0,0,0.5);
+        }
+        .term-header { display: flex; gap: 8px; margin-bottom: 16px; padding-bottom: 16px; border-bottom: 1px solid #232336;}
+        .term-dot { width: 12px; height: 12px; border-radius: 50%; }
+        .term-prompt { color: var(--blue-light); }
+        .term-success { color: var(--green); }
+        .term-error { color: var(--red); }
+        .term-warn { color: var(--yellow); }
+        .term-muted { color: var(--text-muted); }
+
+        /* Feature Grid */
+        .feature-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px; }
+        .feature-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 32px; border-radius: 12px; }
+        .feature-card h3 { font-size: 1.2rem; margin-bottom: 12px; }
+        .feature-card p { color: var(--text-muted); font-size: 0.95rem; }
+
+        /* Pricing */
+        .pricing-controls { display: flex; justify-content: center; align-items: center; margin-bottom: 48px; }
+        .currency-toggle { display: flex; align-items: center; gap: 12px; font-size: 0.95rem; color: var(--text-muted); font-weight: 500;}
+        .switch { position: relative; display: inline-block; width: 44px; height: 24px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: var(--surface); border: 1px solid var(--surface-border); transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 16px; width: 16px; left: 3px; bottom: 3px; background-color: var(--text-muted); transition: .4s; border-radius: 50%; }
+        input:checked + .slider:before { transform: translateX(20px); background-color: var(--text-main); }
+        .pricing-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 24px; }
+        .price-card { background: var(--surface); border: 1px solid var(--surface-border); padding: 40px; border-radius: 16px; display: flex; flex-direction: column; }
+        /* Website refresh deeper (2026-05-06) — dropped the glassmorphism
+         * gradient on the "popular" pricing card. The 0.08-alpha blue
+         * fade-to-transparent + colored shadow was the same SaaS-AI
+         * "this is the recommended plan" treatment every Cursor-clone
+         * uses. Replaced with a clean 2px blue border + a small
+         * "Recommended" wordmark (rendered via :before below) — same
+         * visual hierarchy, less of the AI-tool fingerprint. */
+        .price-card.popular {
             border-color: var(--blue);
             border-width: 2px;
             background: var(--surface);
@@ -534,7 +753,24 @@
         .price-amount span { font-size: 1rem; color: var(--text-muted); font-family: var(--font-body); font-weight: 400; }
         .price-card .btn { margin-top: auto; width: 100%; }
 
-                .founder-block {
+        /* FAQ */
+        .faq-grid { display: flex; flex-direction: column; gap: 16px; max-width: 800px; margin: 0 auto; }
+        .faq-item { background: var(--surface); border: 1px solid var(--surface-border); border-radius: 12px; overflow: hidden; }
+        .faq-item summary { padding: 24px; font-weight: 700; font-size: 1.1rem; cursor: pointer; list-style: none; display: flex; justify-content: space-between; align-items: center; }
+        .faq-item summary::-webkit-details-marker { display: none; }
+        .faq-item summary::after { content: '+'; color: var(--blue-light); font-size: 1.5rem; transition: transform 0.2s; font-family: var(--font-mono); font-weight: 400;}
+        .faq-item[open] summary::after { transform: rotate(45deg); }
+        .faq-answer { padding: 0 24px 24px 24px; color: var(--text-muted); font-size: 0.95rem; line-height: 1.6; }
+
+        /* About & Contact */
+        /* Website refresh deeper (2026-05-06) — founder block in the
+         * Contact section. Single warmest-color avatar + name +
+         * one-line role + handwritten-feeling italic founder note.
+         * Anti-AI-generated signal: a real person willing to put their
+         * name on the page. Avatar is a monogram placeholder until
+         * ops has the headshot file; .founder-block-avatar swaps to
+         * an `<img>` element later with no markup change. */
+        .founder-block {
             display: flex; align-items: flex-start; gap: 18px;
             max-width: 720px; margin: 32px auto 48px;
             padding: 22px 24px;
@@ -820,7 +1056,14 @@
                 <div class="logo-box">E</div>
                 ExecuteSpec
             </a>
-                        <div class="nav-links">
+            <!-- Website refresh (2026-05-06) — nav trimmed from 6 anchors
+                 + Try Free to 4 anchors + Try Free. "Project Workspace",
+                 "Quality Gates", "Enterprise Chores" each pointed at a
+                 single section that already gets reached from the hero
+                 CTA path; clutter at the top of the page bought us
+                 nothing. Kept: How it works (the proof flow), Catalog
+                 (the differentiator), Pricing, FAQ. -->
+            <div class="nav-links">
                 <a href="#real-example">How it works</a>
                 <a href="#catalog">Catalog</a>
                 <a href="#pricing">Pricing</a>
@@ -831,7 +1074,8 @@
         </div>
     </nav>
 
-        <div id="mobileDrawer" class="mobile-drawer" role="dialog" aria-label="Navigation">
+    <!-- v2.5.14 — mobile drawer. Replaces the vanished <900px nav. -->
+    <div id="mobileDrawer" class="mobile-drawer" role="dialog" aria-label="Navigation">
         <button class="mobile-drawer-close" aria-label="Close menu" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Close</button>
         <a href="#catalog" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Library + Migrations</a>
         <a href="#project-workspace" onclick="document.getElementById('mobileDrawer').classList.remove('open')">Project Workspace</a>
@@ -845,7 +1089,13 @@
     <section class="hero">
         <div class="hero-bg"></div>
         <div class="container" style="max-width: 900px;">
-                        <h1 class="h1" style="margin-top: 64px;">
+            <!-- Website refresh (2026-05-06) — dropped the orange-amber
+                 gradient on "AI-written PRs"; the gradient-text trope is
+                 the SaaS-AI-tool signature, and reading the page felt
+                 generated even though the engine isn't. Plain white H1
+                 with a single warm-accent on the verb is more honest:
+                 the page asks what you want shipped, not what we are. -->
+            <h1 class="h1" style="margin-top: 64px;">
                 AI-written PRs you can <span style="color: var(--accent-warm);">actually merge</span>.
             </h1>
             <p style="margin: 18px auto 0; max-width: 620px; font-size: 1.08rem; color: var(--text-secondary); line-height: 1.5;">
@@ -853,7 +1103,21 @@
                 and Devin's $500 demo doesn't survive your test suite.
             </p>
 
-                        <form id="hero-composer" onsubmit="return heroComposerSubmit(event)" style="margin: 36px auto 0; max-width: 720px; text-align: left;">
+            <!-- Chat-first composer + sample prompts + live stats card.
+                 Migrated 2026-04-29 (R-338) from the in-app V3Landing page
+                 so the website is now the single canonical landing surface
+                 with the same direct-interaction shape:
+                  - <textarea> + sample-prompt chips (clickable, populate it)
+                  - live stats card ("3 specs shipped this week · 66%
+                    verified · 89 total runs all-time") fetched from
+                    /api/v3/landing/stats with graceful fallback
+                  - 30-day proof line ("89 PRs shipped in the last 30 days")
+                    fetched from /api/v3/public/exec-snapshot
+                 Submit stashes the spec on the app domain via a query param
+                 and redirects to /v3/landing?prefill=… ; V3Landing's mount
+                 hook reads the param + hydrates its composer for the auth
+                 handoff. -->
+            <form id="hero-composer" onsubmit="return heroComposerSubmit(event)" style="margin: 36px auto 0; max-width: 720px; text-align: left;">
                 <label for="hero-spec" class="mono" style="display: block; font-size: 0.7rem; color: var(--text-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px;">What do you want shipped?</label>
                 <textarea
                     id="hero-spec"
@@ -870,11 +1134,25 @@
                 </div>
             </form>
 
-                        <p id="hero-proof-line" style="margin: 16px auto 0; max-width: 720px; font-size: 0.85rem; color: var(--text-muted); text-align: left;">
+            <!--
+                2026-05-02 — proof strip. Compresses the previous 45-word
+                subtitle (catalog + ~80%-Ready + verdict) into a single
+                muted line below the composer. Keeps the supporting
+                claims discoverable without competing with the composer
+                for visual weight.
+            -->
+            <p id="hero-proof-line" style="margin: 16px auto 0; max-width: 720px; font-size: 0.85rem; color: var(--text-muted); text-align: left;">
                 Or pick from <a href="#catalog" style="color: var(--blue-light); text-decoration: none;">28 readymades + 11 migrations</a>. ~80% of real runs land Ready, verdict on every PR.
             </p>
 
-                        <div id="hero-sample-prompts" class="hero-prompt-grid">
+            <!-- Sample-prompt chip rail.  Six canned prompts you can click
+                 to seed the textarea (matches V3Landing's SAMPLE_PROMPTS).
+                 Same prompts ride the Catalog narrative — half are
+                 readymades, half are migrations / one-off specs.
+                 Grid template lives in CSS (.hero-prompt-grid) so the
+                 mobile media query can reflow the columns without
+                 fighting inline-style specificity. -->
+            <div id="hero-sample-prompts" class="hero-prompt-grid">
                 <button type="button" class="hero-prompt-chip" data-prompt="Add OAuth login to my Next.js app">Add OAuth login to my Next.js app</button>
                 <button type="button" class="hero-prompt-chip" data-prompt="Refactor a React component to TypeScript">Refactor a React component to TypeScript</button>
                 <button type="button" class="hero-prompt-chip" data-prompt="Build a Stripe checkout endpoint">Build a Stripe checkout endpoint</button>
@@ -883,7 +1161,13 @@
                 <button type="button" class="hero-prompt-chip" data-prompt="Add a /healthz endpoint to my Spring Boot app">Add a /healthz endpoint to my Spring Boot app</button>
             </div>
 
-                        <div id="hero-stats" class="hero-stats-card" style="display: none;">
+            <!-- Live stats card — populated by /api/v3/landing/stats on
+                 page load.  Hidden by default; the JS below removes that
+                 style + writes the numbers when the fetch resolves.
+                 Grid + cell rules live in CSS (.hero-stats-card +
+                 .hero-stats-grid) so the mobile media query can reflow
+                 to a stack on narrow phones. -->
+            <div id="hero-stats" class="hero-stats-card" style="display: none;">
                 <div class="hero-stats-grid">
                     <div class="hero-stats-cell">
                         <div id="stat-specs-week" class="hero-stats-num">—</div>
@@ -900,12 +1184,20 @@
                 </div>
             </div>
 
-                        <p id="hero-snapshot-line" style="display:none; margin: 16px auto 0; font-size: 0.95rem; color: var(--text-muted); max-width: 560px;">
+            <!-- 30-day proof line — assertive single number from
+                 /api/v3/public/exec-snapshot.  Hidden until fetch
+                 resolves; orange counter mimics the V3Landing R-313
+                 styling. -->
+            <p id="hero-snapshot-line" style="display:none; margin: 16px auto 0; font-size: 0.95rem; color: var(--text-muted); max-width: 560px;">
                 <strong id="hero-snapshot-runs" style="color: var(--orange); font-weight: 700;">—</strong>
                 PRs shipped in the last 30 days
             </p>
 
-                        <div class="hero-buttons" style="margin-top: 24px;">
+            <!-- Website refresh (2026-05-06) — dropped the second ghost
+                 CTA ("See a team's last 30 days →"); two ghost CTAs at
+                 hero bottom diluted the primary "Ship this →" button.
+                 Catalog link kept as the single discovery path. -->
+            <div class="hero-buttons" style="margin-top: 24px;">
                 <a href="https://dev.executespec.ai/library" class="btn btn-ghost" target="_blank">Browse the catalog →</a>
             </div>
 
@@ -994,6 +1286,7 @@
 
             <script>
                 // ── Hero composer submit ────────────────────────────────
+                // R-341 (2026-04-29): redirects to the bare app root with
                 // the spec in a `?spec=` query param.  The SPA's
                 // ProtectedRoute / LoginPage chain now reads the param,
                 // stashes it to sessionStorage as `v3-anon-spec`, and the
@@ -1019,6 +1312,7 @@
                     var capped = raw.length > 4000 ? raw.slice(0, 4000) : raw;
                     var qs = new URLSearchParams();
                     qs.set('spec', capped);
+                    // R-343 (cross-cutting fix from UX persona review) —
                     // forward the marketing-site URL's UTM + ref params
                     // through to the app domain so the post-signup
                     // attribution funnel (RegisterPage's readSignupAttribution)
@@ -1034,7 +1328,50 @@
                                 var v = siteParams.get(k);
                                 if (v) qs.set(k, v);
                             });
-                    } catch (_) {  });
+                    } catch (_) { /* URLSearchParams not available — skip */ }
+                    var url = 'https://dev.executespec.ai/?' + qs.toString();
+                    if (window.gtag) {
+                        try { window.gtag('event', 'hero_composer_submit', { length: capped.length }); }
+                        catch (_) { /* analytics is non-critical */ }
+                    }
+                    window.location.href = url;
+                    return false;
+                }
+
+                // ── Sample-prompt chip handlers ─────────────────────────
+                document.querySelectorAll('.hero-prompt-chip').forEach(function (btn) {
+                    btn.addEventListener('click', function () {
+                        var p = btn.getAttribute('data-prompt') || '';
+                        var ta = document.getElementById('hero-spec');
+                        ta.value = p;
+                        ta.focus();
+                        // Scroll into view in case the user is on a
+                        // small viewport and the chip pushed it off.
+                        ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                    });
+                });
+
+                // ── Live aggregates fetch (CORS-safe; silent on failure) ─
+                // Wave 7 selling-point: counters land on the static site
+                // exactly the way the in-app V3Landing renders them.
+                // Both endpoints are public + permitAll on the backend;
+                // dev CORS allows executespec.ai per application-dev.yml.
+                var API_BASE = 'https://dev.executespec.ai';
+                function fetchStats() {
+                    fetch(API_BASE + '/api/v3/landing/stats', { mode: 'cors' })
+                        .then(function (r) { return r.ok ? r.json() : null; })
+                        .then(function (s) {
+                            if (!s) return;
+                            // Honest gate (matches V3Landing): only show
+                            // the card when there's actually data.
+                            if ((s.specsThisWeek || 0) === 0 && (s.totalRunsAllTime || 0) === 0) return;
+                            document.getElementById('stat-specs-week').textContent = String(s.specsThisWeek || 0);
+                            document.getElementById('stat-verified').textContent =
+                                (s.verifiedScorePercent != null ? s.verifiedScorePercent + '%' : '—');
+                            document.getElementById('stat-total-runs').textContent = String(s.totalRunsAllTime || 0);
+                            document.getElementById('hero-stats').style.display = 'block';
+                        })
+                        .catch(function () { /* hide block on failure */ });
                 }
                 function fetchSnapshot() {
                     fetch(API_BASE + '/api/v3/public/exec-snapshot', { mode: 'cors' })
@@ -1050,10 +1387,14 @@
                 fetchSnapshot();
             </script>
 
-                        <p style="margin-top:24px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
+            <!-- Selling-point proof strip.  Numbers above are LIVE; this
+                 line stays as the static fallback that always renders. -->
+            <p style="margin-top:24px;font-family:var(--font-mono);font-size:0.78rem;color:var(--text-muted);letter-spacing:0.05em;text-transform:uppercase;">
                 ~80% verified ≥ 80 · plan-approval gate · BYOK on Team + Enterprise · no credit card
             </p>
-                        <p style="margin-top:18px;font-size:0.85rem;color:var(--text-muted);">
+            <!-- Per-persona conversion routing. Each link goes to the surface
+                 that closes that buyer-type's deal. -->
+            <p style="margin-top:18px;font-size:0.85rem;color:var(--text-muted);">
                 For <a href="#pricing" style="color:var(--blue-light);text-decoration:none;">teams</a>
                 · for <a href="https://dev.executespec.ai/trust" style="color:var(--blue-light);text-decoration:none;" target="_blank">enterprise</a>
                 · for <a href="https://dev.executespec.ai/exec-demo" style="color:var(--blue-light);text-decoration:none;" target="_blank">PgM / CFO</a>
@@ -1061,7 +1402,15 @@
         </div>
     </section>
 
-        <section id="real-example" style="padding: 96px 0; background: var(--c-paper); color: var(--c-paper-ink); border: none;">
+    <!-- Website refresh (2026-05-06) — "Real example" section.
+         Breaks the all-graphite monotony with one warm-paper section
+         right after the hero. Two cards side-by-side: the spec the
+         user types, and the PR ExecuteSpec opens. Hand-built (not
+         pulled from an API) so the proof is concrete + immediate.
+         Replaces the "show, don't tell" gap the audit flagged —
+         pre-fix the page told users what we ship without showing
+         it once before pricing. -->
+    <section id="real-example" style="padding: 96px 0; background: var(--c-paper); color: var(--c-paper-ink); border: none;">
       <div class="container" style="max-width: 1080px;">
         <div class="section-header" style="text-align: center; margin-bottom: 48px;">
           <span class="section-label mono" style="color: var(--c-accent-warm); border: 1px solid var(--c-accent-warm); padding: 4px 12px; border-radius: 20px;">A real run · 47s</span>
@@ -1072,7 +1421,8 @@
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 24px; align-items: stretch;" class="real-example-grid">
-                    <div style="background: var(--c-graphite-3); border: 1px solid var(--c-paper-border); border-radius: 14px; padding: 22px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 12px 32px -12px rgba(0,0,0,0.4);">
+          <!-- LEFT: the spec -->
+          <div style="background: var(--c-graphite-3); border: 1px solid var(--c-paper-border); border-radius: 14px; padding: 22px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 12px 32px -12px rgba(0,0,0,0.4);">
             <div class="mono" style="font-size: 0.7rem; color: var(--c-paper-ink-muted); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">The spec</div>
             <p style="font-size: 1.05rem; color: var(--c-paper-ink); line-height: 1.55; margin: 0;">
               "Add a forgot-password flow to my Spring Boot app — JWT, email-token reset, 30-min TTL."
@@ -1084,9 +1434,11 @@
             </div>
           </div>
 
-                    <div style="display: flex; align-items: center; justify-content: center; color: var(--c-accent-warm); font-size: 1.5rem;" class="real-example-arrow" aria-hidden="true">→</div>
+          <!-- ARROW -->
+          <div style="display: flex; align-items: center; justify-content: center; color: var(--c-accent-warm); font-size: 1.5rem;" class="real-example-arrow" aria-hidden="true">→</div>
 
-                    <div style="background: var(--c-graphite-3); border: 1px solid var(--c-paper-border); border-radius: 14px; padding: 22px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 12px 32px -12px rgba(0,0,0,0.4);">
+          <!-- RIGHT: the PR -->
+          <div style="background: var(--c-graphite-3); border: 1px solid var(--c-paper-border); border-radius: 14px; padding: 22px; box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset, 0 12px 32px -12px rgba(0,0,0,0.4);">
             <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px; flex-wrap: wrap;">
               <span class="mono" style="font-size: 0.7rem; color: var(--c-paper-ink-muted); letter-spacing: 0.1em; text-transform: uppercase;">PR opened</span>
               <span style="font-family: var(--font-mono); font-size: 0.72rem; color: var(--c-paper-ink-muted);">#2143</span>
@@ -1128,7 +1480,11 @@
       }
     </style>
 
-        <section id="pipeline">
+    <!-- The Pipeline — replaces the deleted "Dual Mode Strategy" section.
+         The dual-mode toggle (Prototype / Production) is retired in v3 per
+         design decision D-004 — there's just one pipeline now, and the
+         plan-approval gate is part of it. -->
+    <section id="pipeline">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--purple);">The Pipeline</span>
@@ -1162,7 +1518,9 @@
         </div>
     </section>
 
-        <section id="project-workspace" style="background: var(--bg);">
+    <!-- Project Workspace — key offering (v3 positioning). Sits directly after Dual-Mode
+         so the two platform primitives (how you run · where your work lives) pair visually. -->
+    <section id="project-workspace" style="background: var(--bg);">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--blue);">Project Workspace</span>
@@ -1171,9 +1529,20 @@
                 <p class="subtitle" style="margin: 0 auto;">Most AI coding tools stare at the file you pasted in. ExecuteSpec understands the whole project — multiple repos, architecture, past work, tech debt — so every run builds on what's already there. Available on Solo, Team, and Enterprise; Free gets a read-only demo project to see the shape.</p>
             </div>
 
-                        <div class="ws-mockup" aria-hidden="true">
+            <!-- Website refresh deeper pass (2026-05-06) — hand-built
+                 mockup of the project page so the section opens with
+                 a visual instead of yet another paragraph. Zero asset
+                 weight (no PNG to ship), pixel-matches the live UI
+                 (same panel shapes, same chip colors, same score
+                 ring), and stays accurate as the product evolves
+                 because it's HTML, not a screenshot frozen at one
+                 release. The values shown are illustrative — the
+                 numbers say "this is what the page looks like," not
+                 "this is your data." -->
+            <div class="ws-mockup" aria-hidden="true">
                 <div class="ws-mockup-frame">
-                                        <div class="ws-mockup-topbar">
+                    <!-- Faux top bar -->
+                    <div class="ws-mockup-topbar">
                         <span class="ws-mockup-logo">ES</span>
                         <span class="ws-mockup-brand">ExecuteSpec</span>
                         <span class="ws-mockup-pill">Sample project</span>
@@ -1181,7 +1550,8 @@
                         <span class="ws-mockup-quota">2/30 runs</span>
                         <span class="ws-mockup-avatar">RW</span>
                     </div>
-                                        <div class="ws-mockup-projhead">
+                    <!-- Project header -->
+                    <div class="ws-mockup-projhead">
                         <div class="ws-mockup-projicon">▣</div>
                         <div>
                             <div class="ws-mockup-projlabel">PROJECT</div>
@@ -1194,7 +1564,8 @@
                             <span><span class="ws-mockup-statk">SPEND</span> $14.20</span>
                         </div>
                     </div>
-                                        <div class="ws-mockup-tabs">
+                    <!-- Tab strip -->
+                    <div class="ws-mockup-tabs">
                         <span class="ws-mockup-tab">Compose</span>
                         <span class="ws-mockup-tab is-active">Pulse</span>
                         <span class="ws-mockup-tab">Repos</span>
@@ -1202,7 +1573,8 @@
                         <span class="ws-mockup-tab">Code</span>
                         <span class="ws-mockup-tab">Chat</span>
                     </div>
-                                        <div class="ws-mockup-grid">
+                    <!-- Body grid: last-run card + score ring -->
+                    <div class="ws-mockup-grid">
                         <div class="ws-mockup-card">
                             <div class="ws-mockup-card-eyebrow">LAST RUN · <span style="color: #10B981;">● READY</span></div>
                             <div class="ws-mockup-card-title">Add forgot-password flow with JWT email-token reset</div>
@@ -1227,13 +1599,15 @@
                             <div class="ws-mockup-ring-label">est. 91</div>
                         </div>
                     </div>
-                                        <div class="ws-mockup-spendbar">
+                    <!-- Spend bar -->
+                    <div class="ws-mockup-spendbar">
                         <span class="ws-mockup-spendk">Project spend so far</span>
                         <span class="ws-mockup-spendv">$14.20</span>
                         <span class="ws-mockup-spendx">·</span>
                         <span class="ws-mockup-spendt">412k tokens</span>
                     </div>
-                                        <div class="ws-mockup-rollup">
+                    <!-- Triple rollup -->
+                    <div class="ws-mockup-rollup">
                         <div class="ws-mockup-rollup-cell">
                             <div class="ws-mockup-rollup-h">♥ Health &amp; debt</div>
                             <div class="ws-mockup-rollup-p">2 stale codemaps · 3 minor issues across 4 repos.</div>
@@ -1441,7 +1815,11 @@
         </div>
     </section>
 
-        <section id="catalog" style="background: var(--surface); border-top: 1px solid var(--surface-border);">
+    <!-- Catalog — Library + Migrations as first-class products. Added 2026-04-29
+         alongside the W1–W5 Readymades + W1–W7 Migrations ship: 28 readymade
+         solutions across 15 categories, 11 v1 migration recipes.  Surfaces the
+         "browse, click, ship" path that complements the chat-first composer. -->
+    <section id="catalog" style="background: var(--surface); border-top: 1px solid var(--surface-border);">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--green);">Library + Migrations</span>
@@ -1449,8 +1827,10 @@
                 <p class="subtitle" style="margin: 0 auto;">A catalog of vetted solutions you can drop into any project — auth, payments, AI, infra, whole modernization recipes. Pick one, fill three slots, get a PR. Same plan-then-approve pipeline as a chat-driven run, just less typing.</p>
             </div>
 
-                        <div class="dual-mode-grid" style="margin-top: 40px;">
-                                <div class="mode-card" style="border-top: 4px solid var(--green);">
+            <!-- Two-product split — the catalog has two surfaces today. -->
+            <div class="dual-mode-grid" style="margin-top: 40px;">
+                <!-- Library card -->
+                <div class="mode-card" style="border-top: 4px solid var(--green);">
                     <div class="mode-icon">📚</div>
                     <h3 class="mode-title">Library — 28 readymade solutions</h3>
                     <p class="mode-desc">Pre-built, parameterized solutions across 15 categories. Each one ships with multiple variants (TypeScript / Python · Express / Next.js / FastAPI) and auto-resolves to your repo's detected stack.</p>
@@ -1467,7 +1847,8 @@
                     <a href="https://dev.executespec.ai/library" class="btn btn-primary" target="_blank" style="margin-top: 16px;">Browse the library →</a>
                 </div>
 
-                                <div class="mode-card" style="border-top: 4px solid var(--purple);">
+                <!-- Migrations card -->
+                <div class="mode-card" style="border-top: 4px solid var(--purple);">
                     <div class="mode-icon">🔀</div>
                     <h3 class="mode-title">Migrations — 11 modernization recipes</h3>
                     <p class="mode-desc">Cross-repo modernization runs with halt-and-inspect dry-runs. Estimate the file count + cost before you spend a credit; review the sample diff; then apply across one repo or twenty.</p>
@@ -1483,7 +1864,11 @@
                 </div>
             </div>
 
-                        <div class="catalog-tier-band">
+            <!-- Tier visibility band — sets honest expectations on which
+                 entries are unlocked at each tier.  flex-wrap + 12px
+                 row-gap reflows to 4 stacked rows on a phone without
+                 horizontal overflow. -->
+            <div class="catalog-tier-band">
                 <div class="mono" style="color: var(--text-muted); font-size: 0.7rem; letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 12px;">What's unlocked per tier</div>
                 <div class="catalog-tier-row">
                     <div><strong style="color: var(--text-muted);">Free</strong> &middot; 13 readymades unlocked</div>
@@ -1524,7 +1909,11 @@
         </div>
     </section>
 
-        <section id="tour" style="background: var(--bg); border-top: 1px solid var(--surface-border);">
+    <!-- Product Tour — tabbed preview of 5 core surfaces. Lets visitors see what
+         each piece of the platform actually looks like without requiring a signup.
+         Uses mock UI (styled HTML/CSS) until we ship real screenshots; each panel
+         is a <div data-tour-panel> and can be swapped for <img src="..."> later. -->
+    <section id="tour" style="background: var(--bg); border-top: 1px solid var(--surface-border);">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--yellow);">Product Tour</span>
@@ -1541,7 +1930,8 @@
             </div>
 
             <div class="tour-viewport">
-                                <div class="tour-panel is-active" role="tabpanel" id="tour-panel-plan" aria-labelledby="tour-tab-plan">
+                <!-- Panel 1: Plan Approval Gate -->
+                <div class="tour-panel is-active" role="tabpanel" id="tour-panel-plan" aria-labelledby="tour-tab-plan">
                     <div class="tour-browser">
                         <div class="tour-browser-chrome">
                             <span class="tour-dot" style="background:#ef4444"></span>
@@ -1581,7 +1971,8 @@
                     <p class="tour-caption">Every run pauses here before a single token burns. You see the task DAG, requirement coverage, the exact credit cost, and a hard cap. No surprise bills.</p>
                 </div>
 
-                                <div class="tour-panel" role="tabpanel" id="tour-panel-exec" aria-labelledby="tour-tab-exec">
+                <!-- Panel 2: Live Execution (SSE stream) -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-exec" aria-labelledby="tour-tab-exec">
                     <div class="tour-browser">
                         <div class="tour-browser-chrome">
                             <span class="tour-dot" style="background:#ef4444"></span>
@@ -1625,7 +2016,8 @@
                     <p class="tour-caption">Live SSE stream as agents work. Every tool call, every validation gate, every retry is visible. No black-box agent runs.</p>
                 </div>
 
-                                <div class="tour-panel" role="tabpanel" id="tour-panel-score" aria-labelledby="tour-tab-score">
+                <!-- Panel 3: PR Verdict / Validation Report -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-score" aria-labelledby="tour-tab-score">
                     <div class="tour-browser">
                         <div class="tour-browser-chrome">
                             <span class="tour-dot" style="background:#ef4444"></span>
@@ -1659,7 +2051,8 @@
                     <p class="tour-caption">The 92 on the left is deterministic: build passed (20pts) + 73/73 tests (20pts) + reviewer verdict (20pts) + baseline (40pts) − issues. The "LLM est. 97" on the right is the model's self-rating — shown for comparison, not authority.</p>
                 </div>
 
-                                <div class="tour-panel" role="tabpanel" id="tour-panel-project" aria-labelledby="tour-tab-project">
+                <!-- Panel 4: Project Dashboard -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-project" aria-labelledby="tour-tab-project">
                     <div class="tour-browser">
                         <div class="tour-browser-chrome">
                             <span class="tour-dot" style="background:#ef4444"></span>
@@ -1713,7 +2106,8 @@
                     <p class="tour-caption">One project, many repos, one rollup. Tech debt, score trend, recent runs, staleness signals — all in view before you type the next spec.</p>
                 </div>
 
-                                <div class="tour-panel" role="tabpanel" id="tour-panel-mobile" aria-labelledby="tour-tab-mobile">
+                <!-- Panel 5: Mobile Preview (RN + Expo) -->
+                <div class="tour-panel" role="tabpanel" id="tour-panel-mobile" aria-labelledby="tour-tab-mobile">
                     <div class="tour-browser">
                         <div class="tour-browser-chrome">
                             <span class="tour-dot" style="background:#ef4444"></span>
@@ -1762,7 +2156,8 @@
         </div>
     </section>
 
-        <section id="quality" style="background: #09090e;">
+    <!-- Quality & Testing Pipeline -->
+    <section id="quality" style="background: #09090e;">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--green);">Deterministic Quality</span>
@@ -1795,7 +2190,8 @@
         </div>
     </section>
 
-        <section id="use-cases" style="background: var(--surface);">
+    <!-- Enterprise Chores -->
+    <section id="use-cases" style="background: var(--surface);">
         <div class="container">
             <div class="section-header">
                 <span class="section-label mono" style="color: var(--green);">Enterprise Chores</span>
@@ -1820,7 +2216,8 @@
         </div>
     </section>
 
-        <section id="engine">
+    <!-- The Moat (Terminal UI) -->
+    <section id="engine">
         <div class="container">
             <div class="section-header">
                 <span class="section-label mono" style="color: var(--blue-light);">Under the Hood</span>
@@ -1869,7 +2266,8 @@
         </div>
     </section>
 
-        <section id="pricing">
+    <!-- Pricing -->
+    <section id="pricing">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <h2 class="h2">Simple pricing. Start free, scale up.</h2>
@@ -1888,7 +2286,8 @@
             </div>
 
             <div class="pricing-grid" style="grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); align-items: stretch;">
-                                <div class="price-card">
+                <!-- Prototype (Free) -->
+                <div class="price-card">
                     <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Free</h3>
                     <p class="text-muted">See the whole platform, including the project workspace.</p>
                     <div class="price-amount"><span class="sym">$</span><span class="amt" data-usd="0" data-inr="0">0</span><span>/mo</span></div>
@@ -1903,7 +2302,15 @@
                     <a href="https://dev.executespec.ai" class="btn btn-ghost" target="_blank">Sign Up Free</a>
                 </div>
 
-                                                <div class="price-card popular">
+                <!-- Solo (was Pro — V176 renamed display name; tier_key still PRO) -->
+                <!-- R-314 (Wave 7) — F2 Solo Sam value-anchor. The "20 LOW,
+                     5 HIGH, or 10 Mobile runs" copy reads like math homework
+                     to indie buyers; lead with what the plan *enables* and
+                     keep the credit math as fine-print second line.
+                     2026-05-09: priced + run quota updated to match the
+                     authoritative billing-plans (Solo Monthly USD = $29 /
+                     30 credits / month). -->
+                <div class="price-card popular">
                     <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Solo</h3>
                     <p class="text-muted">Enough to keep a side-project shipping every week.</p>
                     <div class="price-amount"><span class="sym">$</span><span class="amt" data-usd="29" data-inr="2499">29</span><span>/mo</span></div>
@@ -1924,7 +2331,8 @@
                     <a href="https://dev.executespec.ai" class="btn bg-gradient-blue" target="_blank">Get Solo</a>
                 </div>
 
-                                <div class="price-card" style="border-top: 3px solid var(--orange);">
+                <!-- Team -->
+                <div class="price-card" style="border-top: 3px solid var(--orange);">
                     <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Team</h3>
                     <p class="text-muted">For 2-20 engineers. BYOK. Shared everything.</p>
                     <div class="price-amount"><span class="sym">$</span><span class="amt" data-usd="39" data-inr="3300">39</span><span>/seat/mo (min 2)</span></div>
@@ -1945,7 +2353,8 @@
                     <a href="https://dev.executespec.ai" class="btn btn-white" target="_blank">Get Team</a>
                 </div>
 
-                                <div class="price-card">
+                <!-- Enterprise -->
+                <div class="price-card">
                     <h3 style="font-size: 1.5rem; margin-bottom: 8px;">Enterprise</h3>
                     <p class="text-muted">For organisations running specs across the whole codebase.</p>
                     <div class="price-amount" style="font-size: 2rem;">Custom</div>
@@ -1969,7 +2378,11 @@
         </div>
     </section>
 
-        <section id="compare" style="background: var(--bg); border-top: 1px solid var(--surface-border);">
+    <!-- Comparison table — captures "X alternative" search intent by showing the
+         honest diff between ExecuteSpec and the major AI coding tools. Used by
+         Google/Bing for featured-snippet tables; also helps LLM answer engines
+         cite our differentiation accurately. -->
+    <section id="compare" style="background: var(--bg); border-top: 1px solid var(--surface-border);">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--purple);">Honest Comparison</span>
@@ -2135,7 +2548,8 @@
         </div>
     </section>
 
-        <section id="faq">
+    <!-- Frequently Asked Questions (SEO & Agentic Search Target) -->
+    <section id="faq">
         <div class="container">
             <div class="section-header text-center" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--blue-light);">Knowledge Base</span>
@@ -2232,7 +2646,8 @@
         </div>
     </section>
 
-        <section id="contact" style="border-top: 1px solid var(--surface-border);">
+    <!-- Reach Out -->
+    <section id="contact" style="border-top: 1px solid var(--surface-border);">
         <div class="container text-center" style="text-align: center;">
             <div class="section-header">
                 <span class="section-label mono" style="color: var(--orange);">Reach Out</span>
@@ -2240,7 +2655,18 @@
                 <p class="subtitle" style="margin: 0 auto;">Whether you need an enterprise demo, want to discuss custom integrations, or just want to talk about AI coding, we are here.</p>
             </div>
 
-                        <div class="founder-block">
+            <!-- Website refresh deeper (2026-05-06) — humanize.
+                 The page sells a tool that ships AI-written code; the
+                 strongest counter-signal to "this site is AI-generated"
+                 is a real person willing to put their name on it. The
+                 contact section was three icon cards (Email / Book /
+                 LinkedIn) with no human on the page anywhere. Adding
+                 a single founder block above the cards: name, role,
+                 one-line "why this exists." Photo is a placeholder
+                 monogram (real photo asset to drop in later when ops
+                 has it). Left-aligned, italic serif on the why-line
+                 so it reads like a note, not a marketing block. -->
+            <div class="founder-block">
                 <img src="images/navneet.jpg" alt="Navneet Prabhakar, founder of ExecuteSpec" class="founder-block-avatar" loading="lazy" decoding="async">
                 <div class="founder-block-text">
                     <div class="founder-block-name">
@@ -2285,7 +2711,8 @@
         </div>
     </section>
 
-        <section id="terms" style="border-top: 1px solid var(--surface-border);">
+    <!-- Terms of Service -->
+    <section id="terms" style="border-top: 1px solid var(--surface-border);">
         <div class="container">
             <div class="section-header" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--text-muted);">Legal</span>
@@ -2369,7 +2796,8 @@
         </div>
     </section>
 
-        <section id="privacy" style="border-top: 1px solid var(--surface-border);">
+    <!-- Privacy Policy -->
+    <section id="privacy" style="border-top: 1px solid var(--surface-border);">
         <div class="container">
             <div class="section-header" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--text-muted);">Legal</span>
@@ -2456,7 +2884,8 @@
         </div>
     </section>
 
-        <section id="dpa" style="border-top: 1px solid var(--surface-border);">
+    <!-- Data Processing Agreement -->
+    <section id="dpa" style="border-top: 1px solid var(--surface-border);">
         <div class="container">
             <div class="section-header" style="text-align: center;">
                 <span class="section-label mono" style="color: var(--text-muted);">Legal</span>
