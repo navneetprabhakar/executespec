@@ -256,7 +256,33 @@ public class SequentialExecutor {
    * task is the resume target.
    */
   private ResumeAction resolveResumeAction(String runId, String taskId, ResumeRequest resume) {
-    String persisted = readPersistedTaskStatus(runId, taskId);
+    // 2026-05-10 — task-id format normalisation.
+    //
+    // The `taskId` argument is the LOGICAL plan id ("T12") — comes
+    // straight from {@link PlannedTask#id()} when the executor walks
+    // {@code plan.tasks()}. The DB primary key on {@code agent_task},
+    // however, is the FULL prefixed key (runShort + "_" + plannedId,
+    // e.g. "7483896a_T12"). Pre-fix, this method called
+    // {@link #readPersistedTaskStatus(String, String)} with the bare
+    // logical id, which {@code findByRunIdAndTaskId} never matched
+    // against the prefixed primary key — every query returned empty,
+    // every task was treated as non-terminal, every resume re-ran
+    // every task from T1.
+    //
+    // Symptom in production: dev run 7483896a, retry of T12 caused
+    // T8 → T9 → T10 → ... to all flip WORKING + re-execute, burning
+    // ~$5.65 of LLM budget before the operator cancelled. Latent on
+    // {@link com.navneet.executespec.recovery.StartupRunResumer} too —
+    // every JVM-crash recovery has been silently re-running tasks
+    // since the resume path landed.
+    //
+    // Fix: build the full DB key explicitly from {@code runId} +
+    // {@code taskId} before lookup, and accept either format
+    // (prefixed OR bare) on {@code resume.targetTaskId()} so callers
+    // don't have to remember which one this method wants.
+    String runShort = runId != null && runId.length() >= 8 ? runId.substring(0, 8) : runId;
+    String fullKey = runShort + "_" + taskId;
+    String persisted = readPersistedTaskStatus(runId, fullKey);
     boolean isTerminal =
         persisted != null
             && (persisted.equals("COMPLETE")
@@ -265,7 +291,7 @@ public class SequentialExecutor {
                 || persisted.equals("FAILED"));
 
     String target = resume.targetTaskId();
-    boolean isResumeTarget = target != null && target.equals(taskId);
+    boolean isResumeTarget = target != null && (target.equals(taskId) || target.equals(fullKey));
 
     // If a target wasn't given explicitly, treat the FIRST non-terminal task we encounter as
     // the resume target (auto-detect path). Once we've passed the target, everything else runs
