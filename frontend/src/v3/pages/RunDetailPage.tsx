@@ -325,7 +325,13 @@ export default function RunDetailPage() {
   }
 
   return (
-    <div>
+    // 2026-05-10 (mobile audit) — outer scroll container so the stacked
+    // mobile layout (status header / file tree / diff / side panel) flows
+    // beyond the viewport and remains scrollable. The parent v3-main--fill
+    // applies `overflow: hidden` so without this, anything past the first
+    // viewport got clipped on phones. Desktop is unaffected — internal
+    // panes already cap themselves with their own overflow-y: auto rules.
+    <div style={{height: '100%', overflowY: 'auto', WebkitOverflowScrolling: 'touch'}}>
       {/* Back-link breadcrumb (the only one in v3) */}
       {projectId && (
         <Link
@@ -634,12 +640,16 @@ export default function RunDetailPage() {
         className='v3-rundetail-grid'
       >
         <aside
+          // 2026-05-10 (mobile audit) — class-ified maxHeight so a media query
+          // can relax it on the stacked mobile layout (the file tree is no
+          // longer competing for grid row height with the diff editor; capping
+          // it forces a tiny scroll port that hides most files).
+          className='v3-rundetail-files'
           style={{
             background: 'var(--v3-surface)',
             border: '1px solid var(--v3-border)',
             borderRadius: 8,
             padding: 8,
-            maxHeight: 'calc(100vh - 320px)',
             overflowY: 'auto',
           }}
         >
