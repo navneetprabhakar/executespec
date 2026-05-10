@@ -105,9 +105,15 @@ function legacyTabToNew(legacy: string | null): {
     case 'chat':
       return {tab: 'chat'};
     default:
-      // Single-surface retirement (2026-05-06): default landing is
-      // Compose (chat-thread + composer).
-      return {tab: 'compose'};
+      // 2026-05-10 — first-visit landing is `pulse` (project state — last run,
+      // score, debt, activity) instead of `compose` (the textbox composer).
+      // Mobile audit feedback: landing on a giant "What do you want to build?"
+      // textbox on a 375-448px viewport hides the project's actual content;
+      // users couldn't tell what the project was. Pulse leads with the last
+      // run + verdict + score; Compose stays one tap away. EmptyProjectLanding
+      // covers the no-runs-no-repos edge inside Pulse, so the change is safe
+      // for fresh projects too.
+      return {tab: 'pulse'};
   }
 }
 

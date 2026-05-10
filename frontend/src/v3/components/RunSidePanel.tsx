@@ -307,7 +307,7 @@ function TabBar({
       // intrinsic width and the strip scrolls. scrollbar-hide ensures the
       // touch hint stays invisible until the user swipes. Below 720px the
       // tabs auto-shrink to keep four-five visible without scrolling.
-      className='scrollbar-hide'
+      className='scrollbar-hide v3-scroll-fade-x'
       style={{
         display: 'flex',
         borderBottom: '1px solid var(--v3-border)',
@@ -473,11 +473,25 @@ function TaskRow({
   canRetry: boolean;
 }) {
   const [retrying, setRetrying] = useState(false);
-  const tone = TASK_STATUS_TONE[task.status?.toUpperCase()] ?? 'neutral';
+  const upperStatus = task.status?.toUpperCase() ?? '';
+  // 2026-05-10 — soft-completion detection. Backend persists status="COMPLETE"
+  // with `failureReason` populated (from agent_task.last_llm_failure) when the
+  // executor accepts work that bypassed the completeTask handshake but wrote
+  // files + passed the smoke gate (SequentialExecutor:583/613/638). In-memory
+  // the executor knows this is `TaskOutcome.Status.COMPLETED_WITH_WARNING`,
+  // but the DB column is just COMPLETE — so the task chip rendered green
+  // while the failureReason box rendered red right below it. Same task, two
+  // opposite signals → looked like a UI bug. Detect the combination here and
+  // collapse to a single amber/warning treatment so the row reads coherently.
+  const hasSoftCompletionWarning =
+    upperStatus === 'COMPLETE' &&
+    typeof task.failureReason === 'string' &&
+    task.failureReason.trim().length > 0;
+  const tone = hasSoftCompletionWarning ? 'warn' : (TASK_STATUS_TONE[upperStatus] ?? 'neutral');
   const tokens = (task.inputTokens ?? 0) + (task.outputTokens ?? 0);
-  const isFailed = ['FAILED', 'ERROR', 'PARTIAL'].includes(task.status?.toUpperCase() ?? '');
+  const isFailed = ['FAILED', 'ERROR', 'PARTIAL'].includes(upperStatus);
   const isRunning = ['WORKING', 'PLANNING', 'RUNNING', 'EXECUTING', 'REVIEWING'].includes(
-    task.status?.toUpperCase() ?? '',
+    upperStatus,
   );
 
   return (
@@ -523,7 +537,9 @@ function TaskRow({
             }}
           >
             <Pill tone={tone} size='sm' dot={isRunning}>
-              {(task.status ?? 'pending').toLowerCase().replace(/_/g, ' ')}
+              {hasSoftCompletionWarning
+                ? 'completed with warnings'
+                : (task.status ?? 'pending').toLowerCase().replace(/_/g, ' ')}
             </Pill>
             {tokens > 0 && (
               <span
@@ -583,11 +599,20 @@ function TaskRow({
               style={{
                 marginTop: 6,
                 padding: '4px 8px',
-                background: 'rgba(239,68,68,0.10)',
-                border: '1px solid rgba(239,68,68,0.30)',
+                // Soft-completion (status=COMPLETE + failureReason): the worker
+                // bailed without completeTask but the executor accepted the
+                // work because files + smoke passed. Render in amber (matching
+                // the chip) — red implied genuine failure. For real failures
+                // (FAILED / PARTIAL / ERROR) the existing red treatment stays.
+                background: hasSoftCompletionWarning
+                  ? 'color-mix(in srgb, var(--v3-warning) 10%, transparent)'
+                  : 'rgba(239,68,68,0.10)',
+                border: hasSoftCompletionWarning
+                  ? '1px solid color-mix(in srgb, var(--v3-warning) 35%, transparent)'
+                  : '1px solid rgba(239,68,68,0.30)',
                 borderRadius: 4,
                 fontSize: 11,
-                color: '#FCA5A5',
+                color: hasSoftCompletionWarning ? 'var(--v3-warning)' : '#FCA5A5',
                 lineHeight: 1.4,
               }}
             >

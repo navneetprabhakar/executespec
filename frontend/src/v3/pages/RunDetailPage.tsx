@@ -1,9 +1,11 @@
 import {useCallback, useEffect, useMemo, useRef, useState} from 'react';
+import {createPortal} from 'react-dom';
 import {Link, useParams} from 'react-router-dom';
 import SafeDiffEditor from '@/components/runs/SafeDiffEditor';
 import {MonacoSafeMount} from '@/components/runs/MonacoSafeMount';
 import {Editor as MonacoEditor} from '@monaco-editor/react';
 import {FileTree} from '@/components/run/FileTree';
+import {useIsPhone} from '@/hooks/useIsMobile';
 import {
   cancelRun,
   getRun,
@@ -94,6 +96,10 @@ export default function RunDetailPage() {
   // runs, audit finding 2026-05-06).
   const {projectId, runShort} = useParams<{projectId?: string; runShort: string}>();
   const runId = runShort ?? '';
+  // 2026-05-10 mobile redesign — branch the layout below 768px (phone). Above
+  // that we fall through to the existing 3-pane desktop layout. matchMedia is
+  // shared via the canonical hook so we stay in sync with other v3 components.
+  const isPhone = useIsPhone();
 
   // 2026-05-07 — RunDetail's 3-pane grid + diff editor want both
   // `v3-main--wide` (max-width 1600px) and `v3-main--fill` (full
@@ -227,6 +233,14 @@ export default function RunDetailPage() {
   // Files actually changed by the run (ADDED + MODIFIED, with vendored paths filtered out).
   const VENDORED_PATTERN =
     /(^|\/)(node_modules|venv|\.venv|dist|build|target|\.next|\.gradle|__pycache__|\.idea|\.vscode|coverage)\//;
+  // 2026-05-10 — harness fixture filter. WorkspaceInitService writes a small
+  // boilerplate set on every run (`.gitattributes`, `.gitignore`); the
+  // preview/deploy flow occasionally writes a `.dockerignore` too. These
+  // surface as ADDED in the file list and dominated the default view of
+  // small runs ("add one line to README" → 6 changed files, 4 of them
+  // fixtures the user never asked for). Filter them out of the `changed`
+  // scope; the `all` scope still shows everything for completeness.
+  const HARNESS_FIXTURE_PATTERN = /(^|\/)(\.gitattributes|\.gitignore|\.dockerignore)$/i;
   // 2026-05-09 — restore multi-repo browse mode. The 'Changed' default still strips
   // UNCHANGED so the diff stays focused (the May 2 user ask), but on multi-repo
   // project runs the user couldn't browse the rest of the workspace to verify
@@ -240,7 +254,10 @@ export default function RunDetailPage() {
       return filesWithStatus.filter((f) => !VENDORED_PATTERN.test(f.path));
     }
     return filesWithStatus.filter(
-      (f) => (f.status === 'ADDED' || f.status === 'MODIFIED') && !VENDORED_PATTERN.test(f.path),
+      (f) =>
+        (f.status === 'ADDED' || f.status === 'MODIFIED') &&
+        !VENDORED_PATTERN.test(f.path) &&
+        !HARNESS_FIXTURE_PATTERN.test(f.path),
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filesWithStatus, fileScope]);
@@ -321,6 +338,58 @@ export default function RunDetailPage() {
           </Link>
         )}
       </div>
+    );
+  }
+
+  // ── 2026-05-10 mobile redesign ────────────────────────────────────────────
+  //
+  // Below 768px the desktop 3-pane grid (file tree + diff editor + side panel)
+  // collapsed into a vertical stack: chrome (header + CHANGED FILES + diff)
+  // pushed the tab strip ~850px below the fold, so users couldn't see the
+  // run's actual progress without scrolling past harness fixture diffs they
+  // don't care about (`.gitattributes`, `.gitignore`, `.git*ignore` boilerplate).
+  //
+  // New mobile layout:
+  //   1. Slim sticky header (44px): back-link · status pill · truncated title
+  //      · "⋯" button. Tap ⋯ to open an action sheet with Re-prompt / Cancel
+  //      / Open PR (all the same actions today's full header card surfaces).
+  //   2. Files affordance bar (32px): "{N} files changed · view" — tap to
+  //      open a slide-up sheet hosting the file tree + diff editor.
+  //   3. Below that, RunSidePanel takes the remaining viewport (its own
+  //      tab strip + content scroll). RunSidePanel already chooses a sensible
+  //      default tab — Plan for non-terminal, Overview for terminal — so the
+  //      first thing the user sees on opening the page is the live progress
+  //      / final report, NOT a diff of `.gitattributes`.
+  //
+  // No functionality removed: every action (open PR, cancel, re-prompt,
+  // browse files, view diff) is still reachable, just rearranged for the
+  // single-column viewport.
+  if (isPhone) {
+    return (
+      <MobileRunDetail
+        runId={runId}
+        projectId={projectId}
+        detail={detail}
+        report={report}
+        prs={prs}
+        verdict={verdict}
+        loading={loading}
+        diff={diff}
+        diffLoading={diffLoading}
+        active={active}
+        setActive={setActive}
+        changedFiles={changedFiles}
+        filesWithStatus={filesWithStatus}
+        fileScope={fileScope}
+        setFileScope={setFileScope}
+        viewerMode={viewerMode}
+        setViewerMode={setViewerMode}
+        onRefetch={() => {
+          getRun(runId)
+            .then((d) => setDetail(d))
+            .catch(() => undefined);
+        }}
+      />
     );
   }
 
@@ -986,6 +1055,832 @@ export default function RunDetailPage() {
           }
         }
       `}</style>
+    </div>
+  );
+}
+
+// ── 2026-05-10 mobile redesign — `MobileRunDetail` ────────────────────────────
+//
+// Phone-only (<768px) layout for `/runs/{id}`. Replaces the desktop 3-pane
+// grid with a flat "header / files-bar / tabs+content" stack designed for a
+// single-column viewport with high tap-target density.
+//
+// Reuses every component the desktop layout uses (RunSidePanel for tabs,
+// FileTree for the file list, SafeDiffEditor / MonacoEditor for diffs) so
+// no functionality is removed — just rearranged to put live progress (the
+// thing a mobile user actually opens this page to check) above the fold.
+//
+// IA decisions:
+//   - Status / title / actions live in a sticky 44px top bar. Re-prompt /
+//     Cancel / Open PR are hidden behind a `⋯` menu so the bar can fit a
+//     readable run title in the remaining space.
+//   - Files affordance is a one-line bar showing the changed-file count
+//     with a "view" tap target that opens a portaled bottom-sheet hosting
+//     the file tree + diff (full-screen on phone). Closes via X / scrim /
+//     ESC.
+//   - Tabs (RunSidePanel) fill the rest of the viewport. Their default-tab
+//     logic — Plan for non-terminal, Overview for terminal — already does
+//     the right thing for a mobile user.
+type MobileRunDetailProps = {
+  runId: string;
+  projectId: string | undefined;
+  detail: RunDetail | null;
+  report: ValidationReportData | null;
+  prs: PrSummary[];
+  verdict: V3Verdict | null;
+  loading: boolean;
+  diff: FileDiffPayload | null;
+  diffLoading: boolean;
+  active: string | null;
+  setActive: (path: string | null) => void;
+  changedFiles: FileWithStatus[];
+  filesWithStatus: FileWithStatus[] | null;
+  fileScope: 'changed' | 'all';
+  setFileScope: (s: 'changed' | 'all') => void;
+  viewerMode: 'diff' | 'full';
+  setViewerMode: (m: 'diff' | 'full') => void;
+  onRefetch: () => void;
+};
+
+function MobileRunDetail({
+  runId,
+  projectId,
+  detail,
+  report,
+  prs,
+  verdict,
+  loading,
+  diff,
+  diffLoading,
+  active,
+  setActive,
+  changedFiles,
+  filesWithStatus,
+  fileScope,
+  setFileScope,
+  viewerMode,
+  setViewerMode,
+  onRefetch,
+}: MobileRunDetailProps) {
+  const [actionsOpen, setActionsOpen] = useState(false);
+  const [filesOpen, setFilesOpen] = useState(false);
+  const [cancelConfirmOpen, setCancelConfirmOpen] = useState(false);
+
+  // Lock body scroll while sheets are open so the page underneath doesn't
+  // rubber-band on iOS.
+  useEffect(() => {
+    if (!actionsOpen && !filesOpen && !cancelConfirmOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [actionsOpen, filesOpen, cancelConfirmOpen]);
+
+  // ESC closes the topmost sheet.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (cancelConfirmOpen) setCancelConfirmOpen(false);
+      else if (actionsOpen) setActionsOpen(false);
+      else if (filesOpen) setFilesOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [actionsOpen, filesOpen, cancelConfirmOpen]);
+
+  if (loading || !detail) {
+    return (
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--v3-text-subtle)',
+          fontSize: 13,
+        }}
+      >
+        Loading run…
+      </div>
+    );
+  }
+
+  const TERMINAL = new Set(['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED', 'ABORTED']);
+  const isTerminal = TERMINAL.has(detail.status);
+  const headerTone =
+    verdict === 'READY'
+      ? 'ok'
+      : verdict === 'NEEDS_REVIEW'
+        ? 'warn'
+        : verdict === 'FAILED'
+          ? 'err'
+          : 'neutral';
+  const statusLabel = verdict
+    ? VERDICT_LABELS[verdict]
+    : (STATUS_LABELS[detail.status] ?? detail.status);
+  const fileCount = changedFiles.length;
+  const legacyPrUrl = detail.githubPrUrl;
+  const hasPr = prs.length > 0 || !!legacyPrUrl;
+
+  const handleCancel = async () => {
+    try {
+      await cancelRun(runId);
+      setCancelConfirmOpen(false);
+      setActionsOpen(false);
+      onRefetch();
+    } catch {
+      // Surface in toast normally; for now swallow and let SSE/polling refresh.
+      setCancelConfirmOpen(false);
+    }
+  };
+
+  return (
+    <div
+      style={{
+        height: '100%',
+        display: 'flex',
+        flexDirection: 'column',
+        overflow: 'hidden',
+      }}
+    >
+      {/* Sticky top bar — back link + status + truncated title + ⋯ menu */}
+      <header
+        style={{
+          flexShrink: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 12px',
+          background: 'var(--v3-surface)',
+          borderBottom: '1px solid var(--v3-border)',
+          minHeight: 44,
+        }}
+      >
+        {projectId && (
+          <Link
+            to={`/projects/${projectId}`}
+            aria-label='Back to project'
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              minWidth: 32,
+              minHeight: 32,
+              padding: '0 4px',
+              color: 'var(--v3-text-muted)',
+              textDecoration: 'none',
+              fontSize: 18,
+              flexShrink: 0,
+            }}
+          >
+            ←
+          </Link>
+        )}
+        <Pill tone={headerTone} size='sm'>
+          {statusLabel}
+        </Pill>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            fontSize: 13,
+            fontWeight: 600,
+            color: 'var(--v3-text)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+          title={detail.runTitle ?? 'Untitled run'}
+        >
+          {detail.runTitle ?? 'Untitled run'}
+        </span>
+        <button
+          type='button'
+          onClick={() => setActionsOpen(true)}
+          aria-label='Run actions'
+          style={{
+            minWidth: 36,
+            minHeight: 36,
+            padding: 0,
+            background: 'transparent',
+            border: '1px solid var(--v3-border)',
+            borderRadius: 6,
+            color: 'var(--v3-text)',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            fontSize: 18,
+            lineHeight: 1,
+            flexShrink: 0,
+          }}
+        >
+          ⋯
+        </button>
+      </header>
+
+      {/* Compact files affordance — one-line bar; tap to expand the file
+          tree + diff in a bottom sheet. Hidden when no files yet (e.g.
+          run is still in PLANNING and the worker hasn't cloned). */}
+      {fileCount > 0 && (
+        <button
+          type='button'
+          onClick={() => setFilesOpen(true)}
+          aria-label={`Open file viewer (${fileCount} changed files)`}
+          style={{
+            flexShrink: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            padding: '8px 14px',
+            background: 'var(--v3-bg)',
+            borderBottom: '1px solid var(--v3-border)',
+            color: 'var(--v3-text-muted)',
+            fontSize: 12,
+            fontFamily: 'inherit',
+            cursor: 'pointer',
+            border: 'none',
+            borderRadius: 0,
+            width: '100%',
+            textAlign: 'left',
+          }}
+        >
+          <span>
+            <span style={{color: 'var(--v3-text)', fontWeight: 600}}>{fileCount}</span> changed file
+            {fileCount === 1 ? '' : 's'}
+          </span>
+          <span style={{color: 'var(--v3-brand)', fontWeight: 600}}>View →</span>
+        </button>
+      )}
+
+      {/* Tabs + content fill the rest. RunSidePanel manages its own tab
+          state + content scroll. */}
+      <div style={{flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column'}}>
+        <RunSidePanel runId={runId} detail={detail} onRefetch={onRefetch} />
+      </div>
+
+      {/* Action sheet — slide-up from bottom, contains every action that
+          used to live in the desktop header card. */}
+      {actionsOpen &&
+        createPortal(
+          <>
+            <div
+              onClick={() => setActionsOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.7)',
+                zIndex: 70,
+                backdropFilter: 'blur(2px)',
+                WebkitBackdropFilter: 'blur(2px)',
+              }}
+              aria-hidden='true'
+            />
+            <div
+              role='dialog'
+              aria-label='Run actions'
+              style={{
+                position: 'fixed',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                background: 'var(--v3-surface)',
+                borderTopLeftRadius: 14,
+                borderTopRightRadius: 14,
+                borderTop: '1px solid var(--v3-border)',
+                boxShadow: '0 -8px 24px rgba(0,0,0,0.6)',
+                zIndex: 71,
+                padding: 8,
+                paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 4,
+                  borderRadius: 999,
+                  background: 'var(--v3-border-strong)',
+                  margin: '6px auto 10px',
+                }}
+                aria-hidden='true'
+              />
+              {hasPr && (
+                <a
+                  href={prs[0]?.prUrl ?? legacyPrUrl ?? '#'}
+                  target='_blank'
+                  rel='noreferrer'
+                  onClick={() => setActionsOpen(false)}
+                  style={{
+                    display: 'block',
+                    padding: '13px 16px',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: 'var(--v3-text-on-brand)',
+                    background: 'var(--v3-brand)',
+                    borderRadius: 8,
+                    textDecoration: 'none',
+                    textAlign: 'center',
+                  }}
+                >
+                  Open PR ↗
+                </a>
+              )}
+              <button
+                type='button'
+                onClick={() => {
+                  setActionsOpen(false);
+                  if (projectId) {
+                    window.location.href = `/projects/${projectId}?tab=compose&fork=${runId}`;
+                  }
+                }}
+                style={{
+                  padding: '13px 16px',
+                  fontSize: 14,
+                  fontWeight: 500,
+                  color: 'var(--v3-text)',
+                  background: 'transparent',
+                  border: 'none',
+                  borderRadius: 8,
+                  textAlign: 'left',
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Re-prompt this run
+                <span
+                  style={{
+                    display: 'block',
+                    fontSize: 11,
+                    color: 'var(--v3-text-subtle)',
+                    marginTop: 2,
+                    fontWeight: 400,
+                  }}
+                >
+                  Open the composer pre-filled with this run's spec.
+                </span>
+              </button>
+              {!isTerminal && (
+                <button
+                  type='button'
+                  onClick={() => {
+                    setActionsOpen(false);
+                    setCancelConfirmOpen(true);
+                  }}
+                  style={{
+                    padding: '13px 16px',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: 'var(--v3-error)',
+                    background: 'transparent',
+                    border: 'none',
+                    borderRadius: 8,
+                    textAlign: 'left',
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Cancel run
+                </button>
+              )}
+              <button
+                type='button'
+                onClick={() => setActionsOpen(false)}
+                style={{
+                  marginTop: 6,
+                  padding: '12px 16px',
+                  fontSize: 13,
+                  color: 'var(--v3-text-muted)',
+                  background: 'var(--v3-surface-elevated)',
+                  border: 'none',
+                  borderRadius: 8,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {/* Cancel confirmation — destructive action gated behind a real
+          confirm step (was missing on desktop too; mobile gets it first
+          because misfires are far more likely on a phone). */}
+      {cancelConfirmOpen &&
+        createPortal(
+          <>
+            <div
+              onClick={() => setCancelConfirmOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.75)',
+                zIndex: 80,
+                backdropFilter: 'blur(2px)',
+                WebkitBackdropFilter: 'blur(2px)',
+              }}
+              aria-hidden='true'
+            />
+            <div
+              role='alertdialog'
+              aria-label='Cancel this run?'
+              style={{
+                position: 'fixed',
+                left: '50%',
+                top: '50%',
+                transform: 'translate(-50%, -50%)',
+                width: 'min(92vw, 360px)',
+                background: 'var(--v3-surface)',
+                border: '1px solid var(--v3-border)',
+                borderRadius: 12,
+                padding: 18,
+                zIndex: 81,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 12,
+              }}
+            >
+              <h2 style={{margin: 0, fontSize: 16, color: 'var(--v3-text)'}}>Cancel this run?</h2>
+              <p
+                style={{
+                  margin: 0,
+                  fontSize: 13,
+                  color: 'var(--v3-text-muted)',
+                  lineHeight: 1.5,
+                }}
+              >
+                The worker will stop on its next iteration boundary. Files written so far stay in
+                the workspace; you can re-prompt or open a fresh run later.
+              </p>
+              <div style={{display: 'flex', gap: 8, marginTop: 4}}>
+                <button
+                  type='button'
+                  onClick={() => setCancelConfirmOpen(false)}
+                  style={{
+                    flex: 1,
+                    padding: '11px 12px',
+                    fontSize: 13,
+                    fontWeight: 500,
+                    color: 'var(--v3-text)',
+                    background: 'var(--v3-surface-elevated)',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Keep running
+                </button>
+                <button
+                  type='button'
+                  onClick={handleCancel}
+                  style={{
+                    flex: 1,
+                    padding: '11px 12px',
+                    fontSize: 13,
+                    fontWeight: 600,
+                    color: '#fff',
+                    background: 'var(--v3-error)',
+                    border: 'none',
+                    borderRadius: 8,
+                    cursor: 'pointer',
+                    fontFamily: 'inherit',
+                  }}
+                >
+                  Cancel run
+                </button>
+              </div>
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {/* Files sheet — full-height bottom sheet with file tree + diff. */}
+      {filesOpen &&
+        createPortal(
+          <>
+            <div
+              onClick={() => setFilesOpen(false)}
+              style={{
+                position: 'fixed',
+                inset: 0,
+                background: 'rgba(0,0,0,0.7)',
+                zIndex: 70,
+                backdropFilter: 'blur(2px)',
+                WebkitBackdropFilter: 'blur(2px)',
+              }}
+              aria-hidden='true'
+            />
+            <div
+              role='dialog'
+              aria-label='Changed files'
+              style={{
+                position: 'fixed',
+                left: 0,
+                right: 0,
+                bottom: 0,
+                top: 'env(safe-area-inset-top)',
+                background: 'var(--v3-bg)',
+                zIndex: 71,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+              }}
+            >
+              <div
+                style={{
+                  flexShrink: 0,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 12px',
+                  borderBottom: '1px solid var(--v3-border)',
+                  background: 'var(--v3-surface)',
+                }}
+              >
+                <span
+                  style={{
+                    fontSize: 12,
+                    fontWeight: 600,
+                    letterSpacing: 0.4,
+                    textTransform: 'uppercase',
+                    color: 'var(--v3-text-subtle)',
+                  }}
+                >
+                  {fileScope === 'changed' ? 'Changed files' : 'All files'}{' '}
+                  {filesWithStatus ? `(${changedFiles.length})` : ''}
+                </span>
+                {filesWithStatus && (
+                  <div
+                    role='radiogroup'
+                    aria-label='File scope'
+                    style={{
+                      display: 'inline-flex',
+                      border: '1px solid var(--v3-border)',
+                      borderRadius: 999,
+                      overflow: 'hidden',
+                      background: 'var(--v3-bg)',
+                    }}
+                  >
+                    {(['changed', 'all'] as const).map((s) => {
+                      const selected = fileScope === s;
+                      return (
+                        <button
+                          key={s}
+                          type='button'
+                          role='radio'
+                          aria-checked={selected}
+                          onClick={() => setFileScope(s)}
+                          style={{
+                            padding: '4px 10px',
+                            fontSize: 11,
+                            fontFamily: 'inherit',
+                            textTransform: 'uppercase',
+                            letterSpacing: 0.4,
+                            background: selected ? 'var(--v3-brand)' : 'transparent',
+                            color: selected
+                              ? 'var(--v3-text-on-brand, #fff)'
+                              : 'var(--v3-text-muted)',
+                            border: 0,
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {s}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+                <button
+                  type='button'
+                  onClick={() => setFilesOpen(false)}
+                  aria-label='Close files'
+                  style={{
+                    minWidth: 36,
+                    minHeight: 36,
+                    padding: 0,
+                    background: 'transparent',
+                    border: '1px solid var(--v3-border)',
+                    borderRadius: 6,
+                    color: 'var(--v3-text)',
+                    cursor: 'pointer',
+                    fontSize: 16,
+                    lineHeight: 1,
+                    marginLeft: 8,
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              {/* Inside the sheet: file tree on top, diff editor below. The
+                  desktop layout has them side-by-side; on phone we stack
+                  vertically with the tree taking ~40% and diff the rest.
+                  Tree is scrollable; tapping a file flips the diff. */}
+              <div
+                style={{
+                  flexShrink: 0,
+                  maxHeight: '40vh',
+                  overflowY: 'auto',
+                  padding: 8,
+                  background: 'var(--v3-surface)',
+                  borderBottom: '1px solid var(--v3-border)',
+                }}
+              >
+                {filesWithStatus && changedFiles.length === 0 && (
+                  <div style={{padding: 8, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+                    {fileScope === 'changed'
+                      ? 'No changes detected. Switch to All to browse.'
+                      : 'Workspace empty.'}
+                  </div>
+                )}
+                {filesWithStatus && (
+                  <FileTree
+                    files={changedFiles.map((f) => ({
+                      path: f.path,
+                      isDirectory: false,
+                      status: f.status,
+                    }))}
+                    onSelectFile={(p) => setActive(p)}
+                    selectedFile={active ?? undefined}
+                  />
+                )}
+              </div>
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  background: 'var(--v3-bg)',
+                }}
+              >
+                {active && diff && (
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      padding: '6px 12px',
+                      background: 'var(--v3-surface)',
+                      borderBottom: '1px solid var(--v3-border)',
+                      fontSize: 11,
+                      color: 'var(--v3-text-muted)',
+                      fontFamily: 'var(--v3-font-mono)',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <span style={{flex: 1, overflow: 'hidden', textOverflow: 'ellipsis'}}>
+                      {active}
+                    </span>
+                    <Pill tone={diff.status === 'ADDED' ? 'ok' : 'warn'} size='sm'>
+                      {diff.status === 'ADDED' ? 'New' : 'Modified'}
+                    </Pill>
+                    <div
+                      role='radiogroup'
+                      aria-label='Viewer'
+                      style={{
+                        display: 'inline-flex',
+                        border: '1px solid var(--v3-border)',
+                        borderRadius: 999,
+                        overflow: 'hidden',
+                      }}
+                    >
+                      {(['diff', 'full'] as const).map((m) => {
+                        const selected = viewerMode === m;
+                        return (
+                          <button
+                            key={m}
+                            type='button'
+                            role='radio'
+                            aria-checked={selected}
+                            onClick={() => setViewerMode(m)}
+                            style={{
+                              padding: '3px 8px',
+                              fontSize: 10,
+                              textTransform: 'uppercase',
+                              background: selected ? 'var(--v3-brand)' : 'transparent',
+                              color: selected
+                                ? 'var(--v3-text-on-brand, #fff)'
+                                : 'var(--v3-text-muted)',
+                              border: 0,
+                              cursor: 'pointer',
+                              fontWeight: 600,
+                              fontFamily: 'inherit',
+                            }}
+                          >
+                            {m}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                <div style={{flex: 1, minHeight: 0, position: 'relative'}}>
+                  {diffLoading && (
+                    <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+                      Loading diff…
+                    </div>
+                  )}
+                  {!diffLoading && !active && (
+                    <div style={{padding: 16, fontSize: 12, color: 'var(--v3-text-subtle)'}}>
+                      Pick a file from the list above.
+                    </div>
+                  )}
+                  {!diffLoading && active && diff && (
+                    <MonacoSafeMount
+                      fallback={
+                        <div
+                          style={{
+                            padding: 16,
+                            fontSize: 12,
+                            color: 'var(--v3-text-subtle)',
+                          }}
+                        >
+                          Diff viewer hit a transient render error.
+                        </div>
+                      }
+                    >
+                      <div style={{position: 'absolute', inset: 0}}>
+                        {viewerMode === 'diff' ? (
+                          <SafeDiffEditor
+                            language={getMonacoLanguage(diff.path)}
+                            original={diff.base}
+                            modified={diff.head}
+                            theme={GEIST_THEME_NAME}
+                            options={{
+                              readOnly: true,
+                              hideUnchangedRegions: {
+                                enabled: true,
+                                contextLineCount: 3,
+                                minimumLineCount: 3,
+                                revealLineCount: 20,
+                              },
+                              renderSideBySide: false,
+                              minimap: {enabled: false},
+                              scrollBeyondLastLine: false,
+                              fontSize: 11,
+                              lineNumbers: 'off',
+                              folding: false,
+                              wordWrap: 'on',
+                              renderLineHighlight: 'line',
+                              contextmenu: false,
+                              domReadOnly: true,
+                              cursorStyle: 'line-thin',
+                              scrollbar: {
+                                verticalScrollbarSize: 6,
+                                horizontalScrollbarSize: 6,
+                              },
+                              overviewRulerLanes: 0,
+                              hideCursorInOverviewRuler: true,
+                              overviewRulerBorder: false,
+                              padding: {top: 6},
+                            }}
+                          />
+                        ) : (
+                          <MonacoEditor
+                            language={getMonacoLanguage(diff.path)}
+                            value={diff.head}
+                            theme={GEIST_THEME_NAME}
+                            options={{
+                              readOnly: true,
+                              minimap: {enabled: false},
+                              scrollBeyondLastLine: false,
+                              fontSize: 11,
+                              lineNumbers: 'off',
+                              folding: false,
+                              wordWrap: 'on',
+                              renderLineHighlight: 'line',
+                              contextmenu: false,
+                              domReadOnly: true,
+                              cursorStyle: 'line-thin',
+                              scrollbar: {
+                                verticalScrollbarSize: 6,
+                                horizontalScrollbarSize: 6,
+                              },
+                              overviewRulerLanes: 0,
+                              hideCursorInOverviewRuler: true,
+                              overviewRulerBorder: false,
+                              padding: {top: 6},
+                            }}
+                          />
+                        )}
+                      </div>
+                    </MonacoSafeMount>
+                  )}
+                </div>
+              </div>
+            </div>
+          </>,
+          document.body,
+        )}
+
+      {/* report is referenced for future widgets (signal chips, score
+          ring) but we don't want eslint to flag it as unused. */}
+      <span hidden>{report ? report.verifiedScore : null}</span>
     </div>
   );
 }

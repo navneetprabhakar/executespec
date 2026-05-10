@@ -497,17 +497,22 @@ public class WorkerAgent {
         // and emitted "Excellent! The implementation is complete and correct. ## Summary…" but
         // never invoked completeTask. The model effectively produced a status report instead of
         // closing the loop. Cost: full task counted as STOPPED_WITHOUT_COMPLETE → soft-PARTIAL.
-        // Lever C fires once per task. Conditions: text-only response + writes happened + iter
-        // past 0.5×maxIter + assistant text contains a "summary/complete/done" keyword. We
-        // append the assistant turn AND a UserMessage telling the model to call completeTask
-        // with the summary as completionNotes (or list the next concrete edit if it isn't
-        // actually done). Then continue the loop — the model gets one more iter to do the
-        // right thing. STOPPED_WITHOUT_COMPLETE still kicks in if the next iter also returns
-        // text-only (we don't fire the nudge twice).
-        if (!completionNudgeFired
-            && totalWriteCalls > 0
-            && iter >= Math.max(3, (int) Math.round(maxIter * 0.5))
-            && looksLikeSummary(assistantText)) {
+        //
+        // 2026-05-10 update — dropped the original `iter ≥ 0.5×maxIter` threshold gate. Dev run
+        // 61c9fffa T12 + T18 reproduced the same failure mode at iter 31/150 and iter 18/150
+        // (both well below the 75-iter threshold), and the soft-completion gate accepted the
+        // bypassed work. The threshold was a defensive heuristic to "let the model do real
+        // work first" — but `totalWriteCalls > 0` already gates that signal correctly. The
+        // iter check just blocked early-bailout cases without adding safety.
+        //
+        // Lever C now fires once per task on three conditions: text-only response + writes
+        // already happened + assistant text matches a summary keyword. We append the assistant
+        // turn AND a UserMessage telling the model to call completeTask with the summary as
+        // completionNotes (or list the next concrete edit if it isn't actually done). Then
+        // continue the loop — the model gets one more iter to do the right thing.
+        // STOPPED_WITHOUT_COMPLETE still kicks in if the next iter also returns text-only
+        // (we don't fire the nudge twice).
+        if (!completionNudgeFired && totalWriteCalls > 0 && looksLikeSummary(assistantText)) {
           completionNudgeFired = true;
           log.info(
               "WorkerAgent LEVER_C completionNudge run={} task={} iter={} writes={}"
@@ -1138,9 +1143,35 @@ public class WorkerAgent {
     return truncate(firstLine.strip(), 120);
   }
 
-  private static String truncate(String s, int max) {
+  /**
+   * 2026-05-10 — surrogate-pair-safe truncation. Caller-visible regression: in the LiveLog,
+   * supplementary-plane emoji from the LLM's assistant text (💭 📝 💻 🔨 📦 🧠 💸 — 4-byte UTF-8,
+   * encoded in Java as a high+low surrogate pair across two {@code char} units) would render as the
+   * Unicode replacement character {@code �} (visually {@code �}) when the LLM happened to place an
+   * emoji exactly at the truncation boundary. Root cause: {@link String#length()} counts UTF-16
+   * code units, not codepoints, and the old {@code substring(0, max - 1)} happily cut between the
+   * high surrogate and its low surrogate, leaving an unpaired high surrogate that the browser
+   * couldn't decode.
+   *
+   * <p>Fix: when the cut point lands inside a surrogate pair (high at {@code end-1}, low at {@code
+   * end}), back up one {@code char} so we discard both halves of the pair before appending the
+   * ellipsis. Single-{@code char} BMP characters (incl. variation-selector compounds like {@code
+   * ✏️} or {@code ⚠️}) are unaffected — those don't use surrogate pairs.
+   *
+   * <p>Visibility is package-private so {@link
+   * com.navneet.executespec.agent.WorkerAgentTruncateTest} can pin the regression directly without
+   * reflection.
+   */
+  static String truncate(String s, int max) {
     if (s == null) return "";
-    return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    if (s.length() <= max) return s;
+    int end = max - 1;
+    if (end > 0
+        && Character.isHighSurrogate(s.charAt(end - 1))
+        && Character.isLowSurrogate(s.charAt(end))) {
+      end -= 1;
+    }
+    return s.substring(0, end) + "…";
   }
 
   /**
