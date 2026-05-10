@@ -85,7 +85,8 @@ function DefaultFallback({error, onReset}: {error: Error; onReset: () => void}) 
         padding: 32,
         color: '#ECEEF2',
         background: 'transparent',
-        fontFamily: '"Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
+        fontFamily:
+          '"DM Sans", "Geist Sans", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif',
       }}
     >
       <div style={{textAlign: 'center', maxWidth: 480}}>
