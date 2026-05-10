@@ -459,6 +459,7 @@ public class SequentialExecutor {
             .maxTokensPerCall(cfg.maxTokens)
             .stagnationWarnAfter(cfg.stagnationWarnAfter)
             .stagnationForceAfter(cfg.stagnationForceAfter)
+            .wallClockSeconds(cfg.wallClockSeconds)
             .build();
     // Resume-aware dispatch — when resumeFrom is non-null, the worker rebuilds history from the
     // saved snapshot and resumes the iteration loop from snapshot.iteration() + 1. Snapshots
@@ -473,6 +474,7 @@ public class SequentialExecutor {
           case COMPLETED -> "✅";
           case COMPLETED_BY_STAGNATION -> "⏱️ ";
           case ITERATION_LIMIT_EXCEEDED -> "⚠️ ";
+          case WALL_CLOCK_EXCEEDED -> "⏰";
           case STOPPED_WITHOUT_COMPLETE -> "⚠️ ";
           case BUDGET_EXCEEDED -> "💸";
           case ERROR -> "❌";
@@ -714,6 +716,7 @@ public class SequentialExecutor {
                 .maxTokensPerCall(cfg.maxTokens)
                 .stagnationWarnAfter(cfg.stagnationWarnAfter)
                 .stagnationForceAfter(cfg.stagnationForceAfter)
+                .wallClockSeconds(cfg.wallClockSeconds)
                 .requireBuildVerification(true)
                 .build());
 
@@ -820,6 +823,7 @@ public class SequentialExecutor {
                   .maxTokensPerCall(cfg.maxTokens)
                   .stagnationWarnAfter(cfg.stagnationWarnAfter)
                   .stagnationForceAfter(cfg.stagnationForceAfter)
+                  .wallClockSeconds(cfg.wallClockSeconds)
                   .requireBuildVerification(true)
                   .build());
       int totalToolCalls2 = totalToolCalls + retry2.toolCallsDispatched();
@@ -928,7 +932,8 @@ public class SequentialExecutor {
       int maxIter,
       int maxTokens,
       int stagnationWarnAfter,
-      int stagnationForceAfter) {}
+      int stagnationForceAfter,
+      int wallClockSeconds) {}
 
   private TierConfig tierConfigFor(
       PlannedTask.Complexity complexity, String runProvider, String runModel, boolean projectRun) {
@@ -937,6 +942,7 @@ public class SequentialExecutor {
     int maxTokens;
     int stagnationWarnAfter;
     int stagnationForceAfter;
+    int wallClockSeconds;
     switch (complexity == null ? PlannedTask.Complexity.MEDIUM : complexity) {
         // Caps bumped again 2026-04-19: 20/30/45 → 30/50/75. Observed on
         // the RN Calorie Tracker run (0a0201c7) — MEDIUM scaffold task
@@ -965,6 +971,7 @@ public class SequentialExecutor {
         maxTokens = 4096;
         stagnationWarnAfter = 8; // matches WorkerAgent.STAGNATION_WARN_AFTER_N default
         stagnationForceAfter = 12;
+        wallClockSeconds = 15 * 60; // 15 min — small file edit, mostly LLM-call latency
       }
       case HIGH -> {
         tier = AgentTier.PLANNING;
@@ -984,19 +991,44 @@ public class SequentialExecutor {
         // That's <22% of the 120-iter budget — safe headroom.
         stagnationWarnAfter = 18;
         stagnationForceAfter = 26;
+        wallClockSeconds = 45 * 60; // 45 min
       }
       default -> {
         tier = AgentTier.WORKHORSE;
-        maxIter = 50;
+        // 2026-05-10 — MEDIUM iter cap 50 → 75. Dev run a59f9798/T12 ("write unit tests for
+        // 3 mobile media.service methods") wrote 92 files at 0.92 writes/iter and hit the
+        // project-run 100-iter cap (50 × 2) mid-test-suite. The worker was making genuine
+        // progress; iter cap killed it. 75 × 2 = 150 gives test-heavy MEDIUM tasks ~50%
+        // more headroom; cost cap still backstops runaway.
+        maxIter = 75;
         maxTokens = 8192;
         stagnationWarnAfter = 12;
         stagnationForceAfter = 20;
+        wallClockSeconds = 25 * 60; // 25 min
       }
     }
     // Project runs (Launches on an existing cloned codebase) need more
     // iterations: the worker has to readFile / searchFiles the real repo
     // before it can write, so 2× the fresh-scratch cap is the default.
-    if (projectRun) maxIter *= 2;
+    //
+    // 2026-05-10 — wall-clock cap also doubles for project runs (same rationale: more files
+    // to read before the first write). Stagnation thresholds DO NOT double — they're
+    // measuring "consecutive non-write iterations" which is a behavioural signal, not a
+    // budget; the underlying LLM doesn't need 2× more reads to recognise "I'm stuck."
+    //
+    // 2026-05-10 — LOW + MEDIUM project stagnation force bumps: 12 → 18 (LOW) and 20 → 24
+    // (MEDIUM) ONLY for project runs. Dev run a59f9798/T9 force-terminated at 12 reads on
+    // a LOW project task that needed to readFile a real codebase before writing the audit
+    // fix; the static 12 is calibrated for fresh-scratch where the workspace is empty.
+    if (projectRun) {
+      maxIter *= 2;
+      wallClockSeconds *= 2;
+      // Bump only the project-run force threshold; warn stays the same so the model still
+      // gets the "PROGRESS CHECK" nudge at the same point.
+      if (complexity == PlannedTask.Complexity.LOW) stagnationForceAfter = 18;
+      else if (complexity == null || complexity == PlannedTask.Complexity.MEDIUM)
+        stagnationForceAfter = 24;
+    }
     // 2026-05-08 — OpenAI 0.7× cap LIFTED. Original premise (2026-04-26): "OpenAI is markedly
     // chattier per iter than Anthropic (Spring AI re-ships the FULL conversation history on
     // every tool call, no prompt cache); observed 1.45M input tokens on HIGH library spec vs
@@ -1023,7 +1055,8 @@ public class SequentialExecutor {
           maxIter,
           maxTokens,
           stagnationWarnAfter,
-          stagnationForceAfter);
+          stagnationForceAfter,
+          wallClockSeconds);
     } catch (Exception e) {
       log.warn(
           "tierConfigFor: resolve failed for provider={} tier={} — using run-level {} / {}",
@@ -1032,7 +1065,13 @@ public class SequentialExecutor {
           runProvider,
           runModel);
       return new TierConfig(
-          runProvider, runModel, maxIter, maxTokens, stagnationWarnAfter, stagnationForceAfter);
+          runProvider,
+          runModel,
+          maxIter,
+          maxTokens,
+          stagnationWarnAfter,
+          stagnationForceAfter,
+          wallClockSeconds);
     }
   }
 
@@ -1155,6 +1194,14 @@ public class SequentialExecutor {
               + " iters, "
               + r.toolCallsDispatched()
               + " tool calls). Worker did not call completeTask.";
+      case WALL_CLOCK_EXCEEDED ->
+          "Wall-clock cap exceeded ("
+              + r.iterations()
+              + " iters, "
+              + r.toolCallsDispatched()
+              + " tool calls, "
+              + (r.totalLatencyMs() / 1000)
+              + "s elapsed). Worker did not call completeTask.";
       case ERROR ->
           "Worker threw unrecoverable exception"
               + (tail != null && !tail.isBlank() ? ": " + tail : "");

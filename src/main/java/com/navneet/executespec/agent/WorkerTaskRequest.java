@@ -42,6 +42,15 @@ import lombok.Builder;
  *     whose build is currently failing — without this the reviewer often calls completeTask after a
  *     few exploratory edits without re-running the build, leaving the run in
  *     PARTIAL/FINAL_BUILD_FAILED. Mirrors the {@code requireTestVerification} pattern.
+ * @param wallClockSeconds 2026-05-10 — per-task wall-clock budget in seconds. When the worker has
+ *     been running for longer than this, the loop terminates with {@link
+ *     WorkerResult.Outcome#WALL_CLOCK_EXCEEDED} on the next iteration boundary (LLM calls are not
+ *     interrupted mid-flight). Acts as a sibling of {@link #maxIterations()} — whichever fires
+ *     first wins. Protects against (a) verbose-model bias where a model uses too many "thin"
+ *     iterations per write and (b) genuine long-tail work where the iter cap kills a worker that's
+ *     making real progress (see dev run a59f9798 T12: 100 iters, 92 files written, hit cap mid-test
+ *     suite). Null/0 leaves wall-clock unbounded — only the iter cap + stagnation watchdog + cost
+ *     cap apply.
  */
 @Builder
 public record WorkerTaskRequest(
@@ -56,7 +65,8 @@ public record WorkerTaskRequest(
     Integer stagnationWarnAfter,
     Integer stagnationForceAfter,
     Boolean requireTestVerification,
-    Boolean requireBuildVerification) {
+    Boolean requireBuildVerification,
+    Integer wallClockSeconds) {
 
   public WorkerTaskRequest {
     if (provider == null || provider.isBlank())

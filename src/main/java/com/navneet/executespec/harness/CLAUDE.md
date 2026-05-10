@@ -4,6 +4,70 @@ Core pipeline orchestration layer. Manages run lifecycle from submission to comp
 
 > **Note (2026-04-13):** `PipelineHarness` and the V1 batch path have been deleted. The live pipeline is `integration/RunOrchestrator`. The V1 descriptions below are kept as historical reference only — see root `CLAUDE.md` "V2 pipeline" section for current behaviour.
 >
+> **2026-05-10 — worker tier-config tuning + Lever C + wall-clock cap.** Dev
+> run a59f9798 (project ppl-ai, ANTHROPIC, 23 tasks, $19.30, 105 min)
+> surfaced three orthogonal worker-termination problems:
+>
+> - **T8 PARTIAL · LOW · 44 iters · 10 files** — final assistant text:
+>   *"Excellent! The implementation is complete and correct. Let me
+>   create a summary of what was done…"*. Worker emitted a status report
+>   instead of invoking `completeTask`. Iter cap, stagnation watchdog,
+>   and budget check were all happy; the loop's exit condition
+>   ("model returned no tool calls") fired and we lost a finished task
+>   to soft-PARTIAL.
+> - **T9 FAILED · LOW · COMPLETED_BY_STAGNATION** — 12-iter non-write
+>   watchdog fired in 25s. T9 was a "audit and fix `deleteMedia`" task
+>   on an existing repo; worker needed to readFile the real codebase
+>   before writing the audit fix. Static `stagnationForceAfter=12` is
+>   calibrated for fresh-scratch where the workspace is empty —
+>   inappropriate when project-run has 2× the iter budget but only 1×
+>   the stagnation budget.
+> - **T12 PARTIAL · MEDIUM · 100/100 iters · 92 files · 17 min** —
+>   *"Write unit tests for all three mobile media.service methods"*.
+>   Worker wrote 92 files at 0.92 writes/iter (extremely active) and
+>   hit the project-run 100-iter cap mid-test-suite. Iter cap killed an
+>   actively-progressing worker.
+>
+> Four-line fix shipped together:
+>
+> 1. **Lever C — completion-gate nudge** (`WorkerAgent.run`,
+>    `looksLikeSummary` helper). When the assistant turn returns no
+>    tool calls AND `totalWriteCalls > 0` AND `iter ≥ 0.5×maxIter` AND
+>    the text matches a summary keyword (case-insensitive: `## summary`,
+>    `summary of changes`, `implementation is complete`, `task complete`,
+>    `i've completed`, `all done`, `ready for review`, etc.), inject a
+>    one-shot UserMessage telling the model to call `completeTask` now
+>    OR list the next concrete edit. Continues the loop; fires at most
+>    once per task. Kicks T8 back into action without a code change to
+>    the LLM router or tool dispatcher. Mirrors Lever A's shape but for
+>    the completion gate, not the investigation gate.
+> 2. **Wall-clock cap** (new `WorkerTaskRequest.wallClockSeconds`,
+>    new `Outcome.WALL_CLOCK_EXCEEDED`). Sibling of `maxIterations` —
+>    whichever fires first wins. Top-of-iter check, so in-flight LLM
+>    calls are not interrupted (terminated on next iter boundary, ~60s
+>    tail). `SequentialExecutor.tierConfigFor` sets per-tier budgets:
+>    LOW=15 min, MEDIUM=25 min, HIGH=45 min; ×2 on project runs.
+>    Protects T12-style runs (active progress, slow model, iter-fat
+>    workload) without requiring the iter cap to be unboundedly raised.
+>    Existing cost cap still backstops genuinely runaway loops.
+> 3. **MEDIUM iter cap 50 → 75** (project-run 100 → 150). T12's worker
+>    was making genuine progress at the 100-iter cap; the bump gives
+>    test-heavy MEDIUM tasks ~50% more headroom. HIGH cap unchanged
+>    (already at 120/240).
+> 4. **Project-run stagnation force bumps** — LOW 12 → 18, MEDIUM 20
+>    → 24. ONLY for project runs. Warn threshold unchanged so the
+>    PROGRESS CHECK nudge still lands at the same depth. T9-class
+>    tasks (read-heavy reverse-engineering on an existing codebase)
+>    now get headroom proportional to their bigger iter budget. HIGH
+>    keeps 26 (already generous). Fresh-scratch unchanged.
+>
+> Tests: `WorkerAgentLeverCAndWallClockTest` (10 cases — pin
+> `looksLikeSummary` heuristic + Lever C fires-once + wall-clock vs
+> COMPLETED), `SequentialExecutorTierConfigTest` (12 cases —
+> reflectively pins every iter / stagnation / wall-clock value across
+> {LOW, MEDIUM, HIGH} × {fresh, project}). 22 new + 79 existing
+> worker/executor/reviewer tests all green.
+>
 > **2026-05-10 — `SequentialExecutor.persistTaskStatus` defensive truncation
 > + V184 column widening.** Dev run 7483896a (PR #95 / fix branch) confirmed
 > via VM journalctl that 3 of 4 problem tasks (T12 FAILED, T17 PARTIAL, T19
