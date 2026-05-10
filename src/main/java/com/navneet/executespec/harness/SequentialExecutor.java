@@ -174,6 +174,30 @@ public class SequentialExecutor {
 
     int taskCount = plan.tasks().size();
     for (int i = 0; i < taskCount; i++) {
+      // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
+      // calls {@code future.cancel(true)} which interrupts THIS thread, but
+      // the only place the interrupt actually surfaces is the next blocking
+      // call (Spring AI / OkHttp inside {@link com.navneet.executespec.agent.LlmRouter}).
+      // Without a top-of-loop check, every remaining task gets dispatched in
+      // turn — each one starts the worker, the very first LLM call throws
+      // {@code BackOffInterruptedException}, persistTaskStatus stamps it
+      // FAILED, the loop body returns, and we walk straight into the next
+      // task. Net effect on dev run 7483896a (PR #99 analysis): a cancel
+      // mid-T11 cascaded T11→T20 into FAILED in <1 second, overwriting
+      // their original PARTIAL / FAILED-stagnation reasons with a generic
+      // "Thread interrupted while sleeping" message and clobbering the
+      // COMPLETE state of T13–T16, T20.
+      //
+      // Re-asserting the interrupt flag with {@code Thread.currentThread()
+      // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
+      // {@code activeRuns} future) still sees it as cancelled.
+      if (Thread.currentThread().isInterrupted()) {
+        log.info(
+            "SequentialExecutor cancel detected at task index {}/{}, breaking loop", i, taskCount);
+        Thread.currentThread().interrupt();
+        break;
+      }
+
       PlannedTask task = plan.tasks().get(i);
       boolean isFinalTask = (i == taskCount - 1);
 
