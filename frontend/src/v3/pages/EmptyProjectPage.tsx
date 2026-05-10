@@ -2,7 +2,8 @@ import {useEffect, useState} from 'react';
 import {useNavigate, Link} from 'react-router-dom';
 import {Sparkles, FolderPlus, ArrowRight, MessageSquareText} from 'lucide-react';
 import {useAuthStore} from '@/stores/useAuthStore';
-import {createProject} from '@/lib/api';
+import {createProject, getMyPermissions} from '@/lib/api';
+import type {TierPermissions} from '@/hooks/useTierPermissions';
 
 /**
  * R-310 (Wave 7) — explicit empty-state for users with zero projects.
@@ -63,6 +64,30 @@ export default function EmptyProjectPage() {
     } catch (_) {
       /* private mode — silent fallback */
     }
+  }, []);
+
+  // I1-01/02/10 (audit-2026-05-09 iter1) — drive the blurb's run-quota
+  // number from the API instead of hardcoding "5" / "20". Fixes the
+  // PRO-tier mismatch where the empty state said "20 runs / month",
+  // the topbar UsageBadge said "0/5", and the permissions API said
+  // "30" — three sources of truth disagreed. We trust the permissions
+  // endpoint (TierEnforcementService.getMonthlyLimit, which already
+  // resolves tier_config + overrides). Best-effort: any failure leaves
+  // monthlyRunLimit null and the blurb falls back to the tier-only
+  // copy — never blocks the empty-state from rendering.
+  const [permsLimit, setPermsLimit] = useState<number | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    getMyPermissions()
+      .then((p: TierPermissions) => {
+        if (!cancelled) setPermsLimit(p.monthlyRunLimit ?? null);
+      })
+      .catch(() => {
+        /* silent — fall back to tier-only blurb */
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   async function onCreate() {
@@ -132,7 +157,7 @@ export default function EmptyProjectPage() {
       >
         {stashedSpec
           ? "Your spec is ready — let's create a project to ship it into."
-          : tierBlurb(user?.tier)}
+          : tierBlurb(user?.tier, permsLimit)}
       </p>
 
       {/* R-343 — spec-ready card.  Rendered when AuthPage.claimAndForward
@@ -307,21 +332,55 @@ export default function EmptyProjectPage() {
  * D3 (round-3 audit) — tier-aware "what does this plan get me" framing.
  * Surfaces the run quota in human terms ("≈ 5 small or 3 large PRs / month")
  * instead of the bare "5 runs / month" the persona-test report flagged
- * as too restrictive-feeling next to consumer competitors. Paid tiers get
- * a neutral framing because the run cap is unlimited.
+ * as too restrictive-feeling next to consumer competitors.
  *
- * 2026-05-04: FREE tier policy is held at 5 runs / month
- * (post-V145 bump-to-10 was reverted as a positioning decision —
- * "free tier will always remain 5"). Reflect that here.
+ * I1-01/02/10 (audit-2026-05-09 iter1) — accepts the actual run quota
+ * from the permissions API instead of hardcoding numbers. Hardcoding
+ * caused three different numbers to surface for the same user (empty
+ * state said "20 runs / month", UsageBadge said "0/5", permissions
+ * said "30"). Now the empty state always agrees with the topbar +
+ * billing surface because all three read from the same source.
+ *
+ * The shape:
+ *   - PAID + unlimited (limit < 0): "across one repo or twenty"
+ *   - PAID + finite limit: "covers N runs / month (≈ N small or N/3 large PRs)"
+ *   - FREE: "covers N PRs / month — about N small features or N/2 large refactors"
+ *   - Unknown tier or null limit: tier-only fallback
  */
-function tierBlurb(tier?: string): string {
+function tierBlurb(tier?: string, monthlyRunLimit?: number | null): string {
   const normalized = (tier || 'FREE').toUpperCase();
-  if (normalized === 'ENTERPRISE' || normalized === 'TEAM' || normalized === 'MAX') {
+  const limit = monthlyRunLimit ?? null;
+  const unlimited = limit !== null && limit < 0;
+  const isPaid =
+    normalized === 'PRO' ||
+    normalized === 'TEAM' ||
+    normalized === 'MAX' ||
+    normalized === 'ENTERPRISE';
+
+  if (isPaid && unlimited) {
     return "Describe what you want to build and we'll ship a draft PR you can actually merge — across one repo or twenty.";
   }
-  if (normalized === 'PRO') {
-    return "Describe what you want to build and we'll ship a draft PR you can actually merge. Your Pro plan covers 20 runs / month (≈ 20 small or 6 large PRs).";
+  if (isPaid && limit !== null && limit > 0) {
+    const small = limit;
+    const large = Math.max(1, Math.round(limit / 3));
+    return `Describe what you want to build and we'll ship a draft PR you can actually merge. Your ${capitaliseTier(normalized)} plan covers ${limit} runs / month (≈ ${small} small or ${large} large PRs).`;
   }
-  // FREE (and everything unrecognised) — surface what 5 runs actually buys.
-  return "Describe what you want to build and we'll ship a draft PR you can actually merge. Your free plan covers 5 PRs / month — about 5 small features or 3 large refactors.";
+  if (normalized === 'FREE' && limit !== null && limit > 0) {
+    const small = limit;
+    const large = Math.max(1, Math.round(limit / 2));
+    return `Describe what you want to build and we'll ship a draft PR you can actually merge. Your free plan covers ${limit} PRs / month — about ${small} small features or ${large} large refactors.`;
+  }
+  // Tier-only fallback (limit unknown / API failed).
+  if (isPaid) {
+    return "Describe what you want to build and we'll ship a draft PR you can actually merge — across one repo or twenty.";
+  }
+  return "Describe what you want to build and we'll ship a draft PR you can actually merge.";
+}
+
+function capitaliseTier(t: string): string {
+  if (t === 'PRO') return 'Pro';
+  if (t === 'TEAM') return 'Team';
+  if (t === 'MAX') return 'Max';
+  if (t === 'ENTERPRISE') return 'Enterprise';
+  return 'Free';
 }

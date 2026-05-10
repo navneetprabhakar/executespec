@@ -95,6 +95,11 @@ export default function RepoContextPanel({projectId}: Props) {
         >
           <span style={{color: 'var(--v3-text-subtle)'}}>{collapsed ? '▸' : '▾'}</span>
           <span>What I see in your repo</span>
+          {/* 2026-05-09 (F-21) — leading glyph so the status is readable
+              for users who can't distinguish the green/amber background
+              alone (low-vision, deuteranopia, monochrome screenshots,
+              dark-mode contrast issues). The glyph + text combo makes
+              the chip self-describing. */}
           <span
             style={{
               fontSize: 11,
@@ -102,6 +107,9 @@ export default function RepoContextPanel({projectId}: Props) {
               borderRadius: 3,
               background: stale > 0 ? 'rgba(245,158,11,0.16)' : 'rgba(34,197,94,0.12)',
               color: stale > 0 ? 'var(--v3-warning)' : 'var(--v3-success, #22c55e)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
             }}
             title={
               stale > 0
@@ -109,13 +117,16 @@ export default function RepoContextPanel({projectId}: Props) {
                 : 'All codemaps match the latest origin HEAD.'
             }
           >
+            <span aria-hidden='true' style={{fontSize: 10}}>
+              {stale > 0 ? '⚠' : '✓'}
+            </span>
             {stale > 0
               ? `${fresh}/${staleness.totalCount} fresh · ${stale} stale`
               : `${staleness.totalCount} repo${staleness.totalCount === 1 ? '' : 's'} · fresh`}
           </span>
         </button>
         <Link
-          to={`/projects/${projectId}/dashboard?tab=code`}
+          to={`/projects/${projectId}/dashboard?tab=code&codeSub=architecture`}
           style={{
             fontSize: 11.5,
             color: 'var(--v3-text-subtle)',

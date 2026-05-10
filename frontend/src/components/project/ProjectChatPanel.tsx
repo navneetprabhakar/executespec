@@ -99,6 +99,11 @@ export default function ProjectChatPanel({
   const [chatInfo, setChatInfo] = useState<ProjectChatInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const scrollerRef = useRef<HTMLDivElement | null>(null);
+  // 2026-05-09 — scroll-pin: only follow new messages if the user is
+  // already at the bottom; if they scrolled up to read history,
+  // don't yank them back on every reply.
+  const isPinnedRef = useRef(true);
   const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const navigate = useNavigate();
 
@@ -192,8 +197,14 @@ export default function ProjectChatPanel({
   }, [projectId]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({behavior: 'smooth'});
+    if (isPinnedRef.current) bottomRef.current?.scrollIntoView({behavior: 'smooth'});
   }, [messages, sending]);
+
+  const handleScrollerScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isPinnedRef.current = distance < 80;
+  };
 
   const handleSend = async (override?: string) => {
     const text = (override ?? input).trim();
@@ -225,6 +236,9 @@ export default function ProjectChatPanel({
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Don't fire on Enter mid-IME composition (CJK keyboards). Without
+    // this guard the user's candidate selection gets sent as a message.
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -329,7 +343,11 @@ export default function ProjectChatPanel({
         </div>
       )}
       {/* Scrollable message list */}
-      <div className='flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3'>
+      <div
+        ref={scrollerRef}
+        onScroll={handleScrollerScroll}
+        className='flex-1 min-h-0 overflow-y-auto px-4 py-3 space-y-3'
+      >
         {loading && (
           <div className='flex items-center gap-2 text-xs text-muted'>
             <Loader2 className='h-3 w-3 animate-spin' />

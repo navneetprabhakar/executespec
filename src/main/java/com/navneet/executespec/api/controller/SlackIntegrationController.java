@@ -10,6 +10,7 @@ import com.navneet.executespec.integration.slack.SlackClient;
 import com.navneet.executespec.integration.slack.SlackNotificationService;
 import com.navneet.executespec.integration.slack.SlackOAuthService;
 import com.navneet.executespec.integration.slack.model.*;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.data.domain.PageRequest;
@@ -41,6 +42,13 @@ public class SlackIntegrationController {
   private final ProjectSlackChannelRepository channelRepo;
   private final SlackNotificationLogRepository logRepo;
   private final RunAccessGuard guard;
+  // 2026-05-09 (B-tenancy fix from audit) — `requireAuthenticated` alone on
+  // /projects/{projectId}/* paths let any authed user enumerate or modify
+  // another project's Slack channel mappings. ProjectAccessGuard.assertCanRead
+  // gates each project-scoped endpoint on org membership / project_member row.
+  // The pre-existing `requireOrgAdmin` stays for the write paths so non-admin
+  // members can read but not mutate.
+  private final ProjectAccessGuard projectAccessGuard;
 
   // ── OAuth flow ────────────────────────────────────────────────────────────
 
@@ -74,11 +82,36 @@ public class SlackIntegrationController {
           .location(URI.create("/integrations?slack=connected"))
           .build();
     } catch (Exception e) {
-      log.error("[Slack] OAuth callback failed: {}", e.getMessage());
+      // 2026-05-09 (#6 / B-sec from audit) — DO NOT include the raw exception
+      // message in the redirect URL. Two reasons: (a) it's an open
+      // information-disclosure surface (stack-trace fragments / DB constraint
+      // names / token format hints leak through the user's browser history +
+      // referrer headers); (b) the message is attacker-controllable when the
+      // OAuth state HMAC fails, so it doubles as a dangling-content / phishing
+      // primitive (`?msg=Your+session+expired,+sign+in+again+at+evil.tld`).
+      // Server-side log keeps the full detail; the redirect carries only an
+      // opaque error code that the frontend maps to user-facing copy.
+      String code0 = errorCodeFor(e);
+      log.error("[Slack] OAuth callback failed (code={}): {}", code0, e.getMessage(), e);
       return ResponseEntity.status(HttpStatus.FOUND)
-          .location(URI.create("/integrations?slack=error&msg=" + e.getMessage()))
+          .location(URI.create("/integrations?slack=error&code=" + code0))
           .build();
     }
+  }
+
+  /**
+   * Maps an OAuth-callback exception to a small, allowlisted error code the frontend can translate
+   * to user-facing copy. New cases are added explicitly so a future stack trace can't silently leak
+   * through. Defaults to {@code unknown}.
+   */
+  private String errorCodeFor(Exception e) {
+    String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+    if (e instanceof java.lang.SecurityException) return "invalid_state";
+    if (msg.contains("state")) return "invalid_state";
+    if (msg.contains("expired")) return "expired_state";
+    if (msg.contains("token") || msg.contains("oauth_v2")) return "oauth_exchange_failed";
+    if (msg.contains("workspace") || msg.contains("team")) return "workspace_lookup_failed";
+    return "unknown";
   }
 
   /** Disconnects Slack — revokes token, removes all channel mappings. */
@@ -161,6 +194,7 @@ public class SlackIntegrationController {
   public ResponseEntity<List<Map<String, Object>>> getProjectChannels(
       @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireAuthenticated(userDetails);
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     List<ProjectSlackChannel> mappings = channelRepo.findByProjectId(projectId);
     List<Map<String, Object>> result =
         mappings.stream()
@@ -183,6 +217,7 @@ public class SlackIntegrationController {
       @RequestBody Map<String, String> body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireOrgAdmin(userDetails);
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     String orgId = userDetails.getUser().getOrgId();
     if (!integrationRepo.findByOrgId(orgId).isPresent()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Slack not connected");
@@ -231,6 +266,7 @@ public class SlackIntegrationController {
       @PathVariable String channelId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireOrgAdmin(userDetails);
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     channelRepo.deleteByProjectIdAndChannelId(projectId, channelId);
     return ResponseEntity.noContent().build();
   }
@@ -243,6 +279,7 @@ public class SlackIntegrationController {
       @RequestBody Map<String, String> body,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     guard.requireOrgAdmin(userDetails);
+    projectAccessGuard.assertCanRead(projectId, userDetails);
     String verbosity = body.get("verbosity");
     try {
       SlackVerbosity.valueOf(verbosity);

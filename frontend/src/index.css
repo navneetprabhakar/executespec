@@ -67,14 +67,12 @@ body {
 body {
   background: var(--geist-bg);
   color: var(--text-primary);
-  font-family:
-    'Geist Sans',
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
+  /* 2026-05-10 (test variant) — JetBrains Mono leads the body chain to
+   * test a fully-monospace product look. Geist Sans + system fallbacks
+   * remain so the page still renders during the Google-Fonts load
+   * window. Revert by swapping JetBrains Mono back to 'DM Sans' if the
+   * mono-everywhere experiment isn't kept. */
+  font-family: 'JetBrains Mono', 'Geist Sans', ui-monospace, SFMono-Regular, Menlo, monospace;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -189,7 +187,7 @@ optgroup {
   gap: 0.25rem;
   padding: 0.125rem 0.5rem;
   border-radius: var(--radius-sm);
-  font-family: 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
+  font-family: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, monospace;
   font-size: 0.6875rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;

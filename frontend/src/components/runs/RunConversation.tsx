@@ -14,17 +14,35 @@ import {
   Minimize2,
   AlertTriangle,
   Shield,
+  Clock,
+  GitBranch,
+  ExternalLink,
 } from 'lucide-react';
 import {getRunChat, sendRunChatMessage, applyToRun, getValidationReport} from '@/lib/api';
 import type {RunChatMessage, ChatResponse, ValidationReportData, ReportIssue} from '@/lib/api';
-import {cn, errMsg} from '@/lib/utils';
+import {cn, errMsg, fmtMs, relativeTime} from '@/lib/utils';
 import {useRunStore} from '@/stores/useRunStore';
 import {useUiStore} from '@/stores/useUiStore';
 import {useSseStore} from '@/stores/useSseStore';
 import {useTierPermissions} from '@/hooks/useTierPermissions';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
+import StatusBadge from '@/components/shared/StatusBadge';
 
 const MAX_MESSAGES = 50;
+
+/**
+ * Module-level cache keyed by runId so the panel re-mounts instantly with the
+ * last good message list instead of flashing empty for ~300ms while the
+ * GET /runs/{id}/chat round-trip completes. Pre-fix the panel called
+ * `setMessages([])` before the fetch — combined with Radix Tabs unmounting
+ * the panel on tab change, every tab switch back to Chat showed the empty
+ * state for the duration of the fetch, which read as "the chat got wiped".
+ *
+ * The cache is intentionally module-scoped (not Zustand) because chat history
+ * is server-authoritative — the cache only optimises the loading UX, never
+ * the source of truth. Entries are replaced on every successful refetch.
+ */
+const runChatCache = new Map<string, RunChatMessage[]>();
 
 interface Props {
   runId: string;
@@ -77,8 +95,13 @@ function buildIssuesPrompt(issues: ReportIssue[]): string {
  */
 export default function RunConversation({runId}: Props) {
   const permissions = useTierPermissions();
-  const [messages, setMessages] = useState<RunChatMessage[]>([]);
-  const [userCount, setUserCount] = useState(0);
+  // Seed from the module-level cache so a tab-switch-back doesn't flash empty
+  // for the duration of the refetch. The fetch still runs and replaces the
+  // list (so server-side compaction / new messages from another window land).
+  const [messages, setMessages] = useState<RunChatMessage[]>(() => runChatCache.get(runId) ?? []);
+  const [userCount, setUserCount] = useState(
+    () => (runChatCache.get(runId) ?? []).filter((m) => m.role === 'user').length,
+  );
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [iterating, _setIterating] = useState(false);
@@ -96,32 +119,61 @@ export default function RunConversation({runId}: Props) {
   const [applyingFixes, setApplyingFixes] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  // 2026-05-09 — scroll-pin: only auto-scroll when the user is already
+  // near the bottom (read: actively following the conversation). If they
+  // scrolled up to read history, leave them alone — yanking them back
+  // mid-read on every assistant token is the daily-cut UX gripe the
+  // audit flagged.
+  const isPinnedRef = useRef(true);
   const {setActiveRunId: _setActiveRunId, fetchRuns: _fetchRuns} = useRunStore();
   const activeRun = useRunStore((s) => s.activeRun);
   const {addToast, setPendingNewRunConfig} = useUiStore();
   const copilotMaximized = useUiStore((s) => s.copilotMaximized);
   const setCopilotMaximized = useUiStore((s) => s.setCopilotMaximized);
 
-  // Load chat history on mount / when runId changes
+  // Load chat history on mount / when runId changes.
+  //
+  // 2026-05-09 — DON'T eagerly clear before the fetch. The state was already
+  // seeded from `runChatCache`; clearing here causes the visible "wipe" the
+  // user reports on every tab switch. Loading flag is shown only when the
+  // cache miss leaves us with an empty list. Cache is updated on successful
+  // fetch so subsequent re-mounts skip the flash entirely.
   useEffect(() => {
-    setLoading(true);
-    setMessages([]);
-    setUserCount(0);
+    const cached = runChatCache.get(runId) ?? [];
+    setMessages(cached);
+    setUserCount(cached.filter((m) => m.role === 'user').length);
+    setLoading(cached.length === 0);
     setError(null);
     getRunChat(runId)
       .then((history) => {
+        runChatCache.set(runId, history);
         setMessages(history);
-        const uCount = history.filter((m) => m.role === 'user').length;
-        setUserCount(uCount);
+        setUserCount(history.filter((m) => m.role === 'user').length);
       })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [runId]);
 
-  // Auto-scroll to bottom whenever messages change
+  // Keep the cache in sync when the user sends messages — otherwise the
+  // optimistic + assistant pair would only live in component state and a
+  // tab-switch round-trip would show stale (cached) data until the refetch.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({behavior: 'smooth'});
+    if (messages.length > 0) runChatCache.set(runId, messages);
+  }, [runId, messages]);
+
+  // Auto-scroll to bottom whenever messages change — but ONLY if the
+  // user is already pinned to the bottom (within 80px). Otherwise we'd
+  // yank them away from history they're reading.
+  useEffect(() => {
+    if (isPinnedRef.current) bottomRef.current?.scrollIntoView({behavior: 'smooth'});
   }, [messages]);
+
+  const handleScrollerScroll = (e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const distance = el.scrollHeight - el.scrollTop - el.clientHeight;
+    isPinnedRef.current = distance < 80;
+  };
 
   // Fetch validation report when run is terminal AND report is ready — avoids 404 noise
   const reportReady = useSseStore((s) => s.entries).some(
@@ -184,6 +236,11 @@ export default function RunConversation({runId}: Props) {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Don't fire on Enter mid-IME composition (CJK / Korean / Japanese
+    // inputs) — `e.nativeEvent.isComposing` is true while a candidate
+    // window is open. Without this guard the user's partial input gets
+    // committed AND sent on Enter.
+    if (e.nativeEvent.isComposing) return;
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -302,13 +359,32 @@ export default function RunConversation({runId}: Props) {
         copilotMaximized && 'fixed inset-0 z-50 bg-[var(--geist-bg)]',
       )}
     >
+      {/* Run context banner — surfaces the run the chat is scoped to so a
+       *  user landing on the Chat tab cold sees what the conversation is
+       *  about (run title, status, repo, age, cost). Without this the chat
+       *  tab opens straight into a blank message list with no anchor to
+       *  the run being discussed. 2026-05-09 user feedback: "Run Chat is
+       *  supposed to have details about the Run as well". */}
+      {activeRun && <RunContextBanner run={activeRun} />}
+
       {/* Header */}
       <div className='flex flex-col gap-2 px-4 py-3 border-b border-[var(--border-default)] flex-shrink-0'>
         <div className='flex items-center justify-between'>
           <div className='flex items-center gap-2'>
             <MessageSquare className='h-4 w-4 text-accent-blue' />
             <span className='text-sm font-medium text-primary'>Run Copilot</span>
-            <span className='text-[10px] text-muted font-mono'>sonnet</span>
+            {/* 2026-05-09 — drop the hardcoded "sonnet" chip. Surface the
+                ACTUAL resolved model the chat is using. Falls through to
+                the run's planner/worker/reviewer model when the chat
+                model isn't explicitly distinct. */}
+            {(activeRun?.workerModel || activeRun?.plannerModel) && (
+              <span
+                className='text-[10px] text-muted font-mono truncate max-w-[140px]'
+                title={`Model: ${activeRun.workerModel || activeRun.plannerModel}`}
+              >
+                {(activeRun.workerModel || activeRun.plannerModel || '').replace(/^claude-/, '')}
+              </span>
+            )}
             <button
               onClick={() => setCopilotMaximized(!copilotMaximized)}
               className='ml-1 p-1.5 min-h-[36px] min-w-[36px] flex items-center justify-center rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
@@ -624,7 +700,11 @@ export default function RunConversation({runId}: Props) {
       </AnimatePresence>
 
       {/* Messages area */}
-      <div className='flex-1 overflow-y-auto px-4 py-4 space-y-4'>
+      <div
+        ref={scrollerRef}
+        onScroll={handleScrollerScroll}
+        className='flex-1 overflow-y-auto px-4 py-4 space-y-4'
+      >
         {/* Empty state */}
         {!hasConversation && (
           <div className='flex flex-col items-center justify-center h-full text-center space-y-4 py-8'>
@@ -788,6 +868,96 @@ export default function RunConversation({runId}: Props) {
           <p className='text-[10px] text-[var(--text-muted)] mt-1 pl-1'>
             Press Enter to send · Shift+Enter for new line
           </p>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Compact one-row banner surfacing the run this conversation is scoped to.
+ * Shows: title (or truncated user request), status, started-relative,
+ * elapsed if running / completed-relative if terminal, and the repo (PR
+ * link when present). Clicks on the title don't navigate — the user is
+ * already on the run page; we just give them a visible anchor.
+ */
+function RunContextBanner({
+  run,
+}: {
+  run: import('@/lib/api').RunDetail | import('@/lib/api').RunSummary;
+}) {
+  const isTerminal = ['COMPLETE', 'PARTIAL', 'FAILED', 'CANCELLED'].includes(run.status);
+  const titleText =
+    run.runTitle?.trim() ||
+    (run.userRequest && run.userRequest.length > 90
+      ? run.userRequest.slice(0, 87).trimEnd() + '…'
+      : run.userRequest) ||
+    `Run ${run.runId.slice(0, 8)}`;
+  const repoFull =
+    run.repoUrl?.replace(/^https?:\/\/github\.com\//, '').replace(/\.git$/, '') ?? null;
+  const startedRel = run.startedAt ? relativeTime(run.startedAt) : null;
+  const completedRel = run.completedAt ? relativeTime(run.completedAt) : null;
+  const durationMs =
+    run.startedAt && run.completedAt
+      ? new Date(run.completedAt).getTime() - new Date(run.startedAt).getTime()
+      : run.startedAt && !isTerminal
+        ? Date.now() - new Date(run.startedAt).getTime()
+        : null;
+  const prUrl = ('scmPrUrl' in run && run.scmPrUrl) || ('githubPrUrl' in run && run.githubPrUrl);
+  const cost = 'actualCostUsd' in run ? run.actualCostUsd : null;
+  return (
+    <div
+      className='px-4 py-2 border-b border-[var(--border-default)] bg-[var(--gray-200)]/40 flex-shrink-0'
+      title={run.userRequest ?? undefined}
+    >
+      <div className='flex items-start justify-between gap-3'>
+        <div className='min-w-0 flex-1'>
+          <div className='flex items-center gap-2 mb-0.5'>
+            <StatusBadge status={run.status} />
+            <span
+              className='text-[10px] font-mono uppercase tracking-wider text-muted'
+              aria-hidden='true'
+            >
+              run · {run.runId.slice(0, 8)}
+            </span>
+          </div>
+          <div className='text-xs text-secondary truncate'>{titleText}</div>
+        </div>
+        <div className='flex items-center gap-2 text-[10px] font-mono text-muted shrink-0'>
+          {startedRel && (
+            <span className='inline-flex items-center gap-1' title={`Started: ${run.startedAt}`}>
+              <Clock className='h-3 w-3' />
+              {isTerminal && completedRel ? completedRel : startedRel}
+            </span>
+          )}
+          {durationMs != null && durationMs > 0 && (
+            <span title={isTerminal ? 'Total run duration' : 'Elapsed since start'}>
+              · {fmtMs(durationMs)}
+            </span>
+          )}
+          {cost != null && cost > 0 && <span title='Total cost'>· ${cost.toFixed(2)}</span>}
+        </div>
+      </div>
+      {(repoFull || prUrl) && (
+        <div className='mt-1 flex items-center gap-2 text-[10px] text-muted font-mono truncate'>
+          {repoFull && (
+            <span className='inline-flex items-center gap-1 truncate' title={run.repoUrl ?? ''}>
+              <GitBranch className='h-3 w-3 shrink-0' />
+              <span className='truncate'>{repoFull}</span>
+            </span>
+          )}
+          {prUrl && (
+            <a
+              href={prUrl}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='inline-flex items-center gap-0.5 text-accent-blue hover:underline shrink-0'
+              title='Open the pull request opened by this run'
+            >
+              PR
+              <ExternalLink className='h-3 w-3' />
+            </a>
+          )}
         </div>
       )}
     </div>
