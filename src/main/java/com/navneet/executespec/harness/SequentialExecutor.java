@@ -174,6 +174,30 @@ public class SequentialExecutor {
 
     int taskCount = plan.tasks().size();
     for (int i = 0; i < taskCount; i++) {
+      // 2026-05-10 — cancel honour at task boundary. {@code RunOrchestrator.cancel}
+      // calls {@code future.cancel(true)} which interrupts THIS thread, but
+      // the only place the interrupt actually surfaces is the next blocking
+      // call (Spring AI / OkHttp inside {@link com.navneet.executespec.agent.LlmRouter}).
+      // Without a top-of-loop check, every remaining task gets dispatched in
+      // turn — each one starts the worker, the very first LLM call throws
+      // {@code BackOffInterruptedException}, persistTaskStatus stamps it
+      // FAILED, the loop body returns, and we walk straight into the next
+      // task. Net effect on dev run 7483896a (PR #99 analysis): a cancel
+      // mid-T11 cascaded T11→T20 into FAILED in <1 second, overwriting
+      // their original PARTIAL / FAILED-stagnation reasons with a generic
+      // "Thread interrupted while sleeping" message and clobbering the
+      // COMPLETE state of T13–T16, T20.
+      //
+      // Re-asserting the interrupt flag with {@code Thread.currentThread()
+      // .interrupt()} so any caller waiting on this thread (RunOrchestrator's
+      // {@code activeRuns} future) still sees it as cancelled.
+      if (Thread.currentThread().isInterrupted()) {
+        log.info(
+            "SequentialExecutor cancel detected at task index {}/{}, breaking loop", i, taskCount);
+        Thread.currentThread().interrupt();
+        break;
+      }
+
       PlannedTask task = plan.tasks().get(i);
       boolean isFinalTask = (i == taskCount - 1);
 
@@ -256,7 +280,33 @@ public class SequentialExecutor {
    * task is the resume target.
    */
   private ResumeAction resolveResumeAction(String runId, String taskId, ResumeRequest resume) {
-    String persisted = readPersistedTaskStatus(runId, taskId);
+    // 2026-05-10 — task-id format normalisation.
+    //
+    // The `taskId` argument is the LOGICAL plan id ("T12") — comes
+    // straight from {@link PlannedTask#id()} when the executor walks
+    // {@code plan.tasks()}. The DB primary key on {@code agent_task},
+    // however, is the FULL prefixed key (runShort + "_" + plannedId,
+    // e.g. "7483896a_T12"). Pre-fix, this method called
+    // {@link #readPersistedTaskStatus(String, String)} with the bare
+    // logical id, which {@code findByRunIdAndTaskId} never matched
+    // against the prefixed primary key — every query returned empty,
+    // every task was treated as non-terminal, every resume re-ran
+    // every task from T1.
+    //
+    // Symptom in production: dev run 7483896a, retry of T12 caused
+    // T8 → T9 → T10 → ... to all flip WORKING + re-execute, burning
+    // ~$5.65 of LLM budget before the operator cancelled. Latent on
+    // {@link com.navneet.executespec.recovery.StartupRunResumer} too —
+    // every JVM-crash recovery has been silently re-running tasks
+    // since the resume path landed.
+    //
+    // Fix: build the full DB key explicitly from {@code runId} +
+    // {@code taskId} before lookup, and accept either format
+    // (prefixed OR bare) on {@code resume.targetTaskId()} so callers
+    // don't have to remember which one this method wants.
+    String runShort = runId != null && runId.length() >= 8 ? runId.substring(0, 8) : runId;
+    String fullKey = runShort + "_" + taskId;
+    String persisted = readPersistedTaskStatus(runId, fullKey);
     boolean isTerminal =
         persisted != null
             && (persisted.equals("COMPLETE")
@@ -265,7 +315,7 @@ public class SequentialExecutor {
                 || persisted.equals("FAILED"));
 
     String target = resume.targetTaskId();
-    boolean isResumeTarget = target != null && target.equals(taskId);
+    boolean isResumeTarget = target != null && (target.equals(taskId) || target.equals(fullKey));
 
     // If a target wasn't given explicitly, treat the FIRST non-terminal task we encounter as
     // the resume target (auto-detect path). Once we've passed the target, everything else runs
