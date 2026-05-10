@@ -562,14 +562,20 @@ function AdminPageInner() {
         onConfirm={(reason) => handleHaltAll(reason)}
       />
 
-      {/* Tabs */}
-      <div className='flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto'>
+      {/* Tabs.
+          2026-05-10 (mobile audit) — `scrollbar-hide` so the touch-scroll
+          affordance stays invisible until the user swipes; each button
+          gets `whitespace-nowrap` + `flex-shrink-0` so 8 tabs (Users /
+          Organisations / Tier Config / Escalations / Top-Up Pkgs /
+          Usage Reports / Payment Audit / Webhooks) don't squish or
+          word-wrap on 375px viewports. */}
+      <div className='flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide'>
         {TABS.map(({id, label, icon: Icon, count}) => (
           <button
             key={id}
             onClick={() => setTab(id)}
             className={cn(
-              'flex items-center gap-1.5 px-3 py-2 text-sm rounded-t-lg border-b-2 transition-colors',
+              'flex items-center gap-1.5 px-3 py-2 text-sm rounded-t-lg border-b-2 transition-colors whitespace-nowrap flex-shrink-0',
               tab === id
                 ? 'border-accent-blue text-accent-blue'
                 : 'border-transparent text-muted hover:text-secondary',

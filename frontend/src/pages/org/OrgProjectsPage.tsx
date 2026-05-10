@@ -523,12 +523,17 @@ export default function OrgProjectsPage() {
           ← Back to runs
         </Link>
 
-        <header className='flex items-start justify-between gap-3'>
+        {/* 2026-05-10 (mobile audit) — header was `flex justify-between` so on
+            375px the hero text column got squashed into a tall narrow strip
+            (each word of "Group runs into projects." wrapped onto its own
+            line). New shape: stack on phones, side-by-side from sm: up.
+            Action cluster wraps below on mobile (already flex-wrap). */}
+        <header className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
           <div className='min-w-0 flex items-start gap-3'>
             <span className='inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0'>
               <FolderGit2 className='h-5 w-5' />
             </span>
-            <div className='min-w-0'>
+            <div className='min-w-0 flex-1'>
               <div className='font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5'>
                 Projects
               </div>
@@ -543,7 +548,7 @@ export default function OrgProjectsPage() {
               </p>
             </div>
           </div>
-          <div className='flex items-center gap-2 flex-shrink-0'>
+          <div className='flex items-center gap-2 flex-wrap sm:flex-shrink-0'>
             <Link
               to='/projects'
               title='Project dashboard'
