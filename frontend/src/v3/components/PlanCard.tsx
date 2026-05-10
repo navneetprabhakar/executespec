@@ -220,7 +220,7 @@ export default function PlanCard({runId, onApproved}: PlanCardProps) {
                  * before they click Approve. SINGLE_SHOT runs ship an
                  * empty array — we hide the blast radius then since
                  * "no files declared" is uninformative. */
-                let touchesByTaskId: Record<string, string[]> = {};
+                const touchesByTaskId: Record<string, string[]> = {};
                 try {
                   const parsed = detail.planJson ? JSON.parse(detail.planJson) : null;
                   if (parsed && Array.isArray(parsed.tasks)) {
