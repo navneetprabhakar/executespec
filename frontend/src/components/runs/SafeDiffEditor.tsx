@@ -62,6 +62,15 @@ import {GEIST_THEME_NAME} from '@/lib/monacoGeistTheme';
  */
 type Props = React.ComponentProps<typeof DiffEditor>;
 
+// 2026-05-11 — Monaco's built-in default font is Consolas / Menlo /
+// 'Courier New', which made the diff viewer the one surface where
+// the brand JetBrains Mono didn't render. Pin fontFamily on every
+// SafeDiffEditor mount so the entire app, including code surfaces,
+// stays on the unified brand chain. Caller-provided `options.fontFamily`
+// wins (we only set the default), but `theme` is still ours.
+const DEFAULT_MONACO_FONT =
+  "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+
 export default function SafeDiffEditor(props: Props) {
   const handleMount: DiffOnMount = (editor, monaco) => {
     props.onMount?.(editor, monaco);
@@ -71,10 +80,15 @@ export default function SafeDiffEditor(props: Props) {
   // cleanup function to just `editor.dispose()` — no model.dispose() calls,
   // no willDispose listener firing, no race. The TextModels are then
   // unreachable after editor.dispose() and JS GC reclaims them.
+  const mergedOptions = {
+    fontFamily: DEFAULT_MONACO_FONT,
+    ...(props.options ?? {}),
+  };
   return (
     <DiffEditor
       theme={GEIST_THEME_NAME}
       {...props}
+      options={mergedOptions}
       keepCurrentOriginalModel={true}
       keepCurrentModifiedModel={true}
       onMount={handleMount}
