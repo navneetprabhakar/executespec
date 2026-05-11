@@ -2303,6 +2303,10 @@ function IDEFileViewer({
               minimap: {enabled: false},
               scrollBeyondLastLine: false,
               fontSize: 12,
+              // 2026-05-11 — pin Monaco's font to the brand JetBrains Mono
+              // chain so this single-file viewer matches the diff viewer
+              // and every other surface in the app.
+              fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
               lineNumbers: 'on',
               folding: true,
               foldingStrategy: 'auto',

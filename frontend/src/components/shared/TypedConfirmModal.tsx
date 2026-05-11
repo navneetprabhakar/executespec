@@ -127,8 +127,7 @@ export default function TypedConfirmModal({
               // Consolas / Liberation Mono). Use the registered mono
               // chain so the typed-confirm input matches every other
               // mono surface in the app.
-              fontFamily:
-                "'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
+              fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
               background: 'var(--bg-base, #0B0D10)',
               border: `1px solid ${keywordOk ? 'var(--status-success, #10B981)' : 'var(--border-default, #242A33)'}`,
               borderRadius: 6,

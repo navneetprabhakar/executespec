@@ -70,7 +70,7 @@ export default function ResetPasswordPage() {
             required
             minLength={10}
             autoComplete='new-password'
-            className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 text-sm text-primary focus:border-accent-blue focus:outline-none transition-colors'
+            className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 text-base sm:text-sm text-primary focus:border-accent-blue focus:outline-none transition-colors'
           />
           {pwd.length > 0 && (
             <ul className='mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-[11px]'>
@@ -107,7 +107,7 @@ export default function ResetPasswordPage() {
             onChange={(e) => setConfirm(e.target.value)}
             required
             autoComplete='new-password'
-            className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 text-sm text-primary focus:border-accent-blue focus:outline-none transition-colors'
+            className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 text-base sm:text-sm text-primary focus:border-accent-blue focus:outline-none transition-colors'
           />
         </div>
         {error && (
