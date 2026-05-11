@@ -548,6 +548,28 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           </button>
         </div>
 
+        {/* Quick-mode inline warning. Amber chip alone signaled "danger" but
+            only via tooltip; this visible single-line caption tells the user
+            exactly what they're trading off. Kept to one tight line so the
+            composer stays compact. */}
+        {mode === 'quick' && (
+          <div
+            role='status'
+            aria-live='polite'
+            style={{
+              marginTop: 6,
+              fontSize: 11,
+              color: 'var(--v3-warning)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4,
+            }}
+          >
+            <span aria-hidden='true'>⚡</span>
+            Quick run skips the plan-approval gate — cost runs to the platform cap, no preview.
+          </div>
+        )}
+
         {advancedOpen && (
           <div
             style={{

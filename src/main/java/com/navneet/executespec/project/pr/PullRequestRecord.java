@@ -124,4 +124,32 @@ public class PullRequestRecord {
   @Column(name = "ci_auto_fix_attempts", nullable = false)
   @Builder.Default
   private Integer ciAutoFixAttempts = 0;
+
+  /**
+   * 2026-05-11 (V186) — CI status rollup persisted from the polling path. The webhook-driven {@link
+   * CiFailureAutoFixService} updates the originating run; this column is the user-visible signal so
+   * the dashboard PR rollup can render a "CI ✗ N" chip even when no webhook is installed. See
+   * {@link CiCheckStatus} for the value space + transition rules.
+   */
+  public enum CiCheckStatus {
+    UNKNOWN,
+    PENDING,
+    SUCCESS,
+    FAILURE,
+    NEUTRAL
+  }
+
+  @Enumerated(EnumType.STRING)
+  @Column(name = "ci_status", nullable = false, length = 16)
+  @Builder.Default
+  private CiCheckStatus ciStatus = CiCheckStatus.UNKNOWN;
+
+  /** Number of failing checks at the last successful poll. 0 unless {@code ciStatus = FAILURE}. */
+  @Column(name = "ci_failing_count", nullable = false)
+  @Builder.Default
+  private Integer ciFailingCount = 0;
+
+  /** Timestamp of the last successful check-runs poll. Null pre-poll. */
+  @Column(name = "ci_checked_at")
+  private Instant ciCheckedAt;
 }

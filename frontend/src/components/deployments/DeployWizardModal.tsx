@@ -283,7 +283,11 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
               </p>
             </div>
           </div>
-          <button onClick={onClose} className='text-muted hover:text-secondary transition-colors'>
+          <button
+            onClick={onClose}
+            aria-label='Close deploy wizard'
+            className='text-muted hover:text-secondary transition-colors'
+          >
             <X className='h-5 w-5' />
           </button>
         </div>
