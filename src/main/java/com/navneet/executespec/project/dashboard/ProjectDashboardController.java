@@ -74,7 +74,10 @@ public class ProjectDashboardController {
       String prUrl,
       String status,
       String createdAt,
-      String mergedAt) {
+      String mergedAt,
+      String ciStatus,
+      Integer ciFailingCount,
+      String ciCheckedAt) {
     static PrSummaryDto from(PullRequestRecord r) {
       return new PrSummaryDto(
           r.getRepoFullName(),
@@ -82,7 +85,10 @@ public class ProjectDashboardController {
           r.getPrUrl(),
           r.getStatus().name(),
           r.getCreatedAt() != null ? r.getCreatedAt().toString() : null,
-          r.getMergedAt() != null ? r.getMergedAt().toString() : null);
+          r.getMergedAt() != null ? r.getMergedAt().toString() : null,
+          r.getCiStatus() != null ? r.getCiStatus().name() : "UNKNOWN",
+          r.getCiFailingCount() != null ? r.getCiFailingCount() : 0,
+          r.getCiCheckedAt() != null ? r.getCiCheckedAt().toString() : null);
     }
   }
 

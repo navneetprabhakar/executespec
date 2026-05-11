@@ -28,7 +28,22 @@ public class PrRefreshService {
   private final GitHubRepoService github;
   private final PostMergeCascadeService cascade;
 
-  public record RefreshResult(int checked, int updated, int newlyMerged) {}
+  /**
+   * Result of a refresh sweep.
+   *
+   * @param checked total non-terminal PRs hit by this sweep
+   * @param updated PRs whose open/merged/closed state transitioned
+   * @param newlyMerged subset of {@code updated} that flipped OPEN→MERGED (triggers cascade)
+   * @param ciFailing PRs whose CI rollup ends up at FAILURE after this sweep — surfaced in the
+   *     toast / Refresh-status copy so the user sees the bad-CI signal even on a webhook-less
+   *     setup. 2026-05-11.
+   */
+  public record RefreshResult(int checked, int updated, int newlyMerged, int ciFailing) {
+    /** Back-compat ctor for callers / tests that only care about state transitions. */
+    public RefreshResult(int checked, int updated, int newlyMerged) {
+      this(checked, updated, newlyMerged, 0);
+    }
+  }
 
   /** V82 contract — back-compat for non-controller callers. */
   public RefreshResult refreshProject(String projectId) {
@@ -80,7 +95,7 @@ public class PrRefreshService {
     }
     if (toCheck.isEmpty()) return new RefreshResult(0, 0, 0);
 
-    int checked = 0, updated = 0, newlyMerged = 0;
+    int checked = 0, updated = 0, newlyMerged = 0, ciFailing = 0;
     // Track unique projectIds that had at least one OPEN→MERGED transition in this batch.
     // After the loop we fire ONE async architecture regen per project — without dedup, 3 PRs
     // landing into one project would fire 3 sequential ~30-60s LLM calls and blow the
@@ -102,26 +117,69 @@ public class PrRefreshService {
           continue;
         }
         PullRequestRecord.Status next = mapState(snap.state(), snap.merged());
-        if (next != rec.getStatus()) {
-          boolean wasOpen = rec.getStatus() == PullRequestRecord.Status.OPEN;
+        boolean stateChanged = next != rec.getStatus();
+        boolean wasOpen = rec.getStatus() == PullRequestRecord.Status.OPEN;
+        if (stateChanged) {
           rec.setStatus(next);
           rec.setUpdatedAt(Instant.now());
           if (next == PullRequestRecord.Status.MERGED) rec.setMergedAt(Instant.now());
           if (next == PullRequestRecord.Status.CLOSED) rec.setClosedAt(Instant.now());
-          prRepo.save(rec);
           updated++;
-          if (wasOpen && next == PullRequestRecord.Status.MERGED) {
-            newlyMerged++;
-            // Per-PR fast steps (notify owner, write banner) — sync, ~ms.
-            try {
-              cascade.onMerged(rec);
-            } catch (Exception cex) {
-              log.warn("cascade.onMerged failed: {}", cex.getMessage());
+        }
+
+        // 2026-05-11 (V186) — CI rollup poll. Only OPEN PRs need a check (merged
+        // / closed PRs the user already moved on from). The headSha from the same
+        // snapshot drives /commits/{sha}/check-runs so we get the exact PR-tip
+        // signal, not a stale main-branch result. Failure / pending / success
+        // persisted via setters; ciChecked_at always bumped on a successful poll
+        // so the UI can render "as of …" even when nothing changed.
+        if (next == PullRequestRecord.Status.OPEN && snap.headSha() != null
+            && !snap.headSha().isBlank()) {
+          try {
+            var rollup =
+                github.getCheckRunRollup(rec.getRepoFullName(), snap.headSha(), callerPat);
+            PullRequestRecord.CiCheckStatus mapped = mapCiStatus(rollup.status());
+            boolean ciChanged =
+                mapped != rec.getCiStatus()
+                    || rollup.failingCount() != (rec.getCiFailingCount() == null
+                        ? 0
+                        : rec.getCiFailingCount());
+            if (ciChanged) {
+              rec.setCiStatus(mapped);
+              rec.setCiFailingCount(rollup.failingCount());
+              rec.setUpdatedAt(Instant.now());
             }
-            // Capture project for the async per-project heavy regen below.
-            String pid = cascade.resolveProjectId(rec);
-            if (pid != null && !pid.isBlank()) projectsToRegen.add(pid);
+            // Always stamp ciCheckedAt on a successful poll, so the dashboard
+            // can show "as of 2 min ago" even when nothing about CI changed.
+            rec.setCiCheckedAt(Instant.now());
+            if (mapped == PullRequestRecord.CiCheckStatus.FAILURE) ciFailing++;
+          } catch (Exception ciEx) {
+            // CI rollup is best-effort; never fail the whole sweep over a single
+            // check-runs poll glitch.
+            log.debug(
+                "PrRefresh: ci rollup failed for {}#{}: {}",
+                rec.getRepoFullName(),
+                rec.getPrNumber(),
+                ciEx.getMessage());
           }
+        }
+
+        // Persist once after both state + ci updates so a single save catches both.
+        if (stateChanged || rec.getCiCheckedAt() != null) {
+          prRepo.save(rec);
+        }
+
+        if (stateChanged && wasOpen && next == PullRequestRecord.Status.MERGED) {
+          newlyMerged++;
+          // Per-PR fast steps (notify owner, write banner) — sync, ~ms.
+          try {
+            cascade.onMerged(rec);
+          } catch (Exception cex) {
+            log.warn("cascade.onMerged failed: {}", cex.getMessage());
+          }
+          // Capture project for the async per-project heavy regen below.
+          String pid = cascade.resolveProjectId(rec);
+          if (pid != null && !pid.isBlank()) projectsToRegen.add(pid);
         }
       } catch (Exception e) {
         log.warn(
@@ -141,12 +199,30 @@ public class PrRefreshService {
         log.warn("PrRefresh: failed to dispatch async regen for {}: {}", pid, e.getMessage());
       }
     }
-    return new RefreshResult(checked, updated, newlyMerged);
+    return new RefreshResult(checked, updated, newlyMerged, ciFailing);
   }
 
   private static PullRequestRecord.Status mapState(String state, boolean merged) {
     if (merged) return PullRequestRecord.Status.MERGED;
     if (state != null && "closed".equalsIgnoreCase(state)) return PullRequestRecord.Status.CLOSED;
     return PullRequestRecord.Status.OPEN;
+  }
+
+  /**
+   * Translates the GitHub check-runs rollup string from {@link
+   * com.navneet.executespec.repo.GitHubRepoService.CheckRunRollup#status} into the entity-level
+   * {@link PullRequestRecord.CiCheckStatus}. Unknown / unmapped values degrade to {@code UNKNOWN}
+   * so a typo at the GitHub side can never write a constraint-violating value (V186 adds the
+   * CHECK constraint).
+   */
+  private static PullRequestRecord.CiCheckStatus mapCiStatus(String raw) {
+    if (raw == null) return PullRequestRecord.CiCheckStatus.UNKNOWN;
+    return switch (raw.toUpperCase()) {
+      case "PENDING" -> PullRequestRecord.CiCheckStatus.PENDING;
+      case "SUCCESS" -> PullRequestRecord.CiCheckStatus.SUCCESS;
+      case "FAILURE" -> PullRequestRecord.CiCheckStatus.FAILURE;
+      case "NEUTRAL" -> PullRequestRecord.CiCheckStatus.NEUTRAL;
+      default -> PullRequestRecord.CiCheckStatus.UNKNOWN;
+    };
   }
 }
