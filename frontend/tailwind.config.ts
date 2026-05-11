@@ -78,12 +78,14 @@ export default {
         dvh: '100dvh',
       },
       fontFamily: {
-        // 2026-05-10 (test variant) — both `sans` and `mono` aliases
-        // resolve to JetBrains Mono so the entire surface renders in
-        // mono. Revert `sans` to ['DM Sans', ...] to drop the mono-
-        // everywhere experiment.
-        sans: ['JetBrains Mono', 'Geist Sans', 'ui-monospace', 'monospace'],
-        mono: ['JetBrains Mono', 'Geist Mono', 'ui-monospace', 'monospace'],
+        // 2026-05-11 — JetBrains Mono is the brand face on every surface.
+        // Both `sans` and `mono` aliases resolve to the same chain so
+        // existing `font-mono` opt-ins (chips, run-ids, command logs)
+        // stay byte-identical to the page font. `ui-monospace` etc are
+        // the system fallback during the Google-Fonts load window. The
+        // Geist Sans / Geist Mono faces have been retired.
+        sans: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+        mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
       },
       spacing: {
         'sp-1': '4px',

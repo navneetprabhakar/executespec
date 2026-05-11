@@ -125,13 +125,16 @@
    * stay aligned automatically. The sans chain matches `body` in
    * `index.css`.
    *
-   * 2026-05-10 (test variant) — both sans + mono use JetBrains Mono.
-   * The "everywhere mono" look is being trialled; revert by swapping
-   * JetBrains Mono back to 'DM Sans' on the sans chain if the
-   * experiment isn't kept. Geist + system fallbacks remain so the
-   * page renders during the Google-Fonts load window. */
-  --v3-font-sans: 'JetBrains Mono', 'Geist Sans', ui-monospace, SFMono-Regular, Menlo, monospace;
-  --v3-font-mono: 'JetBrains Mono', 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+   * 2026-05-11 — JetBrains Mono is the brand face on every surface
+   * (product UI, marketing site, email templates, PDF reports). Both
+   * `--v3-font-sans` and `--v3-font-mono` resolve to the same chain so
+   * existing `var(--v3-font-mono)` opt-ins for chips / run-ids / logs
+   * stay byte-identical to the page font. `ui-monospace` /
+   * `SFMono-Regular` / `Menlo` are the system fallback during the
+   * Google-Fonts load window; the Geist faces have been retired and
+   * their @font-face declarations + woff2 payloads removed. */
+  --v3-font-sans: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --v3-font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   background: var(--v3-bg);
   color: var(--v3-text);
@@ -155,9 +158,9 @@
  * remembered to set `fontFamily: 'inherit'` per-element, but the discipline
  * drifted over time and chat surfaces (textarea, input, select, button) were
  * the most visible offenders. This single rule catches every form control
- * inside the v3 surface so the page font (Geist Sans via --v3-font-sans)
+ * inside the v3 surface so the page font (JetBrains Mono via --v3-font-sans)
  * cascades automatically. ConversationModal portals to <body> but `body` has
- * the same Geist Sans chain (index.css:70), so this still works there.
+ * the same JetBrains chain (index.css:70), so this still works there.
  *
  * Mono content (chips, run-id, command logs) still opts in via class or
  * inline `fontFamily: 'var(--v3-font-mono)'` — the class wins over this
