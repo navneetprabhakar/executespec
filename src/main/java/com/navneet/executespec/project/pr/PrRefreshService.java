@@ -133,17 +133,16 @@ public class PrRefreshService {
         // signal, not a stale main-branch result. Failure / pending / success
         // persisted via setters; ciChecked_at always bumped on a successful poll
         // so the UI can render "as of …" even when nothing changed.
-        if (next == PullRequestRecord.Status.OPEN && snap.headSha() != null
+        if (next == PullRequestRecord.Status.OPEN
+            && snap.headSha() != null
             && !snap.headSha().isBlank()) {
           try {
-            var rollup =
-                github.getCheckRunRollup(rec.getRepoFullName(), snap.headSha(), callerPat);
+            var rollup = github.getCheckRunRollup(rec.getRepoFullName(), snap.headSha(), callerPat);
             PullRequestRecord.CiCheckStatus mapped = mapCiStatus(rollup.status());
             boolean ciChanged =
                 mapped != rec.getCiStatus()
-                    || rollup.failingCount() != (rec.getCiFailingCount() == null
-                        ? 0
-                        : rec.getCiFailingCount());
+                    || rollup.failingCount()
+                        != (rec.getCiFailingCount() == null ? 0 : rec.getCiFailingCount());
             if (ciChanged) {
               rec.setCiStatus(mapped);
               rec.setCiFailingCount(rollup.failingCount());
@@ -212,8 +211,8 @@ public class PrRefreshService {
    * Translates the GitHub check-runs rollup string from {@link
    * com.navneet.executespec.repo.GitHubRepoService.CheckRunRollup#status} into the entity-level
    * {@link PullRequestRecord.CiCheckStatus}. Unknown / unmapped values degrade to {@code UNKNOWN}
-   * so a typo at the GitHub side can never write a constraint-violating value (V186 adds the
-   * CHECK constraint).
+   * so a typo at the GitHub side can never write a constraint-violating value (V186 adds the CHECK
+   * constraint).
    */
   private static PullRequestRecord.CiCheckStatus mapCiStatus(String raw) {
     if (raw == null) return PullRequestRecord.CiCheckStatus.UNKNOWN;

@@ -126,10 +126,10 @@ public class PullRequestRecord {
   private Integer ciAutoFixAttempts = 0;
 
   /**
-   * 2026-05-11 (V186) — CI status rollup persisted from the polling path. The webhook-driven
-   * {@link CiFailureAutoFixService} updates the originating run; this column is the user-visible
-   * signal so the dashboard PR rollup can render a "CI ✗ N" chip even when no webhook is
-   * installed. See {@link CiCheckStatus} for the value space + transition rules.
+   * 2026-05-11 (V186) — CI status rollup persisted from the polling path. The webhook-driven {@link
+   * CiFailureAutoFixService} updates the originating run; this column is the user-visible signal so
+   * the dashboard PR rollup can render a "CI ✗ N" chip even when no webhook is installed. See
+   * {@link CiCheckStatus} for the value space + transition rules.
    */
   public enum CiCheckStatus {
     UNKNOWN,

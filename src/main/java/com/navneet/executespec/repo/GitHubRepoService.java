@@ -1178,7 +1178,8 @@ public class GitHubRepoService {
 
   /**
    * Rollup of GitHub's check-runs for a single commit. Maps GitHub's per-run {@code conclusion}
-   * field into the user-visible {@link com.navneet.executespec.project.pr.PullRequestRecord.CiCheckStatus}.
+   * field into the user-visible {@link
+   * com.navneet.executespec.project.pr.PullRequestRecord.CiCheckStatus}.
    *
    * <p>Conclusion priority (any failing → overall FAILURE):
    *
@@ -1246,11 +1247,8 @@ public class GitHubRepoService {
           continue;
         }
         switch (conclusion == null ? "" : conclusion.toLowerCase()) {
-          case "failure",
-              "cancelled",
-              "timed_out",
-              "action_required",
-              "startup_failure" -> failing++;
+          case "failure", "cancelled", "timed_out", "action_required", "startup_failure" ->
+              failing++;
           case "success" -> success++;
           case "skipped" -> success++;
           case "neutral" -> neutral++;
