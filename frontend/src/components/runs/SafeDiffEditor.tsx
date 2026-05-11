@@ -68,8 +68,7 @@ type Props = React.ComponentProps<typeof DiffEditor>;
 // SafeDiffEditor mount so the entire app, including code surfaces,
 // stays on the unified brand chain. Caller-provided `options.fontFamily`
 // wins (we only set the default), but `theme` is still ours.
-const DEFAULT_MONACO_FONT =
-  "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+const DEFAULT_MONACO_FONT = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
 
 export default function SafeDiffEditor(props: Props) {
   const handleMount: DiffOnMount = (editor, monaco) => {
