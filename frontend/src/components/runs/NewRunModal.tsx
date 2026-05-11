@@ -827,6 +827,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                 <button
                   onClick={sendMessage}
                   disabled={!canSend}
+                  aria-label='Send message to assistant'
                   className={cn(
                     'px-3 py-2 rounded-sm transition-all flex items-center justify-center',
                     'bg-accent-blue hover:bg-accent-blue/80',
