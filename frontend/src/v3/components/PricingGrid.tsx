@@ -97,12 +97,9 @@ export default function PricingGrid({
           alignItems: 'stretch',
         }}
       >
-        {/* Audit r5 (P1-3, 2026-05-06): the original review flagged PRO
-            as a confusing upsell target ("Existing subscribers only").
-            V176 (shipped 2026-05-06) un-hid PRO and rebranded it as
-            "Solo" at $29/mo with 30 runs/month — closing the FREE→Team
-            $0→$78 chasm. The card-hide filter has been retired since
-            Solo is now the canonical FREE-user upgrade path. */}
+        {/* V176 (2026-05-06) un-hid PRO as the canonical FREE-user upgrade
+            path at $29/mo with 30 runs/month — closing the FREE→Team $0→$78
+            chasm. The card-hide filter is retired; PRO is "Pro" again. */}
         {cards.map((card) => (
           <Card
             key={card.tier}

@@ -210,7 +210,7 @@ export default function TopBar() {
   };
   const tierLabel =
     user?.tier === 'PRO'
-      ? 'Solo'
+      ? 'Pro'
       : user?.tier === 'TEAM'
         ? 'Team'
         : user?.tier === 'ENTERPRISE'
@@ -619,7 +619,7 @@ function TierChip() {
 
   const label =
     tier === 'PRO'
-      ? 'Solo'
+      ? 'Pro'
       : tier === 'TEAM'
         ? 'Team'
         : tier === 'MAX'

@@ -2859,9 +2859,13 @@ export const uploadProjectDocument = async (
 export const deleteProjectDocument = (projectId: string, documentId: string) =>
   req<{status: string}>(`/projects/${projectId}/documents/${documentId}`, {method: 'DELETE'});
 
-// PR refresh — polls GitHub for the latest state of every project PR.
+// PR refresh — polls GitHub for the latest state of every project PR + the
+// CI check-runs rollup per non-terminal PR (V186, 2026-05-11). `ciFailing` is
+// the count of PRs that came back FAILURE on this sweep — surfaced in the
+// toast copy so a webhook-less customer sees the red CI signal on every
+// Refresh click.
 export const refreshProjectPrs = (projectId: string) =>
-  req<{checked: number; updated: number; newlyMerged: number}>(
+  req<{checked: number; updated: number; newlyMerged: number; ciFailing: number}>(
     `/projects/${projectId}/prs/refresh`,
     {method: 'POST'},
   );

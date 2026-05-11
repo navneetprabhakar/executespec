@@ -40,7 +40,10 @@ public class PullRequestController {
       String headBranch,
       String baseBranch,
       String createdAt,
-      String mergedAt) {
+      String mergedAt,
+      String ciStatus,
+      Integer ciFailingCount,
+      String ciCheckedAt) {
     static PrSummary from(PullRequestRecord r) {
       return new PrSummary(
           r.getRepoFullName(),
@@ -50,7 +53,10 @@ public class PullRequestController {
           r.getHeadBranch(),
           r.getBaseBranch(),
           r.getCreatedAt() != null ? r.getCreatedAt().toString() : null,
-          r.getMergedAt() != null ? r.getMergedAt().toString() : null);
+          r.getMergedAt() != null ? r.getMergedAt().toString() : null,
+          r.getCiStatus() != null ? r.getCiStatus().name() : "UNKNOWN",
+          r.getCiFailingCount() != null ? r.getCiFailingCount() : 0,
+          r.getCiCheckedAt() != null ? r.getCiCheckedAt().toString() : null);
     }
   }
 

@@ -619,7 +619,11 @@ function AdminPageInner() {
                 >
                   + Invite User
                 </button>
-                <button onClick={loadUsers} className='p-2 text-muted hover:text-secondary'>
+                <button
+                  onClick={loadUsers}
+                  aria-label='Refresh users list'
+                  className='p-2 text-muted hover:text-secondary'
+                >
                   <RefreshCw className='h-4 w-4' />
                 </button>
               </div>
@@ -738,7 +742,11 @@ function AdminPageInner() {
         {tab === 'orgs' && (
           <div className='space-y-4'>
             <div className='flex justify-end'>
-              <button onClick={loadOrgs} className='p-2 text-muted hover:text-secondary'>
+              <button
+                onClick={loadOrgs}
+                aria-label='Refresh orgs list'
+                className='p-2 text-muted hover:text-secondary'
+              >
                 <RefreshCw className='h-4 w-4' />
               </button>
             </div>
@@ -1023,7 +1031,11 @@ function AdminPageInner() {
                 >
                   <Plus className='h-3.5 w-3.5' /> New Package
                 </button>
-                <button onClick={loadPackages} className='p-2 text-muted hover:text-secondary'>
+                <button
+                  onClick={loadPackages}
+                  aria-label='Refresh packages list'
+                  className='p-2 text-muted hover:text-secondary'
+                >
                   <RefreshCw className='h-4 w-4' />
                 </button>
               </div>
@@ -1203,7 +1215,7 @@ function AdminPageInner() {
             <p className='text-sm text-muted leading-relaxed'>
               Sends usage report emails to{' '}
               <strong className='text-secondary'>all active users</strong> and{' '}
-              <strong className='text-secondary'>org admins</strong>. Solo users get personal
+              <strong className='text-secondary'>org admins</strong>. Individual users get personal
               reports. Org admins get aggregated reports with top contributors and per-project
               breakdown.
             </p>
@@ -1266,8 +1278,8 @@ function AdminPageInner() {
               <div className='flex items-start gap-2'>
                 <span className='text-accent-blue mt-0.5'>&#9679;</span>
                 <span>
-                  <strong className='text-secondary'>Solo users</strong> — personal run count, token
-                  usage, cost estimate, per-project breakdown, comparison with previous period
+                  <strong className='text-secondary'>Individual users</strong> — personal run count,
+                  token usage, cost estimate, per-project breakdown, comparison with previous period
                 </span>
               </div>
               <div className='flex items-start gap-2'>

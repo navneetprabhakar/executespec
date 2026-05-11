@@ -176,7 +176,7 @@ export default function RegisterPage() {
                     : 'border-[var(--border-default)] bg-[var(--gray-200)] text-muted hover:text-primary hover:border-[var(--border-hover)]'
                 }`}
               >
-                {p === 'personal' && 'Solo dev'}
+                {p === 'personal' && 'Personal'}
                 {p === 'team' && 'Team (2+ devs)'}
                 {p === 'enterprise' && 'Enterprise'}
               </button>
