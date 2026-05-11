@@ -141,10 +141,44 @@ public class LandingController {
 
   // ── Helpers ───────────────────────────────────────────────────────────────
 
+  /**
+   * Sanitize a raw user-submitted spec into a single line of plain text safe for the public
+   * landing/exec-snapshot surface, then truncate.
+   *
+   * <p>The 2026-05-11 audit found {@code topWins[].spec} entries on {@code
+   * /api/v3/public/exec-snapshot} leaking raw markdown ({@code "** **Project:** Single-Player 3D
+   * Race Game ..."}) — the previous {@link #truncate(String, int)} helper only collapsed
+   * whitespace. We now strip the common markdown noise (heading markers, bold/italic stars +
+   * underscores, inline code backticks, list bullets, blockquote arrows) before the whitespace
+   * collapse, so prospects see "Project: Single-Player 3D Race Game …" instead of leaked stars.
+   * Functional shape (single-line truncated string) unchanged; this strictly reduces the surface
+   * area, never widens it.
+   */
   private static String truncate(String s, int max) {
     if (s == null) return "";
-    String trimmed = s.trim().replaceAll("\\s+", " ");
-    return trimmed.length() <= max ? trimmed : trimmed.substring(0, max - 1) + "…";
+    String cleaned =
+        s
+            // Heading markers at line start (e.g. "## " / "### ")
+            .replaceAll("(?m)^#{1,6}\\s+", "")
+            // List bullets at line start (* / - / +)
+            .replaceAll("(?m)^\\s*[*\\-+]\\s+", "")
+            // Numbered list bullets at line start (1. / 2) / etc.)
+            .replaceAll("(?m)^\\s*\\d+[.)]\\s+", "")
+            // Blockquote markers
+            .replaceAll("(?m)^>\\s+", "")
+            // Bold (**…**) — drop just the markers
+            .replaceAll("\\*\\*([^*]+)\\*\\*", "$1")
+            // Italic (*…* or _…_) — drop just the markers
+            .replaceAll("(?<!\\w)\\*([^*\\n]+)\\*(?!\\w)", "$1")
+            .replaceAll("(?<!\\w)_([^_\\n]+)_(?!\\w)", "$1")
+            // Inline code backticks
+            .replace("`", "")
+            // Stray markdown stars left after the above (e.g. orphan "**")
+            .replace("**", "")
+            // Trailing/leading whitespace runs + newlines → single space
+            .replaceAll("\\s+", " ")
+            .trim();
+    return cleaned.length() <= max ? cleaned : cleaned.substring(0, max - 1) + "…";
   }
 
   private static Integer toInt(Object o) {

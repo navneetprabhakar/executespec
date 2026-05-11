@@ -514,8 +514,17 @@ export default function TopBar() {
           <span className='v3-topbar__brand-text'>ExecuteSpec</span>
         </Link>
 
-        {/* Desktop: inline center nav. Hidden on mobile. */}
-        {!isMobile && (
+        {/* Desktop: inline center nav. Hidden on mobile.
+         *
+         * 2026-05-11 — UX audit B9. The workspace-side center nav
+         * (ProjectSwitcher / Runs / Library / Migrations) used to
+         * render for everyone. The AvatarMenu's anonymous rail also
+         * surfaces Library + Migrations, so logged-out visitors on
+         * marketing pages (e.g. /exec-demo) saw "Library" + "Migrations"
+         * twice and "Runs" pointing at an auth-walled page. Gate the
+         * center nav behind a logged-in user so anonymous visitors see
+         * only the marketing rail (no duplication, no dead links). */}
+        {!isMobile && user && (
           <div
             className='v3-topbar__center'
             style={{display: 'flex', alignItems: 'center', gap: 8}}
@@ -534,8 +543,10 @@ export default function TopBar() {
         )}
 
         {/* Mobile: only ProjectSwitcher stays inline (it's the most
-          frequently-used center surface). Other links go to drawer. */}
-        {isMobile && (
+          frequently-used center surface). Other links go to drawer.
+          Anonymous users skip this too — ProjectSwitcher's "Sign in to
+          pick a project" placeholder is meaningless on marketing pages. */}
+        {isMobile && user && (
           <div
             className='v3-topbar__center'
             style={{display: 'flex', alignItems: 'center', gap: 4, flex: 1, minWidth: 0}}

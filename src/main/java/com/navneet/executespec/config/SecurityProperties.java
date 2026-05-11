@@ -45,6 +45,14 @@ public class SecurityProperties {
     private boolean enabled = true;
     private long maxAgeSeconds = 31_536_000; // 1 year
     private boolean includeSubDomains = true;
+
+    /**
+     * Emit the {@code preload} directive on the HSTS header. Off by default — only flip to true
+     * once dev/prod have been stable on HTTPS for 30+ days, and only then submit the domain to
+     * {@code https://hstspreload.org}. Setting it ahead of submission is safe (browsers ignore the
+     * directive without an entry in the preload list); leaving it off is also safe.
+     */
+    private boolean preload = false;
   }
 
   @Data

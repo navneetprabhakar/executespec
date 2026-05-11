@@ -4,8 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>ExecuteSpec weekly summary</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 </head>
-<body style="margin:0;padding:0;background:#0B0D10;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;color:#ededed;line-height:1.55;">
+<body style="margin:0;padding:0;background:#0B0D10;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#ededed;line-height:1.55;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#0B0D10;">
   <tr><td align="center" style="padding:24px 12px;">
     <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;border-collapse:collapse;background:#14171C;border:1px solid #242A33;border-radius:14px;overflow:hidden;">
@@ -13,12 +16,12 @@
       <!-- ── Header ─────────────────────────────────────────────────────────── -->
       <tr><td style="padding:32px 28px 20px;background:linear-gradient(135deg,rgba(91,141,239,0.18),rgba(139,92,246,0.10) 60%,transparent);border-bottom:1px solid #242A33;">
         <div style="display:inline-flex;align-items:center;gap:10px;margin-bottom:18px;">
-          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#ededed;color:#0B0D10;border-radius:6px;font-family:'SF Mono',Menlo,monospace;font-weight:700;font-size:12px;">ES</span>
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#ededed;color:#0B0D10;border-radius:6px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-weight:700;font-size:12px;">ES</span>
           <span style="color:#ededed;font-weight:600;font-size:15px;letter-spacing:-0.01em;">ExecuteSpec</span>
         </div>
-        <div style="display:inline-block;background:rgba(91,141,239,0.14);border:1px solid rgba(91,141,239,0.45);border-radius:999px;padding:3px 10px;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;color:#5B8DEF;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">Weekly summary</div>
+        <div style="display:inline-block;background:rgba(91,141,239,0.14);border:1px solid rgba(91,141,239,0.45);border-radius:999px;padding:3px 10px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;color:#5B8DEF;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:12px;">Weekly summary</div>
         <h1 style="margin:0;color:#ededed;font-size:24px;line-height:1.18;letter-spacing:-0.025em;font-weight:600;">Last 7 days at a glance.</h1>
-        <div style="margin-top:8px;color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:12px;" th:text="${periodLabel}">2026-04-15 → 2026-04-22</div>
+        <div style="margin-top:8px;color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;" th:text="${periodLabel}">2026-04-15 → 2026-04-22</div>
       </td></tr>
 
       <!-- ── KPI tiles ──────────────────────────────────────────────────────── -->
@@ -26,15 +29,15 @@
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:separate;border-spacing:8px;">
           <tr>
             <td style="width:33%;background:#111;border:1px solid #242A33;border-radius:8px;padding:14px;">
-              <div style="color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;">New signups</div>
+              <div style="color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;">New signups</div>
               <div style="color:#ededed;font-size:28px;font-weight:600;letter-spacing:-0.02em;margin-top:4px;" th:text="${newSignups}">0</div>
             </td>
             <td style="width:33%;background:#111;border:1px solid #242A33;border-radius:8px;padding:14px;">
-              <div style="color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;">Runs</div>
+              <div style="color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;">Runs</div>
               <div style="color:#ededed;font-size:28px;font-weight:600;letter-spacing:-0.02em;margin-top:4px;" th:text="${totalRuns}">0</div>
             </td>
             <td style="width:33%;background:#111;border:1px solid #242A33;border-radius:8px;padding:14px;">
-              <div style="color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;">Completion</div>
+              <div style="color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;">Completion</div>
               <div style="color:#ededed;font-size:28px;font-weight:600;letter-spacing:-0.02em;margin-top:4px;"><span th:text="${completionPct}">0</span>%</div>
             </td>
           </tr>
@@ -43,50 +46,50 @@
 
       <!-- ── Outcome breakdown ──────────────────────────────────────────────── -->
       <tr><td style="padding:8px 28px 4px;">
-        <div style="color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Run outcomes</div>
+        <div style="color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Run outcomes</div>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#111;border:1px solid #242A33;border-radius:8px;font-size:13.5px;">
           <tr>
             <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#8A94A6;">Completed</td>
-            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#10B981;text-align:right;font-family:'SF Mono',Menlo,monospace;" th:text="${completedRuns}">0</td>
+            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#10B981;text-align:right;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;" th:text="${completedRuns}">0</td>
           </tr>
           <tr>
             <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#8A94A6;">Partial</td>
-            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#F59E0B;text-align:right;font-family:'SF Mono',Menlo,monospace;" th:text="${partialRuns}">0</td>
+            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#F59E0B;text-align:right;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;" th:text="${partialRuns}">0</td>
           </tr>
           <tr>
             <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#8A94A6;">Failed</td>
-            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#F26D6D;text-align:right;font-family:'SF Mono',Menlo,monospace;" th:text="${failedRuns}">0</td>
+            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#F26D6D;text-align:right;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;" th:text="${failedRuns}">0</td>
           </tr>
           <tr>
             <td style="padding:10px 14px;color:#8A94A6;">Awaiting approval (snapshot)</td>
-            <td style="padding:10px 14px;color:#ededed;text-align:right;font-family:'SF Mono',Menlo,monospace;" th:text="${openApprovalGates}">0</td>
+            <td style="padding:10px 14px;color:#ededed;text-align:right;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;" th:text="${openApprovalGates}">0</td>
           </tr>
         </table>
       </td></tr>
 
       <!-- ── Users ──────────────────────────────────────────────────────────── -->
       <tr><td style="padding:18px 28px 4px;">
-        <div style="color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Users</div>
+        <div style="color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Users</div>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#111;border:1px solid #242A33;border-radius:8px;font-size:13.5px;">
           <tr>
             <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#8A94A6;">Active this week (any login)</td>
-            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#ededed;text-align:right;font-family:'SF Mono',Menlo,monospace;" th:text="${activeUsers}">0</td>
+            <td style="padding:10px 14px;border-bottom:1px solid #242A33;color:#ededed;text-align:right;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;" th:text="${activeUsers}">0</td>
           </tr>
           <tr>
             <td style="padding:10px 14px;color:#8A94A6;">Total active accounts</td>
-            <td style="padding:10px 14px;color:#ededed;text-align:right;font-family:'SF Mono',Menlo,monospace;" th:text="${totalUsers}">0</td>
+            <td style="padding:10px 14px;color:#ededed;text-align:right;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;" th:text="${totalUsers}">0</td>
           </tr>
         </table>
       </td></tr>
 
       <!-- ── Signup list (up to 15) ─────────────────────────────────────────── -->
       <tr th:if="${not #lists.isEmpty(newSignupList)}"><td style="padding:18px 28px 4px;">
-        <div style="color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Recent signups</div>
+        <div style="color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:10.5px;text-transform:uppercase;letter-spacing:0.08em;margin-bottom:10px;">Recent signups</div>
         <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#111;border:1px solid #242A33;border-radius:8px;font-size:13px;border-collapse:collapse;">
           <tr th:each="row,iterStat : ${newSignupList}" th:style="${iterStat.last} ? '' : 'border-bottom:1px solid #242A33'">
             <td style="padding:10px 14px;color:#ededed;" th:text="${row.name ?: '—'}">Name</td>
-            <td style="padding:10px 14px;color:#C9D1DB;font-family:'SF Mono',Menlo,monospace;font-size:12px;" th:text="${row.email}">email@example.com</td>
-            <td style="padding:10px 14px;color:#8A94A6;font-family:'SF Mono',Menlo,monospace;font-size:11px;text-align:right;" th:text="${row.signupMethod + ' · ' + row.createdAt}">Email · 2026-04-22</td>
+            <td style="padding:10px 14px;color:#C9D1DB;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;" th:text="${row.email}">email@example.com</td>
+            <td style="padding:10px 14px;color:#8A94A6;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;text-align:right;" th:text="${row.signupMethod + ' · ' + row.createdAt}">Email · 2026-04-22</td>
           </tr>
         </table>
       </td></tr>

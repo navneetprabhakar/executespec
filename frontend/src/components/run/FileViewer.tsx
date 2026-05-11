@@ -72,6 +72,12 @@ export function FileViewer({fileName, content, language}: FileViewerProps) {
             minimap: {enabled: false},
             scrollBeyondLastLine: false,
             fontSize: 13,
+            // 2026-05-11 — pin Monaco's font to the brand JetBrains Mono
+            // chain so file viewers match every other surface. Monaco's
+            // built-in default is Consolas/Menlo which created a visible
+            // font mismatch between the diff/code viewer and the
+            // surrounding chrome (chat, chips, headers).
+            fontFamily: "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace",
             lineNumbers: 'on',
             folding: true,
             wordWrap: 'on',
