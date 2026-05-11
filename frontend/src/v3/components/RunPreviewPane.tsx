@@ -688,6 +688,7 @@ export default function RunPreviewPane({runId}: {runId: string}) {
             <button
               type='button'
               onClick={handleRefresh}
+              aria-label='Refresh preview status'
               title='Refresh status'
               style={{
                 background: 'transparent',
@@ -1257,6 +1258,7 @@ function EnvConfigDialog({
           <button
             type='button'
             onClick={onClose}
+            aria-label='Close API keys dialog'
             style={{
               padding: 4,
               borderRadius: 4,
