@@ -86,11 +86,17 @@ export default function ProjectPrRollup({
     setElapsedSec(0);
     try {
       const r = await refreshProjectPrs(projectId);
-      setLastRefresh(
-        r.newlyMerged > 0
-          ? `${r.newlyMerged} merged · ${r.updated}/${r.checked} updated`
-          : `${r.updated}/${r.checked} updated`,
-      );
+      // 2026-05-11 (V186) — surface the CI-failing count in the toast so the
+      // user sees the red signal on a no-webhook setup without scrolling the
+      // PR list. `ciFailing` is the count of PRs that came back FAILURE on
+      // this sweep (rather than the cumulative count across all time).
+      const parts: string[] = [];
+      if (r.newlyMerged > 0) parts.push(`${r.newlyMerged} merged`);
+      parts.push(`${r.updated}/${r.checked} updated`);
+      if (r.ciFailing > 0) {
+        parts.push(`${r.ciFailing} CI failing`);
+      }
+      setLastRefresh(parts.join(' · '));
       await load();
     } catch (e) {
       // Soft-fail: the backend's GitHub poll + DB write often completes
@@ -333,6 +339,39 @@ function statusPill(status: string): string {
   return 'text-[11px] px-1.5 py-0.5 rounded border text-accent-blue border-accent-blue/40';
 }
 
+/**
+ * CI rollup chip — only renders for SUCCESS / PENDING / FAILURE. UNKNOWN +
+ * NEUTRAL collapse to no chip in the caller. Pre-existing `text-status-*` /
+ * `text-muted` token classes are reused so light + dark themes stay coherent.
+ */
+function ciPill(status: 'SUCCESS' | 'PENDING' | 'FAILURE'): string {
+  const base = 'text-[11px] px-1.5 py-0.5 rounded border font-mono';
+  if (status === 'FAILURE')
+    return `${base} text-status-error border-status-error/40 bg-status-error/5`;
+  if (status === 'PENDING') return `${base} text-muted border-[var(--border-default)]`;
+  return `${base} text-status-success border-status-success/40`;
+}
+
+function ciTooltip(
+  status: 'SUCCESS' | 'PENDING' | 'FAILURE',
+  failingCount: number,
+  checkedAt: string | null,
+): string {
+  const head =
+    status === 'FAILURE'
+      ? `${failingCount} failing check${failingCount === 1 ? '' : 's'}`
+      : status === 'PENDING'
+        ? 'CI still running'
+        : 'All checks passed';
+  if (!checkedAt) return head;
+  const when = new Date(checkedAt);
+  const ageMs = Date.now() - when.getTime();
+  const ageMin = Math.max(0, Math.round(ageMs / 60_000));
+  const fresh =
+    ageMin < 1 ? 'just now' : ageMin < 60 ? `${ageMin}m ago` : `${Math.round(ageMin / 60)}h ago`;
+  return `${head} · as of ${fresh}`;
+}
+
 function PrRow({
   pr,
   projectId,
@@ -380,6 +419,23 @@ function PrRow({
         <span className={statusPill(pr.status)}>{pr.status}</span>
         <span className='font-mono'>#{pr.prNumber ?? '—'}</span>
         <span className='truncate flex-1 font-mono'>{pr.repoFullName ?? pr.prUrl}</span>
+        {/* 2026-05-11 (V186) — CI rollup chip. Only renders when the last
+            refresh observed a meaningful signal (FAILURE / PENDING / SUCCESS);
+            UNKNOWN + NEUTRAL stay silent so the row doesn't show a chip on
+            PRs without CI configured. Hover-title carries the "as of …"
+            timestamp + failing count so a quick glance is enough for ops. */}
+        {pr.ciStatus && pr.ciStatus !== 'UNKNOWN' && pr.ciStatus !== 'NEUTRAL' && (
+          <span
+            className={ciPill(pr.ciStatus)}
+            title={ciTooltip(pr.ciStatus, pr.ciFailingCount ?? 0, pr.ciCheckedAt ?? null)}
+          >
+            {pr.ciStatus === 'FAILURE'
+              ? `CI ✗${(pr.ciFailingCount ?? 0) > 1 ? ` ${pr.ciFailingCount}` : ''}`
+              : pr.ciStatus === 'PENDING'
+                ? 'CI …'
+                : 'CI ✓'}
+          </span>
+        )}
         {pr.status === 'OPEN' && pr.repoFullName && pr.prNumber && onAddressReview && (
           <button
             onClick={async (e) => {
