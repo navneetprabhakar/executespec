@@ -463,6 +463,7 @@ export default function PreviewTab({runId}: {runId: string}) {
           {!isStartingPhase && (
             <button
               onClick={handleRefresh}
+              aria-label='Refresh preview status'
               className='p-1.5 rounded text-muted hover:text-secondary hover:bg-[var(--gray-200)] transition-colors'
               title='Refresh status'
             >
@@ -781,6 +782,7 @@ function EnvConfigDialog({
           <h3 className='text-sm font-semibold text-primary'>Third-Party API Keys</h3>
           <button
             onClick={onClose}
+            aria-label='Close API keys dialog'
             className='p-1 rounded hover:bg-[var(--gray-200)] text-muted hover:text-secondary'
           >
             <X className='h-4 w-4' />
