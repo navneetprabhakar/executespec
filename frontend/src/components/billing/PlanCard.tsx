@@ -131,15 +131,7 @@ export function PlanCard({
       )}
 
       <h3 className='text-lg font-semibold text-primary'>
-        {/* GA-readiness P2.1 — derive the visible label from the plan name so
-            the V176 rename "Pro Monthly *" → "Solo Monthly *" surfaces here.
-            Falls back to a tier-based label for older plan rows that still
-            ship with "Pro Monthly". */}
-        {plan.name?.toLowerCase().startsWith('solo')
-          ? 'Solo'
-          : plan.tier === 'TEAM'
-            ? 'Team'
-            : 'Pro'}
+        {plan.tier === 'TEAM' ? 'Team' : plan.tier === 'ENTERPRISE' ? 'Enterprise' : 'Pro'}
       </h3>
       <p className='text-sm text-muted mt-1'>{keyModeLabel}</p>
 

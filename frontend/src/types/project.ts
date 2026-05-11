@@ -54,6 +54,16 @@ export interface PrSummary {
   baseBranch: string | null;
   createdAt: string;
   mergedAt: string | null;
+  /**
+   * 2026-05-11 (V186) — CI rollup status from the most recent
+   * /projects/{id}/prs/refresh poll. Mirrors PullRequestRecord.CiCheckStatus.
+   * UNKNOWN both pre-poll and when GitHub returns zero check-runs.
+   */
+  ciStatus?: 'UNKNOWN' | 'PENDING' | 'SUCCESS' | 'FAILURE' | 'NEUTRAL';
+  /** Number of failing checks at the last poll. 0 unless ciStatus = FAILURE. */
+  ciFailingCount?: number;
+  /** ISO-8601 timestamp of the last successful check-runs poll; null pre-poll. */
+  ciCheckedAt?: string | null;
 }
 
 export interface TaskSummary {

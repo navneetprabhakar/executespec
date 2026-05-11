@@ -161,6 +161,14 @@ export interface PrRollupEntry {
    * to keep the dashboard rollup readable.
    */
   kind?: 'RUN' | 'BOOTSTRAP' | 'ARCHITECTURE' | 'CONTRACT' | 'CHAT_TOOL' | string;
+  /**
+   * V186 (2026-05-11) — CI rollup from the latest PrRefreshService poll.
+   * UNKNOWN both pre-poll and when GitHub returns zero check-runs (= no CI
+   * configured). UI hides the chip on UNKNOWN + NEUTRAL.
+   */
+  ciStatus?: 'UNKNOWN' | 'PENDING' | 'SUCCESS' | 'FAILURE' | 'NEUTRAL';
+  ciFailingCount?: number;
+  ciCheckedAt?: string | null;
 }
 
 export interface ProjectOverview {

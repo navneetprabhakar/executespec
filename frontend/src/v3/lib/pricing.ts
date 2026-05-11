@@ -60,14 +60,12 @@ export const PRICING_CARDS: PricingCard[] = [
     ctaLabel: 'Try free →',
   },
   {
-    // V176 (2026-05-06) renamed `tier_config.PRO` display_name "Pro" → "Solo"
-    // and re-LISTED it as the bridge between FREE and TEAM at $29/mo with
-    // 30 credits/month. The TierKey enum still says 'PRO' because the
-    // database PK didn't change; the user-facing copy is "Solo". Audit r5
-    // (P1-2, 2026-05-06): the frontend pricing.ts hadn't caught up to V176
-    // — it still sold PRO as $20 / 20 credits / Grandfathered. Synced.
+    // V176 (2026-05-06) re-LISTED PRO as the bridge between FREE and TEAM
+    // at $29/mo with 30 credits/month. Display label is "Pro" — the brief
+    // "Solo" rebrand was retired 2026-05-11 to collapse tier-name surfaces
+    // to the canonical FREE/PRO/TEAM/ENTERPRISE ladder.
     tier: 'PRO',
-    name: 'Solo',
+    name: 'Pro',
     priceUsd: 29,
     priceInr: 2499,
     priceUnit: '/ month',
@@ -80,7 +78,7 @@ export const PRICING_CARDS: PricingCard[] = [
       'Plan & review gate',
       'Priority email support',
     ],
-    ctaLabel: 'Upgrade to Solo →',
+    ctaLabel: 'Upgrade to Pro →',
   },
   {
     tier: 'TEAM',

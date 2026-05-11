@@ -1177,6 +1177,102 @@ public class GitHubRepoService {
   }
 
   /**
+   * Rollup of GitHub's check-runs for a single commit. Maps GitHub's per-run {@code conclusion}
+   * field into the user-visible {@link
+   * com.navneet.executespec.project.pr.PullRequestRecord.CiCheckStatus}.
+   *
+   * <p>Conclusion priority (any failing → overall FAILURE):
+   *
+   * <ul>
+   *   <li>FAILURE if any {@code conclusion} ∈ {failure, cancelled, timed_out, action_required,
+   *       startup_failure}.
+   *   <li>PENDING if any check still has {@code status != completed}.
+   *   <li>SUCCESS if all completed checks have {@code conclusion ∈ {success, skipped}}.
+   *   <li>NEUTRAL when checks exist but all are {@code conclusion = neutral} (treated separately
+   *       from SUCCESS so an explicit "neutral" run doesn't claim green).
+   *   <li>UNKNOWN when GitHub returns zero check-runs (no CI configured, or pre-first-push).
+   * </ul>
+   *
+   * @return record with the rollup status + count of failing checks (0 unless FAILURE).
+   */
+  public record CheckRunRollup(String status, int failingCount) {}
+
+  public CheckRunRollup getCheckRunRollup(String repoFullName, String sha, String overridePat) {
+    String effectivePat = resolve(overridePat, pat);
+    if (effectivePat == null || effectivePat.isBlank()) return new CheckRunRollup("UNKNOWN", 0);
+    if (repoFullName == null || repoFullName.isBlank() || sha == null || sha.isBlank()) {
+      return new CheckRunRollup("UNKNOWN", 0);
+    }
+    try {
+      HttpClient client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+      HttpRequest req =
+          HttpRequest.newBuilder()
+              .uri(
+                  URI.create(
+                      "https://api.github.com/repos/"
+                          + repoFullName
+                          + "/commits/"
+                          + sha
+                          + "/check-runs?per_page=100"))
+              .timeout(Duration.ofSeconds(15))
+              .header("Authorization", "Bearer " + effectivePat)
+              .header("Accept", "application/vnd.github+json")
+              .GET()
+              .build();
+      HttpResponse<String> resp = client.send(req, HttpResponse.BodyHandlers.ofString());
+      if (resp.statusCode() != 200) {
+        log.debug(
+            "[GitHubRepoService] check-runs {} @ {} status={}",
+            repoFullName,
+            sha.substring(0, Math.min(7, sha.length())),
+            resp.statusCode());
+        return new CheckRunRollup("UNKNOWN", 0);
+      }
+      com.fasterxml.jackson.databind.ObjectMapper mapper =
+          new com.fasterxml.jackson.databind.ObjectMapper();
+      com.fasterxml.jackson.databind.JsonNode root = mapper.readTree(resp.body());
+      com.fasterxml.jackson.databind.JsonNode runs = root.path("check_runs");
+      if (!runs.isArray() || runs.size() == 0) return new CheckRunRollup("UNKNOWN", 0);
+
+      int failing = 0;
+      int pending = 0;
+      int success = 0;
+      int neutral = 0;
+      int other = 0;
+      for (com.fasterxml.jackson.databind.JsonNode r : runs) {
+        String status = r.path("status").asText("");
+        String conclusion = r.path("conclusion").asText("");
+        if (!"completed".equalsIgnoreCase(status)) {
+          pending++;
+          continue;
+        }
+        switch (conclusion == null ? "" : conclusion.toLowerCase()) {
+          case "failure", "cancelled", "timed_out", "action_required", "startup_failure" ->
+              failing++;
+          case "success" -> success++;
+          case "skipped" -> success++;
+          case "neutral" -> neutral++;
+          default -> other++;
+        }
+      }
+      if (failing > 0) return new CheckRunRollup("FAILURE", failing);
+      if (pending > 0) return new CheckRunRollup("PENDING", 0);
+      if (success > 0) return new CheckRunRollup("SUCCESS", 0);
+      if (neutral > 0) return new CheckRunRollup("NEUTRAL", 0);
+      // Only "other" buckets present (stale, etc.) — degrade to UNKNOWN rather
+      // than fake a green; caller treats UNKNOWN as "no signal."
+      return other > 0 ? new CheckRunRollup("UNKNOWN", 0) : new CheckRunRollup("UNKNOWN", 0);
+    } catch (Exception e) {
+      log.warn(
+          "[GitHubRepoService] check-runs error {} @ {}: {}",
+          repoFullName,
+          sha != null ? sha.substring(0, Math.min(7, sha.length())) : "?",
+          e.getMessage());
+      return new CheckRunRollup("UNKNOWN", 0);
+    }
+  }
+
+  /**
    * Lists repos visible to the supplied PAT. Pulls up to 200 results across two pages of {@code
    * /user/repos} (covers private + collaborator + org-member repos the token can see). If {@code
    * ownerFilter} is non-blank, results are filtered to that owner only — useful when the PAT can
