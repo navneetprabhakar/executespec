@@ -100,9 +100,19 @@ public class SecurityConfig {
               if (securityProperties.getHsts().isEnabled()) {
                 var hstsProps = securityProperties.getHsts();
                 headers.httpStrictTransportSecurity(
-                    hsts ->
-                        hsts.includeSubDomains(hstsProps.isIncludeSubDomains())
-                            .maxAgeInSeconds(hstsProps.getMaxAgeSeconds()));
+                    hsts -> {
+                      hsts.includeSubDomains(hstsProps.isIncludeSubDomains())
+                          .maxAgeInSeconds(hstsProps.getMaxAgeSeconds());
+                      // 2026-05-11 — UX audit B29. Emit the `preload`
+                      // directive when configured so the domain can be
+                      // submitted to hstspreload.org after 30 days of
+                      // stable HTTPS. Off by default — safe to enable
+                      // pre-submission (browsers ignore unrecognized
+                      // domains).
+                      if (hstsProps.isPreload()) {
+                        hsts.preload(true);
+                      }
+                    });
               } else {
                 headers.httpStrictTransportSecurity(hsts -> hsts.disable());
               }

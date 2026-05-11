@@ -1,20 +1,19 @@
-/* ── Geist Font Faces ──────────────────────────────────────────────────── */
-
-@font-face {
-  font-family: 'Geist Sans';
-  src: url('/node_modules/geist/dist/fonts/geist-sans/Geist-Variable.woff2') format('woff2');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Geist Mono';
-  src: url('/node_modules/geist/dist/fonts/geist-mono/GeistMono-Variable.woff2') format('woff2');
-  font-weight: 100 900;
-  font-style: normal;
-  font-display: swap;
-}
+/* ── Typography ─────────────────────────────────────────────────────────
+ *
+ * 2026-05-11 — JetBrains Mono is the sole brand face. The previous Geist
+ * Sans / Geist Mono @font-face declarations + their woff2 payloads
+ * (~50KB) have been removed; JetBrains is loaded from Google Fonts via
+ * `index.html` (cached, async, font-display:swap). Every component CSS
+ * var (`--v3-font-sans`, `--v3-font-mono`) and Tailwind family
+ * (`font-sans`, `font-mono`) resolves to a JetBrains Mono chain with
+ * `ui-monospace` / `SFMono-Regular` / `Menlo` as the system fallback
+ * during the network load window. No `@font-face` block is needed here
+ * — the Google Fonts stylesheet provides one.
+ *
+ * Why: brand consistency (single face across product + marketing +
+ * email + PDF), reduced cold-load weight (no second variable-font
+ * download), and a single source of truth that can't drift.
+ * ──────────────────────────────────────────────────────────────────── */
 
 /* ── Graphite + Signal Design Tokens (v2.5.14, Phase 2) ─────────────────
  *

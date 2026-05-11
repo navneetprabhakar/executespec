@@ -3,6 +3,7 @@ import {errMsg} from '@/lib/utils';
 import {Link, useNavigate, useLocation, useSearchParams} from 'react-router-dom';
 import {Eye, EyeOff, ShieldCheck, Zap, GitBranch} from 'lucide-react';
 import {useAuthStore} from '@/stores/useAuthStore';
+import {authResendVerification} from '@/lib/api';
 
 /**
  * M-047 (Backlog) — pick the surface to send to the backend's OAuth
@@ -49,6 +50,17 @@ export default function LoginPage() {
     oauthError ? (OAUTH_ERROR_MESSAGES[oauthError] ?? 'Login failed.') : '',
   );
   const [loading, setLoading] = useState(false);
+  // 2026-05-11 — UX audit B7+B25. The previous error path collapsed every
+  // non-401/403 status into "Login failed. Please try again.", and the 403
+  // "Please verify your email" message had no resend affordance — users
+  // who lost the verification email had to dig through Settings (which
+  // requires being logged in). We now surface a discrete "needs
+  // verification" state with a one-click Resend CTA. The other map
+  // entries are widened so production 423 / 429 / 5xx land on
+  // actionable copy instead of the generic fallback.
+  const [needsVerification, setNeedsVerification] = useState(false);
+  const [resending, setResending] = useState(false);
+  const [resendNote, setResendNote] = useState('');
   const {login} = useAuthStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -82,20 +94,58 @@ export default function LoginPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
+    setNeedsVerification(false);
+    setResendNote('');
     setLoading(true);
     try {
       await login(email, password);
       navigate(from, {replace: true});
     } catch (err) {
-      setError(
-        errMsg(err)?.includes('403')
-          ? 'Please verify your email before logging in.'
-          : errMsg(err)?.includes('401')
-            ? 'Invalid email or password.'
-            : 'Login failed. Please try again.',
-      );
+      const msg = errMsg(err) ?? '';
+      // Order matters: 423 / 429 / 5xx must be checked before 4xx fallbacks
+      // because some implementations include both codes in a stack trace.
+      if (msg.includes('423')) {
+        setError('Account locked. Reach out to admin@executespec.ai to unlock.');
+      } else if (msg.includes('429')) {
+        setError('Too many sign-in attempts. Try again in a few minutes.');
+      } else if (/\b5\d\d\b/.test(msg)) {
+        setError('ExecuteSpec is having a moment — try again shortly.');
+      } else if (msg.includes('403')) {
+        setNeedsVerification(true);
+        setError('Please verify your email before logging in.');
+      } else if (msg.includes('401')) {
+        setError('Invalid email or password.');
+      } else if (/Failed to fetch|NetworkError/i.test(msg)) {
+        setError('Network problem reaching ExecuteSpec. Check your connection and retry.');
+      } else {
+        setError('Login failed. Please try again.');
+      }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResendVerification = async () => {
+    if (!email) {
+      setResendNote('Enter your email above first, then click Resend.');
+      return;
+    }
+    setResending(true);
+    setResendNote('');
+    try {
+      await authResendVerification(email);
+      setResendNote('Verification email sent. Check your inbox (and spam).');
+    } catch (err) {
+      const msg = errMsg(err) ?? '';
+      // Server returns 200 even when the email isn't on file (prevents
+      // account-enumeration). 4xx here only fires on rate-limit / malformed.
+      setResendNote(
+        msg.includes('429')
+          ? 'Too many resend requests. Wait a few minutes.'
+          : 'Could not send right now — try again in a moment.',
+      );
+    } finally {
+      setResending(false);
     }
   };
 
@@ -103,7 +153,11 @@ export default function LoginPage() {
     <AuthShell>
       <div className='mb-6'>
         <h2 className='text-2xl font-semibold text-primary'>Welcome back</h2>
-        <p className='mt-1 text-sm text-muted'>Ship AI-written PRs you can actually merge.</p>
+        {/* 2026-05-11 — UX audit B24. The previous subhead duplicated the
+            brand H1 from the left pane ("Ship AI-written PRs you can
+            actually merge."). Replace with a personal, action-oriented
+            value-prop so the right pane earns its real-estate. */}
+        <p className='mt-1 text-sm text-muted'>Pick up where you left off.</p>
       </div>
 
       {/* OAuth — direct hit on Spring Security's authorization endpoint
@@ -135,7 +189,7 @@ export default function LoginPage() {
             required
             autoFocus
             autoComplete='email'
-            className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none transition-colors'
+            className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 text-base sm:text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none transition-colors'
             placeholder='you@company.com'
           />
         </Field>
@@ -156,7 +210,7 @@ export default function LoginPage() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete='current-password'
-              className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 pr-10 text-sm text-primary focus:border-accent-blue focus:outline-none transition-colors'
+              className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 pr-10 text-base sm:text-sm text-primary focus:border-accent-blue focus:outline-none transition-colors'
               placeholder='••••••••'
             />
             <button
@@ -171,9 +225,22 @@ export default function LoginPage() {
           </div>
         </Field>
         {error && (
-          <p className='rounded-md bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)] border border-[color-mix(in_srgb,var(--status-error)_30%,transparent)] px-3 py-2 text-xs text-accent-red'>
-            {error}
-          </p>
+          <div className='rounded-md bg-[color-mix(in_srgb,var(--status-error)_12%,transparent)] border border-[color-mix(in_srgb,var(--status-error)_30%,transparent)] px-3 py-2'>
+            <p className='text-xs text-accent-red'>{error}</p>
+            {needsVerification && (
+              <div className='mt-2 flex flex-wrap items-center gap-2'>
+                <button
+                  type='button'
+                  onClick={handleResendVerification}
+                  disabled={resending}
+                  className='inline-flex items-center gap-1.5 rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-2.5 py-1 text-[11px] font-medium text-primary hover:bg-[var(--gray-300)] disabled:opacity-50 transition-colors min-h-[28px]'
+                >
+                  {resending ? 'Sending…' : 'Resend verification email'}
+                </button>
+                {resendNote && <span className='text-[11px] text-muted'>{resendNote}</span>}
+              </div>
+            )}
+          </div>
         )}
         <button
           type='submit'
@@ -275,7 +342,7 @@ export function AuthShell({children}: {children: React.ReactNode}) {
         </div>
 
         <p className='text-xs text-muted'>
-          &copy; 2026 ExecuteSpec &middot;{' '}
+          &copy; {new Date().getFullYear()} ExecuteSpec &middot;{' '}
           <Link to='/terms' className='hover:text-secondary'>
             Terms
           </Link>{' '}
