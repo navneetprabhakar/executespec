@@ -1,50 +1,51 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: **2026-05-06** — persona audit on the in-flight `feature/product-review-fixes-2026-05-06` (PR #77). 5-persona × 16-surface walk-through (FREE / PRO / TEAM / ENTERPRISE / SUPER_ADMIN) → 15 findings, 8 fixed in `bf9f50e1` (theme parity, restored `/runs`, RunSidePanel, OAuth init bridge fix, ProjectLaunches FREE-tier fallback). New audit lives at [`docs/audits/persona-audit-2026-05-06/README.md`](audits/persona-audit-2026-05-06/README.md) + 93 screenshots under `screenshots/<persona>/<NN-surface>.png`. Earlier 2026-05-01 audit r3 + Google-style refactor + CI lint (PRs #55+#56+#57): `docs/design/code-style.md` (deviations doc), `frontend/A11Y.md` (a11y enablement guide), `.github/workflows/lint.yml` (PR lint gate), `frontend/.prettierrc.json` + `.prettierignore` + `.eslintrc.cjs` (style configs), `frontend/src/design-system/contrast.{ts,test.ts}` (vitest-shape WCAG regression test, dormant). Audit reports kept as breadcrumbs: `docs/audits/persona-test-2026-05-04-r4.md` (post-refactor regression check, supersedes r3) + `docs/audits/dev-verification-2026-05-04.md` (live dev super-admin walkthrough, 31 screenshots) + `docs/audits/product-review-2026-05-06.md` (external code-first review that produced PR #77). Earlier 2026-04-28 R-326 cluster B refresh + 2026-04-26 cleanup-pass-1 history retained in git log.
 >
-> **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Enterprise readiness (v2.6.3-track) **Phases E1+E2+E3+E4 (40 slices total) shipped on `feature/enterprise-readiness-eval`** (49+ commits ahead of `dev`, not yet merged); operational summary lives in [`CLAUDE.md`](../CLAUDE.md) under §Current State + §Recently Resolved. Hierarchical planner (v2.6.2-track) **all 5 slices shipped on `feature/hierarchical-planner`** (8 commits ahead of `dev`, not yet merged); operational summary in [`CLAUDE.md`](../CLAUDE.md) §0c (in `ARCHITECTURE.md`) and the v2/agent codemap row. Auto-replay re-trigger from outline checkpoint is the one remaining gap.
+> **Last cleanup: 2026-05-11** — pruned 17 obsolete docs (v3-conversion
+> handoff cluster, greenfield trio, parked plans, one-shot snapshots)
+> + retired the entire `docs/audits/` folder (9 markdown reports +
+> 141 screenshot assets). Past audit/RCA breadcrumbs now live in git
+> log; operational truth lives in [`CLAUDE.md`](../CLAUDE.md). Branch
+> `feature/docs-cleanup-2026-05-11`.
 >
-> **Codemap consolidation (2026-04-25):** the duplicate root-level `CODEBASE_MAP.md` was removed on `feature/hierarchical-planner`. `docs/CODEMAP.md` is now the only codemap; `README.md`'s docs table points there.
+> **Codemap consolidation (2026-04-25):** the duplicate root-level
+> `CODEBASE_MAP.md` was removed. `docs/CODEMAP.md` is the only
+> codemap; `README.md`'s docs table points there.
 
-## Plans folder structure (post-2026-04-26 cleanup)
+## Plans folder
 
-`docs/plans/` holds only the 5 plans that are still actively useful:
+`docs/plans/` holds the plans still actively useful:
 
 | File | Type | What it is |
 |------|------|------------|
 | [`pending-ga-readiness-90-day-execution-plan.md`](plans/pending-ga-readiness-90-day-execution-plan.md) | proposed | 90-day Plan B execution doc operationalising the 2026-05-04 GA-readiness audit. Phase 0 (land in-flight branches) → P1 quality scoring fix → P2 pricing ladder → P3 cost ceiling + HIGH-band reliability → P4 observability + ArchUnit guard pin → P5 beta program + SOC 2 Type I + CLI → P6 GA cutover. Target GA 2026-08-04. Awaiting founder approval before kickoff. |
-| [`partial-work.md`](plans/partial-work.md) | consolidated | All 4 plans with partial implementations / pending follow-ups: Mobile (RN+Expo native-Android gap), Figma v2 (design-only), Harness V2 remaining work (Gap 1+2+3), and the PARTIAL-status removal proposal. |
+| [`partial-work.md`](plans/partial-work.md) | consolidated | Plans with partial implementations / pending follow-ups (Mobile RN+Expo native-Android gap, Figma v2, Harness V2 remaining gaps, PARTIAL-status removal proposal). |
 | [`pending-v2-batch-execution-plan.md`](plans/pending-v2-batch-execution-plan.md) | not started | Re-implement batch execution under V2 (V1 batch was deleted). Realtime-only today. |
 | [`pending-distributed-processing-plan.md`](plans/pending-distributed-processing-plan.md) | not started | Phase A NFS workspace + Phase B worker-lease pool. |
 | [`pending-vscode-extension-plan.md`](plans/pending-vscode-extension-plan.md) | not started | External-repo VS Code extension; device-code OAuth. |
-| [`pending-complimentary-pro-promo-2026-04-30-plan.md`](plans/pending-complimentary-pro-promo-2026-04-30-plan.md) | not started | Founder thank-you 30-day PRO upgrade for early FREE signups. |
-
-**Removed in 2026-04-26 cleanup:**
-- `hierarchical-planner-plan.md` — all 5 slices shipped on `feature/hierarchical-planner`. Operational truth lives in `CLAUDE.md` and `ARCHITECTURE.md`.
-- `pending-enterprise-readiness-execution-eval.md` — all 4 phases shipped on `feature/enterprise-readiness-eval`. Operational truth lives in `CLAUDE.md` §Current State + the new package summaries in `CODEMAP.md` + `ARCHITECTURE.md` §0d.
-- `open-work-2026-04-18.md` — stale 8-day audit referencing deleted plans; superseded by `partial-work.md`.
-- `pending-preview-control-plane-plan.md` + `preview-engine-rewrite.md` — preview pipeline moved to the separate [`preview-engine`](https://github.com/navneetprabhakar/preview-engine) repo; new plans will be authored there.
-
-## Recently shipped (kept here as breadcrumbs; full plans deleted)
-
-The following plans were merged + deployed and their plan files have been removed. Operational truth lives in [`CLAUDE.md`](../CLAUDE.md), [`ARCHITECTURE.md`](ARCHITECTURE.md), and [`PRD.md`](PRD.md).
-
-- **v2.6.3-track Enterprise Readiness** (4 phases, 40 slices, V131-V139) — `.executespec/` folder write contract + activity feed + cross-repo contracts + engineering standards + ADRs + arch invariants + notification preferences + project export. Shipped on `feature/enterprise-readiness-eval`, not yet merged.
-- **v2.6.2-track Hierarchical Planner** (5 slices, V130) — Phase 0 classifier + Phase 1 outline planner + Phase 2 parallel expander + Phase 3 coherence patcher. Shipped on `feature/hierarchical-planner`, not yet merged.
-- **v2.6.1 Waves 1-6** — TEAM tier + 3-state lifecycle + PostHog activation funnel + sandbox onboarding + SSO/GitHub App schema + smart-routing scaffold + startup program + 14-day MAX trial + enterprise SLA reference + CLI plan stub. Migrations V121–V129.
-- **v2.6.0** — UX v3 Graphite+Signal theme + LlmProvider GEMINI rename + pricing v3 ($1=1 credit per band) + US-first pivot + Stripe prod default. Migration V120.
-- **v2.5.x series** — RN+Expo codegen (V118), 3-step architecture pipeline + Generate Docs (V112–V115), validation v3 Pillar 1 (V106–V109), guardrail levels (P1–P5).
+| [`pending-readymade-solutions-plan.md`](plans/pending-readymade-solutions-plan.md) | follow-ups only | Readymades library — W1-W5 + W7 shipped; remaining v1.5 follow-ups documented inside. |
+| [`pending-migrations-plan.md`](plans/pending-migrations-plan.md) | follow-ups only | Migrations product — W1-W7 shipped; remaining items documented inside. |
+| [`backlog-deferred-items.md`](plans/backlog-deferred-items.md) | backlog | Cross-plan deferred items captured during 2026-04-28 cleanup. |
+| [`README.md`](plans/README.md) | index | Plans folder status index. |
 
 ## Reference docs (still authoritative)
 
 - [`docs/reports/model-mapping-audit-2026-05-06.md`](reports/model-mapping-audit-2026-05-06.md) — full audit of every place model identifiers / pricing / context-window metadata live in the codebase. 8 hardcoded sources catalogued (1 active drift on `gpt-5.4` context window, 7 stale-or-redundant). Includes a live 3-provider LOW-band cost eval (Anthropic $0.10 / OpenAI $0.04 / Gemini Pro $1.16) + 3-commit single-source-of-truth proposal. Ground reference for all model-related changes.
 - [`docs/operations/slos.md`](operations/slos.md) — GA-readiness P4.2 (2026-05-06). Five SLOs ExecuteSpec commits to: run terminal in 15min ≥95%, verified-score correctness ≥90% (manual sample audit), cost estimate within 30% on ≥80% of runs, webhook in 60s ≥99%, hot-path 5xx <0.5%. Includes alert thresholds, owners, and measurement queries.
 - [`docs/design/ui-tokens.md`](design/ui-tokens.md) — single source of truth for every color/radius/spacing token. Semantic palette, 4-band score palette, MUST/MUST NOT rules.
+- [`docs/design/code-style.md`](design/code-style.md) — Java + TS style policy + spotless wiring + 7 documented deviations from Google style.
 - [`docs/enterprise-one-pager.md`](enterprise-one-pager.md) — procurement-ready security posture + tier comparison.
 - [`docs/enterprise-sla.md`](enterprise-sla.md) — ENTERPRISE-tier P1–P4 SLA + 99.9% uptime credit schedule + CSM engagement.
 - [`docs/project-user-journeys.md`](project-user-journeys.md) — end-to-end user journeys for the project workbench.
 - [`docs/user-journeys.md`](user-journeys.md) — UI user journeys by tier.
+- [`docs/dpa-flow.md`](dpa-flow.md) — DPA request/signature runbook.
+- [`docs/payment-history.md`](payment-history.md) — Razorpay + Stripe payment_audit reference.
+- [`docs/sso-saml-wiring.md`](sso-saml-wiring.md) — SSO/SAML wire-in spec (SAML2 handshake is the pending piece).
+- [`docs/status-page.md`](status-page.md) — Better Stack status-page commitment.
+- [`docs/stripe-price-ids-ops.md`](stripe-price-ids-ops.md) — Stripe env-var checklist for ops.
+- [`docs/migration-recipes-catalog-format.md`](migration-recipes-catalog-format.md) — YAML format spec for migration-recipe seeder files.
+- [`docs/readymades-catalog-format.md`](readymades-catalog-format.md) — YAML format spec for readymade-solutions catalog.
 
 ---
 
@@ -102,8 +103,7 @@ Find the **type of change** you are making in the table below. Update every docu
 | `sso-saml-wiring.md` | SAML wire-in spec + per-IdP setup notes + lockout-prevention guard rationale (M-016) | When SAML2 actually wires in, when adding a new IdP, when changing the lockout rules |
 | `stripe-price-ids-ops.md` | Stripe env-var checklist + setup runbook + operator gotchas (M-029) | Price-id ops changes, gateway flag flips, setup procedure changes |
 | `cookie-domain-switch.md` | Maintenance-window plan for the JWT cookie scope flip (M-031) | When the Phase-2 surface split actually executes |
-| `backlog-deferred-items.md` | First-slice + owner-needed + when-to-re-open per deferred Backlog item (M-035/036/037/040/041/048/050/052) | When picking up any of those items |
-| `execution-checkpoint.md` | Running execution log of the M-* batches on `feature/v2.7-foundation` | After every 3 items shipped + at every wave-boundary transition |
+| `plans/backlog-deferred-items.md` | First-slice + owner-needed + when-to-re-open per deferred Backlog item (M-035/036/037/040/041/048/050/052) | When picking up any of those items |
 | `billing-workflows.html` | Rendered billing flow diagrams (subscribe, top-up, refund, webhook handling) | Billing / payment flow changes |
 | `design/ui-tokens.md` | Single source of truth for color/radius/spacing tokens | Adding a UI primitive, tweaking the palette, theme work |
 | `document_map.md` | This file | Adding a new doc, adding a new change type |

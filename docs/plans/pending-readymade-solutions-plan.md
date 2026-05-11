@@ -436,12 +436,14 @@ CREATE TABLE readymade_favourite (
 - Industry context: SKILL.md open standard adopted Dec 2025
   (relevant for solution seed format compatibility).
 - Related plans:
-  - [pending-agent-builder-plan.md](pending-agent-builder-plan.md) —
-    PARKED 2026-04-29 pending product-shape rethink. Should be
-    explicitly scoped as "user-built drag-and-drop agents," not
+  - Agent-builder plan PARKED 2026-04-29 pending product-shape
+    rethink; original draft retired in the 2026-05-11 docs cleanup
+    (trail in git log). Should be re-authored as
+    `pending-agent-builder-v2-plan.md` once the corrected scope
+    settles — explicitly "user-built drag-and-drop agents," not
     "internal worker customisation."
-  - **TBD: pending-migrations-plan.md** — separate product per
-    decision #4; not yet authored.
+  - [`pending-migrations-plan.md`](pending-migrations-plan.md) —
+    separate product per decision #4.
 
 ## Open questions for execution-time (NOT blockers)
 
