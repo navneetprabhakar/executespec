@@ -434,10 +434,6 @@ export default function SettingsPage() {
               user?.tier && user.tier !== 'FREE'
                 ? user.tier
                 : (billing?.plan?.tier ?? user?.tier ?? 'FREE');
-            // V176 (2026-05-06) renamed PRO display_name "Pro" → "Solo".
-            // The TierKey enum is still 'PRO' (the DB PK didn't change) but
-            // user-facing copy + the badge letter use the Solo branding.
-            //
             // I3-A — when planTier was driven from JWT (test account
             // with no paid subscription row), `billing.plan.name` is
             // stale ("Free") even though JWT tier says TEAM/PRO/etc.
@@ -449,7 +445,7 @@ export default function SettingsPage() {
                 : planTier === 'TEAM'
                   ? 'Team Plan'
                   : planTier === 'PRO'
-                    ? 'Solo Plan'
+                    ? 'Pro Plan'
                     : 'Free Plan';
             const billingTierMatchesJwt = billing?.plan?.tier && billing.plan.tier === planTier;
             const planName = billingTierMatchesJwt

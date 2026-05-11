@@ -125,7 +125,7 @@ export default function MigrationsPage() {
         >
           <option value=''>All tiers</option>
           <option value='FREE'>Free</option>
-          <option value='PRO'>Solo</option>
+          <option value='PRO'>Pro</option>
           <option value='TEAM'>Team</option>
           <option value='ENTERPRISE'>Enterprise</option>
         </select>
