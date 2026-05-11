@@ -463,7 +463,11 @@
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,700&family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+    <!-- 2026-05-11 — DM Sans family request retired alongside the
+         brand unification on JetBrains Mono. JetBrains is requested
+         with weight 500 added so the existing 500-weight CSS rules
+         resolve (DM Sans 500 was the implicit source on the old chain). -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 
     <style>
         /* R-303 (Wave 6) — every site colour now flows from the
@@ -553,8 +557,14 @@
             --brand-grad: linear-gradient(135deg, var(--c-signal-blue) 0%, var(--c-signal-teal) 100%);
             --pop-grad: linear-gradient(to right, var(--c-pop-orange), var(--c-pop-amber));
             --accent-warm: var(--c-accent-warm);
-            --font-body: 'DM Sans', sans-serif;
-            --font-mono: 'JetBrains Mono', monospace;
+            /* 2026-05-11 — JetBrains Mono is the sole brand face. The
+               previous DM Sans body chain has been retired; --font-body
+               now aliases the same JetBrains chain as --font-mono so
+               every consumer of var(--font-body) stays byte-identical
+               to mono surfaces. ui-monospace / SFMono / Menlo are the
+               system fallback during the Google-Fonts load window. */
+            --font-body: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+            --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
         }
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -3042,7 +3052,11 @@
 
     <footer>
         <div class="container" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 24px;">
-            <div>© 2026 ExecuteSpec. Built for Engineering Leaders.</div>
+            <!-- 2026-05-11 — year stamped by inline JS so the footer
+                 doesn't drift on Jan 1. Static fallback "2026" stays in
+                 the source so SEO crawlers / no-JS users see a sane
+                 default. -->
+            <div>© <span id="copyright-year">2026</span> ExecuteSpec. Built for Engineering Leaders.</div>
             <div class="nav-links" style="display: flex; flex-wrap: wrap; align-items: center; gap: 16px;">
                 <a href="#catalog">Catalog</a>
                 <a href="#project-workspace">Project Workspace</a>
@@ -3123,4 +3137,12 @@
                 });
             });
         })();
+    </script>
+    <script>
+      // 2026-05-11 — keep the footer copyright year fresh without
+      // requiring a redeploy every January 1.
+      (function () {
+        var el = document.getElementById('copyright-year');
+        if (el) el.textContent = String(new Date().getFullYear());
+      })();
     </script>
