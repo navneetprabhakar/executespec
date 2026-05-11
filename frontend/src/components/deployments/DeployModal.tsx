@@ -47,7 +47,11 @@ export default function DeployModal({onClose, onRefresh}: DeployModalProps) {
           <h2 className='text-base font-semibold text-primary flex items-center gap-2'>
             <Rocket className='h-4 w-4 text-accent-blue' /> Deploy to Cloud Run
           </h2>
-          <button onClick={onClose} className='text-muted hover:text-secondary p-2 -m-1'>
+          <button
+            onClick={onClose}
+            aria-label='Close deploy dialog'
+            className='text-muted hover:text-secondary p-2 -m-1'
+          >
             <X className='h-4 w-4' />
           </button>
         </div>

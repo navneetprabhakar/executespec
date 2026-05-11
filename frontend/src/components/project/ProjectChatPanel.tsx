@@ -639,7 +639,11 @@ function LaunchFromChatModal({
             <Rocket className='h-3.5 w-3.5 text-accent-blue' />
             Launch execution from chat
           </h2>
-          <button onClick={onClose} className='text-muted hover:text-primary'>
+          <button
+            onClick={onClose}
+            aria-label='Close launch panel'
+            className='text-muted hover:text-primary'
+          >
             <X className='h-3.5 w-3.5' />
           </button>
         </div>

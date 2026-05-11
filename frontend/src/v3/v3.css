@@ -171,6 +171,28 @@
   font-family: inherit;
 }
 
+/* 2026-05-11 — universal keyboard-focus ring. Pre-fix, many inline-styled
+ * buttons + links had no `:focus` styles at all, so tab navigation was
+ * invisible — the page looked like nothing was happening when a screen-reader
+ * user moved focus. `:focus-visible` (vs `:focus`) means mouse clicks don't
+ * paint the ring (kept the "clean" look), only keyboard / programmatic focus
+ * does. Two layers — a 2px Signal-Blue ring + 2px offset against the page
+ * background — work on both dark and light themes because we use `currentColor`-
+ * equivalent semantic tokens. Inline-styled `outline: none` overrides still
+ * win where set, so this is purely additive. */
+.v3-root :focus-visible {
+  outline: 2px solid var(--v3-brand);
+  outline-offset: 2px;
+  border-radius: var(--v3-radius-sm, 4px);
+}
+.v3-root button:focus-visible,
+.v3-root a:focus-visible,
+.v3-root [role='button']:focus-visible,
+.v3-root [tabindex]:focus-visible {
+  outline: 2px solid var(--v3-brand);
+  outline-offset: 2px;
+}
+
 /* ── R-307 (Wave 6) — v3 light-mode override ────────────────────────────────
  * Activated when [data-theme='light'] propagates from <html> (the v2
  * useUiStore theme toggle already writes this attr). Mirrors v2's

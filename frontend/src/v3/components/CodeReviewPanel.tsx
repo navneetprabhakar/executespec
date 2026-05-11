@@ -171,9 +171,9 @@ export default function CodeReviewPanel({projectId}: Props) {
               background: 'rgba(91,141,239,0.16)',
               color: 'var(--v3-brand)',
             }}
-            title='Paid tier — Solo / Team / Enterprise. Free tier returns 403.'
+            title='Paid tier — Pro / Team / Enterprise. Free tier returns 403.'
           >
-            Solo+
+            Pro+
           </span>
         </button>
       </div>
