@@ -5,7 +5,8 @@
 > path so the next engineer can pick the work up cold without
 > re-deriving the analysis.
 >
-> All other Backlog items shipped — see [`execution-checkpoint.md`](../execution-checkpoint.md).
+> All other Backlog items shipped on `feature/v2.7-foundation`; trail
+> in git log.
 
 ## Why these are deferred
 

@@ -1,38 +1,37 @@
 # `docs/plans/` — index + post-execution status
 
-> Authoritative as of 2026-04-28 (R-326 doc-tree refresh, cluster C,
-> on `feature/v3-platform-expansion`). Brings three previously
-> unclassified plan files into the table (project-surface vite
-> split, pre-deploy open items, wave-7 issue list) and confirms
-> the rest are still accurate. Earlier authority: 2026-04-27 M-067
-> refresh on `feature/v2.7-foundation`.
+> **Last cleanup: 2026-05-11** (`feature/docs-cleanup-2026-05-11`).
+> Pruned 7 plan files whose work either shipped, was parked, or
+> referenced abandoned directions:
+> `eval-2026-04-26-partial-and-openai-degradation.md`,
+> `pending-agent-builder-plan.md`,
+> `pending-complimentary-pro-promo-2026-04-30-plan.md`,
+> `pending-project-surface-vite-split.md`,
+> `phase-2-3-deferred.md`,
+> `pre-deploy-open-items.md`,
+> `ux-overhaul-v4.md`,
+> `wave-7-issue-list.md`. The trail lives in git log; operational
+> truth lives in `CLAUDE.md`.
 
 ## Status table
 
-| File | Status (M-067 review) | Authority |
-|------|------------------------|-----------|
-| [`partial-work.md`](partial-work.md) | **STILL PENDING (revised scope)** — Mobile RN+Expo native-Android gap, Figma v2 design-only, Harness V2 Gap 1+2+3, PARTIAL-status removal proposal. M-* execution did NOT touch these — they're post-v2.7 work. | Self |
-| [`pending-v2-batch-execution-plan.md`](pending-v2-batch-execution-plan.md) | **STILL PENDING** — V2 batch-execution rewrite. V1 batch was deleted in 2026-04-13 deprecation; the V2 path stays realtime-only until this lands. Multi-week feature. | Self |
+| File | Status | Authority |
+|------|--------|-----------|
+| [`partial-work.md`](partial-work.md) | **STILL PENDING** — Mobile RN+Expo native-Android gap, Figma v2 design-only, Harness V2 remaining gaps, PARTIAL-status removal proposal. Post-v2.7 work. | Self |
+| [`pending-v2-batch-execution-plan.md`](pending-v2-batch-execution-plan.md) | **STILL PENDING** — V2 batch-execution rewrite. V1 batch was deleted 2026-04-13; V2 stays realtime-only until this lands. Multi-week feature. | Self |
 | [`pending-distributed-processing-plan.md`](pending-distributed-processing-plan.md) | **STILL PENDING** — Phase A NFS workspace + Phase B worker-lease pool. Multi-quarter scaling work. | Self |
-| [`pending-vscode-extension-plan.md`](pending-vscode-extension-plan.md) | **STILL PENDING** — separate-repo VS Code extension scaffold. Stub plan; the actual extension lives outside this repo when it ships. | Self |
-| [`pending-complimentary-pro-promo-2026-04-30-plan.md`](pending-complimentary-pro-promo-2026-04-30-plan.md) | **TIME-WINDOWED — 2026-04-30 promo date passed mid-execution.** Worth re-deciding whether to relaunch with a new date or close. Marketing decision; engineering scope unchanged. | Self (but needs a Go/No-Go) |
-| [`phase-2-3-deferred.md`](phase-2-3-deferred.md) | **PARTIALLY SUPERSEDED by M-* execution + `docs/backlog-deferred-items.md`.** Phase 1.0 / 1.1 / 1.2 / 1.3 items are now SHIPPED via Wave 1+2+3+Backlog (see `CHANGELOG.md` v2.7 entry). Phase 2 + Phase 3 deferral rationale still authoritative — the cookie-domain switch, multi-org work, etc., remain deferred per the same reasons. | Combined: this file (Phase 2 + 3 reasoning) + [`backlog-deferred-items.md`](backlog-deferred-items.md) (per-item first-slice + owner) |
-| [`ux-overhaul-v4.md`](ux-overhaul-v4.md) | **SHIPPED** on `feature/ux-overhaul-v4-pulse-tab`. Operational truth in `frontend/CLAUDE.md`; this file remains as the design rationale + before/after screenshots. | `frontend/CLAUDE.md` |
-| [`eval-2026-04-26-partial-and-openai-degradation.md`](eval-2026-04-26-partial-and-openai-degradation.md) | **HISTORICAL INVESTIGATION** — root-cause analysis of the booking-spec PARTIAL pattern + OpenAI iteration count. Two of the three findings are now closed by code fixes that landed before the v2.7 batch; the smoke-test bug is still pending. Keep as evidence; don't update. | Self |
-| [`pending-project-surface-vite-split.md`](pending-project-surface-vite-split.md) | **STILL PENDING** — Phase 2 of the v2.7 product-split. Splits the project-surface (TEAM/ENTERPRISE → Build) into a separate Vite bundle from the consumer-surface (FREE/PRO/MAX → Vibe). Multi-week effort, not yet scheduled. Today's surfaces co-habit one bundle (cohabitation invariant under `frontend/src/v3/`). | Self |
-| [`pre-deploy-open-items.md`](pre-deploy-open-items.md) | **HISTORICAL** — pre-deploy audit on `feature/v3-conversion` at tip `cb98ed67` (2026-04-28). Items either landed in the post-Wave-7 deploy or were rolled into the queued-work handoff (`docs/v3-issues-handoff.md`). Not authoritative anymore; keep as snapshot. | `docs/v3-issues-handoff.md` |
-| [`wave-7-issue-list.md`](wave-7-issue-list.md) | **HISTORICAL** — Wave 7 issue compilation from end-to-end test reports + persona-conversion reports on `feature/v3-conversion` (2026-04-28). Items either landed in the post-Wave-7 deploy or are tracked in the queued-work handoff. Snapshot only. | `docs/v3-issues-handoff.md` |
-| [`pending-agent-builder-plan.md`](pending-agent-builder-plan.md) | **PARKED 2026-04-29** — wrong product shape (described internal-worker customisation, founder wants user-facing drag-drop builder + readymade agents + optional code export). Plan stays as work product; do NOT execute. New `pending-agent-builder-v2-plan.md` authored once the corrected scope settles. | Self (parked) |
-| [`pending-readymade-solutions-plan.md`](pending-readymade-solutions-plan.md) | **W1–W5 SHIPPED 2026-04-29** on `feature/readymades-and-migrations` (tip `a6c9f0a2`, NOT yet merged to dev). Library API + 3 POC seeds + frontend gallery + detail + variant resolver + instantiate path (V2 dispatch with V160 tracking columns). Cross-product `composer/` package + tier-stratified cost framing shared with Migrations. **W6** (catalog expansion of 130+ solutions, multi-month authoring), **W7** (community contribution moderation), **W8** (tier-gating UI polish), **W9** (FTS search + recommendations) all v1.5 follow-ups. R-### range R-327 → R-331 consumed; R-332..R-335 reserved. | Self |
-| [`pending-migrations-plan.md`](pending-migrations-plan.md) | **W1–W7 SHIPPED 2026-04-29** on `feature/readymades-and-migrations` (tip `05d92db6`, NOT yet merged to dev). Library API + dry-run + apply (multi-repo fan-out via existing Execution View) + frontend gallery + halt-and-inspect detail + tier-stratified cost UX (cross-product) + 8 of 11 v1 recipe seeds. **W8 (hybrid AST+AI), W9 (PostMergeCascade continuous), W10 (polyglot)** explicitly deferred per the plan's v1.5+ staging. Cross-product `composer/` package (SlotValidator + SpecComposer) + `requiresCostCap` predicate live; Readymades W4+ adopts. R-### range R-336 → R-342 consumed; R-343/344/345 reserved. | Self |
+| [`pending-vscode-extension-plan.md`](pending-vscode-extension-plan.md) | **STILL PENDING** — separate-repo VS Code extension scaffold. The actual extension lives outside this repo when it ships. | Self |
+| [`pending-readymade-solutions-plan.md`](pending-readymade-solutions-plan.md) | **W1–W5 SHIPPED** on `feature/readymades-and-migrations`. Library API + 3 POC seeds + frontend gallery + detail + variant resolver + instantiate path (V2 dispatch with V160 tracking). W6 catalog expansion, W7 community moderation, W8 tier-gating polish, W9 FTS search are v1.5 follow-ups. | Self |
+| [`pending-migrations-plan.md`](pending-migrations-plan.md) | **W1–W7 SHIPPED** on `feature/readymades-and-migrations`. Library API + dry-run + apply (multi-repo via Execution View) + frontend gallery + halt-and-inspect detail + tier-stratified cost UX + 8 of 11 v1 recipe seeds. W8 (hybrid AST+AI), W9 (PostMergeCascade continuous), W10 (polyglot) deferred per the v1.5+ staging. | Self |
+| [`pending-ga-readiness-90-day-execution-plan.md`](pending-ga-readiness-90-day-execution-plan.md) | **PROPOSED** — 90-day Plan B execution doc operationalising the 2026-05-04 GA-readiness audit. P0–P6 phases through 2026-08-04. Awaiting founder approval before kickoff. | Self |
+| [`backlog-deferred-items.md`](backlog-deferred-items.md) | **DEFERRED-ITEM TRACKER** — first-slice + owner-needed + when-to-re-open per deferred item across all plans. Canonical home for tracking work that's been intentionally postponed. | Self |
 
 ## Where shipped plans went
 
 The following plan files were removed in earlier cleanup passes
-(2026-04-26 + earlier) once the work shipped. Operational truth
-lives in `CLAUDE.md` + `ARCHITECTURE.md` + the relevant package
-`CLAUDE.md`. Listed here as breadcrumbs in case anyone goes
-looking:
+once the work shipped. Operational truth lives in `CLAUDE.md` +
+`ARCHITECTURE.md` + the relevant package `CLAUDE.md`. Listed here
+as breadcrumbs in case anyone goes looking:
 
 - `hierarchical-planner-plan.md` — all 5 slices shipped on
   `feature/hierarchical-planner` (V130). Truth: root `CLAUDE.md`
@@ -44,8 +43,25 @@ looking:
   `preview-engine-rewrite.md` — preview pipeline moved to the
   separate [`preview-engine`](https://github.com/navneetprabhakar/preview-engine)
   repo. New plans authored there.
-- `open-work-2026-04-18.md` — stale 8-day audit; superseded by
-  `partial-work.md`.
+- `ux-overhaul-v4.md` — shipped on
+  `feature/ux-overhaul-v4-pulse-tab`. Truth: `frontend/CLAUDE.md`.
+- `eval-2026-04-26-partial-and-openai-degradation.md` —
+  investigation; findings closed by code fixes that landed before
+  v2.7. Trail in git log.
+- `pending-agent-builder-plan.md` — parked 2026-04-29 as wrong
+  product shape. Will be re-authored as `pending-agent-builder-v2-plan.md`
+  once the corrected scope settles.
+- `pending-complimentary-pro-promo-2026-04-30-plan.md` — promo date
+  passed. Marketing decision to relaunch is open.
+- `pending-project-surface-vite-split.md` — Phase 2 of the v2.7
+  product-split. Direction retired with V179 single-surface
+  retirement.
+- `phase-2-3-deferred.md` — Phase 1 shipped; Phase 2 cookie-domain
+  switch + surface split obsolete after V179. Phase 3 items moved
+  to `backlog-deferred-items.md`.
+- `pre-deploy-open-items.md` + `wave-7-issue-list.md` — snapshots
+  for `feature/v3-conversion` work; that branch merged and was
+  superseded by V179. Trail in git log.
 
 ## Rules for new plan files
 
@@ -55,11 +71,13 @@ looking:
 3. **Don't keep a "shipped" plan file alive** — the design intent
    is captured by the diff in git history; the plan file becomes
    stale fast.
-4. **For investigations / postmortems / one-off evals**, name them
-   `eval-YYYY-MM-DD-*.md` and leave them as historical record (no
-   updates after the investigation closes).
-5. **For deferred items**, the canonical home is now
-   [`docs/backlog-deferred-items.md`](backlog-deferred-items.md)
+4. **For investigations / postmortems / one-off evals**, prefer
+   summarising findings in the relevant `CLAUDE.md` and letting
+   git log carry the rest. If a written record is genuinely
+   needed, name it `eval-YYYY-MM-DD-*.md` and leave it as
+   historical record.
+5. **For deferred items**, the canonical home is
+   [`backlog-deferred-items.md`](backlog-deferred-items.md)
    (per-item first-slice + owner-needed + when-to-re-open). Plans
    in this folder should be self-contained design docs, not
    deferred-tracker entries.

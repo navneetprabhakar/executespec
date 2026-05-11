@@ -7,9 +7,9 @@
 ## What "live" means
 
 A status page lives at **status.executespec.ai** (CNAME →
-**Better Stack** per parked decision #1 in
-[`docs/execution-checkpoint.md`](execution-checkpoint.md)). Every
-published incident maps to a component below; SLA credits in
+**Better Stack** per the operator decision recorded in git history
+during the 2026-04-27 deferred-items batch). Every published
+incident maps to a component below; SLA credits in
 `enterprise-sla.md` reference component-level uptime measured here.
 
 ## Components

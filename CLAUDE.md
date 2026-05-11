@@ -873,14 +873,14 @@
 > jobs (typically <2min vs ~12min for the full deploy job). Failure
 > messages point at the local fix command + the deviations doc.
 >
-> **Round-4 dev-deployment verification (PR #57 → main):**
-> [`docs/audits/dev-verification-2026-05-04.md`](docs/audits/dev-verification-2026-05-04.md)
-> — 31 screenshots of every super-admin surface on
-> `https://dev.executespec.ai` + live API + token-contrast probe.
-> All audit fixes confirmed live in production deployment; both CI
-> gates (`Lint` workflow + `Build & Deploy` workflow) succeeded on
-> first run after merge — enforcement layer fires correctly on push,
-> not just locally.
+> **Round-4 dev-deployment verification (PR #57 → main):** 31
+> screenshots of every super-admin surface on
+> `https://dev.executespec.ai` + live API + token-contrast probe
+> (the audit report was retired in the 2026-05-11 docs cleanup;
+> trail in git log). All audit fixes confirmed live in production
+> deployment; both CI gates (`Lint` workflow + `Build & Deploy`
+> workflow) succeeded on first run after merge — enforcement layer
+> fires correctly on push, not just locally.
 >
 > **2026-04-30 — audit Sprint 1 fixes batch on `audit/v2-5-11-ux-product`:**
 > Version-string drift fix [F-22] (pom 2.5.1 → 2.5.11 + frontend
@@ -1588,9 +1588,9 @@ Default provider: OpenAI (user-selected per project). Provider failover is avail
   - **Phase 1.1 empty-state hero pattern:** InvoicesPage / AuditPage / OrgProjectsPage replaced flat "No data" stubs with question + supporting context + concrete CTAs.
   - **Phase 1.1 Drawer + Glossary primitives:** `frontend/src/components/shared/{Drawer,Glossary}.tsx` + `lib/glossary.ts` (5 seed terms + "mission"). Drawer ready for NewRunModal "Add API key" / "Add GitHub PAT" rewires (separate UX sweep). Glossary applied to ScoreCard helper text as the first wire.
   - **Phase 1.2 Wave-3 enterprise:** V127 fields (sso_provider/enforced/metadata/domain + github_installation_id/installed_at) wired into Org entity; new `SsoConfigController` (CRUD only, SAML handshake deferred) + `GitHubAppController` (install URL / status / callback / uninstall, webhook signature deferred). InvoicesPage CSV export (Erin blocker B-9). BYOK Test buttons per provider in SettingsPage with new `POST /api/auth/settings/ai-keys/validate`. AdminPage Audit + Webhook tabs verified pre-shipped; TierLifecyclePage tier-impact preview verified pre-shipped; ExecSummaryPage needs-attention KPI verified pre-shipped; per-seat TEAM seat-purchase end-to-end functional via V144 + restored adjustSeats.
-  - **Phase 1.3 cross-poll wins:** V145 loosens FREE 5 → 10 credits/month + tweaks tier description. `RunCompletionNotifier` body upgraded to lead with cost + duration ("$0.42 · 4m12s") + summary on next line. Other Phase 1.3 items either pre-shipped (Generated Docs v2.5.12, EmptyProjectLanding v2.6.4) or deferred with rationale per docs/plans/phase-2-3-deferred.md (#27/#29/#30 need surface split decisions; #32 needs annual billing backend; #34/#35 are standalone PR-sized).
+  - **Phase 1.3 cross-poll wins:** V145 loosens FREE 5 → 10 credits/month + tweaks tier description. `RunCompletionNotifier` body upgraded to lead with cost + duration ("$0.42 · 4m12s") + summary on next line. Other Phase 1.3 items either pre-shipped (Generated Docs v2.5.12, EmptyProjectLanding v2.6.4) or deferred with rationale per docs/plans/backlog-deferred-items.md (#27/#29/#30 need surface split decisions; #32 needs annual billing backend; #34/#35 are standalone PR-sized).
   - **Tests:** `mvn test` 636/636 green (was 620 pre-batch; +16 from new `ApiContractTest` / `ProductSurfaceFilterTest` / `TierProductSurfaceMapperTest`). Frontend build green throughout.
-  - **Phase 2/3 deferred** with full rationale + when-to-pick-up notes in `docs/plans/phase-2-3-deferred.md`. Phase 2 needs DNS + ops + maintenance window; Phase 3 needs multi-month engineering investments + external dependencies (legal for SOC2, GTM for marketplace, etc).
+  - **Phase 2/3 deferred** with full rationale + when-to-pick-up notes in `docs/plans/backlog-deferred-items.md`. Phase 2 needs DNS + ops + maintenance window; Phase 3 needs multi-month engineering investments + external dependencies (legal for SOC2, GTM for marketplace, etc).
 - **Per-seat TEAM tier reinstated (`feature/product-split-prep`, NOT yet merged).** With the product-split UI in place, the v2.6.1-Wave-1 ladder is the right shape: TEAM as multi-seat $49/seat (→ Build), MAX as power-individual $29/mo BYOK (→ Vibe). Three commits:
   - **Code revert (V141 + 8ef5e39b):** un-rename TEAM → MAX in 33 files (entities, services, frontend, website, tests). Restores `InvitationService.resolveTeamSeatLimit`, `TierEnforcementService.effectiveOrgLimit` per-seat path, `BillingService.subscribe` per-seat branch, 5-element `TIER_RANK`, `OrgController.adjustSeats` + `SeatsAdjustRequest`/`SeatsAdjustResponse`, `OrgService.adjustSeats` working method, frontend `PlanCard` per-seat picker, `OrgAdminDashboard` TEAM seats panel, frontend `adjustOrgSeats` helper. `CostEstimator.estimateWithCredits` overloads stayed deleted (V2 uses `RunCostTracker.estimateRunTierAware`).
   - **V144 migration:** data-side inverse — un-renames TEAM → MAX in `tier_config` / `billing_plan` / `app_user.tier` / `org.tier` / `pipeline_run.user_tier` / `app_user.trial_tier`; re-inserts the per-seat TEAM tier_config (50 credits/seat, 20 max members, LISTED) + 2 billing_plan rows (Team Monthly INR ₹3,999/seat + USD $49/seat, included_seats=2) + billing_plan_limit rows. `org.seat_count` (V123) untouched — V141 didn't drop it.
