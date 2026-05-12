@@ -1,29 +1,35 @@
 # ExecuteSpec — Document Map
 
 > Which docs to update for each type of change.
-> Last updated: **2026-05-06** — persona audit on the in-flight `feature/product-review-fixes-2026-05-06` (PR #77). 5-persona × 16-surface walk-through (FREE / PRO / TEAM / ENTERPRISE / SUPER_ADMIN) → 15 findings, 8 fixed in `bf9f50e1` (theme parity, restored `/runs`, RunSidePanel, OAuth init bridge fix, ProjectLaunches FREE-tier fallback). New audit lives at [`docs/audits/persona-audit-2026-05-06/README.md`](audits/persona-audit-2026-05-06/README.md) + 93 screenshots under `screenshots/<persona>/<NN-surface>.png`. Earlier 2026-05-01 audit r3 + Google-style refactor + CI lint (PRs #55+#56+#57): `docs/design/code-style.md` (deviations doc), `frontend/A11Y.md` (a11y enablement guide), `.github/workflows/lint.yml` (PR lint gate), `frontend/.prettierrc.json` + `.prettierignore` + `.eslintrc.cjs` (style configs), `frontend/src/design-system/contrast.{ts,test.ts}` (vitest-shape WCAG regression test, dormant). Audit reports kept as breadcrumbs: `docs/audits/persona-test-2026-05-04-r4.md` (post-refactor regression check, supersedes r3) + `docs/audits/dev-verification-2026-05-04.md` (live dev super-admin walkthrough, 31 screenshots) + `docs/audits/product-review-2026-05-06.md` (external code-first review that produced PR #77). Earlier 2026-04-28 R-326 cluster B refresh + 2026-04-26 cleanup-pass-1 history retained in git log.
+> Last updated: **2026-05-12** — docs cleanup pass on `feature/full-project-review-2026-05-11`. All `docs/audits/` content removed (point-in-time reports superseded by source-of-truth in `CLAUDE.md` / `ARCHITECTURE.md`); the 8 per-plan files under `docs/plans/` consolidated into a single [`docs/plans/pending.md`](plans/pending.md); the GA-readiness and complimentary-PRO-promo plans removed pending rewrite; the parked agent-builder plan, stale `phase-2-3-deferred.md` / `ux-overhaul-v4.md` / `pre-deploy-open-items.md` / `wave-7-issue-list.md` / `eval-2026-04-26-partial-and-openai-degradation.md` deleted; the expired thread-handoffs (`wave1-progress-handoff.md`, `v3-issues-handoff.md`, `strict-ux-thread-handoff.md`, `execution-checkpoint.md`, `pre-deploy-closeout.md`) and retired greenfield UX redesign tree (`greenfield-action-list.md`, `greenfield-execution-checkpoint.md`, `greenfield-ux-redesign.md`) and stale `local-db-sync-notes.md` all dropped.
 >
 > **App version:** v2.6.1 (deployed to dev.executespec.ai 2026-04-22; main synced 2026-04-23). Enterprise readiness (v2.6.3-track) **Phases E1+E2+E3+E4 (40 slices total) shipped on `feature/enterprise-readiness-eval`** (49+ commits ahead of `dev`, not yet merged); operational summary lives in [`CLAUDE.md`](../CLAUDE.md) under §Current State + §Recently Resolved. Hierarchical planner (v2.6.2-track) **all 5 slices shipped on `feature/hierarchical-planner`** (8 commits ahead of `dev`, not yet merged); operational summary in [`CLAUDE.md`](../CLAUDE.md) §0c (in `ARCHITECTURE.md`) and the v2/agent codemap row. Auto-replay re-trigger from outline checkpoint is the one remaining gap.
 >
 > **Codemap consolidation (2026-04-25):** the duplicate root-level `CODEBASE_MAP.md` was removed on `feature/hierarchical-planner`. `docs/CODEMAP.md` is now the only codemap; `README.md`'s docs table points there.
 
-## Plans folder structure (post-2026-04-26 cleanup)
+## Plans folder structure (post-2026-05-12 cleanup)
 
-`docs/plans/` holds only the 5 plans that are still actively useful:
+`docs/plans/` now holds a single consolidated file:
 
 | File | Type | What it is |
 |------|------|------------|
-| [`pending-ga-readiness-90-day-execution-plan.md`](plans/pending-ga-readiness-90-day-execution-plan.md) | proposed | 90-day Plan B execution doc operationalising the 2026-05-04 GA-readiness audit. Phase 0 (land in-flight branches) → P1 quality scoring fix → P2 pricing ladder → P3 cost ceiling + HIGH-band reliability → P4 observability + ArchUnit guard pin → P5 beta program + SOC 2 Type I + CLI → P6 GA cutover. Target GA 2026-08-04. Awaiting founder approval before kickoff. |
-| [`partial-work.md`](plans/partial-work.md) | consolidated | All 4 plans with partial implementations / pending follow-ups: Mobile (RN+Expo native-Android gap), Figma v2 (design-only), Harness V2 remaining work (Gap 1+2+3), and the PARTIAL-status removal proposal. |
-| [`pending-v2-batch-execution-plan.md`](plans/pending-v2-batch-execution-plan.md) | not started | Re-implement batch execution under V2 (V1 batch was deleted). Realtime-only today. |
-| [`pending-distributed-processing-plan.md`](plans/pending-distributed-processing-plan.md) | not started | Phase A NFS workspace + Phase B worker-lease pool. |
-| [`pending-vscode-extension-plan.md`](plans/pending-vscode-extension-plan.md) | not started | External-repo VS Code extension; device-code OAuth. |
-| [`pending-complimentary-pro-promo-2026-04-30-plan.md`](plans/pending-complimentary-pro-promo-2026-04-30-plan.md) | not started | Founder thank-you 30-day PRO upgrade for early FREE signups. |
+| [`pending.md`](plans/pending.md) | consolidated | All currently-pending plans in one document: (1) Partial/follow-up work — Mobile RN+Expo gaps, Figma v2, Harness V2 Gap 1/2/3, PARTIAL-status removal proposal; (2) Backlog deferred items (M-035..M-052); (3) V2 batch execution; (4) Distributed run processing (Phase A NFS + Phase B worker pool); (5) VS Code extension (deferred to external repo); (6) Project-surface Vite split (Phase 2 of v2.7 product split); (7) Readymade Solutions library (W1–W5 shipped on `feature/readymades-and-migrations`, W6–W9 reserved); (8) Migrations product (W1–W7 shipped on same branch, W8–W10 deferred). |
 
-**Removed in 2026-04-26 cleanup:**
+**Removed in 2026-05-12 cleanup:**
+- `pending-ga-readiness-90-day-execution-plan.md` — to be rewritten.
+- `pending-complimentary-pro-promo-2026-04-30-plan.md` — to be rewritten.
+- `pending-agent-builder-plan.md` — parked 2026-04-29 ("wrong product shape" per founder); historical only.
+- `phase-2-3-deferred.md` — self-stamps "PARTIALLY SUPERSEDED" 2026-04-27; still-pending items moved into `pending.md`.
+- `ux-overhaul-v4.md` — self-stamps "SHIPPED on the branch"; superseded by later UX work.
+- `pre-deploy-open-items.md` — only shippable item already shipped.
+- `wave-7-issue-list.md` — all closed.
+- `eval-2026-04-26-partial-and-openai-degradation.md` — proposed fixes shipped via v2.5.10 verified-score + hierarchical planner + worker-runaway-fixes.
+- `README.md`, `partial-work.md`, `backlog-deferred-items.md`, `pending-v2-batch-execution-plan.md`, `pending-distributed-processing-plan.md`, `pending-vscode-extension-plan.md`, `pending-project-surface-vite-split.md`, `pending-migrations-plan.md`, `pending-readymade-solutions-plan.md` — content consolidated into `pending.md`.
+
+**Removed in 2026-04-26 cleanup (history, kept here as breadcrumbs):**
 - `hierarchical-planner-plan.md` — all 5 slices shipped on `feature/hierarchical-planner`. Operational truth lives in `CLAUDE.md` and `ARCHITECTURE.md`.
 - `pending-enterprise-readiness-execution-eval.md` — all 4 phases shipped on `feature/enterprise-readiness-eval`. Operational truth lives in `CLAUDE.md` §Current State + the new package summaries in `CODEMAP.md` + `ARCHITECTURE.md` §0d.
-- `open-work-2026-04-18.md` — stale 8-day audit referencing deleted plans; superseded by `partial-work.md`.
+- `open-work-2026-04-18.md` — stale 8-day audit referencing deleted plans; superseded by `partial-work.md` (now folded into `pending.md`).
 - `pending-preview-control-plane-plan.md` + `preview-engine-rewrite.md` — preview pipeline moved to the separate [`preview-engine`](https://github.com/navneetprabhakar/preview-engine) repo; new plans will be authored there.
 
 ## Recently shipped (kept here as breadcrumbs; full plans deleted)
@@ -102,8 +108,7 @@ Find the **type of change** you are making in the table below. Update every docu
 | `sso-saml-wiring.md` | SAML wire-in spec + per-IdP setup notes + lockout-prevention guard rationale (M-016) | When SAML2 actually wires in, when adding a new IdP, when changing the lockout rules |
 | `stripe-price-ids-ops.md` | Stripe env-var checklist + setup runbook + operator gotchas (M-029) | Price-id ops changes, gateway flag flips, setup procedure changes |
 | `cookie-domain-switch.md` | Maintenance-window plan for the JWT cookie scope flip (M-031) | When the Phase-2 surface split actually executes |
-| `backlog-deferred-items.md` | First-slice + owner-needed + when-to-re-open per deferred Backlog item (M-035/036/037/040/041/048/050/052) | When picking up any of those items |
-| `execution-checkpoint.md` | Running execution log of the M-* batches on `feature/v2.7-foundation` | After every 3 items shipped + at every wave-boundary transition |
+| `plans/pending.md` | Single consolidated doc for every pending plan (status, what's shipped, what remains, owner / branch / dependencies) | When picking up any pending work or adding a new plan section |
 | `billing-workflows.html` | Rendered billing flow diagrams (subscribe, top-up, refund, webhook handling) | Billing / payment flow changes |
 | `design/ui-tokens.md` | Single source of truth for color/radius/spacing tokens | Adding a UI primitive, tweaking the palette, theme work |
 | `document_map.md` | This file | Adding a new doc, adding a new change type |
