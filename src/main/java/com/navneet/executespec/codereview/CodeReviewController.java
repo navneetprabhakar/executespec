@@ -105,7 +105,9 @@ public class CodeReviewController {
     if (scan == null) {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such scan");
     }
-    projectAccessGuard.assertCanRead(scan.getProjectId(), userDetails);
+    // Audit 2026-05-12 review item B #12 — autofix dispatches a patch-mode run + opens a draft
+    // PR. PROJECT_VIEWER must not be able to trigger this.
+    projectAccessGuard.assertCanWrite(scan.getProjectId(), userDetails);
 
     var result =
         autofixService.dispatchFixForSeverity(

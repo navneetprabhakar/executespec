@@ -1,7 +1,6 @@
 package com.navneet.executespec.deployment.preview;
 
 import java.io.IOException;
-import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -415,7 +414,10 @@ public class EnvVarDetector {
   // ── Source file scanning ─────────────────────────────────────────────────
 
   private void scanSourceFiles(Path workspace, Map<String, DetectedEnvVar> result) {
-    try (Stream<Path> walk = Files.walk(workspace, 4, FileVisitOption.FOLLOW_LINKS)) {
+    // Do NOT follow symlinks — symlink loops (e.g. node_modules/.bin/->../bin/) hang the scan
+    // indefinitely. Customer workspaces don't legitimately need link-following for env-var detect.
+    // Audit: 2026-05-12 line-by-line review item N #73.
+    try (Stream<Path> walk = Files.walk(workspace, 4)) {
       walk.filter(Files::isRegularFile)
           .filter(this::isSourceFile)
           .filter(p -> !isInIgnoredDir(workspace, p))

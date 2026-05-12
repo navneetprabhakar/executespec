@@ -37,11 +37,24 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
     if (config.getWebhookSecret() == null || config.getWebhookSecret().isBlank()) return;
-    // Jira Cloud sends JWT in Authorization header or a shared secret in x-hub-signature
+    // Audit 2026-05-12 review items C #22, #23:
+    //  - JWT path previously trusted "Authorization: JWT ..." without signature verification.
+    //    The shared-secret fallback below is the only currently-supported posture; if Atlassian
+    //    JWT mode is needed, integrate atlassian-connect-spring-boot's QSH validator instead of
+    //    a `startsWith("JWT ")` no-op.
+    //  - Shared-secret comparison now uses MessageDigest.isEqual (constant-time) to close the
+    //    timing-attack side channel that String.equals exposes on early-mismatch returns.
     String authHeader = headers.getOrDefault("authorization", "");
-    if (authHeader.startsWith("JWT ")) return; // JWT is valid — Atlassian-signed
-    String secret = headers.getOrDefault("x-hub-signature", "");
-    if (!config.getWebhookSecret().equals(secret)) {
+    if (authHeader.startsWith("JWT ")) {
+      throw new WebhookSignatureException(
+          "Jira JWT signature verification is not implemented; configure shared-secret"
+              + " (x-hub-signature) instead");
+    }
+    String received = headers.getOrDefault("x-hub-signature", "");
+    byte[] expected =
+        config.getWebhookSecret().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    byte[] actual = received.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    if (!java.security.MessageDigest.isEqual(expected, actual)) {
       throw new WebhookSignatureException("Jira webhook signature mismatch");
     }
   }

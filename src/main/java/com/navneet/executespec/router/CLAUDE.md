@@ -13,7 +13,7 @@ User-selected provider routing with YAML as the single source of truth and a Red
 | `ModelMatrixProperties.java` | `@ConfigurationProperties` binding for `model-matrix:` (providers + agent-tier-map + failover-order + model-pricing + display-label + chainTier + free-tier-locked). |
 | `AgentTier.java` | Enum: PLANNING, WORKHORSE, LIGHTWEIGHT. |
 | `ResolvedModel.java` | DTO: `requestedProvider`, `actualProvider`, `model`, `agentTier`, `fallback`. |
-| `ProviderHealthTracker.java` | Redis-backed circuit breaker. 5 consecutive failures → OPEN; 60s TTL auto-recovery. Fail-open on Redis errors. |
+| `ProviderHealthTracker.java` | Redis-backed circuit breaker. **10** consecutive failures → OPEN; **180s** TTL auto-recovery. Fail-open on Redis errors. (Constants `UNHEALTHY_THRESHOLD=10` + `RECOVERY_WINDOW=Duration.ofSeconds(180)` in the source.) |
 | `AvailableProviderResolver.java` | Resolves available providers per run based on org policy + API key availability. |
 | `ProviderRecommendationService.java` | Heuristic project-type → provider routing. Gated by `provider.smart-routing.enabled` flag (default OFF). |
 
@@ -36,8 +36,8 @@ Per `application.yml failover-order:`, when a provider fails the router walks th
 ## Circuit breaker
 
 - **Storage:** Redis (`StringRedisTemplate`). Keys: `provider:health:{name}`, `provider:failures:{name}`.
-- **Threshold:** 5 consecutive failures → OPEN.
-- **Recovery:** unhealthy key has 60s TTL → auto-expires → provider assumed healthy again.
+- **Threshold:** 10 consecutive failures → OPEN. (Was documented as 5 — corrected by audit 2026-05-12 L #64.)
+- **Recovery:** unhealthy key has 180s TTL → auto-expires → provider assumed healthy again.
 - **Fail-open:** Redis errors degrade to "assume healthy" (never blocks LLM calls due to Redis issues).
 - **Metrics:** `executespec.provider.circuit_opened`, `executespec.provider.circuit_closed` (tagged by provider).
 - **Integration:** `FallbackLlmRouter` checks health before each provider attempt; records success/failure after each call. `LlmRouter` (V2 native-tool path) is direct-dispatch — no auto-failover; relies on the YAML failover-order plus per-call cost-cap protection.

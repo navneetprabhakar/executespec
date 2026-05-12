@@ -155,7 +155,10 @@ public class TestResultController {
             .findById(result.getTestPlanId())
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Test plan not found"));
-    runAccessGuard.requireRunAccess(plan.getRunId(), userDetails);
+    // Audit 2026-05-12 review item B #18 — was requireRunAccess (any org member could mutate
+    // another user's run). markInvalid downgrades test failures, so restrict to owner +
+    // ORG_ADMIN.
+    runAccessGuard.requireRunWriteAccess(plan.getRunId(), userDetails);
 
     result.setStatus(TestResultStatus.SKIPPED);
     result.setFailureMessage(

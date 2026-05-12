@@ -43,7 +43,9 @@ public class ProjectShareLinkController {
       @PathVariable String projectId,
       @RequestBody CreateShareLinkRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    accessGuard.assertCanRead(projectId, userDetails);
+    // Audit 2026-05-12 review item B #10 — minting a public share link is a write op; was
+    // assertCanRead which let PROJECT_VIEWER create them.
+    accessGuard.assertCanWrite(projectId, userDetails);
     if (req == null || req.surface() == null) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "surface is required");
     }
@@ -79,7 +81,8 @@ public class ProjectShareLinkController {
       @PathVariable String projectId,
       @PathVariable UUID linkId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    accessGuard.assertCanRead(projectId, userDetails);
+    // Audit 2026-05-12 review item B #10 — revoke is also a write.
+    accessGuard.assertCanWrite(projectId, userDetails);
     linkService.revoke(linkId, userDetails.getUser());
     return ResponseEntity.noContent().build();
   }

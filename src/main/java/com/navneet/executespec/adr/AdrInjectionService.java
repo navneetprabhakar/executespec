@@ -15,8 +15,13 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Mirror of the contract-injection threshold pattern from E2.11: - ≤ {@code
  * adrs.injection.full-body-threshold} (default 15) → inline every ACCEPTED ADR's full body - >
- * threshold → compact one-liner index, planner uses {@code getAdr(id)} tool on demand (tool wiring
- * deferred).
+ * threshold → compact one-liner index.
+ *
+ * <p><strong>Audit 2026-05-12 review item L #66:</strong> the {@code getAdr(id)} planner tool is
+ * NOT wired yet, so when a project has > {@code fullBodyThreshold} ACCEPTED ADRs the planner only
+ * sees the index. The prompt language below has been adjusted to stop promising tool retrieval.
+ * Wiring a real {@code GetAdrTool} (returns ADR body by id, like {@code GetContractTool}) is a
+ * follow-up; see {@code tool/} package for the contract.
  */
 @Service
 @RequiredArgsConstructor
@@ -61,7 +66,11 @@ public class AdrInjectionService {
     sb.append("=== PROJECT_ADRS_INDEX ===\n");
     sb.append("Project has ")
         .append(adrs.size())
-        .append(" accepted ADRs. Use the getAdr(id) tool to fetch full bodies.\n\n");
+        .append(" accepted ADRs. Below is the title + first-line teaser for each.")
+        .append(
+            " (Full bodies exceed the inline budget; the getAdr tool is not yet wired — if a"
+                + " decision matters for this plan, mention it in the spec and the operator can"
+                + " inline the body.)\n\n");
     List<UUID> ids = new java.util.ArrayList<>();
     for (Adr a : adrs) {
       ids.add(a.getId());

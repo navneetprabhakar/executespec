@@ -11,7 +11,8 @@ import jakarta.annotation.PostConstruct;
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Component;
-import org.yaml.snakeyaml.Yaml;
+
+import com.navneet.executespec.util.SafeYamlLoader;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -33,10 +34,10 @@ public class SampleSpecRegistry {
     try {
       PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
       Resource[] resources = resolver.getResources("classpath:sample-specs/*.yml");
-      Yaml yaml = new Yaml();
       for (Resource r : resources) {
         try (InputStream in = r.getInputStream()) {
-          Map<String, Object> map = yaml.load(in);
+          @SuppressWarnings("unchecked")
+          Map<String, Object> map = (Map<String, Object>) SafeYamlLoader.load(in);
           if (map == null || map.get("id") == null) {
             log.warn("Sample spec {} missing id — skipped", r.getFilename());
             continue;
