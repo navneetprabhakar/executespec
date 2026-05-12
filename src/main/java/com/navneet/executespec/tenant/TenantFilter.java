@@ -7,12 +7,12 @@ import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
+import com.navneet.executespec.auth.security.AppUserDetails;
+
 import org.springframework.core.annotation.Order;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.stereotype.Component;
-
-import com.navneet.executespec.auth.security.AppUserDetails;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -21,11 +21,10 @@ import lombok.extern.slf4j.Slf4j;
  * TenantContext} for the duration of the request.
  *
  * <p><strong>Audit 2026-05-12 review items B #19 + #20:</strong> the {@code X-Tenant-Id} header is
- * now (a) validated against an alphanumeric/hyphen regex (max 64 chars) to refuse path-traversal
- * or shell-metachar payloads, AND (b) cross-checked against the authenticated user's {@code
- * orgId} so an attacker can't spoof a different tenant via a client-controlled header. When the
- * user is not authenticated yet (login / register endpoints), the header is accepted but
- * still regex-validated.
+ * now (a) validated against an alphanumeric/hyphen regex (max 64 chars) to refuse path-traversal or
+ * shell-metachar payloads, AND (b) cross-checked against the authenticated user's {@code orgId} so
+ * an attacker can't spoof a different tenant via a client-controlled header. When the user is not
+ * authenticated yet (login / register endpoints), the header is accepted but still regex-validated.
  */
 @Component
 @Order(1)

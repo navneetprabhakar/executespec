@@ -1,6 +1,5 @@
 package com.navneet.executespec.optimiser;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -236,18 +235,18 @@ public class PromptOptimiserAgent {
 
   /**
    * Resolves a prompt file path. Caller is expected to pass the actual filename WITH its real
-   * extension (`.md` for V2 canonical prompts, `.txt` for V1 legacy archives). Earlier
-   * versions appended `.txt` unconditionally — which never matched anything in the V2 layout.
-   * Audit 2026-05-12 review item F #43.
+   * extension (`.md` for V2 canonical prompts, `.txt` for V1 legacy archives). Earlier versions
+   * appended `.txt` unconditionally — which never matched anything in the V2 layout. Audit
+   * 2026-05-12 review item F #43.
    */
   private Path resolvePromptPath(String promptFile) {
     return Path.of("src/main/resources/prompts", promptFile);
   }
 
   /**
-   * @deprecated Auto-commit was disabled by audit 2026-05-12 review item F #44 (silently
-   *     committing to the developer's working tree from a scheduled task is a foot-gun). Kept as
-   *     a reference for future re-enabled-behind-a-flag iteration. Do NOT call.
+   * @deprecated Auto-commit was disabled by audit 2026-05-12 review item F #44 (silently committing
+   *     to the developer's working tree from a scheduled task is a foot-gun). Kept as a reference
+   *     for future re-enabled-behind-a-flag iteration. Do NOT call.
    */
   @Deprecated(forRemoval = true)
   @SuppressWarnings("unused")

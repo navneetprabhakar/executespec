@@ -79,8 +79,8 @@ public class IntegrationProperties {
 
     /**
      * Shared secret for HMAC-SHA256 signature verification on inbound Confluence webhooks. When
-     * unset the adapter falls back to bearer-token check against {@link #apiToken}; when neither
-     * is configured, inbound webhooks are refused (audit 2026-05-12 review item C #21).
+     * unset the adapter falls back to bearer-token check against {@link #apiToken}; when neither is
+     * configured, inbound webhooks are refused (audit 2026-05-12 review item C #21).
      */
     private String webhookSecret;
   }

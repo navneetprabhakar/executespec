@@ -388,6 +388,15 @@ public class DevDockerfileGenerator {
    * Vite 5.4+ allowedHosts patch — RUN node -e that sets server.allowedHosts:true in vite config.
    * Handles 5 config patterns (server:{}, export default{}, defineConfig({), arrow function,
    * plugins: fallback).
+   *
+   * <p><strong>Audit 2026-05-12 review item N #72:</strong> the multi-line {@code node -e}
+   * fragments below are embedded as Java string literals which is an escape-level hazard — one
+   * stray quote or backslash breaks Dockerfile generation silently. The cleaner fix is to write the
+   * node patch script to {@code .agent-context/vite-allowed-hosts-patch.js} in the workspace at
+   * generation time and emit a {@code RUN node .agent-context/vite-allowed-hosts-patch.js} in the
+   * Dockerfile, so the script lives in a real file with proper syntax highlighting. Deferred
+   * because the change affects multiple Dockerfile templates and needs end-to-end preview
+   * verification on Vite 5.4+ / 6.0+ across all 9 PreviewProjectType variants.
    */
   private String crViteAllowedHostsPatch() {
     return "RUN node -e \"const fs=require('fs'),path=require('path');const"
@@ -407,8 +416,15 @@ public class DevDockerfileGenerator {
                + "        fs.writeFileSync(f,c);      }      break;    }  } "
                + " if(found)break;}if(!found){  const"
                + " feDir=['frontend','client'].find(d=>fs.existsSync(path.join(d,'package.json')))||'.';"
-               + "  fs.writeFileSync(path.join(feDir,'vite.config.js'),'import{defineConfig}from\\\\\"vite\\\\\";export"
-               + " default defineConfig({server:{allowedHosts:true}});');}\"\n";
+        // Audit 2026-05-12 review item O #76: only write a vite.config.js when the
+        // customer's package.json actually declares vite as a direct dep — otherwise we
+        // create a config that doesn't match their build system (webpack/parcel/rspack
+        // with vite as transitive devDep).
+        + "  const pkgPath=path.join(feDir,'package.json');  let hasViteDirect=false;  try{const"
+        + " p=JSON.parse(fs.readFileSync(pkgPath,'utf8'));hasViteDirect=!!((p.dependencies&&p.dependencies.vite)||(p.devDependencies&&p.devDependencies.vite));}catch(e){}"
+        + "  if(hasViteDirect){   "
+        + " fs.writeFileSync(path.join(feDir,'vite.config.js'),'import{defineConfig}from\\\\\"vite\\\\\";export"
+        + " default defineConfig({server:{allowedHosts:true}});');  }}\"\n";
   }
 
   /** Vite proxy patch — rewrites localhost:NNNN → localhost:{port} in vite config. */
@@ -3332,11 +3348,11 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
 
   /**
    * Returns true if {@code file} (within MAX_FILE_SIZE) contains any of the given LITERAL
-   * substrings. NOT a regex match — do NOT pass pipe-alternated patterns like {@code "a|b"};
-   * use the varargs form {@code fileContainsPattern(file, "a", "b")} for OR semantics.
+   * substrings. NOT a regex match — do NOT pass pipe-alternated patterns like {@code "a|b"}; use
+   * the varargs form {@code fileContainsPattern(file, "a", "b")} for OR semantics.
    *
-   * <p>Audit: 2026-05-12 line-by-line review item N #71 — clarified literal-substring semantics
-   * to prevent future drift into regex confusion.
+   * <p>Audit: 2026-05-12 line-by-line review item N #71 — clarified literal-substring semantics to
+   * prevent future drift into regex confusion.
    */
   private boolean fileContainsPattern(Path file, String... patterns) {
     try {

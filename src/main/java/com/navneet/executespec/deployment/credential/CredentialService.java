@@ -428,9 +428,9 @@ public class CredentialService {
    * Defense-in-depth: throws {@link IllegalAccessError} if {@code userId} has no relationship to
    * {@code projectId}. Same admission logic as {@link
    * com.navneet.executespec.project.security.ProjectAccessGuard#assertCanWrite}: SUPER_ADMIN or
-   * in-org member OR project_member with non-VIEWER role. The controller already enforces this
-   * via the access guard — this method is a fallback against future service-layer callers that
-   * forget. Audit 2026-05-12 review item B #17.
+   * in-org member OR project_member with non-VIEWER role. The controller already enforces this via
+   * the access guard — this method is a fallback against future service-layer callers that forget.
+   * Audit 2026-05-12 review item B #17.
    */
   private void assertUserCanWriteProject(String userId, String projectId) {
     var userOpt = userRepository.findById(userId);

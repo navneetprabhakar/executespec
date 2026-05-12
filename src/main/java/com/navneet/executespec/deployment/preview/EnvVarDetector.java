@@ -156,7 +156,13 @@ public class EnvVarDetector {
           "CORS_WHITELIST",
           "CORS_ENABLED",
           "ACCESS_CONTROL_ALLOW_ORIGIN",
-          // Session / cookie / internal auth (not third-party)
+          // Session / cookie / internal auth (not third-party). Audit 2026-05-12 review item
+          // O #74: excluding JWT_SECRET / NEXTAUTH_SECRET / SESSION_SECRET from the prompt
+          // means customer apps that `process.env.JWT_SECRET` read an empty string and crash
+          // silently on first request. The fix lives at the preview-launch layer: when these
+          // vars are detected in source but unset in env, the preview wrapper auto-generates a
+          // 32-byte hex secret per run. Logged here so the exclusion + the auto-gen are
+          // co-located conceptually.
           "SESSION_SECRET",
           "COOKIE_SECRET",
           "COOKIE_DOMAIN",

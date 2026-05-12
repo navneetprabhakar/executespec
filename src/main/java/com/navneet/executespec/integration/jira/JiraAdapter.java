@@ -51,8 +51,7 @@ public class JiraAdapter implements InboundAdapter, OutboundAdapter {
               + " (x-hub-signature) instead");
     }
     String received = headers.getOrDefault("x-hub-signature", "");
-    byte[] expected =
-        config.getWebhookSecret().getBytes(java.nio.charset.StandardCharsets.UTF_8);
+    byte[] expected = config.getWebhookSecret().getBytes(java.nio.charset.StandardCharsets.UTF_8);
     byte[] actual = received.getBytes(java.nio.charset.StandardCharsets.UTF_8);
     if (!java.security.MessageDigest.isEqual(expected, actual)) {
       throw new WebhookSignatureException("Jira webhook signature mismatch");

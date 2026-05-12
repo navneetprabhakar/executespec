@@ -84,8 +84,8 @@ public class ProjectAccessGuard {
   /**
    * Assert the caller may WRITE / MUTATE this project. Same in-org / cross-org admission rules as
    * {@link #assertCanRead}, but additionally rejects PROJECT_VIEWER members (V175 read-only role).
-   * Use this on every endpoint that creates, updates, or deletes per-project state — invites,
-   * share links, memory compactions, autofix dispatches, architecture (re)generation, override /
+   * Use this on every endpoint that creates, updates, or deletes per-project state — invites, share
+   * links, memory compactions, autofix dispatches, architecture (re)generation, override /
    * exception submissions, credential storage, etc.
    *
    * <p>Audit 2026-05-12 review item B #9-#18 — closes the "{@code assertCanRead} used as
