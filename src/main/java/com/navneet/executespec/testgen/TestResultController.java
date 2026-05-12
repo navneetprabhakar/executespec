@@ -230,6 +230,12 @@ public class TestResultController {
     // can't see / use. Short-circuit at the top so the 410 is the FIRST observable behaviour
     // and no data is mutated. When V2 wires this back up, remove the throw and the work
     // below proceeds normally.
+    //
+    // Auth + tenant guard run first so 401/403 fire before 410 (correct HTTP status
+    // ordering) AND so AccessGuardCoverageTest ArchUnit pin still sees a guard call on this
+    // run-scoped endpoint. The guard call is cheap (one indexed DB lookup) and we still
+    // throw 410 immediately after.
+    runAccessGuard.requireRunAccess(runId, userDetails);
     throw new org.springframework.web.server.ResponseStatusException(
         org.springframework.http.HttpStatus.GONE, "apply-test-fixes not yet supported in V2");
     // Original logic preserved below for the V2 wire-up follow-up. Currently unreachable.
