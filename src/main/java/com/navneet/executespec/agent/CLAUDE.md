@@ -1,34 +1,48 @@
-# agent/ — LLM Agents & Routing
+# `agent/` — LLM agents + routing
 
-All LLM-calling agents and the routing infrastructure.
+> Last reviewed: 2026-05-12 (1.0.0-M1).
 
-## Key Files
-- `FallbackLlmRouter.java` — Central LLM call dispatcher. Multi-provider fallback (Anthropic → Google → OpenAI). Integrates with `ProviderHealthTracker` (Redis-backed circuit breaker) to skip unhealthy providers. Uses Caffeine caches (6h TTL, 1000 max) for per-run state. All LLM calls MUST go through this. **v2.5.9**: emits `RUN_PROVIDER_SWITCHED` SSE event (payload `fromProvider|toProvider|reason`) whenever a fallback kicks in, so silent provider switches are observable in the UI. **`FallbackMode.NO_FALLBACK`** (also v2.5.9) added so callers — e.g. `ExecutionPlannerService` — can opt out of auto-failover entirely; required when `-Dexecutespec.strict-provider=true` is set.
-- `WorkerAgent.java` — Executes individual tasks. XML `<tool_call>` format, manual tool dispatch, 25-min wall-clock limit. Silent hard cap enforcement: checks `isOverBudget()` every 5 LLM iterations (no progressive warnings — user approved cost upfront). **Self-play prevention:** strips fabricated `<tool_result>` blocks via `FABRICATED_TOOL_RESULT_PATTERN` regex before parsing. **XML-first parsing** for PATH B (Anthropic/Google): `parseXmlToolCalls()` first, `parseJsonToolCalls()` fallback — prevents JSON short-circuit from losing multi-tool responses.
-- `PlannerAgent.java` — Generates execution plans from user specs. Uses PLANNING tier (Opus). Outputs `project_type` field in plan JSON for downstream preview/deploy detection.
-- `ConversationAgent.java` — Chat copilot. Uses LIGHTWEIGHT tier via ModelResolver. Compact mode for large projects (>50 files).
-- `CostEstimator.java` — Estimates run cost from plan. Per-provider pricing lookup (with cached input pricing from DB). Returns `RunCostEstimate` with per-task breakdown. (V2 uses `RunCostTracker.estimateRunTierAware` for credits; the legacy `estimateWithCredits` overloads were deleted in the 2026-04-26 cleanup pass.)
-- `RunCostEstimate.java` — DTO: `totalEstimatedCost`, `runCredits`, `hardCap`, per-task `TaskCostEstimate` breakdown. Dual pricing: includes `batchCredits`, `batchAvailable`, `creditSavings` for batch execution path (50% discount).
-- `ApiKeyResolver.java` — Resolves API keys: user → org → system fallback.
-- `RunKeyStore.java` — Caches resolved keys per run.
-- `LlmOutputParser.java` — Parses XML tool calls from LLM responses.
+All LLM-calling agents + the routing infrastructure for the V2 pipeline.
 
-## Key Models
-- `TaskPlan.java` — Parsed planner output: `projectType`, `planTitle`, `planSummary`, `tasks` (snake_case JSON)
-- `TaskDefinition.java` — Individual task: `taskId`, `complexity`, `assignedModel`, `ownedFiles`, `dependsOn`
-- `WorkerReport.java` — Worker output: status, files written, provider/model used
+## Key files
+
+| File | Purpose |
+|------|---------|
+| `LlmRouter.java` | Canonical native-tool-calling dispatcher. Routes per provider (Anthropic via Spring AI, OpenAI via `OpenAiNativeToolClient`, Gemini via `GeminiNativeToolClient`). Every call flows through `RunCostTracker` (cache-aware pricing from `application.yml model-matrix.model-pricing`). |
+| `FallbackLlmRouter.java` | Legacy V1 router; still used by non-tool-calling agents (`AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`). Multi-provider fallback via YAML `failover-order`. Emits `RUN_PROVIDER_SWITCHED` SSE on fallback. `FallbackMode.NO_FALLBACK` opts out (used when `-Dexecutespec.strict-provider=true`). |
+| `OpenAiNativeToolClient.java` | OpenAI native-tool client — bypasses Spring AI 1.1.4's `extra_body` bug; auto-cache validated at 43%. |
+| `GeminiNativeToolClient.java` | Gemini native-tool client — schema sanitization + thought-signature round-trip; implicit-cache prefix preserved. Records `cache_read_input_tokens` on every call. |
+| `SmartClassifierAgent.java` | (LIGHTWEIGHT) Picks `PlanStrategy ∈ {SINGLE_SHOT, SMALL, MEDIUM, LARGE, LEGACY}`. Heuristic fast path (≤150-char tiny specs, no multi-feature keywords) returns at 0ms / $0; LLM verifier hits Haiku/Flash with the heuristic verdict as a hint. Redis cache 1h TTL keyed by `SHA-256(spec + sortedRepos + projectId)`. Always falls back to heuristic on parse / enum / timeout error. |
+| `OutlinePlannerAgent.java` | (PLANNING) Two modes — `FULL_PLAN` (32k cap, single `submitPlan` tool call) for SMALL/MEDIUM; `SKELETON_ONLY` (8k cap, id/title/complexity/repos/dependsOn/type only) for LARGE/LEGACY. SINGLE_SHOT bypasses the LLM via `synthesizeSingleShot`. |
+| `TaskExpanderAgent.java` | (WORKHORSE) Per-LEAF parallel expander. `submitTaskDetail` tool fills description / touchesFiles / hardConstraints / meetsRequirements. Dispatched via `CompletableFuture.allOf` on the 4-thread pipeline pool, 20-min wall timeout (LARGE/LEGACY). Per-task failures fall back to title-derived LEAFs. |
+| `CoherencePlannerAgent.java` | (LIGHTWEIGHT) `patchPlan` tool with 5 patch kinds (ADD_MEETS_REQUIREMENT / ADD_DEPENDS_ON / REMOVE_DEPENDS_ON / FIX_HARD_CONSTRAINT_CONFLICT / MOVE_FILE_TO_REPO_SUBDIR). Empty patches array = clean plan. Non-fatal on per-patch failure. |
+| `WorkerAgent.java` | (per-task tier — LOW=LIGHTWEIGHT / MEDIUM=WORKHORSE / HIGH=PLANNING) Sequential multi-turn loop. Native tool calling end-to-end via `LlmRouter`. `CompleteTaskTool` terminates. Two resilience levers: **A** force-edit watchdog at 0.7×maxIter (UserMessage; Anthropic-cache-safe), **B** best-guess salvage on iter-limit / budget-exceeded / stagnation-force. Snapshots conversation to Redis every 5 iters via `ContextStore`. |
+| `PatchAgent.java` | Patch-mode single-shot agent. Per-provider iter caps (Anthropic 150, OpenAI 100, Gemini 120). Test-verification gate on `completeTask` (`failed:[]`, `errored:[]`, `exit_code:0` within `TEST_VERIFICATION_RECENCY_ITERS=5`). |
+| `PlanStrategyCircuitBreaker.java` | Redis-backed. 5 consecutive failures → 1h open → ladder degrade LEGACY → LARGE → MEDIUM → SMALL → legacy. Fail-open on Redis errors. |
+| `PlanStrategy.java` + `ClassificationResult.java` + `Plan.java` + `PlannedTask.java` + `RequirementSpec.java` | Plan data types. `RequirementSpec{id, text, kind}` (FUNCTIONAL / NON_FUNCTIONAL / TEST / CONSTRAINT) — every task cites which IDs it covers via `meetsRequirements`. |
+| `PlannerOutputUtils.java` | Static helpers: `parsePlanFromArgs`, `validatePlan` (Validation v3 Pillar 1), `salvagePlanFromText` (Gemini pseudo-code recovery), `warnIfConstraintsUnderpropagated`, `cleanTitle`, `resolveProviderForTitle`, `truncate`. |
+| `CompleteTaskTool.java` | Native termination tool — the worker calls it as a tool to end the loop. |
+| `ConversationAgent.java` | Chat copilot. Uses LIGHTWEIGHT tier via `FallbackLlmRouter`. |
+| `CostEstimator.java` + `RunCostEstimate.java` | Pre-plan cost estimate. V2 path uses `RunCostTracker.estimateRunTierAware` (see `cost/`). |
+| `ApiKeyResolver.java` | Resolves API keys: user → org → system fallback. `isOwnKeysMode(userId)` returns true when org is `OWN_KEYS` (drives the BYOK cost-cap exemption). |
+| `RunKeyStore.java` | Caches resolved keys per run. |
+| `PromptAssembler.java` + `PromptAudit.java` | Composable prompt fragment system. Resolves `{{include:fragment}}` markers from `prompts/fragments/` + `{{VAR}}` substitutions. SHA-256 prompt hash → `prompt_audit` table. |
+
+## Tier mapping (`application.yml agent-tier-map`)
+
+| Tier | Agents |
+|------|--------|
+| PLANNING | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
+| WORKHORSE | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent |
+| LIGHTWEIGHT | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
 
 ## Patterns
-- Worker completion = response starts with `{` (strict JSON check)
-- Sliding window context: first 2 + last 12 units (reduced from 18 to cut ~33% input tokens)
-- Truncation limits: readFile 5k, shell 4k, diff 3k chars (reduced from 8k/6k/5k)
-- Non-subtask iteration floor: 25 (`REGULAR_TASK_MIN_ITERATIONS`) vs subtask floor 15 (`SUBTASK_ITERATION_LIMIT`)
-- Never call LLM providers directly — always through FallbackLlmRouter
-- Worker stall detection: no file writes in 5min → escalate model (WORKHORSE → PLANNING tier)
-- Worker prompts: `worker.txt` (Anthropic), `worker-openai.txt` (OpenAI), `worker-gemini.txt` (Google)
-- **Self-play prevention:** Anthropic models may output `<tool_call>` + fabricated `<tool_result>` + more `<tool_call>` in one response. `FABRICATED_TOOL_RESULT_PATTERN` strips fake results before parsing. Applied to both main response and truncation salvage paths.
-- **Tool call parsing order (PATH B):** XML first (`parseXmlToolCalls`), JSON fallback (`parseJsonToolCalls`). Prevents `parseJsonToolCalls` short-circuit from losing 2nd/3rd tool calls in multi-tool XML responses.
-- **Per-response tool call cap:** `MAX_TOOL_CALLS_PER_RESPONSE = 15` — prevents Gemini's 100+ call batches from exhausting the iteration budget in one response. Excess calls skipped with a `<system_note>` telling the model to re-request. Applied to PATH A, PATH B, and truncation salvage paths. Salvage path uses `min(15, remainingBudget - 1)` to reserve a slot for the model's next writeFile call.
-- **Read-only tool dedup:** `readOnlyToolCache` in `TaskExecutionState` caches results of read-only tools (readFile, listFiles, searchFiles, git_status, git_diff) keyed by `"toolName|path"`. Cache invalidated on file writes. **Dedup cache hits are FREE — they do NOT count toward `toolCallCount`**, preventing Gemini's redundant reads from exhausting subtask budgets.
-- **Subtask decomposition strategies:** (1) File-based — multi-file tasks split into per-file subtasks. (2) Phase-based — complex single-file tasks (MEDIUM/HIGH) split into method-level phases (MEDIUM → 2, HIGH → 3). Phase 1 creates skeleton; subsequent phases read+extend the file. Both strategies use `SUBTASK_ITERATION_LIMIT = 15`.
-- **Subtask promotion:** Subtasks that hit iteration/time/context limits but have `totalFileWrites > 0` are auto-promoted from PARTIAL → COMPLETE. A subtask owns exactly one file — if it wrote it, the task succeeded. Logged as `SUBTASK_PROMOTED_TO_COMPLETE`.
+
+- **Native tool calling end-to-end.** No XML `<tool_call>` parsing in V2 — that was a V1 idiom. Strict JSON schemas on every `tool/` entry.
+- **Sliding-window context:** first 2 + last 18 messages.
+- **Token-cost control:** `readFile` 8k chars, `shell` 6k chars, `diff` 5k chars.
+- **Never call providers directly** — go through `LlmRouter` (native tool agents) or `FallbackLlmRouter` (non-tool agents).
+- **Worker stagnation guard:** at 0.7×maxIter (`STAGNATION_WARN_AFTER_N=8`), inject UserMessage "PROGRESS CHECK"; at `STAGNATION_FORCE_AFTER_N=12`, force-terminate with `COMPLETED_BY_STAGNATION`. UserMessage (not SystemMessage) so Gemini's implicit cache prefix stays intact.
+- **gitCommit denied for the worker** — `ToolRegistry.bindForWorker(ctx)` filters it (auto-push happens at run-end via `ScmPushService.pushMultiRepo`).
+- **Validation v3 Pillar 1:** `PlannerOutputUtils.validatePlan` enforces every spec requirement is cited by at least one task; one retry on violation. Gated behind `validation.v3-strict` (default OFF).
+- **Prompts** in `src/main/resources/prompts/*.md`. Rollback archives `planner.v*.txt` + `reviewer-v2.txt` retained for `PromptVersioningService`.

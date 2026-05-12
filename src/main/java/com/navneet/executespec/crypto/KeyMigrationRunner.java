@@ -80,14 +80,16 @@ public class KeyMigrationRunner {
         String value = (String) row.get(column);
         if (value == null || value.isBlank()) continue;
 
-        // Try to decrypt — if it succeeds without error, it's already encrypted
+        // Skip already-encrypted rows. AES-GCM uses a random IV per call, so
+        // `encrypt(value).equals(value)` is ALWAYS false (except in passthrough mode, which
+        // we already short-circuited above) — meaning the previous heuristic would re-encrypt
+        // every row on every boot. Audit: 2026-05-12 line-by-line review item H #51.
+        if (encryptionService.isLikelyEncrypted(value)) continue;
+
         String encrypted = encryptionService.encrypt(value);
-        if (!encrypted.equals(value)) {
-          // Value changed after encryption → was plaintext
-          jdbcTemplate.update(
-              "UPDATE " + table + " SET " + column + " = ? WHERE id = ?", encrypted, row.get("id"));
-          count++;
-        }
+        jdbcTemplate.update(
+            "UPDATE " + table + " SET " + column + " = ? WHERE id = ?", encrypted, row.get("id"));
+        count++;
       }
 
       if (count > 0) {

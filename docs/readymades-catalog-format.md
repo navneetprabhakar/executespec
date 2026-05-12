@@ -1,9 +1,9 @@
 # Readymade Solutions — catalog file format
 
-> **Status:** authoritative as of 2026-04-29 (R-328 / W2 of the
-> Readymade Solutions plan).
-> **Audience:** internal authors + community contributors who add
-> new solutions to the Readymade Solutions library.
+> **Status:** authoritative.
+> **Last reviewed:** 2026-05-12 (1.0.0-M1).
+> **Branch:** Readymade Solutions library W1-W5 shipped on `feature/readymades-and-migrations` (not yet merged to dev/main). See [`plans/pending.md`](plans/pending.md) §7.
+> **Audience:** internal authors + community contributors who add new solutions to the Readymade Solutions library.
 
 ## Where catalog files live
 

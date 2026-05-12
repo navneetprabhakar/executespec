@@ -51,6 +51,36 @@ public class RunAccessGuard {
     return run;
   }
 
+  /**
+   * Asserts the caller may MUTATE the given run. Stricter than {@link #assertAccess}: only
+   * SUPER_ADMIN, ORG_ADMIN, or the run's owner are admitted. Org developers / viewers who can READ
+   * a run still need owner status to mutate its derived state (e.g. mark a test result invalid,
+   * retry a task). Audit 2026-05-12 review item B #18.
+   */
+  public PipelineRun requireRunWriteAccess(String runId, AppUserDetails userDetails) {
+    PipelineRun run = requireRunAccess(runId, userDetails);
+    assertWriteAccess(run, userDetails);
+    return run;
+  }
+
+  /** Same as {@link #requireRunWriteAccess} but on a pre-loaded run. */
+  public void assertWriteAccess(PipelineRun run, AppUserDetails userDetails) {
+    AppUser user = userDetails.getUser();
+    if ("SUPER_ADMIN".equals(user.getGlobalRole())) return;
+
+    OrgMember orgMember = userDetails.getOrgMember();
+    if (orgMember != null && "ORG_ADMIN".equals(orgMember.getOrgRole())) {
+      if (user.getOrgId() != null && user.getOrgId().equals(run.getOrgId())) return;
+      throw forbidden(run);
+    }
+
+    if (isOwner(user, run)) return;
+
+    throw new ResponseStatusException(
+        HttpStatus.FORBIDDEN,
+        "Only the run owner or an ORG_ADMIN may modify run " + run.getRunId());
+  }
+
   /** Asserts the caller may access the given (already-loaded) run. */
   public void assertAccess(PipelineRun run, AppUserDetails userDetails) {
     requireAuthenticated(userDetails);

@@ -161,9 +161,13 @@ public class SlackOAuthService {
     if (System.currentTimeMillis() - timestamp > STATE_TTL_MS)
       throw new IllegalArgumentException("OAuth state expired");
 
-    // Verify HMAC
+    // Verify HMAC — MessageDigest.isEqual is constant-time, closing the early-mismatch
+    // timing-attack side-channel that String.equals exposes.
+    // Audit 2026-05-12 review item C #24.
     String expectedSig = hmac(orgId + "|" + parts[1]);
-    if (!expectedSig.equals(parts[2]))
+    byte[] expectedBytes = expectedSig.getBytes(StandardCharsets.UTF_8);
+    byte[] actualBytes = parts[2].getBytes(StandardCharsets.UTF_8);
+    if (!java.security.MessageDigest.isEqual(expectedBytes, actualBytes))
       throw new IllegalArgumentException("Invalid OAuth state signature");
 
     return orgId;

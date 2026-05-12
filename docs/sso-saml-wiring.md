@@ -1,10 +1,10 @@
-# SSO / SAML wiring (M-016, Wave 3)
+# SSO / SAML wiring
 
-> Live ENT-procurement unblocker; the V127 schema and config UI
-> (M-004) shipped already. This doc captures the actual wire-in
-> needed to make SSO enforce — what library, what handshake, how
-> per-IdP testing works, and the lockout-prevention guard now in
-> code (`SsoConfigController.putConfig`).
+> Live ENT-procurement unblocker; the V127 schema and config UI shipped.
+> This doc captures the actual wire-in needed to make SSO enforce — what
+> library, what handshake, how per-IdP testing works, and the lockout-prevention
+> guard in code (`SsoConfigController.putConfig`).
+> Last reviewed: 2026-05-12 (1.0.0-M1).
 
 ## Where we are today
 

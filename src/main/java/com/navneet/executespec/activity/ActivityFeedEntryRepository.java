@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
@@ -29,4 +30,22 @@ public interface ActivityFeedEntryRepository
           + "ORDER BY a.occurredAt DESC")
   List<ActivityFeedEntry> findRecentForProject(
       @Param("projectId") UUID projectId, @Param("from") Instant from, @Param("to") Instant to);
+
+  /**
+   * Limited variant — same partition-pruning query but with a DB-side LIMIT so we don't pull
+   * thousands of rows into the JVM heap for a high-volume project (audit 2026-05-12 review item P
+   * #80). Callers SHOULD prefer this when the controller has a known max page size; the unbounded
+   * {@link #findRecentForProject} is still around for code paths that intentionally want the whole
+   * window.
+   */
+  @Query(
+      "SELECT a FROM ActivityFeedEntry a "
+          + "WHERE a.projectId = :projectId "
+          + "AND a.occurredAt >= :from AND a.occurredAt < :to "
+          + "ORDER BY a.occurredAt DESC")
+  List<ActivityFeedEntry> findRecentForProjectLimited(
+      @Param("projectId") UUID projectId,
+      @Param("from") Instant from,
+      @Param("to") Instant to,
+      Pageable pageable);
 }

@@ -1,15 +1,14 @@
 # ExecuteSpec — Status Page Reference
 
-> Phase 3 deliverable (deferred items batch 2). Companion to
-> [`enterprise-sla.md`](enterprise-sla.md). Captures the public status-page
-> commitment + the per-component health signals that should drive the page.
+> Companion to [`enterprise-sla.md`](enterprise-sla.md). Captures the public
+> status-page commitment + the per-component health signals that should
+> drive the page.
+> Last reviewed: 2026-05-12 (1.0.0-M1).
 
 ## What "live" means
 
-A status page lives at **status.executespec.ai** (CNAME →
-**Better Stack** per parked decision #1 in
-[`docs/execution-checkpoint.md`](execution-checkpoint.md)). Every
-published incident maps to a component below; SLA credits in
+A status page lives at **status.executespec.ai** (CNAME → **Better Stack**).
+Every published incident maps to a component below; SLA credits in
 `enterprise-sla.md` reference component-level uptime measured here.
 
 ## Components

@@ -1,9 +1,9 @@
 # Migration Recipes — catalog file format
 
-> **Status:** authoritative as of 2026-04-29 (R-337 / W2 of the
-> Migrations plan).
-> **Audience:** internal authors + community contributors who add
-> new migration recipes.
+> **Status:** authoritative.
+> **Last reviewed:** 2026-05-12 (1.0.0-M1).
+> **Branch:** Migrations product W1-W7 shipped on `feature/readymades-and-migrations` (not yet merged to dev/main). See [`plans/pending.md`](plans/pending.md) §8.
+> **Audience:** internal authors + community contributors who add new migration recipes.
 
 ## Where catalog files live
 

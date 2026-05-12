@@ -1,7 +1,10 @@
 package com.navneet.executespec.api.controller;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+
+import jakarta.annotation.PostConstruct;
 
 import com.navneet.executespec.agent.FallbackLlmRouter;
 import com.navneet.executespec.agent.FallbackLlmRouter.FallbackMode;
@@ -19,6 +22,8 @@ import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.SystemMessage;
 import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.ai.chat.prompt.Prompt;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -37,31 +42,27 @@ public class ConversationController {
 
   private static final int MAX_MESSAGES = 50;
 
-  private static final String SYSTEM_PROMPT =
-      """
-You are a requirements analyst helping a software engineer clarify their project idea \
-before launching an automated multi-agent coding pipeline.
+  /**
+   * System prompt loaded from {@code prompts/conversation-system.md} at boot. Externalized per
+   * CLAUDE.md MUST-pattern + audit 2026-05-12 review item E #32.
+   */
+  @Value("classpath:prompts/conversation-system.md")
+  private Resource systemPromptResource;
 
-Your job:
-- Ask one or two focused clarifying questions per reply (tech stack, scope, auth, data, integrations).
-- Keep responses short and conversational — no walls of text.
-- If the project has a frontend/UI component, ask: \
-"Visual style: Since this has a UI, which appeals to you most? Or name a website you like and we'll match it." \
-1) Minimal Light — clean, SaaS default (think Notion, Linear) \
-2) Minimal Dark — developer-facing (think Vercel, GitHub) \
-3) Corporate Clean — enterprise, formal (think Salesforce, Workday) \
-4) Startup Bold — vibrant, modern (think Figma, Loom) \
-5) Neutral Warm — editorial, content-focused (think Medium, Substack) \
-6) Or tell me a website you like and I'll match it! \
-Include their choice in the REQUIREMENT SUMMARY as "Visual theme: <choice>".
-- Once the requirement is clear enough to build, produce a tidy summary prefixed with \
-"REQUIREMENT SUMMARY:" on its own line, then the consolidated spec in plain English.
+  private String systemPrompt;
 
-Rules:
-- Do NOT write any code.
-- Do NOT start the implementation.
-- Do NOT ask more than two questions at once.
-""";
+  @PostConstruct
+  void loadSystemPrompt() {
+    try {
+      systemPrompt = systemPromptResource.getContentAsString(StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.error(
+          "[Conversation] Failed to load system prompt from classpath:prompts/"
+              + "conversation-system.md — falling back to a stub",
+          e);
+      systemPrompt = "You are a requirements analyst. Be concise.";
+    }
+  }
 
   private final FallbackLlmRouter fallbackLlmRouter;
   private final ModelResolver modelResolver;
@@ -81,7 +82,7 @@ Rules:
     log.info("POST /api/conversation — {} message(s)", messages.size());
 
     List<Message> springMessages = new ArrayList<>();
-    springMessages.add(new SystemMessage(SYSTEM_PROMPT));
+    springMessages.add(new SystemMessage(systemPrompt));
 
     for (ConversationMessage msg : messages) {
       if ("user".equalsIgnoreCase(msg.role())) {

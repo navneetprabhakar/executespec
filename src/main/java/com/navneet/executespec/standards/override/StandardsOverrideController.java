@@ -7,6 +7,8 @@ import java.util.UUID;
 
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.standards.OrgStandardRepository;
 import com.navneet.executespec.standards.ProjectStandardOverride;
 import com.navneet.executespec.standards.ProjectStandardOverrideRepository;
@@ -16,6 +18,7 @@ import com.navneet.executespec.standards.StandardsViolationRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.server.ResponseStatusException;
 
@@ -52,6 +55,7 @@ public class StandardsOverrideController {
   private final ProjectStandardOverrideRepository overrideRepo;
   private final StandardsViolationRepository violationRepo;
   private final OrgStandardRepository orgStandardRepo;
+  private final ProjectAccessGuard projectAccessGuard;
   private final org.springframework.beans.factory.ObjectProvider<ActivityEventEmitter>
       activityEmitterProvider;
 
@@ -61,8 +65,11 @@ public class StandardsOverrideController {
       @PathVariable String projectId,
       @PathVariable UUID violationId,
       @RequestBody OverrideRequest body,
-      Authentication auth) {
+      Authentication auth,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
     requireAuth(auth);
+    // Audit 2026-05-12 review item B #14 — was no access guard at all.
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     requireRationale(body);
     StandardsViolation v =
         violationRepo
@@ -97,8 +104,10 @@ public class StandardsOverrideController {
       @PathVariable String projectId,
       @PathVariable String standardId,
       @RequestBody ExceptionRequest body,
-      Authentication auth) {
+      Authentication auth,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
     requireAuth(auth);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     requireRationale(body);
     ProjectStandardOverride.OverrideType type = parseOverrideType(body.overrideType());
     if (type == null) {
@@ -143,8 +152,12 @@ public class StandardsOverrideController {
 
   @DeleteMapping("/{standardId}/exception")
   public ResponseEntity<Void> removeProjectException(
-      @PathVariable String projectId, @PathVariable String standardId, Authentication auth) {
+      @PathVariable String projectId,
+      @PathVariable String standardId,
+      Authentication auth,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
     requireAuth(auth);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     ProjectStandardOverride existing =
         overrideRepo
             .findByProjectIdAndStandardId(projectId, standardId)
