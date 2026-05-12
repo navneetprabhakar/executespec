@@ -9,6 +9,9 @@ import java.util.UUID;
 
 import com.navneet.executespec.activity.ActivityEventEmitter;
 import com.navneet.executespec.activity.ActivityEventType;
+import com.navneet.executespec.auth.entity.AppUser;
+import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.standards.OrgStandardRepository;
 import com.navneet.executespec.standards.ProjectStandardOverride;
 import com.navneet.executespec.standards.ProjectStandardOverrideRepository;
@@ -32,6 +35,7 @@ class StandardsOverrideControllerTest {
   @Mock ProjectStandardOverrideRepository overrideRepo;
   @Mock StandardsViolationRepository violationRepo;
   @Mock OrgStandardRepository orgStandardRepo;
+  @Mock ProjectAccessGuard projectAccessGuard;
   @Mock ActivityEventEmitter emitter;
   @Mock ObjectProvider<ActivityEventEmitter> emitterProvider;
 
@@ -65,7 +69,8 @@ class StandardsOverrideControllerTest {
         violationId,
         new StandardsOverrideController.OverrideRequest(
             "Approving for hotfix release; long-form rationale here"),
-        fakeAuth());
+        fakeAuth(),
+        fakeUserDetails());
 
     verify(violationRepo)
         .save(
@@ -92,7 +97,8 @@ class StandardsOverrideControllerTest {
                     projectId,
                     violationId,
                     new StandardsOverrideController.OverrideRequest("too short"),
-                    fakeAuth()))
+                    fakeAuth(),
+                    fakeUserDetails()))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
         .isEqualTo(HttpStatus.BAD_REQUEST);
@@ -109,7 +115,8 @@ class StandardsOverrideControllerTest {
                     violationId,
                     new StandardsOverrideController.OverrideRequest(
                         "This is a long-enough rationale string"),
-                    fakeAuth()))
+                    fakeAuth(),
+                    fakeUserDetails()))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
         .isEqualTo(HttpStatus.NOT_FOUND);
@@ -134,7 +141,8 @@ class StandardsOverrideControllerTest {
                     violationId,
                     new StandardsOverrideController.OverrideRequest(
                         "This is a long-enough rationale string"),
-                    fakeAuth()))
+                    fakeAuth(),
+                    fakeUserDetails()))
         .isInstanceOf(ResponseStatusException.class)
         .extracting(ex -> ((ResponseStatusException) ex).getStatusCode())
         .isEqualTo(HttpStatus.FORBIDDEN);
@@ -153,7 +161,8 @@ class StandardsOverrideControllerTest {
             "NOT_APPLICABLE",
             null,
             "Not applicable in this project — Java legal exemption granted by infosec"),
-        fakeAuth());
+        fakeAuth(),
+        fakeUserDetails());
 
     verify(overrideRepo)
         .save(
@@ -183,7 +192,8 @@ class StandardsOverrideControllerTest {
                         "SEVERITY_DOWNGRADE",
                         null,
                         "Project-wide downgrade for migration phase — keep flag for tracking"),
-                    fakeAuth()))
+                    fakeAuth(),
+                    fakeUserDetails()))
         .isInstanceOf(ResponseStatusException.class);
   }
 
@@ -200,7 +210,7 @@ class StandardsOverrideControllerTest {
     when(overrideRepo.findByProjectIdAndStandardId(projectId, "std-a"))
         .thenReturn(Optional.of(existing));
 
-    controller.removeProjectException(projectId, "std-a", fakeAuth());
+    controller.removeProjectException(projectId, "std-a", fakeAuth(), fakeUserDetails());
 
     verify(overrideRepo).delete(existing);
     verify(emitter)
@@ -216,5 +226,12 @@ class StandardsOverrideControllerTest {
 
   private UsernamePasswordAuthenticationToken fakeAuth() {
     return new UsernamePasswordAuthenticationToken(UUID.randomUUID().toString(), "n/a");
+  }
+
+  private AppUserDetails fakeUserDetails() {
+    AppUser u = new AppUser();
+    u.setId(UUID.randomUUID().toString());
+    u.setOrgId(UUID.randomUUID().toString());
+    return new AppUserDetails(u, null);
   }
 }
