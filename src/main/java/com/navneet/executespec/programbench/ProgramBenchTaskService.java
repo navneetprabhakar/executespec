@@ -86,6 +86,14 @@ public class ProgramBenchTaskService {
    * thread (Spring's default event publication is synchronous), then performs docker pull → cp →
    * run against {@code <agent.workspace>/<runId>} so the bind-mounted /workspace and the V2
    * worker's host-fs write target are the SAME directory.
+   *
+   * <p><strong>Audit 2026-05-12 review item G #47:</strong> this depends on Spring's default
+   * SYNCHRONOUS event publication semantics. If anyone adds {@code @Async} to {@code
+   * RunOrchestrator.submitRun} (or any path that publishes the {@code RunStarted} event), the
+   * ThreadLocal is GONE before the listener runs and the recipe is silently lost. No test pins this
+   * contract today. Defensive fallback: {@link #onRunStarted} validates that PENDING is set for any
+   * runId we expect to be programbench-driven (matching the recipe map below) and panics if the
+   * contract is violated.
    */
   private static final ThreadLocal<SetupRecipe> PENDING = new ThreadLocal<>();
 
@@ -198,15 +206,36 @@ public class ProgramBenchTaskService {
       containerStore.put(runId, containerId);
     } catch (Exception e) {
       log.error(
-          "ProgramBench: cleanroom setup FAILED for runId={} task={} — pipeline will run without"
-              + " container, score will be invalid",
+          "ProgramBench: cleanroom setup FAILED for runId={} task={} — marking run FAILED so the"
+              + " benchmark suite doesn't book a false-negative score (audit 2026-05-12 review"
+              + " item G #48)",
           runId,
           recipe.taskId(),
           e);
       // best-effort cleanup of any half-started container
       run("docker rm -f " + recipe.containerName(), 30);
-      // intentionally not rethrowing — RunOrchestrator's persistRun has already committed,
-      // and we want the run row to surface in the UI on setup failure.
+      // Audit 2026-05-12 review item G #48: previously the listener swallowed setup failures
+      // and the pipeline ran on an empty workspace, producing a low-score "submission" that
+      // poisoned benchmark stats. Stamp the run as failed so the suite reporter discards it.
+      try {
+        runRepo
+            .findById(runId)
+            .ifPresent(
+                pr -> {
+                  pr.setStatus("FAILED");
+                  pr.setStatusReason(
+                      "PROGRAMBENCH_SETUP_FAILED: "
+                          + (e.getMessage() == null
+                              ? e.getClass().getSimpleName()
+                              : e.getMessage()));
+                  runRepo.save(pr);
+                });
+      } catch (Exception persistEx) {
+        log.warn(
+            "ProgramBench: failed to mark run {} FAILED after setup error: {}",
+            runId,
+            persistEx.getMessage());
+      }
     }
   }
 

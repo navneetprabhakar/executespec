@@ -31,8 +31,8 @@ import lombok.extern.slf4j.Slf4j;
  *
  * <p>Retention sweep iterates over every row in {@code tier_config} via {@link
  * TierConfigRepository#findAll()} so future tiers are auto-included without code changes. The
- * scheduler runs daily. It first soft-deletes expired runs, then hard-deletes runs that have
- * been soft-deleted for ≥ 7 days (grace period for the GCS workspace deletion to complete).
+ * scheduler runs daily. It first soft-deletes expired runs, then hard-deletes runs that have been
+ * soft-deleted for ≥ 7 days (grace period for the GCS workspace deletion to complete).
  */
 @Service
 @RequiredArgsConstructor

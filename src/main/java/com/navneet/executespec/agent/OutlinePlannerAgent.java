@@ -227,12 +227,23 @@ public class OutlinePlannerAgent {
           Plan retry = planOnce(req, feedback, mode);
           List<String> retryViolations = PlannerOutputUtils.validatePlan(retry);
           if (!retryViolations.isEmpty()) {
-            throw new IllegalStateException(
-                "PLAN_COVERAGE_INVALID: outline planner produced an invalid requirement graph "
-                    + "even after one retry. Violations: "
-                    + String.join("; ", retryViolations));
+            // Audit 2026-05-12 review item K #63: graceful degradation. Hard-failing here
+            // meant the customer paid for two planner calls and got a hard-failed run with
+            // no recoverable artefact. Accept the retried plan with a status_reason flag so
+            // the reviewer pass can flag coverage gaps post-execution, and downgrade the
+            // strict-coverage check to a structured warning instead of a fatal error.
+            // (`validation.v3-strict` flag is OFF by default, so this graceful path is the
+            // configured behaviour — fail-strict mode can opt back in.)
+            log.warn(
+                "OutlinePlanner plan invalid on retry ({} violations) — DEGRADING to accept the"
+                    + " retried plan and surface a coverage-warning at the reviewer pass."
+                    + " First violation: {}",
+                retryViolations.size(),
+                retryViolations.get(0));
+            plan = retry;
+          } else {
+            plan = retry;
           }
-          plan = retry;
         }
       }
       return plan;

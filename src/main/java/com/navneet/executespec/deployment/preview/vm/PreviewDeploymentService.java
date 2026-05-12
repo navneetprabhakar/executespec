@@ -221,7 +221,11 @@ public class PreviewDeploymentService {
             "-i",
             sshKeyPath,
             "-o",
-            "StrictHostKeyChecking=no",
+            // Audit 2026-05-12 review item I #55: StrictHostKeyChecking=no is a MITM vector.
+            // Use "accept-new" so first contact pins the host key into ~/.ssh/known_hosts and
+            // every subsequent connection requires a matching key. Operators provisioning the
+            // preview-gw VM can also pre-populate known_hosts to remove first-connect risk.
+            "StrictHostKeyChecking=accept-new",
             "-o",
             "ConnectTimeout=" + SSH_CONNECT_TIMEOUT,
             localDir.toString(),
@@ -238,7 +242,11 @@ public class PreviewDeploymentService {
             "-i",
             sshKeyPath,
             "-o",
-            "StrictHostKeyChecking=no",
+            // Audit 2026-05-12 review item I #55: StrictHostKeyChecking=no is a MITM vector.
+            // Use "accept-new" so first contact pins the host key into ~/.ssh/known_hosts and
+            // every subsequent connection requires a matching key. Operators provisioning the
+            // preview-gw VM can also pre-populate known_hosts to remove first-connect risk.
+            "StrictHostKeyChecking=accept-new",
             "-o",
             "ConnectTimeout=" + SSH_CONNECT_TIMEOUT,
             String.format("%s@%s", sshUser, targetIp),

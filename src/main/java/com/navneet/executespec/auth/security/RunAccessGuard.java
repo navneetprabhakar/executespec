@@ -53,9 +53,9 @@ public class RunAccessGuard {
 
   /**
    * Asserts the caller may MUTATE the given run. Stricter than {@link #assertAccess}: only
-   * SUPER_ADMIN, ORG_ADMIN, or the run's owner are admitted. Org developers / viewers who can
-   * READ a run still need owner status to mutate its derived state (e.g. mark a test result
-   * invalid, retry a task). Audit 2026-05-12 review item B #18.
+   * SUPER_ADMIN, ORG_ADMIN, or the run's owner are admitted. Org developers / viewers who can READ
+   * a run still need owner status to mutate its derived state (e.g. mark a test result invalid,
+   * retry a task). Audit 2026-05-12 review item B #18.
    */
   public PipelineRun requireRunWriteAccess(String runId, AppUserDetails userDetails) {
     PipelineRun run = requireRunAccess(runId, userDetails);

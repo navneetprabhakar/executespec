@@ -102,7 +102,15 @@ public class ScmPushService {
     }
 
     try {
-      String branchName = "executespec/" + run.getRunId().substring(0, 8);
+      // Audit 2026-05-12 review item P #78: GitHub path resolves branch name via
+      // resolveBranchName(project, run) which honours Project.branchNamingPattern;
+      // Bitbucket path was hardcoded to "executespec/<runId-short>". Match the contract here
+      // so Bitbucket-deployed customers can override branch naming the same way.
+      Project project =
+          run.getProjectId() != null
+              ? projectRepository.findById(run.getProjectId()).orElse(null)
+              : null;
+      String branchName = resolveBranchName(project, run);
       String cloneUrl = "https://bitbucket.org/" + workspace + "/" + repoSlug + ".git";
 
       gitTool.pushToBranchBitbucket(run.getRunId(), cloneUrl, username, appPassword, branchName);

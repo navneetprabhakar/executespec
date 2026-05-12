@@ -20,6 +20,15 @@ import lombok.extern.slf4j.Slf4j;
 /**
  * Compiles the generated test project to verify tests are valid Java. Uses mvn compile on the
  * workspace-test/{runId}/ project.
+ *
+ * <p><strong>Audit 2026-05-12 review item J #59:</strong> the compile step runs {@code mvn
+ * test-compile} via host-side ProcessBuilder against LLM-generated test code. The test EXECUTION
+ * step is Docker-sandboxed (--read-only --cap-drop ALL --memory=4g) but this compile step isn't.
+ * Hardened here to: minimize the inherited environment (strip everything except PATH, HOME, USER,
+ * JAVA_HOME, MAVEN_HOME); strict 120s timeout already enforced; destroyForcibly on timeout; treat
+ * compile output as untrusted (don't echo back to chat without sanitization). Moving compile into
+ * the same Docker sandbox as execution is the proper long-term fix and tracked as a deferred
+ * follow-up.
  */
 @Component
 @Slf4j
@@ -54,7 +63,19 @@ public class TestCompilationGate {
 
       ProcessBuilder pb =
           new ProcessBuilder("mvn", "test-compile", "-f", pomFile.toString(), "-q", "-T", "1C");
-      pb.environment().put("JAVA_HOME", javaHome);
+      // Audit 2026-05-12 review item J #59 — strip inherited env. Don't leak JWT_SECRET,
+      // OPENAI_API_KEY, etc. into a Maven invocation against LLM-generated pom + sources.
+      java.util.Map<String, String> env = pb.environment();
+      String path = env.get("PATH");
+      String home = env.get("HOME");
+      String user = env.get("USER");
+      String mavenHome = env.get("MAVEN_HOME");
+      env.clear();
+      if (path != null) env.put("PATH", path);
+      if (home != null) env.put("HOME", home);
+      if (user != null) env.put("USER", user);
+      if (mavenHome != null) env.put("MAVEN_HOME", mavenHome);
+      env.put("JAVA_HOME", javaHome);
       pb.redirectErrorStream(true);
 
       Process process = pb.start();

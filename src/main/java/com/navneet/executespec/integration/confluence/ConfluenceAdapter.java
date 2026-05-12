@@ -50,7 +50,8 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
       // Accept both "sha256=<hex>" and bare hex forms.
       String received = header.startsWith("sha256=") ? header.substring(7) : header;
       String expected =
-          com.navneet.executespec.util.HmacUtil.hexSha256(webhookSecret, rawBody == null ? "" : rawBody);
+          com.navneet.executespec.util.HmacUtil.hexSha256(
+              webhookSecret, rawBody == null ? "" : rawBody);
       if (!java.security.MessageDigest.isEqual(
           expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
           received.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {

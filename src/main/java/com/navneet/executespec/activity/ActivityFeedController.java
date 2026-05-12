@@ -66,8 +66,16 @@ public class ActivityFeedController {
     Instant to = Instant.now().plus(1, ChronoUnit.DAYS); // include just-now events
 
     // Pull a windowed page from the partitioned table — partition pruning
-    // kicks in via the (project_id, occurred_at) composite predicate.
-    List<ActivityFeedEntry> page = feedRepo.findRecentForProject(projectUuid, from, to);
+    // kicks in via the (project_id, occurred_at) composite predicate. Audit 2026-05-12 review
+    // item P #80: use the LIMIT variant so we don't pull thousands of rows then filter
+    // in-memory on high-volume projects. Headroom of 3× safeLimit so the in-memory tier filter
+    // below still has some slack to skip ADMIN_TOGGLE rows.
+    List<ActivityFeedEntry> page =
+        feedRepo.findRecentForProjectLimited(
+            projectUuid,
+            from,
+            to,
+            org.springframework.data.domain.PageRequest.of(0, safeLimit * 3));
 
     // Apply remaining filters in-memory (page is bounded by sinceDays so
     // this stays cheap). Push down to the repo when filtering volume
