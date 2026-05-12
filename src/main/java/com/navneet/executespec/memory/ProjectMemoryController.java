@@ -49,7 +49,9 @@ public class ProjectMemoryController {
       @PathVariable String projectId,
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    // Audit 2026-05-12 review item B #11 — compact triggers a paid LLM call + irreversible
+    // ledger merge. Was assertCanRead — PROJECT_VIEWER could drain project's LLM budget.
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     String orgId =
         projectRepo
             .findById(projectId)

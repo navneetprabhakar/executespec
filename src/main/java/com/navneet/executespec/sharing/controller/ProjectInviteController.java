@@ -42,7 +42,9 @@ public class ProjectInviteController {
       @PathVariable String projectId,
       @RequestBody CreateInviteRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    accessGuard.assertCanRead(projectId, userDetails);
+    // Audit 2026-05-12 review item B #9 — assertCanRead used as a write-gate; now uses
+    // assertCanWrite so PROJECT_VIEWER members can't mint invites.
+    accessGuard.assertCanWrite(projectId, userDetails);
     if (req == null || req.email() == null || req.email().isBlank()) {
       throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "email is required");
     }
@@ -54,6 +56,7 @@ public class ProjectInviteController {
   @GetMapping("/api/projects/{projectId}/invites")
   public ResponseEntity<List<ProjectInviteDto>> listPending(
       @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    // List is a read operation — assertCanRead is correct here.
     accessGuard.assertCanRead(projectId, userDetails);
     return ResponseEntity.ok(
         inviteService.listPending(projectId).stream().map(ProjectInviteDto::from).toList());
@@ -64,7 +67,8 @@ public class ProjectInviteController {
       @PathVariable String projectId,
       @PathVariable UUID inviteId,
       @AuthenticationPrincipal AppUserDetails userDetails) {
-    accessGuard.assertCanRead(projectId, userDetails);
+    // Audit 2026-05-12 review item B #9 — revoke is a mutate; needs write authority.
+    accessGuard.assertCanWrite(projectId, userDetails);
     inviteService.revoke(inviteId, userDetails.getUser());
     return ResponseEntity.noContent().build();
   }

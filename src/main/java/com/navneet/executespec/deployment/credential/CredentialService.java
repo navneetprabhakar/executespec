@@ -38,6 +38,12 @@ public class CredentialService {
   private final CredentialEncryptionService encryptionService;
   private final UserGcpCredentialProvider credentialProvider;
   private final ObjectMapper objectMapper;
+  // Defense-in-depth: lets the service verify the userId↔projectId pair is legitimate even when
+  // callers bypass the controller. Audit 2026-05-12 review item B #17.
+  private final com.navneet.executespec.auth.repository.ProjectRepository projectRepository;
+  private final com.navneet.executespec.auth.repository.ProjectMemberRepository
+      projectMemberRepository;
+  private final com.navneet.executespec.auth.repository.AppUserRepository userRepository;
 
   // ── Required GCP Permissions ──────────────────────────────────────────────
 
@@ -95,6 +101,14 @@ public class CredentialService {
   @Transactional
   public CredentialSummary storeCredential(
       String userId, String projectId, String serviceAccountJson) {
+    // Defense-in-depth (audit 2026-05-12 review item B #17): even if a caller bypasses the
+    // controller's ProjectAccessGuard, the service must reject a userId / projectId pair where
+    // the user has no relationship to the project. Same admission logic as ProjectAccessGuard
+    // assertCanWrite (in-org OR project_member non-VIEWER), enforced here as a fallback.
+    if (projectId != null && !projectId.isBlank() && userId != null) {
+      assertUserCanWriteProject(userId, projectId);
+    }
+
     // 1. Parse JSON to extract metadata
     JsonNode root;
     try {
@@ -327,6 +341,10 @@ public class CredentialService {
 
   @Transactional
   public void deleteCredential(String userId, String projectId) {
+    // Defense-in-depth — same rationale as storeCredential. Audit B #17.
+    if (projectId != null && !projectId.isBlank() && userId != null) {
+      assertUserCanWriteProject(userId, projectId);
+    }
     if (projectId != null) {
       credentialRepo
           .findByUserIdAndProjectIdAndCloudProvider(userId, projectId, "GCP")
@@ -404,5 +422,45 @@ public class CredentialService {
   private String textOrNull(JsonNode node, String field) {
     JsonNode child = node.get(field);
     return (child != null && child.isTextual()) ? child.asText() : null;
+  }
+
+  /**
+   * Defense-in-depth: throws {@link IllegalAccessError} if {@code userId} has no relationship to
+   * {@code projectId}. Same admission logic as {@link
+   * com.navneet.executespec.project.security.ProjectAccessGuard#assertCanWrite}: SUPER_ADMIN or
+   * in-org member OR project_member with non-VIEWER role. The controller already enforces this
+   * via the access guard — this method is a fallback against future service-layer callers that
+   * forget. Audit 2026-05-12 review item B #17.
+   */
+  private void assertUserCanWriteProject(String userId, String projectId) {
+    var userOpt = userRepository.findById(userId);
+    if (userOpt.isEmpty()) {
+      throw new SecurityException(
+          "CredentialService: unknown userId=" + userId + " — refusing project-scoped store");
+    }
+    var user = userOpt.get();
+    if ("SUPER_ADMIN".equals(user.getGlobalRole())) {
+      return;
+    }
+    var projectOpt = projectRepository.findById(projectId);
+    if (projectOpt.isEmpty()) {
+      throw new SecurityException(
+          "CredentialService: projectId="
+              + projectId
+              + " does not exist — refusing project-scoped store");
+    }
+    String projectOrgId = projectOpt.get().getOrgId();
+    if (user.getOrgId() != null && user.getOrgId().equals(projectOrgId)) {
+      return; // in-org caller; admit.
+    }
+    var memberOpt = projectMemberRepository.findByProjectIdAndUserId(projectId, userId);
+    if (memberOpt.isPresent() && !"PROJECT_VIEWER".equals(memberOpt.get().getProjectRole())) {
+      return; // cross-org collaborator with write role; admit.
+    }
+    throw new SecurityException(
+        "CredentialService: user "
+            + userId
+            + " cannot write credentials scoped to project "
+            + projectId);
   }
 }

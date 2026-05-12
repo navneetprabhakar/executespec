@@ -140,14 +140,12 @@ public class RunTestsTool implements Tool {
     for (JsonNode el : idsNode) {
       String id = el.asText("").trim();
       if (id.isEmpty()) continue;
-      // Defence: pytest test ids should never contain shell metachars like ; & | $.
-      // If the LLM tries to inject a payload, refuse the whole call.
-      if (id.indexOf(';') >= 0
-          || id.indexOf('&') >= 0
-          || id.indexOf('|') >= 0
-          || id.indexOf('$') >= 0
-          || id.indexOf('`') >= 0
-          || id.contains("\n")) {
+      // Defence: pytest test ids should never contain shell metachars. If the LLM tries to
+      // inject a payload, refuse the whole call. Audit 2026-05-12 review item O #77 — added
+      // missing < > ( ) \ \r and a single ASCII control-char pass to close the defence-in-depth
+      // gap. (Process is still dispatched via ProcessBuilder arg-array, not /bin/sh, so this
+      // is layered defence — not the sole protection.)
+      if (containsShellMetachar(id)) {
         return ToolResult.err(
             ToolResult.ErrorKind.INVALID_ARGS, "test_id contains forbidden shell metachars: " + id);
       }
@@ -318,4 +316,35 @@ public class RunTestsTool implements Tool {
   // Avoids unused-warning when stream/stdlib alternates compile.
   @SuppressWarnings("unused")
   private static final String UNUSED_REF = Arrays.toString(new String[0]);
+
+  /**
+   * Returns true if {@code id} contains any shell metachar that could escape pytest argument
+   * context if a later refactor stops using ProcessBuilder arg arrays. Defence-in-depth — audit
+   * 2026-05-12 review item O #77.
+   */
+  static boolean containsShellMetachar(String id) {
+    for (int i = 0; i < id.length(); i++) {
+      char c = id.charAt(i);
+      switch (c) {
+        case ';':
+        case '&':
+        case '|':
+        case '$':
+        case '`':
+        case '<':
+        case '>':
+        case '(':
+        case ')':
+        case '\\':
+        case '\n':
+        case '\r':
+        case '\0':
+          return true;
+        default:
+          // ASCII control chars (0x01-0x1F minus already-handled tab) — refuse.
+          if (c < 0x20 && c != '\t') return true;
+      }
+    }
+    return false;
+  }
 }

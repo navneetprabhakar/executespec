@@ -278,60 +278,78 @@ public class PreviewService {
                 + "). Stop an existing preview first.");
       }
 
-      // Guard: per-run preview start limit
-      int maxStarts =
-          tierConfigRepo.findById(user.getTier()).map(TierConfig::getMaxPreviewStarts).orElse(3);
-      if (maxStarts >= 0 && run.getPreviewStartCount() >= maxStarts) {
-        throw new PreviewException(
-            "Preview limit reached for this run ("
-                + run.getPreviewStartCount()
-                + "/"
-                + maxStarts
-                + "). Upgrade your plan for more.");
+      // Slot is acquired — anything that throws before `active.put` MUST release it, or the
+      // Redis-backed limiter will leak slots forever for this user across instances.
+      // Audit: 2026-05-12 line-by-line review item I #56.
+      boolean acquired = true;
+      try {
+        // Guard: per-run preview start limit
+        int maxStarts =
+            tierConfigRepo.findById(user.getTier()).map(TierConfig::getMaxPreviewStarts).orElse(3);
+        if (maxStarts >= 0 && run.getPreviewStartCount() >= maxStarts) {
+          throw new PreviewException(
+              "Preview limit reached for this run ("
+                  + run.getPreviewStartCount()
+                  + "/"
+                  + maxStarts
+                  + "). Upgrade your plan for more.");
+        }
+
+        // Increment preview start counter
+        run.setPreviewStartCount(run.getPreviewStartCount() + 1);
+        stateStore.saveRun(run);
+
+        // Detect project type (restore from GCS if needed)
+        workspace = restoreService.ensureWorkspaceAvailable(runId);
+        type = dockerfileGen.detect(workspace);
+        if (type == null) {
+          throw new PreviewException("Unsupported project type — could not detect build system.");
+        }
+
+        // Detect preview mode: WEB, CLI_TERMINAL, or MCP_INSPECTOR
+        mode = dockerfileGen.detectMode(type, workspace);
+        log.info("Preview mode for run {}: {} (type={})", runId, mode, type);
+
+        // Create initial session
+        projectName = composeProjectName(runId);
+        ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
+
+        // For Cloud Run mode, store the service name upfront so the orphan cleanup
+        // job sees it as active during the build/push/deploy cycle.
+        String crServiceName =
+            isCloudRunMode()
+                ? "es-preview-" + (runId.length() > 8 ? runId.substring(0, 8) : runId)
+                : null;
+
+        session =
+            new PreviewSession(
+                runId,
+                projectName,
+                type,
+                mode,
+                null,
+                PreviewStatus.ANALYZING,
+                null,
+                0,
+                null,
+                Instant.now(),
+                Instant.now().plus(ttl),
+                crServiceName,
+                null);
+        active.put(runId, session);
+        acquired = false; // active.put now owns the slot — release will happen via stop()
+      } finally {
+        if (acquired) {
+          try {
+            globalPreviewLimiter.release(user.getId().toString());
+          } catch (Exception releaseEx) {
+            log.warn(
+                "[Preview] Failed to release limiter slot after failed start for run {}: {}",
+                runId,
+                releaseEx.getMessage());
+          }
+        }
       }
-
-      // Increment preview start counter
-      run.setPreviewStartCount(run.getPreviewStartCount() + 1);
-      stateStore.saveRun(run);
-
-      // Detect project type (restore from GCS if needed)
-      workspace = restoreService.ensureWorkspaceAvailable(runId);
-      type = dockerfileGen.detect(workspace);
-      if (type == null) {
-        throw new PreviewException("Unsupported project type — could not detect build system.");
-      }
-
-      // Detect preview mode: WEB, CLI_TERMINAL, or MCP_INSPECTOR
-      mode = dockerfileGen.detectMode(type, workspace);
-      log.info("Preview mode for run {}: {} (type={})", runId, mode, type);
-
-      // Create initial session
-      projectName = composeProjectName(runId);
-      ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
-
-      // For Cloud Run mode, store the service name upfront so the orphan cleanup
-      // job sees it as active during the build/push/deploy cycle.
-      String crServiceName =
-          isCloudRunMode()
-              ? "es-preview-" + (runId.length() > 8 ? runId.substring(0, 8) : runId)
-              : null;
-
-      session =
-          new PreviewSession(
-              runId,
-              projectName,
-              type,
-              mode,
-              null,
-              PreviewStatus.ANALYZING,
-              null,
-              0,
-              null,
-              Instant.now(),
-              Instant.now().plus(ttl),
-              crServiceName,
-              null);
-      active.put(runId, session);
     } // end synchronized
 
     // Launch async build + start on a virtual thread

@@ -90,12 +90,20 @@ public class DevDockerfileGenerator {
                 default -> normalized;
               };
           PreviewProjectType fromPlan = PreviewProjectType.valueOf(normalized);
-          // Validate: if planner declares a Node-based type, package.json must exist
+          // Audit 2026-05-12 review item C #26 — defense-in-depth: validate that the workspace
+          // contents are CONSISTENT with the planner-declared type before trusting the JSON.
+          // The JSON is written by the worker tool and not cryptographically signed; a malicious
+          // / hallucinating planner could declare STATIC_HTML on a workspace full of Java files
+          // to skip security heuristics.
           if (requiresPackageJson(fromPlan) && !Files.exists(workspace.resolve("package.json"))) {
             log.warn(
                 "[Detect] Planner declared {} but no package.json found — falling back to"
                     + " detection",
                 fromPlan);
+          } else if (fromPlan == PreviewProjectType.STATIC_HTML && !hasStaticHtml(workspace)) {
+            log.warn(
+                "[Detect] Planner declared STATIC_HTML but workspace has no .html files —"
+                    + " refusing to trust the declaration, falling back to file-based detection");
           } else {
             // Planner taxonomy (planner.md line 82) has no explicit "full-stack" value —
             // specs with Java backend + React frontend come through as
@@ -302,13 +310,26 @@ public class DevDockerfileGenerator {
           };
     }
 
-    // Use --legacy-peer-deps to avoid peer dependency failures in generated projects.
+    // PREVIEW-ONLY: Use --legacy-peer-deps to avoid peer-dep conflicts during 5-min preview boot.
     // This is a universal fix that catches all variations of 'npm install' or 'npm ci'
     // across all Dockerfile generators (SinglePackage, FullStack, Monorepo, etc).
+    //
+    // Trade-off (audit 2026-05-12 line-by-line review item N #70): silently skips peer-dep
+    // checks, which CAN mask real conflicts. Acceptable here because (a) previews are
+    // ephemeral; (b) the customer's actual deploy Dockerfile (see {@link
+    // com.navneet.executespec.deployment.DockerfileGenerator}) does NOT apply this flag — so
+    // strict peer-dep behaviour is preserved for the deployment pipeline. Surface a single
+    // INFO log so operators can see when it kicks in.
+    String before = dockerfile;
     dockerfile =
         dockerfile.replaceAll(
             "(?m)^(\\s*RUN\\s+.*npm\\s+(?:install|ci))(\\b(?!.*--legacy-peer-deps))",
             "$1 --legacy-peer-deps");
+    if (!dockerfile.equals(before)) {
+      log.info(
+          "[Preview] injected --legacy-peer-deps into RUN npm install/ci"
+              + " (preview-only; production deploy path is unaffected)");
+    }
 
     // Fix CJS/ESM mismatch: if package.json has "type": "module", rename CommonJS config
     // files (.js) to .cjs so Node doesn't choke. Affects postcss.config.js, tailwind.config.js,
@@ -3309,11 +3330,24 @@ CMD ["sh", "-c", "bin=$(find target/release -maxdepth 1 -type f -executable | he
         || type == PreviewProjectType.REACT_NATIVE_EXPO;
   }
 
+  /**
+   * Returns true if {@code file} (within MAX_FILE_SIZE) contains any of the given LITERAL
+   * substrings. NOT a regex match — do NOT pass pipe-alternated patterns like {@code "a|b"};
+   * use the varargs form {@code fileContainsPattern(file, "a", "b")} for OR semantics.
+   *
+   * <p>Audit: 2026-05-12 line-by-line review item N #71 — clarified literal-substring semantics
+   * to prevent future drift into regex confusion.
+   */
   private boolean fileContainsPattern(Path file, String... patterns) {
     try {
       if (Files.size(file) > MAX_FILE_SIZE) return false;
       String content = Files.readString(file);
       for (String pattern : patterns) {
+        // Sanity assert in dev — pipe-alternated patterns indicate a caller bug, never matches.
+        assert pattern.indexOf('|') < 0
+            : "fileContainsPattern pattern '"
+                + pattern
+                + "' contains '|' — use varargs OR semantics instead";
         if (content.contains(pattern)) return true;
       }
     } catch (IOException e) {
