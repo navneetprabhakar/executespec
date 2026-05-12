@@ -1,7 +1,6 @@
 package com.navneet.executespec.deployment.preview;
 
 import java.io.IOException;
-import java.nio.file.FileVisitOption;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
@@ -157,7 +156,13 @@ public class EnvVarDetector {
           "CORS_WHITELIST",
           "CORS_ENABLED",
           "ACCESS_CONTROL_ALLOW_ORIGIN",
-          // Session / cookie / internal auth (not third-party)
+          // Session / cookie / internal auth (not third-party). Audit 2026-05-12 review item
+          // O #74: excluding JWT_SECRET / NEXTAUTH_SECRET / SESSION_SECRET from the prompt
+          // means customer apps that `process.env.JWT_SECRET` read an empty string and crash
+          // silently on first request. The fix lives at the preview-launch layer: when these
+          // vars are detected in source but unset in env, the preview wrapper auto-generates a
+          // 32-byte hex secret per run. Logged here so the exclusion + the auto-gen are
+          // co-located conceptually.
           "SESSION_SECRET",
           "COOKIE_SECRET",
           "COOKIE_DOMAIN",
@@ -415,7 +420,10 @@ public class EnvVarDetector {
   // ── Source file scanning ─────────────────────────────────────────────────
 
   private void scanSourceFiles(Path workspace, Map<String, DetectedEnvVar> result) {
-    try (Stream<Path> walk = Files.walk(workspace, 4, FileVisitOption.FOLLOW_LINKS)) {
+    // Do NOT follow symlinks — symlink loops (e.g. node_modules/.bin/->../bin/) hang the scan
+    // indefinitely. Customer workspaces don't legitimately need link-following for env-var detect.
+    // Audit: 2026-05-12 line-by-line review item N #73.
+    try (Stream<Path> walk = Files.walk(workspace, 4)) {
       walk.filter(Files::isRegularFile)
           .filter(this::isSourceFile)
           .filter(p -> !isInIgnoredDir(workspace, p))

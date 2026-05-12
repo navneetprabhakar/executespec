@@ -71,6 +71,18 @@ public class RunKeyContextStore {
     // return a richer ResolvedKeys (separate user-side + org-side
     // fields) — tracked as a follow-up to the BYOK fix.
 
+    // Audit 2026-05-12 review item O #75: orgId was hardcoded to null, making per-org key
+    // attribution for SOC2 audit + billing reconciliation impossible. Resolve via the user's
+    // orgId now. Cost: one optional DB call; cached in Caffeine for 6h per run.
+    String orgId = null;
+    try {
+      orgId = apiKeyResolver.resolveOrgIdForUser(userId);
+    } catch (Exception ignored) {
+      // resolveOrgIdForUser is best-effort; missing or unmapped users keep orgId=null
+      // (single-user / dev flow). Operators that need strict attribution can fail-closed
+      // by enabling a future executespec.byok.require-org-attribution flag.
+    }
+
     RunKeyContext ctx =
         new RunKeyContext(
             keys.anthropicKey(),
@@ -80,7 +92,7 @@ public class RunKeyContextStore {
             openAiSrc,
             geminiSrc,
             userId,
-            /* orgId= */ null);
+            orgId);
     cache.put(runId, ctx);
     log.debug(
         "[RunKeyContextStore] resolved keys for run={} user={} dominant={}",

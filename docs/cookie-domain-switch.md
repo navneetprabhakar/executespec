@@ -1,18 +1,21 @@
 # Cookie domain switch (Phase 2 surface split)
 
-> M-031 (Wave 3) — operator runbook + maintenance-window plan for
-> the JWT cookie-domain change required to share auth across the
-> upcoming consumer (`app.executespec.ai`) and B2B
-> (`build.executespec.ai`) surfaces.
+> Operator runbook + maintenance-window plan for the JWT cookie-domain
+> change required to share auth across the still-pending consumer
+> (`app.executespec.ai`) and B2B (`build.executespec.ai`) surfaces.
+> Last reviewed: 2026-05-12 (1.0.0-M1).
+>
+> **Status:** the surface split is pending. V143 prototyped the schema +
+> `ProductSurfaceFilter` + `OAuthSurfaceResolver`, then V179 + V185
+> retired the consumer/B2B `product_id` discriminator. The cookie-domain
+> switch below is reserved for when the surface split is actually
+> deployed; today's prod is single-surface (`executespec.ai` →
+> `dev.executespec.ai`) and the cookie stays single-host.
 
 ## Why this exists
 
-Plan 1 (`feature/v2.7-foundation`) shipped the schema + UI
-foundations for splitting consumer (vibe / FREE/PRO/MAX) and B2B
-(executespec / TEAM/ENTERPRISE) surfaces onto separate subdomains.
-Phase 2 actually serves the surfaces. For SSO across both, the
-JWT cookie has to be issued at the parent domain
-(`.executespec.ai`) instead of the current single-host
+When the surface split is revived, the JWT cookie has to be issued at the
+parent domain (`.executespec.ai`) instead of the current single-host
 (`api.executespec.ai`). Switching that requires a maintenance
 window because every existing session cookie becomes invalid.
 

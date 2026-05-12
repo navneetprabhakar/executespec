@@ -1,7 +1,9 @@
-# prreview/ — PR Review Agent
+# `prreview/` — PR Review agent
 
-> v2.6.4. Paid-tier feature (FREE → 403; PRO=10/month, TEAM/MAX/ENTERPRISE=unlimited).
-> Lives on `feature/code-review-agents`, NOT yet merged to dev/main.
+> Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
+>
+> Paid-tier feature (FREE → 403; PRO=10/month, TEAM/ENTERPRISE=unlimited). Schema in V172.
+> Phase 1 of the [`finding/FindingPatchSubmitter`](../finding/) autofix surfaces — `PrReviewAutofixService` dispatches a patch-mode run on demand from the PR Review verdict popover, pushing the patch to the PR head branch via `branchOverride`.
 
 ## What it does
 
@@ -54,7 +56,7 @@ Driven by `tier_config.pr_review_enabled` (boolean) + `pr_review_monthly_quota` 
 |------|---------|---------------|
 | FREE | false | 0 |
 | PRO | true | 10 |
-| TEAM / MAX / ENTERPRISE | true | -1 |
+| TEAM / ENTERPRISE | true | -1 |
 
 `PrReviewService.assertTierAndQuota(user)` is the single chokepoint — throws
 `TierBlockedException` (mapped to 403) or `QuotaExhaustedException` (mapped to 429).

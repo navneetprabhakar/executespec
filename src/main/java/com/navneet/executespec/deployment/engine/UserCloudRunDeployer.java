@@ -104,8 +104,15 @@ public class UserCloudRunDeployer {
         log.info("Cloud Run service created: {}", serviceName);
       }
 
-      // Set IAM policy for unauthenticated access if requested
+      // Audit 2026-05-12 review item I #54: granting allUsers → roles/run.invoker makes the
+      // service publicly reachable from the open internet. Log loudly so the operator can audit
+      // every public deployment. The actual UI-side confirmation (the caller passes
+      // allowUnauth=true) is the user-facing prompt; this log is the server-side trail.
       if (allowUnauth) {
+        log.warn(
+            "[UserCloudRunDeployer] Setting allUsers → roles/run.invoker on service {} —"
+                + " service will be reachable from the open internet (audit I #54).",
+            fullName);
         setPublicAccess(client, fullName);
       }
 

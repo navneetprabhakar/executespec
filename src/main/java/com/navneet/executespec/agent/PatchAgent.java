@@ -1,7 +1,13 @@
 package com.navneet.executespec.agent;
 
+import java.nio.charset.StandardCharsets;
+
+import jakarta.annotation.PostConstruct;
+
 import com.navneet.executespec.tool.ExecutionContext;
 
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.io.Resource;
 import org.springframework.stereotype.Service;
 
 import lombok.RequiredArgsConstructor;
@@ -137,11 +143,44 @@ public class PatchAgent {
   }
 
   /**
-   * Patch-mode system prompt. Test-driven: the first investigation step is always the failing test
-   * (when the request mentions one). Minimal-change discipline: PASS_TO_PASS regression is the
-   * dominant SWE-bench failure mode, so the prompt explicitly directs surgical edits over rewrites.
+   * Patch-mode system prompt loaded from classpath at boot.
+   *
+   * <p>Audit 2026-05-12 review item M #69 — extracted from a 130-line inline string literal to
+   * {@code prompts/patch-agent.md} per the CLAUDE.md MUST-pattern (prompts in external resource
+   * files).
+   */
+  @Value("classpath:prompts/patch-agent.md")
+  private Resource patchAgentPromptResource;
+
+  private String patchAgentPrompt;
+
+  @PostConstruct
+  void loadPatchAgentPrompt() {
+    try {
+      patchAgentPrompt = patchAgentPromptResource.getContentAsString(StandardCharsets.UTF_8);
+    } catch (Exception e) {
+      log.error("[PatchAgent] Failed to load classpath:prompts/patch-agent.md — using a stub", e);
+      patchAgentPrompt =
+          "You are a patch-mode coding agent. Make the minimum change that fixes the issue.";
+    }
+  }
+
+  /**
+   * Returns the loaded patch-mode system prompt. See {@code prompts/patch-agent.md} for the full
+   * template.
    */
   private String buildSystemPrompt() {
+    return patchAgentPrompt;
+  }
+
+  /**
+   * @deprecated Inlined prompt removed; see {@link #buildSystemPrompt} + {@code
+   *     prompts/patch-agent.md}. Kept for compile compatibility during the inline-prompt audit — DO
+   *     NOT call.
+   */
+  @Deprecated(forRemoval = true)
+  @SuppressWarnings("unused")
+  private String buildSystemPromptInlineDeprecated() {
     return """
 You are a patch-mode coding agent. The user has given you a specific bug-fix or
 targeted-edit task. Your job is to make the minimum change that fixes it.

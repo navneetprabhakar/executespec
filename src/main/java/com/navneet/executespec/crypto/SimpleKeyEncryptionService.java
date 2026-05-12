@@ -82,7 +82,15 @@ public class SimpleKeyEncryptionService {
       }
     }
 
-    // Priority 3: passthrough
+    // Priority 3: passthrough — fail-fast in production-pinned deployments.
+    // Audit: 2026-05-12 line-by-line review item H #52.
+    if (cryptoProperties.isRequireEncryption()) {
+      throw new IllegalStateException(
+          "[Crypto] executespec.crypto.require-encryption=true but no encryption key could be"
+              + " loaded. Set executespec.crypto.local-key (dev) or"
+              + " executespec.crypto.gcp-secret-name (prod) — passthrough mode is forbidden in this"
+              + " profile.");
+    }
     log.warn(
         "[Crypto] No encryption key configured — running in passthrough mode (no encryption). Set"
             + " executespec.crypto.local-key (dev) or executespec.crypto.gcp-secret-name (prod).");
@@ -181,9 +189,11 @@ public class SimpleKeyEncryptionService {
   /**
    * Heuristic: encrypted values are Base64-encoded and at least ~40 chars (12-byte IV + 16-byte tag
    * + min 1-byte ciphertext = 29 bytes → 40 Base64 chars). API keys like "sk-..." or "AIza..."
-   * won't match.
+   * won't match. Exposed for {@link KeyMigrationRunner} so it can skip already-encrypted rows
+   * instead of re-encrypting them on every boot (AES-GCM's random IV makes byte-equality always
+   * false → audit 2026-05-12 item H #51).
    */
-  private boolean isLikelyEncrypted(String value) {
+  public boolean isLikelyEncrypted(String value) {
     if (value.length() < 40) return false;
     // API keys typically start with known prefixes — skip decryption for those
     if (value.startsWith("sk-") || value.startsWith("AIza") || value.startsWith("xoxb-"))

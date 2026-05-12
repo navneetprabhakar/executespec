@@ -33,4 +33,13 @@ public class CryptoProperties {
    * skipped entirely.
    */
   private String localKey;
+
+  /**
+   * When true, the application FAILS TO START if no encryption key can be loaded (instead of
+   * silently falling through to passthrough plaintext-storage mode). Strongly recommended for
+   * production deployments. Default is {@code false} to preserve dev-friendly boot semantics.
+   *
+   * <p>Audit: 2026-05-12 line-by-line review item H #52.
+   */
+  private boolean requireEncryption = false;
 }

@@ -39,9 +39,42 @@ public class ConfluenceAdapter implements InboundAdapter, OutboundAdapter {
 
   @Override
   public void verifySignature(Map<String, String> headers, String rawBody) {
-    // Confluence webhooks use shared secret in Authorization header
-    if (config.getApiToken() == null) return;
-    // No standard signature scheme; skip verification for now (dev mode)
+    // Audit 2026-05-12 review item C #21 — was a no-op accepting any POST. Confluence Cloud
+    // sends an HMAC-SHA256 hex digest in X-Hub-Signature when a webhook secret is configured;
+    // verify it constant-time. If no secret is configured, refuse the webhook (prod posture)
+    // unless the caller can also present the bearer apiToken in Authorization (legacy dev
+    // posture).
+    String webhookSecret = config.getWebhookSecret();
+    if (webhookSecret != null && !webhookSecret.isBlank()) {
+      String header = headers.getOrDefault("x-hub-signature", "");
+      // Accept both "sha256=<hex>" and bare hex forms.
+      String received = header.startsWith("sha256=") ? header.substring(7) : header;
+      String expected =
+          com.navneet.executespec.util.HmacUtil.hexSha256(
+              webhookSecret, rawBody == null ? "" : rawBody);
+      if (!java.security.MessageDigest.isEqual(
+          expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          received.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+        throw new com.navneet.executespec.integration.WebhookSignatureException(
+            "Confluence webhook HMAC mismatch");
+      }
+      return;
+    }
+    // Legacy fallback: bearer apiToken in Authorization header (dev-friendly path).
+    if (config.getApiToken() != null && !config.getApiToken().isBlank()) {
+      String authHeader = headers.getOrDefault("authorization", "");
+      String expected = "Bearer " + config.getApiToken();
+      if (!java.security.MessageDigest.isEqual(
+          expected.getBytes(java.nio.charset.StandardCharsets.UTF_8),
+          authHeader.getBytes(java.nio.charset.StandardCharsets.UTF_8))) {
+        throw new com.navneet.executespec.integration.WebhookSignatureException(
+            "Confluence bearer token mismatch");
+      }
+      return;
+    }
+    throw new com.navneet.executespec.integration.WebhookSignatureException(
+        "Confluence webhook: configure integration.confluence.webhook-secret to enable inbound"
+            + " webhooks");
   }
 
   @Override
