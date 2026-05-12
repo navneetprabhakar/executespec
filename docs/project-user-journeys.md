@@ -1,10 +1,13 @@
 # Project — User Journeys & Workflows
 
-> End-to-end flows for the Project-centric workbench (v2.4.0 + v2.5.x).
+> End-to-end flows for the project-centric workbench.
 > Companion to [ARCHITECTURE.md](ARCHITECTURE.md) (the "how") — this doc is the
 > "what happens, in what order, for a given user intent".
 >
-> Last updated: 2026-04-15 (v2.5.1).
+> Last updated: 2026-05-12 (1.0.0-M1). Reflects multi-repo Launch, 3-step
+> architecture pipeline, Generate Docs, project memory + chat, RAG, tech-debt
+> autofix (Phase 2), external sharing (V175), PR + Code review agents (V172),
+> and patch-mode autofix surfaces (V183).
 >
 > Audience: product, QA, support; also onboarding engineers who want to see the
 > pieces fit together without reading the full codebase map.
