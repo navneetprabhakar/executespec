@@ -43,12 +43,12 @@ Scoring (`scoring/`, `report/`): `verifiedScore` is **multiplicative** since 264
 
 All routed through one chokepoint `finding/FindingPatchSubmitter`. Submitter dedupes per finding key, dispatches with `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline` auto-pushes via `scmPushService.push()` on terminal:
 
-| Phase | Surface | UX |
-|-------|---------|-----|
-| 1 | `prreview/PrReviewAutofixService` | PR Review verdict popover → "Autofix N comments" → pushes to PR head branch via `branchOverride` |
-| 2 | `project/techdebt/TechDebtFixService` | TechDebtPanel category rows → "Fix" per category → fresh PR per category |
-| 3 | `project/pr/CiFailureAutoFixService` | GitHub `check_run` webhook auto-fires on PR CI failure (flag `ci.autofix.enabled`, default OFF; max 3 attempts/PR) |
-| 4 | `codereview/CodeReviewAutofixService` | CodeQualityPanel severity chips → "N CRITICAL" / "N MAJOR" → one PR per severity |
+| Phase | Surface                               | UX                                                                                                                 |
+| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 1     | `prreview/PrReviewAutofixService`     | PR Review verdict popover → "Autofix N comments" → pushes to PR head branch via `branchOverride`                   |
+| 2     | `project/techdebt/TechDebtFixService` | TechDebtPanel category rows → "Fix" per category → fresh PR per category                                           |
+| 3     | `project/pr/CiFailureAutoFixService`  | GitHub `check_run` webhook auto-fires on PR CI failure (flag `ci.autofix.enabled`, default OFF; max 3 attempts/PR) |
+| 4     | `codereview/CodeReviewAutofixService` | CodeQualityPanel severity chips → "N CRITICAL" / "N MAJOR" → one PR per severity                                   |
 
 Phase 3's webhook stays OFF until SWE-bench Lite resolved% justifies the unattended-bot path.
 
@@ -92,10 +92,10 @@ YAML is the **single source of truth** for every model identifier / context-wind
 
 Agent tier mapping (`application.yml`):
 
-| Tier | Anthropic | OpenAI | Gemini | Agents |
-|------|-----------|--------|--------|--------|
-| PLANNING | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-pro-preview` | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
-| WORKHORSE | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-pro-preview` | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent |
+| Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                                                                           |
+| ----------- | --------------------------- | -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-pro-preview`   | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
+| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4-mini` | `gemini-3-pro-preview`   | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
 
 Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). User-selectable per project. Per-provider implicit-cache enabled — Gemini Flash threshold 1024 tokens, Pro 4096; Anthropic explicit cache_control blocks. `RunCostTracker` records `cache_read_input_tokens` on every call for all 3 providers.
@@ -226,172 +226,183 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 ## API contracts
 
 ### Run lifecycle
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/runs` | Submit run (202). Body includes `aiProvider`, `executionMode`, `runMode`, `tddMode`, optional `userCostCap`, optional `figmaUrl`, optional `selectedRepoIds[]`. |
-| GET | `/api/runs` | List runs (paginated, filtered by visibility + tier). |
-| GET | `/api/runs/{id}` | Run detail (incl. `githubPrUrl`, `verifiedScore`, `statusReason`, `planStrategy`, per-phase costs). |
-| POST | `/api/runs/{id}/approve` | Plan gate approval; body `{approved, creditsConfirmed?}`. Charges credits. |
-| POST | `/api/runs/{id}/pause` | PAUSED (V168, flag `v2.pause.enabled`, default OFF). |
-| POST | `/api/runs/{id}/resume` | Same-JVM only; workspace must exist. |
-| DELETE | `/api/runs/{id}` | Cancel — `RunOrchestrator.cancel(runId)`. Signals plan gate, interrupts pipeline future, closes opened PRs. |
-| POST | `/api/runs/{id}/archive` | Archive. |
-| POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry one failed task. Requires `requireBuildVerification=true` on retry attempt. Does NOT auto-push — use the `Update PR` button on `InlineRunDetail` if needed. |
-| GET | `/api/runs/{id}/events` | SSE event stream (scoped token). |
-| GET | `/api/runs/{id}/sse-token` | Get scoped SSE token (5-min TTL). |
-| POST | `/api/runs/{id}/run-tests` | Manually trigger test execution (Beta). |
-| GET | `/api/runs/{id}/prs` | List PRs opened by this run with status. |
-| GET | `/api/runs/{id}/cost` | Live token + cost snapshot. |
-| POST | `/api/runs/{id}/sync` | Reset workspace to current origin HEAD. |
-| POST | `/api/runs/{id}/sync/original` | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`). |
-| POST | `/api/repos/{repoId}/webhook` | Install pull_request webhook with caller's PAT. |
+
+| Method | Path                                  | Description                                                                                                                                                       |
+| ------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/runs`                           | Submit run (202). Body includes `aiProvider`, `executionMode`, `runMode`, `tddMode`, optional `userCostCap`, optional `figmaUrl`, optional `selectedRepoIds[]`.   |
+| GET    | `/api/runs`                           | List runs (paginated, filtered by visibility + tier).                                                                                                             |
+| GET    | `/api/runs/{id}`                      | Run detail (incl. `githubPrUrl`, `verifiedScore`, `statusReason`, `planStrategy`, per-phase costs).                                                               |
+| POST   | `/api/runs/{id}/approve`              | Plan gate approval; body `{approved, creditsConfirmed?}`. Charges credits.                                                                                        |
+| POST   | `/api/runs/{id}/pause`                | PAUSED (V168, flag `v2.pause.enabled`, default OFF).                                                                                                              |
+| POST   | `/api/runs/{id}/resume`               | Same-JVM only; workspace must exist.                                                                                                                              |
+| DELETE | `/api/runs/{id}`                      | Cancel — `RunOrchestrator.cancel(runId)`. Signals plan gate, interrupts pipeline future, closes opened PRs.                                                       |
+| POST   | `/api/runs/{id}/archive`              | Archive.                                                                                                                                                          |
+| POST   | `/api/runs/{id}/tasks/{taskId}/retry` | Retry one failed task. Requires `requireBuildVerification=true` on retry attempt. Does NOT auto-push — use the `Update PR` button on `InlineRunDetail` if needed. |
+| GET    | `/api/runs/{id}/events`               | SSE event stream (scoped token).                                                                                                                                  |
+| GET    | `/api/runs/{id}/sse-token`            | Get scoped SSE token (5-min TTL).                                                                                                                                 |
+| POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                           |
+| GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                          |
+| GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot.                                                                                                                                       |
+| POST   | `/api/runs/{id}/sync`                 | Reset workspace to current origin HEAD.                                                                                                                           |
+| POST   | `/api/runs/{id}/sync/original`        | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`).                                                                                     |
+| POST   | `/api/repos/{repoId}/webhook`         | Install pull_request webhook with caller's PAT.                                                                                                                   |
 
 ### Validation report + scoring
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/runs/{id}/report` | Get validation report. |
-| GET | `/api/runs/{id}/report/pdf` | Download report as PDF. |
-| POST | `/api/runs/{id}/report/share` | Generate share link. |
-| GET | `/api/reports/shared/{token}` | Public shared report (no auth). |
+
+| Method | Path                          | Description                     |
+| ------ | ----------------------------- | ------------------------------- |
+| GET    | `/api/runs/{id}/report`       | Get validation report.          |
+| GET    | `/api/runs/{id}/report/pdf`   | Download report as PDF.         |
+| POST   | `/api/runs/{id}/report/share` | Generate share link.            |
+| GET    | `/api/reports/shared/{token}` | Public shared report (no auth). |
 
 ### Preview + deploy
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker, 5-min TTL). |
-| DELETE | `/api/runs/{id}/preview/stop` | Stop preview. |
-| POST | `/api/deployments` | Deploy to Cloud Run (permanent). |
-| POST | `/api/runs/{id}/push-github` | Push to GitHub (single-repo; multi-repo branches into `ScmPushService.pushMultiRepo`). |
+
+| Method | Path                           | Description                                                                            |
+| ------ | ------------------------------ | -------------------------------------------------------------------------------------- |
+| POST   | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker, 5-min TTL).                                        |
+| DELETE | `/api/runs/{id}/preview/stop`  | Stop preview.                                                                          |
+| POST   | `/api/deployments`             | Deploy to Cloud Run (permanent).                                                       |
+| POST   | `/api/runs/{id}/push-github`   | Push to GitHub (single-repo; multi-repo branches into `ScmPushService.pushMultiRepo`). |
 
 ### Project workspace
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/projects/{id}/dashboard` | Aggregated metrics, recent runs/PRs, arch-doc status. |
-| GET | `/api/projects/{id}/memory` + `/memory/ledger` | Project memory snapshot + full ledger. |
-| GET | `/api/projects/{id}/scores` | Score-trend feed. |
-| GET | `/api/projects/{id}/workspace-health` | Per-repo SHA drift + webhook + open-PR rollup. |
-| GET | `/api/projects/{id}/architecture` + `/versions` + `/diff?from=&to=` | Latest arch / all versions / source-file changes between versions. |
-| POST | `/api/projects/{id}/architecture/generate` | Regenerate codemaps + arch doc. |
-| GET | `/api/projects/{id}/repos/{repoId}/architecture` | Per-repo HLD/LLD. |
-| POST | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` + `GET .../download` | Generated Docs. |
-| GET | `/api/projects/{id}/tech-debt?since=<days>` | Issues-by-category / severity / file hotspots. |
-| POST | `/api/projects/{id}/analyse?branch=<name>` | Per-branch arch refresh using caller's PAT. |
-| GET | `/api/projects/{id}/estimate?requirement=<text>` | Heuristic p25/p75 task + cost estimate from project history. |
-| POST | `/api/projects/{id}/prs/refresh` | Poll GitHub + post-merge cascade + CI check-runs. |
-| GET | `/api/projects/{id}/templates` + POST | Spec templates (project + org-scoped). |
-| POST | `/webhooks/github` | PR + check_run webhook (HMAC SHA-256). |
+
+| Method | Path                                                                         | Description                                                        |
+| ------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| GET    | `/api/projects/{id}/dashboard`                                               | Aggregated metrics, recent runs/PRs, arch-doc status.              |
+| GET    | `/api/projects/{id}/memory` + `/memory/ledger`                               | Project memory snapshot + full ledger.                             |
+| GET    | `/api/projects/{id}/scores`                                                  | Score-trend feed.                                                  |
+| GET    | `/api/projects/{id}/workspace-health`                                        | Per-repo SHA drift + webhook + open-PR rollup.                     |
+| GET    | `/api/projects/{id}/architecture` + `/versions` + `/diff?from=&to=`          | Latest arch / all versions / source-file changes between versions. |
+| POST   | `/api/projects/{id}/architecture/generate`                                   | Regenerate codemaps + arch doc.                                    |
+| GET    | `/api/projects/{id}/repos/{repoId}/architecture`                             | Per-repo HLD/LLD.                                                  |
+| POST   | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` + `GET .../download` | Generated Docs.                                                    |
+| GET    | `/api/projects/{id}/tech-debt?since=<days>`                                  | Issues-by-category / severity / file hotspots.                     |
+| POST   | `/api/projects/{id}/analyse?branch=<name>`                                   | Per-branch arch refresh using caller's PAT.                        |
+| GET    | `/api/projects/{id}/estimate?requirement=<text>`                             | Heuristic p25/p75 task + cost estimate from project history.       |
+| POST   | `/api/projects/{id}/prs/refresh`                                             | Poll GitHub + post-merge cascade + CI check-runs.                  |
+| GET    | `/api/projects/{id}/templates` + POST                                        | Spec templates (project + org-scoped).                             |
+| POST   | `/webhooks/github`                                                           | PR + check_run webhook (HMAC SHA-256).                             |
 
 ### PR Review + Code Review (V172)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/pr-reviews` | Submit PR review (PRO+); body `{projectId, repoFullName, prNumber}`. 202 + QUEUED. |
-| GET | `/api/pr-reviews/{id}` + `/api/projects/{id}/pr-reviews` + by-PR query | Read endpoints. |
-| POST | `/api/code-reviews` | Submit whole-repo scan (PRO+). |
-| GET | `/api/code-reviews/{id}` + `/report` (markdown) + `/api/projects/{id}/code-reviews/latest?repo=` | Read endpoints. |
+
+| Method | Path                                                                                             | Description                                                                        |
+| ------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| POST   | `/api/pr-reviews`                                                                                | Submit PR review (PRO+); body `{projectId, repoFullName, prNumber}`. 202 + QUEUED. |
+| GET    | `/api/pr-reviews/{id}` + `/api/projects/{id}/pr-reviews` + by-PR query                           | Read endpoints.                                                                    |
+| POST   | `/api/code-reviews`                                                                              | Submit whole-repo scan (PRO+).                                                     |
+| GET    | `/api/code-reviews/{id}` + `/report` (markdown) + `/api/projects/{id}/code-reviews/latest?repo=` | Read endpoints.                                                                    |
 
 ### External project sharing (V175)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/projects/{id}/invites` + GET + DELETE | Cross-org `ProjectMember` invite by email. |
-| GET | `/api/invites/preview?token=` + POST `/api/invites/accept?token=` | Accept invite (email-match required). |
-| POST | `/api/projects/{id}/share-links` + GET + DELETE | Public read-only share links (tier-gated). |
-| GET | `/api/shared/{token}/{meta,run,validation-report,code-review,pr-review,architecture}` | Public read endpoints. |
+
+| Method | Path                                                                                  | Description                                |
+| ------ | ------------------------------------------------------------------------------------- | ------------------------------------------ |
+| POST   | `/api/projects/{id}/invites` + GET + DELETE                                           | Cross-org `ProjectMember` invite by email. |
+| GET    | `/api/invites/preview?token=` + POST `/api/invites/accept?token=`                     | Accept invite (email-match required).      |
+| POST   | `/api/projects/{id}/share-links` + GET + DELETE                                       | Public read-only share links (tier-gated). |
+| GET    | `/api/shared/{token}/{meta,run,validation-report,code-review,pr-review,architecture}` | Public read endpoints.                     |
 
 ### Auth + org
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/register` / `/login` / `/refresh` / `/logout` | JWT auth. |
-| POST | `/api/auth/forgot-password` / `/reset-password` / GET `/verify-email` | Account recovery. |
-| GET | `/api/auth/oauth2/init?surface=<x>` / `/authorize` / `/callback/{provider}` | OAuth2 (Google + GitHub). |
-| GET | `/api/auth/me/permissions` | Tier-based permissions. |
-| GET | `/api/auth/me/data-export` | GDPR ZIP (manifest + payload + README). |
-| POST | `/api/org` / `/api/org/invite` | Org + invitations. |
+
+| Method | Path                                                                        | Description                             |
+| ------ | --------------------------------------------------------------------------- | --------------------------------------- |
+| POST   | `/api/auth/register` / `/login` / `/refresh` / `/logout`                    | JWT auth.                               |
+| POST   | `/api/auth/forgot-password` / `/reset-password` / GET `/verify-email`       | Account recovery.                       |
+| GET    | `/api/auth/oauth2/init?surface=<x>` / `/authorize` / `/callback/{provider}` | OAuth2 (Google + GitHub).               |
+| GET    | `/api/auth/me/permissions`                                                  | Tier-based permissions.                 |
+| GET    | `/api/auth/me/data-export`                                                  | GDPR ZIP (manifest + payload + README). |
+| POST   | `/api/org` / `/api/org/invite`                                              | Org + invitations.                      |
 
 ### Billing
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/billing/plans` | Yields YAML-driven pricing rows. |
-| POST | `/api/billing/subscribe` | Routed to Razorpay or Stripe via `PaymentGatewayRouter`. |
-| POST | `/api/billing/topup/purchase` | Buy run top-up credits. |
-| GET | `/api/billing/payment-history` | Org-scoped payment history. |
-| POST | `/api/webhooks/razorpay` + `/api/webhooks/stripe` | Webhook events (HMAC verified, no auth). |
+
+| Method | Path                                              | Description                                              |
+| ------ | ------------------------------------------------- | -------------------------------------------------------- |
+| GET    | `/api/billing/plans`                              | Yields YAML-driven pricing rows.                         |
+| POST   | `/api/billing/subscribe`                          | Routed to Razorpay or Stripe via `PaymentGatewayRouter`. |
+| POST   | `/api/billing/topup/purchase`                     | Buy run top-up credits.                                  |
+| GET    | `/api/billing/payment-history`                    | Org-scoped payment history.                              |
+| POST   | `/api/webhooks/razorpay` + `/api/webhooks/stripe` | Webhook events (HMAC verified, no auth).                 |
 
 ### Admin
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/admin/payment-audit` + `/export` | Payment audit log + CSV (SUPER_ADMIN). |
-| GET | `/api/admin/webhook-events` | Webhook event log. |
-| GET | `/api/admin/tiers` + PUT `/{tier}` | Tier lifecycle (LISTED/HIDDEN/SUNSETTING). |
-| POST | `/api/admin/executions/reconcile` | Mark orphaned non-terminal ExecutionRuns FAILED. |
-| POST | `/api/admin/swebench/run` + `/api/admin/programbench/run` | Bench-mode submission. |
-| POST | `/api/admin/projects/{id}/migrate-codemaps` | Migrate legacy codemaps into `.executespec/codemaps/`. |
+
+| Method | Path                                                      | Description                                            |
+| ------ | --------------------------------------------------------- | ------------------------------------------------------ |
+| GET    | `/api/admin/payment-audit` + `/export`                    | Payment audit log + CSV (SUPER_ADMIN).                 |
+| GET    | `/api/admin/webhook-events`                               | Webhook event log.                                     |
+| GET    | `/api/admin/tiers` + PUT `/{tier}`                        | Tier lifecycle (LISTED/HIDDEN/SUNSETTING).             |
+| POST   | `/api/admin/executions/reconcile`                         | Mark orphaned non-terminal ExecutionRuns FAILED.       |
+| POST   | `/api/admin/swebench/run` + `/api/admin/programbench/run` | Bench-mode submission.                                 |
+| POST   | `/api/admin/projects/{id}/migrate-codemaps`               | Migrate legacy codemaps into `.executespec/codemaps/`. |
 
 ### Enterprise readiness — `.executespec/` folder, contracts, standards, ADRs, activity
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/projects/{id}/activity` | Project activity feed (partitioned-by-month). |
-| POST | `/api/projects/{id}/export` | ZIP bundle of every `.executespec/` artefact + DB-only counterparts. |
-| POST | `/api/projects/{id}/check-drift` + per-repo + per-contract | Cross-repo contract drift detection. |
-| POST | `/api/projects/{id}/contracts/{contractId}/{refresh-from-source,dismiss-drift}` | Drift workflow. |
-| GET / POST / DELETE | `/api/projects/{id}/contracts/{contractId}/consumers/{...}` | Consumer pinning. |
-| GET + POST | `/api/projects/{id}/repos/{repoId}/contract-coverage` + `/rescan` | Coverage rollup. |
-| POST | `/api/projects/{id}/standards/violations/{id}/override` + `/standards/{id}/exception` + DELETE | Standards override + standing exception (≥30-char rationale). |
-| GET | `/api/projects/{id}/standards/report?orgId=&sinceDays=` | Standards compliance report. |
+
+| Method              | Path                                                                                           | Description                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| GET                 | `/api/projects/{id}/activity`                                                                  | Project activity feed (partitioned-by-month).                        |
+| POST                | `/api/projects/{id}/export`                                                                    | ZIP bundle of every `.executespec/` artefact + DB-only counterparts. |
+| POST                | `/api/projects/{id}/check-drift` + per-repo + per-contract                                     | Cross-repo contract drift detection.                                 |
+| POST                | `/api/projects/{id}/contracts/{contractId}/{refresh-from-source,dismiss-drift}`                | Drift workflow.                                                      |
+| GET / POST / DELETE | `/api/projects/{id}/contracts/{contractId}/consumers/{...}`                                    | Consumer pinning.                                                    |
+| GET + POST          | `/api/projects/{id}/repos/{repoId}/contract-coverage` + `/rescan`                              | Coverage rollup.                                                     |
+| POST                | `/api/projects/{id}/standards/violations/{id}/override` + `/standards/{id}/exception` + DELETE | Standards override + standing exception (≥30-char rationale).        |
+| GET                 | `/api/projects/{id}/standards/report?orgId=&sinceDays=`                                        | Standards compliance report.                                         |
 
 ### Notifications + flags
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/notifications` + `/unread-count` + POST `/{id}/read` + POST `/read-all` | In-app notifications. |
-| GET | `/api/models/available` | Model matrix (YAML-derived). |
-| GET | `/api/feature-flags` + POST `/{key}` | Feature flag admin (SUPER_ADMIN). |
+
+| Method | Path                                                                          | Description                       |
+| ------ | ----------------------------------------------------------------------------- | --------------------------------- |
+| GET    | `/api/notifications` + `/unread-count` + POST `/{id}/read` + POST `/read-all` | In-app notifications.             |
+| GET    | `/api/models/available`                                                       | Model matrix (YAML-derived).      |
+| GET    | `/api/feature-flags` + POST `/{key}`                                          | Feature flag admin (SUPER_ADMIN). |
 
 ## Key file locations
 
-| Purpose | Path |
-|---------|------|
-| Run orchestrator | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java) |
-| Sequential executor | [`harness/SequentialExecutor.java`](src/main/java/com/navneet/executespec/harness/SequentialExecutor.java) |
-| Worker agent | [`agent/WorkerAgent.java`](src/main/java/com/navneet/executespec/agent/WorkerAgent.java) |
-| Outline planner | [`agent/OutlinePlannerAgent.java`](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java) |
-| Smart classifier | [`agent/SmartClassifierAgent.java`](src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java) |
-| Reviewer | [`reviewer/ReviewerAgent.java`](src/main/java/com/navneet/executespec/reviewer/ReviewerAgent.java) |
-| Patch-mode agent | [`agent/PatchAgent.java`](src/main/java/com/navneet/executespec/agent/PatchAgent.java) |
-| LLM router (V2) | [`agent/LlmRouter.java`](src/main/java/com/navneet/executespec/agent/LlmRouter.java) + `OpenAiNativeToolClient` + `GeminiNativeToolClient` |
-| Legacy router (non-tool agents) | [`agent/FallbackLlmRouter.java`](src/main/java/com/navneet/executespec/agent/FallbackLlmRouter.java) |
-| Tool registry | [`tool/ToolRegistry.java`](src/main/java/com/navneet/executespec/tool/ToolRegistry.java) + `tool/*` (11 tools + `CompleteTaskTool`) |
-| Context store | [`context/ContextStore.java`](src/main/java/com/navneet/executespec/context/ContextStore.java) |
-| Cost tracker | [`cost/RunCostTracker.java`](src/main/java/com/navneet/executespec/cost/RunCostTracker.java) |
-| State store | [`state/StateStore.java`](src/main/java/com/navneet/executespec/state/StateStore.java) |
-| Startup resumer | [`recovery/StartupRunResumer.java`](src/main/java/com/navneet/executespec/recovery/StartupRunResumer.java) |
-| Finding patch submitter | [`finding/FindingPatchSubmitter.java`](src/main/java/com/navneet/executespec/finding/FindingPatchSubmitter.java) |
-| Model registry | [`router/ModelRegistry.java`](src/main/java/com/navneet/executespec/router/ModelRegistry.java) |
-| Validation report | [`report/ValidationReportService.java`](src/main/java/com/navneet/executespec/report/ValidationReportService.java) + `ValidationReportGenerator` |
-| Project architecture | [`codeintel/ProjectArchitectureService.java`](src/main/java/com/navneet/executespec/codeintel/ProjectArchitectureService.java) |
-| Project memory | [`memory/RunLedgerAgent.java`](src/main/java/com/navneet/executespec/memory/RunLedgerAgent.java) + `MemoryCompactionService` + `ProjectMemoryProvider` |
-| GitHub integration | [`repo/GitHubRepoService.java`](src/main/java/com/navneet/executespec/repo/GitHubRepoService.java) + `BitbucketRepoService` |
-| Multi-repo push | [`integration/scm/ScmPushService.java`](src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java) |
-| SWE-bench adapter | [`swebench/`](src/main/java/com/navneet/executespec/swebench/) |
-| ProgramBench adapter | [`programbench/`](src/main/java/com/navneet/executespec/programbench/) |
-| Security config | [`auth/security/SecurityConfig.java`](src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java) |
-| Billing service | [`billing/service/BillingService.java`](src/main/java/com/navneet/executespec/billing/service/BillingService.java) + `gateway/PaymentGatewayRouter` |
-| Feature flags | [`config/featureflag/FeatureFlagService.java`](src/main/java/com/navneet/executespec/config/featureflag/FeatureFlagService.java) |
-| Rate limiting | [`ratelimit/RateLimitFilter.java`](src/main/java/com/navneet/executespec/ratelimit/RateLimitFilter.java) |
-| Sharing | [`sharing/`](src/main/java/com/navneet/executespec/sharing/) |
-| PR Review agent | [`prreview/`](src/main/java/com/navneet/executespec/prreview/) |
-| Code Review agent | [`codereview/`](src/main/java/com/navneet/executespec/codereview/) |
-| Activity feed | [`activity/`](src/main/java/com/navneet/executespec/activity/) |
-| Folder writer (`.executespec/`) | [`folder/ExecutespecFolderWriter.java`](src/main/java/com/navneet/executespec/folder/ExecutespecFolderWriter.java) |
-| Standards / ADR / Invariants | [`standards/`](src/main/java/com/navneet/executespec/standards/), [`adr/`](src/main/java/com/navneet/executespec/adr/), [`arch/invariants/`](src/main/java/com/navneet/executespec/arch/invariants/) |
-| Cross-repo contracts | [`contracts/`](src/main/java/com/navneet/executespec/contracts/) |
-| Notification preferences | [`notification/pref/`](src/main/java/com/navneet/executespec/notification/pref/) |
-| GDPR data export | [`auth/service/UserDataExportService.java`](src/main/java/com/navneet/executespec/auth/service/UserDataExportService.java) |
-| Prompt assembler | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md` |
-| LLM prompts | `src/main/resources/prompts/*.md` |
-| App config | `src/main/resources/application.yml` |
-| DB migrations | `src/main/resources/db/migration/V*.sql` (head V186) |
-| Frontend entry | `frontend/src/main.tsx` |
-| Frontend API client | `frontend/src/lib/api.ts` |
-| Observability stack | `observability/docker-compose.yml` |
-| V2 eval framework | `scripts/v2-eval.sh` + `scripts/v2-eval-specs/{low,medium,high}.txt` |
+| Purpose                         | Path                                                                                                                                                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Run orchestrator                | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)                                                                                         |
+| Sequential executor             | [`harness/SequentialExecutor.java`](src/main/java/com/navneet/executespec/harness/SequentialExecutor.java)                                                                                           |
+| Worker agent                    | [`agent/WorkerAgent.java`](src/main/java/com/navneet/executespec/agent/WorkerAgent.java)                                                                                                             |
+| Outline planner                 | [`agent/OutlinePlannerAgent.java`](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java)                                                                                             |
+| Smart classifier                | [`agent/SmartClassifierAgent.java`](src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java)                                                                                           |
+| Reviewer                        | [`reviewer/ReviewerAgent.java`](src/main/java/com/navneet/executespec/reviewer/ReviewerAgent.java)                                                                                                   |
+| Patch-mode agent                | [`agent/PatchAgent.java`](src/main/java/com/navneet/executespec/agent/PatchAgent.java)                                                                                                               |
+| LLM router (V2)                 | [`agent/LlmRouter.java`](src/main/java/com/navneet/executespec/agent/LlmRouter.java) + `OpenAiNativeToolClient` + `GeminiNativeToolClient`                                                           |
+| Legacy router (non-tool agents) | [`agent/FallbackLlmRouter.java`](src/main/java/com/navneet/executespec/agent/FallbackLlmRouter.java)                                                                                                 |
+| Tool registry                   | [`tool/ToolRegistry.java`](src/main/java/com/navneet/executespec/tool/ToolRegistry.java) + `tool/*` (11 tools + `CompleteTaskTool`)                                                                  |
+| Context store                   | [`context/ContextStore.java`](src/main/java/com/navneet/executespec/context/ContextStore.java)                                                                                                       |
+| Cost tracker                    | [`cost/RunCostTracker.java`](src/main/java/com/navneet/executespec/cost/RunCostTracker.java)                                                                                                         |
+| State store                     | [`state/StateStore.java`](src/main/java/com/navneet/executespec/state/StateStore.java)                                                                                                               |
+| Startup resumer                 | [`recovery/StartupRunResumer.java`](src/main/java/com/navneet/executespec/recovery/StartupRunResumer.java)                                                                                           |
+| Finding patch submitter         | [`finding/FindingPatchSubmitter.java`](src/main/java/com/navneet/executespec/finding/FindingPatchSubmitter.java)                                                                                     |
+| Model registry                  | [`router/ModelRegistry.java`](src/main/java/com/navneet/executespec/router/ModelRegistry.java)                                                                                                       |
+| Validation report               | [`report/ValidationReportService.java`](src/main/java/com/navneet/executespec/report/ValidationReportService.java) + `ValidationReportGenerator`                                                     |
+| Project architecture            | [`codeintel/ProjectArchitectureService.java`](src/main/java/com/navneet/executespec/codeintel/ProjectArchitectureService.java)                                                                       |
+| Project memory                  | [`memory/RunLedgerAgent.java`](src/main/java/com/navneet/executespec/memory/RunLedgerAgent.java) + `MemoryCompactionService` + `ProjectMemoryProvider`                                               |
+| GitHub integration              | [`repo/GitHubRepoService.java`](src/main/java/com/navneet/executespec/repo/GitHubRepoService.java) + `BitbucketRepoService`                                                                          |
+| Multi-repo push                 | [`integration/scm/ScmPushService.java`](src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java)                                                                                   |
+| SWE-bench adapter               | [`swebench/`](src/main/java/com/navneet/executespec/swebench/)                                                                                                                                       |
+| ProgramBench adapter            | [`programbench/`](src/main/java/com/navneet/executespec/programbench/)                                                                                                                               |
+| Security config                 | [`auth/security/SecurityConfig.java`](src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java)                                                                                       |
+| Billing service                 | [`billing/service/BillingService.java`](src/main/java/com/navneet/executespec/billing/service/BillingService.java) + `gateway/PaymentGatewayRouter`                                                  |
+| Feature flags                   | [`config/featureflag/FeatureFlagService.java`](src/main/java/com/navneet/executespec/config/featureflag/FeatureFlagService.java)                                                                     |
+| Rate limiting                   | [`ratelimit/RateLimitFilter.java`](src/main/java/com/navneet/executespec/ratelimit/RateLimitFilter.java)                                                                                             |
+| Sharing                         | [`sharing/`](src/main/java/com/navneet/executespec/sharing/)                                                                                                                                         |
+| PR Review agent                 | [`prreview/`](src/main/java/com/navneet/executespec/prreview/)                                                                                                                                       |
+| Code Review agent               | [`codereview/`](src/main/java/com/navneet/executespec/codereview/)                                                                                                                                   |
+| Activity feed                   | [`activity/`](src/main/java/com/navneet/executespec/activity/)                                                                                                                                       |
+| Folder writer (`.executespec/`) | [`folder/ExecutespecFolderWriter.java`](src/main/java/com/navneet/executespec/folder/ExecutespecFolderWriter.java)                                                                                   |
+| Standards / ADR / Invariants    | [`standards/`](src/main/java/com/navneet/executespec/standards/), [`adr/`](src/main/java/com/navneet/executespec/adr/), [`arch/invariants/`](src/main/java/com/navneet/executespec/arch/invariants/) |
+| Cross-repo contracts            | [`contracts/`](src/main/java/com/navneet/executespec/contracts/)                                                                                                                                     |
+| Notification preferences        | [`notification/pref/`](src/main/java/com/navneet/executespec/notification/pref/)                                                                                                                     |
+| GDPR data export                | [`auth/service/UserDataExportService.java`](src/main/java/com/navneet/executespec/auth/service/UserDataExportService.java)                                                                           |
+| Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
+| LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
+| App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V186)                                                                                                                                                 |
+| Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
+| Frontend API client             | `frontend/src/lib/api.ts`                                                                                                                                                                            |
+| Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |
+| V2 eval framework               | `scripts/v2-eval.sh` + `scripts/v2-eval-specs/{low,medium,high}.txt`                                                                                                                                 |
 
 ## Current state
 

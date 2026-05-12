@@ -45,10 +45,10 @@ frontend/
 
 ## Two coexisting chromes
 
-| Chrome | Layout | Path prefix | Purpose |
-|--------|--------|-------------|---------|
-| **V2 sidebar shell** (`AppLayout`) | Left sidebar + breadcrumb header | `/runs`, `/admin/*`, `/audit`, `/invoices`, `/accounting`, `/exec`, `/org/*`, `/projects/:id/dashboard`, `/projects/:id/executions/*`, `/welcome`, `/deployments`, `/legacy/billing` | Long-form workbench surfaces (admin, billing, project dashboards). |
-| **V3 top-bar shell** (`Shell`) | Top-bar with ProjectSwitcher + theme toggle | `/projects/:slug`, `/projects/:slug/runs/:runShort`, `/projects/empty`, `/insights`, `/billing`, `/pricing`, `/settings`, `/integrations`, `/team`, `/trust`, `/library`, `/migrations`, `/exec-demo`, `/home`, `/claim` | Short-form conversation + landing surfaces. |
+| Chrome                             | Layout                                      | Path prefix                                                                                                                                                                                                              | Purpose                                                            |
+| ---------------------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| **V2 sidebar shell** (`AppLayout`) | Left sidebar + breadcrumb header            | `/runs`, `/admin/*`, `/audit`, `/invoices`, `/accounting`, `/exec`, `/org/*`, `/projects/:id/dashboard`, `/projects/:id/executions/*`, `/welcome`, `/deployments`, `/legacy/billing`                                     | Long-form workbench surfaces (admin, billing, project dashboards). |
+| **V3 top-bar shell** (`Shell`)     | Top-bar with ProjectSwitcher + theme toggle | `/projects/:slug`, `/projects/:slug/runs/:runShort`, `/projects/empty`, `/insights`, `/billing`, `/pricing`, `/settings`, `/integrations`, `/team`, `/trust`, `/library`, `/migrations`, `/exec-demo`, `/home`, `/claim` | Short-form conversation + landing surfaces.                        |
 
 Both share `useAuthStore`, `useUiStore` (theme), `useRunStore`, `useProjectStore`. V3 adds `useV3ProjectStore`. State survives navigation between chromes — users don't lose context crossing the boundary.
 
@@ -92,6 +92,7 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 ## Notable components
 
 ### Run detail
+
 - `RunDetailTabs` — main run detail with live cost polling (5s while non-terminal) + file auto-refresh + SSE event subscription.
 - `ScoreCard` + `ScoreRing` — multiplicative verifiedScore visualization (4-band colour, 132px hero ring).
 - `VerdictPill` — Shippable / Needs review / Blocked derived from build + tests + reviewer + verifiedScore. Numerics demoted to disclosure.
@@ -100,6 +101,7 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 - `InlineRunDetail` — embedded run detail in V3 project chat thread; "Update PR" button on `alreadyPushed=true` runs to re-push after a per-task retry.
 
 ### Project workbench
+
 - `ProjectDashboardPage` — 5-group tabbed dashboard (Pulse / Repos / Runs / Code / Chat).
 - `PulseTab` — last-run hero + ScoreRing + signal chips + workspace health rollup.
 - `ProjectChatPanel` — full-height chat with compaction + reset + per-bubble copy + branch override on launch.
@@ -112,6 +114,7 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 - `GeneratedDocsPanel` — Generate / Regenerate / View / Download for EXPLANATION + SETUP docs.
 
 ### Shared primitives
+
 - `Button`, `Checkbox`, `Radio` — cva variant + size system.
 - `ResponsiveModal` — focus-trap + Escape + `disableDismiss` + `hideCloseButton` + ARIA role=dialog.
 - `Tooltip` — CSS-only, 250ms delay, hover/focus reveal.
@@ -120,6 +123,7 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 - `EstimateChip` — debounced p25/p75 task + cost estimate chip under the requirement textarea.
 
 ### Theme + analytics
+
 - `useUiStore.ts` — theme slice with `setTheme(t)` / `toggleTheme()`, pre-paint `<html data-theme>` apply + localStorage persistence.
 - `analytics.ts` — thin wrapper over `posthog-js`. Enabled only when `VITE_POSTHOG_KEY` is set. Events mirror the 6-event activation funnel (SIGNUP / PROJECT_CREATED / SPEC_SUBMITTED / PLAN_APPROVED / RUN_COMPLETE / PR_MERGED).
 
