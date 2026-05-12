@@ -1,9 +1,9 @@
 # DPA flow (Data Processing Agreement)
 
-> M-020 (Wave 3) — operator-side runbook for the DPA request &
-> signature flow. Companion to the customer-facing
-> [`/dpa`](../frontend/src/pages/DpaPage.tsx) page that points
-> requesters at this process.
+> Operator-side runbook for the DPA request & signature flow.
+> Companion to the customer-facing [`/dpa`](../frontend/src/pages/DpaPage.tsx)
+> page that points requesters at this process.
+> Last reviewed: 2026-05-12 (1.0.0-M1).
 
 ## Why this exists
 

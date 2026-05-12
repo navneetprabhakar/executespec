@@ -220,12 +220,31 @@ public class SwebenchTaskService {
       }
     } catch (Exception e) {
       log.error(
-          "SWE-bench: cleanroom setup FAILED for runId={} instance={} — pipeline will run without"
-              + " container, score will be invalid",
+          "SWE-bench: cleanroom setup FAILED for runId={} instance={} — marking run FAILED to"
+              + " avoid poisoning benchmark stats (audit 2026-05-12 review item G #49)",
           runId,
           recipe.instanceId(),
           e);
       run("docker rm -f " + recipe.containerName(), 30);
+      try {
+        runRepo
+            .findById(runId)
+            .ifPresent(
+                pr -> {
+                  pr.setStatus("FAILED");
+                  pr.setStatusReason(
+                      "SWEBENCH_SETUP_FAILED: "
+                          + (e.getMessage() == null
+                              ? e.getClass().getSimpleName()
+                              : e.getMessage()));
+                  runRepo.save(pr);
+                });
+      } catch (Exception persistEx) {
+        log.warn(
+            "SWE-bench: failed to mark run {} FAILED after setup error: {}",
+            runId,
+            persistEx.getMessage());
+      }
     }
   }
 

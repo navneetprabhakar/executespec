@@ -93,9 +93,15 @@ public class ContextAgent {
 
       writeContextDoc(projectPath, input.currentContextDoc(), llmResponse, run.getRunId());
       appendDecisionsEntry(projectPath, input, run);
-      commitToMain(projectPath, run);
+      // Auto-commit DISABLED — JGit-commit against the customer's project workspace from a
+      // background pipeline thread can co-opt in-flight edits. The files are written; the
+      // caller (RunOrchestrator / project flow) handles commit via ScmPushService.
+      // Audit 2026-05-12 review item F #45.
 
-      log.info("Context Agent completed for run {}", run.getRunId());
+      log.info(
+          "Context Agent completed for run {} — files written, NOT auto-committed (handled by"
+              + " pipeline push flow)",
+          run.getRunId());
 
     } catch (Exception e) {
       log.error("Context Agent failed for run {}: {}", run.getRunId(), e.getMessage(), e);
@@ -397,26 +403,18 @@ public class ContextAgent {
     Files.writeString(p, entry.toString(), StandardOpenOption.APPEND, StandardOpenOption.CREATE);
   }
 
+  /**
+   * @deprecated Auto-commit was disabled by audit 2026-05-12 review item F #45. Direct JGit commits
+   *     against the customer's project workspace from a background thread can co-opt in-flight
+   *     edits. The pipeline's normal push flow ({@code ScmPushService.pushMultiRepo}) stages and
+   *     pushes once at run terminal. Do NOT call.
+   */
+  @Deprecated(forRemoval = true)
+  @SuppressWarnings("unused")
   private void commitToMain(Path projectPath, PipelineRun run) {
-    try (var git = org.eclipse.jgit.api.Git.open(projectPath.toFile())) {
-      git.add()
-          .addFilepattern(".agent-context/CODEBASE_CONTEXT.md")
-          .addFilepattern(".agent-context/decisions.md")
-          .call();
-
-      if (git.status().call().isClean()) {
-        log.info("Context Agent: nothing to commit for run {}", run.getRunId());
-        return;
-      }
-
-      git.commit()
-          .setMessage("[Context Agent] Update CODEBASE_CONTEXT.md after run " + run.getRunId())
-          .setAuthor("Context Agent", "context-agent@devpilot.local")
-          .call();
-
-    } catch (Exception e) {
-      log.error("Context Agent: commit failed for run {}: {}", run.getRunId(), e.getMessage());
-    }
+    log.warn(
+        "[Context Agent] commitToMain is deprecated and disabled — see audit F #45 (run {})",
+        run.getRunId());
   }
 
   private boolean hasAnythingChanged(ContextAgentInput input) {

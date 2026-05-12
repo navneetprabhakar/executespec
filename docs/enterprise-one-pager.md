@@ -17,9 +17,9 @@ executed until an engineer clicks approve.
 | Data-at-rest encryption | AES-256-GCM on all user-supplied secrets (API keys, OAuth tokens, passwords) |
 | Data-in-transit encryption | TLS 1.2+ enforced via HSTS (`Strict-Transport-Security: max-age=31536000; includeSubDomains`) |
 | Authentication | JWT access (1h TTL) + refresh cookie (7d, HttpOnly, SameSite=Lax) |
-| SSO / SAML | Google Workspace OIDC on MAX tier; Okta + Azure AD SAML on Enterprise (Wave 3) |
-| RBAC | SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER |
-| Audit logging | Every privileged action → `activity_audit` table, retained per tier (FREE 30d / PRO 90d / MAX 90d / TEAM 180d / ENTERPRISE unlimited) |
+| SSO / SAML | Google Workspace OIDC on TEAM tier; Okta + Azure AD SAML on Enterprise (Wave 3 schema shipped, wiring tracked in `sso-saml-wiring.md`) |
+| RBAC | SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (V175 cross-org) |
+| Audit logging | Every privileged action → `activity_audit` table with cryptographic chain verification, retained per tier (FREE 30d / PRO 90d / TEAM 180d / ENTERPRISE unlimited) |
 | Secret scanning in user code | `InputSanitizer` + `CodeAbuseScanner` (8-layer defense) — blocks prompt injection, crypto-mining, reverse shells, PowerShell, DNS exfil, cloud-metadata access |
 | Infrastructure | GCP us-east4 (N. Virginia); Cloud Run for previews (5-min TTL, managed HTTPS), Cloud SQL for state, Redis for gate coordination |
 | SOC 2 Type I | Scoping in progress with Vanta (target: Q3 2026) |
@@ -49,22 +49,24 @@ executed until an engineer clicks approve.
 
 ## What's available on each tier
 
-| | FREE | PRO | TEAM | MAX | ENTERPRISE |
-|---|---|---|---|---|---|
-| Monthly runs | 5 | 20 credits | 50 credits/seat (shared) | Unlimited (fair-use) | Unlimited + SLA |
-| Seats | 1 | 1 | 2-20 | 1 | Unlimited |
-| BYOK | No | No | No | Yes | Yes |
-| SSO / SAML | No | No | Google OIDC | Google OIDC + SAML | All providers + SCIM (Q1 2027) |
-| Audit log retention | 30d | 90d | 180d | 90d | Unlimited + CSV export |
-| Uptime SLA | None | None | None | 99.5% | 99.9% with credits |
-| Named support | No | No | No | No | Named CSM + P1 4h |
-| MSA / DPA | Standard Terms | Standard Terms | Standard Terms | Standard Terms | Negotiable |
-| Sub-processor approval | Implicit | Implicit | Implicit | Implicit | Right to object |
+| | FREE | PRO (HIDDEN) | TEAM | ENTERPRISE |
+|---|---|---|---|---|
+| Monthly runs | 5 (1-credit only) | 20 credits | Unlimited (BYOK) | Unlimited + SLA |
+| Seats | 1 | 1 | 2-20 self-serve | Unlimited |
+| BYOK | No | No | Yes (required) | Yes |
+| SSO / SAML | No | No | Google OIDC | All providers + SCIM (Q1 2027) |
+| Audit log retention | 30d | 90d | 180d | Unlimited + CSV export |
+| Uptime SLA | None | None | 99.5% (target, no credit) | 99.9% with credits |
+| Named support | No | No | No | Named CSM + P1 4h |
+| MSA / DPA | Standard Terms | Standard Terms | Standard Terms | Negotiable |
+| Sub-processor approval | Implicit | Implicit | Implicit | Right to object |
+
+PRO is HIDDEN from new buyers (grandfathered). Solo / MAX tiers do not exist on `dev`/`main` (V179/V185 retired both).
 
 ## Contract path
 
 1. **Evaluation:** 14-day team trial (up to 5 seats) — email `admin@executespec.ai` with work email + company name
-2. **Pilot:** 30-day paid pilot on MAX or TEAM (standard Terms, no negotiation)
+2. **Pilot:** 30-day paid pilot on TEAM (standard Terms, no negotiation)
 3. **Enterprise:** annual contract with negotiable MSA, minimum 10 seats, starts at $1,500/mo (~$75/seat for 20 seats)
 4. **Volume pricing:** 21+ seats → direct sales engagement (not self-serve)
 
@@ -87,5 +89,4 @@ On request, we can provide:
 
 ---
 
-_Last updated: 2026-04-23. This document is under active review as the platform
-progresses toward SOC 2 Type I certification._
+_Last updated: 2026-05-12 (1.0.0-M1). This document is under active review as the platform progresses toward SOC 2 Type I certification._

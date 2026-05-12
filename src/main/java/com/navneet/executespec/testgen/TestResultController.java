@@ -6,17 +6,13 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.navneet.executespec.agent.ApplySuggestionTooLargeException;
 import com.navneet.executespec.agent.ConversationAgent;
-import com.navneet.executespec.agent.model.TaskPlan;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.auth.security.RunAccessGuard;
 import com.navneet.executespec.deployment.preview.PreviewService;
 import com.navneet.executespec.deployment.preview.PreviewStatus;
 import com.navneet.executespec.report.ValidationReportService;
-import com.navneet.executespec.state.ApplySource;
 import com.navneet.executespec.state.StateStore;
-import com.navneet.executespec.state.entity.AgentTask;
 import com.navneet.executespec.state.entity.PipelineRun;
 import com.navneet.executespec.testgen.model.TestPlan;
 import com.navneet.executespec.testgen.model.TestPlanStatus;
@@ -155,7 +151,10 @@ public class TestResultController {
             .findById(result.getTestPlanId())
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Test plan not found"));
-    runAccessGuard.requireRunAccess(plan.getRunId(), userDetails);
+    // Audit 2026-05-12 review item B #18 — was requireRunAccess (any org member could mutate
+    // another user's run). markInvalid downgrades test failures, so restrict to owner +
+    // ORG_ADMIN.
+    runAccessGuard.requireRunWriteAccess(plan.getRunId(), userDetails);
 
     result.setStatus(TestResultStatus.SKIPPED);
     result.setFailureMessage(
@@ -225,10 +224,22 @@ public class TestResultController {
 
     /* V2 check removed — V2 is default */
 
-    // GA-readiness P4.1-followup — multi-tenant access guard. The endpoint is
-    // currently 410 Gone (V2 doesn't yet implement apply-test-fixes), but the
-    // guard belongs here so when V2 wires it back up the access check is
-    // already in the right place.
+    // Audit 2026-05-12 review item J #60: this endpoint historically performed a chunk of
+    // work (plan generation, plan-version increment, suggestion-task append, counter
+    // increment, state-store writes) BEFORE throwing 410 Gone, which mutated data the caller
+    // can't see / use. Short-circuit at the top so the 410 is the FIRST observable behaviour
+    // and no data is mutated. When V2 wires this back up, remove the throw and the work
+    // below proceeds normally.
+    //
+    // Auth + tenant guard run first so 401/403 fire before 410 (correct HTTP status
+    // ordering) AND so AccessGuardCoverageTest ArchUnit pin still sees a guard call on this
+    // run-scoped endpoint. The guard call is cheap (one indexed DB lookup) and we still
+    // throw 410 immediately after.
+    runAccessGuard.requireRunAccess(runId, userDetails);
+    throw new org.springframework.web.server.ResponseStatusException(
+        org.springframework.http.HttpStatus.GONE, "apply-test-fixes not yet supported in V2");
+    // Original logic preserved below for the V2 wire-up follow-up. Currently unreachable.
+    /*
     runAccessGuard.requireRunAccess(runId, userDetails);
 
     PipelineRun run =
@@ -324,5 +335,6 @@ public class TestResultController {
         newTasks.size());
     throw new org.springframework.web.server.ResponseStatusException(
         org.springframework.http.HttpStatus.GONE, "apply-test-fixes not yet supported in V2");
+    */
   }
 }

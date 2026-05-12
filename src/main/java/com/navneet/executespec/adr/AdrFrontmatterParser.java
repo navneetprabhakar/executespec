@@ -7,8 +7,9 @@ import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.navneet.executespec.util.SafeYamlLoader;
+
 import org.springframework.stereotype.Component;
-import org.yaml.snakeyaml.Yaml;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -42,7 +43,7 @@ public class AdrFrontmatterParser {
     String markdownBody = m.group(2);
     Object raw;
     try {
-      raw = new Yaml().load(yamlBody);
+      raw = SafeYamlLoader.load(yamlBody);
     } catch (Exception ex) {
       throw new FrontmatterException(List.of("YAML parse failed: " + ex.getMessage()));
     }

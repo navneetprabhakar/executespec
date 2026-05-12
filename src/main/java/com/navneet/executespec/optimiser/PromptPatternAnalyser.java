@@ -62,8 +62,13 @@ public class PromptPatternAnalyser {
       workerPatterns.add("Worker exceeding task boundary in " + boundaryViolations + " tasks");
     }
 
+    // Audit 2026-05-12 review item F #42: prompt filenames had bit-rotted to `.txt` when the
+    // canonical V2 prompts moved to `.md`. The V1 worker.txt still exists (legacy archive)
+    // but V2's worker prompt is composed via `PromptAssembler` from fragments, so this
+    // optimiser only meaningfully targets the planner+reviewer for now. Pointed at the V2
+    // canonical files so `Files.exists(resolvePromptPath(...))` is true for them.
     if (!workerPatterns.isEmpty()) {
-      patternsByPrompt.put("worker.txt", workerPatterns);
+      patternsByPrompt.put("worker.txt", workerPatterns); // V1 legacy worker — still in classpath
     }
 
     // ── Planner patterns ──────────────────────────────────────────────
@@ -83,7 +88,9 @@ public class PromptPatternAnalyser {
     }
 
     if (!plannerPatterns.isEmpty()) {
-      patternsByPrompt.put("planner.txt", plannerPatterns);
+      // Point at the V2 canonical planner prompt (outline-planner.md) — was `planner.txt`
+      // which is the V1 legacy archive that no longer drives the active pipeline.
+      patternsByPrompt.put("outline-planner.md", plannerPatterns);
     }
 
     // ── Reviewer patterns ─────────────────────────────────────────────
@@ -109,7 +116,10 @@ public class PromptPatternAnalyser {
     }
 
     if (!reviewerPatterns.isEmpty()) {
-      patternsByPrompt.put("reviewer.txt", reviewerPatterns);
+      // V2 reviewer is composed from reviewer-general.md + reviewer-wiring.md — point at the
+      // general pass which is the most likely to want patternation. Previously `reviewer.txt`
+      // which never existed in the V2 codebase (audit F #42).
+      patternsByPrompt.put("reviewer-general.md", reviewerPatterns);
     }
 
     if (patternsByPrompt.isEmpty()) return emptyPatterns();

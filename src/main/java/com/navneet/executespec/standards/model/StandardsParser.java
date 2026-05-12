@@ -6,8 +6,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import com.navneet.executespec.util.SafeYamlLoader;
+
 import org.springframework.stereotype.Component;
-import org.yaml.snakeyaml.Yaml;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -43,7 +44,7 @@ public class StandardsParser {
     if (yamlBody == null || yamlBody.isBlank()) return List.of();
     Object raw;
     try {
-      raw = new Yaml().load(yamlBody);
+      raw = SafeYamlLoader.load(yamlBody);
     } catch (Exception ex) {
       throw new ParseException(List.of("YAML parse failed: " + ex.getMessage()));
     }

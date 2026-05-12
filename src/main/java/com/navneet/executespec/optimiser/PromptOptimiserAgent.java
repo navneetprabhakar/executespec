@@ -1,6 +1,5 @@
 package com.navneet.executespec.optimiser;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -104,7 +103,15 @@ public class PromptOptimiserAgent {
         optimisePrompt(entry.getKey(), entry.getValue(), patterns, completedRun);
       }
 
-      commitToMain(completedRun);
+      // Auto-commit DISABLED — agent ran `git add src/main/resources/prompts && git commit` on
+      // the developer's working tree from a Spring scheduled task, co-opting in-flight edits.
+      // The optimiser still writes prompt-file changes to disk; operators commit them manually
+      // (or via a dedicated CI job operating on a clean checkout) after review.
+      // Audit 2026-05-12 review item F #44.
+      log.info(
+          "Prompt Optimiser updated prompts for run {} — files are written, NOT auto-committed."
+              + " Review with `git diff src/main/resources/prompts/` and commit manually.",
+          completedRun.getRunId());
 
     } catch (Exception e) {
       log.error(
@@ -226,23 +233,26 @@ public class PromptOptimiserAgent {
         : "FAILURE_RATE";
   }
 
+  /**
+   * Resolves a prompt file path. Caller is expected to pass the actual filename WITH its real
+   * extension (`.md` for V2 canonical prompts, `.txt` for V1 legacy archives). Earlier versions
+   * appended `.txt` unconditionally — which never matched anything in the V2 layout. Audit
+   * 2026-05-12 review item F #43.
+   */
   private Path resolvePromptPath(String promptFile) {
     return Path.of("src/main/resources/prompts", promptFile);
   }
 
+  /**
+   * @deprecated Auto-commit was disabled by audit 2026-05-12 review item F #44 (silently committing
+   *     to the developer's working tree from a scheduled task is a foot-gun). Kept as a reference
+   *     for future re-enabled-behind-a-flag iteration. Do NOT call.
+   */
+  @Deprecated(forRemoval = true)
+  @SuppressWarnings("unused")
   private void commitToMain(PipelineRun run) {
-    try (var git = org.eclipse.jgit.api.Git.open(new File("."))) {
-      git.add().addFilepattern("src/main/resources/prompts/").call();
-
-      if (git.status().call().isClean()) return;
-
-      git.commit()
-          .setMessage("[Prompt Optimiser] Update prompts after run " + run.getRunId())
-          .setAuthor("Prompt Optimiser", "prompt-optimiser@devpilot.local")
-          .call();
-
-    } catch (Exception e) {
-      log.error("Prompt Optimiser: commit failed for run {}: {}", run.getRunId(), e.getMessage());
-    }
+    log.warn(
+        "[Prompt Optimiser] commitToMain is deprecated and disabled — see audit F #44 (run {})",
+        run.getRunId());
   }
 }

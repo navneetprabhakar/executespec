@@ -19,12 +19,12 @@ import com.navneet.executespec.migration.repository.MigrationDryRunCacheReposito
 import com.navneet.executespec.migration.repository.MigrationRecipeRepository;
 import com.navneet.executespec.migration.repository.MigrationSlotRepository;
 import com.navneet.executespec.migration.repository.MigrationVariantRepository;
+import com.navneet.executespec.util.SafeYamlLoader;
 
 import org.springframework.core.io.Resource;
 import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import org.yaml.snakeyaml.Yaml;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -94,7 +94,7 @@ public class MigrationRecipeSeeder {
   @SuppressWarnings("unchecked")
   private boolean loadOne(Resource r) throws Exception {
     try (InputStream in = r.getInputStream()) {
-      Map<String, Object> map = new Yaml().load(in);
+      Map<String, Object> map = (Map<String, Object>) SafeYamlLoader.load(in);
       if (map == null || map.get("slug") == null) {
         log.warn("[R-337] {} missing slug — skipped", r.getFilename());
         return false;

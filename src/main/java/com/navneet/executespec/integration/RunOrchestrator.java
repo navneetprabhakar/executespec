@@ -3318,6 +3318,14 @@ public class RunOrchestrator {
       // Swap the run's provider to ANTHROPIC for the report call only (narrative-only
       // output — provider doesn't affect accuracy), then restore. Falls through if
       // Anthropic key isn't configured — report just won't generate for that run.
+      // Audit 2026-05-12 review item E #37: mutating run.aiProvider for the call window is a
+      // billing-attribution hazard — any code reading run.aiProvider between the swap and the
+      // finally-restore (including any saveRun() within ValidationReportService) sees the
+      // wrong provider. The mutation is in-memory only (Spring won't auto-persist on field
+      // set), but it remains fragile. Proper fix: change
+      // validationReportService.generateAndPersist to take an explicit provider override
+      // parameter, leave the entity untouched. Logging the mutation here so an operator
+      // tail can audit it.
       String originalProvider = run.getAiProvider();
       boolean rerouted = false;
       if ("OPENAI".equalsIgnoreCase(originalProvider)) {
@@ -3325,14 +3333,20 @@ public class RunOrchestrator {
         rerouted = true;
         log.info(
             "RunOrchestrator run={} validation report rerouted OPENAI → ANTHROPIC "
-                + "to bypass Spring AI 1.1.4 extra_body bug",
+                + "(in-memory only) to bypass Spring AI 1.1.4 extra_body bug — audit E #37",
             runId);
       }
       try {
         validationReportService.generateAndPersist(runId, input);
         log.info("RunOrchestrator run={} validation report generated", runId);
       } finally {
-        if (rerouted) run.setAiProvider(originalProvider);
+        if (rerouted) {
+          run.setAiProvider(originalProvider);
+          log.info(
+              "RunOrchestrator run={} validation report — restored aiProvider to {}",
+              runId,
+              originalProvider);
+        }
       }
     } catch (Exception e) {
       log.warn("RunOrchestrator run={} validation report failed: {}", runId, e.getMessage(), e);

@@ -1,7 +1,9 @@
-# codereview/ — Whole-Repo Code Review Agent
+# `codereview/` — Whole-repo Code Review agent
 
-> v2.6.4. Paid-tier feature (FREE → 403; PRO=4/month, TEAM/MAX/ENTERPRISE=unlimited).
-> Lives on `feature/code-review-agents`, NOT yet merged to dev/main.
+> Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
+>
+> Paid-tier feature (FREE → 403; PRO=4/month, TEAM/ENTERPRISE=unlimited). Schema in V172.
+> Phase 4 of the [`finding/FindingPatchSubmitter`](../finding/) autofix surfaces — `CodeReviewAutofixService` dispatches a patch-mode run per severity bucket on demand.
 
 ## What it does
 

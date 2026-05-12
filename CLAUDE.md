@@ -1,1665 +1,447 @@
 # Project: ExecuteSpec
 
 > This file is read by Claude Code at session start. Keep it accurate.
->
-> **Current state — 2026-05-10**
->
-> - **Live migration head:** V183 on `dev`/`main`. V184 (this session) widens
->   `agent_task.last_llm_failure` from `VARCHAR(255)` to `TEXT` and lands on
->   `fix/mobile-responsive-ui-2026-05-10` (PR #95).
-> - **V143 (`product_split.sql`) + V179 (revert):** the consumer/B2B surface
->   split was prototyped (V143) and rolled back (V179, "Single-surface
->   retirement, 2026-05-06"). All accounts now on the single `executespec`
->   surface; the historical V143 entry below is preserved for context but
->   the schema state is "as if V143 never happened" post-V179.
-> - **V144 (per-seat TEAM tier reinstatement):** landed on dev/main. The
->   live tier ladder is **FREE / PRO (HIDDEN) / TEAM (per-seat $49 / 2-20
->   seats) / MAX ($29/mo BYOK unlimited) / ENTERPRISE** — i.e. the v2.6.1
->   shape. V141's "drop per-seat TEAM, rename MAX → TEAM" was reverted by
->   V144; the older sections below that still say "post-V141: FREE/PRO/
->   TEAM ($29 BYOK)/ENTERPRISE" are stale and shouldn't be relied on.
-> - **Verified-score UI is single-score** as of 2026-05-10 (commit
->   `6f6feeff` on PR #95) — `ValidationReportPanel` + `ScoreCard` no
->   longer surface a secondary `Est. N` LLM-estimate chip; the
->   deterministic `verifiedScore` (V106) is the only number rendered.
->   `accuracyScore` is kept as a legacy fallback for pre-V106 rows.
-> - **Dev-run RCA (7483896a, 2026-05-10):** 3 of 4 problem tasks (T12
->   FAILED, T17 PARTIAL, T19 PARTIAL) were `agent_task.last_llm_failure`
->   VARCHAR(255) overflows during the COMPLETE/PARTIAL DB flip — the
->   worker actually finished but `saveAndFlush` threw on the
->   soft-completion `softWarnReason` (Worker stopped without completion
->   + 240-char `finalAssistantText` tail = up to ~390 chars). T18 alone
->   was a genuine `Outcome.COMPLETED_BY_STAGNATION` (12-iter non-write
->   watchdog from `feature/worker-runaway-fixes` Fix B). V184 fixes the
->   overflow class. Defensive 4000-char cap added in
->   `SequentialExecutor.persistTaskStatus` so the column never absorbs
->   unbounded router stack traces. Per-task retry (`POST /runs/{id}/
->   tasks/{taskId}/retry`) does NOT auto-push to the existing PR
->   today — the v2 push code only runs in the main `runPipeline` flow,
->   not in `RunOrchestrator.retryTask`. New `Update PR` button on
->   `InlineRunDetail` (when `alreadyPushed=true`) closes that gap so
->   the user can re-push manually after a retry without bouncing to
->   the standalone run page.
-> - **AccuracyAssessmentService LLM read-budget hallucinations** (P3.2
->   follow-up): `RunOrchestrator.synthesiseReviewIssues` correctly
->   stamps SYNTH-ACC-* IDs on accuracy-derived issues, and
->   `countUnfixedCritical` filters those out of the verifiedScore
->   penalty. But `extractIssues` (the path that builds
->   `validation_report.issues_json`) **dropped the IDs** when
->   translating `ReviewIssue` → `ReportIssueDTO`, so the dashboard
->   panel displayed null-id null-category criticals as if they were
->   reviewer-flagged. Fixed by setting `source = "ACCURACY_LLM"` (vs
->   `"REVIEWER_AGENT"`) on SYNTH-ACC-* derived issues so the UI can
->   group them. Plus a defense-in-depth filter in
->   `countUnfixedCritical` that also drops null-id criticals whose
->   description matches AccuracyAssessmentService's exact output
->   prefixes (`Spec requirement not implemented:`, `Spec requirement
->   only partially implemented:`, `Endpoint from spec not implemented:`).
->
-> **2026-05-08 (evening) — pipeline reliability + cost / cache audit batch on
-> `feature/swebench-adapter` (PR #88, NOT yet merged).** 14 additional commits
-> on top of the morning's 8-commit batch. Validated empirically across two
-> SWE-bench Lite matrices (5 medium × 3 providers + 5 hard × 3 providers).
->
-> **Empty-patch + FINAL_BUILD_FAILED kill-chain.** 30-day production data
-> showed FINAL_BUILD_FAILED dominating PARTIAL outcomes (16/22). RCA: the
-> reviewer was running but emitting empty completionSummary because it had
-> no concrete spec to fix against. Three layered fixes:
->
-> - `91779ccd` — `ReviewerAgent` captures pre-pass build state; when failing,
->   prepends the verbatim build error to the user prompt as the SWE-bench
->   "test_patch is the spec" pattern. Adds `requireBuildVerification` gate
->   on `WorkerTaskRequest`: refuses `completeTask` unless `buildProject`
->   returned exit=0 within `BUILD_VERIFICATION_RECENCY_ITERS=5` (mirrors
->   the V182 layer-3 `requireTestVerification` gate from PATCH mode).
-> - `fbaa30be` — per-task RETRY in `SequentialExecutor` now sets
->   `requireBuildVerification=true` on the second attempt (the build error
->   is the explicit spec on retry; first attempt unchanged).
-> - `e9d0b6e8` — HIGH-complexity tasks gain a 2nd retry attempt when
->   retry-1 still fails. `LOW`/`MEDIUM` keep 1-retry budget.
->
-> **Empty-patch fix layer (Lever A + B).** SWE-bench data showed
-> sqlfluff-1733 producing 0-byte patches across baseline + 2 reruns
-> (75-iter cap exhausted on investigation, never wrote anything). Two
-> watchdogs in `WorkerAgent`:
->
-> - **Lever A — force-edit watchdog**: at `0.7 × maxIter` with
->   `totalWriteCalls == 0`, inject a `UserMessage` ("investigation phase
->   over, commit to ANY edit now"). UserMessage (NOT SystemMessage) so
->   Gemini's implicit cache prefix isn't invalidated. Targets
->   investigation paralysis without growing iter budget.
-> - **Lever B — best-guess salvage**: when iter-limit OR budget-exceeded
->   fires AND `totalWriteCalls == 0`, make ONE final LLM call asking for
->   "the single best-guess writeFile/editFile, even wrong-file beats
->   empty patch." Validated: hard SWE-bench matrix's only zero-write
->   failure (sqlfluff-1733/Gemini hit budget at $4) is now the exact
->   case the new BUDGET_EXCEEDED salvage path catches.
->
-> **Per-provider cost gap (validated empirically 2026-05-08).** SWE-bench
-> input-token data revealed Gemini consumes 20-100× more input vs Anthropic
-> on identical work. Three fixes:
->
-> - `dda33577` — Gemini cache prefix preservation. Stagnation warning is
->   now `UserMessage` instead of `SystemMessage`. `GeminiNativeToolClient`
->   concatenates every SystemMessage into `systemInstruction`; appending
->   one mid-task mutates the cache prefix and invalidates implicit prompt
->   caching. UserMessage stays in `contents[]`. Empirically:
->   `gemini-3-pro-preview` patch-mode now hits 41-49% implicit cache
->   (was 0% pre-fix). Plus always-on `cache_read_input_tokens` metadata
->   on Gemini + OpenAI clients so `RunCostTracker` per-call logs
->   consistently show `cacheRead=N` for all 3 providers.
-> - `c2a36d2b` — OpenAI 0.7× iteration cap LIFTED. Original premise
->   (Spring AI re-shipping history every call, no auto-cache) is stale —
->   V2 OpenAI uses `OpenAiNativeToolClient` which preserves prefix
->   stability; auto-cache validated at 43% utilization on production
->   runs. HIGH non-project tasks back at 75 iters (was 53 = ceil(75 ×
->   0.7)).
-> - `e9d0b6e8` (Gemini reviewer→Flash) — `ReviewerAgent.runPass` now
->   resolves Gemini provider's reviewer to WORKHORSE tier
->   (`gemini-3-flash-preview`, 1024-token implicit-cache threshold)
->   instead of PLANNING tier (`gemini-3-pro-preview`, 4096 threshold).
->   Fixes the 0% Pro-reviewer cache hit rate empirical observation.
->   Anthropic + OpenAI reviewers stay on PLANNING.
->
-> **Iteration cap calibration.**
->
-> - `e9d0b6e8` — PATCH mode + BUILD HIGH iter cap 75 → 120. HIGH
->   stagnation thresholds tightened 22/32 → 18/26. Real ceiling is the
->   per-run cost cap; iter cap becomes defense-in-depth alongside Lever
->   A/B.
-> - **Per-provider tuning** (post-hard-matrix RCA): Anthropic 150,
->   OpenAI 100, Gemini 120. Derived from output-token distribution —
->   Anthropic uses iters efficiently (32-67K output), OpenAI thin-output
->   terminates early regardless (1-2K), Gemini middle. Per-provider cap
->   in `PatchAgent.iterCapFor(provider)`.
->
-> **Cost-cap policy.**
->
-> - `36bf9c14` — `DEFAULT_PATCH_HARD_CAP_USD` $4 → $8. Hard-matrix data
->   showed Gemini hitting BUDGET_EXCEEDED at $4.06-$4.18 (within $0.20
->   of cap, strangling near-completion runs). $8 gives Pro-class models
->   real headroom on hard SWE-bench instances; protection against
->   runaway loops is now ITER_LIMIT (120) + Lever A + Lever B.
-> - `d5198f8a` + `a258466c` — BYOK cost-cap exemption.
->   `ApiKeyResolver.isOwnKeysMode(userId)` returns true when the org's
->   `keySourceMode=OWN_KEYS`. When true, `RunOrchestrator.persistEstimate`
->   AND `runPatchPipeline` skip setting `hardCapUsd` (customer pays
->   their own API bill; we shouldn't cap on ours). HYBRID + SYSTEM still
->   capped (can fall back to platform spend mid-run). Customer's
->   voluntary `userCostCap` (typed in NewRunModal) IS still honoured —
->   their explicit choice.
->
-> **Patch-mode test-verification gate strengthened.** WorkerAgent
-> previously counted "runTests was called with `ok:true` envelope" as
-> satisfying the V182 layer-3 gate. RCA on hard matrix showed 3/5 OpenAI
-> failures running tests, seeing FAIL, then calling completeTask anyway —
-> gate let it through. Tightened: gate now requires the envelope to
-> contain `"failed":[]` AND `"errored":[]` AND `"exit_code":0` (i.e.
-> tests ACTUALLY passed). 2026-05-08.
->
-> **Empirical results (2 matrices, ~$45 spend total):**
->
-> | Matrix | Anthropic | OpenAI | Gemini | Combined |
-> | :-- | :-- | :-- | :-- | :-- |
-> | Medium (5 instances × 3 providers) | 60% | 60% | 80% | 67% (10/15) |
-> | Hard (5 instances × 3 providers) | 80% | 40% | 60% | 60% (9/15) |
->
-> sqlfluff-1733 (the canonical 0/3 baseline empty-patch case) → 1/3
-> RESOLVED on Anthropic post-fix. pyvista-4315 was 0/3 in BOTH matrices
-> — universally hard, documented as out-of-scope for current pipeline.
-> Test-verification-tightened gate would have caught all 3 OpenAI
-> wrong-fix failures (post-fix; not yet validated).
->
-> **Telegram bridge.** Operator-only bidirectional messaging via Telegram
-> bot (chat_id=6475810501, bot 8489535450). Push: heartbeat every 600s
-> + on every status-count change. Pull: `getUpdates` polled every 120s,
-> writes to `/tmp/tg-inbox.log`. Used as out-of-band channel for
-> long-running matrix tracking. Operator-only; no production user-facing
-> integration.
->
-> **2026-05-08 (morning) — SWE-bench adapter + patch-mode pipeline + 4
-> autofix surfaces on `feature/swebench-adapter` (PR #88, NOT yet
-> merged).** 8 commits, ~3000 LOC.
-> Validated: Anthropic Sonnet 4.6 + new patch-mode pipeline RESOLVES
-> `pylint-dev__astroid-1268` on the official SWE-bench evaluator (first time
-> ExecuteSpec scored on a public SWE benchmark). 10×3 cross-provider matrix
-> in flight on dev set.
->
-> **What it adds:**
->
-> 1. **SWE-bench adapter** (`swebench/` package) — submits SWE-bench Lite
->    instances as PipelineRuns, captures `git diff HEAD` from the cleanroom
->    container, emits `preds.json` for the official harness. SUPER_ADMIN-gated
->    `POST /api/admin/swebench/run`.
->
-> 2. **Patch mode** (`RunMode.PATCH` + `agent/PatchAgent`) — second pipeline
->    shape on V2. Single thin-agent loop, 75-iter cap, forced PLANNING tier
->    (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro). Skips classifier / planner /
->    executor / reviewer entirely. Build mode (`RunMode.BUILD`, the default)
->    untouched — every product entry point keeps the existing flow.
->
-> 3. **Three structural layers** on patch mode:
->    - **Layer 1 — failing-test injection**: SwebenchTaskService runs FAIL_TO_PASS
->      pytest in container at `onRunStarted`, prepends verbatim output to
->      `userRequest` as ground truth. `bash -lc` for conda env activation.
->      Single biggest signal-injection in the harness literature (SWE-agent
->      does this; mini-swe-agent doesn't).
->    - **Layer 2 — `RunTestsTool`** (new tool): structured pytest with parsed
->      envelope (`{summary, passed:[], failed:[{test_id,message}], errored:[],
->      raw_tail}`). Routes via container store same as ShellTool.
->    - **Layer 3 — `completeTask` gate**: `WorkerTaskRequest.requireTestVerification`
->      flag; PatchAgent sets it true. WorkerAgent loop tracks `lastTestRunIter`
->      and refuses `completeTask` if outside `TEST_VERIFICATION_RECENCY_ITERS=5`.
->      Programmatic enforcement, not prompt nudge.
->
-> 4. **Four customer-facing autofix surfaces** — all routed through one shared
->    `FindingPatchSubmitter` (`finding/` package + V183 `triggered_by_finding`
->    column). The submitter dedupes per finding key, dispatches with
->    `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline`
->    auto-pushes via `scmPushService.push()` on terminal:
->
->    | Phase | Surface | UX |
->    |-------|---------|-----|
->    | 1 — `prreview/PrReviewAutofixService` | PR Review verdict popover | "Autofix N comments" → patch pushes to PR head branch via `branchOverride` |
->    | 2 — `project/techdebt/TechDebtFixService` | TechDebtPanel category rows | "Fix" per category → fresh PR per category |
->    | 4 — `codereview/CodeReviewAutofixService` | CodeQualityPanel severity chips | "N CRITICAL" / "N MAJOR" / etc. → one PR per severity |
->    | 3 — `project/pr/CiFailureAutoFixService` (refactored) | GitHub `check_run` webhook | Auto-fires on PR CI failure (flag-gated `ci.autofix.enabled`, default OFF; max 3 attempts/PR) |
->
->    Phase 3's webhook stays OFF until SWE-bench matrix data confirms patch-
->    mode resolved% is high enough to trust the unattended bot path.
->
-> 5. **UX fixes** on `RunDetailPage` (V3) addressing operator notes from
->    watching live patch-mode runs:
->    - Files refresh every 5s while non-terminal (was: only on RUN_STATUS SSE)
->    - Folder tree replaces flat list of changed files (existing `FileTree`
->      reused)
->    - Goal/userRequest expand-able (V2 `<line-clamp-8>` removed; V3 new
->      `RunSpecBlock` with line/char counts + Show all + Copy)
->
-> Tests: `mvn test` 1047/1047 green throughout. Frontend build 3672 modules
-> clean. PR #88 has the full breakdown + empirical numbers.
->
-> **Key entry points:**
-> - Bench-mode: `POST /api/admin/swebench/run` + `POST /api/admin/programbench/run`
-> - Patch-mode dispatch: `RunOrchestrator#submitRun` (20-arg overload with
->   `runMode` parameter)
-> - Autofix surfaces: see [phase table above]
-> - Patch flow: `RunOrchestrator.runPatchPipeline` (skips planner/reviewer)
-> - Patch agent: `agent/PatchAgent`
-> - Tools registry: `tool/ToolRegistry.bindForWorker(ctx)` (excludes
->   `gitCommit`)
-> - Finding submitter: `finding/FindingPatchSubmitter#submit(Finding)`
->
-> **2026-05-07 — ProgramBench RCA fix batch on
-> `fix/programbench-workspace-path-and-classifier`, NOT yet merged.**
-> 3 cmatrix runs against ExecuteSpec V2 on dev (anthropic, 2026-05-07
-> evening) all came back PARTIAL with `verifiedScore=30` — vs the
-> standalone mini-swe-agent baseline of 98. RCA on the 3 runs found 4
-> bugs, 3 fixed in this batch (the 4th, stagnation cascade, is
-> downstream of the others and self-resolves):
->
-> 1. **Bug A — `SmartClassifierAgent` prompt path stale.** The V2/V3
->    unification renamed `prompts/v2/` → `prompts/`, but
->    [agent/SmartClassifierAgent.java:324](src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java:324)
->    still loaded `"v2/classifier.md"`. The LLM verifier silently
->    skipped on every run; the heuristic-only verdict misclassified
->    cmatrix as MEDIUM (4-task fragment) instead of (likely) SINGLE_SHOT.
->    Fixed by changing the path to `"classifier.md"`.
-> 2. **Bug B — Workspace path divergence (the primary cause).**
->    `ProgramBenchTaskService` bind-mounted
->    `/var/programbench/workspaces/<task-epoch>/` into the cleanroom
->    container as `/workspace`, but the V2 worker writes to
->    `<agent.workspace>/<runId>/` (= `/opt/app/workspace/<runId>` on
->    dev) — a DIFFERENT host directory. `Read/Write/Edit/ListFiles`
->    tools went straight to host fs (the V2 path);
->    `ShellTool`/`BuildProjectTool` routed via `docker exec` and saw
->    the bind-mount path. Files written by the worker (e.g. 21KB
->    cmatrix.c on run 25a218aa) never appeared inside the container.
->    The build smoke `chmod +x ./compile.sh && ./compile.sh` failed
->    with "No such file or directory" on every run. Fix: rewrite
->    `ProgramBenchTaskService` to do all docker setup INSIDE the
->    `RunStarted` event listener, using
->    `<agent.workspace>/<runId>` as both the bind-mount source AND
->    the V2 worker's host workspace — they're now the same directory.
->    `WorkspaceInitService.ensureRunWorkspace` runs first inside
->    `submitRun`, creating `.git/.gitignore/.gitattributes`; the
->    listener then `docker cp`'s the cleanroom files on top, then
->    `docker run -d -v <agent.workspace>/<runId>:/workspace`. After
->    the listener returns, the async pipeline starts — every tool sees
->    the same files. ~30 LOC change.
-> 3. **Bug D — `chmod` blocked in shell sandbox.** The LOW
->    `ALLOWED_PREFIXES` list in `tool/ShellSandboxPolicy.java`
->    deliberately excluded `chmod` ("chains unknown binaries"). In
->    practice every binary the worker can chain is already in the
->    allowlist (gcc, cargo, go, mvn, etc.) and forbidding chmod broke
->    the legitimate `chmod +x compile.sh` flow. Fix: add `chmod` to
->    `ALLOWED_PREFIXES`. Defensive guards added: a new
->    `BLOCKED_PATTERNS` regex catches chmod against system dirs
->    (`/etc`, `/usr`, `/var`, `/root`, `/boot`, `/sbin`, `/bin`,
->    `/opt`, `/sys`, `/proc`, `/dev`, `/run`); BLOCKED_COMMANDS
->    entries lowercased to actually match (`"chmod -R 777 /"` had
->    capital R but `normalized` is lowercased before `contains` — a
->    latent case bug; the entry was silently never firing. New
->    coverage adds `"chmod -r 777 /"`, `"chmod 777 /"`,
->    `"chown -r"`). Within workspace, chmod can only flip permission
->    bits on files the worker already owns; in cleanroom +
->    `--network none`, even dangerous chmod has no exfiltration path.
-> 4. **Bug C — Stagnation cascade.** Workers hit
->    `Outcome.COMPLETED_BY_STAGNATION` (12-iter non-write force-
->    terminate from `feature/worker-runaway-fixes`) on every cmatrix
->    task because they couldn't validate (B) or chmod (D), so they
->    burned non-write iterations exploring then got killed.
->    Self-resolves once B+D land — verify by re-running cmatrix and
->    watching `STAGNATION_FORCE` counts drop.
->
-> Tests: 1038/1038 unit suite green. New `ShellSandboxPolicyTest`
-> coverage adds chmod-allow + chmod-system-dir-block + chmod-bare-root
-> tests. Format clean (`mvn spotless:check`). Expected effect on next
-> cmatrix submit: score 30 → 80–95 to match the standalone baseline of
-> 98. Verification cost ~$1 across 3 providers.
->
-> **2026-05-06 — GA-readiness Phase 1 (quality scoring fix) shipped on
-> `feature/project-cost-pool-tuning`, NOT yet merged.** Operationalises
-> §P1.1 + §P1.2 of `docs/plans/pending-ga-readiness-90-day-execution-plan.md`.
-> The audit on run `0444c95f` (project ppl-ai, dev) found `verifiedScore=50`
-> on a run with `finalBuildPassed=true` + `reviewerVerdict=FIXED_ISSUES` +
-> `endpointCoverage.coveragePercent=100`. The documented formula yields 75;
-> the persisted value was 50. Audit traced the −25 gap to two compounding
-> artefacts:
->
-> 1. **AccuracyAssessmentService LLM read budget too small** (P1.1).
->    Per-file content cap was 2,500 chars head-only — multi-endpoint
->    routers (FastAPI / Express with 5+ handlers) showed only imports +
->    first 2 endpoints, then the LLM emitted "controller exists but
->    content not readable" for the others (14× on run 0444c95f). Fix:
->    `buildKeyFileSnippets` now uses 10,000-char per-file cap with
->    head-6K + tail-3K truncation when files exceed it, plus a 100K total
->    snippet ceiling so token cost stays predictable. New marker text
->    "... [truncated N chars in the middle; file is M chars total] ..."
->    is recognised in the SYSTEM_PROMPT so the LLM treats it as PARTIAL,
->    not MISSING. Read errors ("ACCESS DENIED:" / "Cannot read") are
->    filtered before reaching the LLM. New `truncateForSnippet` static
->    helper covered by 6 tests in
->    `AccuracyAssessmentTruncateForSnippetTest`. The selection layer
->    (`inferKeyFilePaths`) was already hardened by R-343 + b171fa52 and
->    needed no change.
-> 2. **`countUnfixedCritical` penalised LLM read-budget bugs** (P1.2).
->    `RunOrchestrator.synthesiseReviewIssues` translates AccuracyReport's
->    `missingRequirements` and `endpointCoverage.missing` into CRITICAL
->    `SYNTH-ACC-MISS-*` / `SYNTH-ACC-EP-*` ReviewIssues (capped at 5
->    each). Those then fed the 5×N verifiedScore penalty — so the same
->    read-budget bug that produced the false partials also dragged the
->    headline number down by up to 25 points. Fix:
->    `ValidationReportService.countUnfixedCritical` now filters out IDs
->    starting with `SYNTH-ACC-` (LLM-derived). Real reviewer signals
->    (`SYNTH-BUILD-*` for build failures, `SYNTH-REV-*` for unresolved
->    verdicts, plus uncategorised LLM-flagged criticals) keep counting.
->    `computeVerifiedScore` gains a 6-arg overload taking
->    `endpointCoveragePercent` — bonus +10 when ≥95% so deterministic
->    endpoint delivery credits the headline number. Old 5-arg overload
->    delegates with `null`. 8 new tests in
->    `ValidationReportServiceCountUnfixedCriticalTest` + 8 new tests in
->    `ValidationReportServiceVerifiedScoreTest` (incl. `run_0444c95f_audit_regression_case`).
->
-> Net effect on the 0444c95f shape: 40 base + 20 build + 0 tests + 15
-> FIXED_ISSUES + 10 endpoint-coverage − 0 unfixed-critical = **85**, up
-> from the persisted 50. Backfill of historical runs deferred to a P1.2
-> follow-up commit (idempotent; not blocking the read-budget fix).
-> Mvn 42/42 green on the new + existing scoring tests.
->
-> **2026-05-06 — GA-readiness P3.1 (cost cap fix) + P4.1 (multi-tenant
-> guard ArchUnit pin) on `feature/project-cost-pool-tuning`.**
->
-> **P3.1 — `WorkerAgent` budget exceeded outcome fix.** The hard-cap
-> enforcement path (lines 215–238 of `WorkerAgent`) was already calling
-> `recordTerminal(BUDGET_EXCEEDED, ...)` for metrics but returning
-> `errorResult(...)` which hardcodes `Outcome.ERROR`. The metric and the
-> WorkerResult disagreed — `SequentialExecutor` couldn't distinguish a
-> router crash from a cost-cap stop. Replaced the early-return with a
-> direct `WorkerResult.builder().outcome(BUDGET_EXCEEDED)` so the
-> outcome is now consistent. New `WorkerAgentHardCapTest` (5 tests)
-> pins the contract: (a) iter-3 over-cap → `BUDGET_EXCEEDED`, (b) under
-> cap → no premature termination, (c) null cap → no enforcement, (d)
-> zero cap → no enforcement, (e) iter-1 already-over-cap → terminate at
-> iter 1. All 5 green.
->
-> **P4.1 — `AccessGuardCoverageTest` ArchUnit drift detector** at
-> `src/test/java/com/navneet/executespec/arch/AccessGuardCoverageTest.java`.
-> Audit Risk #5 (catastrophic): every controller has to remember to
-> call a tenant access guard, and a single missed call = data leak. The
-> test scans every `@*Mapping` method on every `@RestController` /
-> `@Controller` whose URL path contains `/runs/{`, `/projects/{`,
-> `/executions/{`, `/launches/{`, or `/repos/{` and verifies it calls
-> either the canonical `RunAccessGuard` / `ProjectAccessGuard` OR a
-> method matching the regex `^(require|requires|assert|ensure|check|authorize|loadFor|load[A-Z][a-zA-Z]*For)[A-Z][a-zA-Z]*$`
-> (covers local guard patterns like `requireRunAccess` /
-> `requireChatAccess` / `loadRepoForRead`). On first run, found **37
-> legacy methods** without a guard — locked in the `KNOWN_LEGACY_DRIFT`
-> set as documented tech debt with migration order spelled out in the
-> plan doc's §P4.1-followup. New entries to that set fail the build
-> (catches regressions today). Stale entries (controllers migrated /
-> removed) also fail (keeps the legacy ledger honest). 6 entries are
-> in `ALLOWLIST` for `ProjectSharePublicController` (public-by-design,
-> token bearer is the auth). Test runs in ~2.4s.
->
-> Commit: `feat(scoring+arch)` will land both P3.1 and P4.1 as a single
-> coherent batch on top of the P1 commit.
->
-> **2026-05-06 — GA-readiness P2.1 + P2.3 + P2.4 (pricing ladder rewrite)
-> on `feature/project-cost-pool-tuning`.** Closes audit Risk #7 — the
-> FREE-to-$78 conversion chasm — with the lowest-cost-of-entry SOLO tier
-> at $29/mo (managed) un-hidden + annual rows + founder pricing schema.
->
-> **P2.1 — V176 un-hides PRO as Solo.** Migration sets
-> `tier_config.PRO.display_name='Solo'`, `lifecycle_state='LISTED'`,
-> `monthly_run_limit=30` (was 20). Inserts NEW billing_plan rows "Solo
-> Monthly USD" ($29) + "Solo Monthly INR" (₹2,499) — the old "Pro
-> Monthly *" rows stay HIDDEN as before so grandfathered PRO subscribers
-> renew on those untouched. Frontend `PlansPage.tsx` `tierOrder` updated
-> from `['TEAM']` to `['PRO', 'TEAM']` (Solo first, cheapest paid);
-> `PlanCard.tsx` derives the visible label from `plan.name` so "Solo
-> Monthly USD" renders as "Solo" while older "Pro Monthly USD" rows
-> still render as "Pro" for grandfathered display.
->
-> **P2.3 — V177 Solo Yearly billing_plan rows.** $289/yr (USD) +
-> ₹24,890/yr (INR) at 17% annual_discount_pct ("two months free"),
-> matching V146's existing TEAM/MAX yearly shape. The /plans Annual
-> toggle (already shipped in V146 + frontend) now picks them up.
->
-> **P2.4 — V177 founder_pricing_discount + allocation schema.** Two
-> tables (`founder_pricing_discount` + `founder_pricing_allocation`)
-> + a singleton "FOUNDER50_SOLO_LIFETIME" seed row (50% off, max 100,
-> lifetime, active, Stripe coupon ID NULL until ops creates the
-> coupon). New entity classes `FounderPricingDiscount` +
-> `FounderPricingAllocation`, repos
-> `FounderPricingDiscountRepository` (with `findByIdForUpdate` PESSIMISTIC_WRITE
-> lock) + `FounderPricingAllocationRepository`. New service
-> `FounderPricingService.tryAllocate(userId, orgId, tier)` — atomic
-> check-capacity + increment + record-allocation under the row lock so
-> concurrent checkouts can't double-spend a slot. Returns
-> `AllocationResult.{Granted, NoOffer, SoldOut, Inactive}` sealed
-> interface. Lifetime semantics: re-subscribe by the same user returns
-> the existing allocation without bumping the counter (so churn doesn't
-> cost a slot). Revoke flow decrements + un-revokes if used. 12 unit
-> tests in `FounderPricingServiceTest` pin the contract incl. the
-> race path "active at lookup, inactive when locked → returns Inactive".
->
-> **Frontend** — `PlansPage.tsx` fetches `/api/billing/founder-pricing/PRO`
-> on mount (returns 204 when no offer, JS folds to null), then passes
-> the result as `founderOffer={...}` into the SOLO `PlanCard`.
-> `PlanCard.tsx` renders an amber `{discountPct}% FOUNDER · {N} LEFT`
-> badge when the prop is non-null and the tier matches. The badge
-> shows `remainingCapacity` only — never the raw current/max counts
-> (anti-social-engineering posture from `BillingController.FounderOfferDto`).
->
-> **Outstanding for P2.4 to actually charge the discount:**
-> 1. Ops creates the `FOUNDER50_LIFETIME` coupon on Stripe + Razorpay
->    offer; populates `stripe_coupon_id` / `razorpay_offer_id` on the
->    seeded discount row via SUPER_ADMIN endpoint or psql.
-> 2. `BillingService.subscribe` pre-checkout — call
->    `founderPricingService.tryAllocate(userId, orgId, plan.tier)`,
->    forward the coupon ID into the Stripe/Razorpay subscription create
->    if `Granted`. Tracked as P2.4-followup; the schema + service +
->    test surface ship now so the wiring is a few-line follow-up.
->
-> Frontend build: ✓. Backend `mvn test` 97 tests across our touched
-> surfaces — all green (P1 + P3.1 + P4.1 + P2.4 service).
->
-> **2026-05-06 — GA-readiness P3.2 (cost-cap progress bar) + P4.2 (SLO
-> doc) + P5.4 (GDPR data-export) + P4.1-followup partial (2 of 37
-> guards migrated) on `feature/project-cost-pool-tuning`.**
->
-> **P3.2 — visible cost-cap progress bar.** New
-> `frontend/src/components/runs/CostProgressBar.tsx` renders inside the
-> `RunDetailTabs` Credits panel for ALL users (not gated on
-> SUPER_ADMIN). Three-threshold horizontal bar (green 0-80%, amber
-> 80-100%, red ≥100%) with aria-progressbar attributes for screen
-> readers. Falls through silently when `hardCapUsd` is null. The
-> "Stop at $X" customer override is deferred to a P3.2-followup that
-> needs RunRequest field + PipelineRun column.
->
-> **P4.2 — SLO documentation.** New `docs/operations/slos.md` —
-> 5 SLOs with measurement queries, target / alert thresholds, and
-> ownership: (1) run terminal in 15min ≥95%, (2) verified-score
-> correctness ≥90% (weekly random-sample audit), (3) cost estimate
-> within ±30% on ≥80% of runs, (4) webhook in 60s ≥99%, (5) hot-path
-> GET 5xx <0.5%. GA cutover gate: all 5 GREEN over 30 consecutive
-> days. Alert YAML rules + Grafana dashboards land alongside
-> PagerDuty wiring in P4.2-followup.
->
-> **P5.4 — GDPR data-export endpoint.** New
-> `auth/service/UserDataExportService.java` builds a ZIP bundle of
-> the requesting user's personal data: `manifest.json` (export
-> metadata + GDPR Article 15/20 attribution) + `payload.json` (user
-> + orgs + projects with sensitive fields redacted) + `README.md`
-> (export usage + erasure path at `admin@executespec.ai`). New
-> endpoint `GET /api/auth/me/data-export` returns
-> `application/zip` with `Content-Disposition` filename including
-> userId + date. Sensitive fields stripped: password hash, all 3 LLM
-> API keys (Anthropic/OpenAI/Gemini), GitHub PAT. Capability flags
-> (`hasAnthropicKey`, etc.) DO appear so the user can confirm
-> settings without re-exposing the secret. 8 unit tests in
-> `UserDataExportServiceTest` pin the contract: zip structure,
-> manifest content, payload structure, redaction, README usage,
-> empty-org path. Future schema additions (runs, validation reports,
-> notifications, billing, activity audit) bumping the
-> `schemaVersion` to 2.
->
-> **P4.1-followup — migrated 2 of 37 legacy guard sites.**
-> `TestResultController.runTests` + `applyTestFixes` now call
-> `runAccessGuard.requireRunAccess` directly. Both removed from
-> `KNOWN_LEGACY_DRIFT`. Remaining 35 sites tracked under §P4.1-followup
-> in the plan doc; high-traffic + high-risk surfaces prioritised next
-> (PullRequestController, ProjectController.{addMember,removeMember},
-> ProjectExportController.export). The drift detector now allows
-> exactly 35 known-legacy entries; any new violator fails CI.
->
-> **2026-05-06 — GA-readiness P4.1-followup batch 2: 25 of 35 legacy
-> guard sites migrated** on `feature/project-cost-pool-tuning`.
-> Touched controllers: `PullRequestController` (×2),
-> `ProjectExportController` (×1), `ProjectController` (×6),
-> `ActivityFeedController` (×1), `AdrController` (×2),
-> `InvariantController` (×2), `CodeReviewController` (×2),
-> `PrReviewController` (×1), `StandardsComplianceController` (×1),
-> `ProjectRepoController` project-scoped paths (×4),
-> `ProjectDocumentController` (×3),
-> `SpecTemplateController` (×3 — `listForProject`, `createForProject`,
-> `delete`). All now call `projectAccessGuard.assertCanRead(projectId,
-> userDetails)` (or its `principalOrNull(auth)` variant for the
-> `Authentication`-style controllers, which falls back closed when the
-> principal isn't an `AppUserDetails`). Existing service-side checks
-> stay as defense in depth. Test fixture updated:
-> `ActivityFeedControllerTest` adds `@Mock ProjectAccessGuard`. Build:
-> `mvn test -Dtest='*Controller*'` 41/41 green. Remaining 10
-> entries in `KNOWN_LEGACY_DRIFT`: 3 repo-scoped sites in
-> `ProjectRepoController` (`deleteRepo`/`installRepoWebhook`/`syncRepo`)
-> need a dedicated `RepoAccessGuard`; 2 admin sites in
-> `SuperAdminController` + 1 in `ExecutespecMigrationController` are
-> SUPER_ADMIN-gated by SecurityConfig (kept for cleanup later); 1
-> in `RunController#poll` (V2 canary surface, separate access logic);
-> 3 unrelated. Plan doc P4.1-followup migration order updated to
-> reflect the batch landed.
->
-> Tests: 9/9 green on the touched surfaces (UserDataExportServiceTest 8 +
-> AccessGuardCoverageTest 1). Frontend build: clean.
->
-> **2026-05-06 — model-mapping consolidation: YAML is the single source
-> of truth.** Closes the 8 drift sites catalogued in
-> `docs/reports/model-mapping-audit-2026-05-06.md`. 5 commits on
-> `feature/project-cost-pool-tuning`:
->
-> 1. **`72d75b49` — Delete `ModelContextWindowMap`.** The hardcoded
->    Java map said `gpt-5.4` had a 256K context window while YAML
->    said 200K. The chat-header chip and worker-side token guard
->    disagreed. Routes everything through new
->    `ModelRegistry.contextLimitForOrPrefixFallback(model)` — YAML
->    wins, with a forward-compat prefix heuristic for unknowns
->    (claude-opus-*-1m → 1M, claude → 200K, gemini → 1M, gpt → 256K).
->    `ProjectChatController.info` switched dependency from the deleted
->    map to `ModelRegistry`. 7 unit tests in
->    `ModelRegistryContextLimitTest`.
-> 2. **`c9c2799a` — Cache pricing reads YAML.** `RunCostTracker.priceCall`
->    had hardcoded per-provider cache-read multipliers (Anthropic 0.10,
->    OpenAI 0.50, Gemini 0.25) that completely ignored the YAML
->    `cached-input-per-1m` field. YAML cache rates updated to provider
->    reality: gpt-5.4 cached $0.25→$1.25/M (50% of input), gpt-5.4-mini
->    $0.075→$0.375/M, gemini-3-flash-preview $0.05→$0.125/M (25%),
->    gemini-3-pro-preview $0.35→$0.875/M, anthropic unchanged at 10%.
->    `priceCall` now does direct math on `p.getCachedInputCostPer1m()`
->    with a defensive 10%-of-input fallback when YAML is null. 9 unit
->    tests in `RunCostTrackerCachePricingTest`.
-> 3. **`fdf0dac1` — `ModelController.MODEL_LABELS` reads YAML
->    `display-label`.** New optional field on `ModelMatrixProperties.ModelConfig`;
->    8 active models in YAML get explicit labels ("Claude Sonnet 4.6",
->    "Gemini 3 Pro Preview", "GPT-5.4", etc). `ModelRegistry.displayLabelFor`
->    falls back to raw id when label missing. The previously-missing
->    `gemini-3-pro-preview` (added 2026-05-04) now renders correctly in
->    the model selector. 4 new test cases.
-> 4. **`f23b0e77` — Drop the last 4 hardcodes.** `RunOrchestrator.defaultModelFor`
->    routes through `ModelRegistry.workhouseModelFor(provider)`; previously
->    a hardcoded switch returned Haiku/flash/mini even after YAML moved
->    Anthropic and Gemini WORKHORSE upward. Spring AI bean-init defaults
->    bumped (gemini-2.5-flash → gemini-3-flash-preview) with a header
->    comment explaining V2 router overrides per-call. `*Properties.java`
->    default model strings nullified — consumers fall back to registry.
->    Concrete consumer wired: `ApiTestSuiteProperties.getModel()` falls
->    through to `modelRegistry.workhouseModelFor(getProvider())` when
->    the configured value is blank. The other 3 fields had no consumers
->    (verified via grep).
-> 5. **`ab586b5f` — Frontend `PricingTable.MODEL_ROLES` reads YAML
->    `chainTier`.** Backend `PricingRow` DTO gains 3 fields
->    (cachedInputCostPer1m, chainTier, displayLabel) hydrated from
->    `ModelRegistry`. Frontend `MODEL_ROLES` map deleted; new
->    `roleLabel(chainTier)` switch returns 'Architect' / 'Workhorse' /
->    'Utility' from ARCHITECT/CAPABLE/UTILITY. Pricing table now
->    reflects YAML on every model addition without a frontend release.
->
-> Net effect: every model identifier / context-window value /
-> max-output-tokens / pricing rate / display label / fallback chain /
-> free-tier lock / agent→tier map / provider-default model lives in
-> `application.yml model-matrix.*` and is read via `ModelRegistry`.
-> The remaining model-string hits are legacy-alias test fixtures
-> (handled by the alias mechanism) and Spring AI bean-init defaults
-> (overridden per-call). Tests: 39 across touched surfaces, 0
-> failures. Live API endpoints (`/api/billing/plans`,
-> `/api/models/available`, `/api/pricing`) all serve YAML-derived
-> data after a fresh boot.
->
-> **2026-05-06 — log-noise cleanup: ReviewerAgent + Docker preview
-> WARNs.** Two cosmetic warnings flagged during the post-consolidation
-> 3-provider eval are now silent.
->
-> 1. **`ReviewerAgent` → `ReviewerAgent`.** `CostEstimator.java:101`
->    + `RunOrchestrator.java:2854` both called
->    `modelResolver.resolve("ReviewerAgent", ...)` — a class name
->    that hasn't existed since v2.5.10 retired V2 in favour of V3. The
->    YAML `agent-tier-map` has `ReviewerAgent: PLANNING` (correct).
->    The 2-arg form on CostEstimator's call fell through to "No tier
->    mapping for agent ReviewerAgent — defaulting to WORKHORSE";
->    the 3-arg form on RunOrchestrator's call bypassed the tier
->    lookup but kept the stale class name. Both updated.
-> 2. **Docker preview engine — distinguish "daemon not running" from
->    real preview-engine bugs.** `PreviewService.handoffToPreviewEngine`
->    used to log every docker subprocess failure at ERROR with the
->    full 1.5KB stack trace + CLI output, including the "no such
->    file or directory" socket error that fires on every local-dev
->    box without Docker Desktop running. Each completed run produced
->    one of these. New behaviour: detects docker-daemon-down via
->    `e.getMessage()` matching `docker.sock` / `docker daemon` /
->    `Cannot connect to the Docker daemon` / `dial unix...docker`
->    and logs a single concise WARN — "preview skipped — Docker
->    daemon not reachable. Run completed normally; only the auto-
->    preview was skipped. Start Docker Desktop to enable previews."
->    Real preview bugs (any other exception) still log at ERROR with
->    the stack trace. The downstream `fail()` log line also gets a
->    short message ("Docker daemon not reachable; preview skipped")
->    instead of the docker-CLI dump.
->
-> Verified: post-restart eval (Anthropic LOW @ 14:20) shows zero
-> `ReviewerAgent` warnings, exactly two clean WARN lines for the
-> docker-daemon-down case, and zero ERROR-level entries outside the
-> known OTel/gcloud fail-open paths. Run completed cleanly with
-> cost=$0.0991, status=COMPLETE, reason=CLEAN_COMPLETION.
->
-> **2026-05-06 — GA-readiness P3.2 finalization (customer "Stop at $X"
-> override) on `feature/project-cost-pool-tuning`.** Closes the second
-> half of P3.2 — the cost-cap progress bar shipped earlier displayed
-> the platform-derived `hard_cap_usd`. This commit lets the customer
-> voluntarily lower the ceiling at submission time.
->
-> **Schema (V178):** `pipeline_run.user_cost_cap_usd DOUBLE PRECISION`,
-> nullable. Idempotent ALTER TABLE.
->
-> **Backend:**
-> - `RunRequest.userCostCap` field (`Double`,
->   `@DecimalMin(0.10)`/`@DecimalMax(1000.00)`, optional) so unbounded
->   or negative values are rejected before reaching DB.
-> - `PipelineRun.userCostCap` field + getter/setter via Lombok.
-> - `StateStore.setUserCostCap(runId, cap)` chokepoint method
->   (mirroring `setHardCapUsd`).
-> - `RunController.submit` stamps `userCostCap` onto the new run row
->   right after `submitRun()` returns.
-> - `RunOrchestrator.persistEstimate` clamps `hard_cap_usd =
->   min(platformCap, userCostCap)` via new package-private
->   `clampHardCap(platformCap, userCostCap)` helper. Customer can lower
->   the ceiling but not raise it past what credits authorised.
-> - 7 unit tests in `RunOrchestratorClampHardCapTest` pin: null user
->   cap → platform; user > platform → platform; user < platform →
->   user; equal → either; zero/negative → defensive fallback to
->   platform; zero platform + positive user → 0 (immediate-terminate
->   edge).
->
-> **Frontend:** `NewRunModal` adds a "Stop at $X" numeric input under
-> the TDD-mode checkbox with range $0.10–$1000, step $0.10, range
-> attributes for HTML5 validation. `useRunStore.createRun` +
-> `lib/api.ts` createRun signature gain optional `userCostCap?: number`.
-> Empty / unparseable input means "no override" — backend uses the
-> platform cap unchanged.
->
-> **End-to-end story:** customer enters $5 in NewRunModal → submission
-> stamps userCostCap=5 onto pipeline_run row → planner emits a plan
-> → persistEstimate computes platform cap (e.g. $7.50 for 1 credit)
-> → clamp returns $5 → WorkerAgent budget guard force-terminates with
-> `Outcome.BUDGET_EXCEEDED` when cumulative spend hits $5 → cost-cap
-> progress bar in UI flips to red → customer sees the cap honoured.
->
-> Tests: 110 across all touched surfaces, 0 failures. Frontend build:
-> clean. Migration is additive + idempotent (no historical data
-> impact).
->
-> **2026-05-05 — Project sharing + pool tuning + cost rollup (`feature/project-cost-pool-tuning`, NOT yet merged to dev/main; PR #75 + this branch's V175 changes):**
->
-> Three packaged improvements:
->
-> 1. **External project sharing (V175, new `sharing/` package).** Two
->    surfaces:
->    - **Cross-org project invites** — paid-tier admins can invite by
->      email; on accept the invitee gets a `ProjectMember` row with
->      `is_external=true`. New `PROJECT_VIEWER` role (read-only).
->    - **Public read-only share links** — `project_share_link` table
->      with `Surface` enum (PROJECT_OVERVIEW / RUN_DETAIL / CODE_REVIEW
->      / PR_REVIEW / VALIDATION_REPORT / ARCHITECTURE_DOC). Token in
->      URL is the bearer. Tier-gated by `tier_config.share_link_active_cap`
->      (FREE=3, PRO=25, TEAM/MAX/ENTERPRISE=-1 unlimited).
->    - `ProjectAccessGuard` updated to consult `project_member` after the
->      org-match check, opening the door to cross-org collaborators.
->    - 8 new endpoints under `/api/projects/{id}/invites`,
->      `/api/projects/{id}/share-links`, `/api/invites/...`, plus
->      `/api/shared/{token}/...` whitelisted in `SecurityConfig`.
->
-> 2. **Core-dependent dispatch pools.** New
->    `util/PoolSizing.coreMultiple(multiplier, min, max)` helper. 5 fixed
->    pools swapped: CodeReview (2→clamp(2,8,cores×1)), PrReview
->    (4→clamp(4,12,cores×2)), RunService (4→clamp(4,12,cores×1)),
->    RunConversationController.applyExecutor (4→clamp(4,12,cores×2)),
->    RunOrchestrator (4→clamp(4,16,cores×1)).
->
-> 3. **Project cost rollup.** V174 adds `cost_usd` to
->    `repo_architecture_doc` + `project_architecture_doc` +
->    `project_generated_doc`. New `RunCostTracker.computeCost(provider,
->    model, inTok, outTok)` public helper. ProjectArchitectureService +
->    ProjectDocGeneratorService now persist cost at generation time. 5
->    new `sumCostUsdByProject` finders aggregated in
->    ProjectDashboardController. New `DashboardDto.costBreakdown` exposes
->    6 buckets — `runs`, `launches`, `codeReviews`, `prReviews`,
->    `architecture`, `generatedDocs`. Sum equals `totalCostUsd`.
->
-> Tests: 967/0/0/4 skipped on this branch. Two new test classes
-> (`ProjectAccessGuardTest`, `ProjectShareLinkServiceTest`) cover the
-> guard's allow/deny tree + the share-link tier gate + revoke/expire
-> lifecycle. AsyncAllowlist updated for the new
-> `MailService#sendProjectInviteEmail` method. Frontend
-> `lib/api.ts` extended with `ProjectInviteDto`, `ShareLinkDto`,
-> `costBreakdown` types + 9 helper functions.
->
-> **2026-05-05 — PR Review + Code Review agents (`feature/code-review-agents`, NOT yet merged to dev/main):**
-> Two new paid-tier agents land alongside the existing run pipeline,
-> both gated to PRO/TEAM/MAX/ENTERPRISE on the `tier_config` table
-> (FREE → 403, quota exhausted → 429). Both agents emit their tokens +
-> cost into the existing `RunCostTracker` under per-row keys
-> (`pr-review-{id}`, `code-review-{scanId}`) so per-tier billing
-> reports can pivot on the new bucket without schema changes.
->
-> - **PR Review Agent** (`com.navneet.executespec.prreview/`) — runs
->   against a single PR's diff. Single-call agent: PLANNING-tier model
->   (Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro Preview), emits a
->   `submitReview` tool call with `verdict ∈ {APPROVE, COMMENT,
->   REQUEST_CHANGES}` + an array of line-anchored comments. Persisted
->   to `pr_review` + `pr_review_comment` (V172). Async-with-SSE: the
->   service queues a row, kicks off on a 4-thread dispatch pool, and
->   returns the row in QUEUED status immediately. Per-tier monthly
->   quota: PRO=10, TEAM/MAX/ENTERPRISE=unlimited.
-> - **Code Review Agent** (`com.navneet.executespec.codereview/`) —
->   whole-repo two-stage scan. (1) `SemgrepRunner` runs `semgrep
->   --config p/ci` against the cloned workspace (graceful degradation
->   if semgrep isn't on PATH — returns empty findings + the LLM pass
->   alone). (2) `CodeReviewAgent` (PLANNING-tier, 16K cap) takes the
->   static findings + a curated 20-file sample (controllers / auth /
->   db / config first, capped at 12K chars each) and triages KEEP /
->   REWRITE / DROP per finding + adds architectural / logic / security
->   issues semgrep can't see. Status: QUEUED → CLONING →
->   STATIC_RUNNING → LLM_RUNNING → COMPLETE / FAILED, with SSE on
->   `code-review-{scanId}`. `CodeReviewMarkdownRenderer` builds a
->   single markdown report (severity-grouped, file-anchored,
->   suggested-fix blocks); persisted to
->   `code_review_scan.report_markdown` and surfaced verbatim via
->   the chat tool + `/api/code-reviews/{id}/report` download. Per-tier
->   monthly quota: PRO=4, TEAM/MAX/ENTERPRISE=unlimited.
-> - **Schema (V172)** — new tables `pr_review`, `pr_review_comment`,
->   `code_review_scan` (incl. `report_markdown TEXT`),
->   `code_review_issue` with severity / category / source / fingerprint
->   columns. New `tier_config` columns: `pr_review_enabled`,
->   `code_review_enabled`, `pr_review_monthly_quota`,
->   `code_review_monthly_quota` seeded per tier (FREE blocks both;
->   PRO 10 + 4; TEAM/MAX/ENTERPRISE -1).
-> - **Chat tool surface** (`memory/chattools/ProjectChatTools.java`)
->   gains two new tools: `run_code_review(repoFullName)` and
->   `get_latest_code_review(repoFullName)`. The latter returns the
->   markdown report verbatim for chat narration; the former queues a
->   scan + returns its id for the user to poll.
-> - **Frontend** — new `CodeQualityPanel.tsx` mounts inside the
->   project dashboard's Code tab as a "Code review" sub-tab. Shows per
->   linked repo: latest scan card with severity counts, Run / View
->   report / Download .md buttons; polls every 2.5s while a scan is
->   in-flight. New `PrReviewButton.tsx` mounts inline in
->   `ProjectPrRollup.tsx` PR rows: tiny eye icon → spinner → verdict
->   pill (APPROVE/COMMENT/REQUEST_CHANGES); click expands a popover
->   with summary + first 5 comments. Both gated client-side to
->   PRO/TEAM/MAX/ENTERPRISE so FREE users see a tasteful upgrade card
->   instead of a 403 toast.
-> - **Agent tier mapping** — `application.yml` registers
->   `PrReviewAgent: PLANNING`, `CodeReviewAgent: PLANNING`. Both run
->   on Sonnet 4.6 (Anthropic), GPT-5.4 (OpenAI), Gemini 3 Pro Preview
->   (Gemini) per the existing model matrix. The model is whatever
->   `ModelResolver.resolve` returns — full provider failover applies.
-> - **Tests** — `CodeReviewServiceTierGateTest` (7 cases pinning FREE
->   blocked, PRO under/at/over quota, TEAM unlimited, ENTERPRISE with
->   feature flag off, unknown tier closed-fail).
->   `CodeReviewAgentParseTest` (4 cases — clean parse, malformed-issue
->   drop, unknown enum normalisation, missing optional fields).
->   `CodeReviewMarkdownRendererTest` (3 cases — severity ordering,
->   clean-scan note, dropped-findings section). Total 14 new tests;
->   `mvn verify` 953 / 0 / 0 / 4 (skipped).
->
-> **Outstanding before PR ready for review:** GitHub mirroring of PR
-> review verdict + comments via the GitHub Reviews API (planned slice
-> 3); semgrep auto-installation in the prod GCE container (currently
-> only available where the operator has `pip install semgrep`'d the
-> host — graceful degradation today means LLM-only on those hosts);
-> CI-pipeline event listener so PR opens trigger an automatic review
-> (separate feature, deliberately not in this PR per user direction);
-> `MAX` tier currently maps the same as `TEAM` for these features —
-> feature/product-split-prep's `TierProductSurfaceMapper` will mediate
-> the surface split when that lands.
->
-> **2026-05-01 — audit r3 fix batch + Google-style refactor + CI lint enforcement (shipped to main via PRs #55 + #56 + #57):**
-> Round-3 persona-test audit closed seven credibility-class bugs and
-> the Google Java + TypeScript style refactor landed on top, including
-> CI lint enforcement so the baseline can't drift.
->
-> **Audit fixes (PR #55):**
-> - **F-14 (P1)** — `EntitlementResolver.resolveTier` now picks the
->   higher rank between `app_user.tier` and `org.tier` instead of
->   "org always wins". Closes the FREE-leak class for operator-promoted
->   accounts, expired-but-not-demoted subs, and test fixtures whose
->   `app_user.tier` outpaces their org row. Three new regression tests
->   (10/10 green) pin ENT/TEAM/PRO with a FREE org all resolving to
->   their paid tier.
-> - **F-15 / F-16 / F-17** — WCAG-AA contrast closed end-to-end.
->   `--border-default` 1.59 → **3.13** (graphite-7 `#5e6771`, passes
->   SC 1.4.11), `--status-executing` 4.19 → **5.22** (`#5b89e0`,
->   AA-body), new `--c-signal-blue-on-dark` (`#7aa5f5`) at **7.29** for
->   body links on dark surfaces. Light-theme parity preserved.
-> - **F-21** — V3 billing was hardcoding "Unlimited runs" for any
->   paid tier. F-14 exposed it because PRO has a 20-cap per
->   `tier_config`; `tierDisplay.formatRunUsage` now reads
->   `runLimitMonthly` per tier — PRO renders "20 of 20 runs left this
->   month", TEAM/ENT keep "Unlimited".
-> - **D3** — `V3EmptyProject` H1 "Welcome, Reval." → "What do you want
->   to build, Reval?" (outcome-led; matches login hero). Body is
->   tier-aware: FREE surfaces the 10-PR/month cap in human terms;
->   paid tiers omit the line. Secondary link "Set up a project the
->   long way →" → "Already have a GitHub repo? Attach it first →".
-> - **Tier-lifecycle reason hover-only** — `TierLifecyclePage` shows
->   date-only with reason on hover. Migration-version churn ("TEAM
->   tier reinstated (V144)") no longer leaks into screenshots.
-> - **Process-gap closure** — `frontend/src/design-system/contrast.{ts,test.ts}`
->   (vitest-shape, dormant) pins every (token, surface) ratio fixed in
->   the batch + 3 counter-examples that must still fail.
->   `frontend/.pa11yci.json` for the public surface. `frontend/A11Y.md`
->   documenting how to enable both.
->
-> **Google-style refactor (PR #56):** spotless-maven-plugin 2.43.0 +
-> google-java-format 1.22.0 (GOOGLE profile, reflowLongStrings) wired
-> into `mvn verify`; 1043 .java files reformatted. Frontend got
-> prettier 3.3 + eslint 8.57 + @typescript-eslint/* 7.18 + react /
-> react-hooks plugins; 260 .ts/.tsx/.css files reformatted. New
-> `frontend/.prettierrc.json` + `.prettierignore` + `.eslintrc.cjs` +
-> npm scripts (`format` / `format:check` / `lint` / `lint:fix`). Pure
-> mechanical pass — zero semantic changes; mvn test 839/839 green
-> through the entire batch. Seven documented deviations in
-> [`docs/design/code-style.md`](docs/design/code-style.md): D-J1
-> wildcard imports retained (217 files; OpenRewrite recipe available
-> for follow-up), D-J2 Javadoc only on top-level + REST controllers,
-> D-J3 `// VisibleForTesting` comment vs annotation, D-T1 default
-> exports OK for `*.tsx`, D-T2 `any` warn-mode, D-T3 interface/type
-> both ok, D-T4 JSDoc on internal types skipped.
->
-> **CI lint enforcement (PR #56):** `.github/workflows/deploy.yml`
-> bumped `mvn package -q` → `mvn verify -q` (fires the spotless
-> binding); added `npm run format:check` + `npm run lint` between
-> `npm ci` and `npm run build`. New `.github/workflows/lint.yml`
-> runs on every PR to dev/main with parallel Java + frontend lint
-> jobs (typically <2min vs ~12min for the full deploy job). Failure
-> messages point at the local fix command + the deviations doc.
->
-> **Round-4 dev-deployment verification (PR #57 → main):**
-> [`docs/audits/dev-verification-2026-05-04.md`](docs/audits/dev-verification-2026-05-04.md)
-> — 31 screenshots of every super-admin surface on
-> `https://dev.executespec.ai` + live API + token-contrast probe.
-> All audit fixes confirmed live in production deployment; both CI
-> gates (`Lint` workflow + `Build & Deploy` workflow) succeeded on
-> first run after merge — enforcement layer fires correctly on push,
-> not just locally.
->
-> **2026-04-30 — audit Sprint 1 fixes batch on `audit/v2-5-11-ux-product`:**
-> Version-string drift fix [F-22] (pom 2.5.1 → 2.5.11 + frontend
-> package.json + Version file). Permission map fix [F-03] in
-> `TierPermissionService.freeUserPermissions` — `canDeploy` /
-> `maxDeployments` / `canViewCostBreakdown` / `canManageBillingProfile`
-> now read from tier_config or tier identity instead of hardcoded values
-> + new `TierPermissionServiceSoloUserTest` (8 tests) pinning per-tier
-> expected map. v3 IA cleanup PR-1 — `Runs` link + `UsageBadge` chip
-> added to `V3TopBar.tsx` [F-01 + IA-Q4]; `V3Placeholder` retired in
-> favor of direct mounts of `OrgAdminDashboard` / `PricingManager` /
-> `TierLifecyclePage` for `/admin/{analytics,pricing,tiers}` [F-14];
-> `/governance/audit` now redirects to canonical `/audit` [F-26]. F-12
-> batch strike — V2 batch UI hidden in `RunDetail.tsx` plan-approval gate
-> + `RunCard.tsx` badge; USER_MANUAL §3.3 marked as not-shipped. README
-> pipeline diagram refreshed from V1 stale flow (`RequestTriageService`
-> separate, `CompilerAgent`, `SubtaskDecomposer`, `BatchClientRouter`,
-> merge gate, `PartialRunResumeService`, `ReviewerAgent`) to current
-> V2 reality (SmartClassifier → Outline/Skeleton+Expander+Coherence
-> branches by strategy, per-task buildProject smoke, ReviewerAgent
-> two-pass) [F-08]. Tier ladder authoritative against `tier_config`:
-> FREE / PRO (HIDDEN) / TEAM (per-seat $49) / MAX (BYOK unlimited $29) /
-> ENTERPRISE — V141 (rename MAX → TEAM) was reverted by V144
-> (reinstating per-seat TEAM), so the live ladder has BOTH TEAM and MAX
-> active. The "4-tier post-V141" claim in older entries below is
-> superseded.
->
-> Last updated before today: 2026-04-26 (cleanup pass — workspace/, workspace-test/, scripts/{e2e-matrix-logs,eval-runs,project-view-results,v2-eval-results}, docs/test-scenarios/, docs/reports/ all removed; runs+projects+contracts+activity_feed truncated in DB; 5 shipped/preview-engine plans removed from docs/plans/; hierarchical-planner-plan.md moved into docs/plans/ then removed as shipped). 2026-04-25: enterprise-readiness eval shipped on `feature/enterprise-readiness-eval` — Phases E1+E2+E3+E4 (40 slices total) + V131-V139 + 8 new packages + 23 new endpoints; server-up sweep landed clean (3-provider low-band eval all CLEAN with verified 97-100, 23/23 API endpoints behaving correctly, V131-V139 schema verified). v2.6.2-track hierarchical-planner all 5 slices shipped on `feature/hierarchical-planner` — schema + SmartClassifierAgent in shadow mode + V130 migration; project-chat UX bundle + OSIV-off + Hikari handling-mode + async apply-suggestion all live on dev; v2.6.1 Waves 1-6: persona-driven roadmap; v2.6.0: UX overhaul v3 Graphite+Signal + LlmProvider GEMINI rename; v2.5.13: RN+Expo codegen; v2.5.12: 3-step architecture; v2.5.11: Validation v3 Pillar 1; v2.5.10: trustworthy verified score)
->
-> **v2.6.3-track — Enterprise Readiness (in-flight on `feature/enterprise-readiness-eval`, NOT merged to dev/main):** 40-slice rewrite of the customer-facing project surface to make every persistent artefact live in a versioned `.executespec/` folder in customer git, gate every write through a single `ExecutespecFolderWriter` chokepoint, and add 4 new persistence stripes (contracts, engineering standards, ADRs, architecture invariants) + an activity feed + an export bundle + per-user notification preferences. 4 phases shipped on the branch:
-> - **E1 — folder + activity (8 slices, V131-V134):** `.executespec/` folder bootstrap (`BootstrapService`), 4-state status machine (MISSING/BOOTSTRAP_PENDING/PR_PENDING/READY) on `project_repo`, `ExecutespecFolderWriter` chokepoint with PR vs DIRECT_PUSH dispatch (`prModeEnum()`), per-project config namespacing decision tree (`ProjectConfigPathResolver`: FOLDER_FLAT vs FOLDER_NAMESPACED vs DATABASE), `activity_feed` partitioned-by-month table + `ActivityEventEmitter` (dual-writes to `activity_audit` for AUDIT-tagged events), `ActivityFeedRetentionJob` + `ActivityFeedPartitionJob` (`@Scheduled`, `@SchedulerLock`).
-> - **E2 — contracts + monorepo (12 slices, V135):** Cross-repo contract registry — 4 contract kinds (OPENAPI/GRAPHQL/JSON_SCHEMA/PROTO) detected per-repo, drift detection via per-kind classifiers (`ProtoBreakingChangeClassifier` + 3 others), consumer pinning + drift event triage (unresolved-drift partial index for hot-path queries), per-repo coverage rescan, contract index materialised into `.executespec/contracts/` per producer + mirrored into `.executespec/contracts/consumed/` per consumer.
-> - **E3 — standards + ADR + invariants (13 slices, V136-V138):** Engineering standards as binding policy (`org_standard` org-level + `project_standard_override` project-level merged via `EffectiveStandardsResolver`), violation tracking + override workflow (≥30 char rationale required), ADRs as first-class — `.executespec/arch/adrs/<NNNN>-<slug>.md` parsed via `AdrFrontmatterParser` + cached in `adr` table for query speed, architectural invariants (e.g. "only payment-service writes to the payments table") via `InvariantChecker` + `arch_invariant`/`arch_invariant_violation` tables, `.executespec/arch/invariants.yaml` per repo.
-> - **E4 — visibility + retention + export (7 slices, V139):** Per-user notification preferences (`UserNotificationPref` — opt-in/out per event type per channel, sensible defaults via `NotificationPrefService`), project export bundle (zip of every artefact under `.executespec/` + DB-only counterparts when `config_storage=DATABASE`), retention policy on `activity_feed` partitions.
-> - **Test coverage (JaCoCo, this branch's packages, ranked low → high):** folder 79.4 / standards 82.4 / export 83.5 / arch.invariants 84.4 / adr 87.7 / activity 89.9 / contracts.detection 90.7 / standards.llmreview 92.0 / contracts.consumers 93.4 / standards.ast 94.5 / contracts.injection 94.8 / contracts.coverage 95.4. Project-wide 11.1% line — diluted by untested V1 legacy + LLM-agent + deployment packages outside this branch's scope.
-> - **ArchUnit caller-allowlist guard:** `ExecutespecFolderWriterCallerAllowlistTest` pins `ExecutespecFolderWriter#writeFiles` to exactly 4 callers (`BootstrapService` E1.5, `ContractDriftController` E2.6, `ContractConsumerController` E2.7, `ProjectArchitectureService` E1.6) — new callers fail the build until they're justified + added.
-> - **Boot fix shipped this session:** `ExecutespecFolderWriter` + `BootstrapService` had two constructors (prod + test seam) but neither annotated with `@Autowired`; Spring 6 fell back to no-arg (which doesn't exist) and refused the bean. Added `@Autowired` on both prod constructors. Discovered when this session brought up the local stack for the deferred server-up eval; would have crashed the first dev deploy attempt.
-> - **NOT in this session:** GitHub-write integration end-to-end (writer is wired and bean-validated, real PR vs DIRECT_PUSH dispatch needs sandbox repo + webhook), planner-side wiring of `{{CONTRACTS}}` / `{{ADR}}` / `{{STANDARDS}}` / `{{INVARIANTS}}` blocks (kept bounded to avoid hierarchical-planner merge conflicts), DIRECT_PUSH admin endpoint UI, real-PR integration tests, `ExecutespecFolderWriter.writeToBranch` for chat-action batching, activity-feed event-source integration (table + emitter shipped, emit-points into project create / run terminal / PR merge follow). Adversarial sweep + UX click-through deferred (per FINAL message §13).
->
-> **v2.6.2-track — Hierarchical Planner (in-flight on `feature/hierarchical-planner`):** 4-phase rewrite of the planner pipeline to scale beyond the single-shot 8192-token output cap. Classify (LIGHTWEIGHT) → Outline (PLANNING) → parallel Expand (WORKHORSE) → Coherence (LIGHTWEIGHT). Adaptive collapse: SINGLE_SHOT bypasses everything, SMALL collapses phases 1+2, MEDIUM skips parallel expand, LARGE/LEGACY use the full chain. LLM-augmented classification from day 1 with a heuristic fast path for obvious tiny specs.
-> - **Slice 1 (shipped on the branch, not on dev):** migration `V130__hierarchical_planner.sql` (additive — `pipeline_run.plan_strategy` + per-phase cost columns + `agent_task.task_type/expansion_status/expanded_at`); `SmartClassifierAgent` (heuristic fast path + LLM verifier + Redis cache + always-fall-back-to-heuristic); wired into `RunOrchestrator.runClassifierShadow` — verdict + per-phase tokens persist on the run row.
-> - **Slice 2 (shipped on the branch, not on dev):** `OutlinePlannerAgent` (PLANNING tier, 32k maxTokens) + `submitOutline` tool + `prompts/outline-planner.md`. `RunOrchestrator` now routes by strategy: SMALL/MEDIUM → OutlinePlannerAgent (full plan in one tool call, 32k cap so the truncation that triggered this whole rewrite cannot happen on bounded specs); SINGLE_SHOT/LARGE/LEGACY/null-on-failure → legacy `PlannerAgent` fallback. Outline cost diff'd from `RunCostTracker.snapshot()` and persisted to `pipeline_run.outline_*` columns; full plan JSON persisted to `pipeline_run.plan_outline_json`. Plan-level fallback to legacy planner if OutlinePlannerAgent throws — runs always progress.
-> - **Slice 3 (shipped on the branch, not on dev):** LARGE pipeline. `OutlinePlannerAgent` gains `Mode.SKELETON_ONLY` + new `prompts/outline-planner-skeleton.md` (id/title/complexity/repos/dependsOn/type only, 8k cap). New `TaskExpanderAgent` (WORKHORSE tier, 3k cap, `submitTaskDetail` tool) fills task bodies; new `CoherencePlannerAgent` (LIGHTWEIGHT tier, 1.5k cap, `patchPlan` tool with 5 patch kinds: ADD_MEETS_REQUIREMENT / ADD_DEPENDS_ON / REMOVE_DEPENDS_ON / FIX_HARD_CONSTRAINT_CONFLICT / MOVE_FILE_TO_REPO_SUBDIR) applies minimal deltas. `RunOrchestrator.runLargePipeline` orchestrates: skeleton outline → parallel expansion via `CompletableFuture.allOf` on the existing 4-thread pool (15-min wall timeout) → coherence patch. Per-phase cost columns `expansion_*` + `coherence_*` populated from `RunCostTracker.snapshot()` diffs. Per-task expansion failures fall back to a title-derived LEAF so the run still progresses. New `PlanStrategyCircuitBreaker` (Redis-backed, 5 consecutive failures → 1h open, ladder degrade LEGACY → LARGE → MEDIUM → SMALL → legacy) wraps strategy selection so a flaky path auto-falls-back without operator action. `PlannedTask` gains `taskType: LEAF | EPIC` + `isSkeleton()` helper; descriptions can legitimately be blank pre-expansion. LEGACY currently degrades to LARGE — recursive depth-2 expansion ships in slice 4.
-> - **Slice 4 (shipped on the branch, not on dev):** LEGACY recursive depth-2 expansion. `RunOrchestrator.runLargePipeline` now takes `enableEpicRecursion` — when the original classification was LEGACY, EPIC skeletons are dispatched to the new `expandEpic` helper instead of the regular LEAF expander. `expandEpic` makes a focused `OutlinePlannerAgent.SKELETON_ONLY` sub-call for just that epic (capped at MEDIUM = 4 sub-tasks per Classification), prefixes child IDs with the parent (T3 → T3.1, T3.2, …), forces children to LEAF (depth-2 cap — no infinite recursion), then expands them in parallel via `TaskExpanderAgent` on the same pipeline pool with a 10-min sub-timeout. Phase-2 wall-clock timeout extended 15 → 20 min to accommodate sub-expansion latency. EPIC entries in the assembled task list are replaced by their N child LEAFs in-place; `dependsOn` references that pointed at the EPIC ID still work because the children inherit the parent's prefix range. `coerceToLeafFallback` collapses a failed sub-outline back into a single LEAF so the run still progresses. **`StartupRunResumer` outline-checkpoint awareness** — interrupted runs that already have `plan_outline_json` set get a clearer failure message naming the persisted strategy + outline size; full auto-replay deferred to slice 5d.
-> - **Slice 5a + 5b (shipped on the branch, not on dev):** **estimateRun re-tune** — new `RunCostTracker.estimateRunTierAware(provider, complexities, strategy)` overload computes per-strategy phase costs (classifier ~$0.001-0.003, outline FULL/SKELETON, parallel expansion per LEAF, coherence, plus LEGACY's recursive sub-outline + sub-expansion fan-out for ~25% of skeletons assumed EPIC). Wired into `RunOrchestrator.persistEstimate` which reads the persisted `plan_strategy` so plan-approval modal cost reflects the actual pipeline shape. **Legacy planner deletion** — extracted parse + validation helpers into a new static `PlannerOutputUtils` class (`parsePlanFromArgs`, `validatePlan`, `salvagePlanFromText`, `warnIfConstraintsUnderpropagated`, `cleanTitle`, `resolveProviderForTitle`, `truncate`); SINGLE_SHOT synthesis migrated to `OutlinePlannerAgent.synthesizeSingleShot`; `RunOrchestrator.runPipeline` routes ALL classifications through `OutlinePlannerAgent` (SINGLE_SHOT/null → `synthesizeSingleShot`, SMALL/MEDIUM → `Mode.FULL_PLAN`, LARGE/LEGACY → `runLargePipeline`); `PlannerAgent.java`, `prompts/planner.md`, the `PlannerAgent: PLANNING` tier mapping, and the matching validation test all deleted. New `PlannerOutputUtilsValidationTest` (9 tests) covers the migrated validation contract. Test controllers (`ExecutorTestController`, `PlannerTestController`) and `RunService` migrated off the legacy planner. Build clean, all 298 tests green.
-> - **Slice 5c (shipped on the branch, not on dev):** Dashboard per-phase cost surfacing. New fields on `RunDetail` DTO + `RunMapper` + frontend `lib/api.ts` types: `planStrategy`, `classifierReasoning`, plus the 4 phase cost columns (`{classifier,outline,expansion,coherence}_{cost_usd,input_tokens,output_tokens}`). New `PlannerPhaseBreakdown` component on `RunDetailTabs` Overview tab — renders only when `planStrategy` is set + ≥1 phase has tokens. Hides for legacy runs. Frontend build green.
-> - **Slice 5d (partial — shipped on the branch, not on dev):** Per-task expansion-status visibility. `RunOrchestrator.persistTasks` writes `agent_task.{task_type, expansion_status, expanded_at}` per row (EXPANDED for fully-bodied tasks, PENDING for skeletons that didn't get expanded). `StartupRunResumer`'s outline-checkpoint failure message now reports `expanded=N pending=M failed=K` so the user knows the exact state at JVM-restart time. **Full auto-replay** (re-trigger `runLargePipeline.continueExpansion(...)` on boot, skipping EXPANDED tasks) is the remaining gap — needs a careful design pass to re-acquire workspace state, re-establish Redis cache for the classifier, and prove idempotency on partial-state recovery. Tracked as a follow-up.
-> - **Slice 5e (shipped on the branch, not on dev):** Calibration methodology — audit SQL queries (classifier accuracy, estimate accuracy, heuristic leakage, per-phase cost), tuning targets table, threshold-tuning notes for `HEURISTIC_FAST_PATH_CHAR_CAP` / `DOMAIN_EXPLOSIVE` / `MULTI_FEATURE_PHRASES`, audit cadence (weekly first month, monthly after).
->
-> **v2.6.1 — Project-chat UX + OSIV/Hikari hardening (commits `3cef1d90 → ddf9c498` on dev, deployed):** big working session split into three logical fix-arcs.
-> - **Connection-leak fix arc** (`3cef1d90 → cd07e318`): apply-suggestion was burning a Hikari connection across a 25-iteration Sonnet worker loop because OSIV bound the EM to the Tomcat handler thread for the request's lifetime. Three commits: (1) async-dispatch `applySuggestion` via `CompletableFuture` on a dedicated 4-thread `applyExecutor` + `spring.mvc.async.request-timeout: 900000` (Tomcat thread releases on dispatch), (2) `hibernate.connection.handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION` so the connection is returned at tx commit instead of EM close, (3) `spring.jpa.open-in-view: false` after auditing every lazy-walk site (entity-level `EAGER` on `ExecutionSolution.dependencies/repoMappings` + `@EntityGraph` on `findListByProjectId/findDetailById/findWith*` + `@Transactional(readOnly=true)` on `ProjectLaunchController.{listLaunches,projectPrs,overview}`). Defensive `@Transactional(NOT_SUPPORTED)` on `ApplyService.apply` was tried in commit (2) and reverted — it tripped a separate leak by initialising tx synchronization on the async thread. Hikari leak threshold also bumped 60s → 90s with rationale comment.
-> - **Project-chat UX bundle** (`ddf9c498`): live cost polling on `RunDetailTabs` (5s interval while non-terminal — was frozen at mount-time snapshot through entire WORKING phase); chat panel filling its parent (`h-full min-h-0`) with `ProjectDashboardPage` main pane opting out of padding/overflow on the chat tab; `Reset` (clear history via `DELETE /api/projects/{id}/chat`) and `Compact` (summarise older N-tail messages, keep last 6 verbatim, via `POST /api/projects/{id}/chat/compact`) buttons in a slim header that only renders when the conversation has messages; hover-revealed Copy/Check button below every bubble (copies raw markdown for assistant replies); Launch-from-chat redirect changed from non-existent `/runs/{id}` to `/projects/{id}/dashboard` with `state.launchedRunId` for downstream use; per-launch branch override input on the Launch modal (use cases: re-launch on a PR branch to address review comments, or stack a staged launch onto an in-progress branch).
-> - **Tooltip primitive + Sidebar gaps** (`ddf9c498`): new `frontend/src/components/shared/Tooltip.tsx` (CSS-only, 250ms delay, hover/focus reveal — available for migration off native `title=""`); audit found Sidebar's mobile-close + desktop-collapse icon buttons missed both `aria-label` and `title` — patched.
-> - **Planner + chat-compactor tier moves**: `RepoArchitectureGenerator` LIGHTWEIGHT → PLANNING, `ArchitectureDocGenerator` WORKHORSE → PLANNING, `ProjectChatCompiler` LIGHTWEIGHT → PLANNING, new `ProjectChatCompactor: LIGHTWEIGHT`. Anthropic WORKHORSE/LIGHTWEIGHT both resolve to Haiku 4.5; PLANNING is Sonnet 4.6 — moving these closes the "Haiku missed cross-repo wiring + mangled spec compilation" gap.
-> - **Persona-driven roadmap (Waves 1-6)** still merged on dev + main from 2026-04-22/23 — see prior note below.
 
-> **v2.6.1 — Persona-driven roadmap (Waves 1-6, merged 2026-04-22/23):** 6 feature branches sequentially merged into `dev` (→ deploy) and `main` (sync). Full scope at (plan doc removed in 2026-04-26 cleanup pass).
-> - **Wave 1 (SHIPPED full-stack):** TEAM tier at $49/seat (2-20 seats shared pool) + 3-state tier-lifecycle machine (LISTED/HIDDEN/SUNSETTING) + PRO grandfathered to HIDDEN + seat-aware Stripe checkout + webhook seat sync + `/admin/tiers` console + `POST /api/org/me/seats/adjust`. Migrations V121-V124.
-> - **Wave 2 (SHIPPED full-stack):** PostHog 6-event activation funnel + `EventTrackingService` + sandbox onboarding with 3 sample specs + SandboxProvisioningService + SandboxCleanupJob + `/welcome` page + FirstRunCelebration component. Migrations V125-V126.
-> - **Wave 3 (SHIPPED schema + docs):** SSO/SAML + GitHub App install + team trial queue schema + enterprise one-pager (`docs/enterprise-one-pager.md`). Migration V127. Controllers + auth flow in follow-up per (plan doc removed in 2026-04-26 cleanup pass).
-> - **Wave 4 (SHIPPED schema + scaffold):** Provider recommendation scaffold (`ProviderRecommendationService` heuristic routing) + A/B feature flags + VS Code extension plan. Migration V128. Live-demo hero + persona-first PlansPage + changelog deferred.
-> - **Wave 5 (SHIPPED schema):** Startup program application table + 14-day MAX trial columns + free-tier teammate flag. Migration V129. Service + frontend per (plan doc removed in 2026-04-26 cleanup pass).
-> - **Wave 6 (SHIPPED docs only):** Enterprise SLA reference (`docs/enterprise-sla.md`) + CLI plan stub ((plan doc removed in 2026-04-26 cleanup pass)). Audit CSV export + CLI repo + VS Code extension are external follow-ups.
-> **v2.6.1 — Persona-driven roadmap (Waves 1-6, merged 2026-04-22/23):** 6 feature branches sequentially merged into `dev` (→ deploy) and `main` (sync). Full scope at (plan doc removed in 2026-04-26 cleanup pass).
-> - **Wave 1 (SHIPPED full-stack):** TEAM tier at $49/seat (2-20 seats shared pool) + 3-state tier-lifecycle machine (LISTED/HIDDEN/SUNSETTING) + PRO grandfathered to HIDDEN + seat-aware Stripe checkout + webhook seat sync + `/admin/tiers` console + `POST /api/org/me/seats/adjust`. Migrations V121-V124.
-> - **Wave 2 (SHIPPED full-stack):** PostHog 6-event activation funnel + `EventTrackingService` + sandbox onboarding with 3 sample specs + SandboxProvisioningService + SandboxCleanupJob + `/welcome` page + FirstRunCelebration component. Migrations V125-V126.
-> - **Wave 3 (SHIPPED schema + docs):** SSO/SAML + GitHub App install + team trial queue schema + enterprise one-pager (`docs/enterprise-one-pager.md`). Migration V127. Controllers + auth flow in follow-up per (plan doc removed in 2026-04-26 cleanup pass).
-> - **Wave 4 (SHIPPED schema + scaffold):** Provider recommendation scaffold (`ProviderRecommendationService` heuristic routing) + A/B feature flags + VS Code extension plan. Migration V128. Live-demo hero + persona-first PlansPage + changelog deferred.
-> - **Wave 5 (SHIPPED schema):** Startup program application table + 14-day MAX trial columns + free-tier teammate flag. Migration V129. Service + frontend per (plan doc removed in 2026-04-26 cleanup pass).
-> - **Wave 6 (SHIPPED docs only):** Enterprise SLA reference (`docs/enterprise-sla.md`) + CLI plan stub ((plan doc removed in 2026-04-26 cleanup pass)). Audit CSV export + CLI repo + VS Code extension are external follow-ups.
+**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V186**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
-## Architecture
+Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
-> **Versioning convention (2026-05-07 onward): no V2/V3 markers in Java code or resource paths.** Backend packages, classes, files, and prompt directories were unified — what used to live at `com.navneet.executespec.v2.*` (the pipeline) and `com.navneet.executespec.v3.*` (the consumer/product surface) is now flat under `com.navneet.executespec.*`. Version suffixes (`LlmRouter`, `ReviewerAgent`, `ReviewReport`, etc.) and prefixes (`LandingController`, `RunController`, etc.) were dropped. For the historical context (what was V1 vs V2, why packages were split), see git history before commit `327e1c19` and the audit notes in `docs/ARCHITECTURE.md`.
->
-> **Still versioned (out of scope for the unification pass):**
-> - **Flyway migration filenames** (`V1__init.sql` through `V150__*.sql`) — Flyway tracks applied migrations by exact filename in the `flyway_schema_history` table; rename = silent re-apply. **Immutable.**
-> - **Frontend bundled JS** (`src/main/resources/static/assets/index-*.js`) — build artifacts, not source.
-> - **Prompt rollback archives** (`prompts/planner.v1.txt`..`v14.txt`, `prompts/reviewer-v2.txt`) — kept for `PromptVersioningService` rollback semantics; not "current" prompts.
+## Architecture (5-minute orientation)
 
-- **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.4
-- **Harness:** Single unified pipeline under `com.navneet.executespec.*` (the V1 → V2 migration completed and the v2/ package was flattened in the 2026-05-07 unification pass). The legacy multi-provider fallback router (`agent/FallbackLlmRouter`) still serves a handful of non-tool-calling agents (`AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`) until those are migrated to the canonical `agent/LlmRouter`; the rest of the pipeline (`RunOrchestrator`, `OutlinePlannerAgent`, `WorkerAgent`, `SequentialExecutor`, `ReviewerAgent`, `LlmRouter`) lives at top-level packages. Shared infrastructure (`StateStore`, `PipelineRun`/`AgentTask` entities, `CostEstimator`, `ApiKeyResolver`, `WorkspaceInitService`, `GitHubRepoService`, `ModelResolver`, `GateStore`, `UiStyleResolver`) is at top-level too.
-- **V2 pipeline:** `RunOrchestrator` (entry) → `PlannerAgent` (plan as a `submitPlan` tool call) → plan gate (PRODUCTION pauses at AWAITING_APPROVAL, PROTOTYPE bypasses) → `SequentialExecutor` (tier-routed worker per task, one at a time) → `ReviewerAgent` (general + wiring passes) → validation report + test-gen kickoff → auto-preview. Runs persist to the shared `pipeline_run`/`agent_task` tables.
-- **V2 tools:** Unified `Tool` contract in `v2.tool` — `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `gitCommit`, `buildProject`, plus `completeTask` for native termination. `ToolRegistry.bind(ExecutionContext)` returns Spring AI `ToolCallback`s with run context captured. Sequential-by-design: no FileLockTool.
-- **V2 LLM router:** `LlmRouter.call(LlmRequest)` uses native tool calling for all 3 providers. Anthropic via Spring AI; OpenAI via `OpenAiNativeToolClient` (bypasses Spring AI 1.1.4's `extra_body` bug); Gemini via `GeminiNativeToolClient` (handles schema sanitization + thought-signature round-trip for 2.5+ models). Every call flows through `RunCostTracker` for token + cost accounting.
-- **V2 worker:** `WorkerAgent` — single-agent, multi-turn loop. Per-complexity caps: LOW=12 iters/4k tokens, MEDIUM=22/8k, HIGH=35/16k. Outcomes: COMPLETED | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | ERROR. Native completion via `CompleteTaskTool`. Conversation snapshots saved to Redis every 5 iterations via `ContextStore` (24h TTL) for recovery.
-- **V2 planner:** `PlannerAgent` emits a structured plan via a restricted-tool `submitPlan` call (no JSON-in-text parsing). Schema includes `buildCommand`, `smokeTestStrategy` (BUILD | PREVIEW_HEALTH | TEST_SUITE), `runtimeSurface` (HTTP | CLI | LIBRARY | STATIC_WEB), per-task `hardConstraints`. Classification (SINGLE_SHOT | MEDIUM | MULTI_TASK) caps task count (1 / 4 / unlimited). `SINGLE_SHOT` bypasses the LLM and synthesises a 1-task plan.
-- **V2 sequential executor:** per task — compose system + user prompt → `WorkerAgent.run()` → if worker hit `completeTask`, run `buildProject` smoke test → pass=SUCCESS, fail=ONE retry with build error injected, retry fail=COMPLETED_WITH_WARNING. Aggregate: ALL_SUCCESS | PARTIAL_WITH_WARNINGS | FAILED | ABORTED. Per-task model tier: LOW→LIGHTWEIGHT, MEDIUM→WORKHORSE, HIGH→PLANNING.
-- **V2 reviewer:** `ReviewerAgent` — two `WorkerAgent`-backed passes (general + wiring), 30 iter cap each. Wiring pass is project-type-aware (Rust `mod.rs`, TS barrels, Spring component-scan, Express routes, Python decorators, Go imports). Final verdict: CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED. Iteration-limit outcomes fall through to final-build verdict rather than masquerading as REVIEW_FAILED.
-- **V2 cost + tokens:** `RunCostTracker` accumulates per-call usage + cost (Anthropic cache-aware). Phase-level attribution (planner / reviewer) persisted on `PipelineRun` via snapshot diffs; per-task worker tokens on `AgentTask` rows. Run totals are built atomically via `PipelineRunRepository.addTokens` calls from each phase — terminal `terminate()` no longer overwrites, only bumps up. Pre-plan `estimateRunTierAware()` populates `costEstimateLow/High`, `creditsCharged`, `hardCapUsd`.
-- **V2 observability:** `Metrics` — `executespec.v2.*` meters for run.outcome + run.latency, planner.latency + planner.tasks, task.status + task.latency + task.smoketest, worker.iterations + worker.outcome + worker.toolcall, llm.latency, reviewer.verdict, context.save + context.save.bytes. Dump endpoint `/api/v2/test/metrics`. Prometheus scrape at `/actuator/prometheus`.
-- **V2 recovery:** `StartupRunResumer` scans non-terminal V2 runs on boot (PLANNING/WORKING/REVIEWING/AWAITING_APPROVAL) and fails them cleanly with a clear reason + terminal SSE, so the UI surfaces the interruption instead of leaving runs stuck. Full replay (restore conversation history + resume at saved iteration) is a planned follow-up — see (plan doc removed in 2026-04-26 cleanup pass) Gap 2.
-- **V2 cancel:** `RunOrchestrator.cancel(runId)` is the V2 path for `DELETE /api/runs/{id}` — signals the plan gate, interrupts the pipeline future, writes CANCELLED status + terminal SSE.
-- **V2 eval harness:** `scripts/v2-eval.sh` submits LOW / MEDIUM / HIGH specs × anthropic / openai / gemini (9 runs, PROTOTYPE), polls each to terminal, emits machine-readable JSON + a markdown comparison to `scripts/v2-eval-results/v2-eval-<timestamp>.{json,md}`. Specs live in `scripts/v2-eval-specs/{low,medium,high}.txt`.
-- **v2.6.0 — UX overhaul v3 Graphite+Signal + LlmProvider GEMINI rename + $20=20 credits pricing lock + US-first pivot + PH launch kit + UI polish v1 + 2-day stabilisation pass (2026-04-21/22, merged dev + main):**
-  - **UX overhaul v3 (PR ff-merged `feature/ux-overhaul-v1`, commit `8c6a5dcc`):** Phase 1 stop-the-bleed — Sidebar a11y (aria-label + title on every NavLink, WCAG 2.4.4/4.1.2), `ValidationReportPanel` suppresses "Clean completion" copy when pipelineResult is FAILED/NEEDS_ATTENTION ("Failed" chip → "Has issues"), `ProjectDashboardPage` tablet layout 2/3/6 col KPI grid + runs-rail collapses at `lg:`, dynamic Header breadcrumb per route (was hard-coded "Runs"), disabled `NewExecutionButton` + `ArchitectureViewer` get inline "Link a repo to enable" caption, `IntegrationsPage` grouped by category (Enabled / Coming soon / Admin disabled / Ready to configure). Phase 2 Graphite+Signal theme — `tokens.css` palette swap `#000 → #0B0D10` graphite, Signal Blue `#5B8DEF`, brand gradient (blue → teal `#7AD1C8`), money colour neutralised (was amber, collided with warning), full `[data-theme='light']` override ruleset; `useUiStore` theme slice + `setTheme/toggleTheme` with pre-paint apply to `<html data-theme>` + `localStorage` persistence; Sun/Moon `ThemeToggle` button in Header; ES logo uses brand gradient; `validation-report-pdf.html` Signal Blue brand accent (was green, collided with Passed semantic); all 17 email templates bulk palette swap. Phase 2 IA — `ProjectDashboardPage` flat 10 tabs → 5 top-level groups (Overview / Work / Knowledge / Settings / Chat) with second-tier child pills; Chat is first-class, not nested inside Knowledge. Phase 3 persona-first — new `ExecSummaryPage` at `/exec` (Business Owner view: MTD spend, success rate, needs-attention count, spend-by-project bars, top-3 wins, cross-project Awaiting-approval digest — PgM persona); gated behind `canViewCostBreakdown` (PRO/MAX/ENTERPRISE → FREE sees upgrade wall); `OrgProjectsPage` shows 3 starter templates when list is empty + aligned to `/projects/:id/dashboard` philosophy (icon-chip hero, accent-blue "PROJECTS" eyebrow, 5-col KPI tiles, scrollable body under fixed header, hard-coded `bg-[#0f1117]` → `var(--gray-100)`).
-  - **LlmProvider.GOOGLE → GEMINI rename (commits `4214fbbe` + `88706108`):** root-cause fix for the "No enum constant LlmProvider.GOOGLE" planner crash. 12 call sites across `router/`, `agent/`, `integration/`, `auth/service/`. `application.yml` — `model-matrix:` `google:` → `gemini:`, `failover-order:` `google` → `gemini`, model pricing rows `provider: google` → `provider: gemini`, provider-pool key `GOOGLE:` → `GEMINI:`. `RunRequest` + `CreateProjectRequest` `@Pattern` regex accept `GEMINI` (legacy `GOOGLE` kept as back-compat alias so old stored rows still deserialize). `RunCostTracker` + `SequentialExecutor` `google`↔`gemini` bridges retired (both sides now agree on `gemini`). Spring AI library keys (`spring.ai.google.genai.*`) and OAuth registration (`spring.security.oauth2.client.registration.google`) deliberately untouched. New **V120** migration `rename_provider_google_to_gemini.sql` — idempotent `UPDATE project/execution_run/pipeline_run SET ai_provider='GEMINI' WHERE ai_provider='GOOGLE'` to unblock JPA `@Enumerated(EnumType.STRING)` reads on legacy rows (was surfacing as HTTP 500 on `/api/projects` for orgs that once picked Gemini). `BatchClientRouterTest` updated to `LlmProvider.GEMINI`. Smoke-verified on Gemini LOW (runId `6f172111…` — COMPLETE · $0.105 · 100 accuracy) + full 15-cell matrix Apr 21 (5×3 bands × providers).
-  - **Router regression guard (commit `64dc9f65`):** new `FailoverOrderEnumAlignmentTest` (ArchUnit-style) asserts that every provider name in `llm-router.failover-order` resolves to a valid `LlmProvider` enum constant. Previously the YAML drifted silently — `ModelResolver.selectAdaptiveProvider` called `LlmProvider.valueOf(name.toUpperCase())` and crashed at runtime. Test fails the build before boot if the YAML drifts again.
-  - **Flyway dev/prod tolerance (commits `3faa2f13` + `9634a634`):** V119 was `preview_platform_v2_schema.sql` on Apr 19 and got applied on dev/prod but the file was subsequently renamed / superseded. `application.yml` now sets `spring.flyway.out-of-order=true` + `ignore-migration-patterns: repeatable:missing,versioned:missing` so boot tolerates the executed-but-missing V119 row in `flyway_schema_history`. Hot-fix `9634a634` corrected the invalid pattern syntax (was causing boot crash since `3faa2f13`).
-  - **Pricing v3 lock — $1 = 1 credit flat per band (commit `d91761a7`):** per-provider credit pricing dropped in favour of flat bands: **LOW=1, MEDIUM=1, HIGH=4, Mobile=2**. Anthropic HIGH eats a `-32%` margin loss as CAC — user picked Anthropic on purpose for accuracy signal; penalising that choice undercuts the "your provider, your choice" positioning. Blended HIGH margin stays `+59%` across the 3-provider mix. Rationale in `website/tier-decision.md`, real eval data in `website/pricing-analysis.md`. `PlansPage.tsx` PRO card copy corrected from stale "50 runs/month" → "20 credits / month · ≈ 20 LOW, 6 HIGH, or 10 Mobile runs".
-  - **US-first pivot + Stripe prod default gateway (commit `d91761a7`):** `PlansPage.tsx` — USD default; geo-detect flips to INR for `navigator.language` starting with `en-in`/`hi` or timezone `Asia/Kolkata`. `website/index.html` same geo-detect pattern + legal copy (Terms §8, Privacy data-collection, DPA sub-processors) now reads "Stripe (US/global) · Razorpay (India)". `application-prod.yml` adds `billing.default-gateway: ${BILLING_DEFAULT_GATEWAY:stripe}` + `billing.stripe.enabled: ${BILLING_STRIPE_ENABLED:true}` — effective only when ops wires 5 env vars on prod GCE (`STRIPE_SECRET_KEY`, `STRIPE_PUBLISHABLE_KEY`, `STRIPE_WEBHOOK_SECRET`, `STRIPE_PRO_PRICE_ID`, `STRIPE_ENTERPRISE_PRICE_ID`). Dev profile untouched — Razorpay still the local default. Fallback: `BILLING_STRIPE_ENABLED=false` + `BILLING_DEFAULT_GATEWAY=razorpay` reverts. Known deferred: `BillingController.purchaseTopup` still hardcodes Razorpay (4-6 file fix, P1 post-launch); `BillingEntity.getCountry()` not yet persisted so routing is "stripe by default in prod, per-entity preference respected"; `currency-gateway-map` declared in `application.yml:587-591` but not read by `PaymentGatewayRouter`; `BillingService.issueProratedRefund:961` Stripe refund path is a TODO.
-  - **Product Hunt launch kit (commit `d91761a7` + `c54f9fca` + `77deb08f`):** `website/product-hunt-launch.md` — tagline, 260-char description, maker's first comment, 7-question FAQ, launch checklist, Google/Meta/LinkedIn ad copy, success metrics, missing-asset list. `website/press-kit/README.md` — press contact, boilerplate, founding story, brand guidelines, logo/screenshot placeholder list. 6 product screenshots under `website/press-kit/ss-0{1..5}-*.png` (dashboard, run detail, project overview, architecture viewer, validation report, ss-05b polished). `website/images/og-hero.png` — 1200×630 designed social card (Pillow placeholder → designed asset swap via `website/press-kit/og-hero-template/` HTML+CSS template renderer). `website/index.html` end-of-file geo-detect script. `website/{.assetsignore, BingSiteAuth.xml, llms.txt, robots.txt, site.webmanifest, sitemap.xml, wrangler.toml}` — SEO + CDN config + Cloudflare Wrangler deploy.
-  - **UI polish v1 — ScoreRing + graduated 4-band palette + token audit (commit `f4171320`):** new `ScoreRing` component (SVG stroke-dasharray, 132px hero, 4-band color from `ScoreCard.barColor`); `ValidationReportPanel` hero swap — ScoreRing hero + "Verified / 100" primary label + "Est. N" secondary chip; `ScoreCard` + `TechDebtPanel` migrate all hardcoded hexes to `var(--status-*)` tokens (recharts `resolveVar()` helper for SVG cells that can't read CSS vars); `tokens.css` PARTIAL nudged `#F97316` → `#F59E0B` (was reading as "failure orange" on amber chips). 4-band palette formally documented at [docs/design/ui-tokens.md](docs/design/ui-tokens.md) — new file, single source of truth for every color in the app.
-  - **Semantic-token drift fix — 2 passes, 50 files total (commits `78826ed6` + `98de5bc4`):** Pass 1 — 13 user-facing components (PlanCard, FailureDecisionModal, Header, InlineRunDetail, PostMergeBar, ProjectRepoManager, RepoRelationshipEditor, InvoicesPage, PlansPage, SettingsPage, OrgProjectsPage, ProjectDashboardPage, ProjectsListPage); `tailwind.config.ts` extends `colors: { muted, primary, secondary, 'status-*' }`. Pass 2 — 37 remaining files across `auth/`, `billing/`, `execution/`, `project/`, `runs/`, `shared/`, admin pages. No more raw Tailwind colors (`bg-red-500`, `text-emerald-600`) — everything goes through `var(--status-*)` tokens. Rule enforced: PARTIAL is never red (it's amber `--status-partial`).
-  - **Notification panel mobile fix (commit `71c9ddb6`):** `NotificationPanel` was fixed-positioned with `right-4` but no `left-*` constraint → on screens <420px the 320px panel would overflow the left edge and clip behind the sidebar. Now uses `inset-x-4 sm:inset-x-auto sm:right-4 sm:w-96` so mobile renders full-width padded + desktop renders pinned-right 384px.
-  - **Preview engine prod handoff + V2 chat/apply (commit `7f1e2d19`, landed 2026-04-21):** the preview pipeline rewrite now lives in the separate [`preview-engine`](https://github.com/navneetprabhakar/preview-engine) repo. Old plan docs were removed in the 2026-04-26 cleanup pass; new plans will be tracked in that repo.
-- **v2.5.13 — React Native + Expo codegen shipped + 6 pipeline-tuning fixes + cost-tracker live tokens (PRs #46-47):**
-  - **React Native + Expo codegen (PR #46, merged dev+main 2026-04-19):** new `projectType=react-native-expo` + `runtimeSurface=MOBILE_APP` path. `codegen.react_native.enabled` feature flag (V118) gates the whole pipeline; when on, `PlannerAgent.renderMobilePreferenceBlock()` actively nudges mobile specs toward RN over native Gradle. Reference scaffold at `scripts/rn-smoke/` smoke-tested green (`npx expo export` → 2.5 MB Hermes bundle). `DevDockerfileGenerator.reactNativeExpoDockerfile()` generates a 2-stage build (builder runs expo export, nginx serves dist) with a hermes-compiler guard for the SDK 55 under-declaration. `ShellSandboxPolicy` adds `expo`/`eas`/`tsc`/`jest` to the LOW allowlist + HIGH canonical verb sets. `BuildCommandResolver` emits `npx expo export --platform {android|ios} --output-dir dist && npx tsc --noEmit` when `app.json` + `package.json` both present. Frontend: new `MobilePreviewPanel.tsx` with a QR code (qrcode.react) replaces the iframe when `projectType=react-native-expo`; `ScaffoldController` surfaces **Mobile · iOS**, **Mobile · Android**, and **Mobile · Cross-platform** in the Launch UI dropdown. Verified live on localhost with Android Calorie Tracker run `521236da` (COMPLETE · verified_score=85) and iOS Habit Tracker run `49f8a507` (COMPLETE · CLEAN · verified_score=90).
-  - **Pipeline tuning (PR #47):** worker iteration caps bumped 20/30/45 → **30/50/75** in `SequentialExecutor.tierConfigFor`; reviewer pass cap 30 → **50**; reviewer wall-clock timeouts 90s/60s → **600s/600s** (the real unlock — 60s wiring-pass timeout was chopping mid-LLM-call on mobile reviews, returning ERROR → REVIEW_FAILED → FINAL_BUILD_FAILED cascade even though the workspace built fine). `RunCostTracker` estimate bands recalibrated from real run data: OVERHEAD 12k/2k → 40k/5k; LOW 6k/1.5k → 30k/4k; MEDIUM 20k/4k → 200k/15k; HIGH 50k/10k → 600k/40k (prior estimate was ~42% under actual on RN runs). Planner `maxTokens` bumped 4096 → 8192 to avoid tool-call JSON truncation when validation v3 requirements + mobile preference block both fire.
-  - **Cost-tracker live tokens + frontend reads (PR #47):** `/api/runs/{id}/cost` now returns live `inputTokens` + `outputTokens` from the V2 snapshot alongside `costUsd`. Frontend `RunDetailTabs` computes `totalTokens = Math.max(liveSnapshot, dbTotal)` so mid-run shows accurate tokens in lockstep with live cost (was: "Total 3.4K next to Live $3.31" — a ~200× divergence because V2 flushes DB token columns only at phase boundaries while the accumulator updates per call). Terminal / V1 runs fall through to DB totals cleanly.
-  - **Worker scaffold adherence directive:** `SequentialExecutor.composeSystemPrompt` now loads `prompts/scaffolds/<projectType>.md` verbatim into the worker's system prompt when the plan specifies one — was just a planner hint before, so the worker drifted (shipped Expo SDK 51 instead of 55, kept deprecated jest-native despite the template saying drop it).
-  - **PARTIAL-removal design doc:** (plan doc removed in 2026-04-26 cleanup pass) proposes collapsing PARTIAL into `{COMPLETE, COMPLETE_WITH_CONCERNS, FAILED}` driven by two independent signals (codeBuildPassed + reviewerOutcome). Design only; waiting on user review before scheduling.
-- **v2.5.12 — 3-step architecture pipeline + Generate Docs + real Sync + 5 gap fixes (PRs #27-37, all merged to dev + main):**
-  - **3-step architecture (PR #30):** `ProjectArchitectureService.generate()` rewritten as: (1) per-repo codemap idempotent by SHA → reuse if `generatedFromSha` matches current origin HEAD; (2) per-repo HLD+LLD architecture doc via new `RepoArchitectureGenerator` (LIGHTWEIGHT tier), idempotent by `sourceCodeMapId`; (3) combined arch doc via rewritten `ArchitectureDocGenerator` synthesised from per-repo docs (LLM-driven WORKHORSE) with deterministic fallback. New `repo_architecture_doc` table (V115). New `GET /api/projects/{id}/repos/{repoId}/architecture` endpoint. Workspace layout adds `repos/<short>/architecture.md` per repo. Idempotency log lines: `codemap up-to-date @ sha=… reusing v{n}` + `repo-arch up-to-date @ codemap v{n} reusing v{n}` + `3-step arch generation complete: N repos, combined v{n}`.
-  - **Generate Docs feature (PR #27):** new `ProjectGeneratedDoc` table (V113-V114) for user-invoked EXPLANATION + SETUP docs; `ProjectDocGeneratorService` (LIGHTWEIGHT tier; reads project + arch + per-repo codemaps; ~500-1200 word output); 3 endpoints per type: `POST /api/projects/{id}/docs/{type}/generate` (201 + row, 409 if no architecture), `GET /api/projects/{id}/docs/{type}` (200 row or 204), `GET .../download` (text/markdown attachment with Content-Disposition). Frontend `GeneratedDocsPanel` on Project Overview tab: Generate / Regenerate / inline View / Download.
-  - **Sync enhancement (PR #30):** `ProjectRepoService.syncRepo` now does a real fresh-pull + per-repo regen, not metadata-only. For every project this repo is linked to: refresh metadata (detected_stack + last_synced_sha) + run Steps 1+2 of the arch pipeline via `ProjectArchitectureService.regenerateForRepo(projectId, repoId, pat)`. Step 3 (combined) deliberately deferred to next Analyse to keep Sync cheap. Uses caller's GitHub PAT for private-repo fetches. `ObjectProvider` injection avoids boot-time cycle risk.
-  - **Bug #3 root-cause (PR #28):** V112 adds `execution_run.version` BIGINT for JPA `@Version` optimistic locking; new `OptimisticLockAdvice` `@RestControllerAdvice` translates `ObjectOptimisticLockingFailureException` → 409 Conflict globally. Closes the planner-vs-approve race that returned a stale 409 surface fix (`f2a77a5a`).
-  - **Design-system primitives (PR #21 follow-up):** new shared `Button.tsx` (cva variants × sizes), `Checkbox.tsx`, `Radio.tsx`. `ResponsiveModal.tsx` hardened with focus-trap + Escape + `disableDismiss` + `hideCloseButton` + ARIA role=dialog. ~9 modals migrated (GrantRunsModal, AdminInviteModal, ChangePasswordModal, ContactModal, UpgradeModal, DisclaimerModal, AddRepoModal, FailureDecisionModal, NewRunModal partial).
-  - **Notification gap (PR #21 follow-up):** new `PipelineEvent.GateOpened(runId, gateType, credits)` + new `QuotaEvent.QuotaWarning(userId, orgId, metric, current, limit, percentUsed)` (separate sealed interface — user-scoped not run-scoped). `RunCompletionNotifier` gains `onGateOpened` + `onQuotaWarning` listeners. `TierEnforcementService` fires the 80% one-shot warning per billing cycle (dedupe key embeds `YearMonth`). New `auth/api-key.fine-grained` watch for the SUPER_ADMIN bypass need.
-  - **`RunTokenAttributor` strangler (PR #21 follow-up):** extracted ~90 LOC of phase + per-task token attribution out of `RunOrchestrator` (1675→1586 LOC). Sets the strangler-pattern groundwork for the larger orchestrator refactor.
-  - **Eval matrix harness ready (PR #21 follow-up):** new strict `s3-medium.txt` / `s4-large.txt` / `s5-integration.txt` specs in `scripts/v2-eval-specs/` + new runner `scripts/v2-eval-strict.sh` (dry-run green; live run deferred — needs servers + ~$12 LLM spend).
-  - **5 gaps closed (PR #35-37) from 2026-04-18 persona test pass:** Gap #1 — SUPER_ADMIN now bypasses `loadRepoForRead` for USER-scope repos (single `appUserRepository` lookup, matches `TierEnforcementService` pattern). Gap #2 — new `ValidationAdvice` `@RestControllerAdvice` translates `MethodArgumentNotValidException` into JSON `{error,message,fields:{field:msg}}` body (was empty 400 before). Gap #3 — CI's `mvn package -DskipTests` dropped to `mvn package`; surefire excludes `e2e,integration,chaos` so 214 unit tests run on every push (~32s). Gap #4 — health-check curl wrapper rewritten: `rm` stale body file before each curl, gate on `http=200` AND body containing `UP|DEGRADED` (was reading stale buffer + grepping body, masking the V113 boot-crash on 2026-04-17). Gap #5 — `RunOrchestrator` background staleness probe now loads run-owner PAT from `appUserRepository` and threads it through `stalenessService.report` + `projectArchitectureService.generate`.
-  - **Tier mappings + connection-leak fix (PR #31 + #32):** `application.yml` `agent-tier-map` adds `RepoArchitectureGenerator: LIGHTWEIGHT`, `ArchitectureDocGenerator: WORKHORSE`, `ProjectDocGeneratorService: WORKHORSE` (no more `No tier mapping` WARN). `ProjectArchitectureService.generate()` + `regenerateForRepo()` no longer `@Transactional` — long LLM calls inside a tx tripped Hikari's 60s leak detector; now each `save()` runs in its own auto-tx, latest-version-wins lookup preserves correctness. `StalenessService.report` gains a 2-arg form `report(projectId, overridePat)` — dashboard + staleness controllers thread caller PAT (no more `getBranchHeadSha … 404` on private-org repo dashboard loads).
-  - **Honest scoring + test-coverage fix (PR #21 follow-up — `3b7adfe6`):** `ReviewScoringService.scanWorkspace` now scans only files modified after `run.startedAt`, excludes doc/config files (.md, .yml, Dockerfile, etc.) from the source-file denominator. Pure doc-only runs return `testCoverage = null` (UI hides the row). `RunDetail.tsx` top banner + `ScoreCard` header prefer `verifiedScore` over `accuracyScore` (closes the "0/100 accuracy · F at top, Verified 90/100 in panel" contradiction). New "honest scoring" helper note appears when all dimensions equal anchor.
-  - **Tests + memory:** new `AsyncAllowlistTest` (ArchUnit + curated allowlist) guards against the 3a17e9aa @Async + lazy-JPA regression class. `PlannerAgentV2ValidationTest` constructor-drift fix. `ExecutespecApplicationTests` tagged `@integration` (needs DB — runs via `mvn test -Pintegration`). New memory rules: `feedback_test_locally_first.md`, `feedback_ff_only_pull.md`. (The persona + adversarial test-scenario docs were captured in this session and then archived in the 2026-04-26 cleanup pass.)
-- **v2.5.11 — Validation v3 / Pillar 1 (planner requirement graph, open PR #21):** New record `RequirementSpec{id,text,kind}` (FUNCTIONAL | NON_FUNCTIONAL | TEST | CONSTRAINT). `Plan.requirements` + `PlannedTask.meetsRequirements` added; `submitPlan` tool schema extended with both. `planner.md` prompt gains a mandatory Step 1 "enumerate every requirement" section + invariant #9 declaring coverage non-negotiable. `PlannerAgent.validatePlan(plan)` enforces: (1) non-empty requirements; (2) unique non-blank ids; (3) every `meetsRequirements` ref resolves; (4) every requirement cited by ≥1 task; (5) testable surfaces (HTTP/CLI/LIBRARY, non-SINGLE_SHOT) have a test task or TEST-kind requirement. One retry with violation list as feedback; second failure → run ends `PLAN_COVERAGE_INVALID`. Gated behind new feature flag `validation.v3-strict` (default OFF in prod). SINGLE_SHOT path synthesises R1 (first 120 chars of spec) + T1.meetsRequirements=[R1]. `RunOrchestrator.persistPlan/persistTasks` serialize the graph to `pipeline_run.plan_requirements_json` and `agent_task.meets_requirements_json`. Migration V109. New test `PlannerAgentV2ValidationTest` — 9/9 green. Full 5-pillar plan at (plan doc removed in 2026-04-26 cleanup pass).
-- **v2.5.10 — trustworthy verified score + honest PARTIAL status:** Fixes the "PARTIAL · 97/100" contradiction: LLM-inferred `accuracyScore` was hallucinating from the file tree and a flaky intermediate smoke test flipped the whole run's status_reason to PARTIAL. V106 adds `validation_report.final_build_passed / tests_passed / tests_total / reviewer_verdict / verified_score` and seeds feature flag `scoring.v2-verified`. V107 adds `pipeline_run.status_reason` (CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS | FINAL_BUILD_FAILED | TESTS_FAILED:N_OF_M | REVIEWER_UNRESOLVED | REVIEWER_FAILED | ALL_TASKS_FAILED | LEGACY_UNKNOWN). V108 backfills historical PARTIAL runs (CLEAN verdict + build passed + tests pass → COMPLETE + CLEAN_WITH_INTERMEDIATE_WARNINGS; build failed → keep PARTIAL + FINAL_BUILD_FAILED; else → LEGACY_UNKNOWN). `ValidationReportService.computeVerifiedScore = clamp(0,100, base40 + build20 + round(20×pass/total) + verdict(CLEAN=20/FIXED=15/UNRESOLVED=5/REVIEW_FAILED=0) − 5×unfixedCritical)`. `ReviewScoringService.score()` adds a `verifiedScore` parameter and anchors the 6 dimensions on it when the flag is on. `RunOrchestrator.resolveTerminalStatus()` decision tree derives status + reason from reviewer verdict + final build + execution signals. `RunEvent.complete(runId, status, reason)` overload threads reason to the SSE payload. `AccuracyAssessmentService` prompt tightened: requires inline `[file:line-range]` citations; removes the "file-tree plausibility" rule that enabled hallucination. Frontend: `StatusBadge` gains a native tooltip mapping every status_reason to human copy; new `SignalBreakdown` chip (`Build ✓ · Tests 73/73 · Reviewer CLEAN · Verified 92 · Est. 97`); `ValidationReportPanel` primary badge is `verifiedScore` when present (`accuracyScore` demoted to "Est." secondary). Migrations V106/V107/V108.
-- **v2.5.9 — evaluation hardening (5 bug fixes):** #1a `ExecutionPlannerService` hardcoded OPENAI → now reads `run.getAiProvider()` with ANTHROPIC fallback. #1b `FallbackMode.IMMEDIATE → NO_FALLBACK` so provider failures surface under strict-provider mode. #2 `execution_solution_dependency` duplicate-key PK violation → edge dedup + batch save. #3 Gemini default `gemini-2.5-flash` → `gemini-3-flash-preview` (older emitted Python-style tool calls causing MALFORMED_FUNCTION_CALL); added `PlannerAgent.salvagePlanFromText()` regex fallback for text-blob responses. #4 `LlmRouter` emits `RUN_PROVIDER_SWITCHED` SSE event on fallback so silent switches become observable. System property `-Dexecutespec.strict-provider=true` gates strict no-fallback in `RunOrchestrator.normalizeProvider`. Verified via 6-run eval matrix (3 providers × Pro + Project). One additional finding surfaced: `ModelResolver.selectAdaptiveProvider` bypasses strict-provider at the router level (documented for follow-up as Bug #1c; not yet fixed).
-- **v2.5.6 — billing-zone run-counter reset + nav fixes + dev wipe:** `TierEnforcementService.isNewCalendarMonth` now evaluates in `Asia/Kolkata` (`BILLING_ZONE` constant) — previously anchored to UTC, which fires reset at 05:30 IST on the 1st instead of 00:00 IST. New `MonthlyRunCounterResetJob` (`@Scheduled(cron = "0 0 0 1 * *", zone = "Asia/Kolkata")` + `@SchedulerLock`) iterates every user/org on the 1st midnight IST and calls new package-private `shouldResetUserCounterForJob` / `shouldResetOrgCounterForJob` helpers on `TierEnforcementService` so subscribed users still anchor to their billing cycle and FREE users stay on their lifetime quota. Closes the "dormant users show last-month usage until they submit" gap. Nav: `ViewModeToggle` PROJECT toggle now routes to `/org/projects` (OrgProjectsPage — the management screen with New Project + members). Sidebar "Projects" section header is a `NavLink` to `/org/projects`. "Dashboard" button added to OrgProjectsPage header linking to `/projects` (the read-only ProjectsListPage). Dev-only DB/workspace/Redis wipe scripts added at `scripts/dev-wipe-runs-and-projects.{sql,sh}` — pg_dump backup first, TRUNCATE CASCADE in one transaction, reset `org.monthly_run_count` + `app_user.personal_run_count` to 0, preserves billing + identity tables.
-- **Batch 7 — arch diff source-file correlation (v2.5.5):** New `ArchitectureDiffService` + `GET /api/projects/{id}/architecture/diff?from=&to=` returns per-repo added/modified/removed/renamed files between two architecture versions. Uses the `generated_from_shas` map already persisted on `ProjectArchitectureDoc` — for each repo present in both versions, calls `GitHubRepoService.compareCommits(repoFullName, baseSha, headSha, pat)` which hits GitHub's `GET /repos/{o}/{r}/compare/{base}...{head}` endpoint. No new schema, no agent-task filesChanged plumbing. `ArchitectureViewer` renders a "Source file changes" section under the existing LCS text diff when the user opens Diff vs v{N-1} — grouped by repo, subgrouped by status (Added/Modified/Removed/Renamed), each file shows `+additions -deletions`. Silent fallback when the SHAs are missing (pre-v3.0 rows) or GitHub returns non-200. No migrations.
-- **Batch 6 — regression fix + UX polish (v2.5.4):** **Fix**: `ExecutionRunRepository.findListByProjectId` / `findDetailById` dropped `solutions.repoMappings` from the `@EntityGraph` — Hibernate can't JOIN FETCH two List-typed collections in one query (MultipleBagFetchException on `/api/projects/{id}/prs` and `/launches`). The list endpoint now joins `solutions` only; `repoMappings` load lazily per-solution under OSIV during DTO mapping. **UX-5.2 Failed Solution UI**: `FailureDecisionModal` rewritten — replaces the dropdown+submit with dedicated action buttons (Retry / Skip this+dependents / Fix manually / ⚠ Attempt anyway), computes blocked downstream solutions from `dependencyIds`, and shows an amber block listing them before the decision. **UX-4.1 Reset sheet**: new `ResetWorkspaceSheet` component replaces the inline toast from the Repos tab — previews per-repo SHA movement (old→new, "already up to date") before confirming; on submit calls `analyseProject`, refetches health, and shows a ✓ line when done. **UX-1.3 Multi-banner stacking**: `PostMergeCascadeService` now writes to a Redis List (`project:post-merge:<id>`, trimmed to 3 newest, TTL refreshed on push) via `readPostMergeBars` / `dismissPostMergeBars`. Controller endpoint returns `List<PostMergeBar>`. Frontend shows top 2 banners + a "+N more merged" chip with full details in the tooltip. **UX-2.2 Skeleton**: `ExecutionSetup` estimate chip now has a pulsing skeleton state while the debounced request is in-flight + a tooltip on the basis string explaining how the estimate is computed. No migrations.
-- **Batch 5 UX polish (v2.5.3):** Frontend-only pass against (plan doc removed in 2026-04-26 cleanup pass). `ExecutionStepper` swapped to user-facing labels ("Analysing codebase", "Building", "Paused — action needed") with hover descriptions + live elapsed time on the active step (driven off `executionRun.updatedAt`). `RepoChip` + `extractRepoShortName(...texts)` surfaced on `TaskCard` — derives `repos/<name>/` prefix from title/objective/completion-notes so multi-repo runs get repo attribution without a backend DTO change (TaskGraph node chip deferred — SVG). `StalenessWarning` on `ExecutionSetup` calls the existing `workspace-health` endpoint on mount + selection change; when any selected repo is stale it renders an amber non-blocking block with "Analyse before planning" (invokes `analyseProject` + refetches health) and "Proceed anyway" CTAs. `TechDebtPanel` upgraded: horizontal recharts `BarChart` for issues-by-category with color coding (LOGIC blue, SECURITY red, PERFORMANCE amber, …), severity rendered as colored chips (BLOCKER/MAJOR/MINOR/INFO) instead of plain rows. No backend changes, no migrations.
-- **Batch 4 — tech debt, templates, TDD, cancel rollback (v2.5.2):** New `TechDebtService` + `GET /api/projects/{id}/tech-debt?since=<days>` aggregates `validation_report.issues_json` into category/severity counts + top-5 file hotspots + dimension trend (no LLM call). `TechDebtPanel` renders on Project Overview with All-time / 30-day toggle. Spec templates land at V102 (`project_spec_template`, owner_type PROJECT|ORG, soft-delete). New `SpecTemplateService` + `SpecTemplateController` expose CRUD via `/api/projects/{id}/templates` + `/api/orgs/{orgId}/templates`; project list merges project + org-scoped templates in one call. `TemplatePicker` dropdown sits above the requirement textarea in `ExecutionSetup`, with inline "Save current as template" using whatever the user has typed. TDD Mode (Phase 4.3): `RunRequest.tddMode` (Boolean) threads through `RunOrchestrator.submitRun` (new overload, defaults false on legacy callers) → `runPipeline` → `PlannerRequest.tddMode` → `{{TDD_MODE_BLOCK}}` slot in `prompts/planner.md`. `PlannerAgent.renderTddBlock` injects an instruction telling the planner to lead with test tasks and have implementation tasks declare `dependsOn` the test ids. Toggle exposed in `NewRunModal`. Phase 2.3 cancel rollback: `ExecutionOrchestrator.abortExecution` now runs `runCompensations` after the status flip — iterates every `ExecutionSolution` with a `prUrl`, calls `GitHubRepoService.closePullRequest(repoFullName, prNumber, pat)` (PATCH `/repos/{owner}/{repo}/pulls/{n}` with `state=closed`, idempotent on 422), and emits `EXEC_COMPENSATION_UPDATE` (RUNNING → COMPLETE/FAILED) per step plus a final `EXEC_COMPENSATION_DONE` summary on the existing exec SSE channel. `useExecutionStore` gains a `compensations[]` slice + `applyCompensationUpdate`/`setCompensationDone` actions. `CancellationPanel` renders the live cleanup view (✓/✗ per PR, "Close on GitHub" deep-link on failure) on the ABORTED status page. Migration V102.
-- **Batch 3 — workspace health, N+1, post-merge, estimation (v2.5.2):** New `WorkspaceHealthService` + `GET /api/projects/{id}/workspace-health` rolls up per-repo SHA drift (codemap vs current origin HEAD, origin lookup cached 10 min in Redis at `project:origin-sha:<repoId>`), webhook install status, open-PR count, and last-analysed timestamp. `WorkspaceHealthPanel` renders the report on the Project Overview tab with per-repo chips + an "Analyse all" button. `ExecutionRunRepository.findListByProjectId` uses `@EntityGraph(solutions, solutions.repoMappings)` — the Launches list endpoint (`/api/projects/{id}/launches`) + project PR rollup (`/api/projects/{id}/prs`) now single-query their solution data instead of N+1-ing per row. `PostMergeCascadeService.writePostMergeBar` drops a transient Redis marker (`project:post-merge:<projectId>`, 10 min TTL) on PR merge; `PostMergeBar` component polls `GET /api/projects/{id}/post-merge-bar` on dashboard mount and renders a "✓ PR #N merged — Start next requirement →" banner above the tab strip (dismissible, auto-routes to Launch). New heuristic `EstimationService` + `GET /api/projects/{id}/estimate?requirement=…` returns p25/p75 task + cost estimates from the project's last 20 completed runs (bucketed by requirement length), falling back to project-average then platform-average; `ExecutionSetup` shows a debounced gray chip under the requirement textarea (no LLM call). No new migrations in Batch 3.
-- **Batch 2 — worker RAG, snapshots, webhooks, reset (v2.5.2):** `SequentialExecutor` now injects a task-scoped `{{REFERENCE_DOCS}}` block into every worker's system prompt via `RetrievalService.retrieve(projectId, task.description(), k=2, cap=800)` — planner already had its own wider k=3/1500 retrieval, the worker pass is narrower but keeps API contracts / limits / field names in front of the code-writing LLM. `ExecutionRequest` gained a `projectId` field; `RunOrchestrator` threads it through. `WorkspaceInitService.cloneMultipleRepos` now captures `git rev-parse HEAD` per repo right after clone and persists a `run_repo_snapshot` row (V100). `RunSyncService.syncToOriginalCommit(runId)` + `POST /api/runs/{id}/sync/original` reset the workspace back to those exact SHAs — distinct from `POST /api/runs/{id}/sync` which resets to current origin HEAD. "Reset to run state" button added to `InlineRunDetail`. New-repo Launches auto-install the GitHub pull_request webhook via `GitHubRepoService.installWebhook` (requires `github.webhook.callback-url` + `github.webhook.secret`); `ProjectRepoService.createAndLinkNewRepo` records the result on `ProjectRepo.webhookInstalled` (V101 — NOT NULL default FALSE). Linked existing repos get a manual "Install webhook" button on `RepoCard` that calls `POST /api/repos/{repoId}/webhook` using the caller's PAT (needs `admin:repo_hook`). Webhook status chip surfaces on every RepoCard. `ProjectRepoManager` adds a "Reset workspace" button that calls the existing `analyseProject` path to re-pull every linked repo and regenerate codemaps + architecture before a Launch. Migrations V100, V101.
-- **Batch 1 hardening (v2.5.2):** `StalenessService` moved from Caffeine (per-JVM) to Redis (`project:stale:<id>`, 5-min TTL) so invalidation on one MIG node is visible to every other node — no more stuck STALE badges after a generate. New `ProjectWorkspaceWarmer.warmDiskCache(projectId)` (`@Async`) pulls DB-authoritative codemaps + architecture.md and mirrors them to the local project workspace; called post-generate so the node that ran `generate()` warms its disk, and exposed for future first-access hooks on other nodes. `ProjectWorkspaceService.writeRawFile(projectId, path, content)` is a no-commit mirror path (atomic tmp-rename + Redis lock) used by the warmer. `RunOrchestrator.normalizeProvider` now takes `projectId`+`runId`, falls back to `project.ai_provider` before the platform default (OPENAI), and logs WARN at each fallback — legacy `ExecutionRun` rows with null `ai_provider` no longer silently land on OPENAI. V99 backfill migration closes the same gap for existing rows. New `SUPER_ADMIN` endpoint `POST /api/admin/executions/reconcile` (powered by `AdminReconciliationService` + `ExecutionRunRepository.findStaleNonTerminal`) marks `ExecutionRun` rows stuck in non-terminal status >30 min as FAILED with reason `reconciled_orphan_v251` — operational cleanup for pre-v2.5.1 orphans. Migration V99.
-- **Project hardening + Launch loop (v2.5.1):** `spring.jpa.open-in-view=true` (flipped from false) eliminates the entire class of lazy-init crashes that hit every detached-entity DTO mapper in the execution + project controllers. `ExecutionPlannerService.persistPlan` now falls back to name-match (full or short `githubRepoFullName`) when the LLM returns a repo name instead of a UUID in the `repoId` field — the previous `UUID.fromString` throw left `repoId=null`, skipped the clone, and triggered `maxRetries=3` per solution. `SolutionExecutionService.submitSolutionRun` now passes `ExecutionRun.aiProvider` to `RunOrchestrator.submitRun` (was silently defaulting to openai). `ProjectArchitectureController.analyse` + `ExecutionOrchestrator.triggerAnalysis` thread the caller's `AppUser.githubPat` into `ProjectArchitectureService.generate(projectId, branch, pat)` — private repos were returning empty trees under the system PAT. New endpoints: `POST /api/projects/{id}/prs/refresh` (polls GH + post-merge cascade), `POST /api/projects/{id}/analyse?branch=<name>`, `POST /api/runs/{id}/sync?branch=<name>`, `POST /api/executions/{id}/resume`. Architecture diff UI (LCS line diff of `architecture.md` vN vs vN-1). `GitHubRepoService.listRepoFiles` + `readRepoFile` no longer hardcode `main`. Launch header has a persistent Cancel button on every non-terminal step. Migrations V96-V98 (auto-push flag on PLATFORM scope, execution_* id columns widened to VARCHAR(64) + tenant_isolation policy drop-recreate dance).
-- **Project Workspace + RAG (v2.5.0):** Per-project workspace at `workspace/projects/<projectId>/` (codemaps/, architecture.md, summary.md, docs/, .git) owned by `ProjectWorkspaceService` with atomic writes + Redis-backed lock. `ProjectArchitectureService.generate()` now writes each codemap + architecture.md + summary.md to disk; DB blobs remain authoritative (Cloud Run / GCE VMs are ephemeral). `ProjectBriefService` summarises arch into 2-4 sentences via LIGHTWEIGHT-tier LLM, builds a `{{PROJECT_BRIEF}}` block injected into `PlannerAgent`. `POST /api/projects/{id}/analyse` + `GET /api/projects/{id}/summary` are the new entry points (legacy `/architecture/generate` still works). `RunOrchestrator` does pre-execution lazy refresh via `StalenessService` and post-success staleness invalidation. `ReadFileTool` accepts `project:` prefix and falls back to DB when the disk cache is missing. Always-on RAG via Tika `DocumentExtractor` + 500/50-token `ChunkingService` + Spring AI OpenAI `EmbeddingService` (text-embedding-3-small) + JDBC `ChunkStore` over pgvector; `ProjectDocumentService` + `/api/projects/{id}/documents` handle upload / async index pipeline (UPLOADED -> EXTRACTING -> EMBEDDING -> READY/FAILED). `RetrievalService.retrieve(projectId, query, k=3, cap=1500)` is wired into the planner (`{{REFERENCE_DOCS}}`) and `ProjectChatService`. Architecture tab gets a GitHub-style `Diff vs v{N-1}` button (LCS line diff). Auto-push of successful project runs is now ON by default. Memory snapshot ceiling bumped 8K -> 12K. Migrations V95 (pgvector + project_document + project_document_chunk), V96/V97 (auto-push flag).
-- **Project Shell + Launch (v2.4.0):** ENTERPRISE + TEAM premium feature (was "MAX" until V141 renamed MAX → TEAM on dev/main; the historical "MAX" label is preserved in the migration trail below for audit accuracy). Project dashboard gains Launches + Pull Requests tabs; "Launch" creates an `ExecutionRun` with optional new-repo specs (`NewRepoSpec` — name/description/techHint/githubOwner/visibility). `ExecutionOrchestrator` pre-creates new repos via `ProjectRepoService.createAndLinkNewRepo` before persisting the Launch. Solutions are now multi-run: each V2 dispatch (initial + retry + manual fix) writes an `execution_solution_run` row; UI's `SolutionSection` is collapsible and links each attempt to the existing `RunDetailPage`. Project-level rollup endpoints under `/api/projects/{id}/{launches,prs,overview}` + pre-flight `/launches/validate-repo-access`. Scaffold taxonomy at `/api/scaffolds`. Migration V90.
-- **Execution View (`execution/`, v2.3.0):** Project-level workbench for multi-repo, multi-solution work. `ExecutionOrchestrator` drives an `ExecutionRun` through SETUP → ANALYSING → ARCH_REVIEW → PLANNING → EXECUTING → COMPLETE. `ExecutionPlannerService` decomposes the requirement (with `{{PROJECT_MEMORY}}`) into ordered `ExecutionSolution`s — each targeting one repo and dispatched through `RunOrchestrator.submitRun(...)` by `SolutionExecutionService`. Dependency layering via `SolutionDependencyResolver`, cross-solution file conflicts via `FileConflictDetector`. Per-solution markers live on `exec/<runId>` branches through `ExecutionBranchService`; final per-repo PRs opened via `GitHubRepoService` + `PullRequestRecordService`. Handover contracts persist in `execution_context_handover` via `CrossRepoContextService`. SSE channel `sse:channel:exec:{id}` with `EXEC_*` events. Feature flag `execution.view.enabled` (default off) + ENTERPRISE tier gate (`tier_config.execution_view_enabled`). Migration V89.
-- **Project memory (`memory/`, v2.2.0):** Every completed project-scoped run appends a caveman-English digest to `project_run_ledger` via `RunLedgerAgent` (LIGHTWEIGHT tier, post-`generateValidationReport`, non-fatal). `MemoryCompactionService` rewrites a versioned `project_memory_snapshot` every 10 runs (starting at R20), keeping planner context bounded regardless of project age. `ProjectMemoryProvider.buildPlannerContext(projectId)` feeds `{{PROJECT_MEMORY}}` into `PlannerAgent`'s prompt so new runs know what was built, what patterns were set, and what debt was left. Surfaced to the UI via `GET /api/projects/{id}/memory` + Memory tab on the project dashboard (`ProjectMemoryPanel`). Migration V88.
-- **Pilot v3.0 — project workspace (`project/`, `codeintel/`, `assessment/`, `scoring/`):** Project becomes the unit of organization. New `ProjectDashboardController` aggregates active/completed/failed counts + score trend. Dual-scope `ProjectRepo` registry (ORG = shared, USER = personal) joined to projects via `project_repo_link`; multi-repo selection in `NewRunModal` clones each into `workspace/<runId>/repos/<name>/` via `WorkspaceInitService.cloneMultipleRepos`. `ProjectArchitectureService` versions per-repo `ProjectCodeMap` + project-wide `ProjectArchitectureDoc`; `StalenessService` (Caffeine 5-min cache) drives the dashboard's STALE flag using stored generation SHAs. `FeatureAssessmentService` runs before planner (heuristic by default; LLM-backed when `assessment.llm.enabled` flag is on); the `AssessmentPanel` surfaces complexity + risks + cross-repo deps above the plan-approval gate. `ScmPushService.pushMultiRepo` handles per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`; PRs persisted to `pull_request_record` (R5), webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `ReviewScoringService` derives 6 dimensions (code quality / test coverage / architecture / security / performance / design compliance) from review issues + accuracy report — no extra LLM call. `ScoreCard` at top of `ValidationReportPanel`. Optional Figma URL on `RunRequest` drives design-compliance scoring. `StackRefreshJob` (`@Scheduled` daily 03:00, `@SchedulerLock`) refreshes `detected_stack` + `last_synced_sha` org-wide.
-- **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3
-- **Database:** PostgreSQL (Cloud SQL) for state, Redis for caching + gate coordination + feature flags + rate limiting
-- **Infra:** GCP N. Virginia (us-east4), Cloud Run for previews (dev/prod), Docker Compose for local previews, GCE for main app
-- **Batch execution:** Not yet re-implemented under V2. V1 batch (`batch/*`) is frozen; the V2 re-implementation is scoped in docs/plans/pending-v2-batch-execution-plan.md and waits on deprecation P3.
-- **Project type detection:** Planner declares `project_type` in plan JSON → written to `.agent-context/project.json` → read by preview/deploy Dockerfile generators (fallback: file-based heuristics)
-- **LLM Router:** V2 uses `LlmRouter` with native tool calling; YAML-configured model matrix maps `AgentTier x Provider → Model` via `ModelResolver`. Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open, 60s TTL auto-recovery). Agent tiers: PLANNING, WORKHORSE, LIGHTWEIGHT.
-- **Gate system:** Redis-backed plan approval gate with 500ms polling, 2h TTL, 24h max wait timeout. V2 auto-merges per task — no merge gate.
-- **Auth:** JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. RBAC with SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER roles. Force-logout via feature flag epoch-based JWT invalidation. JWT secret validated at startup in prod (`JwtSecretValidator`).
-- **Tiers (live on dev/main, post-V144 + V145):** FREE (10 runs/month, 1-credit specs only — V145 loosened from 5) → PRO (20/month managed keys — **grandfathered, hidden from new buyers**) → **TEAM** ($49/seat, 2-20 seats shared pool, BYOK + per-seat collaboration) → **MAX** ($29/mo BYOK unlimited) → ENTERPRISE (unlimited, custom). V141's "drop per-seat TEAM, rename MAX → TEAM" was REVERTED by V144 (2026-04-26 same-day correction); V179 (2026-05-06) reverted the V143 product_split so there's no longer a vibe/executespec surface gate. Older sections below that still describe the 4-tier post-V141 ladder are stale. Tier→surface policy enforced by `TierProductSurfaceMapper`. Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`. Tier-state machine via `TierLifecycleService` — every tier row has `lifecycle_state ∈ {LISTED, HIDDEN, SUNSETTING}` on `tier_config` + `billing_plan`; SUPER_ADMIN toggles at `/admin/tiers`. SUNSETTING gateway side-effects (cancel-at-period-end on Stripe/Razorpay) gated by feature flag `billing.lifecycle.sunsetting.enabled` (default OFF).
-- **Billing:** Multi-gateway via `PaymentGatewayRouter` (Razorpay + Stripe). Subscriptions, run top-up credits, invoicing with GST, payment audit trail. Cost-proportional credits: charged at plan approval (not submission), refunded on FAILURE. `run_cost_log` table tracks estimated vs actual cost for pricing analytics.
-- **Security:** 8-layer defense-in-depth: request validation, input sanitization (`InputSanitizer` — NFKC normalization, zero-width strip, base64 decode+scan), LLM prompt defense, code abuse scanning (`CodeAbuseScanner` — crypto, reverse shell, PowerShell, DNS exfil, cloud metadata, obfuscation), shell sandbox, file sandbox, process isolation, container hardening (metadata endpoint blocking, env var whitelist). Configurable CSP/HSTS/X-Frame-Options via `SecurityProperties`.
-- **Guardrail levels (Plan 1 P1–P5):** five of the security layers above now accept a `GuardrailLevel` parameter — `LOW` (default, today's behaviour), `MEDIUM`, `HIGH`. Flip `security.guardrail_level` via `PUT /api/feature-flags/{key}`. Diagnostic at `GET /api/admin/guardrail`. Per-level deltas: `InputSanitizer` MEDIUM 8 KB cap / HIGH 10% non-printable cap; `CodeAbuseScanner` MEDIUM+ auto-400 on flagged; `RateLimitPolicy` MEDIUM halves WRITE/DEPLOY/PREVIEW / HIGH quarters every group; `ShellSandboxPolicy` MEDIUM rejects `eval`/`exec` / HIGH strict npm/mvn/gradle verbs; `FileSandboxPolicy` MEDIUM path allowlist / HIGH dotfile lockdown (bean ready; call-site wiring follow-up). See (plan doc removed in 2026-04-26 cleanup pass).
-- **Feature flags:** DB-backed `FeatureFlagService` with Redis pub/sub cache invalidation + 60s scheduled reload. Admin-manageable via `FeatureFlagController`.
-- **Rate limiting:** Redis-backed per-tenant rate limiting via `RateLimitFilter`. Endpoint groups: AUTH, RUNS, WEBHOOK, READ, WRITE, PREVIEW, DEPLOY with per-tier limits.
-- **Observability:** Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP)
-- **Prompt architecture:** Composable fragment system via `PromptAssembler` (`@Service`). Shared rules stored in `prompts/fragments/*.md`, injected via `{{include:name}}` markers. Per-project-type scaffold templates in `prompts/scaffolds/*.md`, injected via `{{SCAFFOLD_TEMPLATE}}`. `assembleAndTrack()` computes SHA-256 prefix hash, saves row to `prompt_audit` table. Inline CSS removed from worker system prompts (`{{STYLING_SECTION}}` = empty string); actual design content arrives via `buildFrontendBlock()` → `UiStyleResolver` → filesystem folder in `application.yml`.
-- **Request classification:** V2 folds triage into `PlannerAgent` — classification (SINGLE_SHOT | MEDIUM | MULTI_TASK) decides task caps (1 / 4 / unlimited) and whether to bypass the LLM (SINGLE_SHOT uses a synthesised 1-task plan).
+- **Backend:** Java 21, Spring Boot 3.3, Spring AI 1.1.4, PostgreSQL (Cloud SQL) + Redis. Single Spring Boot JAR; frontend served from `static/`.
+- **Frontend:** React 18, Vite 5, Tailwind CSS 3.4, TypeScript 5.3. Two coexisting chromes share Zustand stores: V2 sidebar shell (under `frontend/src/components/layout/`) and V3 top-bar shell (under `frontend/src/v3/`).
+- **Infra:** GCP us-east4. Single GCE VM serves prod + dev; Cloud Run serves on-demand previews. Cloudflare in front of `*.executespec.ai`.
+- **Codebase shape:** 72 top-level packages under `com.navneet.executespec.*` (flat; the historical `v2.*` / `v3.*` prefixes were retired in 2026-05-07's unification pass). 98 REST controllers, 78 entities, 186 Flyway migrations, ~88 prompt files. Frontend ~75K LOC.
+
+### V2 pipeline (the only execution path)
+
+```
+RunOrchestrator
+  ├─ SmartClassifierAgent (LIGHTWEIGHT)            classify spec: SINGLE_SHOT | SMALL | MEDIUM | LARGE | LEGACY
+  ├─ OutlinePlannerAgent (PLANNING)                emit Plan via submitPlan tool
+  │   └─ for LARGE/LEGACY: SKELETON_ONLY → parallel TaskExpanderAgent (WORKHORSE) → CoherencePlannerAgent (LIGHTWEIGHT)
+  ├─ plan gate (PRODUCTION pauses at AWAITING_APPROVAL; PROTOTYPE bypasses)
+  ├─ SequentialExecutor                            per-task tier-routed WorkerAgent + per-task buildProject smoke
+  ├─ ReviewerAgent (PLANNING)                      general + wiring passes (project-type aware)
+  ├─ ValidationReport persistence + verifiedScore
+  └─ auto-preview kickoff + test generation in background
+```
+
+Run modes (`pipeline_run.run_mode`): **`BUILD`** (default — the diagram above) and **`PATCH`** (single thin-agent loop against a failing-test spec; skips classifier / planner / reviewer; used by the four autofix surfaces below and the SWE-bench / ProgramBench adapters).
+
+Tools (`tool/`): `readFile`, `writeFile`, `editFile`, `listFiles`, `searchFiles`, `shell`, `gitStatus`, `gitDiff`, `gitCommit`, `buildProject`, `runTests` (patch-mode only), plus `completeTask` for native termination. `ToolRegistry.bindForWorker(ctx)` filters `gitCommit` from worker authority (auto-push happens at run-end via `ScmPushService.pushMultiRepo`).
+
+LLM router (`agent/LlmRouter.java`): native tool calling end-to-end across all three providers. Anthropic via Spring AI; OpenAI via `OpenAiNativeToolClient`; Gemini via `GeminiNativeToolClient` (handles schema sanitization + thought-signature round-trip). Every call flows through `RunCostTracker` (cache-aware pricing from `application.yml model-matrix.model-pricing`). Legacy `FallbackLlmRouter` survives for non-tool-calling agents (`AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`).
+
+Workspaces: `<agent.workspace>/<runId>/` (local disk on the VM). Multi-repo runs clone each linked repo into `<workspace>/<runId>/repos/<name>/`. Worker writes flow through tool dispatchers; cleanroom container mounts (SWE-bench, ProgramBench) bind the workspace dir at `/workspace` so host-side tools and container-side tools see the same files.
+
+Workers (`agent/WorkerAgent.java`) — sequential, multi-turn. Per-complexity caps (set in `SequentialExecutor.tierConfigFor`): LOW=30 iters / 4k tokens, MEDIUM=50 / 8k, HIGH=75 / 16k. Per-provider PATCH-mode caps: Anthropic 150, OpenAI 100, Gemini 120. Outcomes: `COMPLETED | COMPLETED_BY_STAGNATION | STOPPED_WITHOUT_COMPLETE | ITERATION_LIMIT_EXCEEDED | BUDGET_EXCEEDED | ERROR`. Two resilience levers fire at end-of-budget: **Lever A** (force-edit watchdog injects "commit to ANY edit now" UserMessage at 0.7×maxIter when `totalWriteCalls=0`) and **Lever B** (best-guess salvage — one final LLM call on iter-limit / budget-exceeded / stagnation-force when no writes have happened). Conversation snapshots persisted every 5 iters to Redis at `v2:agent-ctx:{runId}:{taskId}` (24h TTL).
+
+Scoring (`scoring/`, `report/`): `verifiedScore` is **multiplicative** since 264cca58 — `clamp(0,100, baseAccuracy × buildOK × testRatio × reviewerMultiplier − criticalPenalty)`. `accuracyScore` (LLM-judged) survives as a legacy fallback for pre-V106 rows; UI surfaces only `verifiedScore` since 6f6feeff. PARTIAL status survives but each one carries a `status_reason` (CLEAN_COMPLETION / CLEAN_WITH_INTERMEDIATE_WARNINGS / FINAL_BUILD_FAILED / TESTS_FAILED:N_OF_M / REVIEWER_UNRESOLVED / REVIEWER_FAILED / ALL_TASKS_FAILED / LEGACY_UNKNOWN) so the UI can disambiguate; `StatusBadge` shows it as a tooltip.
+
+### Four customer-facing autofix surfaces (V183 `triggered_by_finding`)
+
+All routed through one chokepoint `finding/FindingPatchSubmitter`. Submitter dedupes per finding key, dispatches with `runMode=PATCH` + `source="finding:<TYPE>"`, and `runPatchPipeline` auto-pushes via `scmPushService.push()` on terminal:
+
+| Phase | Surface                               | UX                                                                                                                 |
+| ----- | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| 1     | `prreview/PrReviewAutofixService`     | PR Review verdict popover → "Autofix N comments" → pushes to PR head branch via `branchOverride`                   |
+| 2     | `project/techdebt/TechDebtFixService` | TechDebtPanel category rows → "Fix" per category → fresh PR per category                                           |
+| 3     | `project/pr/CiFailureAutoFixService`  | GitHub `check_run` webhook auto-fires on PR CI failure (flag `ci.autofix.enabled`, default OFF; max 3 attempts/PR) |
+| 4     | `codereview/CodeReviewAutofixService` | CodeQualityPanel severity chips → "N CRITICAL" / "N MAJOR" → one PR per severity                                   |
+
+Phase 3's webhook stays OFF until SWE-bench Lite resolved% justifies the unattended-bot path.
+
+### Tier ladder (live on `dev` + `main`)
+
+**FREE** (5 runs/month, 1-credit specs only) → **PRO** (HIDDEN — grandfathered, new buyers can't pick) → **TEAM** ($39/seat/month BYOK, min 2 seats) → **ENTERPRISE** (custom, unlimited). The V143 `product_id` consumer/B2B surface split was prototyped then rolled back by V179 + V185 — all accounts on a single `executespec` surface; `TierProductSurfaceMapper` is dormant.
+
+Each run costs 1–N credits proportional to estimated LLM cost: `credits = max(1, ceil(bufferedEstimate / $5.0))`. Charged at plan approval (not submission); refunded on FAILURE. Customer can voluntarily lower the ceiling via `RunRequest.userCostCap` (clamped against the platform cap). BYOK orgs (`keySourceMode=OWN_KEYS`) skip the platform cap entirely; HYBRID + SYSTEM stay capped.
+
+### Auth + RBAC
+
+JWT (access 1h, refresh 7d) + OAuth2 (Google, GitHub). Scoped SSE tokens (5-min TTL, `scope=sse` + `runId` claim) for event streams. Roles: SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (read-only, cross-org `ProjectMember` from V175). Force-logout via feature-flag epoch-based JWT invalidation. Solo users get a personal org auto-provisioned on registration (V162/V163; `org.is_personal=true`).
+
+`AccessGuardCoverageTest` (`arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a tenant access guard. Ten legacy sites remain in `KNOWN_LEGACY_DRIFT`; new violators fail the build.
+
+### Security
+
+8-layer defense-in-depth: request validation → input sanitization (`InputSanitizer` — NFKC + zero-width strip + base64 decode+scan) → LLM prompt defense → code abuse scanning (`CodeAbuseScanner` — crypto, shells, PowerShell, DNS exfil, cloud metadata, obfuscation) → shell sandbox (`ShellSandboxPolicy`) → file sandbox → process isolation → container hardening. Configurable headers (CSP, HSTS, X-Frame-Options) via `SecurityProperties`. Three guardrail levels (LOW / MEDIUM / HIGH) flip via `security.guardrail_level` flag.
+
+Cleanroom containers (SWE-bench / ProgramBench) run with `--rm --network none -v <hostDir>:/workspace`. `ShellTool` + `BuildProjectTool` consult `ProgramBenchContainerStore` per invocation; when a containerId is set for the run, the tool dispatches via `docker exec` instead of host shell.
+
+### Project workbench (`project/` + companions)
+
+Per-project workspace at `workspace/projects/<projectId>/` (codemaps/, architecture.md, summary.md, docs/, .git) owned by `ProjectWorkspaceService` with atomic writes + Redis-backed lock. Disk is ephemeral on Cloud Run / GCE; DB blobs are authoritative.
+
+3-step architecture pipeline (`codeintel/`): per-repo `CodeMapGenerator` (idempotent by SHA) → `RepoArchitectureGenerator` (per-repo HLD/LLD, PLANNING tier) → `ArchitectureDocGenerator` (cross-repo synthesis, PLANNING tier). `StalenessService` keeps the dashboard "STALE" badge honest via Redis-backed cache. `POST /api/projects/{id}/repos/{repoId}/architecture` and `GET /api/projects/{id}/architecture/diff?from=&to=` (LCS + GitHub compare API for source-file changes).
+
+Always-on RAG: Tika `DocumentExtractor` + 500/50-token `ChunkingService` + Spring AI OpenAI `EmbeddingService` (text-embedding-3-small) + JDBC `ChunkStore` over pgvector. `ProjectDocumentService` + `/api/projects/{id}/documents` handle upload + async index (UPLOADED → EXTRACTING → EMBEDDING → READY/FAILED). `RetrievalService.retrieve(projectId, query, k, cap)` wired into the planner (`{{REFERENCE_DOCS}}`) and chat.
+
+Project memory (`memory/`): every completed project-scoped run appends a digest to `project_run_ledger` via `RunLedgerAgent`; `MemoryCompactionService` rewrites a versioned `project_memory_snapshot` every 10 runs. `ProjectMemoryProvider.buildPlannerContext(projectId)` feeds `{{PROJECT_MEMORY}}` into the planner prompt.
+
+Project chat (`memory/ProjectChatService`): compaction (summarise older N messages, keep last 6 verbatim) + reset + per-bubble copy + branch override on launch. Async-dispatched apply-suggestion through dedicated `applyExecutor` (4 threads) so the 25-iter worker loop doesn't burn a Tomcat handler thread.
+
+Multi-repo PR creation: `ScmPushService.pushMultiRepo` handles per-subdir push + per-repo PR + cross-link via `GitHubRepoService.updatePullRequestBody`. PRs persisted to `pull_request_record` (V169 added `project_id` + `kind`; V170 added `ci_auto_fix_attempts`; V186 added `ci_status` columns). Webhook at `/webhooks/github` flips status (HMAC SHA-256 verified). `PullRequestSnapshot` carries `headSha` so PR refresh polls CI check-runs alongside merge state.
+
+Tech debt (`project/techdebt/`): rolls up `validation_report.issues_json` into category / severity / file hotspots / dimension trend. Surfaced on the project Overview tab. The "Fix" button per category dispatches a patch-mode run via `TechDebtFixService` (autofix Phase 2).
+
+### Models, routing, cost
+
+YAML is the **single source of truth** for every model identifier / context-window / max-output-tokens / pricing rate / display label / fallback chain / free-tier lock / agent→tier map / provider-default model. `ModelRegistry` reads `application.yml model-matrix.*`. `ModelContextWindowMap` was deleted; `ModelController.MODEL_LABELS` reads `display-label` from YAML; frontend `PricingTable` reads `chainTier` via new DTO fields on `PricingRow`.
+
+Agent tier mapping (`application.yml`):
+
+| Tier        | Anthropic                   | OpenAI         | Gemini                   | Agents                                                                                                                                                                           |
+| ----------- | --------------------------- | -------------- | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| PLANNING    | `claude-sonnet-4-6`         | `gpt-5.4`      | `gemini-3-pro-preview`   | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent                                     |
+| WORKHORSE   | `claude-sonnet-4-6`         | `gpt-5.4-mini` | `gemini-3-pro-preview`   | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent                |
+| LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
+
+Default provider: Anthropic (changed from OpenAI in `1.0.0-M1`). User-selectable per project. Per-provider implicit-cache enabled — Gemini Flash threshold 1024 tokens, Pro 4096; Anthropic explicit cache_control blocks. `RunCostTracker` records `cache_read_input_tokens` on every call for all 3 providers.
+
+Reviewer routes Gemini to WORKHORSE tier (`gemini-3-flash-preview`) since `e9d0b6e8` (Pro at 4096-token implicit-cache threshold was hitting 0% cache; Flash at 1024 hits real cache). Anthropic + OpenAI reviewers stay PLANNING.
+
+Provider circuit breaker via `ProviderHealthTracker` (Redis-backed, 5 failures → open 60s) on the legacy router; the V2 `LlmRouter` is direct-dispatch with per-provider failover via the YAML `failover-order:` chain.
+
+### Observability
+
+Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud Monitoring (GCP). `executespec.v2.*` custom metrics for `run.{outcome,latency}`, `planner.{latency,tasks}`, `task.{status,latency,smoketest}`, `worker.{iterations,outcome,toolcall}`, `llm.latency`, `reviewer.verdict`, `context.{save,save.bytes}`. Dump endpoint `/api/v2/test/metrics`. Actuator at `/actuator/prometheus`.
+
+5 published SLOs in [`docs/operations/slos.md`](docs/operations/slos.md): run terminal in 15min ≥95% / verified-score correctness ≥90% / cost estimate within 30% on ≥80% / webhook in 60s ≥99% / hot-path 5xx <0.5%.
+
+### Operator-only Telegram bridge
+
+`chat_id=6475810501` + bot `8489535450`. Push: heartbeat every 600s + on every status-count change. Pull: `getUpdates` polled every 120s, writes to `/tmp/tg-inbox.log`. Used as out-of-band channel for long-running matrix tracking; not a customer-facing integration.
 
 ## Code Conventions
 
 - **Base package:** `com.navneet.executespec`
-- **Layers:** controller → service → V2 agent → V2 tool → `LlmRouter`. V1 `LlmRouter` is still alive for legacy agents (test-gen, `AccuracyAssessmentService`, `ConversationAgent`) until those migrate — see deprecation plan P4.
-- **DTOs:** Java records where possible. Lombok `@Data`/`@Builder` for JPA entities.
-- **Dependency injection:** Constructor injection via Lombok `@RequiredArgsConstructor` (no `@Autowired` field injection)
-- **LLM prompts:** External files in `src/main/resources/prompts/*.txt` — never inline strings
-- **Worker tool format:** Provider-native tool calling end-to-end via `LlmRouter`. Strict JSON schemas on every `v2/tool` entry. No XML `<tool_call>` parsing in V2 (that was a V1 idiom).
-- **Completion detection:** `CompleteTaskTool` — the worker calls it as a native tool to terminate the loop. No JSON-prefix heuristic.
-- **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (live head **V183 on `dev`/`main`**, **V184 in flight on `fix/mobile-responsive-ui-2026-05-10` / PR #95** — widens `agent_task.last_llm_failure` from VARCHAR(255) to TEXT to fix the overflow class found on dev run 7483896a. The historical "V131–V142 on enterprise-readiness branch" and "V143–V144 on product-split-prep" notes below are stale: V131–V142 + V143 + V144 are all merged to dev/main. V179 (single-surface retirement, 2026-05-06) reverts V143's product_split, so the active schema state is "as if V143 never happened". V145–V183 added incrementally for tier polish, billing, code-review, PR-comment inbox, and finding-triggered patch runs. — V143 (Plan 1 #1) adds `product_id` ENUM ('vibe','executespec') discriminator + `app_user_product_access` join table for the consumer/B2B surface split groundwork; backfills existing rows to 'executespec' so call-site wiring can stay deferred to Phase 2. V144 reinstates the v2.6.1-Wave-1 per-seat TEAM tier (un-renames TEAM → MAX from V141 + re-inserts the per-seat TEAM tier_config + 2 billing_plan rows); restored ladder is FREE / PRO (HIDDEN) / TEAM ($49/seat 2-20 seats → Build) / MAX ($29 BYOK unlimited → Vibe) / ENTERPRISE; tier→surface policy enforced by new `TierProductSurfaceMapper`. Both migration numbers may be re-sequenced when next batch lands. V141 (2026-04-26) is the ladder consolidation that drops the v2.6.1-Wave-1 per-seat TEAM tier and renames MAX → TEAM; `application.yml` sets `ignore-migration-patterns: *:missing` to tolerate the V119 orphan from the preview-engine repo split). Persona-roadmap range: **V121** tier/plan `lifecycle_state` columns · **V122** TEAM tier row + PRO → HIDDEN · **V123** TEAM billing plans + `org.seat_count` · **V124** seeds `billing.lifecycle.sunsetting.enabled` flag · **V125** `user_activation_event` ledger + `app_user.signup_source/utm_source/utm_campaign` · **V126** `app_user.sandbox_project_id` FK + `project.is_sandbox` · **V127** `org.sso_provider/sso_enforced/sso_metadata_url/sso_domain/github_installation_id/github_installed_at` + `team_trial_request` table · **V128** `provider_recommendation_log` + seeds `pricing.persona-first` + `provider.smart-routing.enabled` flags · **V129** `startup_program_application` table + `app_user.trial_tier/trial_started_at/trial_ends_at/can_invite_teammates` · **V130** `pipeline_run.plan_strategy` + `plan_outline_json` + `classifier_reasoning` + per-phase token/cost columns + `agent_task.task_type/expansion_status/expanded_at` + partial index on `plan_strategy` (additive, all columns nullable) · **V131** (feature branch only — slice E1.1 of enterprise-readiness eval) `project_repo.executespec_folder_status / executespec_folder_sha / executespec_bootstrap_pr_url / executespec_last_synced_at` + partial index on `executespec_folder_status` (additive, all columns nullable) · **V132** (feature branch only — slice E1.4 of enterprise-readiness eval) `project_repo.executespec_pr_mode` (NULL | PR | DIRECT_PUSH; defaults to PR via `prModeEnum()`) — opt-in DIRECT_PUSH bypass for trusted high-frequency writes (codemap regen post-merge) to reduce bot-PR noise · **V133** (feature branch only — slice E1.8/9/10 bundle of enterprise-readiness eval) `activity_feed` partitioned-by-month table + 12 monthly partitions seeded (2026-04 → 2027-03) + `idx_activity_feed_{project_time, event_type, target, actor}` — customer-facing project activity feed; separate from `activity_audit` (V22) which stays for compliance use; `ActivityEventEmitter` chokepoint dual-writes to `activity_audit` for events whose `Surface` set includes AUDIT · **V134** (feature branch only — slice E1.7 of enterprise-readiness eval) `project.config_storage` (NULL | FOLDER | DATABASE; defaults to FOLDER via `configStorageEnum()`) + `project_config` table for the confidential-project DATABASE opt-out; `ProjectConfigPathResolver` returns one of FOLDER_FLAT / FOLDER_NAMESPACED / DATABASE per (project, repo) so callers don't re-implement the multi-project namespacing decision tree · **V135** (feature branch only — slice E2.1 of enterprise-readiness eval) `contract_registry` + `contract_version` + `contract_consumer` + `contract_drift_event` tables for the cross-repo contract surface (Phase E2). Index hot paths: per-repo coverage lookup (E2.3), unresolved-drift triage (E2.8 via partial index), per-project consumer rollup (E2.11 + E2.12). · **V136** (feature branch only — slice E3.1 of enterprise-readiness eval) `org_standard` + `project_standard_override` + `standards_violation` four-table model for engineering standards as binding policy; `EffectiveStandardsResolver` merges org-level + project-level via `(orgId, standardId)` lookup with per-project override semantics; violation track-and-acknowledge workflow with ≥30 char rationale required for both single-violation and standing-exception paths. · **V137** (feature branch only — slice E3.12 of enterprise-readiness eval) `adr` table caches frontmatter parsed from `.executespec/arch/adrs/<NNNN>-<slug>.md` in customer git so the planner / dashboards can query ADRs by status (PROPOSED/ACCEPTED/SUPERSEDED/DEPRECATED) without round-tripping to GitHub on every query; `AdrFrontmatterParser` is the single parser, `AdrInjectionService` is what the planner calls into. · **V138** (feature branch only — slice E3.14 of enterprise-readiness eval) `arch_invariant` + `arch_invariant_violation` for continuous architectural properties (e.g. "only payment-service writes to the payments table" / "no module under api/ imports from internal/"); definitions live in customer git as `.executespec/arch/invariants.yaml` per repo, `InvariantChecker` runs per-codemap-version. · **V139** (feature branch only — slice E4.5 of enterprise-readiness eval) `user_notification_pref` (per-user × event-type × channel opt-in/out matrix) — sensible defaults applied by `NotificationPrefService` (notify for things needing attention, don't notify for routine events); replaces the implicit "everything goes everywhere" fan-out. · **V140** (feature branch only — 2026-04-26 alignment of `tier_config` with `website/index.html` source-of-truth) adds `tier_config.max_projects_per_org` + `tier_config.max_repos_per_project` (both INT NOT NULL DEFAULT -1, where -1 = unlimited), updates PRO.monthly_run_limit 10 → 20, ENTERPRISE.monthly_run_limit 5000 → -1, MAX.execution_view_enabled TRUE → FALSE, and seeds the new caps per tier (FREE 1/1 · PRO 2/2 · TEAM 5/5 · MAX 10/10 · ENTERPRISE -1/-1). Enforced by new `TierEnforcementService.assertCanCreateProject` + `assertCanLinkRepoToProject`, wired into `ProjectService.createProject` + `ProjectRepoService.{linkToProject, createAndLinkNewRepo}`. · **V141** (feature branch only — 2026-04-26) tier ladder consolidation: deletes the v2.6.1-Wave-1 per-seat TEAM tier (V122 + V123 row + plans) and renames the existing MAX tier ($29/mo BYOK unlimited) to TEAM. Idempotent BEGIN/COMMIT migration: defensively rehomes orphan TEAM rows on `app_user`/`org`/`pipeline_run.user_tier` to ENTERPRISE, deletes the old TEAM `billing_plan_limit` + `billing_plan_feature` (DO-block-guarded) + `billing_plan` rows, deletes the old TEAM `tier_config` row, then UPDATE-renames `tier_config` PK MAX → TEAM (display_name "Team"), `billing_plan` (tier + name "Max ..." → "Team ..."), `app_user.tier`, `org.tier`, `pipeline_run.user_tier`, V129 `app_user.trial_tier`. Net post-rename ladder: FREE → PRO (HIDDEN) → **TEAM** ($29 BYOK unlimited) → ENTERPRISE. · **V142** (feature branch only — 2026-04-26 dead-code cleanup pass) drops 2 dead `feature_flag` rows: `codegen.react_native.enabled` (V118 seed; RN/Expo codegen path retired) and `pricing.persona-first` (V128 seed; pricing A/B never shipped).
-- **Prompt assembly:** LLM prompts assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
+- **Layering:** controller → service → agent → tool → `LlmRouter`. Legacy `FallbackLlmRouter` survives for non-tool-calling agents only.
+- **DTOs:** Java records where possible. Lombok `@Data` / `@Builder` for JPA entities.
+- **DI:** Constructor injection via Lombok `@RequiredArgsConstructor`. **No** `@Autowired` on fields.
+- **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
+- **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
+- **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V186**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
 
-## Patterns: MUST Follow
+### Patterns: MUST follow
 
-- LLM calls go through `LlmRouter` — supports multi-provider fallback, per-run API key resolution, and tier-based model routing
-- Agent outputs validated by the post-execute `ReviewerAgent` (general + wiring passes) + a final `buildProject` smoke, not by per-task compilation
-- Structured logging with traceId/spanId via Micrometer context propagation (MDC auto-populated)
-- Constructor injection only via `@RequiredArgsConstructor`
-- Run ownership fields (`createdByUserId`, `orgId`, `projectId`) stamped BEFORE async pipeline thread starts (race condition fix)
-- Gate-loss fallback: `approve()` → if gate missing → auto-fail with message
-- Sliding window for LLM context: first 2 + last 18 messages
-- Token cost control: `readFile` 8k chars, `shell` 6k chars, `diff` 5k chars truncation limits
-- `JAVA_HOME=/opt/homebrew/opt/openjdk@21` must be set before any Maven command (shell sessions may not inherit it)
-- Payment webhook signatures verified before processing (Razorpay HMAC, Stripe `Stripe-Signature`)
-- Feature flags checked via `FeatureFlagService.isEnabled()` — never hardcode toggles
+- LLM calls go through `LlmRouter` (or `FallbackLlmRouter` for legacy non-tool agents). Never call providers directly.
+- Run ownership fields (`createdByUserId`, `orgId`, `projectId`) stamped BEFORE async pipeline thread starts (race-condition fix).
+- Gate-loss fallback: `approve()` → if gate missing → auto-fail with message.
+- Sliding-window LLM context: first 2 + last 18 messages.
+- Token-cost control: `readFile` 8k chars, `shell` 6k chars, `diff` 5k chars truncation limits.
+- `JAVA_HOME=/opt/homebrew/opt/openjdk@21` before any Maven command on macOS dev.
+- Payment-webhook signatures verified before processing (Razorpay HMAC, Stripe `Stripe-Signature`).
+- Feature flags via `FeatureFlagService.isEnabled()` — never hardcode toggles.
+- Structured logging with traceId / spanId via Micrometer context propagation (MDC auto-populated).
+- Async work: wrap `Thread.ofVirtual().start()` runnables in `ContextSnapshotFactory.captureAll().wrap(runnable)` so traceId + RequestAttributes survive thread boundaries.
 
-## Patterns: MUST NOT Use
+### Patterns: MUST NOT use
 
-- Field injection (`@Autowired` on fields)
-- Raw String for LLM prompts (use prompt files in `resources/prompts/`)
-- Direct HTTP calls to LLM providers (always go through `LlmRouter`)
-- Swallowed exceptions (log + rethrow or handle explicitly)
-- Setting run ownership fields AFTER `submitRun()` returns (causes async thread race condition)
-- `Thread.ofVirtual().start()` without context wrapping (`ContextSnapshotFactory.captureAll().wrap(runnable)`)
+- Field injection (`@Autowired` on fields).
+- Raw String for LLM prompts (use prompt files).
+- Direct HTTP calls to LLM providers.
+- Swallowed exceptions (log + rethrow or handle explicitly).
+- Setting run ownership fields AFTER `submitRun()` returns.
 
 ## Documentation hygiene (MANDATORY before every commit)
 
-Standing rule from 2026-04-25: every commit must keep the project's
-documentation surface in lockstep with the code. **Before staging files
-for any commit, walk this checklist:**
+Standing rule from 2026-04-25: every commit must keep the project's documentation surface in lockstep with the code. **Before staging files for any commit, walk this checklist:**
 
-1. **CLAUDE.md files (root + per-package)** — root `CLAUDE.md` if the
-   change affects architecture, API contracts, file locations, agent
-   tiers, status of in-flight work, or anything in the "Current State"
-   section. Per-package `CLAUDE.md` (e.g. `state/CLAUDE.md`,
-   `router/CLAUDE.md`) when entities, repository methods, agents, or
-   migrations change in that package.
-2. **`docs/CODEMAP.md`** — refresh whenever new top-level packages,
-   entities, agents, or DB migrations are added so the codemap stays
-   navigable.
-3. **`docs/document_map.md`** — refresh on every commit so the doc index
-   reflects whatever was just added or removed under `docs/`.
-4. **Architecture docs under `docs/`** — per-feature plans (e.g.
-   `docs/plans/*.md`),
-   per-area references (`docs/enterprise-sla.md`,
-   `docs/enterprise-one-pager.md`), and `docs/plans/*.md` slice plans
-   when their corresponding code lands. Move shipped plans out of
-   `docs/plans/` (keep prefixed with `pending-` only while the work is
-   in-flight).
-5. **README + design docs** — `README.md` if a user-visible feature,
-   environment variable, or build step changed. `docs/design/*` when
-   tokens / theming / accessibility commitments change.
-6. **Migration trail** — every `Vxxx__*.sql` added must be cross-linked
-   from the matching package's `CLAUDE.md` migration log + the entity
-   it touches.
+1. **Root CLAUDE.md** if the change affects architecture, API contracts, file locations, agent tiers, status of in-flight work.
+2. **Per-package `CLAUDE.md`** (e.g. `agent/CLAUDE.md`, `state/CLAUDE.md`) when entities, repository methods, agents, or migrations change in that package.
+3. **`docs/CODEMAP.md`** when new top-level packages, entities, agents, or DB migrations are added.
+4. **`docs/document_map.md`** when a doc is added or removed under `docs/`.
+5. **`docs/plans/pending.md`** when an in-flight item changes status or a new pending plan is added.
+6. **`README.md`** if a user-visible feature, environment variable, or build step changed. **`docs/design/*`** when tokens / theming / a11y commitments change.
+7. **Migration trail** — every new `Vxxx__*.sql` must be cross-linked from the touching package's `CLAUDE.md` + the entity row.
 
-If a commit is not feasible to document (e.g. truly trivial typo fix), say
-so explicitly in the commit message: "skip doc-refresh: trivial typo".
-Otherwise the doc-refresh artefacts go in the same commit as the code,
-not a separate "fix docs" follow-up — keeps the history coherent and
-makes review one operation instead of two.
+For trivial typo fixes you may write `skip doc-refresh: trivial typo` in the commit message. Otherwise doc-refresh artefacts go in the same commit as the code, not a separate follow-up.
 
-## Build & Test
+## Build & test
 
 ```bash
-# IMPORTANT: Always set JAVA_HOME for Maven commands
+# IMPORTANT: macOS dev sets JAVA_HOME explicitly
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
 
-# Backend build
+# Backend compile
 JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q
 
-# Frontend build
-npm --prefix frontend run build
+# Backend full verify (includes spotless format gate)
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
 
-# Full verify (both)
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q && npm --prefix frontend run build
+# Frontend
+npm --prefix frontend run build
+npm --prefix frontend run format:check
+npm --prefix frontend run lint
 
 # Run locally
 JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
 
-# Local observability stack (Grafana + Prometheus + Tempo)
+# Local observability stack
 cd observability && docker compose up -d
-# Grafana: http://localhost:3001 (admin/admin)
-# Prometheus: http://localhost:9090
-# Tempo: http://localhost:3200
+# Grafana http://localhost:3001 (admin/admin), Prometheus :9090, Tempo :3200
+
+# V2 eval matrix
+scripts/v2-eval.sh   # LOW/MEDIUM/HIGH × anthropic/openai/gemini, outputs scripts/v2-eval-results/
 ```
 
-## Required Environment Variables
+## Required environment variables
 
 ```bash
-# Required
-OPENAI_API_KEY=          # OpenAI API key (default provider)
-ANTHROPIC_API_KEY=       # Claude API key
+# Required — LLM
+OPENAI_API_KEY=
+ANTHROPIC_API_KEY=
 
 # Optional — LLM
-GOOGLE_API_KEY=          # Gemini API key (for LLM fallback chain)
+GOOGLE_API_KEY=                  # Gemini API key
 
 # Optional — Integrations
-GITHUB_PAT=              # GitHub Personal Access Token
-SLACK_CLIENT_ID=         # Slack app credentials
-SLACK_CLIENT_SECRET=
-SLACK_SIGNING_SECRET=
-DASHBOARD_URL=           # Frontend URL for Slack links
+GITHUB_PAT=
+SLACK_CLIENT_ID= / SLACK_CLIENT_SECRET= / SLACK_SIGNING_SECRET=
+DASHBOARD_URL=
 
-# Optional — OAuth2
-GOOGLE_OAUTH_CLIENT_ID=      # Google OAuth2 login
-GOOGLE_OAUTH_CLIENT_SECRET=
-GITHUB_OAUTH_CLIENT_ID=      # GitHub OAuth2 login
-GITHUB_OAUTH_CLIENT_SECRET=
+# Optional — OAuth2 login
+GOOGLE_OAUTH_CLIENT_ID= / GOOGLE_OAUTH_CLIENT_SECRET=
+GITHUB_OAUTH_CLIENT_ID= / GITHUB_OAUTH_CLIENT_SECRET=
 
 # Optional — Billing
-RAZORPAY_KEY_ID=         # Razorpay payment gateway
-RAZORPAY_KEY_SECRET=
-STRIPE_SECRET_KEY=       # Stripe payment gateway
-STRIPE_WEBHOOK_SECRET=
+RAZORPAY_KEY_ID= / RAZORPAY_KEY_SECRET=
+STRIPE_SECRET_KEY= / STRIPE_WEBHOOK_SECRET= / STRIPE_PUBLISHABLE_KEY=
+STRIPE_TEAM_MONTHLY_PRICE_ID= / STRIPE_ENTERPRISE_PRICE_ID=
+BILLING_DEFAULT_GATEWAY=stripe   # prod default (dev defaults to razorpay)
+BILLING_STRIPE_ENABLED=true
 
 # Optional — Infrastructure
-REDIS_HOST=              # Default: localhost
+REDIS_HOST=                      # default localhost
 
 # Optional — Observability
-OTEL_SAMPLING_PROBABILITY=1.0    # Trace sampling (1.0 = 100%)
-OTEL_METRICS_ENABLED=false       # OTLP metrics export
+OTEL_SAMPLING_PROBABILITY=1.0
+OTEL_METRICS_ENABLED=false
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 ```
 
-## API Contracts
+## API contracts
 
-### Run Lifecycle
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/runs` | Submit run (202) |
-| GET | `/api/runs` | List runs (paginated, filtered by visibility + tier) |
-| GET | `/api/runs/{id}` | Run detail (includes `githubPrUrl`) |
-| POST | `/api/runs/{id}/approve` | Plan gate approval (charges N credits; body: `{approved, creditsConfirmed?}`) |
-| POST | `/api/runs/{id}/sync/original` | v2.5.2 — reset workspace to the exact SHAs captured at run start (from `run_repo_snapshot`) |
-| POST | `/api/repos/{repoId}/webhook` | v2.5.2 — install a pull_request webhook on this repo using caller's PAT |
-| GET | `/api/projects/{id}/workspace-health` | v2.5.2 — per-repo SHA drift + webhook + open-PR rollup for Project Overview |
-| GET | `/api/projects/{id}/post-merge-bar` | v2.5.2 — read transient post-merge banner marker (null when absent) |
-| DELETE | `/api/projects/{id}/post-merge-bar` | v2.5.2 — dismiss post-merge banner |
-| GET | `/api/projects/{id}/estimate?requirement=<text>` | v2.5.2 — heuristic task/cost estimate from project history (no LLM) |
-| GET | `/api/projects/{id}/tech-debt?since=<days>` | v2.5.2 — issues-by-category/severity + file hotspots + dimension trend |
-| GET | `/api/projects/{id}/templates` | v2.5.2 — list spec templates (project + org-scoped merged) |
-| POST | `/api/projects/{id}/templates` | v2.5.2 — create project-scoped spec template |
-| POST | `/api/orgs/{orgId}/templates` | v2.5.2 — create org-scoped spec template |
-| DELETE | `/api/projects/{id}/templates/{templateId}` | v2.5.2 — soft-delete a template |
-| GET | `/api/projects/{id}/architecture/diff?from=<v>&to=<v>` | v2.5.5 — per-repo source file changes between two arch versions (GitHub compare API) |
-| POST | `/api/runs/{id}/merge` | Merge gate (legacy — merge is now automatic) |
-| DELETE | `/api/runs/{id}` | Cancel/delete run |
-| POST | `/api/runs/{id}/archive` | Archive run |
-| POST | `/api/runs/{id}/tasks/{taskId}/retry` | Retry failed task |
-| GET | `/api/runs/{id}/events` | SSE event stream (scoped token) |
-| GET | `/api/runs/{id}/sse-token` | Get scoped SSE token (5-min TTL) |
-| POST | `/api/runs/{id}/run-tests` | Manually trigger test execution (Beta, requires preview RUNNING) |
-| GET | `/api/runs/{id}/prs` | Pilot R5 — list PRs opened by this run with status |
-| PUT | `/api/admin/feature-flags/{key}` | v2.5.10/11 — SUPER_ADMIN toggle for `scoring.v2-verified` / `validation.v3-strict` |
+### Run lifecycle
 
-### Validation Report
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/runs/{id}/report` | Get validation report |
-| GET | `/api/runs/{id}/report/pdf` | Download report as PDF |
-| POST | `/api/runs/{id}/report/share` | Generate share link |
-| GET | `/api/reports/shared/{token}` | Public shared report (no auth) |
+| Method | Path                                  | Description                                                                                                                                                       |
+| ------ | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| POST   | `/api/runs`                           | Submit run (202). Body includes `aiProvider`, `executionMode`, `runMode`, `tddMode`, optional `userCostCap`, optional `figmaUrl`, optional `selectedRepoIds[]`.   |
+| GET    | `/api/runs`                           | List runs (paginated, filtered by visibility + tier).                                                                                                             |
+| GET    | `/api/runs/{id}`                      | Run detail (incl. `githubPrUrl`, `verifiedScore`, `statusReason`, `planStrategy`, per-phase costs).                                                               |
+| POST   | `/api/runs/{id}/approve`              | Plan gate approval; body `{approved, creditsConfirmed?}`. Charges credits.                                                                                        |
+| POST   | `/api/runs/{id}/pause`                | PAUSED (V168, flag `v2.pause.enabled`, default OFF).                                                                                                              |
+| POST   | `/api/runs/{id}/resume`               | Same-JVM only; workspace must exist.                                                                                                                              |
+| DELETE | `/api/runs/{id}`                      | Cancel — `RunOrchestrator.cancel(runId)`. Signals plan gate, interrupts pipeline future, closes opened PRs.                                                       |
+| POST   | `/api/runs/{id}/archive`              | Archive.                                                                                                                                                          |
+| POST   | `/api/runs/{id}/tasks/{taskId}/retry` | Retry one failed task. Requires `requireBuildVerification=true` on retry attempt. Does NOT auto-push — use the `Update PR` button on `InlineRunDetail` if needed. |
+| GET    | `/api/runs/{id}/events`               | SSE event stream (scoped token).                                                                                                                                  |
+| GET    | `/api/runs/{id}/sse-token`            | Get scoped SSE token (5-min TTL).                                                                                                                                 |
+| POST   | `/api/runs/{id}/run-tests`            | Manually trigger test execution (Beta).                                                                                                                           |
+| GET    | `/api/runs/{id}/prs`                  | List PRs opened by this run with status.                                                                                                                          |
+| GET    | `/api/runs/{id}/cost`                 | Live token + cost snapshot.                                                                                                                                       |
+| POST   | `/api/runs/{id}/sync`                 | Reset workspace to current origin HEAD.                                                                                                                           |
+| POST   | `/api/runs/{id}/sync/original`        | Reset workspace to the SHAs captured at run start (from `run_repo_snapshot`).                                                                                     |
+| POST   | `/api/repos/{repoId}/webhook`         | Install pull_request webhook with caller's PAT.                                                                                                                   |
 
-### Preview & Deploy
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker) |
-| DELETE | `/api/runs/{id}/preview/stop` | Stop preview |
-| POST | `/api/deployments` | Deploy to Cloud Run (permanent) — body: `{runId, repoMode, repoUrl?, repoName?}`. Gated on `agent.deployment.enabled=true`; uses `RunAccessGuard.requireRunAccess` for RBAC. |
-| POST | `/api/runs/{id}/push-github` | Push to GitHub (single-repo path; multi-repo branches into `ScmPushService.pushMultiRepo`) |
+### Validation report + scoring
 
-### Pilot v3.0 — Project workspace
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/projects/{id}/dashboard` | Aggregated metrics, recent runs/PRs, arch-doc status (NONE/GENERATED/STALE) |
-| GET | `/api/projects/{id}/memory` | Project memory — compacted snapshot + last 10 uncompacted entries + stats (v2.2.0) |
-| GET | `/api/projects/{id}/memory/ledger` | Full append-only ledger for a project (v2.2.0) |
-| GET | `/api/projects/{id}/scores` | Score trend feed for the dashboard chart |
-| POST | `/api/repos` | Create repo at chosen scope (ORG requires ORG_ADMIN) |
-| GET | `/api/repos?scope=ORG\|USER\|ALL` | List repos visible to caller |
-| POST | `/api/repos/{repoId}/sync` | Re-detect stack + refresh `last_synced_sha` |
-| DELETE | `/api/repos/{repoId}` | Delete repo (must not be linked to any project) |
-| GET | `/api/projects/{id}/repos` | List repos linked to this project |
-| POST | `/api/projects/{id}/repos/{repoId}` | Link an existing repo to the project |
-| DELETE | `/api/projects/{id}/repos/{repoId}` | Unlink (repo itself survives) |
-| PUT | `/api/projects/{id}/repos/{repoId}/relationships` | Update relationship tags |
-| POST | `/api/projects/{id}/architecture/generate` | Regenerate codemaps + arch doc (versioned) |
-| GET | `/api/projects/{id}/architecture` | Latest arch doc |
-| GET | `/api/projects/{id}/architecture/versions` | All versions |
-| PUT | `/api/projects/{id}/architecture/annotate` | Save user annotations on the latest doc |
-| GET | `/api/projects/{id}/architecture/staleness` | Per-repo SHA drift report (5-min cached) |
-| GET | `/api/projects/{id}/repos/{repoId}/codemap` | Latest codemap for a single repo |
-| GET | `/api/projects/{id}/repos/{repoId}/architecture` | v2.5.12 — latest per-repo HLD+LLD arch doc (Step 2 of 3-step pipeline; 204 if not yet generated) |
-| POST | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` | v2.5.12 — generate user-facing project doc; 201 + row, 409 if no architecture |
-| GET | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}` | v2.5.12 — latest generated doc; 204 if not yet generated |
-| GET | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/download` | v2.5.12 — download `.md` (Content-Disposition attachment, text/markdown) |
-| POST | `/webhooks/github` | GitHub PR webhook (HMAC SHA-256 verified, secret via `github.webhook.secret`) |
+| Method | Path                          | Description                     |
+| ------ | ----------------------------- | ------------------------------- |
+| GET    | `/api/runs/{id}/report`       | Get validation report.          |
+| GET    | `/api/runs/{id}/report/pdf`   | Download report as PDF.         |
+| POST   | `/api/runs/{id}/report/share` | Generate share link.            |
+| GET    | `/api/reports/shared/{token}` | Public shared report (no auth). |
 
-### Auth & Org
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/auth/register` | Self-register |
-| POST | `/api/auth/login` | Login → JWT |
-| POST | `/api/auth/refresh` | Refresh JWT token |
-| DELETE | `/api/auth/logout` | Logout (clears refresh cookie) |
-| POST | `/api/auth/forgot-password` | Request password reset email |
-| POST | `/api/auth/reset-password` | Reset password with token |
-| GET | `/api/auth/verify-email` | Verify email link |
-| GET | `/api/auth/me/permissions` | Tier-based permissions |
-| GET | `/api/auth/oauth2/authorize` | OAuth2 authorization redirect |
-| GET | `/api/auth/oauth2/callback/{provider}` | OAuth2 callback (Google/GitHub) |
-| GET | `/api/auth/oauth2/init` | **Plan 1 #5 (on `feature/product-split-prep`)** — surface-aware OAuth bridge. Captures `?surface=vibe\|executespec` (or Origin/Referer fallback) into the session, then redirects to `/oauth2/authorization/{provider}`. `OAuthSuccessHandler` reads the stash via `OAuthSurfaceResolver.resolveReturnUrl` to redirect to per-surface frontend post-login. Pre-Phase-2: missing surface → falls back to `dashboardUrl` (no behavior change today). |
-| POST | `/api/org` | Create org |
-| POST | `/api/org/invite` | Invite user |
+### Preview + deploy
 
-### Billing & Payments
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/billing/plans` | List billing plans |
-| POST | `/api/billing/subscribe` | Initiate subscription (routed to Razorpay or Stripe) |
-| POST | `/api/billing/topup/purchase` | Buy run top-up credits |
-| GET | `/api/billing/payment-history` | Org-scoped payment history |
-| POST | `/api/webhooks/razorpay` | Razorpay webhook (HMAC verified, no auth) |
-| POST | `/api/webhooks/stripe` | Stripe webhook (Stripe-Signature verified, no auth) |
+| Method | Path                           | Description                                                                            |
+| ------ | ------------------------------ | -------------------------------------------------------------------------------------- |
+| POST   | `/api/runs/{id}/preview/start` | Start preview (Cloud Run or Docker, 5-min TTL).                                        |
+| DELETE | `/api/runs/{id}/preview/stop`  | Stop preview.                                                                          |
+| POST   | `/api/deployments`             | Deploy to Cloud Run (permanent).                                                       |
+| POST   | `/api/runs/{id}/push-github`   | Push to GitHub (single-repo; multi-repo branches into `ScmPushService.pushMultiRepo`). |
 
-### Notifications
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/notifications` | List notifications (paginated) |
-| GET | `/api/notifications/unread-count` | Unread notification count |
-| POST | `/api/notifications/{id}/read` | Mark notification as read |
-| POST | `/api/notifications/read-all` | Mark all notifications as read |
+### Project workspace
 
-### Models & Feature Flags
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/models/available` | Model matrix + provider tags |
-| GET | `/api/feature-flags` | List all feature flags (SUPER_ADMIN) |
-| POST | `/api/feature-flags/{key}` | Update feature flag (SUPER_ADMIN) |
+| Method | Path                                                                         | Description                                                        |
+| ------ | ---------------------------------------------------------------------------- | ------------------------------------------------------------------ |
+| GET    | `/api/projects/{id}/dashboard`                                               | Aggregated metrics, recent runs/PRs, arch-doc status.              |
+| GET    | `/api/projects/{id}/memory` + `/memory/ledger`                               | Project memory snapshot + full ledger.                             |
+| GET    | `/api/projects/{id}/scores`                                                  | Score-trend feed.                                                  |
+| GET    | `/api/projects/{id}/workspace-health`                                        | Per-repo SHA drift + webhook + open-PR rollup.                     |
+| GET    | `/api/projects/{id}/architecture` + `/versions` + `/diff?from=&to=`          | Latest arch / all versions / source-file changes between versions. |
+| POST   | `/api/projects/{id}/architecture/generate`                                   | Regenerate codemaps + arch doc.                                    |
+| GET    | `/api/projects/{id}/repos/{repoId}/architecture`                             | Per-repo HLD/LLD.                                                  |
+| POST   | `/api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` + `GET .../download` | Generated Docs.                                                    |
+| GET    | `/api/projects/{id}/tech-debt?since=<days>`                                  | Issues-by-category / severity / file hotspots.                     |
+| POST   | `/api/projects/{id}/analyse?branch=<name>`                                   | Per-branch arch refresh using caller's PAT.                        |
+| GET    | `/api/projects/{id}/estimate?requirement=<text>`                             | Heuristic p25/p75 task + cost estimate from project history.       |
+| POST   | `/api/projects/{id}/prs/refresh`                                             | Poll GitHub + post-merge cascade + CI check-runs.                  |
+| GET    | `/api/projects/{id}/templates` + POST                                        | Spec templates (project + org-scoped).                             |
+| POST   | `/webhooks/github`                                                           | PR + check_run webhook (HMAC SHA-256).                             |
+
+### PR Review + Code Review (V172)
+
+| Method | Path                                                                                             | Description                                                                        |
+| ------ | ------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------- |
+| POST   | `/api/pr-reviews`                                                                                | Submit PR review (PRO+); body `{projectId, repoFullName, prNumber}`. 202 + QUEUED. |
+| GET    | `/api/pr-reviews/{id}` + `/api/projects/{id}/pr-reviews` + by-PR query                           | Read endpoints.                                                                    |
+| POST   | `/api/code-reviews`                                                                              | Submit whole-repo scan (PRO+).                                                     |
+| GET    | `/api/code-reviews/{id}` + `/report` (markdown) + `/api/projects/{id}/code-reviews/latest?repo=` | Read endpoints.                                                                    |
+
+### External project sharing (V175)
+
+| Method | Path                                                                                  | Description                                |
+| ------ | ------------------------------------------------------------------------------------- | ------------------------------------------ |
+| POST   | `/api/projects/{id}/invites` + GET + DELETE                                           | Cross-org `ProjectMember` invite by email. |
+| GET    | `/api/invites/preview?token=` + POST `/api/invites/accept?token=`                     | Accept invite (email-match required).      |
+| POST   | `/api/projects/{id}/share-links` + GET + DELETE                                       | Public read-only share links (tier-gated). |
+| GET    | `/api/shared/{token}/{meta,run,validation-report,code-review,pr-review,architecture}` | Public read endpoints.                     |
+
+### Auth + org
+
+| Method | Path                                                                        | Description                             |
+| ------ | --------------------------------------------------------------------------- | --------------------------------------- |
+| POST   | `/api/auth/register` / `/login` / `/refresh` / `/logout`                    | JWT auth.                               |
+| POST   | `/api/auth/forgot-password` / `/reset-password` / GET `/verify-email`       | Account recovery.                       |
+| GET    | `/api/auth/oauth2/init?surface=<x>` / `/authorize` / `/callback/{provider}` | OAuth2 (Google + GitHub).               |
+| GET    | `/api/auth/me/permissions`                                                  | Tier-based permissions.                 |
+| GET    | `/api/auth/me/data-export`                                                  | GDPR ZIP (manifest + payload + README). |
+| POST   | `/api/org` / `/api/org/invite`                                              | Org + invitations.                      |
+
+### Billing
+
+| Method | Path                                              | Description                                              |
+| ------ | ------------------------------------------------- | -------------------------------------------------------- |
+| GET    | `/api/billing/plans`                              | Yields YAML-driven pricing rows.                         |
+| POST   | `/api/billing/subscribe`                          | Routed to Razorpay or Stripe via `PaymentGatewayRouter`. |
+| POST   | `/api/billing/topup/purchase`                     | Buy run top-up credits.                                  |
+| GET    | `/api/billing/payment-history`                    | Org-scoped payment history.                              |
+| POST   | `/api/webhooks/razorpay` + `/api/webhooks/stripe` | Webhook events (HMAC verified, no auth).                 |
 
 ### Admin
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/admin/payment-audit` | Payment audit log (paginated, SUPER_ADMIN) |
-| GET | `/api/admin/payment-audit/export` | Export audit as CSV (SUPER_ADMIN) |
-| GET | `/api/admin/webhook-events` | Webhook event log (filterable, SUPER_ADMIN) |
-| POST | `/api/admin/executions/reconcile` | Mark orphaned non-terminal ExecutionRuns as FAILED (SUPER_ADMIN; body: `{staleMinutes?}`) |
-| POST | `/api/admin/projects/{projectId}/migrate-codemaps` | v2.6.3 — migrate legacy codemaps for a project into the new `.executespec/codemaps/` folder structure (SUPER_ADMIN; idempotent, reports per-repo result) |
 
-### Enterprise readiness — `.executespec/` folder + contracts + standards + ADR + activity (v2.6.3, `feature/enterprise-readiness-eval`)
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/projects/{id}/activity` | E1.8/9/10 — paginated project activity feed; supports `limit`, `eventType`, `from`/`to` query params; reads from `activity_feed` partitioned-by-month |
-| POST | `/api/projects/{id}/export` | E4.7 — zip bundle of every `.executespec/` artefact + DB-only counterparts when `config_storage=DATABASE`; `Content-Type: application/zip` |
-| POST | `/api/projects/{id}/check-drift` | E2.5 — sweep every contract in the project for drift; returns `[]` when clean |
-| POST | `/api/projects/{id}/repos/{repoId}/check-drift` | E2.5 — drift sweep scoped to one repo; 400 when repo not linked to project |
-| POST | `/api/projects/{id}/contracts/{contractId}/check-drift` | E2.5 — drift check for one contract; 200 with `summary:"contract not found"` when missing |
-| POST | `/api/projects/{id}/contracts/{contractId}/refresh-from-source` | E2.6 — re-fetch contract source from producer repo; 404 when contract unknown |
-| POST | `/api/projects/{id}/contracts/{contractId}/dismiss-drift` | E2.6 — dismiss a drift event with rationale (≥10 chars enforced) |
-| GET | `/api/projects/{id}/contracts/{contractId}/consumers` | E2.7 — list pinned consumers of one contract |
-| POST | `/api/projects/{id}/contracts/{contractId}/consumers` | E2.7 — register a consumer + pinned version; mirrors into `.executespec/contracts/consumed/` |
-| DELETE | `/api/projects/{id}/contracts/{contractId}/consumers/{consumerRepoId}` | E2.7 — unregister a consumer |
-| GET | `/api/projects/{id}/repos/{repoId}/contract-coverage` | E2.3 — per-repo coverage rollup (produced + consumed contracts vs unowned ones) |
-| POST | `/api/projects/{id}/repos/{repoId}/contract-coverage/rescan` | E2.3 — force re-scan of contracts in a repo |
-| POST | `/api/projects/{id}/standards/violations/{violationId}/override` | E3.5 — override a single standards violation; rationale ≥30 chars required |
-| POST | `/api/projects/{id}/standards/{standardId}/exception` | E3.6 — declare a standing project-level exception to a standard; rationale ≥30 chars required |
-| DELETE | `/api/projects/{id}/standards/{standardId}/exception` | E3.6 — withdraw a standing exception |
-| GET | `/api/projects/{id}/standards/report?orgId={orgId}&sinceDays={n}` | E3.16 — read-only project standards compliance report (effective standards merged from org + project, recent violations, persistent overrides); default `sinceDays=30` |
+| Method | Path                                                      | Description                                            |
+| ------ | --------------------------------------------------------- | ------------------------------------------------------ |
+| GET    | `/api/admin/payment-audit` + `/export`                    | Payment audit log + CSV (SUPER_ADMIN).                 |
+| GET    | `/api/admin/webhook-events`                               | Webhook event log.                                     |
+| GET    | `/api/admin/tiers` + PUT `/{tier}`                        | Tier lifecycle (LISTED/HIDDEN/SUNSETTING).             |
+| POST   | `/api/admin/executions/reconcile`                         | Mark orphaned non-terminal ExecutionRuns FAILED.       |
+| POST   | `/api/admin/swebench/run` + `/api/admin/programbench/run` | Bench-mode submission.                                 |
+| POST   | `/api/admin/projects/{id}/migrate-codemaps`               | Migrate legacy codemaps into `.executespec/codemaps/`. |
 
-### External project sharing (v2.6.4, V175, `feature/project-cost-pool-tuning`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/projects/{id}/invites` | Create cross-org invite by email (PRO+); body `{email, role}`; emails accept link. |
-| GET | `/api/projects/{id}/invites` | List PENDING invites for the project. |
-| DELETE | `/api/projects/{id}/invites/{inviteId}` | Revoke a pending invite. |
-| GET | `/api/invites/preview?token=` | Public — preview invite metadata before accepting (no token leak). |
-| POST | `/api/invites/accept?token=` | Authenticated — accept the invite; email-match required. |
-| POST | `/api/projects/{id}/share-links` | Create public read-only link; tier-gated by `tier_config.share_link_active_cap`. Body: `{surface, scopeId?, label?, expiresInDays?}`. |
-| GET | `/api/projects/{id}/share-links` | List + active count. |
-| DELETE | `/api/projects/{id}/share-links/{linkId}` | Revoke link (idempotent). |
-| GET | `/api/shared/{token}/meta` | Public — surface metadata, no payload. |
-| GET | `/api/shared/{token}/run` | Public — RUN_DETAIL slice (read-safe). |
-| GET | `/api/shared/{token}/validation-report` | Public — VALIDATION_REPORT slice. |
-| GET | `/api/shared/{token}/code-review` | Public — CODE_REVIEW markdown + counts. |
-| GET | `/api/shared/{token}/pr-review` | Public — PR_REVIEW summary + comment count. |
-| GET | `/api/shared/{token}/architecture` | Public — latest project ARCHITECTURE_DOC content. |
+### Enterprise readiness — `.executespec/` folder, contracts, standards, ADRs, activity
 
-### PR Review + Code Review agents (v2.6.4, `feature/code-review-agents`)
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/pr-reviews` | Submit a PR review (PRO+); body `{projectId, repoFullName, prNumber}`. 202 + QUEUED row; FREE → 403; quota exhausted → 429; GitHub fetch fail → 502. |
-| GET | `/api/pr-reviews/{id}` | Get a PR review with comments inlined. |
-| GET | `/api/pr-reviews?repo={repo}&number={n}` | List reviews for a single PR, newest first. |
-| GET | `/api/projects/{projectId}/pr-reviews` | Project-level rollup of every PR review. |
-| POST | `/api/code-reviews` | Submit a whole-repo code review scan (PRO+); body `{projectId, repoId?, repoFullName}`. 202 + QUEUED row; FREE → 403; quota exhausted → 429. |
-| GET | `/api/code-reviews/{id}` | Get a scan with issues inlined + the markdown report. |
-| GET | `/api/projects/{projectId}/code-reviews` | All scans for a project, newest first. |
-| GET | `/api/projects/{projectId}/code-reviews/latest?repo={repo}` | Latest COMPLETE scan for a (project, repo); 204 if none. |
-| GET | `/api/code-reviews/{id}/report` | Markdown report download (text/markdown attachment). |
+| Method              | Path                                                                                           | Description                                                          |
+| ------------------- | ---------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
+| GET                 | `/api/projects/{id}/activity`                                                                  | Project activity feed (partitioned-by-month).                        |
+| POST                | `/api/projects/{id}/export`                                                                    | ZIP bundle of every `.executespec/` artefact + DB-only counterparts. |
+| POST                | `/api/projects/{id}/check-drift` + per-repo + per-contract                                     | Cross-repo contract drift detection.                                 |
+| POST                | `/api/projects/{id}/contracts/{contractId}/{refresh-from-source,dismiss-drift}`                | Drift workflow.                                                      |
+| GET / POST / DELETE | `/api/projects/{id}/contracts/{contractId}/consumers/{...}`                                    | Consumer pinning.                                                    |
+| GET + POST          | `/api/projects/{id}/repos/{repoId}/contract-coverage` + `/rescan`                              | Coverage rollup.                                                     |
+| POST                | `/api/projects/{id}/standards/violations/{id}/override` + `/standards/{id}/exception` + DELETE | Standards override + standing exception (≥30-char rationale).        |
+| GET                 | `/api/projects/{id}/standards/report?orgId=&sinceDays=`                                        | Standards compliance report.                                         |
 
-## Key File Locations
+### Notifications + flags
 
-| Purpose | Path |
-|---------|------|
-| V2 run orchestrator | `integration/RunOrchestrator.java` |
-| V2 sequential executor | `harness/SequentialExecutor.java` |
-| V2 planner | `agent/PlannerAgent.java` |
-| V2 worker | `agent/WorkerAgent.java` |
-| V2 reviewer | `reviewer/ReviewerAgent.java` |
-| V2 LLM router | `agent/LlmRouter.java` + `OpenAiNativeToolClient` / `GeminiNativeToolClient` |
-| V2 tool registry | `tool/ToolRegistry.java` + `tool/*` (10 tools + `CompleteTaskTool`) |
-| V2 context store | `context/ContextStore.java` (Redis snapshot, 24h TTL) |
-| V2 cost tracker | `cost/RunCostTracker.java` (per-call accumulator + cache-aware pricing) |
-| V2 startup resumer | `recovery/StartupRunResumer.java` (fail-cleanly on boot) |
-| V2 CLI smoke runner | `smoketest/CliSmokeRunner.java` |
-| V2 metrics | `observability/Metrics.java` |
-| V1 legacy (deprecated) | `harness/PipelineHarness.java`, `agent/PlannerAgent.java`, `agent/WorkerAgent.java`, `batch/*`, `compiler/*`, `reviewer/ReviewerAgent.java` — pending deletion per (plan doc removed in 2026-04-26 cleanup pass) |
-| Cost estimator (shared) | `agent/CostEstimator.java` (used by both V1 and V2 paths) |
-| Cost audit log | `billing/cost/RunCostLog.java`, `billing/cost/RunCostLogRepository.java` |
-| Notification entity | `notification/Notification.java` |
-| Notification service | `notification/InAppNotificationService.java` |
-| Notification controller | `notification/NotificationController.java` (REST: GET/POST /api/notifications) |
-| Notification listener | `notification/RunCompletionNotifier.java` (creates notifications on run complete/fail) |
-| Design system config | `harness/DesignSystemProperties.java` |
-| UI style resolver | `harness/UiStyleResolver.java` (design loading, fuzzy match, 3-signal resolution) |
-| Model resolver (matrix-based) | `router/ModelResolver.java` |
-| Model matrix config | `router/ModelMatrixProperties.java` |
-| Provider circuit breaker | `router/ProviderHealthTracker.java` (Redis-backed) |
-| State store | `state/StateStore.java` |
-| Validation report | `report/ValidationReportService.java`, `report/ValidationReportGenerator.java` |
-| Report controller | `report/ValidationReportController.java` |
-| Report PDF | `report/ValidationReportPdfService.java` |
-| Report entity | `report/entity/ValidationReport.java` |
-| Report frontend | `frontend/src/components/runs/ValidationReportPanel.tsx` |
-| Shared report page | `frontend/src/pages/SharedReportPage.tsx` |
-| Preview service | `deployment/preview/PreviewService.java` (dual-mode: docker/cloud-run) |
-| Preview config | `deployment/preview/PreviewProperties.java` (mode, TTL, concurrency) |
-| Caddy proxy manager | `deployment/preview/CaddyProxyManager.java` (Docker mode only) |
-| Cloud Run client | `deployment/CloudRunClient.java` |
-| Artifact Registry | `deployment/ArtifactRegistryClient.java` |
-| Deployment service | `deployment/DeploymentService.java` |
-| Dockerfile gen (preview) | `deployment/preview/DevDockerfileGenerator.java` (reads `.agent-context/project.json`) |
-| Dockerfile gen (deploy) | `deployment/DockerfileGenerator.java` (strategy pattern, reads `project.json`) |
-| Security config | `auth/security/SecurityConfig.java` |
-| JWT secret validator | `auth/security/JwtSecretValidator.java` (prod-only startup check) |
-| Security properties | `config/SecurityProperties.java` (CSP, HSTS, X-Frame-Options) |
-| JWT utility | `auth/security/JwtUtil.java` (includes scoped SSE tokens) |
-| OAuth2 handler | `auth/oauth/OAuthSuccessHandler.java` |
-| Tier permissions | `auth/service/TierPermissionService.java` |
-| Tier enforcement | `auth/service/TierEnforcementService.java` |
-| Billing service | `billing/service/BillingService.java` |
-| Payment gateway router | `billing/gateway/PaymentGatewayRouter.java` (Razorpay + Stripe) |
-| Stripe gateway | `billing/gateway/StripePaymentGateway.java` |
-| Invoice service | `billing/service/InvoiceService.java` |
-| Payment audit | `billing/service/PaymentAuditService.java` |
-| Analytics service | `billing/service/AnalyticsService.java` |
-| Feature flags | `config/featureflag/FeatureFlagService.java`, `config/featureflag/FeatureFlagController.java` |
-| Rate limiting | `ratelimit/RateLimitFilter.java` |
-| Input sanitizer | `security/InputSanitizer.java` |
-| Code abuse scanner | `security/CodeAbuseScanner.java` |
-| Request classification | Folded into `agent/PlannerAgent.java` (`Classification: SINGLE_SHOT | MEDIUM | MULTI_TASK`) |
-| Prompt assembler | `agent/PromptAssembler.java` (fragment resolution, variable substitution, hash tracking) |
-| Prompt audit entity | `agent/PromptAudit.java`, `agent/PromptAuditRepository.java` |
-| Prompt fragments | `resources/prompts/fragments/*.md` (security-rules, preview-defaults, cors-config, etc.) |
-| Scaffold templates | `resources/prompts/scaffolds/*.md` (spring-boot, node-backend, node-frontend, python, go, etc.) |
-| API prober | `testgen/ApiProber.java` (probes live preview endpoints before test generation) |
-| API surface extractor | `testgen/ApiSurfaceExtractor.java` (regex-extracts routes from workspace for test planner) |
-| Slack integration | `integration/slack/SlackNotificationService.java` |
-| GitHub repo service | `integration/github/GitHubRepoService.java` (branch, PR creation, default branch lookup) |
-| Git tool | `tool/GitTool.java` (workspace git ops, `pushToBranch()` for existing repos) |
-| JIRA adapter | `integration/jira/JiraAdapter.java` (inbound webhook + outbound comments) |
-| Confluence adapter | `integration/confluence/ConfluenceAdapter.java` (inbound webhook + outbound child pages) |
-| Integration manager | `integration/IntegrationManager.java` (routes webhooks, listens for MergeCompleted) |
-| Test generation orchestrator | `testgen/TestGenOrchestrator.java` |
-| Test preview coordinator | `testgen/TestPreviewCoordinator.java` (owns preview lifecycle for test execution) |
-| Test execution service | `testgen/TestExecutionService.java` |
-| Test result controller | `testgen/TestResultController.java` (apply-test-fixes, run-tests) |
-| Project workspace | `project/service/ProjectRepoService.java`, `project/controller/ProjectRepoController.java`, `project/dashboard/ProjectDashboardController.java`, `project/scores/ProjectScoresController.java` |
-| Project repo entities | `project/entity/ProjectRepo.java` (ORG/USER scope), `project/entity/ProjectRepoLink.java` |
-| PR records + webhook | `project/pr/PullRequestRecord.java`, `project/pr/PullRequestRecordService.java`, `project/pr/GitHubWebhookController.java`, `project/pr/PullRequestController.java` |
-| Stack detection | `project/service/StackDetector.java`, `project/service/StackRefreshJob.java` (`@Scheduled` + `@SchedulerLock`) |
-| Codebase intelligence | `codeintel/CodeMapGenerator.java`, `codeintel/ArchitectureDocGenerator.java` (v2.5.12 LLM-driven), `codeintel/RepoArchitectureGenerator.java` (v2.5.12 — per-repo HLD+LLD), `codeintel/ProjectArchitectureService.java` (v2.5.12 3-step `generate()` + `regenerateForRepo()`), `codeintel/ProjectArchitectureController.java`, `codeintel/StalenessService.java` (v2.5.12 — `report(projectId, pat)` overload) |
-| Generate Docs (v2.5.12) | `codeintel/ProjectDocGeneratorService.java`, `codeintel/ProjectDocGeneratorController.java`, `codeintel/entity/ProjectGeneratedDoc.java`, `codeintel/repository/ProjectGeneratedDocRepository.java`, frontend `components/project/GeneratedDocsPanel.tsx` |
-| Per-repo arch (v2.5.12) | `codeintel/entity/RepoArchitectureDoc.java`, `codeintel/repository/RepoArchitectureDocRepository.java` (V115) |
-| Bug #3 optimistic lock (v2.5.12) | `execution/entity/ExecutionRun.java` (`@Version`), `api/advice/OptimisticLockAdvice.java`, V112 migration |
-| Validation advice (v2.5.12 Gap #2) | `api/advice/ValidationAdvice.java` (translates Bean Validation 400s into JSON `{error,message,fields}`) |
-| Notification events (v2.5.12) | `harness/event/PipelineEvent.java::GateOpened`, `harness/event/QuotaEvent.java::QuotaWarning`, `notification/RunCompletionNotifier.java::onGateOpened`, `notification/RunCompletionNotifier.java::onQuotaWarning` |
-| Design-system primitives (v2.5.12) | `frontend/src/components/shared/{Button,Checkbox,Radio,ResponsiveModal,EstimateChip}.tsx` |
-| ArchUnit @Async allowlist | `src/test/java/com/navneet/executespec/arch/AsyncAllowlistTest.java` |
-| Feature assessment | `assessment/FeatureAssessmentService.java` (heuristic + LLM via `assessment.llm.enabled` flag), `assessment/AssessmentResult.java` |
-| Review scoring | `scoring/ReviewScoringService.java` (6 dimensions, deterministic heuristic from existing review data) |
-| Multi-repo push | `integration/scm/ScmPushService.pushMultiRepo`, `tool/GitTool.commitAndPushSubdir` |
-| Workspace multi-repo | `harness/WorkspaceInitService.cloneMultipleRepos` |
-| Dashboard frontend | `frontend/src/pages/project/ProjectDashboardPage.tsx`, `frontend/src/components/project/*` |
-| Project memory | `memory/RunLedgerAgent.java`, `memory/MemoryCompactionService.java`, `memory/ProjectMemoryProvider.java`, `memory/ProjectMemoryController.java`, `memory/entity/ProjectRunLedger.java`, `memory/entity/ProjectMemorySnapshot.java` |
-| Workspace disk warmer (v2.5.2) | `project/workspace/ProjectWorkspaceWarmer.java` (@Async DB→disk mirror), `ProjectWorkspaceService.writeRawFile` |
-| Admin reconcile (v2.5.2) | `execution/service/AdminReconciliationService.java`, `POST /api/admin/executions/reconcile` on `SuperAdminController` |
-| Run repo snapshot (v2.5.2) | `state/entity/RunRepoSnapshot.java`, `state/repository/RunRepoSnapshotRepository.java`, `WorkspaceInitService.cloneMultipleRepos` (SHA capture), `RunSyncService.syncToOriginalCommit` |
-| Worker RAG injection (v2.5.2) | `SequentialExecutor.fetchReferenceDocs` + `composeSystemPrompt` (`{{REFERENCE_DOCS}}` block), `ExecutionRequest.projectId` |
-| GitHub webhook auto-provision (v2.5.2) | `GitHubRepoService.installWebhook`, `ProjectRepoService.installWebhook`, `ProjectRepoController` POST `/api/repos/{repoId}/webhook`, `ProjectRepo.webhookInstalled` |
-| Workspace health (v2.5.2) | `project/service/WorkspaceHealthService.java`, `WorkspaceHealthPanel.tsx`, `GET /api/projects/{id}/workspace-health` |
-| Post-merge banner (v2.5.2) | `PostMergeCascadeService.writePostMergeBar/readPostMergeBar/dismissPostMergeBar`, `components/project/PostMergeBar.tsx` |
-| Launch estimation (v2.5.2) | `project/estimation/EstimationService.java`, `ExecutionSetup.tsx` debounced chip, `GET /api/projects/{id}/estimate` |
-| Execution list N+1 fix (v2.5.2) | `ExecutionRunRepository.findListByProjectId` + `findDetailById` with `@EntityGraph` |
-| Tech debt (v2.5.2) | `project/techdebt/TechDebtService.java`, `TechDebtPanel.tsx`, `GET /api/projects/{id}/tech-debt` |
-| Spec templates (v2.5.2) | `project/template/{ProjectSpecTemplate,SpecTemplateService,SpecTemplateController}.java`, `TemplatePicker.tsx`, V102 |
-| TDD mode (v2.5.2) | `RunRequest.tddMode`, `PlannerRequest.tddMode`, `PlannerAgent.renderTddBlock`, `{{TDD_MODE_BLOCK}}` slot in `prompts/planner.md`, NewRunModal toggle |
-| Cancel rollback (v2.5.2) | `ExecutionOrchestrator.runCompensations`, `GitHubRepoService.closePullRequest`, `EXEC_COMPENSATION_UPDATE`/`_DONE` events, `CancellationPanel.tsx` |
-| Plan 1 — product-split + UX foundation (`feature/product-split-prep`, NOT yet merged) | `src/main/resources/db/migration/V143__product_split.sql` (`product_id` ENUM + `app_user_product_access` table); `src/main/java/com/navneet/executespec/auth/oauth/{OAuthSurfaceResolver,OAuthInitController}.java` + `OAuthSuccessHandler.java` (per-surface OAuth redirect); `src/test/java/com/navneet/executespec/arch/ApiContractTest.java` (ArchUnit + bytecode scan, lib/api.ts ↔ backend `@*Mapping`); `frontend/src/components/runs/VerdictPill.tsx` + sweep into `ValidationReportPanel.tsx`/`ScoreCard.tsx`/`SignalBreakdown.tsx` (numeric Verified+Est segments dropped) + `project/RunStamp.tsx`; `frontend/src/components/shared/Glossary.tsx` + `frontend/src/lib/glossary.ts` + extended `Tooltip.tsx` (wrap+maxWidthClass); `application-{dev,prod}.yml` (CORS allow-list expansion + `app.product-routing.*` keys for `OAuthSurfaceResolver`). |
-| Per-seat TEAM tier reinstated (`feature/product-split-prep`, NOT yet merged) | `src/main/resources/db/migration/V144__reinstate_per_seat_team_tier.sql` (un-renames TEAM → MAX + re-inserts per-seat TEAM tier_config + 2 billing_plan rows + billing_plan_limit rows); `src/main/java/com/navneet/executespec/auth/service/TierProductSurfaceMapper.java` + matching test (9 cases pinning FREE/PRO/MAX → vibe and TEAM/ENTERPRISE → executespec); revert of V141 (faaa1451) + 8ef5e39b touches 33 files restoring `OrgController.adjustSeats` + `SeatsAdjustRequest`/`SeatsAdjustResponse` + `OrgService.adjustSeats` + `InvitationService.resolveTeamSeatLimit` + `TierEnforcementService.effectiveOrgLimit` per-seat path + `BillingService.subscribe` per-seat branch + 5-element `TIER_RANK` + frontend `PlanCard` per-seat picker + `OrgAdminDashboard` TEAM seats panel + frontend `adjustOrgSeats` helper. |
-| Arch diff source correlation (v2.5.5) | `codeintel/ArchitectureDiffService.java`, `GitHubRepoService.compareCommits`, `GET /api/projects/{id}/architecture/diff`, `ArchSourceChanges` inside `ArchitectureViewer.tsx` |
-| Execution View | `execution/controller/ExecutionController.java`, `execution/service/{ExecutionOrchestrator,ExecutionPlannerService,SolutionExecutionService,ExecutionBranchService,CrossRepoContextService,IncrementalCodeMapService,SolutionDependencyResolver,FileConflictDetector}.java`, `execution/entity/{ExecutionRun,ExecutionSolution,ExecutionSolutionRepo,ExecutionContextHandover}.java`, `execution/event/ExecutionEventTypes.java` |
-| DB migrations | `resources/db/migration/V*.sql` (V1–V115; V81=project settings + repo registry, V82=pull_request_record, V83=validation_report scores, V84=codebase intelligence, V85=assessment_result + figma_url, V86=pipeline_run.selected_repo_ids, V87=run_code_map, V88=project memory, V89=execution view, V90=project shell + multi-run solutions + MAX tier gate, V99=backfill execution_run.ai_provider, V100=run_repo_snapshot, V101=project_repo.webhook_installed, V102=project_spec_template, V103=execution_run.branch, V104=project.github_owner, V105=execution_run.continue_pr, V106=validation_report.verified_score + scoring.v2-verified flag, V107=pipeline_run.status_reason, V108=backfill historical PARTIAL runs, V109=pipeline_run.plan_requirements_json + agent_task.meets_requirements_json + validation.v3-strict flag, V110=enable scoring.v2-verified, V111=execution_solution failure-signature dedup, V112=execution_run.version (@Version optimistic lock for Bug #3), V113=project_generated_doc, V114=widen project_generated_doc.generated_by to VARCHAR(255), V115=repo_architecture_doc for the 3-step arch pipeline) |
-| v2.5.9/10/11 validation pipeline | `agent/RequirementSpec.java`, `agent/Plan.java` (+requirements), `agent/PlannedTask.java` (+meetsRequirements), `agent/PlannerAgent.validatePlan`, `prompts/planner.md` (Step 1 requirement extraction), `integration/RunOrchestrator.resolveTerminalStatus`, `report/ValidationReportService.computeVerifiedScore`, `report/entity/ValidationReport.java` (+5 verified columns), `state/entity/PipelineRun.java` (+status_reason, +planRequirementsJson), `state/entity/AgentTask.java` (+meetsRequirementsJson), `reviewer/AccuracyAssessmentService.java` (evidence-citation prompt), `sse/RunEvent.complete(runId,status,reason)` |
-| v2.5.10 frontend (signals + tooltip) | `frontend/src/components/runs/SignalBreakdown.tsx` (NEW), `frontend/src/components/shared/StatusBadge.tsx` (statusReason tooltip + DISPLAY_NAMES['PARTIAL']='Partial'), `frontend/src/components/runs/ValidationReportPanel.tsx` (primary `Verified N/100` + secondary `Est.` chip), `frontend/src/lib/api.ts` (RunSummary.statusReason, ValidationReportData.{finalBuildPassed,testsPassed,testsTotal,reviewerVerdict,verifiedScore}) |
-| v2.6.0 UX v3 Graphite+Signal | `frontend/src/tokens.css` (v2.6.0 palette + light theme override + `[data-theme=light]`), `frontend/src/stores/useUiStore.ts` (theme slice + `setTheme/toggleTheme` + pre-paint apply), `frontend/src/components/layout/Header.tsx` (dynamic breadcrumb + Sun/Moon ThemeToggle), `frontend/src/pages/ExecSummaryPage.tsx` (NEW, `/exec` route), `frontend/src/pages/org/OrgProjectsPage.tsx` (hero + 5-col KPI + 3 starter-project templates), `frontend/src/pages/project/ProjectDashboardPage.tsx` (10 flat → 5 top-level groups), `frontend/src/pages/IntegrationsPage.tsx` (category grouping), `frontend/src/pages/SharedReportPage.tsx` (semantic chip tokens), `src/main/resources/templates/email/*.html` (17 templates palette swap), `src/main/resources/templates/report/validation-report-pdf.html` (Signal Blue brand accent) |
-| v2.6.0 UI polish v1 (scores + tokens) | `frontend/src/components/runs/ScoreRing.tsx` (NEW), `frontend/src/components/runs/ScoreCard.tsx` (barColor/textColor → 4-band), `frontend/src/components/runs/ValidationReportPanel.tsx` (ScoreRing hero + Est. secondary chip), `frontend/src/components/project/TechDebtPanel.tsx` (`resolveVar()` for recharts + semantic chips), `docs/design/ui-tokens.md` (NEW — single source of truth) |
-| v2.6.0 provider rename | `src/main/java/com/navneet/executespec/router/LlmProvider.java` (GOOGLE → GEMINI enum), `src/main/java/com/navneet/executespec/api/dto/RunRequest.java` (+ `CreateProjectRequest`) @Pattern regex + back-compat alias, `src/main/java/com/navneet/executespec/auth/service/{OrgService,ProjectService}.java`, `src/main/java/com/navneet/executespec/router/{AvailableProviderResolver,ProviderStatusService,ResolvedModel}.java`, `src/main/java/com/navneet/executespec/config/AgentModelConfig.java`, `src/main/java/com/navneet/executespec/agent/PlannerAgent.java`, `src/main/java/com/navneet/executespec/cost/RunCostTracker.java`, `src/main/java/com/navneet/executespec/harness/SequentialExecutor.java`, `src/main/java/com/navneet/executespec/integration/RunOrchestrator.java`, `src/main/java/com/navneet/executespec/agent/LlmRouter.java`, `src/main/java/com/navneet/executespec/agent/model/WorkerReport.java`, `src/main/resources/application.yml` (model-matrix + failover-order + model-pricing + provider-pool key GEMINI), `src/main/resources/db/migration/V120__rename_provider_google_to_gemini.sql`, `src/test/java/com/navneet/executespec/arch/FailoverOrderEnumAlignmentTest.java` (regression guard) |
-| v2.6.0 pricing + launch | `src/main/resources/application-prod.yml` (`billing.default-gateway: stripe` + `billing.stripe.enabled` env-gated), `src/main/resources/application.yml` (v3 band-flat pricing), `frontend/src/pages/PlansPage.tsx` (USD default + geo-detect + corrected PRO copy), `website/{index.html,product-hunt-launch.md,tier-decision.md,pricing-analysis.md}`, `website/press-kit/README.md`, `website/press-kit/og-hero-template/{template.html,render.js,README.md}`, `website/images/og-hero.png` (1200×630 designed), `website/press-kit/ss-0{1..5}-*.png` (6 screenshots), `website/{sitemap.xml,robots.txt,site.webmanifest,llms.txt,BingSiteAuth.xml,wrangler.toml}` |
-| v2.6.1 Wave 1 — TEAM tier + lifecycle tooling | `src/main/java/com/navneet/executespec/billing/lifecycle/{LifecycleState.java,TierLifecycleService.java,TierLifecycleController.java}` — 3-state machine + `/api/admin/tiers` routes + SUNSETTING side-effects (flag-gated). `src/main/java/com/navneet/executespec/auth/entity/{TierConfig.java,Org.java}` (lifecycle + seat_count columns). `src/main/java/com/navneet/executespec/billing/entity/BillingPlan.java` (lifecycle columns). `src/main/java/com/navneet/executespec/auth/controller/OrgController.java` (`POST /api/org/me/seats/adjust`). `src/main/java/com/navneet/executespec/auth/service/{OrgService.java,InvitationService.java}` (adjustSeats, TEAM seat-cap 402). `src/main/java/com/navneet/executespec/billing/service/BillingService.java::handleStripeCheckoutCompleted` (line_items.quantity → totalSeats + org.seat_count webhook sync). `src/main/java/com/navneet/executespec/billing/gateway/{PaymentGateway.java,StripePaymentGateway.java,RazorpayPaymentGateway.java}` (seat-aware checkout + cancelAtPeriodEnd + updateSubscriptionQuantity). `src/main/resources/db/migration/V121__tier_lifecycle_state.sql`, `V122__team_tier_and_pro_hidden.sql`, `V123__team_billing_plans_and_org_seats.sql`, `V124__seed_lifecycle_sunsetting_flag.sql`. Frontend: `frontend/src/pages/admin/TierLifecyclePage.tsx` (NEW), `frontend/src/pages/PlansPage.tsx` + `frontend/src/components/billing/PlanCard.tsx` (TEAM card + seat picker), `frontend/src/pages/admin/OrgAdminDashboard.tsx` (seats panel), `frontend/src/lib/api.ts` (`adjustOrgSeats`, `fetchTiersLifecycle`, `updateTierLifecycle`). Plan doc: (plan doc removed in 2026-04-26 cleanup pass) + (plan doc removed in 2026-04-26 cleanup pass). |
-| v2.6.1 Wave 2 — activation funnel + TTFV sandbox | `src/main/java/com/navneet/executespec/analytics/{EventName.java,UserActivationEvent.java,UserActivationEventRepository.java,EventTrackingService.java,PostHogClient.java}` — 6-event funnel (SIGNUP / PROJECT_CREATED / SPEC_SUBMITTED / PLAN_APPROVED / RUN_COMPLETE / PR_MERGED), composite-PK idempotency ledger, `@Async` PostHog forwarding. `src/main/java/com/navneet/executespec/onboarding/{SampleSpec.java,SampleSpecRegistry.java,SandboxProvisioningService.java,SandboxCleanupJob.java,OnboardingController.java}` — `/api/onboarding/{sample-specs,pick-sample,sandbox-status}` + hourly cleanup cron. `src/main/resources/sample-specs/{web-api,frontend,cli}.yml`. Event firing hooks in `AuthService.register` + `findOrCreateFromOAuth` + `ProjectService.createProject` + `RunOrchestrator.submitRun/terminate` + `RunController.approvePlan` + `PullRequestRecordService.applyWebhookUpdate`. `src/main/resources/db/migration/V125__user_activation_event.sql`, `V126__sandbox_on_signup.sql`. Frontend: `frontend/src/lib/analytics.ts` (NEW — posthog-js wrapper + `readSignupAttribution`), `frontend/src/App.tsx` (init + identify + page), `frontend/src/pages/onboarding/{WelcomePage.tsx,RunsNewLanding.tsx}` (NEW), `frontend/src/components/runs/FirstRunCelebration.tsx` (NEW). Plan docs: (plan doc removed in 2026-04-26 cleanup pass) + (plan doc removed in 2026-04-26 cleanup pass). |
-| v2.6.1 Wave 3 — SSO/SAML + GitHub App + team trial (schema + docs) | `src/main/resources/db/migration/V127__wave3_sso_githubapp_trial.sql` — `org.sso_{provider,enforced,metadata_url,domain}` + `org.github_installation_id` + `team_trial_request` table. `docs/enterprise-one-pager.md` (procurement-ready security posture + tier comparison). Controllers + frontend deferred per (plan doc removed in 2026-04-26 cleanup pass). |
-| v2.6.1 Wave 4 — smart provider routing + A/B flags | `src/main/java/com/navneet/executespec/router/ProviderRecommendationService.java` (NEW — project-type → provider heuristic, gated by `provider.smart-routing.enabled`). `src/main/resources/db/migration/V128__wave4_provider_routing.sql` — `provider_recommendation_log` + seeds `pricing.persona-first` + `provider.smart-routing.enabled` flags (both OFF). Plan: (plan doc removed in 2026-04-26 cleanup pass) + docs/plans/pending-vscode-extension-plan.md (external-repo stub). |
-| v2.6.1 Wave 5 — startup program + 14-day MAX trial + free-tier teammates (schema) | `src/main/resources/db/migration/V129__wave5_startup_program_trial.sql` — `startup_program_application` + `app_user.trial_tier/trial_started_at/trial_ends_at/can_invite_teammates`. Service + frontend per (plan doc removed in 2026-04-26 cleanup pass). |
-| v2.6.1 Wave 6 — CLI + enterprise depth (docs only) | `docs/enterprise-sla.md` (P1/P2/P3/P4 SLA + 99.9% uptime credit schedule + CSM engagement). (plan doc removed in 2026-04-26 cleanup pass) (external `executespec-cli` repo stub). (plan doc removed in 2026-04-26 cleanup pass) — audit CSV export endpoint + logo page deferred. |
-| v2.6.1 connection-leak fix arc (commits `3cef1d90 → cd07e318` on dev) | `src/main/java/com/navneet/executespec/api/controller/RunConversationController.java` (CompletableFuture async dispatch via `applyExecutor` + `@PreDestroy` shutdown), `src/main/resources/application.yml` (`spring.mvc.async.request-timeout: 900000` + `hibernate.connection.handling_mode: DELAYED_ACQUISITION_AND_RELEASE_AFTER_TRANSACTION` + `spring.jpa.open-in-view: false` + Hikari `leak-detection-threshold: 90000`), `src/main/java/com/navneet/executespec/chat/ApplyService.java` (no `@Transactional`, async-only), `src/main/java/com/navneet/executespec/execution/service/SolutionExecutionService.java` (eager `findWithDependencies…` for handover loop), `src/main/java/com/navneet/executespec/execution/controller/ProjectLaunchController.java` (`@Transactional(readOnly=true)` on `listLaunches/projectPrs/overview`) |
-| v2.6.1 project-chat UX bundle (commit `ddf9c498` on dev) | Backend: `src/main/java/com/navneet/executespec/memory/ProjectChatService.java` (clearHistory + compactHistory + `ProjectChatCompactor` LIGHTWEIGHT calls), `ProjectChatController.java` (`DELETE /api/projects/{id}/chat` + `POST /api/projects/{id}/chat/compact`), `repository/ProjectChatMessageRepository.java` (deleteByProjectId), `application.yml` (ProjectChatCompactor + ProjectChatCompiler tier moves). Frontend: `frontend/src/components/runs/RunDetailTabs.tsx` (live cost polling 5s), `frontend/src/components/project/ProjectChatPanel.tsx` (h-full, slim header, Compact + Reset + Copy buttons, branch input, Launch redirect to `/projects/{id}/dashboard`), `frontend/src/pages/project/ProjectDashboardPage.tsx` (chat tab opts main pane out of padding/overflow), `frontend/src/lib/api.ts` (clearProjectChat, compactProjectChat), `frontend/src/components/shared/Tooltip.tsx` (NEW), `frontend/src/components/layout/Sidebar.tsx` (aria-label + title on close + collapse buttons) |
-| v2.6.2-track hierarchical planner slice 1 (commits `07ce5cc1 → 6adce0c4` on `feature/hierarchical-planner`, NOT on dev/main) | Schema: `src/main/resources/db/migration/V130__hierarchical_planner.sql`. New types: `src/main/java/com/navneet/executespec/agent/PlanStrategy.java` (enum), `ClassificationResult.java` (record), `SmartClassifierAgent.java` (heuristic fast path + LLM verifier + Redis cache + JSON-bracket-balanced parser + always-fall-back-to-heuristic). Wiring: `RunOrchestrator.runClassifierShadow` (cost-snapshot diff before/after the classify call to attribute tokens to `pipeline_run.classifier_*` columns; auto-aggregates into run total via existing `RunCostTracker`). Prompt: `src/main/resources/prompts/classifier.md`. Entity columns: `state/entity/PipelineRun.java` (planStrategy, planOutlineJson, classifierReasoning, per-phase token + cost columns), `state/entity/AgentTask.java` (taskType, expansionStatus, expandedAt). Tier mapping: `application.yml` (`SmartClassifierAgent: LIGHTWEIGHT`). Test fix: `src/test/java/com/navneet/executespec/deployment/preview/PreviewServiceTest.java` (Mockito stubbing leak in freeTierLimit — switched post-real-call stubs to `doReturn(y).when(mock).x()` form). |
-| v2.6.2-track hierarchical planner slice 2 (on `feature/hierarchical-planner`, NOT on dev/main) | New agent: `src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java` (PLANNING tier, 32k maxTokens, `submitOutline` tool with same JSON schema as `submitPlan`, reuses PlannerAgent's parse helpers via package-private accessors). New prompt: `src/main/resources/prompts/outline-planner.md`. Wiring: `RunOrchestrator.runOutlinePhase` (cost-snapshot diff to attribute tokens + USD to `pipeline_run.outline_*` columns; persists plan JSON to `plan_outline_json`). Strategy routing: `runPipeline` reads classifier verdict → SMALL/MEDIUM go to OutlinePlannerAgent, others (SINGLE_SHOT/LARGE/LEGACY/null) stay on legacy `PlannerAgent`; legacy fallback engaged on OutlinePlannerAgent failure so runs always progress. `PlannerAgent` access modifiers: `parsePlanFromArgs`, `salvagePlanFromText`, `warnIfConstraintsUnderpropagated`, `truncate` made package-private. Tier: `application.yml` (`OutlinePlannerAgent: PLANNING`). |
-| v2.6.2-track hierarchical planner slice 3 (on `feature/hierarchical-planner`, NOT on dev/main) | LARGE strategy fully wired. New file: `src/main/java/com/navneet/executespec/agent/TaskExpanderAgent.java` (WORKHORSE tier, 3k cap, `submitTaskDetail` tool — fills one skeleton task in parallel). New file: `src/main/java/com/navneet/executespec/agent/CoherencePlannerAgent.java` (LIGHTWEIGHT tier, 1.5k cap, `patchPlan` tool with 5 patch kinds: ADD_MEETS_REQUIREMENT, ADD/REMOVE_DEPENDS_ON, FIX_HARD_CONSTRAINT_CONFLICT, MOVE_FILE_TO_REPO_SUBDIR). New file: `src/main/java/com/navneet/executespec/agent/PlanStrategyCircuitBreaker.java` (Redis-backed, 5-failure threshold within 1h, ladder degrade LEGACY→LARGE→MEDIUM→SMALL→legacy, 1h auto-recovery TTL). `PlannedTask` gains `taskType: LEAF | EPIC` + `isSkeleton()` helper; descriptions allowed blank pre-expansion. `OutlinePlannerAgent` gains `Mode.SKELETON_ONLY` (8k cap, calls new `prompts/outline-planner-skeleton.md`). New prompts: `prompts/outline-planner-skeleton.md`, `prompts/task-expander.md`, `prompts/coherence-planner.md`. `RunOrchestrator.runLargePipeline` drives skeleton-outline → parallel expansion via `CompletableFuture.allOf` on the 4-thread `pool` (15-min wall timeout, per-task fallback to title-derived LEAF on expansion error) → coherence patch. Cost diff'd into `expansion_*` + `coherence_*` columns. Strategy gate uses `PlanStrategyCircuitBreaker.degradeIfOpen` before routing. LEGACY currently degrades to LARGE (recursive depth-2 lands in slice 4). Tier mappings: `TaskExpanderAgent: WORKHORSE`, `CoherencePlannerAgent: LIGHTWEIGHT`. |
-| v2.6.2-track hierarchical planner slice 4 (on `feature/hierarchical-planner`, NOT on dev/main) | LEGACY recursive depth-2 expansion. `RunOrchestrator.runLargePipeline` now takes `enableEpicRecursion`; when the original (pre-degrade) classification was LEGACY, EPIC skeletons dispatch to `expandEpic` instead of the regular LEAF expander. `expandEpic` makes a focused `OutlinePlannerAgent.SKELETON_ONLY` sub-call (Classification.MEDIUM, max 4 children), prefixes child IDs with parent (T3 → T3.1, T3.2, …), forces children to LEAF (depth-2 cap), then expands them in parallel via `TaskExpanderAgent` with a 10-min sub-timeout. EPIC entries replaced by their N child LEAFs in-place; `coerceToLeafFallback` handles failed sub-outlines. Phase-2 wall-clock timeout 15 → 20 min to accommodate recursion. `StartupRunResumer` outline-checkpoint awareness — interrupted runs with persisted `plan_outline_json` get a clearer failure message naming strategy + outline size. Auto-replay deferred to follow-up. PlannerAgent deletion + parse-helper extraction also deferred (touches `ExecutorTestController`, `PlannerTestController`, `PlannerAgentV2ValidationTest`; pure refactor kept separate). |
-| v2.6.3-track enterprise readiness — folder + write chokepoint (E1, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `folder/`: `ExecutespecFolderWriter.java` (single chokepoint for every `.executespec/` mutation; PR vs DIRECT_PUSH dispatch via `ProjectRepo.prModeEnum()`), `BootstrapService.java` (creates initial `.executespec/` scaffold + bootstrap PR + flips status machine to READY), `FolderReadmeGenerator.java` (auto-generated README inside `.executespec/`), `ProjectConfigPathResolver.java` (FOLDER_FLAT vs FOLDER_NAMESPACED vs DATABASE decision tree per (project, repo)), `ExecutespecMigrationController.java` (`POST /api/admin/projects/{id}/migrate-codemaps`). Schema: V131 (4-state status machine + bootstrap PR url + last synced at on `project_repo`) + V132 (`executespec_pr_mode` enum) + V134 (`project.config_storage` + `project_config` table for confidential-project DATABASE opt-out). ArchUnit pin: `src/test/java/com/navneet/executespec/arch/ExecutespecFolderWriterCallerAllowlistTest.java` (4 approved callers). |
-| v2.6.3-track enterprise readiness — activity feed (E1, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `activity/`: `ActivityEventEmitter.java` (chokepoint for every customer-facing event; dual-writes to `activity_audit` for AUDIT-tagged events), `ActivityFeedController.java` (`GET /api/projects/{id}/activity` with `limit`/`eventType`/`from`/`to` query params), `ActivityFeedRetentionJob.java` + `ActivityFeedPartitionJob.java` (`@Scheduled` + `@SchedulerLock`). Schema: V133 (`activity_feed` partitioned-by-month + 12 monthly partitions seeded 2026-04 → 2027-03 + 4 hot-path indexes). |
-| v2.6.3-track enterprise readiness — contracts + monorepo (E2, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `contracts/`: 4 sub-packages — `breaking/` (`BreakingChangeService.java` + per-kind classifiers including `ProtoBreakingChangeClassifier`), `consumers/` (`ContractConsumerController.java`), `coverage/` (`ContractCoverageController.java`), `detection/` (per-kind contract detectors), `drift/` (`ContractDriftController.java`), `injection/` (planner-side hooks). Schema: V135 (`contract_registry` + `contract_version` + `contract_consumer` + `contract_drift_event`). Index hot paths: per-repo coverage lookup (E2.3), unresolved-drift triage (E2.8 partial index), per-project consumer rollup (E2.11 + E2.12). Materialised paths: `.executespec/contracts/<contract>.{yaml,json,proto,graphql}` per producer + `.executespec/contracts/consumed/<contract>.json` per consumer. |
-| v2.6.3-track enterprise readiness — engineering standards (E3, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `standards/`: 5 sub-packages — root has `EffectiveStandardsResolver.java` (org + project merge), `ast/` (AST-based standards checks), `llmreview/` (LLM-augmented standards review for non-AST checks), `override/` (`StandardsOverrideController.java` — single-violation overrides + standing exceptions, both require ≥30 char rationale), `report/` (`StandardsComplianceController.java` — `GET /api/projects/{id}/standards/report`). Schema: V136 (`org_standard` + `project_standard_override` + `standards_violation`). |
-| v2.6.3-track enterprise readiness — ADRs as first-class (E3.12, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `adr/`: `Adr.java` entity, `AdrRepository.java`, `AdrFrontmatterParser.java` (single parser for `.executespec/arch/adrs/<NNNN>-<slug>.md` markdown frontmatter), `AdrInjectionService.java` (planner-side injection point — kept bounded on this branch). Schema: V137 (`adr` table caches parsed frontmatter so dashboards / planner can query by status without round-tripping to GitHub). |
-| v2.6.3-track enterprise readiness — architectural invariants (E3.14, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `arch/invariants/`: `ArchInvariant.java` + `ArchInvariantViolation.java` entities, `InvariantChecker.java` (runs per-codemap-version; definitions live in customer git as `.executespec/arch/invariants.yaml` per repo). Schema: V138 (`arch_invariant` + `arch_invariant_violation`). |
-| v2.6.3-track enterprise readiness — visibility + retention + export (E4, on `feature/enterprise-readiness-eval`, NOT on dev/main) | New package `notification/pref/`: `UserNotificationPref.java` entity + `NotificationPrefService.java` (per-user × event-type × channel opt-in/out matrix + sensible defaults). New package `export/`: `ProjectExportController.java` (`POST /api/projects/{id}/export` returns zip of every `.executespec/` artefact + DB-only counterparts when `config_storage=DATABASE`). Schema: V139 (`user_notification_pref`). |
-| v2.6.3-track session boot fix (2026-04-25, on `feature/enterprise-readiness-eval`) | `folder/ExecutespecFolderWriter.java` + `folder/BootstrapService.java` — both had two constructors (prod + test seam) but neither annotated; Spring 6 fell back to no-arg (which doesn't exist). Added `@Autowired` on both prod constructors. Caught when local stack was brought up for the deferred server-up eval — would have crashed the first dev deploy attempt. |
-| v2.6.4 PR Review + Code Review agents (`feature/code-review-agents`, NOT yet merged) | Backend new packages: `prreview/` (`PrReviewAgent`, `PrReviewService`, `PrReviewController`, entity + repos for `pr_review` + `pr_review_comment`) and `codereview/` (`CodeReviewAgent`, `CodeReviewService`, `CodeReviewController`, `SemgrepRunner`, `CodeReviewMarkdownRenderer`, entity + repos for `code_review_scan` + `code_review_issue`). Both register PLANNING tier in `application.yml` agent-tier-map. Both gate on new `tier_config` columns (`pr_review_enabled` / `code_review_enabled` / `*_monthly_quota`). New chat tools wired via `memory/chattools/ProjectChatTools.java#runCodeReview` + `getLatestCodeReview`. Schema: V172. Frontend: new `components/project/CodeQualityPanel.tsx` (sub-tab inside Code) + `components/project/PrReviewButton.tsx` (inline icon-button on every PR row in `ProjectPrRollup`); api helpers + types in `lib/api.ts`. Tests: `CodeReviewServiceTierGateTest` (7) + `CodeReviewAgentParseTest` (4) + `CodeReviewMarkdownRendererTest` (3). PullRequestSnapshot record gained a `headSha` field — backward-compatible since all callers go through `GitHubRepoService.getPullRequestSnapshot`. |
-| LLM prompts | `resources/prompts/*.txt` (15 main + 13 eval) |
-| App config | `resources/application.yml` |
-| Frontend entry | `frontend/src/main.tsx` |
-| Frontend API client | `frontend/src/lib/api.ts` |
-| Observability stack | `observability/docker-compose.yml` |
-| OTel config | `config/ObservabilityConfig.java`, `config/CustomMetricsConfig.java` |
-| Eval framework | `eval/EvalController.java`, `eval/ModelEvaluator.java` |
-| Infra (Terraform) | `infra/` |
+| Method | Path                                                                          | Description                       |
+| ------ | ----------------------------------------------------------------------------- | --------------------------------- |
+| GET    | `/api/notifications` + `/unread-count` + POST `/{id}/read` + POST `/read-all` | In-app notifications.             |
+| GET    | `/api/models/available`                                                       | Model matrix (YAML-derived).      |
+| GET    | `/api/feature-flags` + POST `/{key}`                                          | Feature flag admin (SUPER_ADMIN). |
 
-## Model Matrix
+## Key file locations
 
-| Agent Tier | Agents | Anthropic | Gemini | OpenAI |
-|------------|--------|-----------|--------|--------|
-| PLANNING | PlannerAgent (HIGH tasks, reviewer) | `claude-sonnet-4-6` | `gemini-3-flash-preview` | `gpt-5.4` |
-| WORKHORSE | WorkerAgent (MEDIUM tasks), TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ValidationReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
-| LIGHTWEIGHT | WorkerAgent (LOW tasks), ConversationAgent, ContextAgent, TestReportGenerator | `claude-haiku-4-5-20251001` | `gemini-3-flash-preview` | `gpt-5.4` |
+| Purpose                         | Path                                                                                                                                                                                                 |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Run orchestrator                | [`integration/RunOrchestrator.java`](src/main/java/com/navneet/executespec/integration/RunOrchestrator.java)                                                                                         |
+| Sequential executor             | [`harness/SequentialExecutor.java`](src/main/java/com/navneet/executespec/harness/SequentialExecutor.java)                                                                                           |
+| Worker agent                    | [`agent/WorkerAgent.java`](src/main/java/com/navneet/executespec/agent/WorkerAgent.java)                                                                                                             |
+| Outline planner                 | [`agent/OutlinePlannerAgent.java`](src/main/java/com/navneet/executespec/agent/OutlinePlannerAgent.java)                                                                                             |
+| Smart classifier                | [`agent/SmartClassifierAgent.java`](src/main/java/com/navneet/executespec/agent/SmartClassifierAgent.java)                                                                                           |
+| Reviewer                        | [`reviewer/ReviewerAgent.java`](src/main/java/com/navneet/executespec/reviewer/ReviewerAgent.java)                                                                                                   |
+| Patch-mode agent                | [`agent/PatchAgent.java`](src/main/java/com/navneet/executespec/agent/PatchAgent.java)                                                                                                               |
+| LLM router (V2)                 | [`agent/LlmRouter.java`](src/main/java/com/navneet/executespec/agent/LlmRouter.java) + `OpenAiNativeToolClient` + `GeminiNativeToolClient`                                                           |
+| Legacy router (non-tool agents) | [`agent/FallbackLlmRouter.java`](src/main/java/com/navneet/executespec/agent/FallbackLlmRouter.java)                                                                                                 |
+| Tool registry                   | [`tool/ToolRegistry.java`](src/main/java/com/navneet/executespec/tool/ToolRegistry.java) + `tool/*` (11 tools + `CompleteTaskTool`)                                                                  |
+| Context store                   | [`context/ContextStore.java`](src/main/java/com/navneet/executespec/context/ContextStore.java)                                                                                                       |
+| Cost tracker                    | [`cost/RunCostTracker.java`](src/main/java/com/navneet/executespec/cost/RunCostTracker.java)                                                                                                         |
+| State store                     | [`state/StateStore.java`](src/main/java/com/navneet/executespec/state/StateStore.java)                                                                                                               |
+| Startup resumer                 | [`recovery/StartupRunResumer.java`](src/main/java/com/navneet/executespec/recovery/StartupRunResumer.java)                                                                                           |
+| Finding patch submitter         | [`finding/FindingPatchSubmitter.java`](src/main/java/com/navneet/executespec/finding/FindingPatchSubmitter.java)                                                                                     |
+| Model registry                  | [`router/ModelRegistry.java`](src/main/java/com/navneet/executespec/router/ModelRegistry.java)                                                                                                       |
+| Validation report               | [`report/ValidationReportService.java`](src/main/java/com/navneet/executespec/report/ValidationReportService.java) + `ValidationReportGenerator`                                                     |
+| Project architecture            | [`codeintel/ProjectArchitectureService.java`](src/main/java/com/navneet/executespec/codeintel/ProjectArchitectureService.java)                                                                       |
+| Project memory                  | [`memory/RunLedgerAgent.java`](src/main/java/com/navneet/executespec/memory/RunLedgerAgent.java) + `MemoryCompactionService` + `ProjectMemoryProvider`                                               |
+| GitHub integration              | [`repo/GitHubRepoService.java`](src/main/java/com/navneet/executespec/repo/GitHubRepoService.java) + `BitbucketRepoService`                                                                          |
+| Multi-repo push                 | [`integration/scm/ScmPushService.java`](src/main/java/com/navneet/executespec/integration/scm/ScmPushService.java)                                                                                   |
+| SWE-bench adapter               | [`swebench/`](src/main/java/com/navneet/executespec/swebench/)                                                                                                                                       |
+| ProgramBench adapter            | [`programbench/`](src/main/java/com/navneet/executespec/programbench/)                                                                                                                               |
+| Security config                 | [`auth/security/SecurityConfig.java`](src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java)                                                                                       |
+| Billing service                 | [`billing/service/BillingService.java`](src/main/java/com/navneet/executespec/billing/service/BillingService.java) + `gateway/PaymentGatewayRouter`                                                  |
+| Feature flags                   | [`config/featureflag/FeatureFlagService.java`](src/main/java/com/navneet/executespec/config/featureflag/FeatureFlagService.java)                                                                     |
+| Rate limiting                   | [`ratelimit/RateLimitFilter.java`](src/main/java/com/navneet/executespec/ratelimit/RateLimitFilter.java)                                                                                             |
+| Sharing                         | [`sharing/`](src/main/java/com/navneet/executespec/sharing/)                                                                                                                                         |
+| PR Review agent                 | [`prreview/`](src/main/java/com/navneet/executespec/prreview/)                                                                                                                                       |
+| Code Review agent               | [`codereview/`](src/main/java/com/navneet/executespec/codereview/)                                                                                                                                   |
+| Activity feed                   | [`activity/`](src/main/java/com/navneet/executespec/activity/)                                                                                                                                       |
+| Folder writer (`.executespec/`) | [`folder/ExecutespecFolderWriter.java`](src/main/java/com/navneet/executespec/folder/ExecutespecFolderWriter.java)                                                                                   |
+| Standards / ADR / Invariants    | [`standards/`](src/main/java/com/navneet/executespec/standards/), [`adr/`](src/main/java/com/navneet/executespec/adr/), [`arch/invariants/`](src/main/java/com/navneet/executespec/arch/invariants/) |
+| Cross-repo contracts            | [`contracts/`](src/main/java/com/navneet/executespec/contracts/)                                                                                                                                     |
+| Notification preferences        | [`notification/pref/`](src/main/java/com/navneet/executespec/notification/pref/)                                                                                                                     |
+| GDPR data export                | [`auth/service/UserDataExportService.java`](src/main/java/com/navneet/executespec/auth/service/UserDataExportService.java)                                                                           |
+| Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
+| LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
+| App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V186)                                                                                                                                                 |
+| Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
+| Frontend API client             | `frontend/src/lib/api.ts`                                                                                                                                                                            |
+| Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |
+| V2 eval framework               | `scripts/v2-eval.sh` + `scripts/v2-eval-specs/{low,medium,high}.txt`                                                                                                                                 |
 
-> v2.6.0 — `LlmProvider` enum canonical spelling is `GEMINI` (was `GOOGLE` until v2.5.13). YAML keys in `application.yml` (`model-matrix.gemini`, `failover-order.gemini`, `model-pricing[].provider: gemini`, `provider-pool.GEMINI`) must match. Legacy `GOOGLE` is accepted as a back-compat alias on `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider` input but is rewritten to `GEMINI` before persistence. See `FailoverOrderEnumAlignmentTest` for the regression guard.
-
-Default provider: OpenAI (user-selected per project). Provider failover is available via `ProviderHealthTracker` (V1 router only — V2 `LlmRouter` is direct-dispatch with circuit-breaker metrics but no failover chain). See `application.yml` → `model-matrix:` for full configuration.
-
-## Current State
+## Current state
 
 ### Working
-- Full V2 pipeline: plan (native `submitPlan` tool) → approve → sequential per-task worker (tier-routed) → reviewer (general + wiring) → **COMPLETE** → auto-preview (5-min TTL) → background validation (report + test gen + test exec)
-- V2 startup recovery: non-terminal V2 runs at boot are marked FAILED with a clear reason (replay is a planned follow-up)
-- V2 cancel: `DELETE /api/runs/{id}` on V2 runs interrupts the pipeline, signals the plan gate, writes CANCELLED + terminal SSE
-- V2 run-stats correctness: per-phase token persistence atomically increments run totals; `terminate()` only bumps up, never shrinks
-- User-selected AI provider per project (Anthropic/Gemini/OpenAI) with YAML model matrix
-- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, 5-min TTL, Caddy proxy with Cloudflare Origin Certificate)
-- JWT auth + OAuth2 (Google, GitHub) with RBAC, org management, project scoping
-- Multi-gateway billing via PaymentGatewayRouter (Razorpay + Stripe): subscriptions, run top-up credits, invoicing with GST
-- Cost-proportional run credits: `credits = max(1, ceil(estimate × 1.10 / $5.0))`. Charged at plan approval, refunded on FAILURE. FREE tier limited to 1-credit specs. Insufficient credits → suggest top-up or tier upgrade.
-- `run_cost_log` audit table: tracks estimated vs actual cost, margin, budget-hit rate per run for pricing analytics
-- Payment audit trail with CSV export + webhook event log (admin)
-- Feature flag system (DB + Redis pub/sub + admin UI) for platform toggles
-- Force-logout via feature flag epoch-based JWT invalidation
-- Redis-backed per-tenant rate limiting (AUTH, RUNS, WEBHOOK, READ, WRITE, PREVIEW, DEPLOY groups)
-- 8-layer security: request validation, input sanitization (NFKC + zero-width strip + base64 decode), LLM prompt defense, code abuse scanning (crypto, shells, PowerShell, DNS exfil, metadata), shell sandbox, file sandbox, process isolation, container hardening (metadata blocking, env whitelist)
-- Configurable security headers (CSP, HSTS, X-Frame-Options) via SecurityProperties
-- JIRA/Confluence inbound webhooks + outbound completion comments (via MergeCompleted event, both PROTOTYPE and PRODUCTION)
-- Slack notifications (Block Kit messages)
-- GitHub branch + PR creation for existing-repo runs (branch `executespec/{runId-short}`, PR opened automatically)
-- Chat copilot + apply suggestion (chat/review improvements on same run)
-- Run archive feature
-- Observability: Micrometer traces + V2 custom metrics (`executespec.v2.*`) + structured logging
-- Local Grafana dashboards (ExecuteSpec Overview + JVM/HTTP)
-- GCP Cloud Trace (traces) + Cloud Monitoring (metrics) via `@Profile("gcp")` exporters
-- Model evaluation framework (`eval/` package)
-- Atomic quota enforcement (pessimistic locking, single-TX check+increment, multi-credit support)
-- Atomic token counter updates (SQL-level increment, no read-modify-write)
-- Bounded thread pool for pipeline runs (CallerRunsPolicy backpressure)
-- Gate wait timeout (24h max, prevents indefinite thread block)
-- Semaphore enforcement on all run entry points (startIterationRun, resumeRun, executeApplySuggestion)
-- Concurrent preview limit race fix (synchronized block)
-- Scoped SSE tokens (5-min TTL, per-runId, prevents cross-run eavesdropping)
-- JWT secret startup validation (prod profile, blocks dev placeholder)
-- Tier-based deployment limits (enforces `max_deployments` from tier_config)
-- Silent hard cap cost enforcement (ceiling = credits × $5 × 1.5; no progressive warnings — user approved cost upfront)
-- Manual test execution (Beta): POST /runs/{runId}/run-tests endpoint, "Run Tests" button in PreviewTab (requires preview RUNNING)
-- In-app notification system: JPA entity, REST API, NotificationBell in header, run completion/failure notifications
-- Containerized test execution (Docker with --read-only, --cap-drop ALL, memory/CPU limits)
-- Env var whitelist for Docker subprocess (PATH, HOME, DOCKER_HOST only — no leaked secrets)
-- ServiceNow webhook HMAC verification
-- Actuator endpoint restriction (health+prometheus public, rest SUPER_ADMIN)
-- Design system integration: 54 company DESIGN.md files loaded from filesystem, 3-signal resolution (explicit hint > planner ui_style > project type heuristic), Caffeine cache (30min), token-budget truncation (2500 tokens), GCS-synced on deploy/boot
-- CSP `frame-src` directive for Cloud Run preview iframes
-- Prompt architecture: shared fragment system (`PromptAssembler`), scaffold templates, prompt version tracking (SHA-256 hash → `prompt_audit`), failure pattern injection into planner, live API probe for test generation (`ApiProber`), API surface extraction for test planner (`ApiSurfaceExtractor`), command allowlist in `ProcessExecutor`
-- **FileViewer markdown preview:** `.md` files in the workspace viewer show a Preview/Source toggle. Preview mode renders via `MarkdownContent`; Source mode uses Monaco editor.
-- **V2 eval matrix:** `scripts/v2-eval.sh` — LOW/MEDIUM/HIGH × anthropic/openai/gemini, produces JSON + markdown comparison under `scripts/v2-eval-results/`
-- **Pilot v3.0 — project workspace** (commit `6bbfde9b`): project dashboard with metrics + score trend + recent runs/PRs; ORG/USER scoped repo registry with multi-repo selection in NewRunModal; per-repo codemaps + versioned project architecture doc with annotations + STALE detection; pre-plan feature assessment (heuristic by default; LLM-backed when `assessment.llm.enabled` flag is on); 6-dimension review scoring on validation report; per-run PR list with GitHub webhook for merge status; multi-repo PR creation with cross-linking; daily `StackRefreshJob` keeps `detected_stack` + `last_synced_sha` fresh; optional Figma URL drives design-compliance scoring.
 
-### In Progress
-- **ProgramBench benchmarking adapter (`feature/programbench-benchmark`, NOT yet merged to dev/main).** Step 1 of a two-step effort to put a number on ExecuteSpec against [ProgramBench](https://github.com/facebookresearch/programbench) (Meta's "rebuild a binary from scratch" benchmark, 201 tasks). New standalone python runner at `scripts/programbench/` — `programbench_runner.py` (~310 LOC) + `programbench.yaml` (mini-swe-agent v2 config) + `README.md`. Forks the structure of mini-swe-agent's built-in `swebench.py`; three real differences: (a) tasks read from the locally installed `programbench` package (`<install>/data/tasks/<id>/task.yaml`), not a HuggingFace dataset; (b) cleanroom contract enforced via `run_args: ["--rm", "--network", "none"]` in the docker env config; (c) submission shape is the contents of `/workspace` at agent-exit time, captured via `docker cp` and tar'd as `submission.tar.gz` with files at the archive root (NOT under a `submission/` prefix — programbench's eval extracts directly into `/workspace` and runs `chmod +x ./compile.sh && ./compile.sh`, verified by reading `programbench/eval/eval.py:_compile_executable`). The runner reuses `DefaultAgent` + the `docker` Environment from mini-swe-agent v2.2.8 — the agent process runs on the host (with internet for LLM API calls); only tool calls (shell, file ops, builds) get dispatched into the cleanroom container. **Inference target**: GCE `executespec-dev-vm` (Linux x86_64, Ubuntu 22.04, docker 29, sudo passwordless, 76 GB free after the 2026-05-07 disk cleanup, JVM dev backend coexisting on the box at `:8080`). `/opt/programbench-bench/` scratchpad with isolated uv venv on **Python 3.11** (programbench's `eval_batch.py` uses `typing.Self` which needs ≥3.11 — uv installs `mini-swe-agent==2.2.8` + `programbench` cleanly). `PROGRAMBENCH_DOCKER_CPUS=4` env override required since default is 10 and the VM has 4. API keys come from `/opt/app/executespec.env` via `set -a; source ...; export GEMINI_API_KEY=$GOOGLE_API_KEY; set +a` — no duplicate key files on disk. **First validated score (cmatrix smoke, 2026-05-07)**: 98/100 on `abishekvashok__cmatrix.5c082c6` (759/769 tests pass; 10 failures all in "invalid color flag should error" — agent didn't implement strict argument validation). Cost: $5.03 (hit the `cost_limit: 5.0` cap; agent kept tweaking because the original prompt didn't tell it about `compile.sh` or when to stop). Wall time: 15.5 min agent + 4 min eval. The score-0 we initially saw was two bugs in the runner, both now fixed: (1) `tarfile.add(..., arcname="submission")` → `arcname="."` so files land at archive root; (2) system prompt rewritten with explicit `compile.sh` build contract + per-language examples (C/Rust/Go) + "be efficient with iterations" guidance. Step 2 (separate work, separate branch) wires the same adapter shape — container-attached shell + fs tools, post-agent tar — into ExecuteSpec's V2 worker stack so we can measure what the planner + reviewer + tool design contribute on top of the bare mini-swe-agent baseline. **Outstanding**: re-run cmatrix smoke with the fixed prompt to validate cost drops below the $5 cap (no quality risk — agent's code already scored 98). Then easy-3 across providers as the smallest meaningful matrix (~$15–45). Full 201 deferred until easy-N numbers justify it.
-- **Worker runaway fixes (`feature/worker-runaway-fixes`, NOT yet merged to dev/main).** Diagnosed from run `a076c876` task T2 (2026-05-03): a LOW-complexity task ("Move confidence threshold to env/config var") burned 60 iterations + 70k tokens + ~22 iters in a `git status` / `git add` / `gitCommit` loop after the actual code change had been applied. Root causes (4): (1) worker had `gitCommit` in its tool authorities even though V2 commits at run-end via `ScmPushService.pushMultiRepo`; (2) no stagnation detector — worker spent ~14 iters re-verifying its own writes; (3) `outcome != COMPLETED && fileWrites > 0` was pre-marked PARTIAL even for intermediate tasks in multi-task plans where the reviewer's final build is authoritative; (4) planner templated TypeScript filenames (`scan.service.ts`) into a Python repo's task description because user spec used TS wording. Four commits, each independently shippable:
-  - **A — strip gitCommit from worker tool registry** (`358ec267`): new `ToolRegistry.bindForWorker(ctx)` filters out everything in `WORKER_DENY_TOOLS = {gitCommit}`. `WorkerAgent` passes `bindForWorker` via `LlmRequest.toolsOverride` and refuses any deny-listed tool at dispatch time with a `FORBIDDEN` envelope. System prompt updated to forbid shell-mediated git mutations (`git add`, `git commit`, `git reset`, `git stash`, `git push`). Reviewer / orchestration callers still get `gitCommit` via the unchanged `bind(ctx)`. 3/3 tests in `ToolRegistryWorkerBindTest` pin (a) gitCommit absent from worker bind, (b) gitCommit kept in default bind, (c) deny set contains gitCommit.
-  - **B — stagnation guard force-terminates indecisive workers** (`72cbf65a`): new `WorkerAgent.STAGNATION_WARN_AFTER_N=8` + `STAGNATION_FORCE_AFTER_N=12` thresholds + `WORKER_DENY_TOOLS`-style `WRITE_CLASS_TOOLS = {writeFile, editFile}` set. After 8 consecutive non-write iters, inject one-shot "PROGRESS CHECK" system message; after 12 consecutive non-write iters, force-terminate with new outcome `COMPLETED_BY_STAGNATION`. The downstream smoke gate decides whether the change set actually compiles. 5/5 tests in `WorkerAgentStagnationTest` pin force-terminate at threshold, writeFile reset, editFile reset, threshold ordering invariant, and empty-toolcalls path is not preempted by the guard.
-  - **C — honest soft-completion gate replaces premature PARTIAL** (`74547b99`): `SequentialExecutor.executeOne` reshaped — outcome != COMPLETED + files written falls through to the SAME gate the COMPLETED path uses (multi-task skip / smoke test). Smoke pass → `COMPLETE` + warning persisted on `lastLlmFailure`; smoke fail (no retry — worker already burned its budget) → `PARTIAL` + combined reason. Multi-task intermediate task with iter-limit + writes → `COMPLETE` (was: PARTIAL) since reviewer's final build is the authoritative gate. `COMPLETED_BY_STAGNATION` (Fix B) flows through this gate identically. 5/5 tests in `SequentialExecutorSoftCompletionTest` cover all four corners + the new outcome's path.
-  - **D — per-repo language parity in workspace summary** (`8bfe9a58`): `RunOrchestrator.buildMultiRepoSummary` appends a "LANGUAGE PARITY (do not violate)" block per linked repo from `ProjectRepo.detectedStack` (populated by `StackDetector` at /sync time). Each language maps to a one-line convention hint (Python: snake_case .py + os.getenv + pytest; TS/JS: kebab-case .ts/.tsx + process.env + vitest/jest; Go/Rust/Java/Kotlin/Ruby/C# similar). The block flows automatically into the planner prompt's `{{WORKSPACE_SUMMARY}}` placeholder + the worker's system prompt via `composeSystemPrompt`'s MULTI-REPO forwarding rule — no additional plumbing. `outline-planner.md` gains invariant #10 instructing the planner to TRANSLATE filename + idiom conventions in the spec to match the repo's actual language before emitting the task description. 9/9 tests in `LanguageParityBlockTest` pin per-language hint output, case-insensitive matching, and the conservative default for unknown / null / blank languages.
-  - **Tests:** `mvn test` 881/881 green (was 859 pre-batch; +22 from new tests). Branch off `dev` at `f2949659`. **No push** — pending user review of in-flight run a076c876 to confirm no regressions and the reviewer + validation phases land cleanly on top.
-  - **Outstanding before PR:** doc-refresh on per-package CLAUDE.md surfaces (this entry) + decide whether to also extend the language-parity block to single-repo runs (currently multi-repo only via `buildMultiRepoSummary`; the single-repo codemap path implicitly conveys language via file extensions but doesn't have an explicit rule).
-- **Plan 1 — product-split foundation + UX polish (`feature/product-split-prep`, NOT yet merged to dev/main).** Strategic groundwork for the eventual `app.executespec.ai` (consumer / VIBE+PRO) vs. `build.executespec.ai` (B2B / TEAM+ENTERPRISE) surface split, plus three orthogonal "this-week" UX/test wins that don't need the split to land. Five commits:
-  - **#1 V143 product-split migration** — `product_id` ENUM ('vibe','executespec') on `pipeline_run`/`project`/`org`/`billing_subscription`/`invoice`/`notification` + `app_user_product_access` join table. All existing rows backfill to `executespec`; call-site enforcement deferred to Phase 2.
-  - **#2 `ApiContractTest` + dead `approveAssessment` removed** — ArchUnit-based scan asserts every URL in `frontend/src/lib/api.ts` resolves to a registered backend `@*Mapping`. Caught one real drift on first run (frontend export with no backend handler, no callers); deleted. 321 backend patterns × ~200 api.ts URLs in 2.6s. Stays in unit suite.
-  - **#3 `<VerdictPill />` + dual-score sweep** — collapses build/tests/reviewer/verifiedScore signals into Shippable / Needs review / Blocked. Wired into `ValidationReportPanel`, `ScoreCard`, `SignalBreakdown` (dropped Verified+Est numeric segments — collapsed into pill), `RunStamp`. Numerics demoted to disclosure / supporting detail.
-  - **#4 `<Glossary />` primitive + 5-term dictionary** — hover/focus tooltip with plain-English definition. Seed dictionary: `codemap`, `wiring pass`, `verified score`, `status reason`, `classifier`. Extended `Tooltip` with `wrap` + `maxWidthClass` for multi-line text.
-  - **#5 OAuth surface skeleton + CORS prep** — new `OAuthSurfaceResolver` + `OAuthInitController` (`GET /api/auth/oauth2/init?surface=...`); `OAuthSuccessHandler` reads stashed surface to pick the per-surface frontend redirect URL. Pre-Phase-2 fallback: missing surface → original `dashboardUrl` redirect (no behavior change today). CORS allow-list pre-emptively includes both surface subdomains. Cookie-domain switch deferred to Phase 2 maintenance window.
-  - **Tests:** `mvn test` 620/620 green (includes new `ApiContractTest`); `npm --prefix frontend run build` clean.
-  - **Outstanding (carried forward via the Phase 1.0/1.1/1.2/1.3 auto-execute pass below):** call-site enforcement of `product_id` (Phase 2), per-component application of `<Glossary>` (UX sweep, separate), cookie-domain switch (Phase 2 maintenance).
-- **Phase 1.0/1.1/1.2/1.3 auto-execute pass (`feature/v2.7-foundation`, NOT yet merged).** Continuation of Plan 1 — chewed through 17 of 22 plan items per the consolidated execution doc. Each commit on the branch corresponds to a numbered plan item (or a coherent batch). Highlights:
-  - **Phase 1.0 #2 — `ProductSurfaceFilter`:** request-scoped `currentProduct` attribute via X-Product header / Origin / Referer / OAuth-stashed session. 7 unit tests pin the resolution ladder.
-  - **Phase 1.1 retire-and-rename batch:** view-mode toggle removed from header; PRO hidden from `/plans`; `/runs/new` redirects to `/projects`; `/legacy/billing` redirect for grandfathered PRO; sidebar nav "Runs" → "Missions" (URLs + DTOs unchanged).
-  - **Phase 1.1 empty-state hero pattern:** InvoicesPage / AuditPage / OrgProjectsPage replaced flat "No data" stubs with question + supporting context + concrete CTAs.
-  - **Phase 1.1 Drawer + Glossary primitives:** `frontend/src/components/shared/{Drawer,Glossary}.tsx` + `lib/glossary.ts` (5 seed terms + "mission"). Drawer ready for NewRunModal "Add API key" / "Add GitHub PAT" rewires (separate UX sweep). Glossary applied to ScoreCard helper text as the first wire.
-  - **Phase 1.2 Wave-3 enterprise:** V127 fields (sso_provider/enforced/metadata/domain + github_installation_id/installed_at) wired into Org entity; new `SsoConfigController` (CRUD only, SAML handshake deferred) + `GitHubAppController` (install URL / status / callback / uninstall, webhook signature deferred). InvoicesPage CSV export (Erin blocker B-9). BYOK Test buttons per provider in SettingsPage with new `POST /api/auth/settings/ai-keys/validate`. AdminPage Audit + Webhook tabs verified pre-shipped; TierLifecyclePage tier-impact preview verified pre-shipped; ExecSummaryPage needs-attention KPI verified pre-shipped; per-seat TEAM seat-purchase end-to-end functional via V144 + restored adjustSeats.
-  - **Phase 1.3 cross-poll wins:** V145 loosens FREE 5 → 10 credits/month + tweaks tier description. `RunCompletionNotifier` body upgraded to lead with cost + duration ("$0.42 · 4m12s") + summary on next line. Other Phase 1.3 items either pre-shipped (Generated Docs v2.5.12, EmptyProjectLanding v2.6.4) or deferred with rationale per docs/plans/phase-2-3-deferred.md (#27/#29/#30 need surface split decisions; #32 needs annual billing backend; #34/#35 are standalone PR-sized).
-  - **Tests:** `mvn test` 636/636 green (was 620 pre-batch; +16 from new `ApiContractTest` / `ProductSurfaceFilterTest` / `TierProductSurfaceMapperTest`). Frontend build green throughout.
-  - **Phase 2/3 deferred** with full rationale + when-to-pick-up notes in `docs/plans/phase-2-3-deferred.md`. Phase 2 needs DNS + ops + maintenance window; Phase 3 needs multi-month engineering investments + external dependencies (legal for SOC2, GTM for marketplace, etc).
-- **Per-seat TEAM tier reinstated (`feature/product-split-prep`, NOT yet merged).** With the product-split UI in place, the v2.6.1-Wave-1 ladder is the right shape: TEAM as multi-seat $49/seat (→ Build), MAX as power-individual $29/mo BYOK (→ Vibe). Three commits:
-  - **Code revert (V141 + 8ef5e39b):** un-rename TEAM → MAX in 33 files (entities, services, frontend, website, tests). Restores `InvitationService.resolveTeamSeatLimit`, `TierEnforcementService.effectiveOrgLimit` per-seat path, `BillingService.subscribe` per-seat branch, 5-element `TIER_RANK`, `OrgController.adjustSeats` + `SeatsAdjustRequest`/`SeatsAdjustResponse`, `OrgService.adjustSeats` working method, frontend `PlanCard` per-seat picker, `OrgAdminDashboard` TEAM seats panel, frontend `adjustOrgSeats` helper. `CostEstimator.estimateWithCredits` overloads stayed deleted (V2 uses `RunCostTracker.estimateRunTierAware`).
-  - **V144 migration:** data-side inverse — un-renames TEAM → MAX in `tier_config` / `billing_plan` / `app_user.tier` / `org.tier` / `pipeline_run.user_tier` / `app_user.trial_tier`; re-inserts the per-seat TEAM tier_config (50 credits/seat, 20 max members, LISTED) + 2 billing_plan rows (Team Monthly INR ₹3,999/seat + USD $49/seat, included_seats=2) + billing_plan_limit rows. `org.seat_count` (V123) untouched — V141 didn't drop it.
-  - **`TierProductSurfaceMapper`:** single source of truth for tier → product_surface policy. FREE/PRO/MAX → vibe; TEAM/ENTERPRISE → executespec. Consultative-only in this commit (call-site stamping at subscribe-webhook time lands when both surfaces actually exist in Phase 2). 9 unit tests pinning the policy matrix.
-  - **Tests:** `mvn test` 621/621 green (was 620 pre-mapper).
-  - **Outstanding:** Stripe/Razorpay plan-ID env vars (`STRIPE_TEAM_MONTHLY_PRICE_ID` to be re-added by ops alongside `STRIPE_MAX_PRICE_ID`); call-site write of `org.product_id` from `BillingService.handleStripeCheckoutCompleted` (Phase 2).
-- **Enterprise readiness (v2.6.3-track) — all 4 phases (E1+E2+E3+E4, 40 slices) shipped on `feature/enterprise-readiness-eval`** (not yet merged to dev/main; 49+ commits ahead of dev). Schema V131-V139 applied + verified. 8 new top-level packages (`folder/`, `activity/`, `contracts/`, `standards/`, `adr/`, `arch/invariants/`, `export/`, `notification/pref/`). 23 new REST endpoints (see "Enterprise readiness" section under API Contracts). `ExecutespecFolderWriter` chokepoint pinned by ArchUnit caller-allowlist (4 approved callers). Server-up sweep landed clean on 2026-04-25 — 3-provider low-band v2-eval all CLEAN with verified 97-100, 23/23 API endpoints behaving correctly, V131-V139 schema verified. Outstanding follow-ups: GitHub-write integration end-to-end (real PR vs DIRECT_PUSH dispatch needs sandbox repo + webhook), planner-side wiring of `{{CONTRACTS}}` / `{{ADR}}` / `{{STANDARDS}}` / `{{INVARIANTS}}` blocks (kept bounded to avoid hierarchical-planner merge conflicts), DIRECT_PUSH admin endpoint UI, real-PR integration tests, `ExecutespecFolderWriter.writeToBranch` for chat-action batching, activity-feed event-source integration (table + emitter shipped, emit-points into project create / run terminal / PR merge follow), adversarial sweep + UX click-through.
-- **Hierarchical planner (v2.6.2-track) — all 5 slices shipped on `feature/hierarchical-planner`** (not yet merged to dev/main; auto-replay portion of slice 5d deferred to a follow-up commit). Phase 0 `SmartClassifierAgent` (heuristic fast path or LIGHTWEIGHT LLM verifier) persists verdict + per-phase tokens on `pipeline_run.classifier_*` columns. Phase 1 `OutlinePlannerAgent` runs `FULL_PLAN` (32k cap) for SMALL/MEDIUM and `SKELETON_ONLY` (8k cap) for LARGE/LEGACY. Phase 2 `TaskExpanderAgent` (WORKHORSE) fills LEAF skeletons in parallel via `CompletableFuture.allOf` on the existing 4-thread pipeline pool (20-min wall timeout post-slice-4); EPIC skeletons under LEGACY classification trigger `runLargePipeline.expandEpic` — a focused `SKELETON_ONLY` sub-outline (Classification.MEDIUM, max 4 children) followed by parallel LEAF expansion of those children with parent-prefixed IDs (T3 → T3.1, T3.2, …), depth capped at 2 (children are forced to LEAF — no further recursion). Per-task / per-sub-task expansion failures fall back to title-derived LEAFs so the run always progresses. Phase 3 `CoherencePlannerAgent` (LIGHTWEIGHT) applies minimal patches (5 kinds). `PlanStrategyCircuitBreaker` wraps strategy selection — 5 consecutive failures → 1h open → ladder degrade. SINGLE_SHOT keeps the synthesised-plan bypass; classifier-failure or any uncaught pipeline exception falls back to legacy `PlannerAgent` so runs always progress. `StartupRunResumer` (slice 4) names the persisted outline checkpoint + strategy in the failure message when a run is interrupted mid-pipeline. Cost flows through `RunCostTracker`: per-phase columns (`outline_*` + `expansion_*` + `coherence_*` + `classifier_*`) get the diff, run totals auto-aggregate.
-- **Validation v3 rollout** — 5-pillar rewrite for consistent 95+ scores under strict validation. Pillar 1 (planner requirement graph) shipped as PR #21; pillars 2-5 scoped in (plan doc removed in 2026-04-26 cleanup pass): evidence-based reviewer, sync test gate, CLI+LIBRARY test coverage, strict score formula + UI.
-- Production deployment preparation (main branch `.github/workflows/deploy.yml` restored as dev-only PR #26; prod GCP env still deliberately unset).
+- V2 BUILD-mode pipeline end-to-end: classify → outline → sequential per-task worker → reviewer → COMPLETE → auto-preview (5-min TTL) → background validation (report + test gen + test exec). Hierarchical planning (LARGE/LEGACY).
+- V2 PATCH-mode pipeline: SWE-bench Lite + ProgramBench bench-mode + 4 customer-facing autofix surfaces (PR Review / TechDebt / CI failure webhook / Code Review severity buckets).
+- Per-run codemap + 3-step project architecture pipeline + Generate Docs.
+- Project memory + project chat with compaction.
+- Always-on RAG over user docs via pgvector + Tika + OpenAI embeddings.
+- External project sharing: cross-org `ProjectMember` invites + public read-only share links (V175).
+- PR Review + Code Review agents with markdown report download (V172).
+- Multi-repo runs: per-repo workspace + per-repo codemap + per-repo PR + cross-link.
+- Tier lifecycle state machine + SUPER_ADMIN tier console.
+- Cost-proportional run credits + voluntary `userCostCap` + BYOK cost-cap exemption + visible `CostProgressBar`.
+- Multi-gateway billing (Razorpay + Stripe) with run top-up credits.
+- Dual-mode previews: Cloud Run (dev/prod, 5-min TTL, managed HTTPS) or Docker Compose (local, Caddy + Cloudflare Origin Certificate).
+- JWT auth + OAuth2 (Google, GitHub) with RBAC, org management, project scoping.
+- 8-layer security + 3 guardrail levels.
+- Containerized test execution (Docker `--read-only --cap-drop ALL` + memory/CPU limits + env-var whitelist).
+- In-app notifications (run completion + quota warning + gate-opened events).
+- Pause / resume on V2 runs (interrupt + resume-from-disk; flag `v2.pause.enabled`).
+- GDPR data-export endpoint.
+- `AccessGuardCoverageTest` ArchUnit pin + known-legacy ledger (10 sites remaining).
+- Local Grafana dashboards + GCP Cloud Trace + Cloud Monitoring exporters (`@Profile("gcp")`).
+- Model evaluation framework (`eval/`).
 
-### Known Tech Debt
-- **V2 batch not implemented** — V2 re-implementation scoped in `docs/plans/pending-v2-batch-execution-plan.md`; V1 batch already deleted, dependency unblocked.
-- **Bug #1c — ModelResolver adaptive routing bypasses strict-provider** (v2.5.9 eval finding, not yet fixed). `ModelResolver.selectAdaptiveProvider` silently switches providers based on historical success rate even when `-Dexecutespec.strict-provider=true` is set. Evidence: Proj-OpenAI (74270ac6) logged `provider=anthropic model=claude-sonnet-4-6` despite `project.aiProvider=OPENAI`. Fix deferred — needs either a strict-mode guard inside ModelResolver OR opt-out flag per org.
-- **Planner model sourced from run model, not tier** — `PlannerAgent.plannerViaLlm` uses `req.model()` which is the RUN-level `defaultModelFor(provider)` (→ haiku for anthropic), NOT `ModelResolver.resolve("PlannerAgent", provider).getModel()`. Swapping `anthropic: planning:` in the model matrix has no effect on the planner. Fix: have the planner resolve its own tier model; same for reviewer. Tracked for post-Pillar-1.
+### In progress / not-yet-merged
 
-### Recently Resolved (2026-05-07, branch `feature/programbench-benchmark`, NOT yet merged — PR open against dev)
-- ~~**V2/V3 versioning markers throughout backend**~~ — full unification pass shipped in 9 stages on this branch:
-  - **Stage 1-6 (V1 cleanup)**: deleted 3 confirmed-dead V1 files (`agent/RunCostEstimate`, `harness/entity/BackgroundValidation` + repo); renamed V1 classes whose names blocked V2 promotion to non-version descriptors — `LlmRouter` → `FallbackLlmRouter` (38 files cascade-updated incl. 19 V1-router consumers like `AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`); `ReviewReport` → `TaskReviewReport` (V1 per-task review schema, used by `ConversationAgent` + `StateStore` for legacy reviewJson reads); `ToolResult` → `GitToolResult` (V1 ok/err envelope used only by `GitTool` + `ScmPushService`).
-  - **Stage 7-12 (package promotion)**: moved every `com.navneet.executespec.v2.*` and `com.navneet.executespec.v3.*` Java file up to top-level packages. 88 main + 18 test files moved + 139 import-string updates across the codebase (perl-driven). `v2/` and `v3/` package directories deleted entirely along with their `package-info.java` + `CLAUDE.md`. Subpackage merges where collisions existed (`agent/* → agent/`, `harness/* → harness/`, `reviewer/* → reviewer/`, `tool/* → tool/`); new top-level packages where v2 had unique names (`batch/`, `chat/`, `cost/`, `lint/`, `observability/`, `recovery/`, `rollout/`, `smoketest/`, `test/`, `integration/`); same for v3 (`landing/`, `referral/`, `anonrun/`, `entitlements/`, `credit/`, merged into top-level `api/`).
-  - **Stage 13 (class-name suffixes/prefixes)**: dropped `V2`/`V3` from 25 class names — `LlmRouter → LlmRouter`, `ReviewerAgent → ReviewerAgent`, `ReviewReport → ReviewReport`, `ShellTool → ShellTool`, `RunKeyContext → RunKeyContext`, all V3-prefixed product controllers (`LandingController → LandingController` etc.), all V2/V3-suffixed test class names. The two `RunController.java` files in different packages (api/controller and rollout) were a Spring bean-name collision blocker — `rollout/RunController` → `RolloutRunController` (Spring's default `@Service`/`@RestController` bean name is the lowercase-first-letter form of the simple class name, so two classes called `RunController` in different packages both default to `runController` and the application context refuses to start). Found at first boot attempt; fixed in a follow-up.
-  - **Stage 14 (resource paths)**: `prompts/*.md` → `prompts/*.md` (7 prompt files for the V2 pipeline agents) + 7 java string-ref updates; `templates/email/v3-referral-invite.html` → `referral-invite.html` + `MailService` ref updated. **Out of scope** (deliberately left versioned): Flyway migration filenames (`V1__init.sql`..`V150__*.sql`) — Flyway tracks applied migrations by exact filename, renaming would re-trigger them; prompt rollback archives `planner.v1.txt`..`v14.txt` + `reviewer-v2.txt` kept for `PromptVersioningService` rollback semantics; frontend bundled JS in `static/assets/index-*.js` (build artifacts).
-  - **Stage 15 (docs)**: replaced the now-obsolete "V2 vs v3 naming convention" callout (added on 2026-05-07 morning to clarify the historical overlap, before the unification was decided) with a "no V2/V3 markers" convention statement reflecting the post-unification reality. Updates landed in root CLAUDE.md, `docs/ARCHITECTURE.md`, `README.md`. Bulk perl across all `.md` files updated package-path references and class-name mentions (`com.navneet.executespec.v2.X` → `com.navneet.executespec.X`, `LlmRouter → LlmRouter`, etc.).
-  - **Verification**: `mvn test` 1034/0/0/0 → BUILD SUCCESS at every stage boundary. `mvn compile` clean throughout.
-- ~~**Step 2: ExecuteSpec on ProgramBench (the planner+reviewer+tools, not just the model)**~~ — adapter shipped in 6 sub-stages on the same branch, on top of the unified codebase:
-  - **2A** — `programbench/ProgramBenchContainerStore`: Redis-backed `runId → containerId` map with 4-hour TTL; backbone for the docker-aware tool dispatch.
-  - **2B/2C** — `ShellTool` + `BuildProjectTool` made docker-aware: each consults the container store on every invocation; when a containerId is set for the run, the tool dispatches via `docker exec -w /workspace <cid> /bin/sh -c '<cmd>'` instead of running on the host. For normal runs the store returns null and behavior is unchanged.
-  - **2D** — `ProgramBenchProperties` (config: `programbench.enabled=false` master switch, `programbench.bootstrap=false`, deterministic UUIDs for the synthetic Bench Org/User/Project, `workspaceBase`, `outputBase`, `dockerOrg`, `taskWallTimeoutMinutes`) + `ProgramBenchBootstrap` (`@EventListener(ApplicationReadyEvent)`, idempotent — creates the synthetic Org `00...b0b0` + User `00...b001` (ENTERPRISE-tier SUPER_ADMIN, login-disabled) + Project `00...b002` so every programbench task run is a real `PipelineRun` row attributable to a real Project, visible in the UI).
-  - **2E** — `ProgramBenchTaskService` (~280 LOC): per-task lifecycle — pull cleanroom image → `docker create` + `docker cp /workspace` to a host bind-mount dir → `docker rm` → `docker run -d --rm --network none -v <hostDir>:/workspace -w /workspace <image> sleep <h>` → stash cid in ThreadLocal → call `RunOrchestrator.submitRun(...)` with synthetic Bench IDs → `@Async captureOnTerminalAsync` polls `PipelineRunRepository.findById(runId)` until terminal status, then `docker cp /workspace` out, tars at archive root (programbench eval layout), removes container.
-  - **Option-C event hook** for the runId↔containerId timing: `RunOrchestrator.submitRun` now publishes the existing-but-previously-dormant `PipelineEvent.RunStarted(runId)` synchronously between persistRun and the async pipeline pool submit. `ProgramBenchTaskService.@EventListener(RunStarted)` runs on the same thread as the caller, transfers the cid from a private static ThreadLocal into the container store. **Race-free**: no window between submit-returning and the worker's first tool call where the store could be empty. (Earlier draft used post-submit stash — reverted at user direction.)
-  - **2F** — `ProgramBenchController` admin endpoint `POST /api/admin/programbench/run` (SUPER_ADMIN-gated, returns the runId so caller can navigate to `/runs/<id>` in the UI) + `GET /api/admin/programbench/preview/{taskId}` (image-name preview).
-  - **AsyncAllowlistTest** updated for the new `ProgramBenchTaskService#captureOnTerminalAsync`.
-- ~~**Local 3-provider regression test (2026-05-07 evening)**~~ — verified the unification + step 2 changes don't break the V2 pipeline. Booted backend on `local` Spring profile (1034 tests pass), frontend on `:5173`. Logged in as super-admin via the live UI; verified login → /projects → /runs → /settings → /admin (Users 28, Orgs 23, Tier Config tabs) → /plans (model pricing matrix) all render with zero console errors. Submitted the same single-shot Python spec ("Create fib.py with fib(n) iterative + main printing fib(10)") to all 3 providers via `POST /api/runs`:
-  - **OpenAI gpt-5.4**: COMPLETE in <4 min, $0.0316, CLEAN_COMPLETION.
-  - **Anthropic claude-sonnet-4-6**: COMPLETE, $0.1143, CLEAN_COMPLETION.
-  - **Gemini gemini-3-pro-preview**: COMPLETE, $0.1127, CLEAN_COMPLETION.
-  Total verification spend $0.26. The pipeline is healthy across all 3 providers post-unification.
+- **`feature/full-project-review-2026-05-11`** — current branch; doc-refresh pass on top of the 2026-05-11 full-project review.
+- **`feature/programbench-benchmark`** — V2/V3 unification pass (88+18 file moves, 25 class renames) + ProgramBench adapter + step-2 wire-in into V2 worker stack. Validated locally across 3 providers (OpenAI / Anthropic / Gemini) on a Python single-shot spec; pipeline healthy. PR open against dev.
+- **`feature/swebench-adapter`** (PR #88, NOT merged) — SWE-bench adapter + patch-mode pipeline + 4 autofix surfaces + 14 reliability/cost commits (empty-patch kill-chain via Lever A+B, per-provider cost gap fixes, iter-cap calibration, $4→$8 default platform cap, BYOK exemption). Empirical: medium matrix 67% / hard matrix 60% across 3 providers.
+- **`feature/hierarchical-planner`** + **`feature/enterprise-readiness-eval`** — earlier in-flight tracks; both functional on their branches; not merged to `dev`/`main`. Operational truth in `docs/plans/pending.md` (consolidated) and per-package `CLAUDE.md` files.
+- Mid-task checkpoint replay + per-provider mid-LLM-call abort + cross-JVM workspace shipping via GCS — all scoped + bounded; today's pause is "interrupt + resume-from-disk" semantics. Tracked in [`docs/plans/pending.md`](docs/plans/pending.md) §1.3 Gap 2.
+- V2 batch execution — scoped in [`docs/plans/pending.md`](docs/plans/pending.md) §3; not started.
 
-### Recently Resolved (2026-05-04, branch `hotfix/pr-refresh-async-cascade`)
-- ~~**V2 startup replay (WORKING / REVIEWING / PLANNING) pending**~~ — implemented Phase 2 of the resume design that the original `StartupRunResumer` doc-block laid out 2 weeks ago. New `RunOrchestrator.resumeAfterCrash(runId)` (returns `CrashResumeOutcome.{OK,NOT_FOUND,NOT_APPLICABLE,EXHAUSTED,WORKSPACE_GONE,PLAN_MISSING}`) reconstructs the in-memory pipeline state from DB+Redis and dispatches the appropriate phase: PLANNING re-runs the planner; WORKING calls `SequentialExecutor.execute(req, ResumeRequest)` which skips terminal AgentTasks and hands the in-flight task's saved Redis snapshot to a new `WorkerAgent.run(req, SavedContext resumeFrom)` overload (loads snapshot history + iteration count, continues the loop at `iter+1`); REVIEWING re-runs the reviewer (idempotent against the same workspace + plan). `StartupRunResumer.scanAndRecover` rewired to call `resumeAfterCrash` instead of fail-cleanly for non-AWAITING_APPROVAL non-salvageable runs (with a try/catch fallback to fail-cleanly if the resume entry-point itself blows up); `MAX_RESUME_ATTEMPTS=3` cap enforced inside `resumeAfterCrash` and shared with the legacy fail-clean path. Workspace files at `<agent.workspace>/<runId>/` survive on disk across the JVM restart so writes already committed pre-crash are preserved; tool idempotency contract documented in the new overload's javadoc (writeFile content-replace = no-op on retry; editFile fails cleanly if old_string already gone; gitCommit denied for worker entirely). Worst-case cost: ≤4 iterations of duplicate work between the last Redis snapshot and the crash (snapshots fire every 5 iters).
-- ~~**Launch reconciler 5–20 min latency on interrupted ExecutionRuns**~~ — `AdminReconciliationService` only ran via `@Scheduled(fixedDelay=15min, initialDelay=5min)`, so a Launch interrupted by a deploy could sit `EXECUTING` for up to 20 minutes before being failed. Added `@EventListener(ApplicationReadyEvent.class)` boot-fire with a tight 1-min cutoff; pairs with the new `ExecutionOrchestrator.onApplicationReady` listener (also `@Async`) which **resumes** EXECUTING ExecutionRuns by re-calling `executeApprovedPlan(executionRunId)` (idempotent — skips solutions not in QUEUED status, RUNNING solutions whose underlying V2 PipelineRun was killed are picked up by the V2 resume path above). The reconciler boot-fire deliberately excludes EXECUTING rows so the two listeners don't conflict — it only fail-cleans non-resumable upstream phases (SETUP / ANALYSING / ARCH_REVIEW / PLANNING / PAUSED) where there's no in-flight V2 sub-run to recover. Net effect: deploy-during-Launch path goes from "stuck for 5–20 min then fails" to "<30s to either resume cleanly OR fail-clean depending on phase".
-- ~~**Local resilience simulation harness**~~ — new `scripts/test-resilience.sh` boots a JVM, submits a multi-task V2 run, waits for WORKING, SIGKILLs the JVM (worst-case — no shutdown hooks fire), restarts, verifies the run reaches a terminal status within 10 min. Configurable via `SIGNAL=TERM` (graceful) and `SPEC_FILE=...` for custom specs. Exit codes 0–6 so it slots into CI cleanly. Logs split into `pre-crash` and `post-crash` files for triage; tail of post-restart log greps for `StartupRunResumer | resumeAfterCrash | RESUME` lines so the resume signal is visible in the test output.
+### Known tech debt
 
-### Recently Resolved (2026-04-30, branch `hotfix/solo-user-bootstrap`)
-- ~~**P0 — fresh self-registered users 403 on `POST /api/projects` + 500 on `/api/onboarding/pick-sample`**~~ (R-343 deeper persona test). Same architectural bug, two symptoms: solo users have no org but the system everywhere assumes orgs exist. (a) `auth/controller/ProjectController.java:28` requires `ROLE_ORG_ADMIN | ROLE_DEVELOPER | ROLE_SUPER_ADMIN` and self-registered users get `globalRole=USER` (`AuthService.java:75`). (b) `SandboxProvisioningService.java:82` writes `project.org_id = user.getOrgId()` (null for solo users), `Project.orgId` is `nullable=false` so JPA throws on insert. Pre-existing — `c914471a` (2026-03-11) and `781b3fcd` (2026-04-22) respectively, NOT a regression introduced by `feature/readymades-and-migrations`. **Fix (Option A from the report):** auto-provision a personal org on `register()` + OAuth new-user signup. New `OrgService.bootstrapPersonalOrg(userId)` creates an `is_personal=true` org, makes the user `ORG_ADMIN` so the role-gate passes, and stamps `user.orgId` so the sandbox path works. Idempotent (returns existing org if user.orgId is set; doesn't replace real-org membership with personal scope). New V162 adds `org.is_personal BOOLEAN NOT NULL DEFAULT FALSE` + partial index `idx_org_is_personal WHERE is_personal=TRUE` for filtering personal orgs out of admin/billing/invitation flows. Migration uses `IF NOT EXISTS` for partial-apply safety. Tests: 6 in `OrgServiceBootstrapPersonalOrgTest` covering fresh-user happy path / idempotency / real-org no-op / stale-orgId re-bootstrap / 404 / empty-firstName email-fallback. Wired into `AuthService.register` (after user save) + `findOrCreateFromOAuth` branch 3 (OAuth new user). Existing fresh-USER accounts on dev with null orgId can either re-register or get a manual SQL backfill (deliberately deferred to keep blast radius minimal — `feature/readymades-and-migrations` not yet shipped, no prod users affected).
-- ~~**P1 — AccuracyAssessmentService false-positives on small projects**~~ (R-343 deeper persona test, **mis-attributed in v2 report**). Symptom: 4-task Python CLI run came back `pipelineResult: NEEDS_ATTENTION` with 5 `WOULD_FAIL_REVIEW` issues all of the form "X exists but content not readable in KEY SOURCE FILES" — despite `statusReason: CLEAN_COMPLETION` and all 3 checks passing. **v2 report's "context-exhaustion / file truncation" hypothesis was wrong.** Reading `AccuracyAssessmentService.inferKeyFilePaths` showed the actual cause: when ANY file matched a structural keyword (`route|controller|service|...|main|app|...`), the method returned ONLY structural matches — even just 1 file out of a 6-slot read budget. For a `main.py` + `wordfreq.py` project, only `main.py` was read; `wordfreq.py` (where the actual logic lived) was never selected, so the LLM correctly observed "I have the file tree but not wordfreq.py's content" and emitted issues on every requirement. **Fix:** top up structural matches with smallest-first non-structural source files until the 6-file read budget is filled. `LinkedHashSet` de-dupes overlap and preserves structural-first ordering. Tests: 6 in `AccuracyAssessmentInferKeyFilePathsTest` covering R-343 regression / structural-only-fills-budget / 10-file cap / no-structural fallback / empty-tree / exclude-pattern preservation. The v2 report's recommended fix ("downgrade `WOULD_FAIL_REVIEW` → `INFO` when checks pass") was symptom papering and would have hidden this bug from future detection.
-
-### Recently Resolved (2026-04-26, branch `chore/dead-code-cleanup-pass-1`)
-- ~~**Dead-code cleanup pass 1**~~ — 7-commit sweep on `chore/dead-code-cleanup-pass-1`. Deleted: `agent/FailurePatternService`, `agent/ConflictResolverAgent`, `config/ModelConstants` (was `@Deprecated forRemoval`), `CostEstimator.estimateWithCredits` (4-arg + 5-arg overloads — V2 path uses `RunCostTracker.estimateRunTierAware` directly), 6 unused `@radix-ui/*` packages (kept `react-tabs`), `frontend/src/components/runs/{TechBadges,VibeRunSubmit}.tsx`, `frontend/src/components/shared/ResponsiveTable.tsx`, `BATCH_PIPELINE_STEPS` export, `createSseSpan` + unused OTel imports, `isAnalyticsEnabled` export, frontend-only `issueCreditNote` + `voidInvoice` helpers (backend endpoints kept), and the entire `POST /api/org/me/seats/adjust` plumbing (`OrgController#adjustSeats`, `OrgService#adjustSeats`, `SeatsAdjustRequest/Response` records, frontend `adjustOrgSeats` helper). `OrgService` field cleanup (`BillingSubscriptionRepository`, `StripePaymentGateway`). New V142 drops 2 dead feature flags (`codegen.react_native.enabled`, `pricing.persona-first`). 14+ stale `PipelineHarness` docstrings updated to `RunOrchestrator`.
-
-### Recently Resolved (2026-04-26, branch `feature/enterprise-readiness-eval`)
-- ~~**Execution View async @Version race — systemic shotgun**~~ — multiple long-running async write sites in the Execution View were holding an in-memory `ExecutionRun` reference across a long sub-call (LLM, git, V2 dispatch) and `runRepo.save(stale)` after, OOMing on `ObjectOptimisticLockingFailureException` because concurrent writers (SSE update, sibling cron, project-level analyse callback) bumped @Version mid-flight; the @Async exception bubbled to `SimpleAsyncUncaughtExceptionHandler` with no recovery, leaving the row stuck. Promoted `casUpdateRun` from a private method on `ExecutionOrchestrator` (shipped with the 2026-04-26 triggerAnalysis hotfix) into a shared `ExecutionRunCasUpdater` `@Component` bean (`execution/service/ExecutionRunCasUpdater.java`) — single public `casUpdate(String runId, Consumer<ExecutionRun> mutator)` that refetches + applies + retries up to 3 attempts with 50ms × attempt back-off. Patched 4 sites: (1) `ExecutionPlannerService.persistPlan` — wraps the run save through CAS, refetches a fresh entity for the FK reference on new `ExecutionSolution` rows; (2) `ExecutionOrchestrator.approvePlanAndExecute` — `planApprovedAt` save through CAS; (3) `ExecutionOrchestrator.executeApprovedPlan` — initial `EXECUTING` save + cyclic-deps `ABORTED` save through CAS (the terminal `applyTerminalStatus` was already CAS-protected); (4) `ExecutionOrchestrator.abortExecution` + `SolutionExecutionService.handleFailure` (`PAUSED`) + `SolutionExecutionService.resume` (`EXECUTING`) + `SolutionExecutionService.accumulateExecutionRunTotals` (token + cost increment now compounds correctly across retries instead of silently dropping on conflict). Skipped: `runCompensations` (no run save) + `cancelActiveV2Runs` (no run save) + `executeSolution` itself (only saves solutions, not run). New tests: `ExecutionRunCasUpdaterTest` (4) + `ExecutionPlannerServicePersistPlanCasTest` (3, reflection-driven) + `ExecutionOrchestratorApproveAndAbortCasTest` (4) + `SolutionExecutionServiceAccumulateCasTest` (3); existing `ExecutionOrchestratorTriggerAnalysisRetryTest` (5) + `ExecutionOrchestratorTerminalStatusTest` (5) re-wired to construct the orchestrator with the real `ExecutionRunCasUpdater` over the mock `ExecutionRunRepository`. Targeted run `mvn test -Dtest='Execution*,SolutionExecution*'` → 24 tests, 0 failures.
-- ~~**PRO monthly_run_limit drift (10 → 20)**~~ — backend `tier_config.PRO.monthly_run_limit = 10` mismatched website schema.org Product Offer "20 credits per month ($1 = 1 credit)". V140 sets it to 20.
-- ~~**ENTERPRISE monthly_run_limit drift (5000 → -1)**~~ — backend `tier_config.ENTERPRISE.monthly_run_limit = 5000` mismatched website "Unlimited (fair use)". V140 sets it to -1 (existing convention shared with MAX). `FALLBACK_ENT` constant in `TierEnforcementService` updated to match.
-- ~~**FALLBACK_FREE constant out of sync (3 → 5)**~~ — `TierEnforcementService.FALLBACK_FREE = 3` with a misleading "lifetime limit" comment; tier_config.FREE.monthly_run_limit has been 5 since V62. Updated to 5 with a comment that calls out it's only used when the DB lookup fails. FREE-tier user-facing copy in `assertUserQuota` updated to "Pro for 20 credits/month" (was "Pro for 10 runs/month").
-- ~~**Per-tier project + repo caps (NEW V140 columns + 2 new asserts)**~~ — backend had no enforcement for the per-tier "N projects / N repos" promises on website. V140 adds `tier_config.max_projects_per_org` + `tier_config.max_repos_per_project` (both INT NOT NULL DEFAULT -1, where -1 = unlimited) and seeds the per-tier values (FREE 1/1 · PRO 2/2 · TEAM 5/5 · MAX 10/10 · ENTERPRISE -1/-1). New `TierEnforcementService.assertCanCreateProject(userId, orgId)` reads `max_projects_per_org` from the org's tier and 403s when `project.countByOrgIdAndStatus(orgId, "ACTIVE") >= limit`; new `TierEnforcementService.assertCanLinkRepoToProject(userId, projectId)` reads `max_repos_per_project` from the project's org tier and 403s when `project_repo_link.countByProjectId(projectId) >= limit`. SUPER_ADMIN bypasses both. Wired into `ProjectService.createProject` (asserts before save) and `ProjectRepoService.linkToProject` + `createAndLinkNewRepo` (asserts before any GitHub side-effect). New repo methods: `ProjectRepository.countByOrgIdAndStatus`, `ProjectRepoLinkRepository.countByProjectId`. New unit tests at `src/test/java/com/navneet/executespec/auth/service/TierEnforcementServiceProjectLimitsTest.java` (15 tests, all green) cover under-limit pass / at-limit + over-limit 403 / unlimited bypass / SUPER_ADMIN bypass / unknown user 401 / unknown project 404 / org tier wins over user tier / null orgId no-op.
-- ~~**MAX execution_view_enabled drift (TRUE → FALSE)**~~ — backend `tier_config.MAX.execution_view_enabled = TRUE` mismatched website "Execution View: multi-repo, multi-solution launches (Enterprise)". V140 sets MAX to FALSE; ENTERPRISE stays TRUE. Tier comparison row now matches the marketing positioning.
-- ~~**5-tier ladder consolidation — drop old TEAM, rename MAX → TEAM (V141)**~~ — the FREE / PRO / TEAM (per-seat) / MAX / ENTERPRISE ladder was confusing customers. V141 (idempotent, BEGIN/COMMIT-wrapped) deletes the v2.6.1-Wave-1 per-seat TEAM tier ($49/seat, 50 credits/seat shared pool — the v2.6.1 + V122/V123 introduction) and renames the existing MAX tier ($29/mo + BYOK unlimited) to TEAM. Net post-rename: FREE / PRO (HIDDEN) / **TEAM** ($29 BYOK unlimited) / ENTERPRISE. Defensive UPDATE-before-DELETE pattern bumps any orphan TEAM rows on `app_user`/`org`/`pipeline_run.user_tier` to ENTERPRISE first; then renames MAX → TEAM across `tier_config` (PK rewrite + display_name "Team"), `billing_plan` (tier + name "Max ..." → "Team ..."), `app_user.tier`, `org.tier`, `pipeline_run.user_tier`, `app_user.trial_tier` (V129 startup-program). BYOK semantics preserved. PRO grandfathering (HIDDEN) untouched. Code rename — backend: `TierEnforcementService` (FALLBACK_MAX → FALLBACK_TEAM, removed seat-aware path on `effectiveOrgLimit`, complexity assert + cost-budget + project/repo limit copy + getMonthlyLimit switch), `TierPermissionService` (`isMaxOrEnterprise` → `isTeamOrEnterprise`), `ApiKeyResolver` (BYOK enforcement check + UI-facing error copy), `CostEstimator` (batch availability switch), `GlobalPreviewLimiter` + `PreviewService` (concurrency tier switch), `RunCodeMapService.ELIGIBLE_TIERS` (PRO/TEAM/ENTERPRISE), `BillingService` (TIER_RANK collapsed to 4 entries; `upgradeTier` switch; `subscribe()` no longer branches on TEAM seats — seats arg always coerced to 1 with warn-log), `OrgService.adjustSeats` returns 410 Gone (endpoint deprecated; old plumbing kept; constants + import cleanup), `InvitationService` TEAM seat-cap path deleted (generic `max_org_members` cap covers it), `ProjectChatController` + `RunEvent.budgetExceeded` + `OrgService` org-create copy. Frontend: `TierBadge` + `useViewMode` + `lib/api.ts` tier union types collapsed to `'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'`; `PlanCard` rewritten to drop the per-seat picker + per-seat math; `PlansPage.tierOrder` collapsed `['PRO', 'TEAM']`; `OrgAdminDashboard` TEAM seats panel removed (along with seatsDraft/Busy/Msg/Error state + handleSeatsAdjust + UserCheck + adjustOrgSeats import + OrgDto type import); 11 tier-string comparisons across `QuotaUsageBar` / `Header` / `Sidebar` / `ViewModeToggle` / `NewRunModal` (BYOK warning) / `ProviderModelSelector` / `UsageBadge` / `SettingsPage` / `BillingPage` / `OrgSettingsPage` / `ProjectsListPage` flipped from `'MAX'` → `'TEAM'`. Website `index.html` schema.org Product Offer renamed Max → Team; FAQ + fair-use + retention table updated; pricing-card h3 + button label + "Everything in Max" line + tier-chip groups (PRO · MAX · ENTERPRISE → PRO · TEAM · ENTERPRISE). Tests: `TierEnforcementServiceProjectLimitsTest` "MAX" assertions in `TierResolution` block flipped to "TEAM" — 15/15 green. `mvn -q compile` clean; `npm --prefix frontend run build` clean. Out-of-scope: Stripe/Razorpay env-driven plan-ID env vars (ops will refresh `STRIPE_MAX_PRICE_ID` etc when this hits prod).
-
-### Recently Resolved (2026-04-25, branch `feature/enterprise-readiness-eval`)
-- ~~**Boot crash: `ExecutespecFolderWriter` + `BootstrapService` no default constructor**~~ — both `@Service` beans had two constructors (prod + test seam) but neither annotated; Spring 6 fell back to no-arg (which doesn't exist) and refused the bean → `BeanInstantiationException` at boot. Added `@Autowired` on the prod constructor of each. Caught when this session brought up the local stack for the deferred server-up eval — would have crashed the first dev deploy attempt.
-- ~~**Enterprise readiness server-up sweep (deferred from FINAL message §13)**~~ — local stack stood up (Postgres 18 + Redis + backend `local` profile + Vite frontend), 23 enterprise-readiness endpoints behaving correctly (200/204 happy, 4xx with structured error bodies on negative paths), v2-eval low band ran cleanly on all 3 providers (anthropic 98 / openai 97 / gemini 100, total $0.378). UX walk through login + dashboard + project dashboard + Activity tab + Knowledge tab — no console errors. Standards / ADR / Invariants UI tabs intentionally unbuilt (kept bounded). Cleanup pass 2026-04-26 archived the per-session report; results captured here.
-
-### Recently Resolved (2026-04-13, branch `feature/v2-next`)
-- ~~**Intermediate smoke-test false negatives**~~ — multi-task BUILD plans used to mark intermediate tasks PARTIAL when the scaffold couldn't build yet. `SequentialExecutor` now skips smoke on non-final tasks for multi-task plans; only the final task + reviewer final build are authoritative.
-- ~~**Per-task worker tokens equal-split**~~ — `RunCostTracker` now keeps a per-task accumulator keyed by `runId|taskId`; `LlmRouter` passes the task id on every dispatch; `distributeWorkerTokens` uses real per-task snapshots with equal-split only for the residual.
-- ~~**Gate lost on restart**~~ — `GateStore.isPlanGateWaiting()` lets the approve endpoint detect when the pipeline thread is gone (server restart during AWAITING_APPROVAL) and fail cleanly with 409 instead of hanging.
-- ~~**`@Lazy @Autowired` on `PreviewService`**~~ — `TestPreviewCoordinator` now injects `ObjectProvider<PreviewService>` via the constructor, matching the rest of the codebase.
-- ~~**ValidationReport `status` field**~~ — added `status` column (PENDING / COMPLETE / FAILED) via V80; service writes `COMPLETE` on successful persistence. Consumers no longer have to infer status from `accuracyScore != null`.
-- ~~**Default provider OpenAI**~~ — `application.yml` already defaults to `anthropic` (legacy note dropped).
-- ~~**`GitTool.createBranch()` catch-and-recover**~~ — inspected; the `findRef` pre-check + `RefAlreadyExistsException` catch is intentional belt-and-suspenders for a JGit ref-DB race after thread interrupt. Not debt; kept as-is.
-- ~~**Pilot v3.0 four deferrals**~~ — repo SHA tracking, multi-repo PR creation, scheduled stack refresh + version field, and LLM-backed assessment all shipped in commit `6bbfde9b`.
+- **Bug #1c (router strict-provider bypass)** — `ModelResolver.selectAdaptiveProvider` silently switches providers based on historical success rate even when `-Dexecutespec.strict-provider=true` is set. Fix deferred — needs either a strict-mode guard inside ModelResolver or opt-out flag per org.
+- **Planner model sourced from run model, not tier** — `OutlinePlannerAgent` constructs the LLM request using `req.model()` which is the RUN-level `defaultModelFor(provider)` (→ haiku for anthropic), not `ModelResolver.resolve("OutlinePlannerAgent", provider).getModel()`. Swapping `anthropic: planning:` in YAML has no effect on the planner today. Fix: have the planner resolve its own tier model.
+- **10 legacy guard sites** in `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT` — 3 repo-scoped in `ProjectRepoController`, 2 SUPER_ADMIN in `SuperAdminController` + 1 in `ExecutespecMigrationController`, 1 V2-canary in `RunController#poll`, 3 unrelated. Migration order spelled out in the GA-readiness P4.1-followup.
+- **JAVADOC.md is stale** — last comprehensively refreshed at v2.4.0 (2026-04-14); subsequent ranges live in CLAUDE.md / ARCHITECTURE.md / per-package CLAUDE.md. Rewriting JAVADOC.md is on the queue but not blocking.

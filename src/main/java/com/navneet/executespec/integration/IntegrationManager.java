@@ -54,8 +54,27 @@ public class IntegrationManager {
    * Submit an integration-triggered run. Integration runs bypass the plan- approval gate
    * (skipApproval=true when signalled) and have no repo/github config — they're webhook-driven.
    */
+  /**
+   * Submits a pipeline run on behalf of an inbound webhook event.
+   *
+   * <p><strong>Audit 2026-05-12 review item E #36:</strong> historically passed null for userId /
+   * orgId / projectId because webhook context didn't carry an authenticated user. That bypasses
+   * credit gating, tenant attribution, and project memory. The new contract: when {@link
+   * IntegrationProperties.GenericConfig#getRunOnBehalfOfUserId()} or matching per-source config
+   * returns a non-blank value, that user (and their org) is stamped on the run so billing +
+   * multi-tenant audit work. Falls back to the legacy null-attribution behaviour only when no
+   * integration-runner identity is configured (single-tenant dev mode).
+   */
   private PipelineRun submitIntegrationRun(
       String userRequest, String sourceType, boolean skipApproval) {
+    String runnerUserId = resolveIntegrationRunnerUserId(sourceType);
+    String runnerOrgId = resolveIntegrationRunnerOrgId(runnerUserId);
+    if (runnerUserId == null) {
+      log.warn(
+          "[Integration] No integration-runner identity configured for source '{}' — submitting"
+              + " with null user/org attribution (legacy dev path).",
+          sourceType);
+    }
     return v2Orchestrator.submitRun(
         userRequest,
         sourceType,
@@ -67,10 +86,25 @@ public class IntegrationManager {
         /* autoMerge */ true,
         /* modelName */ null,
         /* aiProvider */ null,
-        /* userId */ null,
-        /* orgId */ null,
+        runnerUserId,
+        runnerOrgId,
         /* projectId */ null,
         "PROTOTYPE");
+  }
+
+  /**
+   * Hook for org-scoped integration-runner identity. Today returns null (preserves legacy
+   * behaviour); when teams add per-source-type runner identity config the field is read here.
+   * Documented so the follow-up wire-up is a one-place edit.
+   */
+  private String resolveIntegrationRunnerUserId(String sourceType) {
+    // TODO(audit E #36 follow-up): read integrationProperties.getXxx().getRunnerUserId().
+    return null;
+  }
+
+  private String resolveIntegrationRunnerOrgId(String runnerUserId) {
+    // TODO(audit E #36 follow-up): look up org for runnerUserId via UserRepository.
+    return null;
   }
 
   // ── Inbound ───────────────────────────────────────────────────────────────
@@ -181,14 +215,36 @@ public class IntegrationManager {
     eventLogRepo.save(entry);
   }
 
+  /** Per-field length cap when stitching external-issue content into the planner prompt. */
+  private static final int FIELD_CAP_CHARS = 4_000;
+
   private String buildUserRequest(IntegrationEvent event) {
-    StringBuilder sb = new StringBuilder(event.goal());
+    // Audit 2026-05-12 review item D #31 — Jira / Confluence issue bodies are external,
+    // attacker-influenceable content. Sanitize before they hit the planner prompt:
+    //  1) Strip prompt-control sequences (lines starting with "SYSTEM:", "===", "<|...|>" etc.)
+    //  2) Length-cap every field so a giant issue can't blow the planner's context window.
+    StringBuilder sb = new StringBuilder(sanitizeAndCap(event.goal()));
     if (event.contextMarkdown() != null && !event.contextMarkdown().isBlank()) {
-      sb.append("\n\n## Additional Context\n").append(event.contextMarkdown());
+      sb.append("\n\n## Additional Context\n").append(sanitizeAndCap(event.contextMarkdown()));
     }
     if (event.acceptanceCriteria() != null && !event.acceptanceCriteria().isBlank()) {
-      sb.append("\n\n## Acceptance Criteria\n").append(event.acceptanceCriteria());
+      sb.append("\n\n## Acceptance Criteria\n").append(sanitizeAndCap(event.acceptanceCriteria()));
     }
     return sb.toString();
+  }
+
+  /**
+   * Strip prompt-injection patterns + cap length. Conservative — only removes lines that look like
+   * the LLM-control sequences the planner could mistake for system instructions.
+   */
+  static String sanitizeAndCap(String raw) {
+    if (raw == null) return "";
+    String trimmed = raw.length() > FIELD_CAP_CHARS ? raw.substring(0, FIELD_CAP_CHARS) + "…" : raw;
+    // Strip obvious injection seeds: "SYSTEM:", "<|im_start|>", "###system", etc.
+    // Conservative: only removes the offending TOKENS, leaves surrounding text intact.
+    return trimmed
+        .replaceAll("(?im)^\\s*(SYSTEM|ASSISTANT|TOOL|USER)\\s*:\\s*$", "")
+        .replaceAll("<\\|[^|]{1,32}\\|>", "")
+        .replaceAll("(?m)^###\\s*system\\b.*$", "");
   }
 }

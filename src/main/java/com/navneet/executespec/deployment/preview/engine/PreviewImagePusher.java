@@ -97,9 +97,13 @@ public class PreviewImagePusher {
     }
   }
 
+  /**
+   * Content-addressed hash of the workspace. Audit 2026-05-12 review item I #58: was hashing (path,
+   * size, mtime) — that's not actually content-addressed; two workspaces with the same file sizes +
+   * mtimes (e.g. same `cp -p` copy) would collide and cache-poison a stale image. Now hashes (path,
+   * SHA-256(content)). Slower but correct.
+   */
   private String workspaceSha(Path workspace) {
-    // Content-addressed on file sizes + mtimes. Deterministic enough for
-    // our cache-hit logic — changes in code → changes in the hash.
     try {
       StringBuilder material = new StringBuilder();
       java.nio.file.Files.walk(workspace)
@@ -114,16 +118,18 @@ public class PreviewImagePusher {
           .forEach(
               p -> {
                 try {
-                  long size = java.nio.file.Files.size(p);
-                  long mtime = java.nio.file.Files.getLastModifiedTime(p).toMillis();
+                  byte[] contentBytes = java.nio.file.Files.readAllBytes(p);
+                  MessageDigest contentMd = MessageDigest.getInstance("SHA-256");
+                  byte[] contentHash = contentMd.digest(contentBytes);
+                  StringBuilder contentHex = new StringBuilder(contentHash.length * 2);
+                  for (byte b : contentHash) contentHex.append(String.format("%02x", b));
                   material
                       .append(workspace.relativize(p))
                       .append(':')
-                      .append(size)
-                      .append(':')
-                      .append(mtime)
+                      .append(contentHex)
                       .append('\n');
                 } catch (Exception ignored) {
+                  // Best-effort — skip unreadable files so we don't fail the whole hash.
                 }
               });
       MessageDigest md = MessageDigest.getInstance("SHA-256");

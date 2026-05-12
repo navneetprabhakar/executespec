@@ -80,4 +80,45 @@ public class ProjectAccessGuard {
     throw new ResponseStatusException(
         HttpStatus.FORBIDDEN, "You don't have access to this project");
   }
+
+  /**
+   * Assert the caller may WRITE / MUTATE this project. Same in-org / cross-org admission rules as
+   * {@link #assertCanRead}, but additionally rejects PROJECT_VIEWER members (V175 read-only role).
+   * Use this on every endpoint that creates, updates, or deletes per-project state — invites, share
+   * links, memory compactions, autofix dispatches, architecture (re)generation, override /
+   * exception submissions, credential storage, etc.
+   *
+   * <p>Audit 2026-05-12 review item B #9-#18 — closes the "{@code assertCanRead} used as
+   * write-gate" cluster.
+   */
+  public Project assertCanWrite(String projectId, AppUserDetails userDetails) {
+    Project project = assertCanRead(projectId, userDetails);
+
+    if ("SUPER_ADMIN".equals(userDetails.getUser().getGlobalRole())) {
+      return project;
+    }
+
+    String callerOrgId = userDetails.getUser().getOrgId();
+    if (callerOrgId != null && callerOrgId.equals(project.getOrgId())) {
+      // In-org members are admitted for writes by default; cross-org collaborators MUST pass the
+      // per-project_member role check below.
+      return project;
+    }
+
+    String callerUserId = userDetails.getUser().getId();
+    if (callerUserId != null) {
+      var member = projectMemberRepo.findByProjectIdAndUserId(projectId, callerUserId);
+      if (member.isPresent()) {
+        String role = member.get().getProjectRole();
+        if ("PROJECT_VIEWER".equals(role)) {
+          throw new ResponseStatusException(
+              HttpStatus.FORBIDDEN, "PROJECT_VIEWER cannot modify this project");
+        }
+        return project;
+      }
+    }
+
+    throw new ResponseStatusException(
+        HttpStatus.FORBIDDEN, "You don't have write access to this project");
+  }
 }
