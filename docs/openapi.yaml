@@ -2,27 +2,41 @@ openapi: 3.0.3
 info:
   title: ExecuteSpec API
   description: |
-    Multi-agent code generation platform API.
-    All endpoints under `/api` except those marked public require a JWT Bearer token.
+    Spec-driven AI coding platform API. Customer submits a natural-language spec
+    via POST /api/runs → V2 pipeline plans, codes, builds + tests, opens a PR.
 
-    v2.6.0 (2026-04-22) — LlmProvider enum renamed GOOGLE → GEMINI. `aiProvider`
-    request fields now prefer GEMINI; GOOGLE is retained as a back-compat alias
-    on input and rewritten to GEMINI before persistence. YAML keys under
-    `model-matrix` / `failover-order` use `gemini`.
+    All endpoints under `/api` require a JWT Bearer token unless explicitly
+    marked public (webhooks, public share links, scoped SSE tokens, public
+    invites preview, OAuth callback).
 
-    v2.6.1 (2026-04-23) — persona roadmap Waves 1-6. Wave 1 adds TEAM tier +
-    3-state tier lifecycle (`/api/admin/tiers`). Wave 2 adds onboarding sandbox + sample specs
-    (`/api/onboarding/*`) and a 6-event activation funnel (PostHog). Waves 3-6
-    land schema + docs for SSO, team-trial, startup program, and provider
-    smart-routing; full UI surfaces follow post-launch.
-  version: 1.7.0
+    Provider enum: ANTHROPIC (default since 1.0.0-M1), OPENAI, GEMINI. The
+    `GOOGLE` alias is accepted on input and rewritten to GEMINI before
+    persistence (V120). YAML keys under `model-matrix` / `failover-order` use
+    `gemini`.
+
+    Tier ladder (live): FREE / PRO (HIDDEN — grandfathered) / TEAM ($39/seat,
+    min 2, BYOK) / ENTERPRISE. The Solo / MAX tiers do not exist on dev/main
+    today (V179/V185 retired Solo + the V143 product-split discriminator).
+
+    Run modes: BUILD (default — full V2 pipeline) and PATCH (single thin-agent
+    loop against a failing-test spec; powers the 4 autofix surfaces + SWE-bench
+    / ProgramBench adapters).
+
+    For the human-readable endpoint inventory grouped by capability, see
+    `CLAUDE.md` § API Contracts. For the frontend consumption audit, see
+    `frontend-api-usage.md`.
+  version: 1.0.0-M1
   contact:
     name: ExecuteSpec
     url: https://executespec.ai
 
 servers:
-  - url: https://app.executespec.ai/api
+  - url: https://executespec.ai/api
     description: Production
+  - url: https://dev.executespec.ai/api
+    description: Development
+  - url: http://localhost:8080/api
+    description: Local
   - url: https://dev.executespec.ai/api
     description: Development
   - url: http://localhost:8080/api

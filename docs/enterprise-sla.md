@@ -1,7 +1,6 @@
 # ExecuteSpec — Enterprise Support SLA
 
-_Applicable to customers on the ENTERPRISE tier. PRO / TEAM / MAX customers
-receive best-effort email support at `admin@executespec.ai`._
+_Applicable to customers on the ENTERPRISE tier. PRO / TEAM customers receive best-effort email support at `admin@executespec.ai`._
 
 ## Severity definitions
 
@@ -29,8 +28,8 @@ CSM message. Clock pauses when the ticket is waiting on customer info.
 | Tier | Target | Service credit |
 |---|---|---|
 | ENTERPRISE | 99.9% | 10% of monthly fee per 0.1% missed; capped at 100% of monthly fee |
-| MAX | 99.5% (target, not credit-eligible) | None — best effort |
-| PRO / TEAM / FREE | No SLA | None |
+| TEAM | 99.5% (target, not credit-eligible) | None — best effort |
+| PRO / FREE | No SLA | None |
 
 **Exclusions:** scheduled maintenance (announced ≥ 48h in advance), upstream
 provider outages (Anthropic / OpenAI / Gemini / GCP — we attribute through
@@ -101,6 +100,6 @@ via:
 
 ---
 
-_Last updated: 2026-04-23. This SLA is the reference document for all
-ENTERPRISE contracts. Individual MSAs may include customer-specific
+_Last updated: 2026-05-12 (1.0.0-M1). This SLA is the reference document for
+all ENTERPRISE contracts. Individual MSAs may include customer-specific
 overrides — the MSA language controls when conflicts arise._

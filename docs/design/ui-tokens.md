@@ -1,6 +1,7 @@
 # UI Design Tokens & Color Semantics
 
-_Created: 2026-04-22 · v2.6.0 UI polish v1 · Lives alongside the code in `frontend/src/tokens.css`_
+_Created: 2026-04-22 · Lives alongside the code in `frontend/src/tokens.css`_
+_Last reviewed: 2026-05-12 (1.0.0-M1) — palette + 4-band score colours unchanged; JetBrainsMono variable font unified across login + dashboard + project surfaces (PR #108 2026-05-11)._
 
 Single source of truth for why every color on the ExecuteSpec app looks the way it does. **If you're about to use a raw hex in a component, stop — add a token instead or reuse one below.**
 

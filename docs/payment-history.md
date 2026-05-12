@@ -2,7 +2,7 @@
 
 > Operator + customer-facing reference for the unified `payment_audit` log:
 > what's recorded, where it comes from for each gateway, and how to read it.
-> Last reviewed: 2026-04-27 (M-044, Wave 2).
+> Last reviewed: 2026-05-12 (1.0.0-M1).
 
 ExecuteSpec routes payments through two gateways: **Razorpay** (default for
 INR / India) and **Stripe** (default for prod USD via

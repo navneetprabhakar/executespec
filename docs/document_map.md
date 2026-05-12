@@ -62,24 +62,26 @@ Find the **type of change** you are making in the table below. Update every docu
 
 ## Change-to-Document Matrix
 
-| Change Type | CLAUDE.md | ARCHITECTURE.md | JAVADOC.md | WORKFLOWS.md | document_map.md |
-|-------------|-----------|-----------------|------------|--------------|-----------------|
-| New agent or major agent change | §Key File Locations | §3.2 Agent Architecture | §5.x Agent System | §2 if it changes pipeline shape | — |
-| New REST endpoint | §API Contracts | — | §17.x REST API Reference | If it adds a user-facing workflow | — |
-| New scheduled job / background service | §Current State (Working/In Progress) | §8 Concurrency Model (if threaded) | §19 Recovery System (if recovery-related) or new section | §10 Task Retry & Recovery | — |
-| Pipeline flow change | §Architecture (multi-agent pipeline bullet) | §4.2 Detailed Pipeline Steps | §8.1 PipelineHarness + §4 Core Pipeline Flow | §2 Pipeline Execution | — |
-| New feature flag | §Feature Flags | §7.2 Feature Flag System | §12 Feature Flags | — | — |
-| Auth / RBAC change | §Auth bullet in Architecture | §5 Security Architecture + §10 Auth | §10 Auth and Multi-Tenancy | — | — |
-| Billing / payment change | §Billing bullet | §7 Billing Architecture | §14 Billing and Payment Gateway | §billing-workflows.html | — |
-| Preview / deployment change | §Infra bullet + Key File Locations | §6 Deployment Architecture + §6.2 Preview System | §16 Deployment and Preview | §12 Deployment & Preview | — |
-| New configuration property | §Build & Test (if env var) | — | §20 Configuration Reference | — | — |
-| DB migration (new Flyway file) | §Patterns: MUST Follow (Flyway note) | §4 Data Architecture | §21.1 Flyway Migrations | — | — |
-| LLM / model routing change | §Model Matrix table | §3.1 / §9 Model Routing | §9 Model Routing | — | — |
-| Security hardening | §Security section | §5 Security Architecture | §25 Security Architecture | — | — |
-| Frontend component (new page/panel) | — | — | — | If it surfaces a new workflow | — |
-| Frontend API client (`api.ts`) | — | — | — | — | — |
-| New doc file added | — | — | — | — | Add row here |
-| Known tech debt resolved | §Known Tech Debt (remove entry) | If architectural | — | — | — |
+| Change Type | CLAUDE.md | ARCHITECTURE.md | CODEMAP.md | WORKFLOWS.md | Other |
+|-------------|-----------|-----------------|------------|--------------|-------|
+| New agent or major agent change | §Architecture + §Key File Locations + §Model Matrix | §3 V2 pipeline | §Agents | §1 if pipeline shape changes | — |
+| New REST endpoint | §API Contracts table | §15 / §13 / §14 if bench-mode / autofix / sharing | — | §1-§15 if user-initiated | openapi.yaml + frontend-api-usage.md if frontend consumes |
+| New scheduled job / background service | §Current State | §8 Concurrency model | — | If user-visible | — |
+| Pipeline flow change | §V2 pipeline | §3 V2 pipeline | §Run pipeline | §1 + §2 | — |
+| New feature flag | §Tier ladder / §Security / wherever it applies | §17 + relevant section | — | — | — |
+| Auth / RBAC change | §Auth + RBAC bullet | §5 Security + §5 Auth + RBAC | §Auth | — | RBAC.md |
+| Billing / payment change | §Tier ladder + §Current State | §7 Billing | §Billing | — | billing-workflows.html + payment-history.md + stripe-price-ids-ops.md if env vars change |
+| Preview / deployment change | §Architecture bullet | §6 Deployment + preview | §Deployment | §12 | DEPLOYMENT.md §2 |
+| New configuration property | §Required env vars | §Section relevant | — | — | DEPLOYMENT.md §1 env vars |
+| DB migration (new Flyway file) | §Architecture (head V###) | §4 Data architecture | §Migrations index | — | DEPLOYMENT.md §1 migration table |
+| LLM / model routing change | §Models, routing, cost (tier table) | §10 LLM routing | §LLM routing | — | reports/model-mapping-audit-2026-05-06.md if mapping changes |
+| Security hardening | §Security bullet | §5 Security | §`security/` | — | — |
+| `.executespec/` folder write (`folder/ExecutespecFolderWriter`) | — | §12 | §`folder/` | — | Caller-allowlist test must be updated |
+| Frontend component (new page/panel) | — | §16 Frontend | — | If it surfaces a new workflow | frontend-api-usage.md if it calls new endpoints |
+| Frontend API client (`api.ts`) | — | — | — | — | frontend-api-usage.md + ApiContractTest |
+| New doc file added | — | — | — | — | document_map.md (this file — add row to Document Index) |
+| Known tech debt resolved | §Known tech debt (remove entry) | §20 if architectural | — | — | — |
+| New pending plan | — | — | — | — | `plans/pending.md` (add new §N) |
 
 ---
 
@@ -117,64 +119,89 @@ Find the **type of change** you are making in the table below. Update every docu
 
 ## Per-Package Quick Reference
 
-> Mirrors the actual top-level packages under `src/main/java/com/navneet/executespec/` as of 2026-04-25. See [`CODEMAP.md`](CODEMAP.md) for the full structural map.
+> Mirrors the actual top-level packages under `src/main/java/com/navneet/executespec/` as of 2026-05-12 (post the 2026-05-07 unification — no V2/V3 prefixes). See [`CODEMAP.md`](CODEMAP.md) for the full structural map.
 
-| Package | Primary Doc Sections |
+| Package | Primary doc sections |
 |---------|----------------------|
-| `v2/` (V2 harness — agent/, batch/, chat/, context/, cost/, harness/, integration/, observability/, recovery/, reviewer/, smoketest/, test/, tool/) | JAVADOC §8 Pipeline Harness; ARCHITECTURE §3 V2 pipeline; CLAUDE.md V2 bullets; CODEMAP.md §V2 |
-| `agent/` (LlmRouter V1, PromptAssembler, ConversationAgent, CostEstimator) | JAVADOC §5 Agent System (V1 surface still used by chat/test-gen); CODEMAP.md §LLM router |
-| `analytics/` (UserActivationEvent + EventTrackingService + PostHogClient) | ARCHITECTURE §0b Wave 2; CLAUDE.md activation funnel bullet |
-| `api/` (RunMapper + advice/ + controller/ + dto/) | JAVADOC §17.x REST API Reference |
-| `apitests/` (ApiTestSuiteAgent) | JAVADOC §apitests |
-| `assessment/` (FeatureAssessmentService heuristic + LLM-gated) | ARCHITECTURE §pilot v3.0 (pre-plan assessment) |
-| `auth/` | JAVADOC §10–11 Auth; ARCHITECTURE §5 Security; RBAC.md |
-| `billing/` (incl. lifecycle/) | JAVADOC §14–15 Billing; ARCHITECTURE §7 Billing + §0b Wave 1; billing-workflows.html |
-| `codeintel/` | JAVADOC §codeintel; ARCHITECTURE §3-step arch pipeline (v2.5.12) |
-| `compliance/` (DataRetentionService — GDPR soft-delete) | JAVADOC §compliance; CLAUDE.md retention bullet |
-| `config/featureflag/` | JAVADOC §12 Feature Flags; ARCHITECTURE §7.2 |
-| `contact/` (public contact form) | JAVADOC §contact controller |
-| `context/` (legacy V1 ContextAgent) | JAVADOC §context (legacy) |
-| `crypto/` (KMS / encryption-at-rest) | ARCHITECTURE §5 Security |
-| `deployment/`, `deployment/preview/` | JAVADOC §16; ARCHITECTURE §6.2; WORKFLOWS §12 |
-| `eval/` | JAVADOC §24 Eval Framework |
-| `execution/` (Execution View) | ARCHITECTURE §execution view (v2.3.0) |
-| `governance/` (M-032/033/039 — `GovernanceGuard`) | CHANGELOG v2.7 / CODEMAP §v2.7 Foundation new packages |
-| `auth/dsar/` (M-017 — `DsarController`) | CHANGELOG v2.7 / CODEMAP §v2.7 Foundation new packages |
-| `auth/sso/` (M-016 — `SsoConfigController` lockout guard) | sso-saml-wiring.md |
-| `harness/` (V1 — workspace, GateStore, design-system) | JAVADOC §8 (legacy V1 surface kept); ARCHITECTURE §V2 reuses these primitives |
-| `integration/` (slack, jira, confluence, bitbucket, pagerduty, servicenow, scm) | JAVADOC §17.11–17.12; WORKFLOWS §7–8 |
-| `memory/` | ARCHITECTURE §project memory (v2.2.0) |
-| `notification/` | JAVADOC §notification; CLAUDE.md notification bullet |
-| `onboarding/` | ARCHITECTURE §0b Wave 2 (sandbox); USER_MANUAL §v2.6.1 onboarding |
-| `optimiser/` | JAVADOC §optimiser |
-| `pricing/` | JAVADOC §pricing; ARCHITECTURE §0a v3 pricing |
-| `project/` (incl. dashboard/, estimation/, pr/, rag/, scores/, techdebt/, template/, workspace/) | JAVADOC §project; ARCHITECTURE §pilot v3.0; project-user-journeys.md |
-| `ratelimit/` | JAVADOC §13 Rate Limiting |
-| `repo/` (GitHubRepoService, BitbucketRepoService, ScmProvider) | JAVADOC §repo (SCM clients) |
-| `report/` | JAVADOC §17.10 Validation Report Endpoints |
-| `reviewer/` (V1 surface — V2 uses v2/reviewer/) | JAVADOC §reviewer (legacy) |
-| `router/` (LlmProvider enum, ModelResolver, ProviderHealthTracker, ProviderRecommendationService) | JAVADOC §9 Model Routing; ARCHITECTURE §Model Matrix |
-| `run/` | JAVADOC §run controllers |
-| `saga/` | JAVADOC §saga |
-| `scoring/` | JAVADOC §scoring; ARCHITECTURE §6-dimension scoring |
-| `security/` (incl. guardrail/) | JAVADOC §25 Security Architecture |
-| `sse/` | JAVADOC §SSE channel (RunEvent, ExecutionEventTypes) |
-| `state/` | JAVADOC §7 State Management |
-| `tenant/` | JAVADOC §tenant isolation |
-| `prreview/` | CLAUDE.md v2.6.4 entry — PR Review Agent (single-call PLANNING-tier review of one PR's diff). |
-| `codereview/` | CLAUDE.md v2.6.4 entry — whole-repo Code Review Agent (semgrep + LLM augmentation, markdown report). |
-| `sharing/` | CLAUDE.md v2.6.4 entry (V175) — external project sharing: cross-org `ProjectMember` invites + public read-only share links. Tier-gated. |
-| `util/` | `PoolSizing.coreMultiple(multiplier, min, max)` — shared helper for sizing per-service dispatch pools (CodeReview, PrReview, RunService, RunOrchestrator, RunConversationController.applyExecutor). |
-| `testgen/` | JAVADOC §5.10 Test Generation Agents; WORKFLOWS §2 |
-| `tool/` (V1 GitTool, etc.) | JAVADOC §tool (legacy V1 surface) |
-| `validator/` (CodeValidator + execution/gate/language/prompt subpackages) | JAVADOC §validator |
+| `activity/` (project activity feed, partitioned by month, V133) | ARCHITECTURE §12; CODEMAP §`activity/` |
+| `adr/` (ADRs as first-class, V137) | ARCHITECTURE §12; CODEMAP §`adr/` |
+| `agent/` (LlmRouter, FallbackLlmRouter, SmartClassifier / Outline / TaskExpander / Coherence / Worker / Patch agents, native-tool clients) | CLAUDE.md §V2 pipeline; ARCHITECTURE §3 + §10; CODEMAP §Agents |
+| `analytics/` (UserActivationEvent + PostHog 6-event funnel) | PRD §3.8; USER_MANUAL §Sandbox; CLAUDE.md activation funnel bullet |
+| `anonrun/` (anonymous no-auth run flow) | CODEMAP §`anonrun/` |
+| `api/` (controllers + DTOs + advice) | JAVADOC §17; CODEMAP §Top-level layout |
+| `apitests/` (ApiTestSuiteAgent) | CODEMAP §Agents |
+| `arch/invariants/` (continuous architectural properties, V138) | ARCHITECTURE §12; CODEMAP §`arch/invariants/` |
+| `assessment/` (pre-plan feature assessment) | ARCHITECTURE §3 + §11; CODEMAP §Project workbench |
+| `auth/` (incl. `dsar/`, `sso/`, `oauth/`, `security/`) | RBAC.md; ARCHITECTURE §5; JAVADOC §5 |
+| `batch/` (frozen V1 batch surface — V2 batch in `plans/pending.md` §3) | `plans/pending.md` §3 |
+| `billing/` (incl. `lifecycle/`, `gateway/`, `webhook/`, `founder/`, `cost/`) | ARCHITECTURE §7; PRD §3.6; billing-workflows.html; stripe-price-ids-ops.md; payment-history.md |
+| `chat/` (apply-suggestion service) | USER_MANUAL §Project chat; CLAUDE.md project chat bullet |
+| `codeintel/` (3-step arch pipeline + Generate Docs + StalenessService) | ARCHITECTURE §11; CODEMAP §Project workbench |
+| `codereview/` (whole-repo Code Review agent + autofix Phase 4) | CLAUDE.md §13; ARCHITECTURE §13; CODEMAP §Agents |
+| `compliance/` (DataRetentionService — GDPR soft-delete) | ARCHITECTURE §5; CODEMAP §`compliance/` |
+| `composer/` (Migration recipe slot validator + spec composer — cross-product helpers) | CODEMAP §Readymade + Migration |
+| `config/featureflag/` | CLAUDE.md Feature flags bullet; ARCHITECTURE §17 |
+| `contact/` (public contact form) | CODEMAP §`contact/` |
+| `context/` (ContextAgent legacy + V2 ContextStore Redis snapshot) | ARCHITECTURE §3; CLAUDE.md Worker context bullet |
+| `contracts/` (cross-repo registry — drift, consumers, coverage, V135) | ARCHITECTURE §12; CODEMAP §`contracts/` |
+| `cost/` (RunCostTracker — cache-aware per-call accumulator) | ARCHITECTURE §10; CLAUDE.md Cost tracker bullet |
+| `credit/` (legacy v3 credit grant + ledger) | CODEMAP §`credit/` |
+| `crypto/` (KMS / encryption-at-rest) | ARCHITECTURE §5 |
+| `deployment/` (incl. `preview/`) | DEPLOYMENT.md §2; ARCHITECTURE §6; WORKFLOWS §12 |
+| `entitlements/` (EntitlementResolver tier rank + project scope) | RBAC.md; CLAUDE.md auth bullet |
+| `eval/` (model evaluation framework) | JAVADOC §24 |
+| `execution/` (Execution View — multi-repo, multi-solution) | ARCHITECTURE §15; CODEMAP §Execution View |
+| `export/` (project export ZIP bundle, E4.7) | ARCHITECTURE §12 |
+| `finding/` (FindingPatchSubmitter chokepoint for the 4 autofix surfaces, V183) | CLAUDE.md autofix surfaces table; ARCHITECTURE §3.4 |
+| `folder/` (.executespec/ folder write chokepoint + bootstrap, E1) | ARCHITECTURE §12; CODEMAP §`folder/` |
+| `governance/` (plan-approval policy + project spend cap + repo allowlist) | CODEMAP §`governance/` |
+| `harness/` (SequentialExecutor + workspace + gate primitives) | ARCHITECTURE §3; CODEMAP §Run pipeline |
+| `integration/` (Slack, JIRA, Confluence, Bitbucket, PagerDuty, ServiceNow, scm/ScmPushService, RunOrchestrator) | WORKFLOWS §7-14; CODEMAP §Integrations |
+| `landing/` (legacy v3 landing surface) | CODEMAP §`landing/` |
+| `lint/` (lint autofix flag, V180) | CODEMAP §`lint/` |
+| `memory/` (project memory + chat + chat tools) | ARCHITECTURE §11; CLAUDE.md Project memory bullet |
+| `migration/` (Migration Recipe orchestrator) | `plans/pending.md` §8; CODEMAP §Readymade + Migration; migration-recipes-catalog-format.md |
+| `notification/` (incl. `pref/` per-user matrix V139) | CLAUDE.md notifications bullet; ARCHITECTURE §12 |
+| `observability/` (Micrometer V2 metrics) | ARCHITECTURE §9 |
+| `onboarding/` (sandbox + sample specs) | PRD §3.8; USER_MANUAL §Getting started |
+| `optimiser/` (PromptOptimiserAgent) | CODEMAP §Agents |
+| `pricing/` (PricingController — YAML-driven) | ARCHITECTURE §10 |
+| `programbench/` (ProgramBench cleanroom adapter) | ARCHITECTURE §15; CODEMAP §Bench adapters |
+| `project/` (incl. `dashboard/`, `estimation/`, `pr/`, `rag/`, `scores/`, `techdebt/`, `template/`, `workspace/`) | ARCHITECTURE §11; project-user-journeys.md |
+| `prreview/` (PR Review agent + autofix Phase 1, V172) | CLAUDE.md §13; ARCHITECTURE §13 |
+| `ratelimit/` (Redis per-tenant rate limit) | CLAUDE.md Rate limiting bullet; ARCHITECTURE §5 |
+| `readymade/` (Readymade Solutions library, V157) | `plans/pending.md` §7; readymades-catalog-format.md |
+| `recovery/` (StartupRunResumer — boot-time crash recovery) | ARCHITECTURE §3; CLAUDE.md In-progress + Recovery |
+| `referral/` (referral codes + lifetime credit grants — legacy v3 surface) | CODEMAP §`referral/` |
+| `repo/` (GitHubRepoService + BitbucketRepoService + ScmProvider) | ARCHITECTURE §11; CODEMAP §Integrations |
+| `report/` (ValidationReport entity + PDF + share) | ARCHITECTURE §3; CLAUDE.md scoring bullet |
+| `reviewer/` (ReviewerAgent + AccuracyAssessmentService) | ARCHITECTURE §3; CODEMAP §Agents |
+| `rollout/` (RolloutRunController — gradual rollout surface) | CODEMAP §`rollout/` |
+| `router/` (LlmProvider, ModelRegistry, ProviderHealthTracker, ProviderRecommendationService) | ARCHITECTURE §10; CLAUDE.md Model Matrix |
+| `run/` (run sync helpers + run-aux services) | CODEMAP §`run/` |
+| `saga/` (side-effect outbox / compensation) | CODEMAP §`saga/` |
+| `scoring/` (6-dimension scoring + verifiedScore) | ARCHITECTURE §3; CLAUDE.md scoring bullet |
+| `security/` (incl. `guardrail/`) | ARCHITECTURE §5; CLAUDE.md security bullet |
+| `sharing/` (external project sharing — cross-org `ProjectMember` + public share links, V175) | ARCHITECTURE §14; CLAUDE.md §External project sharing |
+| `smoketest/` (CliSmokeRunner) | CODEMAP §`smoketest/` |
+| `sse/` (RunEvent + SseBroadcaster + ExecutionEventTypes) | WORKFLOWS §15; ARCHITECTURE §3 |
+| `standards/` (engineering standards as binding policy + AST/LLM checks + override, V136) | ARCHITECTURE §12 |
+| `state/` (StateStore + JPA entities for runs/tasks) | ARCHITECTURE §4; CODEMAP §State |
+| `swebench/` (SWE-bench Lite adapter) | ARCHITECTURE §15 |
+| `tenant/` (tenant filter + interceptor + thread context) | ARCHITECTURE §5 |
+| `test/` (test controllers — V2 dev-only) | CODEMAP §`test/` |
+| `testgen/` (TestGenOrchestrator + agents + ApiProber) | CODEMAP §Agents |
+| `tool/` (11 worker tools + CompleteTaskTool + ShellSandboxPolicy + FileSandboxPolicy + ProcessExecutor) | ARCHITECTURE §3; CODEMAP §Run pipeline |
+| `util/` (PoolSizing helper for per-service dispatch pools) | CODEMAP §Top-level layout |
+| `validator/` (CodeValidator + execution/gate/language/prompt subpackages) | CODEMAP §`validator/` |
 | `frontend/src/` | frontend-api-usage.md; user-journeys.md; project-user-journeys.md |
-| `frontend/src/tokens.css` + `tailwind.config.ts` | [`docs/design/ui-tokens.md`](design/ui-tokens.md) |
-| `src/main/resources/db/migration/` | JAVADOC §21.1 Flyway Migrations; CLAUDE.md Flyway note; DEPLOYMENT.md migration ranges |
-| `src/main/resources/application.yml` | JAVADOC §20 Configuration Reference; CLAUDE.md env vars; DEPLOYMENT.md env-var section |
-| `src/main/resources/prompts/` | JAVADOC §5.x (per agent); CLAUDE.md Prompt architecture bullet |
-| `src/main/resources/sample-specs/` | ARCHITECTURE §0b Wave 2 (sandbox onboarding); USER_MANUAL §v2.6.1 |
-| `src/main/resources/templates/email/` + `templates/report/` | JAVADOC §email templates; ARCHITECTURE §0a UX v3 (palette swap) |
+| `frontend/src/tokens.css` + `tailwind.config.ts` | [`design/ui-tokens.md`](design/ui-tokens.md) |
+| `src/main/resources/db/migration/` | CLAUDE.md Flyway note; DEPLOYMENT.md §1 migration table; CODEMAP §Migrations |
+| `src/main/resources/application.yml` | CLAUDE.md env vars; DEPLOYMENT.md §1 env vars |
+| `src/main/resources/prompts/` (+ `fragments/`, `scaffolds/`) | CLAUDE.md Prompt architecture bullet |
+| `src/main/resources/sample-specs/` | PRD §3.8; USER_MANUAL §Getting started |
+| `src/main/resources/readymades/` + `migration-recipes/` | readymades-catalog-format.md + migration-recipes-catalog-format.md |
+| `src/main/resources/templates/email/` + `templates/report/` | CLAUDE.md email templates bullet; ARCHITECTURE §6 |
 
 ---
 

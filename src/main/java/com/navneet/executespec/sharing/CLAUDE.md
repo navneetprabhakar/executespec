@@ -1,10 +1,12 @@
-# sharing/ — External Project Sharing (V175)
+# `sharing/` — External project sharing (V175)
 
-> v2.6.4. Two complementary surfaces for sharing project visibility outside the host org:
+> Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
+>
+> Two complementary surfaces for sharing project visibility outside the host org:
 > 1. **Project invites** — cross-org `ProjectMember` rows (collaboration)
 > 2. **Public share links** — signed read-only links per surface (one-off viewing)
 >
-> Both gated tier-aware. Lives on `feature/project-cost-pool-tuning`, NOT yet merged.
+> Both tier-aware.
 
 ## Files
 
@@ -23,7 +25,7 @@
 - `project_member.project_role` extended to include `PROJECT_VIEWER` (read-only).
 - `project_invite` table — id, project_id, email, role, token UNIQUE, invited_by_user_id, invited_org_id, status, expires_at, accepted_at, accepted_by_user_id, revoked_at, revoked_by_user_id, created_at. Partial index on PENDING.
 - `project_share_link` table — id, project_id, token UNIQUE, surface (CHECK constraint), scope_id, label, created_by, expires_at, revoked_at, views, last_viewed_at. Partial index on active.
-- `tier_config.share_link_active_cap INT` — seeded FREE=3, PRO=25, TEAM/MAX/ENTERPRISE=-1.
+- `tier_config.share_link_active_cap INT` — seeded FREE=3, PRO=25, TEAM/ENTERPRISE=-1 (Solo/MAX tiers retired by V179/V185).
 
 ## Access semantics
 
@@ -55,9 +57,9 @@ Public share-link reads bypass `ProjectAccessGuard` entirely — the URL token i
 
 `/api/shared/**` and `/api/invites/preview` are whitelisted in `SecurityConfig`.
 
-## Outstanding (post-PR follow-ups)
+## Outstanding follow-ups
 
 - Frontend dashboard panel for managing invites + share links (the API helpers are in `lib/api.ts`; the UI panels would be follow-up commits).
-- Public share-link viewer pages at `/shared/:token` route — frontend-side, not in this PR.
+- Public share-link viewer pages at `/shared/:token` route.
 - Scheduled cleanup job that flips PENDING invites past `expires_at` to EXPIRED (today the read path checks expiry on accept; a sweeper would keep the table tidy for analytics).
 - Per-tier monthly invite cap (today: paid-tier is the only gate; structure is in place to add a count).

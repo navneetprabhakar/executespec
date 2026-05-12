@@ -1,17 +1,15 @@
 # Stripe price IDs — ops env-var reference
 
-> M-029 (Wave 3) — operator-only checklist for the Stripe environment
-> variables that gate the prod billing path.
+> Operator-only checklist for the Stripe environment variables that gate the
+> prod billing path. Last reviewed: 2026-05-12 (1.0.0-M1).
 > Companion to [`docs/payment-history.md`](payment-history.md).
 
 ## TL;DR
 
-The prod backend reads Stripe credentials from 5 environment
-variables (or 7 once TEAM monthly + TEAM yearly + MAX yearly all
-ship as separate price objects). They are **deliberately unset on
-prod** until ops wires them — the dev profile defaults to Razorpay
-sandbox, so prod stays in a known-good "Stripe disabled" state
-until explicitly enabled.
+The prod backend reads Stripe credentials from 6 environment variables
+(production tier ladder: PRO grandfathered + TEAM + ENTERPRISE). MAX and
+Solo tier env vars from earlier prototypes are **not** in scope — V165
+renamed MAX → TEAM @ $39/seat, and V179/V185 retired the Solo experiment.
 
 ## Required env vars
 
@@ -21,16 +19,15 @@ until explicitly enabled.
 | `STRIPE_PUBLISHABLE_KEY` | Client-side checkout key (`pk_live_…`) | `application-prod.yml:billing.stripe.publishable-key` → `/api/billing/stripe-publishable-key` returns this for the frontend |
 | `STRIPE_WEBHOOK_SECRET` | HMAC verification on incoming webhooks (`whsec_…`) | `application-prod.yml:billing.stripe.webhook-secret` → `StripeWebhookController` |
 | `STRIPE_PRO_PRICE_ID` | Stripe Price ID for the legacy PRO monthly plan (HIDDEN to new buyers; grandfathered subscribers stay on this) | `application-prod.yml:billing.stripe.pro-price-id` |
+| `STRIPE_TEAM_MONTHLY_PRICE_ID` | TEAM per-seat monthly ($39/seat). V165 renamed MAX → TEAM @ $39. | `application-prod.yml:billing.stripe.team-monthly-price-id` |
 | `STRIPE_ENTERPRISE_PRICE_ID` | Stripe Price ID for the ENTERPRISE plan (sales-managed) | `application-prod.yml:billing.stripe.enterprise-price-id` |
 
-## Plus (when V146 annual + V144 TEAM ship to prod):
+## Optional (annual plans, V146)
 
 | Env var | Purpose | Notes |
 |---|---|---|
-| `STRIPE_TEAM_MONTHLY_PRICE_ID` | TEAM per-seat monthly ($49/seat) | V144 reinstated this tier on `feature/v2.7-foundation`; ops must add the matching Stripe Price object before the env var is set. |
-| `STRIPE_TEAM_YEARLY_PRICE_ID` | TEAM per-seat yearly (17% discount) | V146. Needs a separate Stripe Price with `billing_scheme=per_unit` + `recurring.interval=year`. |
-| `STRIPE_MAX_PRICE_ID` | MAX flat $29/mo BYOK | V144 / V141. The MAX tier id was renamed → TEAM in V141 then unrenamed in V144; this env var stays `MAX_*` to match the current tier id. |
-| `STRIPE_MAX_YEARLY_PRICE_ID` | MAX flat yearly | V146. Optional — annual on a flat-fee tier is convenience only. |
+| `STRIPE_TEAM_YEARLY_PRICE_ID` | TEAM per-seat yearly (17% discount) | Needs a separate Stripe Price with `billing_scheme=per_unit` + `recurring.interval=year`. |
+| `STRIPE_ENTERPRISE_YEARLY_PRICE_ID` | ENTERPRISE annual | Optional. |
 
 ## Gateway flag (when to flip)
 
@@ -79,11 +76,10 @@ billing:
    STRIPE_PUBLISHABLE_KEY=pk_live_...
    STRIPE_WEBHOOK_SECRET=whsec_...
    STRIPE_PRO_PRICE_ID=price_...
-   STRIPE_ENTERPRISE_PRICE_ID=price_...
    STRIPE_TEAM_MONTHLY_PRICE_ID=price_...
-   STRIPE_TEAM_YEARLY_PRICE_ID=price_...
-   STRIPE_MAX_PRICE_ID=price_...
-   STRIPE_MAX_YEARLY_PRICE_ID=price_...
+   STRIPE_ENTERPRISE_PRICE_ID=price_...
+   STRIPE_TEAM_YEARLY_PRICE_ID=price_...        # optional, V146 annual
+   STRIPE_ENTERPRISE_YEARLY_PRICE_ID=price_...  # optional
    BILLING_STRIPE_ENABLED=true
    BILLING_DEFAULT_GATEWAY=stripe
    ```
