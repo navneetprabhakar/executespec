@@ -45,7 +45,8 @@ public class ProjectArchitectureController {
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails,
       @PathVariable String projectId) {
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    // Audit 2026-05-12 review item B #13 — regenerate is a paid LLM call + workspace mutation.
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
     ProjectArchitectureDoc doc = service.generate(projectId, null, pat);
     stalenessService.invalidate(projectId);
@@ -60,7 +61,7 @@ public class ProjectArchitectureController {
       @PathVariable String projectId,
       @org.springframework.web.bind.annotation.RequestParam(value = "branch", required = false)
           String branch) {
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
     ProjectArchitectureDoc doc = service.generate(projectId, branch, pat);
     stalenessService.invalidate(projectId);
@@ -132,7 +133,8 @@ public class ProjectArchitectureController {
       @RequestBody Map<String, String> body,
       @org.springframework.security.core.annotation.AuthenticationPrincipal
           com.navneet.executespec.auth.security.AppUserDetails userDetails) {
-    projectAccessGuard.assertCanRead(projectId, userDetails);
+    // Audit 2026-05-12 review item B #13 — annotation mutates persisted state.
+    projectAccessGuard.assertCanWrite(projectId, userDetails);
     String annotation = body.getOrDefault("annotation", "");
     return ResponseEntity.ok(ArchDocDto.from(service.annotate(projectId, annotation)));
   }

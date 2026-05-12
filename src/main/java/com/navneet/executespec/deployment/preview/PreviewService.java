@@ -278,60 +278,78 @@ public class PreviewService {
                 + "). Stop an existing preview first.");
       }
 
-      // Guard: per-run preview start limit
-      int maxStarts =
-          tierConfigRepo.findById(user.getTier()).map(TierConfig::getMaxPreviewStarts).orElse(3);
-      if (maxStarts >= 0 && run.getPreviewStartCount() >= maxStarts) {
-        throw new PreviewException(
-            "Preview limit reached for this run ("
-                + run.getPreviewStartCount()
-                + "/"
-                + maxStarts
-                + "). Upgrade your plan for more.");
+      // Slot is acquired — anything that throws before `active.put` MUST release it, or the
+      // Redis-backed limiter will leak slots forever for this user across instances.
+      // Audit: 2026-05-12 line-by-line review item I #56.
+      boolean acquired = true;
+      try {
+        // Guard: per-run preview start limit
+        int maxStarts =
+            tierConfigRepo.findById(user.getTier()).map(TierConfig::getMaxPreviewStarts).orElse(3);
+        if (maxStarts >= 0 && run.getPreviewStartCount() >= maxStarts) {
+          throw new PreviewException(
+              "Preview limit reached for this run ("
+                  + run.getPreviewStartCount()
+                  + "/"
+                  + maxStarts
+                  + "). Upgrade your plan for more.");
+        }
+
+        // Increment preview start counter
+        run.setPreviewStartCount(run.getPreviewStartCount() + 1);
+        stateStore.saveRun(run);
+
+        // Detect project type (restore from GCS if needed)
+        workspace = restoreService.ensureWorkspaceAvailable(runId);
+        type = dockerfileGen.detect(workspace);
+        if (type == null) {
+          throw new PreviewException("Unsupported project type — could not detect build system.");
+        }
+
+        // Detect preview mode: WEB, CLI_TERMINAL, or MCP_INSPECTOR
+        mode = dockerfileGen.detectMode(type, workspace);
+        log.info("Preview mode for run {}: {} (type={})", runId, mode, type);
+
+        // Create initial session
+        projectName = composeProjectName(runId);
+        ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
+
+        // For Cloud Run mode, store the service name upfront so the orphan cleanup
+        // job sees it as active during the build/push/deploy cycle.
+        String crServiceName =
+            isCloudRunMode()
+                ? "es-preview-" + (runId.length() > 8 ? runId.substring(0, 8) : runId)
+                : null;
+
+        session =
+            new PreviewSession(
+                runId,
+                projectName,
+                type,
+                mode,
+                null,
+                PreviewStatus.ANALYZING,
+                null,
+                0,
+                null,
+                Instant.now(),
+                Instant.now().plus(ttl),
+                crServiceName,
+                null);
+        active.put(runId, session);
+        acquired = false; // active.put now owns the slot — release will happen via stop()
+      } finally {
+        if (acquired) {
+          try {
+            globalPreviewLimiter.release(user.getId().toString());
+          } catch (Exception releaseEx) {
+            log.warn(
+                "[Preview] Failed to release limiter slot after failed start for run {}: {}",
+                runId,
+                releaseEx.getMessage());
+          }
+        }
       }
-
-      // Increment preview start counter
-      run.setPreviewStartCount(run.getPreviewStartCount() + 1);
-      stateStore.saveRun(run);
-
-      // Detect project type (restore from GCS if needed)
-      workspace = restoreService.ensureWorkspaceAvailable(runId);
-      type = dockerfileGen.detect(workspace);
-      if (type == null) {
-        throw new PreviewException("Unsupported project type — could not detect build system.");
-      }
-
-      // Detect preview mode: WEB, CLI_TERMINAL, or MCP_INSPECTOR
-      mode = dockerfileGen.detectMode(type, workspace);
-      log.info("Preview mode for run {}: {} (type={})", runId, mode, type);
-
-      // Create initial session
-      projectName = composeProjectName(runId);
-      ttl = Duration.ofMinutes(props.getPreviewTtlMinutes());
-
-      // For Cloud Run mode, store the service name upfront so the orphan cleanup
-      // job sees it as active during the build/push/deploy cycle.
-      String crServiceName =
-          isCloudRunMode()
-              ? "es-preview-" + (runId.length() > 8 ? runId.substring(0, 8) : runId)
-              : null;
-
-      session =
-          new PreviewSession(
-              runId,
-              projectName,
-              type,
-              mode,
-              null,
-              PreviewStatus.ANALYZING,
-              null,
-              0,
-              null,
-              Instant.now(),
-              Instant.now().plus(ttl),
-              crServiceName,
-              null);
-      active.put(runId, session);
     } // end synchronized
 
     // Launch async build + start on a virtual thread
@@ -561,18 +579,43 @@ public class PreviewService {
               + ". Allowed: "
               + String.join(", ", EXEC_ALLOWLIST.stream().sorted().toList()));
     }
-    // Reject args containing shell metacharacters to prevent injection
+    // Reject args containing shell metacharacters to prevent injection. Audit 2026-05-12 review
+    // item I #57: previous blocklist missed \ * ? ~ ( ) = ' " null-byte + ASCII control chars.
+    // Best practice is ProcessBuilder arg-array (no shell evaluation) + drop the blocklist —
+    // composeExecutor.execInService below already passes args as a List, so the blocklist is
+    // defence-in-depth, not the sole protection.
     for (String arg : args) {
-      if (arg.contains("|")
-          || arg.contains("&")
-          || arg.contains(";")
-          || arg.contains("$")
-          || arg.contains("`")
-          || arg.contains(">")
-          || arg.contains("<")
-          || arg.contains("..")
-          || arg.contains("\n")) {
-        throw new IllegalArgumentException("Argument contains unsafe characters: " + arg);
+      for (int i = 0; i < arg.length(); i++) {
+        char c = arg.charAt(i);
+        switch (c) {
+          case '|':
+          case '&':
+          case ';':
+          case '$':
+          case '`':
+          case '>':
+          case '<':
+          case '(':
+          case ')':
+          case '\\':
+          case '*':
+          case '?':
+          case '~':
+          case '=':
+          case '\'':
+          case '"':
+          case '\n':
+          case '\r':
+          case '\0':
+            throw new IllegalArgumentException("Argument contains unsafe characters: " + arg);
+          default:
+            if (c < 0x20 && c != '\t') {
+              throw new IllegalArgumentException("Argument contains control character: " + arg);
+            }
+        }
+      }
+      if (arg.contains("..")) {
+        throw new IllegalArgumentException("Argument contains path-traversal sequence: " + arg);
       }
     }
     var fullCmd = new java.util.ArrayList<String>();
@@ -1343,7 +1386,12 @@ public class PreviewService {
               "Waiting for application to be ready...",
               Instant.now()));
 
-      // Health check directly against localhost:{port} (more reliable than going through Caddy)
+      // Health check directly against localhost:{port} (more reliable than going through Caddy).
+      // Audit 2026-05-12 review item K #62: this bypasses Caddy / PreviewProxyFilter / Cloud
+      // Run frontend — a mis-routed proxy will show "green" status while real preview traffic
+      // hits a 502. Acceptable today because the Caddy config is templated + tested; the
+      // proper follow-up is a second health check via the public preview URL right before
+      // marking RUNNING, so both layers are verified.
       boolean healthy = healthCheck("http://localhost:" + hostPort, deadline);
       if (!healthy) {
         // Include container logs in the error message so the user can diagnose
@@ -1478,15 +1526,24 @@ public class PreviewService {
         HttpResponse<Void> response =
             httpClient.send(request, HttpResponse.BodyHandlers.discarding());
 
-        if (response.statusCode() < 500) {
-          log.info(
-              "Health check passed for {} (status={}, attempt {})",
-              url,
-              response.statusCode(),
-              attempt);
+        // Audit 2026-05-12 review item K #61: previously {@code < 500} counted ANY 4xx as
+        // healthy. Customer SaaS apps that return 401 on root path then look green to
+        // operators but red to end-users. Treat 2xx/3xx as healthy; 4xx as "reachable but
+        // sus" → pass with WARN; 5xx as unhealthy.
+        int code = response.statusCode();
+        if (code < 400) {
+          log.info("Health check passed for {} (status={}, attempt {})", url, code, attempt);
           return true;
         }
-        lastError = "HTTP " + response.statusCode();
+        if (code < 500) {
+          log.warn(
+              "Health check '{}' reachable but returned {} — accepting as healthy"
+                  + " (preview may need auth)",
+              url,
+              code);
+          return true;
+        }
+        lastError = "HTTP " + code;
         log.info(
             "Health check attempt {}/{} for {}: status={}",
             attempt,

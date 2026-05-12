@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.Map;
 
 import com.navneet.executespec.auth.security.AppUserDetails;
+import com.navneet.executespec.project.security.ProjectAccessGuard;
 
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.http.ResponseEntity;
@@ -25,6 +26,7 @@ import lombok.RequiredArgsConstructor;
 public class CredentialController {
 
   private final CredentialService credentialService;
+  private final ProjectAccessGuard projectAccessGuard;
 
   // ── Permission Requirements (shown BEFORE upload) ─────────────────────────
 
@@ -51,6 +53,12 @@ public class CredentialController {
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestParam(required = false) String projectId,
       @RequestBody String serviceAccountJson) {
+    // Audit 2026-05-12 review item B #15 — project-scoped credential writes must verify the
+    // caller can write to that project. User-default credentials (projectId=null) are owned by
+    // the authenticated user and don't need the project guard.
+    if (projectId != null && !projectId.isBlank()) {
+      projectAccessGuard.assertCanWrite(projectId, userDetails);
+    }
     var summary =
         credentialService.storeCredential(
             userDetails.getUser().getId(), projectId, serviceAccountJson);
@@ -101,6 +109,11 @@ public class CredentialController {
   public ResponseEntity<Map<String, String>> deleteCredential(
       @AuthenticationPrincipal AppUserDetails userDetails,
       @RequestParam(required = false) String projectId) {
+    // Audit 2026-05-12 review item B #16 — project-scoped delete must verify caller write access
+    // so an attacker can't delete legitimate per-project credentials they don't own.
+    if (projectId != null && !projectId.isBlank()) {
+      projectAccessGuard.assertCanWrite(projectId, userDetails);
+    }
     credentialService.deleteCredential(userDetails.getUser().getId(), projectId);
     return ResponseEntity.ok(Map.of("message", "GCP credentials deleted"));
   }

@@ -61,9 +61,13 @@ import lombok.extern.slf4j.Slf4j;
  * prompt-caching stays on the customer's API account. OpenAI + Gemini wrappers already accept a
  * per-request key, so the router just threads it through.
  *
- * <p>Multi-provider failover, {@code ProviderHealthTracker} circuit breaker, tier-based model
- * resolution remain deferred to a later phase — V2's direct-dispatch model handles that via
- * per-call status metrics today.
+ * <p><strong>Audit 2026-05-12 review item M #68:</strong> Multi-provider failover, {@code
+ * ProviderHealthTracker} circuit breaker, and tier-based model resolution are NOT yet wired here. A
+ * single 5xx from the primary provider hard-fails the V2 pipeline call — the legacy {@link
+ * FallbackLlmRouter} has all three. The follow-up is to layer the YAML {@code failover-order} chain
+ * on top of {@code internalToolExecutionEnabled(false)} dispatch so workflow-mid LLM failures can
+ * degrade gracefully. Tracking deliberately so this gap is visible in every router-touching change
+ * until closed.
  *
  * <p>{@code internalToolExecutionEnabled(false)} is set on every Spring-AI-routed call so the
  * WorkerAgent loop (Phase 3) keeps control of dispatch — needed for context checkpointing and

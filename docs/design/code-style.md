@@ -1,6 +1,6 @@
 # ExecuteSpec — code style policy
 
-Last updated 2026-05-01.
+Last updated 2026-05-12 (1.0.0-M1).
 
 ## Source-of-truth
 

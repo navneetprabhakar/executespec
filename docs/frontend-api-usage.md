@@ -1,620 +1,350 @@
 # Frontend API Usage Audit
 
-> Every API call made from the frontend, organized by file. Use this to understand which backend endpoints the frontend depends on.
-> Last updated: 2026-04-23 (v2.6.1 — Waves 1-6 persona roadmap: TEAM tier + lifecycle, onboarding+activation, SSO + team-trial, startup program shells)
+> **Last updated:** 2026-05-12 (1.0.0-M1).
+> **Purpose:** which backend endpoints the frontend depends on, organised by capability. Source of truth: `frontend/src/lib/api.ts` (single API client file).
+> **Audit rigour:** `arch/ApiContractTest` (ArchUnit + bytecode scan) asserts every URL in `lib/api.ts` resolves to a registered backend `@*Mapping`. Caught one drift on first run (frontend export with no backend handler) and forced cleanup.
 
-## v2.6.1 additions (Waves 1-6)
+## How to read this doc
 
-**Wave 1 — TEAM tier + 3-state lifecycle**
-- **`fetchTiersLifecycle()`** → `GET /api/admin/tiers` → `{tiers: TierLifecycleRow[]}`. Used by the new `TierLifecyclePage` under `/admin/tiers`. Each row includes `tier`, `lifecycleState` (`LISTED|HIDDEN|SUNSETTING`), `sunsettingStartedAt`, `sunsettingEndsAt`, `hiddenSinceTs`, `metadataJson`.
-- **`updateTierLifecycle(tier, body)`** → `PUT /api/admin/tiers/{tier}` body `{state, reason?, observationDays?}`. SUNSETTING transitions require a 14-day `HIDDEN` observation window — backend enforces 409 if not met.
-- **Billing subscribe seats param** — `subscribe(planId, gateway, successUrl, cancelUrl, seats?)` now accepts an optional `seats` (2-20). Stripe path threads it through `/billing/subscribe` → `SubscriptionUpdateParams` → Checkout Session line_items quantity.
-- **`PlanCard.tsx`** — introduces TIER_RANK slot `TEAM=2.5` between PRO and MAX; adds a seat picker (2-20) on the TEAM card wired to `subscribe`.
-- **`PlansPage.tsx`** — tier display order locked as FREE → PRO (hidden when `LISTED`-only is on) → TEAM → MAX → ENTERPRISE.
+The frontend is organised by **feature surfaces**, not by HTTP verb. Each surface section below lists the api.ts helper, the backend endpoint, and the store / page that consumes it.
 
-**Wave 2 — onboarding + activation funnel**
-- **`listOnboardingSamples()`** → `GET /api/onboarding/sample-specs` → `SampleSpec[]` (`{id, title, surface, description, tags[], expectedTimeMinutes}`). Reads from `sample-specs/{web-api,frontend,cli}.yml` shipped on the backend classpath.
-- **`pickOnboardingSample(sampleId)`** → `POST /api/onboarding/pick-sample` body `{sampleId}` → `{runId, projectId}`. Provisions (or reuses) the sandbox project, drops the sample spec into the new run, dispatches via `RunOrchestrator.submitRun`.
-- **`getSandboxStatus()`** → `GET /api/onboarding/sandbox-status` → `{provisioned, projectId?, lastActivity?, expiresAt?}`. Called by `WelcomePage` + `FirstRunCelebration` to decide whether to deep-link into the sandbox.
-- **`RegisterPayload`** — adds `signupSource`, `utmCampaign`, `utmMedium`, `utmSource`, `referrer` (optional). `RegisterPage.tsx` reads `document.referrer` + querystring UTM params before the submit; backend writes to `app_user.signup_*` columns (Wave 2 V125 ledger + V126 sandbox).
-- **`analytics.ts`** — thin wrapper over `posthog-js` (`initAnalytics`, `identify`, `page`, `reset`, `track`). Enabled only when `VITE_POSTHOG_KEY` is set. Events mirror the 6-event funnel (SIGNUP, PROJECT_CREATED, SPEC_SUBMITTED, PLAN_APPROVED, RUN_COMPLETE, PR_MERGED).
-- **New pages** — `WelcomePage` (post-signup), `RunsNewLanding` (empty-state aware of sandbox), `FirstRunCelebration` (fires on first `RUN_COMPLETE`).
-
-**Wave 3 — SSO + team-trial shells** (schema + docs live; UI lands post-launch)
-- **`requestTeamTrial(body)`** → `POST /api/org/trial-request` body `{orgId, contactEmail, intendedSeats, notes?}` → `{id, status: 'PENDING'}`. Backed by `team_trial_request` table (V127). Not yet wired to a UI surface.
-- **Org SSO preview** — `OrgDto` gains read-only `samlMetadataUrl`, `ssoRequired`, `scimProvisioning` fields. Admin UI is deferred; see `docs/plans/wave-3-sso-githubapp-procurement-plan.md`.
-
-**Wave 4-6** — landing proof, routing heuristic scaffold, changelog, startup program application (`POST /api/startup-program/apply`), CLI bootstrap — all ship as schema + docs in v2.6.1; no new frontend-facing endpoints beyond the documented shells.
-
-**Carryover from v2.6.0**
-- **Theme state** — `useUiStore.ts` `theme: 'dark' | 'light'` slice with `setTheme(t)` / `toggleTheme()`. Pre-paint applies `<html data-theme>` + persists to `localStorage`. No backend API involved.
-- **`ExecSummaryPage` (`/exec`)** — reads `/api/billing/usage`, `/api/runs?scope=org&limit=30`, `/api/projects?scope=org`, cross-project AWAITING_APPROVAL digest. Gated behind `canViewCostBreakdown` (PRO/TEAM/MAX/ENTERPRISE).
-- **Provider name** — send `GEMINI` (preferred); `GOOGLE` accepted as input alias, rewritten server-side.
-- **ScoreRing consumer** — `ValidationReportPanel` hero renders `ScoreRing` with `report.verifiedScore`.
-
-
-## API Client Architecture
-
-### Core Client: `src/lib/api.ts`
-
-- **Base URL:** `/api` (relative — uses Vite proxy in dev, same-origin in prod)
-- **Auth:** `Authorization: Bearer {token}` from `localStorage.getItem('access_token')`
-- **Credentials:** `credentials: 'include'` (sends httpOnly `refresh_token` cookie)
-- **Error handling:** Parses JSON error body for `message` or `error` fields, falls back to status-based friendly messages (400-503 mapped), then raw body text
-- **Empty body handling:** Returns `undefined` for 204 and empty 200 responses (Spring endpoints like approve/merge)
-
-### Specialized Clients
-
-| File | Purpose |
-|------|---------|
-| `src/lib/billing-api.ts` | Billing, subscription (multi-gateway: Stripe + Razorpay), seat management, top-up endpoints |
-| `src/lib/invoice-api.ts` | Invoices, billing profile, accounting (revenue, GST, trial balance), PDF downloads |
-
-### Utility Libraries (no API calls)
-
-| File | Purpose |
-|------|---------|
-| `src/lib/telemetry.ts` | OpenTelemetry browser tracing (OTLP export, SSE span tracking) |
-| `src/lib/techDetect.ts` | Tech stack detection from run request text / backend `techStack` field (renders badges on RunCard) |
-| `src/lib/vibeNarrative.ts` | Maps SSE log entries to human-readable narrative items for Vibe mode |
-| `src/lib/monacoSetup.ts` | Monaco editor CDN loader initialization + Geist theme registration (idempotent) |
-| `src/lib/monacoGeistTheme.ts` | Geist-inspired dark theme definition for Monaco editor |
-| `src/lib/constants.ts` | Shared constants |
-| `src/lib/utils.ts` | General utility functions |
-
-### Hooks
-
-| File | Purpose |
-|------|---------|
-| `src/hooks/useApi.ts` | Generic wrapper for async calls with loading/error state |
-| `src/hooks/useSse.ts` | SSE (Server-Sent Events) connection for live run updates |
-| `src/hooks/useTierPermissions.ts` | Tier-based permission checking |
-| `src/hooks/useViewMode.ts` | Vibe/Pro view mode switching |
-| `src/hooks/useKeyboardShortcuts.ts` | Global keyboard shortcut bindings |
-| `src/hooks/useKeyboardScroll.ts` | Keyboard-driven scroll behavior |
-| `src/hooks/useIsMobile.ts` | Mobile viewport detection |
+For the canonical endpoint inventory in HTTP-verb order, see [`CLAUDE.md`](../CLAUDE.md) § API Contracts. For the OpenAPI spec, see [`openapi.yaml`](openapi.yaml).
 
 ---
 
-## API Functions Defined in `src/lib/api.ts`
+## Auth + session
 
-### Auth (lines 818-852)
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `register(payload)` | `POST /api/auth/register` | Body includes optional `signupSource`, `utmCampaign`, `utmMedium`, `utmSource`, `referrer`. Personal org auto-provisioned. |
+| `login(payload)` | `POST /api/auth/login` | Returns access + refresh JWTs. |
+| `refresh()` | `POST /api/auth/refresh` | Refresh token in HTTP-only cookie. |
+| `logout()` | `DELETE /api/auth/logout` | Clears refresh cookie. |
+| `forgotPassword(email)` | `POST /api/auth/forgot-password` | Sends reset email. |
+| `resetPassword(token, newPassword)` | `POST /api/auth/reset-password` | Token from email link. |
+| `verifyEmail(token)` | `GET /api/auth/verify-email` | Public. |
+| `oauth2Init(surface)` | `GET /api/auth/oauth2/init?surface=<x>` | Stashes surface, redirects to OAuth provider authorize. |
+| `oauth2Authorize(provider)` | `GET /api/auth/oauth2/authorize?provider=<p>` | Spring Security entry. |
+| `me()` | `GET /api/auth/me` | Current user. |
+| `mePermissions()` | `GET /api/auth/me/permissions` | Tier-based permission map (`canManageAiKeys`, `canViewAudit`, etc). |
+| `dataExport()` | `GET /api/auth/me/data-export` | GDPR ZIP download. |
+| `validateAiKey(provider, key)` | `POST /api/auth/settings/ai-keys/validate` | Test button per provider in Settings. |
 
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `authRegister(body)` | POST | `/auth/register` | `{email, firstName, lastName, password}` | `AuthUser` |
-| `authLogin(body)` | POST | `/auth/login` | `{email, password}` | `LoginResponse` |
-| `authRefresh()` | POST | `/auth/refresh` | _(cookie)_ | `LoginResponse` |
-| `authLogout()` | DELETE | `/auth/logout` | | |
-| `authMe()` | GET | `/auth/me` | | `AuthUser` |
-| `getMyPermissions()` | GET | `/auth/me/permissions` | | `TierPermissions` |
-| `authVerifyEmail(token)` | GET | `/auth/verify-email?token=` | | `{message}` |
-| `authResendVerification(email)` | POST | `/auth/resend-verification` | `{email}` | `{message}` |
-| `authForgotPassword(email)` | POST | `/auth/forgot-password` | `{email}` | `{message}` |
-| `authResetPassword(token, newPassword)` | POST | `/auth/reset-password` | `{token, newPassword}` | `{message}` |
-| `authChangePassword(currentPassword, newPassword)` | POST | `/auth/change-password` | `{currentPassword, newPassword}` | `{message}` |
-
-### User Settings (lines 858-915)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `updateGithubSettings(githubPat, githubOwner)` | PUT | `/auth/settings/github` | `{githubPat, githubOwner}` | `AuthUser` |
-| `updateAiKeySettings(openAiApiKey, anthropicApiKey, geminiApiKey)` | PUT | `/auth/settings/ai-keys` | `{openAiApiKey, anthropicApiKey, geminiApiKey}` | `AuthUser` |
-| `updateJiraSettings(jiraBaseUrl, jiraEmail, jiraApiToken)` | PUT | `/auth/settings/jira` | `{jiraBaseUrl, jiraEmail, jiraApiToken}` | `AuthUser` |
-| `updateConfluenceSettings(...)` | PUT | `/auth/settings/confluence` | `{confluenceBaseUrl, confluenceEmail, confluenceApiToken}` | `AuthUser` |
-| `updateViewMode(viewMode)` | PUT | `/auth/settings/view-mode` | `{viewMode}` | `AuthUser` |
-| `validateGitHub(pat)` | POST | `/auth/settings/github/validate` | `{pat}` | `{valid, message}` |
-| `validateJira(baseUrl, email, apiToken)` | POST | `/auth/settings/jira/validate` | `{baseUrl, email, apiToken}` | `{valid, message}` |
-| `validateConfluence(baseUrl, email, apiToken)` | POST | `/auth/settings/confluence/validate` | `{baseUrl, email, apiToken}` | `{valid, message}` |
-
-### Runs (lines 334-411)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getRuns(params)` | GET | `/runs?status=&projectId=&scope=&archived=&page=&size=` | _(query)_ | `PagedResponse<RunSummary>` |
-| `archiveRun(runId)` | POST | `/runs/{runId}/archive` | | `{message}` |
-| `getRun(id)` | GET | `/runs/{id}` | | `RunDetail` |
-| `createRun(body)` | POST | `/runs` | `{userRequest, executionMode?, skipApproval?, autoMerge?, modelName?, aiProvider?, projectId?, repoMode?, repoUrl?}` | `{runId}` |
-| `approveRun(id, approved)` | POST | `/runs/{id}/approve` | `{approved}` | |
-| `clarifyRun(id, response)` | POST | `/runs/{id}/clarify` | `{response}` | **410 Gone** (V2) |
-| `mergeRun(id, approved)` | POST | `/runs/{id}/merge` | `{approved}` | **410 Gone** (V2 auto-merges) |
-| `cancelRun(id)` | DELETE | `/runs/{id}` | | |
-| `retryTask(runId, taskId)` | POST | `/runs/{runId}/tasks/{taskId}/retry` | | |
-| `retryRun(runId)` | POST | `/runs/{runId}/retry` | | **410 Gone** (V2 — submit fresh run) |
-| `reopenMergeGate(runId)` | POST | `/runs/{runId}/reopen-merge` | | **410 Gone** (V2) |
-| `implementSuggestions(runId)` | POST | `/runs/{runId}/implement-suggestions` | | **410 Gone** (V2) |
-| `reworkRun(runId)` | POST | `/runs/{runId}/rework` | | **410 Gone** (V2) |
-| `pauseRun(runId)` | POST | `/runs/{runId}/pause` | | **410 Gone** (V2) |
-| `editAndRestartRun(runId, userRequest)` | POST | `/runs/{runId}/edit-and-restart` | `{userRequest}` | **410 Gone** (V2) |
-| `resumeRun(runId)` | POST | `/runs/{runId}/resume` | | **410 Gone** (V2) |
-| `editRunPlan(runId, feedback)` | POST | `/runs/{runId}/edit-plan` | `{feedback}` | `{status, version}` |
-| `getPlanVersions(runId)` | GET | `/runs/{runId}/plan-versions` | | `any[]` |
-| `updateRunProject(runId, projectId)` | PATCH | `/runs/{runId}/project` | `{projectId}` | `RunSummary` |
-| `runTests(runId)` | POST | `/runs/{runId}/run-tests` | | `{runId, testPlanId, previewUrl}` |
-
-### Run Content (lines 600-661)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getTimeline(runId)` | GET | `/runs/{runId}/timeline` | | `TimelineData` |
-| `getFiles(runId)` | GET | `/runs/{runId}/files` | | `string[]` |
-| `downloadWorkspace(runId)` | GET | `/runs/{runId}/download` | | _Blob (zip)_ |
-| `pushToGitHub(runId, repoMode)` | POST | `/runs/{runId}/push-github?repoMode=` | | `{status, repoUrl}` |
-| `getFile(runId, filePath)` | GET | `/runs/{runId}/file?path=` | | `string` (text/plain) |
-| `getMessages(runId)` | GET | `/runs/{runId}/messages` | | `MessageResponse[]` |
-| `getOpenApiSpec(runId)` | GET | `/runs/{runId}/openapi.yaml` | | `string` (text/plain) |
-| `probeApiDocs(runId)` | GET | `/runs/{runId}/preview/probe-api-docs` | | `ApiDocsProbeResult` |
-| `getTaskGraph(runId)` | GET | `/runs/{runId}/task-graph` | | `TaskGraphNode[]` |
-
-### Metrics (lines 415-438)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getMetrics(days?)` | GET | `/metrics?days=` | | `MetricsResponse` |
-| `getModelComparison(days?)` | GET | `/model-comparison?days=` | | `ModelComparisonData` |
-| `getUserRunsSummary(days?)` | GET | `/user-runs-summary?days=` | | `UserRunsSummaryData` |
-
-### Cost & Feasibility (lines 449-455)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getLiveCost(runId)` | GET | `/runs/{runId}/cost` | | `{runId, costUsd}` |
-| `feasibility(body)` | POST | `/feasibility` | `{goal, provider?, model?, budgetUsd?}` | `FeasibilityReport` |
-
-### Models & Pricing (lines 371-372, 442-445, 1471-1474)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getAvailableModels()` | GET | `/models/available` | | `AvailableModelsResponse` |
-| `getPricing()` | GET | `/pricing` | | `PricingRow[]` |
-| `updatePricing(provider, model, body)` | PUT | `/pricing/{provider}/{model}` | _partial_ | `PricingRow` |
-| `getAllPricing()` | GET | `/pricing` | | `PricingRow[]` |
-| `updateModelPricing(provider, model, data)` | PUT | `/pricing/{provider}/{model}` | `{inputCostPer1m, outputCostPer1m, notes?}` | `PricingRow` |
-
-### Preview (lines 697-715)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `analyzePreview(runId)` | POST | `/runs/{runId}/preview/analyze` | | `PreviewAnalysis` |
-| `getPreviewStatus(runId)` | GET | `/runs/{runId}/preview/status` | | `LocalPreviewStatus` |
-| `startPreview(runId, envVars?)` | POST | `/runs/{runId}/preview/start` | `{envVars?}` | `LocalPreviewStatus` |
-| `stopPreview(runId)` | DELETE | `/runs/{runId}/preview/stop` | | |
-| `getPreviewLogs(runId, lines?, filter?)` | GET | `/runs/{runId}/preview/logs?lines=&filter=` | | `PreviewLogs` |
-
-### Deployment (lines 459-493)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getDeployments()` | GET | `/deployments` | | `DeploymentSummary[]` |
-| `createDeployment(body)` | POST | `/deployments` | `{runId, strategy?}` | `DeploymentSummary` |
-| `deleteDeployment(id)` | DELETE | `/deployments/{id}` | | |
-| `rollbackDeployment(id)` | POST | `/deployments/{id}/rollback` | | `DeploymentSummary` |
-| `analyzeForDeploy(runId)` | POST | `/deployments/analyze?runId=` | | `DeployAnalysisResult` |
-| `confirmDeploy(body)` | POST | `/deployments/confirm` | `{runId, deploymentPath, region?, envVars?, manifestJson?, healthCheckPath?, appPort?}` | `DeploymentSummary` |
-| `engineRollback(id)` | POST | `/deployments/{id}/engine-rollback` | | |
-| `engineDestroy(id)` | DELETE | `/deployments/{id}/engine-destroy` | | |
-| `getDeploymentDetail(id)` | GET | `/deployments/{id}` | | `DeploymentSummary` |
-
-### GCP Credentials (lines 497-524)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getRequiredPermissions()` | GET | `/credentials/gcp/required-permissions` | | `RequiredPermission[]` |
-| `storeGcpCredential(json, projectId?)` | POST | `/credentials/gcp?projectId=` | _raw JSON_ | `CredentialSummary` |
-| `getGcpCredential(projectId?)` | GET | `/credentials/gcp?projectId=` | | `CredentialSummary?` |
-| `listGcpCredentials()` | GET | `/credentials/gcp/all` | | `CredentialSummary[]` |
-| `validateGcpCredential(projectId?)` | GET | `/credentials/gcp/validate?projectId=` | | `ValidationResult` |
-| `deleteGcpCredential(projectId?)` | DELETE | `/credentials/gcp?projectId=` | | `{message}` |
-
-### Integrations (lines 528-596)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getIntegrationStatus()` | GET | `/integrations/status` | | `{enabledSources[]}` |
-| `getIntegrationRuns(source?)` | GET | `/integrations/runs?source=` | | `RunSummary[]` |
-| `triggerConfluence(body)` | POST | `/integrations/confluence/trigger` | `{pageId, goal}` | `{runId}` |
-| `triggerJira(body)` | POST | `/integrations/jira/trigger` | `{issueKey, goal?}` | `{runId}` |
-| `getSlackStatus()` | GET | `/integrations/slack/status` | | `SlackStatus` |
-| `getSlackInstallUrl()` | GET | `/integrations/slack/install` | | `{installUrl}` |
-| `disconnectSlack()` | DELETE | `/integrations/slack/disconnect` | | |
-| `listSlackChannels()` | GET | `/integrations/slack/channels` | | `SlackChannel[]` |
-| `getProjectSlackChannels(projectId)` | GET | `/integrations/slack/projects/{projectId}/channels` | | `ProjectSlackChannelDto[]` |
-| `addProjectSlackChannel(projectId, ...)` | POST | `/integrations/slack/projects/{projectId}/channels` | `{channelId, channelName, verbosity}` | `ProjectSlackChannelDto` |
-| `removeProjectSlackChannel(projectId, channelId)` | DELETE | `/integrations/slack/projects/{projectId}/channels/{channelId}` | | |
-| `updateSlackChannelVerbosity(projectId, channelId, verbosity)` | PUT | `.../{channelId}/verbosity` | `{verbosity}` | |
-| `sendSlackTestMessage(channelId)` | POST | `/integrations/slack/test` | `{channelId}` | `{ok, message}` |
-
-### Chat & Conversation (lines 724-777)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `conversationChat(messages)` | POST | `/conversation` | `{messages[]}` | `{reply}` |
-| `getRunChat(runId)` | GET | `/runs/{runId}/chat` | | `RunChatMessage[]` |
-| `sendRunChatMessage(runId, message)` | POST | `/runs/{runId}/chat` | `{message}` | `ChatResponse` |
-| `applyToRun(runId, suggestion, source)` | POST | `/runs/{runId}/apply` | `{suggestion, source}` | `ApplyResult` |
-| `iterateRun(runId, userRequest)` | POST | `/runs/{runId}/iterate` | `{userRequest}` | `{runId}` |
-
-### Validation & Test Reports (lines 1301-1422)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getValidationReport(runId)` | GET | `/runs/{runId}/report` | | `ValidationReportData?` |
-| `shareValidationReport(runId)` | POST | `/runs/{runId}/report/share` | | `{shareToken, shareUrl}` |
-| `getSharedReport(shareToken)` | GET | `/reports/shared/{shareToken}` | | `SharedReportData?` |
-| `downloadValidationReportPdf(runId)` | GET | `/runs/{runId}/report/pdf` | | _Blob (PDF)_ |
-| `getTestReport(runId)` | GET | `/runs/{runId}/test-report` | | `TestReportData?` |
-| `getTestPlan(runId)` | GET | `/runs/{runId}/test-plan` | | `TestPlanData?` |
-| `getTestGraph(runId)` | GET | `/runs/{runId}/test-graph` | | `TestGraphData?` |
-| `markTestInvalid(testResultId)` | PUT | `/test-results/{testResultId}/mark-invalid` | | |
-| `applyTestFixes(runId, signature?)` | POST | `/runs/{runId}/apply-test-fixes?signature=` | | |
-
-### Onboarding (v2.6.1 Wave 2)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `listOnboardingSamples()` | GET | `/onboarding/sample-specs` | | `SampleSpec[]` |
-| `pickOnboardingSample(sampleId)` | POST | `/onboarding/pick-sample` | `{sampleId}` | `{runId, projectId}` |
-| `getSandboxStatus()` | GET | `/onboarding/sandbox-status` | | `{provisioned, projectId?, lastActivity?, expiresAt?}` |
-
-### Tier Lifecycle (v2.6.1 Wave 1, SUPER_ADMIN)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `fetchTiersLifecycle()` | GET | `/admin/tiers` | | `{tiers: TierLifecycleRow[]}` |
-| `updateTierLifecycle(tier, body)` | PUT | `/admin/tiers/{tier}` | `{state, reason?, observationDays?}` | `TierLifecycleRow` |
-
-### Organization (lines 967-1034)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getMyOrg()` | GET | `/org/me` | | `OrgDto` |
-| `createOrg(body)` | POST | `/org` | `{name, domains[], adminEmail}` | `OrgDto` |
-| `updateOrg(body)` | PUT | `/org/me` | `{name?, domains?}` | `OrgDto` |
-| `updateOrgAiKeySettings(...)` | PUT | `/org/me/settings/ai-keys` | `{anthropicApiKey, openAiApiKey, geminiApiKey}` | `OrgDto` |
-| `updateOrgKeySourceSettings(...)` | PUT | `/org/me/settings/key-source` | `{keySourceMode, enabledProviders[]}` | `OrgDto` |
-| `updateOrgJiraSettings(...)` | PUT | `/org/me/settings/jira` | `{baseUrl, email, apiToken}` | `OrgDto` |
-| `validateOrgJira(...)` | POST | `/org/me/settings/jira/validate` | `{baseUrl, email, apiToken}` | `{valid, message}` |
-| `updateOrgConfluenceSettings(...)` | PUT | `/org/me/settings/confluence` | `{baseUrl, email, apiToken}` | `OrgDto` |
-| `validateOrgConfluence(...)` | POST | `/org/me/settings/confluence/validate` | `{baseUrl, email, apiToken}` | `{valid, message}` |
-| `getOrgMembers()` | GET | `/org/me/members` | | `OrgMemberDto[]` |
-| `removeMember(userId)` | DELETE | `/org/me/members/{userId}` | | |
-| `changeMemberRole(userId, role)` | PUT | `/org/me/members/{userId}/role` | `{role}` | |
-| `orgSuspendMember(userId, suspended)` | PUT | `/org/me/members/{userId}/suspend` | `{suspended}` | |
-| `inviteMember(body)` | POST | `/org/invite` | `{email, orgRole?, projectIds?}` | `{message, status}` |
-| `getOrgInvitations()` | GET | `/org/me/invitations` | | `OrgInvitation[]` |
-| `resendInvitation(id)` | POST | `/org/me/invitations/{id}/resend` | | `{message}` |
-| `acceptInvite(token)` | POST | `/org/accept-invite?token=` | | `{message}` |
-| `requestTeamTrial(body)` | POST | `/org/trial-request` | `{orgId, contactEmail, intendedSeats, notes?}` | `{id, status}` |
-
-### Projects (lines 1057-1078)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getProjects()` | GET | `/projects` | | `ProjectDto[]` |
-| `createProject(body)` | POST | `/projects` | `{name, description?, aiProvider?}` | `ProjectDto` |
-| `updateProjectSettings(id, body)` | PATCH | `/projects/{id}/settings` | `{aiProvider}` | `ProjectDto` |
-| `archiveProject(id)` | PUT | `/projects/{id}/archive` | | `ProjectDto` |
-| `getProjectMembers(projectId)` | GET | `/projects/{projectId}/members` | | `ProjectMemberDto[]` |
-| `addProjectMember(projectId, userId, role)` | POST | `/projects/{projectId}/members` | `{userId, role}` | |
-| `removeProjectMember(projectId, userId)` | DELETE | `/projects/{projectId}/members/{userId}` | | |
-
-### Admin (lines 1082-1181)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `adminListUsers()` | GET | `/admin/users` | | `AuthUser[]` |
-| `adminGetUser(id)` | GET | `/admin/users/{id}` | | `AuthUser` |
-| `adminUpdateUserStatus(id, status)` | PUT | `/admin/users/{id}/status` | `{status}` | `AuthUser` |
-| `adminUpdateUserTier(id, tier)` | PUT | `/admin/users/{id}/tier` | `{tier}` | `AuthUser` |
-| `adminListOrgs()` | GET | `/admin/orgs` | | `OrgDto[]` |
-| `adminUpdateOrgTier(id, tier)` | PUT | `/admin/orgs/{id}/tier` | `{tier}` | `OrgDto` |
-| `adminUpdateOrgStatus(id, status)` | PUT | `/admin/orgs/{id}/status` | `{status}` | `OrgDto` |
-| `adminListEscalated()` | GET | `/admin/invitations/escalated` | | `OrgInvitation[]` |
-| `adminApproveInvite(id)` | POST | `/admin/invitations/{id}/approve` | | `{message}` |
-| `adminRejectInvite(id)` | POST | `/admin/invitations/{id}/reject` | | `{message}` |
-| `adminGetTierConfig()` | GET | `/admin/tier-config` | | `TierConfig[]` |
-| `adminUpdateTierConfig(tier, monthlyRunLimit)` | PUT | `/admin/tier-config/{tier}` | `{monthlyRunLimit}` | `TierConfig` |
-| `adminUpdateOrgRunLimit(id, limit)` | PUT | `/admin/orgs/{id}/run-limit` | `{limit}` | `OrgDto` |
-| `adminUpdateOrgApiKeys(id, provided)` | PUT | `/admin/orgs/{id}/api-keys` | `{provided}` | `OrgDto` |
-| `adminInviteUser(body)` | POST | `/admin/invite` | `{email, firstName, lastName, tier, orgId?, newOrgName?, orgRole?}` | `{message}` |
-| `adminGrantUserRuns(userId, quantity, ...)` | POST | `/admin/users/{userId}/grant-runs` | `{quantity, expiryDays?, reason?}` | |
-| `adminGrantOrgRuns(orgId, quantity, ...)` | POST | `/admin/orgs/{orgId}/grant-runs` | `{quantity, expiryDays?, reason?}` | |
-| `adminListTopupPackages()` | GET | `/admin/topup-packages` | | `TopupPackageAdmin[]` |
-| `adminCreateTopupPackage(body)` | POST | `/admin/topup-packages` | `{name, runCount, amountInr, amountUsd?, sortOrder?}` | `TopupPackageAdmin` |
-| `adminUpdateTopupPackage(id, body)` | PUT | `/admin/topup-packages/{id}` | _partial_ | `TopupPackageAdmin` |
-| `adminDeleteTopupPackage(id)` | DELETE | `/admin/topup-packages/{id}` | | `{message}` |
-| `adminTriggerUsageReport(period)` | POST | `/admin/usage-reports/trigger` | `{period}` | `{emailsSent, period}` |
-| `adminListFeatureFlags()` | GET | `/admin/feature-flags` | | `FeatureFlagDto[]` |
-| `adminUpdateFeatureFlag(key, value)` | PUT | `/admin/feature-flags/{key}` | `{value}` | `FeatureFlagDto` |
-| `getAuditLogs(params)` | GET | `/admin/audit-logs` or `/org/me/audit-logs` | _(query: entityType, eventType, actorId, entityId, from, to, page, size)_ | `AuditLogPage` |
-
-### Admin Analytics (lines 1462-1469)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getAnalyticsUsage(entityType, entityId, period)` | GET | `/admin/analytics/usage?entityType=&entityId=&period=` | | `UsageMetrics` |
-| `getAnalyticsMembers(orgId, period)` | GET | `/admin/analytics/members?orgId=&period=` | | `MemberUsage[]` |
-| `getAnalyticsBilling(entityType, entityId)` | GET | `/admin/analytics/billing?entityType=&entityId=` | | `BillingOverviewData` |
-
-### Payment Audit (lines 1530-1560)
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `adminListPaymentAudit(page, size, orgId?, userId?)` | GET | `/admin/payment-audit?page=&size=&orgId=&userId=` | | `PagedResponse<PaymentAuditEntry>` |
-| `adminExportPaymentAuditCsv()` | GET | `/admin/payment-audit/export` | | _Blob (CSV)_ |
-| `adminListWebhookEvents(page, size, gateway?)` | GET | `/admin/webhook-events?page=&size=&gateway=` | | `PagedResponse<WebhookEventEntry>` |
+Consumed by: `useAuthStore`, `LoginPage`, `RegisterPage`, `SettingsPage`.
 
 ---
 
-## API Functions Defined in `src/lib/billing-api.ts`
+## Runs
 
-Multi-gateway support: `subscribe()` accepts optional `gateway` param (`'stripe'` or `'razorpay'`). Stripe returns `checkoutUrl` + `sessionId`; Razorpay returns `gatewaySubscriptionId` + `razorpayKeyId` for client SDK.
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `submitRun(req)` | `POST /api/runs` | Body fields: `aiProvider`, `executionMode`, `runMode` (BUILD/PATCH), `tddMode`, `userCostCap?`, `figmaUrl?`, `selectedRepoIds[]?`, `projectId?`. Returns 202. |
+| `listRuns(params)` | `GET /api/runs` | Paginated, filtered by visibility + tier. |
+| `getRun(id)` | `GET /api/runs/{id}` | Includes `verifiedScore`, `statusReason`, `planStrategy`, per-phase token + cost columns. |
+| `approveRun(id, body)` | `POST /api/runs/{id}/approve` | `{approved, creditsConfirmed?}`. Charges credits. |
+| `cancelRun(id)` | `DELETE /api/runs/{id}` | Triggers compensation (closes opened PRs). |
+| `archiveRun(id)` | `POST /api/runs/{id}/archive` | |
+| `retryTask(runId, taskId)` | `POST /api/runs/{id}/tasks/{taskId}/retry` | Requires `requireBuildVerification=true`. Does NOT auto-push. |
+| `pauseRun(id)` | `POST /api/runs/{id}/pause` | Flag `v2.pause.enabled`, default OFF. |
+| `resumeRun(id)` | `POST /api/runs/{id}/resume` | Same-JVM only. |
+| `runTests(id)` | `POST /api/runs/{id}/run-tests` | Manual test execution (Beta). |
+| `runCost(id)` | `GET /api/runs/{id}/cost` | Live cost snapshot — used by `CostProgressBar` + `RunDetailTabs` (polled 5s while non-terminal). |
+| `runPrs(id)` | `GET /api/runs/{id}/prs` | PRs opened by this run. |
+| `syncRun(id, branch?)` | `POST /api/runs/{id}/sync` | Reset workspace to current origin HEAD. |
+| `syncRunOriginal(id)` | `POST /api/runs/{id}/sync/original` | Reset to SHAs captured at run start (from `run_repo_snapshot`). |
+| `sseToken(id)` | `GET /api/runs/{id}/sse-token` | Scoped JWT, 5-min TTL, `scope=sse` + `runId` claim. |
+| `runEvents(id, token)` | `GET /api/runs/{id}/events?token=<jwt>` (EventSource) | Server-Sent Events. |
 
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `fetchPlans(keyMode?)` | GET | `/billing/plans?keyMode=` | | `BillingPlan[]` |
-| `fetchBillingStatus()` | GET | `/billing/status` | | `BillingStatus` |
-| `subscribe(planId, gateway?, successUrl?, cancelUrl?, seats?)` | POST | `/billing/subscribe` | `{planId, gateway, successUrl, cancelUrl, seats?}` | `SubscriptionInitResult` |
-| `verifyPayment(razorpaySubscriptionId, razorpayPaymentId, razorpaySignature)` | POST | `/billing/verify` | `{razorpaySubscriptionId, razorpayPaymentId, razorpaySignature}` | `BillingStatus` |
-| `cancelSubscription()` | POST | `/billing/cancel` | | |
-| `updateSeats(totalSeats)` | POST | `/billing/seats` | `{totalSeats}` | `BillingStatus` |
-| `fetchTopupPackages()` | GET | `/billing/topup/packages` | | `TopupPackage[]` |
-| `purchaseTopup(packageId)` | POST | `/billing/topup/purchase` | `{packageId}` | `TopupOrderResult` |
-| `verifyTopup(razorpayOrderId, razorpayPaymentId, razorpaySignature)` | POST | `/billing/topup/verify` | `{razorpayOrderId, razorpayPaymentId, razorpaySignature}` | `BillingStatus` |
+Consumed by: `useRunStore`, `RunDetail`, `RunDetailTabs`, `InlineRunDetail`, `RunCard`, `RunsListPage`, `NewRunModal`.
 
-### Key Types in billing-api.ts
-
-- `SubscriptionInitResult` includes both Razorpay fields (`gatewaySubscriptionId`, `razorpayKeyId`, `shortUrl`) and Stripe fields (`gateway`, `checkoutUrl`, `sessionId`)
-- `BillingStatus` contains `subscription` (with `paymentGateway` field), `plan`, `usage[]`, and `bonusRuns`
-- `BillingPlan` includes dual-currency amounts (`baseAmountInr`/`baseAmountUsd`, `perSeatInr`/`perSeatUsd`), founder pricing flag, and `limits` map
-
----
-
-## API Functions Defined in `src/lib/invoice-api.ts`
-
-| Function | Method | Endpoint | Request | Response |
-|----------|--------|----------|---------|----------|
-| `getBillingProfile()` | GET | `/billing/profile` | | `BillingProfile` |
-| `updateBillingProfile(profile)` | PUT | `/billing/profile` | `BillingProfile` | `BillingProfile` |
-| `getMyInvoices(page?, size?)` | GET | `/billing/invoices?page=&size=` | | `Page<Invoice>` |
-| `getInvoiceDetail(id)` | GET | `/billing/invoices/{id}` | | `InvoiceDetail` |
-| `getAllInvoices(page?, size?)` | GET | `/admin/invoices?page=&size=` | | `Page<Invoice>` |
-| `issueCreditNote(invoiceId, amountPaise, reason)` | POST | `/admin/invoices/{id}/credit-note` | `{amountPaise, reason}` | `Invoice` |
-| `voidInvoice(invoiceId)` | POST | `/admin/invoices/{id}/void` | | `Invoice` |
-| `resendInvoice(invoiceId)` | POST | `/admin/invoices/{id}/send` | | |
-| `getSellerConfig()` | GET | `/admin/seller-config` | | `SellerConfig` |
-| `updateSellerConfig(config)` | PUT | `/admin/seller-config` | `SellerConfig` | `SellerConfig` |
-| `getRevenueMetrics(from, to)` | GET | `/accounting/revenue?from=&to=` | | `RevenueMetrics` |
-| `getGstSummary(fy, quarter)` | GET | `/accounting/gst-summary?fy=&quarter=` | | `GstSummary` |
-| `getTrialBalance(from, to)` | GET | `/accounting/trial-balance?from=&to=` | | `TrialBalanceEntry[]` |
-| `downloadInvoicePdf(id, invoiceNumber, admin?)` | GET | `/billing/invoices/{id}/pdf` or `/admin/invoices/{id}/pdf` | | _Blob (PDF)_ |
-| `getGstr1ExportUrl(fy, quarter)` | _builds URL_ | `/accounting/gstr1-export?fy=&quarter=` | | _URL string_ |
-
-### Helper in invoice-api.ts
-
-- `formatPaise(paise)` -- formats paise to INR currency string
+SSE event types: `PLAN_READY`, `RUN_STATUS`, `TASK_STATUS`, `LIVE_LOG`, `RUN_COST`, `EXEC_COMPENSATION_UPDATE`, `EXEC_COMPENSATION_DONE`, `COMPLETE` (payload `{status, statusReason}`).
 
 ---
 
-## Component-Level API Usage
+## Validation report
 
-### Stores (Zustand)
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `getReport(runId)` | `GET /api/runs/{id}/report` | |
+| `downloadReportPdf(runId)` | `GET /api/runs/{id}/report/pdf` | Content-Disposition attachment. |
+| `createReportShare(runId)` | `POST /api/runs/{id}/report/share` | Returns share token. |
+| `getSharedReport(token)` | `GET /api/reports/shared/{token}` | Public. |
 
-#### `src/stores/useAuthStore.ts`
-| Action | Calls |
-|--------|-------|
-| `login()` | `authLogin()` -- stores `accessToken` in localStorage |
-| `register()` | `authRegister()` |
-| `refreshAccessToken()` | `authRefresh()` -- updates stored token |
-| `loadMe()` | `authMe()` -- populates `user` state |
-| `logout()` | `authLogout()` -- clears localStorage |
-
-#### `src/stores/useRunStore.ts`
-| Action | Calls |
-|--------|-------|
-| `fetchRuns(params)` | `getRuns(params)` |
-| `fetchRun(id)` | `getRun(id)` |
-| `createRun(data)` | `createRun(data)` |
-| `cancelRun(id)` | `cancelRun(id)` |
-| `approveRun(id, approved)` | `approveRun(id, approved)` |
-| `clarifyRun(id, response)` | `clarifyRun(id, response)` |
-| `mergeRun(id, approved)` | `mergeRun(id, approved)` |
-| `retryTask(runId, taskId)` | `retryTask(runId, taskId)` |
-| `retryRun(runId)` | `retryRun(runId)` |
-| `reopenMergeGate(runId)` | `reopenMergeGate(runId)` |
-| `implementSuggestions(runId)` | `implementSuggestions(runId)` |
-| `reworkRun(runId)` | `reworkRun(runId)` |
-| `pauseRun(id)` | `pauseRun(id)` |
-| `editAndRestartRun(runId, req)` | `editAndRestartRun(runId, req)` |
-| `resumeRun(runId)` | `resumeRun(runId)` |
-
-#### `src/stores/useMetricsStore.ts`
-| Action | Calls |
-|--------|-------|
-| `fetchMetrics(days)` | `getMetrics(days)` |
-| `fetchModelComparison(days)` | `getModelComparison(days)` |
-| `fetchUserRunsSummary(days)` | `getUserRunsSummary(days)` |
-
-#### `src/stores/useSseStore.ts`
-No API calls. Zustand store for SSE connection state + log entries.
-
-#### `src/stores/useUiStore.ts`
-No API calls. UI state (sidebar, modals).
-
-### Pages
-
-#### `src/pages/SettingsPage.tsx`
-- `validateGitHub()` -- validate PAT
-- `updateGithubSettings()` -- save or clear
-- `updateAiKeySettings()` -- save or clear
-- `updateOrgAiKeySettings()` -- save or clear
-- `updateOrgKeySourceSettings()` -- save mode & providers
-- `getMetrics()` -- system health display
-
-#### `src/pages/BillingPage.tsx`
-- `fetchBillingStatus()` -- on mount
-- `fetchTopupPackages()` -- on mount
-- `cancelSubscription()` -- user action
-- `purchaseTopup()` -- Razorpay checkout -- `verifyTopup()`
-
-#### `src/pages/PlansPage.tsx`
-- `fetchPlans()` -- on mount
-- `subscribe(planId, gateway, successUrl, cancelUrl)` -- initiates checkout (Stripe redirect or Razorpay SDK)
-- `verifyPayment()` -- Razorpay post-checkout verification
-
-#### `src/pages/IntegrationsPage.tsx`
-- Jira: `validateOrgJira()`, `updateOrgJiraSettings()` (save/clear)
-- Confluence: `validateOrgConfluence()`, `updateOrgConfluenceSettings()` (save/clear)
-- Slack: `getSlackStatus()`, `getSlackInstallUrl()`, `sendSlackTestMessage()`
-- Status: `getIntegrationStatus()`, `getIntegrationRuns()`
-
-#### `src/pages/DeploymentsPage.tsx`
-- `getDeployments()` -- on mount
-
-#### `src/pages/admin/AdminPage.tsx`
-- Loads: `adminListUsers()`, `adminListOrgs()`, `adminGetTierConfig()`, `adminListEscalated()`, `adminListTopupPackages()`, `adminListFeatureFlags()`
-- Actions: `adminUpdateUserStatus()`, `adminUpdateUserTier()`, `adminUpdateOrgStatus()`, `adminUpdateOrgTier()`, `adminUpdateOrgRunLimit()`, `adminUpdateOrgApiKeys()`, `adminUpdateTierConfig()`, `adminApproveInvite()`, `adminRejectInvite()`, `adminTriggerUsageReport()`, `adminCreateTopupPackage()`, `adminUpdateTopupPackage()`, `adminDeleteTopupPackage()`, `adminUpdateFeatureFlag()`
-- Payment audit: `adminListPaymentAudit()`, `adminExportPaymentAuditCsv()`, `adminListWebhookEvents()`
-
-#### `src/pages/org/OrgSettingsPage.tsx`
-- `createOrg()`, `getMyOrg()`, `getOrgMembers()`, `getOrgInvitations()`, `resendInvitation()`
-
-#### `src/pages/org/OrgProjectsPage.tsx`
-- `getProjects()`, `createProject()`, `getProjectMembers()`, `updateProjectSettings()`, `getOrgMembers()`
-
-#### `src/pages/SharedReportPage.tsx`
-- `getSharedReport(shareToken)` -- public, no auth
-
-#### `src/pages/auth/VerifyEmailPage.tsx`
-- `authVerifyEmail(token)`
-
-#### `src/pages/auth/ResetPasswordPage.tsx`
-- `authResetPassword(token, newPassword)`
-
-#### `src/pages/auth/ForgotPasswordPage.tsx`
-- `authForgotPassword(email)`
-
-### Components
-
-#### `src/components/runs/NewRunModal.tsx`
-- `conversationChat(messages)` -- pre-run clarification
-- `createRun(data)` -- submit run
-- `getAvailableModels()` -- populate model selector
-
-#### `src/components/runs/RunConversation.tsx`
-- `getRunChat(runId)` -- load history on mount
-- `sendRunChatMessage(runId, message)` -- send message
-
-#### `src/components/runs/PreviewTab.tsx`
-- `getPreviewStatus(runId)` -- poll status
-- `startPreview(runId, envVars)` -- start container
-- `stopPreview(runId)` -- stop container
-- `getPreviewLogs(runId, lines, filter)` -- poll logs every 5s
-- `analyzePreview(runId)` -- check DB/env requirements
-
-#### `src/components/runs/ValidationReportPanel.tsx`
-- `getValidationReport(runId)` -- load report
-- `shareValidationReport(runId)` -- generate share link
-- `downloadValidationReportPdf(runId)` -- download PDF
-
-#### `src/components/runs/RunList.tsx`
-- `getProjects()` -- populate project filter
-- `archiveRun(runId)` -- archive from list
-
-#### `src/components/runs/VibeProgressNarrative.tsx`
-- `mapEventToNarrative()` from `vibeNarrative.ts` (no API call; maps SSE events)
-
-#### `src/components/runs/RunDetailTabs.tsx`
-- Uses `monacoGeistTheme.ts` for code viewer theme (no API call)
-
-#### `src/components/run/FileViewer.tsx`
-- Uses `monacoGeistTheme.ts` for code viewer theme (no API call)
-
-#### `src/components/deployments/DeployWizardModal.tsx`
-- `getGcpCredential()`, `getRequiredPermissions()` -- GCP setup
-- `validateGcpCredential()` -- validate
-- `analyzeForDeploy(runId)` -- analyze readiness
-- `confirmDeploy(data)` -- deploy
-- `getDeploymentDetail(id)` -- poll status
-
-#### `src/components/auth/ProjectSelector.tsx`
-- `getProjects()` -- populate dropdown
-- `createProject(data)` -- inline create
-
-#### `src/components/auth/ChangePasswordModal.tsx`
-- `authChangePassword(data)`
-
-#### `src/components/layout/Sidebar.tsx`
-- `getProjects()` -- populate project navigation
-- `fetchBillingStatus()` -- usage badge display
-
-#### `src/components/billing/UsageBadge.tsx`
-- `fetchBillingStatus()` -- on mount
-
-#### `src/components/billing/PlanCard.tsx`
-- Uses `BillingPlan` type from billing-api.ts (no API call; receives data via props)
+Consumed by: `ValidationReportPanel`, `SharedReportPage`.
 
 ---
 
-## SSE (Server-Sent Events)
+## Projects
 
-#### `src/hooks/useSse.ts`
-- **Endpoint:** `/api/runs/{runId}/events`
-- **Auth:** `?token={accessToken}` query parameter
-- **Reconnect:** Exponential backoff (1s, 2s, 4s, 8s, 16s, 30s cap)
-- **On reconnect:** Full `fetchRun()` to catch missed events
-- **Pre-populate:** Loads historical `getMessages(runId)` on mount
-- **Refetch triggers** (via `RUN_STATUS` payload): `COMPLETE`, `FAILED`, `CANCELLED`, `PAUSED`, `AWAITING_APPROVAL`, `AWAITING_MERGE`, `COMPILING`, `MERGING`, `PARTIAL`
-- **Additional refetch triggers:** `TASK_STATUS`, `GATE_OPENED`, `COMPLETE`, `RUN_RESTARTED`, `BUDGET_EXCEEDED`
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listProjects()` | `GET /api/projects` | |
+| `createProject(req)` | `POST /api/projects` | Body: `name`, `description?`, `aiProvider`, `scaffoldTemplate?`, `figmaUrl?`. Tier-gated by `TierEnforcementService.assertCanCreateProject`. |
+| `getProject(id)` | `GET /api/projects/{id}` | |
+| `updateProject(id, req)` | `PUT /api/projects/{id}` | |
+| `archiveProject(id)` | `POST /api/projects/{id}/archive` | |
+| `projectDashboard(id)` | `GET /api/projects/{id}/dashboard` | Aggregated metrics + recent runs/PRs + arch-doc status. |
+| `projectMemory(id)` | `GET /api/projects/{id}/memory` | |
+| `projectMemoryLedger(id)` | `GET /api/projects/{id}/memory/ledger` | |
+| `projectScores(id)` | `GET /api/projects/{id}/scores` | |
+| `projectWorkspaceHealth(id)` | `GET /api/projects/{id}/workspace-health` | |
+| `projectEstimate(id, requirement)` | `GET /api/projects/{id}/estimate?requirement=<text>` | Heuristic; no LLM call. |
+| `projectTechDebt(id, sinceDays)` | `GET /api/projects/{id}/tech-debt?since=<days>` | |
+| `projectActivity(id, params)` | `GET /api/projects/{id}/activity` | Partitioned-by-month feed. |
+| `projectExport(id)` | `POST /api/projects/{id}/export` | ZIP of `.executespec/` + DB-only counterparts. |
 
----
-
-## Summary Statistics
-
-| Metric | Count |
-|--------|-------|
-| API functions in `api.ts` | ~130 |
-| API functions in `billing-api.ts` | 9 |
-| API functions in `invoice-api.ts` | 15 |
-| **Total API functions** | **~154** |
-| Unique backend endpoints used | ~120 |
-| Files making API calls | ~28 |
-| SSE event types handled | 5 (RUN_STATUS, TASK_STATUS, GATE_OPENED, COMPLETE, RUN_RESTARTED, BUDGET_EXCEEDED) |
-| Utility lib files (no API) | 5 (telemetry, techDetect, vibeNarrative, monacoSetup, monacoGeistTheme) |
+Consumed by: `useProjectStore`, `useV3ProjectStore`, `ProjectDashboardPage`, `V3ProjectHome`, `OrgProjectsPage`.
 
 ---
 
-## Pilot v3.0 — Project workspace endpoints
+## Project repos + architecture
 
-| Endpoint | Frontend caller | Component / store |
-|---|---|---|
-| `GET /api/projects/{id}` | `getProject` | `ProjectDashboardPage` (header) |
-| `GET /api/projects/{id}/dashboard` | `getProjectDashboard` | `useProjectStore.fetchDashboard` → metric tiles + Overview tab |
-| `GET /api/projects/{id}/scores` | `getProjectScores` | `useProjectStore.fetchScoreTrend` → `ProjectScoreTrend` (recharts) |
-| `POST /api/repos` | `createRepo` | `AddRepoModal` (Create-new tab) |
-| `GET /api/repos?scope=ORG\|USER\|ALL` | `listRepos` | `AddRepoModal` (Pick-existing tab) |
-| `POST /api/repos/{repoId}/sync` | `syncRepo` | `ProjectRepoManager` (RepoCard sync button) |
-| `DELETE /api/repos/{repoId}` | `deleteRepo` | (planned admin UI; not yet wired) |
-| `GET /api/projects/{id}/repos` | `getProjectRepos` | `useProjectStore.fetchRepos`, `NewRunModal` multi-select |
-| `POST /api/projects/{id}/repos/{repoId}` | `linkProjectRepo` | `AddRepoModal.link` |
-| `DELETE /api/projects/{id}/repos/{repoId}` | `unlinkProjectRepo` | `ProjectRepoManager.handleUnlink` |
-| `PUT /api/projects/{id}/repos/{repoId}/relationships` | `updateRepoRelationships` | `RepoCard` editor |
-| `POST /api/projects/{id}/architecture/generate` | `generateArchitecture` | `ArchitectureViewer.generate` |
-| `GET /api/projects/{id}/architecture` | `getArchitectureDoc` | `ArchitectureViewer.refresh` |
-| `GET /api/projects/{id}/architecture/versions` | `getArchitectureVersions` | `ArchitectureViewer` version dropdown |
-| `PUT /api/projects/{id}/architecture/annotate` | `annotateArchitecture` | `ArchitectureViewer.saveAnnotation` |
-| `GET /api/projects/{id}/architecture/staleness` | `getArchitectureStaleness` | `ArchitectureViewer` amber stale badge |
-| `GET /api/projects/{id}/repos/{repoId}/codemap` | `getRepoCodeMap` | (planned `CodeMapPanel`; endpoint live) |
-| `GET /api/runs/{id}/prs` | `getRunPrs` | `RunDetailTabs.RunPrList` |
-| `POST /api/runs` extends | `createRun` | now accepts `selectedRepoIds[]` and `figmaUrl` |
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listProjectRepos(id)` | `GET /api/projects/{id}/repos` | |
+| `linkRepoToProject(id, repoId)` | `POST /api/projects/{id}/repos/{repoId}` | Tier-gated by `assertCanLinkRepoToProject`. |
+| `unlinkRepoFromProject(id, repoId)` | `DELETE /api/projects/{id}/repos/{repoId}` | |
+| `updateRepoRelationships(id, repoId, tags)` | `PUT /api/projects/{id}/repos/{repoId}/relationships` | |
+| `analyseProject(id, branch?)` | `POST /api/projects/{id}/analyse?branch=<name>` | Per-branch arch refresh with caller PAT. |
+| `getProjectArchitecture(id)` | `GET /api/projects/{id}/architecture` | |
+| `listProjectArchitectureVersions(id)` | `GET /api/projects/{id}/architecture/versions` | |
+| `archDiff(id, from, to)` | `GET /api/projects/{id}/architecture/diff?from=&to=` | LCS + GitHub `compareCommits`. |
+| `getRepoArchitecture(id, repoId)` | `GET /api/projects/{id}/repos/{repoId}/architecture` | Per-repo HLD/LLD. |
+| `regenerateArchitecture(id)` | `POST /api/projects/{id}/architecture/generate` | |
+| `annotateArchitecture(id, annotations)` | `PUT /api/projects/{id}/architecture/annotate` | |
+| `getProjectStaleness(id)` | `GET /api/projects/{id}/architecture/staleness` | Per-repo SHA drift report. |
 
-### New types (`src/types/project.ts`)
-`ProjectRepo`, `ProjectRepoLink`, `RepoScope`, `StackInfo`, `ProjectDashboardDTO`,
-`ScoreEntry`, `PrSummary`, `TaskSummary`, `ArchitectureDoc`, `AssessmentResult`,
-`LinkRepoRequest`. Plus `StalenessReport` / `RepoStaleness` exported from
-`src/lib/api.ts`.
+Consumed by: `ArchitectureViewer`, `WorkspaceHealthPanel`, `RepoCard`.
 
-### Backend-only endpoint
-`POST /webhooks/github` (HMAC SHA-256 verified; secret in `github.webhook.secret`)
-— not called from the frontend; configured per-repo in GitHub settings.
+---
 
+## Project documents + RAG
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `uploadDocument(id, file)` | `POST /api/projects/{id}/documents` | Multipart upload. |
+| `listDocuments(id)` | `GET /api/projects/{id}/documents` | Status: UPLOADED / EXTRACTING / EMBEDDING / READY / FAILED. |
+| `deleteDocument(id, docId)` | `DELETE /api/projects/{id}/documents/{docId}` | |
+
+Consumed by: Knowledge tab on `ProjectDashboardPage`.
+
+---
+
+## Project chat
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `getProjectChat(id)` | `GET /api/projects/{id}/chat` | Full message history. |
+| `postProjectChat(id, message)` | `POST /api/projects/{id}/chat` | |
+| `applyChatSuggestion(id, body)` | `POST /api/projects/{id}/chat/apply` | Async via `applyExecutor` (4 threads). |
+| `clearProjectChat(id)` | `DELETE /api/projects/{id}/chat` | |
+| `compactProjectChat(id)` | `POST /api/projects/{id}/chat/compact` | Summarise older N messages, keep last 6 verbatim. |
+
+Consumed by: `ProjectChatPanel`.
+
+---
+
+## Project docs (Generate Docs)
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `generateDoc(id, type)` | `POST /api/projects/{id}/docs/{EXPLANATION\|SETUP}/generate` | 201 + row, 409 if no architecture. |
+| `getDoc(id, type)` | `GET /api/projects/{id}/docs/{type}` | 204 if not yet generated. |
+| `downloadDoc(id, type)` | `GET /api/projects/{id}/docs/{type}/download` | text/markdown attachment. |
+
+Consumed by: `GeneratedDocsPanel`.
+
+---
+
+## Spec templates
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listProjectTemplates(id)` | `GET /api/projects/{id}/templates` | Merged project + org-scoped. |
+| `createProjectTemplate(id, req)` | `POST /api/projects/{id}/templates` | |
+| `createOrgTemplate(orgId, req)` | `POST /api/orgs/{orgId}/templates` | |
+| `deleteTemplate(id, templateId)` | `DELETE /api/projects/{id}/templates/{templateId}` | Soft delete. |
+
+Consumed by: `TemplatePicker` (above the requirement textarea on `ExecutionSetup`).
+
+---
+
+## Pull requests
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listProjectPrs(id)` | `GET /api/projects/{id}/prs` | Multi-repo PR rollup. |
+| `refreshPrs(id)` | `POST /api/projects/{id}/prs/refresh` | Polls GitHub open/merged state + CI check-runs (V186). |
+| `getPostMergeBar(id)` | `GET /api/projects/{id}/post-merge-bar` | Transient banner marker. |
+| `dismissPostMergeBar(id)` | `DELETE /api/projects/{id}/post-merge-bar` | |
+| `installRepoWebhook(repoId)` | `POST /api/repos/{repoId}/webhook` | Uses caller's PAT (`admin:repo_hook`). |
+
+Consumed by: `ProjectPrRollup`, `PostMergeBar`, `RepoCard`.
+
+---
+
+## Repos (ORG/USER registry)
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listRepos(scope)` | `GET /api/repos?scope=ORG\|USER\|ALL` | |
+| `createRepo(req)` | `POST /api/repos` | ORG scope requires ORG_ADMIN. |
+| `syncRepo(id)` | `POST /api/repos/{id}/sync` | Re-detect stack + refresh `last_synced_sha`. |
+| `deleteRepo(id)` | `DELETE /api/repos/{id}` | Must not be linked to any project. |
+
+Consumed by: `OrgReposPage`, `ProjectRepoManager`, `AddRepoModal`.
+
+---
+
+## PR Review + Code Review (V172, PRO+)
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `submitPrReview(req)` | `POST /api/pr-reviews` | Body `{projectId, repoFullName, prNumber}`. 202 + QUEUED. |
+| `getPrReview(id)` | `GET /api/pr-reviews/{id}` | Includes comments. |
+| `listPrReviewsForPr(repo, number)` | `GET /api/pr-reviews?repo=&number=` | |
+| `listProjectPrReviews(projectId)` | `GET /api/projects/{projectId}/pr-reviews` | |
+| `prReviewAutofix(id)` | `POST /api/pr-reviews/{id}/autofix` | Phase 1 autofix dispatch via `FindingPatchSubmitter`. |
+| `submitCodeReview(req)` | `POST /api/code-reviews` | Body `{projectId, repoId?, repoFullName}`. 202 + QUEUED. |
+| `getCodeReview(id)` | `GET /api/code-reviews/{id}` | Includes issues + markdown report. |
+| `listProjectCodeReviews(projectId)` | `GET /api/projects/{projectId}/code-reviews` | |
+| `latestCodeReviewForRepo(projectId, repo)` | `GET /api/projects/{projectId}/code-reviews/latest?repo=` | 204 if none. |
+| `downloadCodeReviewReport(id)` | `GET /api/code-reviews/{id}/report` | text/markdown attachment. |
+| `codeReviewAutofix(id, severity)` | `POST /api/code-reviews/{id}/autofix?severity=` | Phase 4 autofix dispatch. |
+
+Consumed by: `PrReviewButton` (inline on PR rows), `CodeQualityPanel` (Code tab sub-tab).
+
+---
+
+## External sharing (V175)
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `createProjectInvite(id, body)` | `POST /api/projects/{id}/invites` | Body `{email, role}`. Sends email link. |
+| `listProjectInvites(id)` | `GET /api/projects/{id}/invites` | PENDING invites. |
+| `revokeInvite(id, inviteId)` | `DELETE /api/projects/{id}/invites/{inviteId}` | |
+| `previewInvite(token)` | `GET /api/invites/preview?token=` | Public. |
+| `acceptInvite(token)` | `POST /api/invites/accept?token=` | Authenticated; email-match required. |
+| `createShareLink(id, body)` | `POST /api/projects/{id}/share-links` | Body `{surface, scopeId?, label?, expiresInDays?}`. Tier-gated by `share_link_active_cap`. |
+| `listShareLinks(id)` | `GET /api/projects/{id}/share-links` | |
+| `revokeShareLink(id, linkId)` | `DELETE /api/projects/{id}/share-links/{linkId}` | Idempotent. |
+| `getSharedMeta(token)` | `GET /api/shared/{token}/meta` | Public — surface metadata, no payload. |
+| `getSharedRun(token)` | `GET /api/shared/{token}/run` | Public. |
+| `getSharedValidationReport(token)` | `GET /api/shared/{token}/validation-report` | |
+| `getSharedCodeReview(token)` | `GET /api/shared/{token}/code-review` | |
+| `getSharedPrReview(token)` | `GET /api/shared/{token}/pr-review` | |
+| `getSharedArchitecture(token)` | `GET /api/shared/{token}/architecture` | |
+
+Consumed by: `ProjectMembersPanel`, `SharePopover`, public `Shared*Page` components.
+
+---
+
+## Org + invites
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `getOrg()` | `GET /api/org` | Current user's org. |
+| `updateOrg(req)` | `PUT /api/org` | |
+| `inviteOrgMember(req)` | `POST /api/org/invite` | Same-org invite (not cross-org sharing). |
+| `acceptOrgInvite(token)` | `POST /api/org/invite/accept?token=` | |
+| `listOrgMembers()` | `GET /api/org/members` | |
+| `updateOrgMember(id, role)` | `PUT /api/org/members/{id}/role` | ORG_ADMIN or SUPER_ADMIN. |
+| `removeOrgMember(id)` | `DELETE /api/org/members/{id}` | |
+| `suspendOrgMember(id)` | `POST /api/org/members/{id}/suspend` | |
+| `adjustOrgSeats(seats)` | `POST /api/org/me/seats/adjust` | TEAM only. |
+
+Consumed by: `OrgSettingsPage`, `OrgTeamPage`, `OrgAdminDashboard`.
+
+---
+
+## Billing
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listPlans()` | `GET /api/billing/plans` | YAML-driven. |
+| `subscribe(planId, gateway, successUrl, cancelUrl, seats?)` | `POST /api/billing/subscribe` | TEAM passes `seats` 2-20. |
+| `cancelSubscription()` | `POST /api/billing/subscribe/cancel` | |
+| `purchaseTopup(packageId)` | `POST /api/billing/topup/purchase` | Buy run credits. |
+| `paymentHistory()` | `GET /api/billing/payment-history` | Org-scoped. |
+| `getInvoices()` | `GET /api/invoices` | |
+| `downloadInvoice(id)` | `GET /api/invoices/{id}/download` | PDF. |
+
+Consumed by: `PlansPage`, `PlanCard`, `BillingPage`, `InvoicesPage`.
+
+---
+
+## Onboarding (sandbox)
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listOnboardingSamples()` | `GET /api/onboarding/sample-specs` | 3 sample specs: web-api / frontend / cli. |
+| `pickOnboardingSample(sampleId)` | `POST /api/onboarding/pick-sample` | Provisions sandbox + pre-fills spec. |
+| `getSandboxStatus()` | `GET /api/onboarding/sandbox-status` | |
+
+Consumed by: `WelcomePage`, `FirstRunCelebration`.
+
+---
+
+## Notifications
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `listNotifications(params)` | `GET /api/notifications` | Paginated. |
+| `unreadCount()` | `GET /api/notifications/unread-count` | |
+| `markRead(id)` | `POST /api/notifications/{id}/read` | |
+| `markAllRead()` | `POST /api/notifications/read-all` | |
+| `getNotificationPrefs()` | `GET /api/notification-prefs` | Per-event-type × channel matrix. |
+| `updateNotificationPrefs(prefs)` | `PUT /api/notification-prefs` | |
+
+Consumed by: `NotificationBell` (Header), `NotificationPanel`.
+
+---
+
+## Admin (SUPER_ADMIN)
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `fetchTiersLifecycle()` | `GET /api/admin/tiers` | |
+| `updateTierLifecycle(tier, body)` | `PUT /api/admin/tiers/{tier}` | |
+| `paymentAudit(params)` | `GET /api/admin/payment-audit` | |
+| `exportPaymentAudit(params)` | `GET /api/admin/payment-audit/export` | CSV. |
+| `webhookEvents(params)` | `GET /api/admin/webhook-events` | |
+| `reconcileExecutions(body)` | `POST /api/admin/executions/reconcile` | Mark orphan EXECUTING rows FAILED. |
+| `runSwebench(taskId, provider)` | `POST /api/admin/swebench/run` | |
+| `runProgrambench(taskId, provider)` | `POST /api/admin/programbench/run` | |
+| `migrateProjectCodemaps(projectId)` | `POST /api/admin/projects/{id}/migrate-codemaps` | |
+| `listFeatureFlags()` | `GET /api/feature-flags` | |
+| `updateFeatureFlag(key, body)` | `POST /api/feature-flags/{key}` | |
+
+Consumed by: `AdminPage`, `TierLifecyclePage`, `PaymentAuditPage`.
+
+---
+
+## Models + integrations
+
+| Helper | Endpoint | Notes |
+|--------|----------|-------|
+| `availableModels()` | `GET /api/models/available` | Model matrix YAML-derived. |
+| `listIntegrations()` | `GET /api/integrations` | Slack / JIRA / Confluence / Bitbucket / PagerDuty / ServiceNow. |
+| `slackOauthInit()` | `GET /api/integrations/slack/oauth/init` | |
+| `slackOauthCallback(code, state)` | `GET /api/integrations/slack/oauth/callback` | Public. |
+| `disconnectIntegration(provider)` | `DELETE /api/integrations/{provider}` | |
+
+Consumed by: `IntegrationsPage`, `NewRunModal` (provider selector), `ProviderModelSelector`.
+
+---
+
+## Theme + analytics (no backend)
+
+- `useUiStore.ts` — `theme: 'dark' | 'light'` slice; pre-paint applies `<html data-theme>` + persists to `localStorage`.
+- `analytics.ts` — thin wrapper over `posthog-js`. Enabled only when `VITE_POSTHOG_KEY` is set. Events mirror the 6-event activation funnel (`SIGNUP`, `PROJECT_CREATED`, `SPEC_SUBMITTED`, `PLAN_APPROVED`, `RUN_COMPLETE`, `PR_MERGED`).
+
+---
+
+## ApiContractTest regression guard
+
+ArchUnit test at `src/test/java/com/navneet/executespec/arch/ApiContractTest.java` extracts:
+- Every URL referenced from `frontend/src/lib/api.ts` (regex over the literal string args of `fetch`, `useApi`, etc.).
+- Every backend `@*Mapping` annotation on every controller method (bytecode scan).
+
+The test asserts every frontend URL resolves to at least one backend mapping. ~321 backend patterns × ~200 api.ts URLs, runs in 2.6s.

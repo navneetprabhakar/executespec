@@ -1,9 +1,11 @@
-# deployment/ — Preview & Deploy
+# `deployment/` — Preview + deploy
+
+> Last reviewed: 2026-05-12 (1.0.0-M1).
 
 Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for prod), permanent Cloud Run deployment for 9 languages, workspace management with GCS archiving, and GitHub integration.
 
-## Key Files
-- `preview/PreviewService.java` — Triple-mode preview lifecycle (docker/vm/cloud-run). TTL: 15min (dev), 5min (prod). Preview auto-starts after COMPLETE via PipelineHarness. Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews from in-memory `active` map.
+## Key files
+- `preview/PreviewService.java` — Triple-mode preview lifecycle (docker / vm / cloud-run). 5-min TTL (prod default). Preview auto-starts after terminal via `RunOrchestrator` (was `PipelineHarness` in V1; deleted 2026-04-13). Idempotent: returns existing session if already running. `cleanupExpired()` runs every 60s to tear down expired previews from in-memory `active` map. **`handoffToPreviewEngine`** distinguishes "Docker daemon not reachable" from real preview-engine bugs (concise WARN vs ERROR + stack).
 - `preview/PreviewProperties.java` — Config: mode, TTL, concurrency limits, proxy settings.
 - `preview/CaddyProxyManager.java` — Caddy JSON config via admin API (Docker mode only, with Cloudflare Origin Cert).
 - `preview/DevDockerfileGenerator.java` — Preview-specific Dockerfile generation. `detect()` reads `.agent-context/project.json` (planner-declared type) first, falls back to file-based heuristics. Static HTML check runs before loose JS/TS fallback. **Single-package full-stack detection:** checks for both backend deps (express/fastify/etc) AND frontend deps (react/vue/vite/etc) in same `package.json` → returns FULL_STACK. NODE_BACKEND Dockerfile includes `ENV PORT=3000`.
@@ -14,17 +16,17 @@ Triple-mode preview system (Docker Compose for local, VM for dev, Cloud Run for 
 - `preview/vm/PreviewGarbageCollector.java` — DB-backed GC for VM previews. Runs every 10 min, tears down previews past `expiresAt`. Safety net for app restarts (in-memory map lost).
 - `preview/vm/PreviewRegistry.java` — JPA entity for `preview_registry` table. Tracks status, VM assignment, port, TTL, deploy duration.
 - `preview/vm/PreviewVmController.java` — REST: teardown, extend TTL, list active, stats, per-VM stats.
-- `DeploymentService.java` — Full Cloud Run deployment. 9-language support, 7-day TTL. Tier-based deployment limits enforced via `TierConfig.maxDeployments` (FREE=0, PRO=5, ENTERPRISE=-1).
+- `DeploymentService.java` — Full Cloud Run deployment. 9-language support. Tier-based deployment limits enforced via `tier_config.max_deployments` (FREE=1, PRO=3, TEAM/ENTERPRISE=-1).
 - `CloudRunClient.java` — GCP Cloud Run API client. All subprocess calls have timeouts.
 - `ArtifactRegistryClient.java` — Docker build + push to Artifact Registry. Build/push have timeouts.
 - `DockerfileGenerator.java` — Generates language-specific Dockerfiles (9 strategies). Also reads `.agent-context/project.json` to select correct strategy before file-based detection.
 - `GcsWorkspaceStore.java` — Archives workspaces to GCS after 24h.
-- `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). Note: pipeline push flow uses `PipelineHarness.pushToGitHubIfConfigured()` → `GitTool.pushToBranch()` instead.
+- `DeploymentGitHubService.java` — Push to GitHub for deploy flow (per-user PAT). Note: pipeline push flow uses `ScmPushService.pushMultiRepo` (auto-push at run-end) instead — `gitCommit` is denied for workers via `ToolRegistry.bindForWorker(ctx)`.
 
 ## Project Type Detection Flow
 ```
 Planner → plan JSON with "project_type": "STATIC_HTML"
-  → PipelineHarness.initAgentContext() writes .agent-context/project.json
+  → RunOrchestrator writes .agent-context/project.json
   → DevDockerfileGenerator.detect() reads project.json → STATIC_HTML
   → DockerfileGenerator reads project.json → StaticDeploymentStrategy
   → Fallback: file-based heuristic detection if project.json missing/invalid
@@ -46,7 +48,7 @@ For projects with both backend + frontend in one `package.json` (e.g., express +
 
 ## Patterns
 - Workspace: per-run isolated directory (workspace/{runId}/)
-- Preview auto-starts after COMPLETE via PipelineHarness (PROTOTYPE and real-time PRODUCTION). Batch runs skip auto-preview — `TestPreviewCoordinator` publishes empty event instead
+- Preview auto-starts after terminal via `RunOrchestrator` (PROTOTYPE + PRODUCTION). PATCH-mode runs (autofix + bench) skip auto-preview.
 - TestPreviewCoordinator reuses existing preview via `previewService.getStatus()` check
 - Preview NOT stopped after test execution (stays up for user's full 5-min TTL)
 - Deployment cleanup via scheduled job (DeploymentCleanupJob)

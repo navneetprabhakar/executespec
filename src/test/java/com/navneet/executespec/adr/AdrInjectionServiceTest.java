@@ -63,7 +63,8 @@ class AdrInjectionServiceTest {
     assertThat(r.block()).contains("=== PROJECT_ADRS_INDEX ===");
     assertThat(r.block()).contains("[0001]");
     assertThat(r.block()).contains("[0020]");
-    assertThat(r.block()).contains("Use the getAdr(id) tool");
+    // Audit 2026-05-12 L #66 — prompt copy adjusted (getAdr tool not wired yet).
+    assertThat(r.block()).contains("the getAdr tool is not yet wired");
     assertThat(r.totalAdrs()).isEqualTo(20);
   }
 

@@ -164,4 +164,13 @@ public class ApiKeyResolver {
         .filter(s -> !s.isEmpty())
         .collect(Collectors.toSet());
   }
+
+  /**
+   * Resolves the org ID associated with a user, or null if the user has no org or doesn't exist.
+   * Used by {@link RunKeyContextStore} for per-org attribution. Audit 2026-05-12 review item O #75.
+   */
+  public String resolveOrgIdForUser(String userId) {
+    if (userId == null || userId.isBlank()) return null;
+    return userRepo.findById(userId).map(AppUser::getOrgId).orElse(null);
+  }
 }

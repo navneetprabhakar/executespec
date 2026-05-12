@@ -61,7 +61,7 @@ class ActivityFeedControllerTest {
 
   @Test
   void filtersAuditOnlyEvents_evenWhenNoExplicitFilter() {
-    when(feedRepo.findRecentForProject(any(), any(), any()))
+    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
         .thenReturn(
             List.of(
                 entry(ActivityEventType.RUN_SUBMITTED),
@@ -78,7 +78,7 @@ class ActivityFeedControllerTest {
 
   @Test
   void filtersAdminToggleEvents_unlessIncludeAdminEventsTrue() {
-    when(feedRepo.findRecentForProject(any(), any(), any()))
+    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
         .thenReturn(
             List.of(
                 entry(ActivityEventType.RUN_SUBMITTED),
@@ -96,7 +96,7 @@ class ActivityFeedControllerTest {
 
   @Test
   void filtersByEventTypeWhenProvided() {
-    when(feedRepo.findRecentForProject(any(), any(), any()))
+    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
         .thenReturn(
             List.of(
                 entry(ActivityEventType.RUN_SUBMITTED),
@@ -129,7 +129,8 @@ class ActivityFeedControllerTest {
     ActivityFeedEntry e2 = entry(ActivityEventType.RUN_SUBMITTED);
     e2.setActorUserId(UUID.randomUUID());
 
-    when(feedRepo.findRecentForProject(any(), any(), any())).thenReturn(List.of(e1, e2));
+    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
+        .thenReturn(List.of(e1, e2));
     ResponseEntity<ActivityFeedController.ActivityPage> res =
         controller.list(projectId, 30, null, actor.toString(), null, null, false, 100, fakeAuth());
     assertThat(res.getBody().entries()).hasSize(1);
@@ -142,7 +143,7 @@ class ActivityFeedControllerTest {
     // after 100 → hasMore=true
     List<ActivityFeedEntry> many = new java.util.ArrayList<>();
     for (int i = 0; i < 101; i++) many.add(entry(ActivityEventType.RUN_SUBMITTED));
-    when(feedRepo.findRecentForProject(any(), any(), any())).thenReturn(many);
+    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any())).thenReturn(many);
 
     ResponseEntity<ActivityFeedController.ActivityPage> res =
         controller.list(projectId, 30, null, null, null, null, false, 100, fakeAuth());
@@ -152,7 +153,7 @@ class ActivityFeedControllerTest {
 
   @Test
   void clampsLimitToValidRange() {
-    when(feedRepo.findRecentForProject(any(), any(), any()))
+    when(feedRepo.findRecentForProjectLimited(any(), any(), any(), any()))
         .thenReturn(List.of(entry(ActivityEventType.RUN_SUBMITTED)));
     // limit=0 → clamped to 1; limit=10000 → clamped to 500. Both should
     // succeed without throwing.

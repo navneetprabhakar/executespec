@@ -1,170 +1,68 @@
-# harness/ — Pipeline Orchestration
+# `harness/` — V2 pipeline orchestration
 
-Core pipeline orchestration layer. Manages run lifecycle from submission to completion.
-
-> **Note (2026-04-13):** `PipelineHarness` and the V1 batch path have been deleted. The live pipeline is `integration/RunOrchestrator`. The V1 descriptions below are kept as historical reference only — see root `CLAUDE.md` "V2 pipeline" section for current behaviour.
+> Last reviewed: 2026-05-12 (1.0.0-M1).
 >
-> **2026-05-10 — worker tier-config tuning + Lever C + wall-clock cap.** Dev
-> run a59f9798 (project ppl-ai, ANTHROPIC, 23 tasks, $19.30, 105 min)
-> surfaced three orthogonal worker-termination problems:
->
-> - **T8 PARTIAL · LOW · 44 iters · 10 files** — final assistant text:
->   *"Excellent! The implementation is complete and correct. Let me
->   create a summary of what was done…"*. Worker emitted a status report
->   instead of invoking `completeTask`. Iter cap, stagnation watchdog,
->   and budget check were all happy; the loop's exit condition
->   ("model returned no tool calls") fired and we lost a finished task
->   to soft-PARTIAL.
-> - **T9 FAILED · LOW · COMPLETED_BY_STAGNATION** — 12-iter non-write
->   watchdog fired in 25s. T9 was a "audit and fix `deleteMedia`" task
->   on an existing repo; worker needed to readFile the real codebase
->   before writing the audit fix. Static `stagnationForceAfter=12` is
->   calibrated for fresh-scratch where the workspace is empty —
->   inappropriate when project-run has 2× the iter budget but only 1×
->   the stagnation budget.
-> - **T12 PARTIAL · MEDIUM · 100/100 iters · 92 files · 17 min** —
->   *"Write unit tests for all three mobile media.service methods"*.
->   Worker wrote 92 files at 0.92 writes/iter (extremely active) and
->   hit the project-run 100-iter cap mid-test-suite. Iter cap killed an
->   actively-progressing worker.
->
-> Four-line fix shipped together:
->
-> 1. **Lever C — completion-gate nudge** (`WorkerAgent.run`,
->    `looksLikeSummary` helper). When the assistant turn returns no
->    tool calls AND `totalWriteCalls > 0` AND `iter ≥ 0.5×maxIter` AND
->    the text matches a summary keyword (case-insensitive: `## summary`,
->    `summary of changes`, `implementation is complete`, `task complete`,
->    `i've completed`, `all done`, `ready for review`, etc.), inject a
->    one-shot UserMessage telling the model to call `completeTask` now
->    OR list the next concrete edit. Continues the loop; fires at most
->    once per task. Kicks T8 back into action without a code change to
->    the LLM router or tool dispatcher. Mirrors Lever A's shape but for
->    the completion gate, not the investigation gate.
-> 2. **Wall-clock cap** (new `WorkerTaskRequest.wallClockSeconds`,
->    new `Outcome.WALL_CLOCK_EXCEEDED`). Sibling of `maxIterations` —
->    whichever fires first wins. Top-of-iter check, so in-flight LLM
->    calls are not interrupted (terminated on next iter boundary, ~60s
->    tail). `SequentialExecutor.tierConfigFor` sets per-tier budgets:
->    LOW=15 min, MEDIUM=25 min, HIGH=45 min; ×2 on project runs.
->    Protects T12-style runs (active progress, slow model, iter-fat
->    workload) without requiring the iter cap to be unboundedly raised.
->    Existing cost cap still backstops genuinely runaway loops.
-> 3. **MEDIUM iter cap 50 → 75** (project-run 100 → 150). T12's worker
->    was making genuine progress at the 100-iter cap; the bump gives
->    test-heavy MEDIUM tasks ~50% more headroom. HIGH cap unchanged
->    (already at 120/240).
-> 4. **Project-run stagnation force bumps** — LOW 12 → 18, MEDIUM 20
->    → 24. ONLY for project runs. Warn threshold unchanged so the
->    PROGRESS CHECK nudge still lands at the same depth. T9-class
->    tasks (read-heavy reverse-engineering on an existing codebase)
->    now get headroom proportional to their bigger iter budget. HIGH
->    keeps 26 (already generous). Fresh-scratch unchanged.
->
-> Tests: `WorkerAgentLeverCAndWallClockTest` (10 cases — pin
-> `looksLikeSummary` heuristic + Lever C fires-once + wall-clock vs
-> COMPLETED), `SequentialExecutorTierConfigTest` (12 cases —
-> reflectively pins every iter / stagnation / wall-clock value across
-> {LOW, MEDIUM, HIGH} × {fresh, project}). 22 new + 79 existing
-> worker/executor/reviewer tests all green.
->
-> **2026-05-10 — `SequentialExecutor.persistTaskStatus` defensive truncation
-> + V184 column widening.** Dev run 7483896a (PR #95 / fix branch) confirmed
-> via VM journalctl that 3 of 4 problem tasks (T12 FAILED, T17 PARTIAL, T19
-> PARTIAL) were `value too long for type character varying(255)` overflows
-> on the COMPLETE/PARTIAL DB flip. The `softWarnReason` formula at
-> `executeOne` line ~513 (`"Worker stopped without completion but wrote N
-> files — " + describeWorkerFailure(primary)`) routinely exceeds 255 chars
-> when `Outcome.STOPPED_WITHOUT_COMPLETE` injects the 240-char
-> `finalAssistantText` tail. The persistence catch in `persistTaskStatus`
-> (line ~1063 try/catch around `taskRepo.saveAndFlush`) swallowed the
-> exception → orphan WORKING row → run-terminal resolver mis-marked as
-> FAILED/PARTIAL even though the worker had cleanly completed.
->
-> Two-line fix:
-> 1. **V184** widens `agent_task.last_llm_failure` from VARCHAR(255) to
->    TEXT (matches `taskJson` / `workerReportJson` / `completionNotes` /
->    `meetsRequirementsJson` which are all already TEXT).
-> 2. **Defensive cap** at `persistTaskStatus`: truncate `failureReason`
->    to 4000 chars before save with a literal `… [truncated]` suffix so
->    a future reader knows the value was clipped, not that the worker
->    terminated mid-thought. Belt-and-braces against router stack
->    traces ever growing the column unbounded.
->
-> T18 was the lone genuine soft-completion — the
-> `COMPLETED_BY_STAGNATION` outcome from the 12-iter non-write watchdog
-> (see `feature/worker-runaway-fixes` Fix B, commit `72cbf65a`,
-> 2026-05-03). The watchdog fired correctly; the file `EventContactsScreen.tsx`
-> at the spec'd mobile path simply did not exist, so the worker burned
-> 12 non-write iters searching before being force-terminated.
+> V1 `PipelineHarness` was deleted in deprecation P1-P6 (2026-04-13). The live entry point is `integration/RunOrchestrator`; `harness/` now holds the V2 sequential executor + the workspace + gate primitives that survived from the V1 era.
 
-## Key Files (V1 historical — deleted)
-- `PipelineHarness.java` — Main orchestrator. Runs async pipeline: plan → approve → work → compile → merge → **COMPLETE** → auto-preview → background validation (review → test gen → test exec → report). Writes `.agent-context/project.json` with planner-declared project type in `initAgentContext()`.
-- `SequentialTaskExecutor.java` — Executes tasks in tiered parallel groups via WorkerAgent. Model resolved from matrix via ModelResolver. Validation deferred to review phase.
-- `WorkspaceInitService.java` — Creates fresh git repo for each run. Writes `.gitignore`, `.gitattributes`.
-- `ApprovalGate.java` — Plan approval gate interface
-- `GateStore.java` — Redis-backed gate storage (500ms poll, 2h TTL, 24h max wait timeout)
-- `GitMergeService.java` — Merges task branches into main. Progressive merge after each task.
-- `SubtaskDecomposer.java` — Decomposes tasks into subtasks at execution time. Two strategies: (1) **File-based** — multi-file tasks (2+ owned files) split into per-file subtasks, one `writeFile` per subtask. (2) **Phase-based** — complex single-file tasks (MEDIUM/HIGH complexity, 1 owned file) split into method-level phases (MEDIUM → 2 phases, HIGH → 3 phases). Phase 1 creates the file skeleton; subsequent phases `readFile` then `writeFile` to extend it with more methods. Rework tasks excluded from both strategies.
-- `LanguageValidator.java` — Blocks unsupported languages at submission
-- `UiStyleResolver.java` — Resolves UI style from user request or project defaults
+## Key files
 
-## Pipeline Sequencing (PRODUCTION mode)
-1. PlannerAgent generates plan (includes `project_type`)
-2. Cost estimation: `CostEstimator.estimateWithCredits()` computes credits (`max(1, ceil(estimate × 1.10 / $5.0))`), persists `creditsCharged` + `hardCapUsd` on the run
-3. Plan approval gate (Redis-backed, user approves via UI). SSE `GATE_OPENED` includes credits + estimated cost.
-   - On approval: charges N credits via `TierEnforcementService.assertAndIncrementRunCount(userId, credits)`
-   - FREE tier: blocks specs requiring >1 credit (suggests top-up or tier upgrade)
-   - Insufficient credits: auto-rejects with message to purchase top-up or upgrade tier
-   - BYOK/ENTERPRISE: skip credit charge (unlimited)
-4. `initAgentContext()` writes `.agent-context/` files including `project.json`
-5. SequentialTaskExecutor runs tasks in tiered groups (SubtaskDecomposer splits multi-file tasks into per-file subtasks; complex single-file tasks into method-level phases)
-6. CompilerAgent fixes compilation errors
-7. Auto-merge all task branches to main
-8. **Mark run COMPLETE** (status set, `completedAt` recorded)
-9. **Auto-start preview** (5-min TTL) for PROTOTYPE and real-time PRODUCTION modes. Batch runs skip auto-preview.
-10. **Background validation thread** (`bg-validation-{runId}` virtual thread):
-   - ReviewerAgent inspects + auto-fixes
-   - Re-validation after auto-fix
-   - TestGenOrchestrator generates integration tests (async)
-   - TestPreviewCoordinator reuses existing preview → executes tests
-   - ValidationReport generated
-   - MergeCompleted event published (triggers JIRA/Confluence outbound comments via IntegrationManager)
-   - Cost calculated and persisted
-   - Cleanup: `backgroundValidationRuns.remove()`, `runKeyStore.remove()`, `broadcaster.complete()`
+| File | Purpose |
+|------|---------|
+| `SequentialExecutor.java` | Per-task tier-routed worker dispatch. For each task: compose system + user prompt → `WorkerAgent.run()` → if worker hit `completeTask`, run `buildProject` smoke (final task only on multi-task plans) → pass=SUCCESS / fail=ONE retry with build error injected. Aggregate: ALL_SUCCESS / PARTIAL_WITH_WARNINGS / FAILED / ABORTED. Per-task tier-config: LOW=LIGHTWEIGHT (30 iters / 4k tokens / 15-min wall-clock), MEDIUM=WORKHORSE (50 / 8k / 25-min), HIGH=PLANNING (75 / 16k / 45-min); project-run multiplier ×2. PATCH-mode per-provider caps: Anthropic 150 / OpenAI 100 / Gemini 120. **Soft-completion gate** (Fix C of `feature/worker-runaway-fixes`): when worker outcome is `COMPLETED_BY_STAGNATION` or `STOPPED_WITHOUT_COMPLETE` with `totalWriteCalls > 0`, falls through to the same smoke gate that COMPLETED uses — multi-task intermediate task with writes → `COMPLETE`; final smoke fail → `PARTIAL`. **2026-05-10:** `wallClockSeconds` per tier-config sibling to `maxIterations` (whichever fires first wins); `Outcome.WALL_CLOCK_EXCEEDED`. **`persistTaskStatus`** carries a defensive 4000-char cap on `failureReason` (V184 widens the column to TEXT). Also exposes the boot-time `execute(req, ResumeRequest)` overload that walks per-task status to decide SKIP_TERMINAL / RESUME_FROM_SNAPSHOT / RUN_FRESH on JVM restart. |
+| `WorkspaceInitService.java` | Creates fresh git repo for each run. Writes `.gitignore`, `.gitattributes`. Multi-repo runs clone each linked repo into `<workspace>/<runId>/repos/<name>/` via `cloneMultipleRepos`. Captures per-repo SHA snapshot into `run_repo_snapshot` (V100) for the "reset to run state" feature. |
+| `GateStore.java` | Redis-backed plan-gate storage. 500ms poll, 2h TTL, 24h max wait timeout. `isPlanGateWaiting(runId)` detects when the pipeline thread is gone (server restart during AWAITING_APPROVAL) so `approve()` can fail cleanly with 409. |
+| `UiStyleResolver.java` | Resolves design-system / UI style from user request or project defaults. 3-signal priority: explicit hint > planner `ui_style` > project type heuristic. |
+| `DesignSystemProperties.java` | YAML config for the company design-system library. Filesystem-backed (54 design systems shipped). |
+| `WorkerTaskRequest.java` | Per-task request shape — `taskId`, `complexity`, model + tier, `maxIterations`, `wallClockSeconds`, `requireBuildVerification`, `requireTestVerification` (patch-mode gate). |
+| `ApprovalGate.java` | Plan-gate interface. |
 
-**PROTOTYPE mode:** Skips only the approval gate — runs everything else (review, test gen, test exec, validation report). Still publishes MergeCompleted so integration comments fire.
+## Pipeline sequencing (PRODUCTION mode)
 
-**Existing-repo GitHub push:** `pushToGitHubIfConfigured()` creates branch `executespec/{runId-short}`, pushes to branch (not main), opens PR via `GitHubRepoService.createPullRequest()`, stores PR URL in `PipelineRun.githubPrUrl`.
+1. `RunOrchestrator.submitRun(req)` persists the run row + estimate.
+2. `SmartClassifierAgent.classify(spec)` → `PlanStrategy`.
+3. Strategy router emits the plan via `OutlinePlannerAgent` (FULL_PLAN / SKELETON_ONLY) + optional `TaskExpanderAgent` parallel expansion + `CoherencePlannerAgent` patch.
+4. **Plan approval gate** — `GateStore.openPlanGate(runId)`. SSE `GATE_OPENED` includes credits + estimated cost. PRODUCTION pauses; PROTOTYPE / `skipApproval` bypasses.
+5. On approval: charges credits via `TierEnforcementService.assertAndIncrementRunCount(userId, credits)`. FREE blocks specs requiring >1 credit. BYOK orgs skip the platform cap entirely.
+6. **`SequentialExecutor.execute(req)`** runs tasks one at a time. Tier-routed per-task model. Soft-completion gate covers `COMPLETED_BY_STAGNATION` / `STOPPED_WITHOUT_COMPLETE` paths. Final-task smoke + one-retry on fail.
+7. `ReviewerAgent.review(workspace, plan)` — general + project-type-aware wiring pass.
+8. `AccuracyAssessmentService` reads key files, scores requirements coverage.
+9. `ValidationReportService` computes the multiplicative `verifiedScore`.
+10. **Mark run terminal** (`COMPLETE / PARTIAL / FAILED`) with `status_reason`.
+11. **Background: auto-preview** (5-min TTL) + `TestGenOrchestrator` (plan → generate → compile → execute against live preview) + `MergeCompleted` event (drives Slack / JIRA / Confluence outbound comments).
+12. **Auto-push:** `ScmPushService.pushMultiRepo` opens per-repo PRs with cross-link.
 
-**Batch execution flow:** At plan approval, user may choose BATCH mode (if `batchAvailable`). `approvedExecutionMode=BATCH` triggers batch submission via `BatchClientRouter` → run enters `QUEUED_BATCH` → `IN_PROGRESS_BATCH`. `BatchPollService` polls every 30s (@Scheduled + @SchedulerLock). On completion, `BatchResumeService` writes files to workspace, marks tasks, resolves WORKHORSE model/provider via `ModelResolver` and sets on tasks via `StateStore.setTaskModelProvider()`, publishes `BatchCompleteEvent`. PipelineHarness `@EventListener @Async onBatchComplete()` auto-retries FAILED tasks: queries for failed tasks → `StateStore.resetTaskForRetry()` → executes in real-time via `SequentialTaskExecutor` → then resumes compile step → merge → COMPLETE → validation. Batch runs skip auto-preview; `TestPreviewCoordinator.onTestsReady()` publishes empty `TestExecutionCompletedEvent` to unblock validation report.
+PATCH mode: `PatchAgent.runPatchPipeline` runs a single thin-agent loop, skipping classifier / planner / reviewer. Used by the 4 autofix surfaces + SWE-bench / ProgramBench adapters.
 
-**Key design:** User sees COMPLETE immediately after compile+merge. Preview is available while validation runs in background. SSE stream stays open until background validation finishes.
+## Worker outcomes + resilience
 
-## Cost Budget Enforcement
-- **Cost-proportional credits:** `credits = max(1, ceil(bufferedEstimate / $5.0))` where buffer = 10% retry margin
-- **Silent hard cap:** `credits × $5.0 × 1.5` — no progressive warnings. User approved cost upfront at plan gate.
-- `RunCostBudgetService` uses Caffeine caches (6h TTL, 1000 max). Only `isOverBudget()` as silent safety net.
-- Mid-task cost check: WorkerAgent checks `isOverBudget(runId)` every 5 LLM iterations; emits `budgetExceeded` SSE event and stops cleanly
-- **Refund on FAILURE:** `RunQuotaRefundListener` reads `creditsCharged` from run and refunds N credits via `TierEnforcementService.decrementRunCount(userId, credits)`
-- **Cost audit:** `RunCostLog` entity persisted after each run completion — tracks estimated, actual, margin, credits, budget-hit for pricing analytics
-- **`creditsConfirmed` validation:** Approve endpoint echoes credit count; 409 Conflict if mismatch (prevents stale approvals after repricing)
+| Outcome | Meaning |
+|---------|---------|
+| `COMPLETED` | Worker called `completeTask` cleanly. |
+| `COMPLETED_BY_STAGNATION` | 12-iter non-write watchdog force-terminated; falls through to soft-completion gate + Lever B salvage. |
+| `STOPPED_WITHOUT_COMPLETE` | Worker hit terminal without calling `completeTask`. Falls through to soft-completion gate. |
+| `ITERATION_LIMIT_EXCEEDED` | Per-tier cap hit. |
+| `WALL_CLOCK_EXCEEDED` | Per-tier wall-clock cap hit (2026-05-10). |
+| `BUDGET_EXCEEDED` | Hard-cap dollar ceiling hit. Lever B salvage fires when 0 writes happened. |
+| `ERROR` | Router or tool error. |
 
-## Background Validation Lifecycle
-- `backgroundValidationRuns` (ConcurrentHashMap.newKeySet()) tracks runs with active background threads
-- Main `executeRunAsync()` finally block checks this set — defers cleanup for background runs
-- Background thread's own `finally` block handles: `backgroundValidationRuns.remove()`, `runKeyStore.remove()`, `runBudgetTracker.remove()`, `broadcaster.complete()`
-- Preview NOT stopped after test execution (stays up for user's full TTL)
+**Three nudge levers** in `WorkerAgent`:
+- **A — force-edit watchdog** at 0.7×maxIter with `totalWriteCalls=0`: inject a UserMessage "commit to ANY edit now". Anthropic/Gemini cache-safe.
+- **B — best-guess salvage** on iter-limit / budget-exceeded / stagnation-force when 0 writes happened: one final LLM call asking for the single best-guess writeFile/editFile.
+- **C — completion-gate nudge** (2026-05-10) when the worker emits a "summary" status text past 0.5×maxIter without `completeTask` and `totalWriteCalls > 0`: inject a one-shot UserMessage telling it to call `completeTask` now or list the next concrete edit.
 
-## Concurrency Controls
-- **Thread pool:** Bounded `ThreadPoolExecutor` (core=maxRuns, max=maxRuns*3, CallerRunsPolicy) — replaces unbounded `newCachedThreadPool`
-- **Run semaphore:** `runSlots.tryAcquire()` on ALL entry points: `startIterationRun()`, `resumeRun()`, `executeApplySuggestion()`. Released in `finally` block.
-- **Gate timeout:** All gate waits (`awaitPlanGate`, `awaitMergeGate`, `awaitClarificationGate`) have 24h max wait. Throws `InterruptedException` on deadline expiry.
+## Concurrency
+
+- **Bounded thread pool** at the orchestrator entry: `ThreadPoolExecutor` with `CallerRunsPolicy` backpressure. Size = `PoolSizing.coreMultiple(1, 4, 16)`.
+- **Per-task sequential** within a run (no intra-run parallelism).
+- **Plan-gate wait** Redis-backed, 500ms polling, 24h max wait.
+- **Async work** in virtual threads wrapped with `ContextSnapshotFactory.captureAll().wrap(runnable)` so traceId + RequestAttributes survive.
+- **`AsyncAllowlistTest`** (ArchUnit) pins every `@Async` method to a curated allowlist (regression guard against the `@Async` + lazy-JPA class of bugs).
 
 ## Patterns
-- Pipeline runs in virtual thread, MUST wrap with `ContextSnapshotFactory.captureAll()`
-- Run ownership (userId, orgId, projectId) stamped BEFORE async thread starts
-- `doReviewAndMerge()` is the centralized post-task flow for resume/retry paths (NOT updated for background pattern — runs synchronous)
-- Cost estimate + credits computed after plan creation via `CostEstimator.estimateWithCredits()`, persisted to `creditsCharged` + `hardCapUsd`
-- Credits charged at plan approval, NOT at submission (`assertCanSubmitRun` at submit, `assertAndIncrementRunCount(userId, credits)` at approval)
-- `.agent-context/project.json` written from planner output — used by preview/deploy for project type detection
+
+- Run ownership (`userId`, `orgId`, `projectId`) stamped BEFORE the async pipeline thread starts.
+- `.agent-context/project.json` written from planner output — used by preview / deploy for project-type detection.
+- `gitCommit` denied for workers via `ToolRegistry.bindForWorker(ctx)` — auto-push happens at run-end.
+- Cost estimate + credits computed after planner emits the plan; persisted to `creditsCharged` + `hardCapUsd` via `RunOrchestrator.persistEstimate` (clamps with `userCostCap` when present; skips the platform cap entirely for BYOK orgs).
+- Credits charged at plan approval (not submission). Refunded on FAILURE.
+- Cost audit: `RunCostLog` entity persisted after each run completion — tracks estimated vs actual, margin, credits, budget-hit for pricing analytics.

@@ -1,7 +1,11 @@
 # Model-Mapping Audit + Pricing Eval — 2026-05-06
 
-> **Asked for:** pricing eval per model/provider, restart servers + run a cost eval, double-check context-window config, generate a report on all model mappings (single source of truth audit).
-> **Branch:** `feature/project-cost-pool-tuning`
+> **Snapshot:** point-in-time audit + 3-provider LOW-band eval that drove the
+> 2026-05-06 model-mapping consolidation. Last reviewed for relevance:
+> 2026-05-12 — kept as a breadcrumb because the 5 fix commits + YAML
+> consolidation pattern are still referenced from `CLAUDE.md` and
+> `ARCHITECTURE.md` as the single-source-of-truth rationale.
+> **Branch this work landed on:** `feature/project-cost-pool-tuning` (merged).
 > **Eval results:** `scripts/v2-eval-results/v2-eval-20260506-120242.{json,md}` + the 2026-05-04 baseline.
 >
 > ---

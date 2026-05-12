@@ -25,11 +25,14 @@ import lombok.extern.slf4j.Slf4j;
  * <ul>
  *   <li>FREE — 30 days after completion
  *   <li>PRO — 90 days after completion
+ *   <li>TEAM — per tier_config (V144 reinstatement)
  *   <li>ENTERPRISE — 365 days after completion
  * </ul>
  *
- * <p>The scheduler runs daily. It first soft-deletes expired runs, then hard-deletes runs that have
- * been soft-deleted for ≥ 7 days (grace period for the GCS workspace deletion to complete).
+ * <p>Retention sweep iterates over every row in {@code tier_config} via {@link
+ * TierConfigRepository#findAll()} so future tiers are auto-included without code changes. The
+ * scheduler runs daily. It first soft-deletes expired runs, then hard-deletes runs that have been
+ * soft-deleted for ≥ 7 days (grace period for the GCS workspace deletion to complete).
  */
 @Service
 @RequiredArgsConstructor
@@ -79,19 +82,18 @@ public class DataRetentionService {
   // ── Internal sweep helpers ────────────────────────────────────────────────
 
   private void softDeleteExpiredRuns() {
-    List<String> tiers = List.of("FREE", "PRO", "ENTERPRISE");
+    // Iterate over every configured tier — was a hardcoded ["FREE","PRO","ENTERPRISE"] list,
+    // which silently missed TEAM (V144 reinstatement) and any future tiers added to tier_config.
+    // Audit: 2026-05-12 line-by-line review item H #53.
+    List<com.navneet.executespec.auth.entity.TierConfig> allTiers = tierConfigRepository.findAll();
     int total = 0;
 
-    for (String tier : tiers) {
+    for (var tierConfig : allTiers) {
+      String tier = tierConfig.getTier();
       int retentionDays =
-          tierConfigRepository
-              .findById(tier)
-              .map(
-                  tc ->
-                      tc.getRetentionDays() != null
-                          ? tc.getRetentionDays()
-                          : DEFAULT_RETENTION_DAYS)
-              .orElse(DEFAULT_RETENTION_DAYS);
+          tierConfig.getRetentionDays() != null
+              ? tierConfig.getRetentionDays()
+              : DEFAULT_RETENTION_DAYS;
 
       Instant cutoff = Instant.now().minus(retentionDays, ChronoUnit.DAYS);
       List<PipelineRun> expired = runRepository.findExpiredRunsForTier(tier, cutoff);

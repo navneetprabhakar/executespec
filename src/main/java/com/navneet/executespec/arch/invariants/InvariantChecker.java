@@ -4,8 +4,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import com.navneet.executespec.util.SafeYamlLoader;
+
 import org.springframework.stereotype.Component;
-import org.yaml.snakeyaml.Yaml;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -45,7 +46,7 @@ public class InvariantChecker {
       String invariantYaml, List<String> repoFilePaths, ContentLoader loader) {
     if (invariantYaml == null || invariantYaml.isBlank()) return List.of();
     try {
-      Object raw = new Yaml().load(invariantYaml);
+      Object raw = SafeYamlLoader.load(invariantYaml);
       // Support both single-invariant body and a one-element list
       if (raw instanceof List<?> l && !l.isEmpty()) raw = l.get(0);
       if (!(raw instanceof Map)) return List.of();

@@ -1,6 +1,7 @@
 # Service-Level Objectives (SLOs)
 
-> **Created:** 2026-05-06 — GA-readiness §P4.2
+> **Created:** 2026-05-06.
+> **Last reviewed:** 2026-05-12 (1.0.0-M1).
 > **Status:** PROPOSED — alert rules + Grafana dashboard land alongside the
 > on-call rotation in the next pass.
 > **Audience:** founding eng team + incoming on-call rotation.

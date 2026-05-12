@@ -124,7 +124,17 @@ public class RunCodeMapService {
     return repo.findByRunId(runId);
   }
 
-  /** Returns [summary, inputTokens, outputTokens]. */
+  /**
+   * Returns [summary, inputTokens, outputTokens].
+   *
+   * <p><strong>Audit 2026-05-12 review item E #35:</strong> this method calls {@code
+   * anthropicModel.call(prompt)} directly, bypassing {@code LlmRouter}'s provider failover, circuit
+   * breaker, RunCostTracker integration, and telemetry. It is also Anthropic-only — a Gemini- or
+   * OpenAI-preferring org gets no summary even though those providers can summarise. Migrating to
+   * {@code FallbackLlmRouter.callWithFallback} (with a {@code RunCostTracker.record} adapter) is
+   * the cleanest path; left as a follow-up because it changes failure semantics for code-map
+   * summarisation across all eligible tiers.
+   */
   private String[] summarise(String repoFullName, String rawMarkdown) {
     String system =
         """

@@ -205,10 +205,14 @@ public class OpenAiNativeToolClient {
         for (var tc : am.getToolCalls()) {
           ObjectNode tcn = tcs.addObject();
           // OpenAI requires non-empty IDs to round-trip in the tool response.
+          // Stable, collision-free synthetic ID when the upstream tool call lacks one.
+          // `System.identityHashCode` is NOT unique across JVMs and can collide within one JVM
+          // (rare but real → OpenAI returns 400 "tool_call_id mismatch"). UUIDs are safe.
+          // Audit: 2026-05-12 line-by-line review item M #67.
           tcn.put(
               "id",
               (tc.id() == null || tc.id().isBlank())
-                  ? "call_" + Integer.toHexString(System.identityHashCode(tc))
+                  ? "call_" + java.util.UUID.randomUUID().toString().replace("-", "")
                   : tc.id());
           tcn.put("type", "function");
           ObjectNode fn = tcn.putObject("function");
