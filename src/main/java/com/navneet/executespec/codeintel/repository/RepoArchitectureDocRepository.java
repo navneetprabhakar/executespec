@@ -15,6 +15,10 @@ public interface RepoArchitectureDocRepository extends JpaRepository<RepoArchite
 
   List<RepoArchitectureDoc> findByProjectIdOrderByGeneratedAtDesc(String projectId);
 
+  /** 2026-05-13 — used by {@code VersionRetentionService} to prune all but the latest N. */
+  List<RepoArchitectureDoc> findByProjectIdAndRepoIdOrderByVersionDesc(
+      String projectId, UUID repoId);
+
   /**
    * Sum of {@code cost_usd} across every per-repo architecture doc generated for a project. Used by
    * the project dashboard to roll up arch-generation spend.

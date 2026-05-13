@@ -40,6 +40,7 @@ public class ProjectArchitectureService {
   private final ProjectCodeMapRepository codeMapRepo;
   private final ProjectArchitectureDocRepository archDocRepo;
   private final RepoArchitectureDocRepository repoArchRepo;
+  private final VersionRetentionService versionRetention;
   private final CodeMapGenerator codeMapGenerator;
   private final RepoArchitectureGenerator repoArchGenerator;
   private final ArchitectureDocGenerator archDocGenerator;
@@ -216,6 +217,10 @@ public class ProjectArchitectureService {
             .costUsd(archCost)
             .build();
     archDocRepo.save(doc);
+    // 2026-05-13 — cap version history at the latest N. See VersionRetentionService for the
+    // contract + per-artifact grouping keys; failures here are swallowed (logged) so the regen
+    // flow always returns the new version even if the legacy-row delete trips on something.
+    versionRetention.pruneProjectArch(projectId);
     log.info(
         "[{}] 3-step arch generation complete: {} repos, combined v{} ({} in / {} out tokens)",
         projectId,
@@ -269,6 +274,7 @@ public class ProjectArchitectureService {
             .generatedFromSha(result.sha() != null ? result.sha() : repo.getLastSyncedSha())
             .build();
     codeMapRepo.save(cm);
+    versionRetention.pruneCodeMap(projectId, repo.getId());
     log.info(
         "[{}] codemap for {} regenerated as v{} @ sha={}",
         projectId,
@@ -344,6 +350,7 @@ public class ProjectArchitectureService {
             .costUsd(cost)
             .build();
     repoArchRepo.save(doc);
+    versionRetention.pruneRepoArch(projectId, repo.getId());
     log.info(
         "[{}] repo-arch for {} generated as v{} ({} in / {} out tokens, model={})",
         projectId,
