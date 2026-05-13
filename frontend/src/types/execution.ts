@@ -75,6 +75,13 @@ export interface ExecutionRunDto {
   createdAt: string;
   updatedAt: string;
   /**
+   * V188 (2026-05-13) — unified-dispatch link. When set, the entire execution runs as one V2
+   * pipeline_run (multi-repo, hierarchical-planned). The V3 page should render the V2 run's plan +
+   * task progress instead of per-Solution rows. NULL for legacy executions that fanned out into
+   * per-Solution V2 runs.
+   */
+  pipelineRunId?: string | null;
+  /**
    * 2026-05-04 — discriminator for the merged Launches list.
    * - `EXECUTION` — real `execution_run` row, viewable at `/projects/{id}/executions/{id}`.
    * - `PIPELINE_RUN` — V2 `pipeline_run` synthesised into the same list (project chat / V3
