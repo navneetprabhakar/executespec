@@ -184,6 +184,32 @@ public class ProjectDocGeneratorService {
     }
     ProjectArchitectureDoc arch = archOpt.get();
 
+    // PR-Q (2026-05-13) — short-circuit cache. Same idea as PR-K's fingerprint short-circuit
+    // on combined-arch regen, one layer up: if the most recent doc of this type was generated
+    // against the SAME arch version AND the SAME per-repo SHA fingerprint, return it instead
+    // of burning a 15-40s LLM call. Cheap composite key (Integer + short String) — no
+    // additional query cost over the existing latest-version lookup the cost-aware code path
+    // does anyway.
+    Integer sourceArchVersion = arch.getVersion();
+    String sourceFingerprint = arch.getGeneratedFromShas(); // already a canonical JSON string
+    if (sourceArchVersion != null && sourceFingerprint != null) {
+      Optional<ProjectGeneratedDoc> cached =
+          docRepo
+              .findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc(
+                  projectId, docType, sourceArchVersion, sourceFingerprint)
+              .filter(d -> d.getContent() != null && !d.getContent().isBlank());
+      if (cached.isPresent()) {
+        log.info(
+            "[{}] doc-gen short-circuit type={} — reusing v{} (arch v{} + SHAs unchanged); skipped"
+                + " LLM",
+            projectId,
+            docType,
+            cached.get().getVersion(),
+            sourceArchVersion);
+        return cached.get();
+      }
+    }
+
     String systemPrompt =
         switch (docType) {
           case EXPLANATION -> EXPLANATION_SYSTEM;
@@ -239,6 +265,12 @@ public class ProjectDocGeneratorService {
             .inputTokens(inTok)
             .outputTokens(outTok)
             .costUsd(cost)
+            // PR-Q (2026-05-13) — persist the cache key so the next /generate call can decide
+            // whether to short-circuit. sourceArchVersion + sourceFingerprint were computed
+            // above for the cache-hit check; reuse the same values here so the round-trip is
+            // a true round-trip (no risk of a one-iteration drift).
+            .sourceArchVersion(sourceArchVersion)
+            .sourceShasFingerprint(sourceFingerprint)
             .build();
     doc = docRepo.save(doc);
     versionRetention.pruneGeneratedDoc(projectId, docType);
