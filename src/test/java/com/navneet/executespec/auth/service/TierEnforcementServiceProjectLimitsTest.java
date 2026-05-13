@@ -104,7 +104,7 @@ class TierEnforcementServiceProjectLimitsTest {
       when(userRepo.findById("u1")).thenReturn(Optional.of(user("u1", "USER", "FREE", "org1")));
       when(orgRepo.findById("org1")).thenReturn(Optional.of(org("org1", "FREE")));
       when(tierConfigRepo.findById("FREE")).thenReturn(Optional.of(tierCfg("FREE", 1, 1)));
-      when(projectRepo.countByOrgIdAndStatus("org1", "ACTIVE")).thenReturn(0L);
+      when(projectRepo.countByOrgIdAndStatusAndDeletedAtIsNull("org1", "ACTIVE")).thenReturn(0L);
 
       svc.assertCanCreateProject("u1", "org1");
       // no throw
@@ -115,7 +115,7 @@ class TierEnforcementServiceProjectLimitsTest {
       when(userRepo.findById("u1")).thenReturn(Optional.of(user("u1", "USER", "FREE", "org1")));
       when(orgRepo.findById("org1")).thenReturn(Optional.of(org("org1", "FREE")));
       when(tierConfigRepo.findById("FREE")).thenReturn(Optional.of(tierCfg("FREE", 1, 1)));
-      when(projectRepo.countByOrgIdAndStatus("org1", "ACTIVE")).thenReturn(1L);
+      when(projectRepo.countByOrgIdAndStatusAndDeletedAtIsNull("org1", "ACTIVE")).thenReturn(1L);
 
       assertThatThrownBy(() -> svc.assertCanCreateProject("u1", "org1"))
           .isInstanceOf(ResponseStatusException.class)
@@ -129,7 +129,7 @@ class TierEnforcementServiceProjectLimitsTest {
       when(userRepo.findById("u1")).thenReturn(Optional.of(user("u1", "USER", "PRO", "org1")));
       when(orgRepo.findById("org1")).thenReturn(Optional.of(org("org1", "PRO")));
       when(tierConfigRepo.findById("PRO")).thenReturn(Optional.of(tierCfg("PRO", 2, 2)));
-      when(projectRepo.countByOrgIdAndStatus("org1", "ACTIVE")).thenReturn(5L);
+      when(projectRepo.countByOrgIdAndStatusAndDeletedAtIsNull("org1", "ACTIVE")).thenReturn(5L);
 
       assertThatThrownBy(() -> svc.assertCanCreateProject("u1", "org1"))
           .isInstanceOf(ResponseStatusException.class)
@@ -145,7 +145,8 @@ class TierEnforcementServiceProjectLimitsTest {
           .thenReturn(Optional.of(tierCfg("ENTERPRISE", -1, -1)));
 
       svc.assertCanCreateProject("u1", "org1");
-      verify(projectRepo, never()).countByOrgIdAndStatus(anyString(), anyString());
+      verify(projectRepo, never())
+          .countByOrgIdAndStatusAndDeletedAtIsNull(anyString(), anyString());
     }
 
     @Test
@@ -179,7 +180,8 @@ class TierEnforcementServiceProjectLimitsTest {
 
       svc.assertCanCreateProject("u1", "org1");
       // no throw
-      verify(projectRepo, never()).countByOrgIdAndStatus(anyString(), anyString());
+      verify(projectRepo, never())
+          .countByOrgIdAndStatusAndDeletedAtIsNull(anyString(), anyString());
     }
   }
 
@@ -274,7 +276,7 @@ class TierEnforcementServiceProjectLimitsTest {
       when(userRepo.findById("u1")).thenReturn(Optional.of(user("u1", "USER", "FREE", "org1")));
       when(orgRepo.findById("org1")).thenReturn(Optional.of(org("org1", "TEAM")));
       when(tierConfigRepo.findById("TEAM")).thenReturn(Optional.of(tierCfg("TEAM", 10, 10)));
-      when(projectRepo.countByOrgIdAndStatus("org1", "ACTIVE")).thenReturn(5L);
+      when(projectRepo.countByOrgIdAndStatusAndDeletedAtIsNull("org1", "ACTIVE")).thenReturn(5L);
 
       svc.assertCanCreateProject("u1", "org1");
       verify(tierConfigRepo).findById("TEAM");
@@ -289,7 +291,8 @@ class TierEnforcementServiceProjectLimitsTest {
       when(tierConfigRepo.findById("FREE")).thenReturn(Optional.of(tierCfg("FREE", 1, 1)));
 
       svc.assertCanCreateProject("u1", null);
-      verify(projectRepo, never()).countByOrgIdAndStatus(anyString(), anyString());
+      verify(projectRepo, never())
+          .countByOrgIdAndStatusAndDeletedAtIsNull(anyString(), anyString());
     }
   }
 }

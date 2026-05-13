@@ -1530,6 +1530,14 @@ export interface ProjectDto {
   defaultReviewers?: string | null;
   /** v2.5.7 — default GitHub org/owner for repos created under this project. */
   githubOwner?: string | null;
+  /** V191 (PR-B-part-2, 2026-05-13) — when this project was archived (null = ACTIVE). */
+  archivedAt?: string | null;
+  /**
+   * V191 (PR-B-part-2) — when this project was soft-deleted (null = not deleted). Soft-deleted
+   * rows are normally filtered server-side; this field is non-null only when an admin tool
+   * fetches the tombstone explicitly.
+   */
+  deletedAt?: string | null;
 }
 
 export interface ProjectMemberDto {
@@ -1559,6 +1567,40 @@ export const updateProjectSettings = (
 
 export const archiveProject = (id: string) =>
   req<ProjectDto>(`/projects/${id}/archive`, {method: 'PUT'});
+
+/**
+ * V191 (PR-B-part-2, 2026-05-13) — reverse of {@link archiveProject}. Idempotent on the backend:
+ * unarchiving an already-active project returns 200 OK with no audit row.
+ */
+export const unarchiveProject = (id: string) =>
+  req<ProjectDto>(`/projects/${id}/unarchive`, {method: 'PUT'});
+
+/**
+ * V191 (PR-B-part-2) — soft-delete with 30-day undo window. The project disappears from the
+ * listing immediately; call {@link restoreProject} within 30 days to bring it back. After that
+ * the cleanup sweeper (PR-H) hard-deletes it.
+ */
+export const deleteProject = (id: string) => req<void>(`/projects/${id}`, {method: 'DELETE'});
+
+/** V191 (PR-B-part-2) — undo a soft-delete within the 30-day window. */
+export const restoreProject = (id: string) =>
+  req<ProjectDto>(`/projects/${id}/restore`, {method: 'POST'});
+
+/** V191 (PR-B-part-2) — reverse of run archive. Idempotent. */
+export const unarchiveRun = (runId: string) =>
+  req<{message: string}>(`/runs/${runId}/unarchive`, {method: 'POST'});
+
+/**
+ * V191 (PR-B-part-2) — soft-delete a run with 30-day undo window. Distinct from cancelling an
+ * in-flight run (which uses DELETE /api/runs/{id}); soft-delete is for tombstoning terminal
+ * runs. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be soft-deleted.
+ */
+export const softDeleteRun = (runId: string) =>
+  req<{message: string}>(`/runs/${runId}/soft-delete`, {method: 'POST'});
+
+/** V191 (PR-B-part-2) — undo a run soft-delete within the 30-day window. */
+export const restoreRun = (runId: string) =>
+  req<{message: string}>(`/runs/${runId}/restore`, {method: 'POST'});
 
 /** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
 export const fetchPrReviewComments = (projectId: string, prNumber: number, repoFullName: string) =>
