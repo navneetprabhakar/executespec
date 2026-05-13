@@ -87,6 +87,12 @@ public class ReviewerAgent {
   private final BuildProjectTool buildProjectTool;
   private final ObjectMapper objectMapper;
   private final Metrics metrics;
+  // 2026-05-13 — post-edit formatter pass. Audit run 6024f510 RC-1: reviewer's
+  // surgical async→def edits introduced black-incompatible formatting drift
+  // that broke the customer's `black --check app/` CI step. Runs after both
+  // review passes finish, before the final build smoke, so the formatter's
+  // re-write is included in the buildProject verification.
+  private final PostEditFormatter postEditFormatter;
   // v2.5.12 — resolve PLANNING-tier model from the matrix (same tier as
   // planner). Was req.model() (run-level worker default), so YAML matrix
   // changes for the reviewer had no effect.
@@ -216,6 +222,38 @@ public class ReviewerAgent {
                 + "falling through to final build",
             wiring.outcome());
       }
+    }
+
+    // ── Post-edit formatter pass (2026-05-13 audit Fix-1) ────────────────
+    // After the reviewer's general/wiring edits, run any language formatters
+    // present on PATH (black, prettier, gofmt) so the workspace lands in the
+    // shape the customer's CI's `--check` step expects. Best-effort — no-op
+    // when no matching files exist or the formatter isn't on PATH. Runs
+    // BEFORE the final build so its (possibly reformatted) output is what
+    // buildProject verifies. Tracking telemetry on PostEditFormatter.Result.
+    try {
+      PostEditFormatter.Result formatResult =
+          postEditFormatter.run(req.context().workspaceRoot(), req.context().runId());
+      if (formatResult.filesReformatted() > 0) {
+        log.info(
+            "ReviewerAgent run={} post-edit formatter reformatted ~{} file(s) via {}",
+            req.context().runId(),
+            formatResult.filesReformatted(),
+            formatResult.formattersRun());
+      }
+      if (!formatResult.errors().isEmpty()) {
+        log.warn(
+            "ReviewerAgent run={} post-edit formatter had {} non-fatal error(s): {}",
+            req.context().runId(),
+            formatResult.errors().size(),
+            formatResult.errors());
+      }
+    } catch (Exception e) {
+      // Never abort the run on a formatter error — final build still runs.
+      log.warn(
+          "ReviewerAgent run={} post-edit formatter pass threw (continuing): {}",
+          req.context().runId(),
+          e.getMessage());
     }
 
     // ── Final build ──────────────────────────────────────────────────────

@@ -1244,6 +1244,20 @@ public class RunOrchestrator {
           programBenchContainerStore != null && programBenchContainerStore.get(runId) != null
               ? 80
               : null;
+      // 2026-05-13 — skip wiring pass on simple single-repo runs where it's pure cost overhead.
+      // Audit run 6024f510 (Black formatting fix, SINGLE_SHOT, 1 repo) spent ~$0.62 of $1.04
+      // total on a 3-repo wiring scan that found nothing actionable. Wiring pass is valuable on
+      // multi-component / multi-repo plans where the worker can leave routes / barrels /
+      // imports orphaned; on a SINGLE_SHOT against a single repo there is nothing to wire.
+      int linkedRepoCount = selectedRepoIds == null ? 0 : selectedRepoIds.size();
+      boolean skipWiring =
+          plan.classification() == Classification.SINGLE_SHOT && linkedRepoCount <= 1;
+      if (skipWiring) {
+        log.info(
+            "RunOrchestrator run={} skipping reviewer wiring pass — SINGLE_SHOT × single-repo"
+                + " (audit 2026-05-13 cost-control)",
+            runId);
+      }
       try {
         reviewResult =
             reviewer.review(
@@ -1252,7 +1266,7 @@ public class RunOrchestrator {
                     .model(model)
                     .context(rootCtx)
                     .buildCommand(plan.buildCommand())
-                    .skipWiringPass(false)
+                    .skipWiringPass(skipWiring)
                     .maxIterationsPerPass(reviewerMaxIter)
                     .build());
         persistReview(runId, reviewResult);

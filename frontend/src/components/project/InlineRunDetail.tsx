@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Download,
   ExternalLink,
   Github,
   RefreshCw,
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   cancelRun as cancelRunApi,
+  downloadWorkspace,
   getFiles,
   pauseRun as pauseRunApi,
   pushToGitHub,
@@ -169,6 +171,16 @@ export default function InlineRunDetail({
   const isFullyTerminal = isTerminalRunStatus(run.status);
   const isLive = isNonTerminalRunStatus(run.status);
   const alreadyPushed = !!(run.scmPrUrl || run.githubPrUrl);
+
+  // 2026-05-12 — when a run is project-scoped AND already had a repo attached
+  // at launch (repoMode !== 'NONE'), the pipeline auto-pushes at run-end via
+  // ScmPushService.pushMultiRepo. Surfacing a manual Push / Update PR button
+  // in that case is redundant and confusing — the workspace already lands in
+  // the project's linked repo without user action. Hide the manual buttons
+  // for that case. Standalone runs (no projectId) or project runs with
+  // repoMode='NONE' still see the manual buttons because they're the only
+  // way to ship the workspace anywhere.
+  const projectAutoPushes = !!run.projectId && !!run.repoMode && run.repoMode !== 'NONE';
 
   const doSync = async () => {
     if (syncing || !terminal) return;
@@ -377,7 +389,7 @@ export default function InlineRunDetail({
               automatically. This closes the gap where a per-task retry
               writes new files to workspace but the PR stays frozen on
               the old commit until manual push. */}
-          {terminal && !alreadyPushed && (
+          {terminal && !alreadyPushed && !projectAutoPushes && (
             <button
               onClick={doPush}
               disabled={pushing}
@@ -392,7 +404,7 @@ export default function InlineRunDetail({
               {pushing ? 'Pushing…' : `Push & open PR`}
             </button>
           )}
-          {terminal && alreadyPushed && (
+          {terminal && alreadyPushed && !projectAutoPushes && (
             <button
               onClick={doPush}
               disabled={pushing}
@@ -405,6 +417,20 @@ export default function InlineRunDetail({
                 <Upload className='h-3 w-3' />
               )}
               {pushing ? 'Pushing…' : 'Update PR'}
+            </button>
+          )}
+          {/* Download workspace as ZIP — restored from V2's RunDetail page after
+              regression report 2026-05-12 (V3 inline run panel was missing the
+              Download affordance that V2's full-page RunDetail has). Mirrors
+              RunDetail.tsx lines 736-745. */}
+          {terminal && (
+            <button
+              onClick={() => downloadWorkspace(run.runId)}
+              title='Download workspace as ZIP'
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-accent-green disabled:opacity-50'
+            >
+              <Download className='h-3 w-3' />
+              Download code
             </button>
           )}
           {terminal && (
