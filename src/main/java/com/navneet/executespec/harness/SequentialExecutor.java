@@ -725,6 +725,33 @@ end and only call completeTask if it exits 0.
     // the retry can call completeTask after a single editFile and we get the same regression
     // path that produced the 16/22 FINAL_BUILD_FAILED rate over the last 30 days.
     String retryPrompt = composeUserPrompt(task, smoke.output());
+    // PR-D (2026-05-13) — adaptive iter budget on retry. If the primary attempt exhausted its
+    // iter or wall-clock budget, give the retry +50% headroom — the smoke-test feedback path
+    // depends on the worker actually completing, and burning the same budget twice on a
+    // genuinely-larger-than-MEDIUM task is the exact wasteful-retry pattern the user reported.
+    // Keep the boost capped at 1.5× so a runaway worker can't escalate unbounded; the
+    // user-cost-cap remains the hard ceiling regardless.
+    int retryMaxIter =
+        req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter;
+    int retryWallClock = cfg.wallClockSeconds;
+    boolean primaryHitIterCap = primary.outcome() == WorkerResult.Outcome.ITERATION_LIMIT_EXCEEDED;
+    boolean primaryHitWallClock = primary.outcome() == WorkerResult.Outcome.WALL_CLOCK_EXCEEDED;
+    if (primaryHitIterCap) {
+      retryMaxIter = Math.max(retryMaxIter, (int) Math.ceil(cfg.maxIter * 1.5));
+      log.info(
+          "Executor task={} primary exhausted iter cap ({} iter); retry boosted to {} iter",
+          task.id(),
+          cfg.maxIter,
+          retryMaxIter);
+    }
+    if (primaryHitWallClock) {
+      retryWallClock = (int) Math.ceil(cfg.wallClockSeconds * 1.5);
+      log.info(
+          "Executor task={} primary exhausted wall-clock ({}s); retry boosted to {}s",
+          task.id(),
+          cfg.wallClockSeconds,
+          retryWallClock);
+    }
     WorkerResult retry =
         worker.run(
             WorkerTaskRequest.builder()
@@ -733,13 +760,12 @@ end and only call completeTask if it exits 0.
                 .systemPrompt(systemPrompt)
                 .userPrompt(retryPrompt)
                 .context(taskCtx)
-                .maxIterations(
-                    req.maxIterationsPerTask() != null ? req.maxIterationsPerTask() : cfg.maxIter)
+                .maxIterations(retryMaxIter)
                 .temperature(0.0)
                 .maxTokensPerCall(cfg.maxTokens)
                 .stagnationWarnAfter(cfg.stagnationWarnAfter)
                 .stagnationForceAfter(cfg.stagnationForceAfter)
-                .wallClockSeconds(cfg.wallClockSeconds)
+                .wallClockSeconds(retryWallClock)
                 .requireBuildVerification(true)
                 .build());
 
