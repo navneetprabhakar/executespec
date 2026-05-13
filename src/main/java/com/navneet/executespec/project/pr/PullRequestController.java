@@ -81,10 +81,19 @@ public class PullRequestController {
    * Refresh every non-terminal PR opened by this project against GitHub. Used by the dashboard
    * "Refresh" button when webhooks aren't wired up. Triggers the post-merge cascade (codemap regen
    * + notification) for any OPEN → MERGED transition.
+   *
+   * <p>2026-05-13 — added optional {@code ?forceAll=true} override. Default is open-only fast path
+   * (skips merged + closed records entirely, including the DB fetch). Force-all is only needed for
+   * backfill after a long outage or webhook-loss recovery.
    */
   @PostMapping("/api/projects/{projectId}/prs/refresh")
   public ResponseEntity<PrRefreshService.RefreshResult> refreshProjectPrs(
-      @PathVariable String projectId, @AuthenticationPrincipal AppUserDetails userDetails) {
+      @PathVariable String projectId,
+      @org.springframework.web.bind.annotation.RequestParam(
+              required = false,
+              defaultValue = "false")
+          boolean forceAll,
+      @AuthenticationPrincipal AppUserDetails userDetails) {
     // GA-readiness P4.1-followup — assertCanRead before issuing the GitHub
     // refresh. Closes the legacy gap where any authenticated caller could
     // poll any project's PR list (returning the same data + URLs).
@@ -93,7 +102,7 @@ public class PullRequestController {
     // this, getPullRequestSnapshot returned null on private repos and the refresh
     // silently no-op'd; user clicked Refresh + saw merged PRs still showing OPEN.
     String pat = userDetails != null ? userDetails.getUser().getGithubPat() : null;
-    return ResponseEntity.ok(refreshService.refreshProject(projectId, pat));
+    return ResponseEntity.ok(refreshService.refreshProject(projectId, pat, forceAll));
   }
 
   @GetMapping("/api/prs/snapshot")

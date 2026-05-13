@@ -30,4 +30,17 @@ public interface PullRequestRecordRepository extends JpaRepository<PullRequestRe
    */
   Optional<PullRequestRecord> findFirstByRepoFullNameAndHeadBranchOrderByCreatedAtDesc(
       String repoFullName, String headBranch);
+
+  /**
+   * 2026-05-13 — open-only variants for PrRefreshService. Merged + closed PRs don't change at
+   * GitHub once they're terminal, so the refresh sweep shouldn't pull them from the DB just to skip
+   * them in-loop. Cuts the DB round-trip + JPA hydration cost on projects with many historical PRs
+   * (e.g. pplai-api has 28+ PRs but typically &lt;5 open at a time).
+   */
+  List<PullRequestRecord> findByRunIdAndStatusOrderByCreatedAtAsc(
+      String runId, PullRequestRecord.Status status);
+
+  /** Open system PRs for a project (BOOTSTRAP / ARCHITECTURE / CONTRACT / CHAT_TOOL kinds). */
+  List<PullRequestRecord> findByProjectIdAndKindNotAndStatusOrderByCreatedAtDesc(
+      String projectId, PullRequestRecord.Kind excludeKind, PullRequestRecord.Status status);
 }
