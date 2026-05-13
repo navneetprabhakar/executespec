@@ -16,6 +16,10 @@ public interface ProjectGeneratedDocRepository extends JpaRepository<ProjectGene
 
   List<ProjectGeneratedDoc> findByProjectIdOrderByGeneratedAtDesc(String projectId);
 
+  /** 2026-05-13 — used by {@code VersionRetentionService} to prune all but the latest N. */
+  List<ProjectGeneratedDoc> findByProjectIdAndDocTypeOrderByVersionDesc(
+      String projectId, DocType docType);
+
   /**
    * Sum of {@code cost_usd} across every generated doc (EXPLANATION + SETUP + future kinds) for a
    * project. Used by the project dashboard to roll up doc-generation spend.

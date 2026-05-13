@@ -122,17 +122,25 @@ export default function ArchitectureViewer({
             </span>
           )}
           {versions.length > 0 && (
-            <select
-              className='text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-0.5 focus:outline-none focus:border-accent-blue'
-              value={selectedVersion ?? ''}
-              onChange={(e) => setSelectedVersion(Number(e.target.value))}
-            >
-              {versions.map((v) => (
-                <option key={v.version} value={v.version}>
-                  v{v.version} · {new Date(v.generatedAt).toLocaleDateString()}
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                className='text-xs rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] text-primary px-2 py-0.5 focus:outline-none focus:border-accent-blue'
+                value={selectedVersion ?? ''}
+                onChange={(e) => setSelectedVersion(Number(e.target.value))}
+              >
+                {versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    v{v.version} · {new Date(v.generatedAt).toLocaleDateString()}
+                  </option>
+                ))}
+              </select>
+              <span
+                className='text-[10px] text-muted whitespace-nowrap'
+                title='Only the most recent 20 versions are kept. Older versions are pruned automatically when a new one is generated.'
+              >
+                latest 20 kept
+              </span>
+            </>
           )}
         </div>
         {shown && previous && (
