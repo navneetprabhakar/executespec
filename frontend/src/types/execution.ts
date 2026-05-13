@@ -6,7 +6,8 @@ export type ExecutionRunStatus =
   | 'EXECUTING'
   | 'PAUSED'
   | 'COMPLETE'
-  | 'ABORTED';
+  | 'ABORTED'
+  | 'FAILED';
 
 export type SolutionStatus =
   | 'QUEUED'
