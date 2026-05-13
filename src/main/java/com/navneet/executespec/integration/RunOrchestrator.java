@@ -53,6 +53,7 @@ import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.AccuracyAssessmentService;
+import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
@@ -129,6 +130,7 @@ public class RunOrchestrator {
   private final SmartClassifierAgent smartClassifier;
   private final SequentialExecutor executor;
   private final ReviewerAgent reviewer;
+  private final PostEditFormatter postEditFormatter;
 
   /**
    * V182 (2026-05-08) — patch-mode entry. Used by the {@code runPatchPipeline} branch when {@link
@@ -1686,6 +1688,27 @@ public class RunOrchestrator {
     if (("COMPLETE".equals(terminalStatus) || "PARTIAL".equals(terminalStatus))
         && run.getSourceType() != null
         && run.getSourceType().startsWith("finding:")) {
+      // 2026-05-13 audit Fix-A — same PostEditFormatter pass the BUILD-mode reviewer
+      // runs. Without this, autofix surfaces (PR Review / TechDebt / CI failure /
+      // Code Review severity buckets) pushed unformatted code to the existing PR
+      // branch and CI's `black --check` / `prettier --check` rejected it — making
+      // the autofix look like it "didn't fix anything". Idempotent + never throws.
+      try {
+        PostEditFormatter.Result fmt = postEditFormatter.run(rootCtx.workspaceRoot(), runId);
+        if (fmt.filesReformatted() > 0 || !fmt.errors().isEmpty()) {
+          log.info(
+              "PATCH run={} post-edit formatter — reformatted={} formatters={} errors={}",
+              runId,
+              fmt.filesReformatted(),
+              fmt.formattersRun(),
+              fmt.errors());
+        }
+      } catch (Exception fmtEx) {
+        log.warn(
+            "PATCH run={} post-edit formatter threw (continuing to push): {}",
+            runId,
+            fmtEx.getMessage());
+      }
       try {
         PipelineRun fresh = runRepo.findById(runId).orElse(null);
         if (fresh != null) {
