@@ -21,9 +21,9 @@ import lombok.extern.slf4j.Slf4j;
  * per-agent @PostConstruct check) and {@code classifier.md} still missing on dev (this component's
  * reason for existing).
  *
- * <p>Verifies every critical prompt resource at startup. Fail-fast: any missing resource throws
- * and Spring refuses to come up, so a broken deploy is loud at boot instead of silently
- * malfunctioning under traffic.
+ * <p>Verifies every critical prompt resource at startup. Fail-fast: any missing resource throws and
+ * Spring refuses to come up, so a broken deploy is loud at boot instead of silently malfunctioning
+ * under traffic.
  */
 @Slf4j
 @Component

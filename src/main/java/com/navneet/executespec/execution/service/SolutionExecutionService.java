@@ -53,6 +53,19 @@ public class SolutionExecutionService {
   private static final long POLL_INTERVAL_MS = 10_000L;
   private static final long POLL_TIMEOUT_MS = 2L * 60L * 60L * 1000L; // 2h
 
+  /**
+   * 2026-05-13 audit — statusReason prefixes that indicate "the worker did its job; what failed was
+   * post-worker validation". When BOTH this AND the worker-task-outcome is COMPLETE, an auto-retry
+   * just re-runs a deterministic task and produces identical code. Each such retry costs
+   * $0.10-$0.30 on a SMALL plan and never improves the outcome. Pause for user decision instead so
+   * the customer can SKIP (accept the partial) / RETRY (override) / FIX (manual).
+   *
+   * <p>{@code TESTS_FAILED} carries a counter suffix ({@code TESTS_FAILED:5_OF_12}); match by
+   * prefix via {@code startsWith}.
+   */
+  private static final Set<String> NON_RETRYABLE_WHEN_WORKER_CLEAN =
+      Set.of("FINAL_BUILD_FAILED", "TESTS_FAILED");
+
   private final RunOrchestrator v2Orchestrator;
   private final CrossRepoContextService contextService;
   private final ExecutionBranchService branchService;
@@ -62,6 +75,7 @@ public class SolutionExecutionService {
   private final ExecutionSolutionRunRepository solutionRunRepo;
   private final ProjectRepoRepository projectRepoRepo;
   private final PipelineRunRepository pipelineRunRepo;
+  private final com.navneet.executespec.state.repository.AgentTaskRepository agentTaskRepo;
   private final AppUserRepository appUserRepo;
   private final SseBroadcaster broadcaster;
   private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
@@ -313,11 +327,36 @@ public class SolutionExecutionService {
     // TESTS_FAILED:5_OF_12 — if consecutive retries land on the same
     // signature, the failure is deterministic and further retries just
     // burn budget. Different signatures still get the full retry budget.
-    String currentSignature =
-        pipelineRunRepo
-            .findById(solution.getPipelineRunId())
-            .map(PipelineRun::getStatusReason)
-            .orElse(null);
+    PipelineRun pipelineRun = pipelineRunRepo.findById(solution.getPipelineRunId()).orElse(null);
+    String currentSignature = pipelineRun == null ? null : pipelineRun.getStatusReason();
+
+    // 2026-05-13 audit — gate auto-retry on the failure shape. When the V2
+    // run hit a post-worker validation issue (FINAL_BUILD_FAILED, TESTS_FAILED)
+    // BUT the worker's per-task outcome was clean, retry just re-runs a
+    // deterministic task and produces identical code. Pause for user
+    // decision instead — they can SKIP (accept the partial PR), RETRY
+    // (override with intent), or FIX (manual). Saves the $0.10-$0.30 per
+    // wasted auto-retry observed across exec 85778e63.
+    if (pipelineRun != null
+        && currentSignature != null
+        && isNonRetryableReason(currentSignature)
+        && isWorkerOutcomeClean(pipelineRun.getRunId())) {
+      log.info(
+          "[exec={} sol={}] PARTIAL with statusReason={} but worker outcome clean — skipping"
+              + " auto-retry; pausing for user decision",
+          run.getId(),
+          solution.getId(),
+          currentSignature);
+      handleFailure(
+          run,
+          solution,
+          "VALIDATING",
+          "Worker completed but post-worker validation failed ("
+              + currentSignature
+              + "). Retry would produce identical code — review the PR or pick SKIP/FIX.");
+      return;
+    }
+
     if (currentSignature != null && currentSignature.equals(solution.getLastFailureSignature())) {
       int newStreak = solution.getConsecutiveFailureCount() + 1;
       solution.setConsecutiveFailureCount(newStreak);
@@ -565,6 +604,37 @@ public class SolutionExecutionService {
     String msg =
         e == null ? "" : (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
     return msg.length() > 300 ? msg.substring(0, 300) + "…" : msg;
+  }
+
+  /**
+   * 2026-05-13 audit — true when the {@code statusReason} (e.g. {@code FINAL_BUILD_FAILED} or
+   * {@code TESTS_FAILED:5_OF_12}) indicates post-worker validation failed rather than a worker-side
+   * problem retry could fix. Prefix match handles the counter-suffix variants.
+   */
+  private static boolean isNonRetryableReason(String statusReason) {
+    if (statusReason == null) return false;
+    for (String prefix : NON_RETRYABLE_WHEN_WORKER_CLEAN) {
+      if (statusReason.equals(prefix) || statusReason.startsWith(prefix + ":")) return true;
+    }
+    return false;
+  }
+
+  /**
+   * 2026-05-13 audit — true when every agent_task on the pipeline_run ended in {@code COMPLETE}
+   * status. Used to decide whether the worker actually did its job: when the answer is yes and the
+   * run still PARTIAL'd, the issue is post-worker validation (build / test gate), not the worker
+   * itself — retry can't help.
+   *
+   * <p>Conservative: returns false if the task list is unexpectedly empty (treat as worker didn't
+   * record progress; allow the retry).
+   */
+  private boolean isWorkerOutcomeClean(String pipelineRunId) {
+    var tasks = agentTaskRepo.findByRunId(pipelineRunId);
+    if (tasks == null || tasks.isEmpty()) return false;
+    for (var t : tasks) {
+      if (!"COMPLETE".equals(t.getStatus())) return false;
+    }
+    return true;
   }
 
   /**
