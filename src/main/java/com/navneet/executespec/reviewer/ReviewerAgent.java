@@ -113,6 +113,25 @@ public class ReviewerAgent {
               t.setDaemon(true);
               return t;
             });
+    // 2026-05-13 — sanity check on the reviewer's prompt files at boot. Previously a missing
+    // prompt only surfaced on the FIRST run that exercised it (audit run e5f40b8a hit this on
+    // dev; ran for ~2min before REVIEW_FAILED). Fail-fast at startup so a stale deploy is
+    // caught by ops the moment the app comes up, not on the first customer-facing run.
+    String[] reviewerPrompts = {"prompts/reviewer-general.md", "prompts/reviewer-wiring.md"};
+    for (String prompt : reviewerPrompts) {
+      org.springframework.core.io.ClassPathResource r = new ClassPathResource(prompt);
+      if (!r.exists()) {
+        // Don't crash the whole app — log loudly. Reviewer is a degradeable feature; runs
+        // can still complete with overall=REVIEW_FAILED. But operators MUST see this.
+        log.error(
+            "[ReviewerAgent] BOOT CHECK FAILED: classpath resource '{}' missing. Reviewer will"
+                + " REVIEW_FAILED on every run until this is fixed. JAR may be stale or built"
+                + " with a resource exclusion. Verify with: jar tf <jar> | grep prompts/",
+            prompt);
+      } else {
+        log.info("[ReviewerAgent] boot check ok — '{}' found on classpath", prompt);
+      }
+    }
   }
 
   @PreDestroy
@@ -605,11 +624,49 @@ exit=0 — the harness will reject premature completions.
     return false;
   }
 
+  /**
+   * Load a classpath prompt resource. Returns content as UTF-8 string.
+   *
+   * <p>2026-05-13 — hardened after dev run e5f40b8a failed silently with the upstream {@code
+   * IOException} hidden behind an unchained {@code IllegalStateException}. The reviewer caught
+   * {@code REVIEW_FAILED} but the JSON error only surfaced "Failed to load
+   * prompts/reviewer-general.md" — operators couldn't tell whether the file was missing,
+   * unreadable, or had an encoding issue. Now logs the root cause class + message + classpath
+   * resource state before re-throwing so the next failure points operators at the right fix.
+   */
   private String loadPrompt(String path) {
+    ClassPathResource resource = new ClassPathResource(path);
     try {
-      return new ClassPathResource(path).getContentAsString(StandardCharsets.UTF_8);
+      if (!resource.exists()) {
+        // Distinct error class for "file missing from classpath" vs IO. Operators see this in
+        // logs when a deploy ships a JAR with the resource excluded (resource-plugin filter,
+        // .gitignore drift, etc).
+        log.error(
+            "[ReviewerAgent] Classpath resource MISSING — '{}'. JAR may be stale or built with"
+                + " a resource exclusion. Try: jar tf <jar> | grep '{}'",
+            path,
+            path);
+        throw new IllegalStateException(
+            "Classpath resource not found: " + path + " (deploy artefact issue)");
+      }
+      return resource.getContentAsString(StandardCharsets.UTF_8);
     } catch (IOException e) {
-      throw new IllegalStateException("Failed to load " + path, e);
+      log.error(
+          "[ReviewerAgent] IOException loading '{}': {}: {} (resource.exists()={})",
+          path,
+          e.getClass().getSimpleName(),
+          e.getMessage(),
+          resource.exists(),
+          e);
+      throw new IllegalStateException(
+          "Failed to load "
+              + path
+              + " ("
+              + e.getClass().getSimpleName()
+              + ": "
+              + e.getMessage()
+              + ")",
+          e);
     }
   }
 
