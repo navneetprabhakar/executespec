@@ -562,7 +562,7 @@ public class ValidationReportService {
               heuristic == PipelineResult.FAILED
                   ? PipelineResult.FAILED
                   : PipelineResult.NEEDS_ATTENTION;
-          case "LEGACY_UNKNOWN" -> heuristic;
+          case "LEGACY_UNKNOWN", "NO_REVIEW_RESULT" -> heuristic;
           default -> isTestsFailed ? PipelineResult.NEEDS_ATTENTION : heuristic;
         };
 
