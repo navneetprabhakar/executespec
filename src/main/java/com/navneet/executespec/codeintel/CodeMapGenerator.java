@@ -297,7 +297,18 @@ public class CodeMapGenerator {
     Set<String> seen = new HashSet<>();
     switch (ext) {
       case "java":
-        emitClassThenMethods(content, JAVA_CLASS, JAVA_METHOD, out, seen);
+        // PR-N1 (2026-05-14) — Java AST path. JavaParser handles multi-line signatures,
+        // records, sealed types, generics + throws clauses that the regex misses. Fall back
+        // to the regex path if the AST extractor returned nothing (parse failure on
+        // malformed source) so we never regress: AST result > 0 → AST wins; empty → regex.
+        List<String> astSymbols = JavaAstSymbolExtractor.extract(content);
+        if (!astSymbols.isEmpty()) {
+          for (String s : astSymbols) {
+            if (seen.add(s)) out.add(s);
+          }
+        } else {
+          emitClassThenMethods(content, JAVA_CLASS, JAVA_METHOD, out, seen);
+        }
         break;
       case "kt":
       case "kts":
