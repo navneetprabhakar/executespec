@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronUp,
+  Download,
   ExternalLink,
   Github,
   RefreshCw,
@@ -17,6 +18,7 @@ import {
 } from 'lucide-react';
 import {
   cancelRun as cancelRunApi,
+  downloadWorkspace,
   getFiles,
   pauseRun as pauseRunApi,
   pushToGitHub,
@@ -405,6 +407,20 @@ export default function InlineRunDetail({
                 <Upload className='h-3 w-3' />
               )}
               {pushing ? 'Pushing…' : 'Update PR'}
+            </button>
+          )}
+          {/* Download workspace as ZIP — restored from V2's RunDetail page after
+              regression report 2026-05-12 (V3 inline run panel was missing the
+              Download affordance that V2's full-page RunDetail has). Mirrors
+              RunDetail.tsx lines 736-745. */}
+          {terminal && (
+            <button
+              onClick={() => downloadWorkspace(run.runId)}
+              title='Download workspace as ZIP'
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-accent-green disabled:opacity-50'
+            >
+              <Download className='h-3 w-3' />
+              Download code
             </button>
           )}
           {terminal && (
