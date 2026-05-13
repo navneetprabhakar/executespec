@@ -85,6 +85,55 @@ public class ProjectController {
     return ResponseEntity.ok(projectService.archiveProject(id, userDetails.getUser().getId()));
   }
 
+  /**
+   * V191 (PR-B-part-2) — reverse of {@link #archiveProject}. Idempotent: re-unarchiving an
+   * already-active project is a no-op (no audit row, no error). Refuses with 409 if the project is
+   * soft-deleted — restore must happen first.
+   */
+  @PutMapping("/{id}/unarchive")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<ProjectDto> unarchiveProject(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
+    projectAccessGuard.assertCanRead(id, userDetails);
+    return ResponseEntity.ok(projectService.unarchiveProject(id, userDetails.getUser().getId()));
+  }
+
+  /**
+   * V191 (PR-B-part-2) — soft-delete with 30-day undo window. The project disappears from every
+   * listing immediately but the row is retained for 30 days so the user can {@link #restoreProject}
+   * it; after that the cleanup sweeper (PR-H) hard-deletes it together with its dependent rows.
+   * Idempotent — re-deleting an already-deleted project is a 204 no-op.
+   */
+  @DeleteMapping("/{id}")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<Void> deleteProject(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
+    projectAccessGuard.assertCanRead(id, userDetails);
+    projectService.softDeleteProject(id, userDetails.getUser().getId());
+    return ResponseEntity.noContent().build();
+  }
+
+  /**
+   * V191 (PR-B-part-2) — undo a soft-delete within the 30-day window. 404 if the project is not
+   * currently deleted (so the frontend can disambiguate "no such project" from "already restored").
+   * Status field is not touched — a project that was archived-then-deleted comes back archived, not
+   * active.
+   *
+   * <p>Tenant safety: {@link ProjectAccessGuard#assertCanRead} uses {@code projectRepo.findById}
+   * which is the standard JPA finder and DOES return soft-deleted rows (no {@code @Where} clause on
+   * the entity). The guard's org-membership check therefore runs correctly on a tombstoned project
+   * — exactly what we need for the restore-by-id flow. The {@link
+   * com.navneet.executespec.auth.service.ProjectService#getProject} 404-on-deleted path does not
+   * affect this guard.
+   */
+  @PostMapping("/{id}/restore")
+  @PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")
+  public ResponseEntity<ProjectDto> restoreProject(
+      @AuthenticationPrincipal AppUserDetails userDetails, @PathVariable String id) {
+    projectAccessGuard.assertCanRead(id, userDetails);
+    return ResponseEntity.ok(projectService.restoreProject(id, userDetails.getUser().getId()));
+  }
+
   @GetMapping("/{id}/members")
   public ResponseEntity<List<ProjectMemberDto>> listMembers(
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails userDetails) {

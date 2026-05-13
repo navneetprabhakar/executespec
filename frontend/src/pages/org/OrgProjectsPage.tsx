@@ -159,16 +159,49 @@ function ProjectCard({
   orgMembers,
   isAdmin,
   onArchive,
+  onUnarchive,
+  onDelete,
   onViewRuns,
   onUpdateProject,
 }: {
   project: api.ProjectDto;
   orgMembers: api.OrgMemberDto[];
   isAdmin: boolean;
-  onArchive: (id: string) => void;
+  // PR-L (2026-05-13) — handlers now async-aware. Each returns a Promise so the card can show a
+  // pending state ("Archiving…" / "Deleting…") on the button until the network round-trip
+  // resolves. Pre-PR-L the buttons fired off and looked like nothing happened until the row
+  // either disappeared or refreshed — confused users into double-clicking.
+  onArchive: (id: string) => Promise<void> | void;
+  /** V191 (PR-B-part-2) — reverse of archive. Visible only on archived rows. */
+  onUnarchive: (id: string) => Promise<void> | void;
+  /**
+   * V191 (PR-B-part-2) — soft-delete with 30-day undo window. Surfaced as a destructive button
+   * with a confirm-then-execute UX in the handler.
+   */
+  onDelete: (id: string) => Promise<void> | void;
   onViewRuns: (id: string) => void;
   onUpdateProject: (updated: api.ProjectDto) => void;
 }) {
+  // PR-L (2026-05-13) — single state machine for the three lifecycle actions. Only one can be
+  // in-flight at a time on a given card, so a single 'pending' enum is cleaner than three
+  // independent booleans. null = idle; 'archive' | 'unarchive' | 'delete' = the action that
+  // started but hasn't resolved yet. The buttons read this to disable themselves + show
+  // "Archiving…" / "Deleting…" inline.
+  const [pendingAction, setPendingAction] = useState<'archive' | 'unarchive' | 'delete' | null>(
+    null,
+  );
+  const runWithPending = async (
+    action: 'archive' | 'unarchive' | 'delete',
+    fn: () => Promise<void> | void,
+  ) => {
+    if (pendingAction) return;
+    setPendingAction(action);
+    try {
+      await fn();
+    } finally {
+      setPendingAction(null);
+    }
+  };
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [members, setMembers] = useState<api.ProjectMemberDto[]>([]);
@@ -382,15 +415,59 @@ function ProjectCard({
             </div>
           )}
 
-          {/* Archive action */}
-          {isAdmin && !isArchived && (
-            <div className='flex justify-end pt-2 border-t border-[var(--border-default)]'>
+          {/* V191 (PR-B-part-2, 2026-05-13) — lifecycle action row.
+              ACTIVE rows: Archive + Delete.
+              ARCHIVED rows: Unarchive + Delete.
+              Soft-deleted rows never render (filtered server-side). The destructive Delete
+              button is split visually from the reversible Archive/Unarchive so the user can
+              tell at a glance which one tombstones the project.
+              PR-L (2026-05-13) — buttons disable + show pending text while the action is
+              in-flight so the user doesn't double-tap. The shared `pendingAction` state
+              guarantees only one of the three can be active at any moment. */}
+          {isAdmin && (
+            <div className='flex flex-wrap justify-end gap-3 pt-2 border-t border-[var(--border-default)]'>
+              {!isArchived && (
+                <button
+                  onClick={() => runWithPending('archive', () => onArchive(project.id))}
+                  disabled={pendingAction !== null}
+                  className='flex items-center gap-1.5 text-xs text-muted hover:text-accent-blue transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  title='Park this project out of the active list. Reversible via Unarchive.'
+                >
+                  {pendingAction === 'archive' ? (
+                    <span className='inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin' />
+                  ) : (
+                    <FolderArchive className='h-3.5 w-3.5' />
+                  )}
+                  {pendingAction === 'archive' ? 'Archiving…' : 'Archive project'}
+                </button>
+              )}
+              {isArchived && (
+                <button
+                  onClick={() => runWithPending('unarchive', () => onUnarchive(project.id))}
+                  disabled={pendingAction !== null}
+                  className='flex items-center gap-1.5 text-xs text-accent-blue hover:text-primary transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                  title='Restore this project to the active list.'
+                >
+                  {pendingAction === 'unarchive' ? (
+                    <span className='inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin' />
+                  ) : (
+                    <FolderOpen className='h-3.5 w-3.5' />
+                  )}
+                  {pendingAction === 'unarchive' ? 'Unarchiving…' : 'Unarchive'}
+                </button>
+              )}
               <button
-                onClick={() => onArchive(project.id)}
-                className='flex items-center gap-1.5 text-xs text-muted hover:text-accent-red transition-colors'
+                onClick={() => runWithPending('delete', () => onDelete(project.id))}
+                disabled={pendingAction !== null}
+                className='flex items-center gap-1.5 text-xs text-muted hover:text-status-error transition-colors disabled:opacity-50 disabled:cursor-not-allowed'
+                title='Delete with a 30-day undo window. After that the project + its runs are permanently removed.'
               >
-                <FolderArchive className='h-3.5 w-3.5' />
-                Archive project
+                {pendingAction === 'delete' ? (
+                  <span className='inline-block w-3 h-3 rounded-full border-2 border-current border-t-transparent animate-spin' />
+                ) : (
+                  <FolderArchive className='h-3.5 w-3.5' />
+                )}
+                {pendingAction === 'delete' ? 'Deleting…' : 'Delete project'}
               </button>
             </div>
           )}
@@ -490,6 +567,27 @@ export default function OrgProjectsPage() {
     if (!confirm('Archive this project? No new runs will be linked to it.')) return;
     const updated = await api.archiveProject(id);
     setProjects((prev) => prev.map((p) => (p.id === id ? updated : p)));
+  };
+
+  // V191 (PR-B-part-2, 2026-05-13) — reverse of archive. Confirmation skipped because the
+  // operation is non-destructive (status flips back to ACTIVE; no data is lost).
+  const handleUnarchive = async (id: string) => {
+    const updated = await api.unarchiveProject(id);
+    setProjects((prev) => prev.map((p) => (p.id === id ? updated : p)));
+  };
+
+  // V191 (PR-B-part-2) — soft-delete with 30-day undo window. We explicitly explain the undo
+  // window so the user knows this isn't a hard-delete; without that line the confirm-prompt
+  // reads identical to archive and the user can't tell which they're picking.
+  const handleDelete = async (id: string) => {
+    const ok = confirm(
+      'Delete this project?\n\n' +
+        'It will be hidden immediately. You have 30 days to restore it via the support flow; ' +
+        'after that the project and its runs are permanently removed.',
+    );
+    if (!ok) return;
+    await api.deleteProject(id);
+    setProjects((prev) => prev.filter((p) => p.id !== id));
   };
 
   const handleViewRuns = (projectId: string) => {
@@ -705,6 +803,8 @@ export default function OrgProjectsPage() {
                     orgMembers={orgMembers}
                     isAdmin={isAdmin}
                     onArchive={handleArchive}
+                    onUnarchive={handleUnarchive}
+                    onDelete={handleDelete}
                     onViewRuns={handleViewRuns}
                     onUpdateProject={(updated) =>
                       setProjects((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
@@ -720,6 +820,8 @@ export default function OrgProjectsPage() {
                 projects={archived}
                 orgMembers={orgMembers}
                 isAdmin={isAdmin}
+                onUnarchive={handleUnarchive}
+                onDelete={handleDelete}
                 onViewRuns={handleViewRuns}
               />
             )}
@@ -761,11 +863,17 @@ function ArchivedSection({
   projects,
   orgMembers,
   isAdmin,
+  onUnarchive,
+  onDelete,
   onViewRuns,
 }: {
   projects: api.ProjectDto[];
   orgMembers: api.OrgMemberDto[];
   isAdmin: boolean;
+  /** V191 (PR-B-part-2) — unarchive callback so the row can transition ARCHIVED → ACTIVE. */
+  onUnarchive: (id: string) => void;
+  /** V191 (PR-B-part-2) — soft-delete callback, also valid on archived rows. */
+  onDelete: (id: string) => void;
   onViewRuns: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -787,7 +895,11 @@ function ArchivedSection({
               project={p}
               orgMembers={orgMembers}
               isAdmin={isAdmin}
+              // Archive button is suppressed inside the card when the row is already archived,
+              // so this no-op never fires; leaving it wired so the prop contract stays whole.
               onArchive={() => {}}
+              onUnarchive={onUnarchive}
+              onDelete={onDelete}
               onViewRuns={onViewRuns}
               onUpdateProject={() => {}}
             />

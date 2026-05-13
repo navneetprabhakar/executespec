@@ -212,6 +212,24 @@ export default function RunDetailPage() {
     }
   }, [lastEntryId, lastEntryType, refetchAll]);
 
+  // PR-C (2026-05-13) — push-driven file-tree refresh. WriteFileTool + EditFileTool emit
+  // FILE_WRITTEN SSE events on every tool call; useSse bumps fileWrittenTickAt in the store on
+  // each one. Subscribe here and re-fetch the file list (debounced via the ref-guard) so the
+  // tree updates the moment a write lands instead of waiting for the 5s polling fallback below.
+  // Refetch is cheap (one /api/runs/{id}/files call) and the 300ms debounce coalesces bursts.
+  const fileWrittenTickAt = useSseStore((s) => s.fileWrittenTickAt);
+  const fileWriteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!fileWrittenTickAt) return;
+    if (fileWriteDebounceRef.current) clearTimeout(fileWriteDebounceRef.current);
+    fileWriteDebounceRef.current = setTimeout(() => {
+      void refetchAll(false);
+    }, 300);
+    return () => {
+      if (fileWriteDebounceRef.current) clearTimeout(fileWriteDebounceRef.current);
+    };
+  }, [fileWrittenTickAt, refetchAll]);
+
   // 2026-05-08 — fallback polling for non-terminal runs. SSE-driven refresh
   // catches the big lifecycle events (status change, validation-report ready)
   // but the worker writes files mid-run without emitting any SSE event the

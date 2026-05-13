@@ -138,6 +138,26 @@ public class ValidationReport {
   @Column(name = "verified_score")
   private Integer verifiedScore;
 
+  /**
+   * V194 / PR-E Phase A (2026-05-13) — additive rubric companion to {@link #verifiedScore}. 0-100
+   * where each dimension contributes independently:
+   *
+   * <ul>
+   *   <li>Build passed: 25 pts
+   *   <li>Tests passed (linear): 20 pts
+   *   <li>Reviewer verdict: 20 pts (CLEAN/FIXED_ISSUES/UNRESOLVED/FAILED → 20/15/5/0)
+   *   <li>Endpoint coverage (linear): 15 pts
+   *   <li>Critical-issue damper: 10 pts (10 − 1 per critical, floored at 0)
+   *   <li>Code quality (no review fail): 10 pts
+   * </ul>
+   *
+   * <p>Fixes the verifiedScore=0 cliff for runs that landed with one dimension missing — the rubric
+   * still rewards every dimension that did succeed. Frontend headline picks the more informative of
+   * the two (Phase B). Null on pre-V194 rows.
+   */
+  @Column(name = "rubric_score")
+  private Integer rubricScore;
+
   // ──────────────────────────────────────────────────────────────────────────────────────────
 
   /**
