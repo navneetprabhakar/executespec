@@ -1326,10 +1326,17 @@ public class RunOrchestrator {
       // then reuse the same `sr` for terminate(). The reconcile path now
       // reads the right value at report-time and writes a consistent
       // pipelineResult.
+      // 2026-05-13 audit — always derive the statusReason via resolveTerminalStatus,
+      // even when the v2-verified scoring flag is off. Previously the off-path wrote
+      // reason=null which left the terminate() write a no-op (see :3028), and downstream
+      // surfaces fell back to the V108 backfill value "LEGACY_UNKNOWN" — so users saw
+      // every PARTIAL/COMPLETE run tagged with a vague reason that conveyed nothing.
+      // The flag should only gate the SCORING formula choice, not the reason field.
+      StatusAndReason srDerived = resolveTerminalStatus(execResult, reviewResult);
       StatusAndReason sr =
           featureFlagService.isEnabled("scoring.v2-verified")
-              ? resolveTerminalStatus(execResult, reviewResult)
-              : new StatusAndReason(mapOverallToV1Status(execResult.overall()), null);
+              ? srDerived
+              : new StatusAndReason(mapOverallToV1Status(execResult.overall()), srDerived.reason());
       if (sr.reason() != null) {
         try {
           runRepo
@@ -3671,10 +3678,13 @@ public class RunOrchestrator {
     if (!anyTaskSucceeded && exec.tasksFailed() > 0) {
       return new StatusAndReason("FAILED", "ALL_TASKS_FAILED");
     }
-    // Defensive fallback — the reviewer didn't run (review == null) or
-    // produced an unexpected verdict. Fall back to the legacy map but
-    // tag the reason so the UI can show it.
-    return new StatusAndReason(mapOverallToV1Status(exec.overall()), "LEGACY_UNKNOWN");
+    // Defensive fallback — reached when the reviewer didn't run (review == null)
+    // or produced a verdict outside the known set. 2026-05-13 audit — the legacy
+    // "LEGACY_UNKNOWN" label was inherited from V108's backfill of pre-v2.5.10
+    // rows and conveys nothing for NEW runs. Tag the reason with what we actually
+    // know — the reviewer didn't deliver a usable verdict — so dashboards +
+    // retry logic can branch on it instead of treating it as "we have no idea".
+    return new StatusAndReason(mapOverallToV1Status(exec.overall()), "NO_REVIEW_RESULT");
   }
 
   private static String mapTaskStatusToV1(TaskOutcome.Status status) {

@@ -54,7 +54,27 @@ export default function ProjectLaunchesList({projectId}: {projectId: string}) {
 
   if (error) return <div className='text-xs text-status-error'>{error}</div>;
   if (launches == null) return <div className='text-xs text-muted'>Loading launches…</div>;
-  if (launches.length === 0) {
+
+  // 2026-05-13 audit — collapse child V2 pipeline_runs under their parent execution.
+  // Each ExecutionSolution carries a pipelineRunId; the launches endpoint returns BOTH
+  // the parent execution AND every child pipeline_run as separate top-level rows. On a
+  // 10-solution execution with retries that meant ~13 list items competing for attention,
+  // making the parent execution row hard to spot. Filter out any PIPELINE_RUN whose id
+  // appears in some execution's solutions[].pipelineRunId — the user can still reach
+  // the child run by drilling into the execution detail page.
+  const ownedPipelineRunIds = new Set<string>();
+  for (const l of launches) {
+    if (l.kind === 'PIPELINE_RUN') continue;
+    for (const s of l.solutions ?? []) {
+      if (s.pipelineRunId) ownedPipelineRunIds.add(s.pipelineRunId);
+    }
+  }
+  const visibleLaunches = launches.filter(
+    (l) => !(l.kind === 'PIPELINE_RUN' && ownedPipelineRunIds.has(l.id)),
+  );
+  const hiddenChildCount = launches.length - visibleLaunches.length;
+
+  if (visibleLaunches.length === 0) {
     return (
       <EmptyState
         compact
@@ -67,7 +87,16 @@ export default function ProjectLaunchesList({projectId}: {projectId: string}) {
 
   return (
     <div className='space-y-1.5'>
-      {launches.map((l) => {
+      {hiddenChildCount > 0 && (
+        <div
+          className='text-[10px] text-muted'
+          title={`${hiddenChildCount} child V2 run(s) are nested under their parent execution row(s) below. Open the execution to see them.`}
+        >
+          {hiddenChildCount} child run{hiddenChildCount > 1 ? 's' : ''} hidden — open the parent
+          execution to view
+        </div>
+      )}
+      {visibleLaunches.map((l) => {
         const doneCount = l.solutions.filter((s) => s.status === 'DONE').length;
         // 2026-05-04 — route based on the V169-companion `kind` discriminator. Without it,
         // PIPELINE_RUN entries (V2 runs from the project chat / V3 composer) routed to
