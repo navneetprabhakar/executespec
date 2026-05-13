@@ -69,7 +69,15 @@ public class RunCostTracker {
   private static final int OVERHEAD_OUTPUT_TOKENS = 5_000; // pre-plan estimate was 42% under actual
 
   // High-end multiplier for the buffered estimate (retries, cache misses, escalations).
-  private static final double HIGH_MULTIPLIER = 1.75;
+  // 2026-05-13 audit run 6024f510 (estimate $0.05-$0.09, actual $1.04, 12× miss) showed
+  // the old 1.75× tail cap is calibrated for happy-path runs; real distribution has 5-10×
+  // tails on multi-repo / reviewer-heavy specs. Bump to 3.0× — still optimistic on the
+  // fat tail but closes most of the gap that the new post-planning-cost terms below don't
+  // already cover.
+  private static final double HIGH_MULTIPLIER = 3.0;
+
+  /** Buffered-midpoint inflator that drives credits + silent hard cap. Was 1.10. */
+  private static final double BUFFERED_MULTIPLIER = 1.20;
 
   /** Credit multiplier — USD per credit. Matches V1's default (see AgentProperties.Cost). */
   private static final double USD_PER_CREDIT = 5.0;
@@ -270,6 +278,114 @@ public class RunCostTracker {
   }
 
   /**
+   * 2026-05-13 audit overload — includes {@code repoCount} (number of linked repos in the
+   * workspace) and {@code isProjectScoped} (drives codemap cost). Callers that have these signals
+   * should prefer this variant; the no-arg + 3-arg variants stay for back-compat and use defaults
+   * (repoCount=1, isProjectScoped=false) which historically under-estimate multi-repo project runs.
+   *
+   * <p>Closes audit run 6024f510 RC-1 / RC-2 / RC-3 (cost-estimation accuracy) — the old estimator
+   * missed reviewer cost entirely, missed accuracy assessment, missed per-repo codemap, and missed
+   * Anthropic cache-write overhead. On run 6024f510 (SINGLE_SHOT × 1 LOW task × 3-repo project ×
+   * Anthropic), the old estimate was $0.05-$0.09 against an actual $1.04 (12× miss). With this
+   * overload it lands at ~$0.40-$1.10 — actual sits in-band.
+   */
+  public Estimate estimateRunTierAware(
+      String provider,
+      java.util.List<String> taskComplexities,
+      com.navneet.executespec.agent.PlanStrategy strategy,
+      int repoCount,
+      boolean isProjectScoped) {
+    String matrixProvider = provider == null ? "OPENAI" : provider.toUpperCase();
+    LlmProvider p;
+    try {
+      p = LlmProvider.valueOf(matrixProvider);
+    } catch (Exception e) {
+      return estimateRun(provider, null, taskComplexities);
+    }
+
+    int totalTasks = taskComplexities == null ? 0 : taskComplexities.size();
+    double workerCost = computeWorkerCost(p, taskComplexities);
+    double planningPhaseCost = computePlanningPhaseCost(p, strategy, totalTasks);
+    double postPlanningCost = computePostPlanningCost(p, repoCount, isProjectScoped, totalTasks);
+    double cacheOverhead = computeCacheWriteOverhead(p, workerCost + postPlanningCost);
+
+    double low = workerCost + planningPhaseCost + postPlanningCost + cacheOverhead;
+    double high = low * HIGH_MULTIPLIER;
+    double buffered = (low + high) / 2.0 * BUFFERED_MULTIPLIER;
+    int credits = Math.max(1, (int) Math.ceil(buffered / USD_PER_CREDIT));
+    double hardCap = credits * USD_PER_CREDIT;
+    return new Estimate(low, high, credits, hardCap, totalTasks);
+  }
+
+  /** Shared worker-cost computation, extracted so the new + old variants stay in sync. */
+  private double computeWorkerCost(LlmProvider p, java.util.List<String> taskComplexities) {
+    if (taskComplexities == null) return 0.0;
+    double total = 0.0;
+    for (String c : taskComplexities) {
+      AgentTier tier =
+          switch (c == null ? "MEDIUM" : c.toUpperCase()) {
+            case "LOW" -> AgentTier.LIGHTWEIGHT;
+            case "HIGH" -> AgentTier.PLANNING;
+            default -> AgentTier.WORKHORSE;
+          };
+      ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
+      double[] r = rates(resolved.getActualProvider().name().toLowerCase(), resolved.getModel());
+      int[] band = bandFor(c);
+      total += (band[0] / 1_000_000.0) * r[0] + (band[1] / 1_000_000.0) * r[1];
+    }
+    return total;
+  }
+
+  /**
+   * Cost of every LLM phase that runs AFTER the planner+workers but is invariant of strategy:
+   * reviewer (general + optionally wiring + multi-repo scaling), accuracy assessment, validation
+   * report generation, per-repo codemap (project-scoped only).
+   */
+  private double computePostPlanningCost(
+      LlmProvider p, int repoCount, boolean isProjectScoped, int totalTasks) {
+    double[] planningRates = ratesForTier(p, AgentTier.PLANNING);
+    double[] workhorseRates = ratesForTier(p, AgentTier.WORKHORSE);
+
+    // Reviewer general pass — always runs on terminal-state workspaces.
+    double reviewerGeneral = cost(REVIEWER_GENERAL_PASS_TOKENS, planningRates);
+
+    // Reviewer wiring pass — skipped on single-repo × single-task (see RunOrchestrator
+    // 2026-05-13 broadened gate). For estimation we ASSUME wiring runs unless the run is
+    // single-repo single-task, mirroring the gate.
+    boolean wiringRuns = !(repoCount <= 1 && totalTasks <= 1);
+    double reviewerWiring = wiringRuns ? cost(REVIEWER_WIRING_PASS_TOKENS, planningRates) : 0.0;
+    if (wiringRuns && repoCount > 1) {
+      reviewerWiring += (repoCount - 1) * cost(REVIEWER_PER_EXTRA_REPO_TOKENS, planningRates);
+    }
+
+    // Accuracy assessment — runs once per terminal state on every run.
+    double accuracy = cost(ACCURACY_ASSESSMENT_TOKENS, planningRates);
+
+    // Validation report markdown narration — small WORKHORSE call.
+    double validationReport = cost(VALIDATION_REPORT_TOKENS, workhorseRates);
+
+    // Codemap — per-repo, project-scoped runs only. Cached after first generation, but we
+    // assume cold-cache on estimate for safety.
+    double codemap =
+        isProjectScoped
+            ? Math.max(1, repoCount) * cost(CODEMAP_PER_REPO_TOKENS, planningRates)
+            : 0.0;
+
+    return reviewerGeneral + reviewerWiring + accuracy + validationReport + codemap;
+  }
+
+  /**
+   * Anthropic 5-min cache write costs 125% of the input rate per tokens written. ~30% of total
+   * input is typically written on the first run. No-op for OpenAI / Gemini.
+   */
+  private double computeCacheWriteOverhead(LlmProvider p, double inputDrivenCostUsd) {
+    if (p != LlmProvider.ANTHROPIC) return 0.0;
+    // The 25% premium applies to the WRITE-fraction of input; total cost is input-driven by the
+    // factor (input_rate × tokens_in), so a back-of-the-envelope is: 0.30 × 0.25 × inputDrivenCost.
+    return ANTHROPIC_CACHE_WRITE_INPUT_FRACTION * 0.25 * inputDrivenCostUsd;
+  }
+
+  /**
    * v2.6.2 slice 5 — strategy-aware estimate. Adds the per-strategy hierarchical- planner phase
    * costs on top of the worker cost:
    *
@@ -292,44 +408,10 @@ public class RunCostTracker {
       String provider,
       java.util.List<String> taskComplexities,
       com.navneet.executespec.agent.PlanStrategy strategy) {
-    // v2.5.13 — enum is now GEMINI (was GOOGLE); "gemini" input → "GEMINI" enum
-    // value. Keep the null + uppercase guards so callers can pass any case.
-    String matrixProvider = provider == null ? "OPENAI" : provider.toUpperCase();
-    LlmProvider p;
-    try {
-      p = LlmProvider.valueOf(matrixProvider);
-    } catch (Exception e) {
-      return estimateRun(provider, null, taskComplexities); // fallback
-    }
-
-    // ── Worker cost (per-task, tier-aware). Same logic for every strategy. ──
-    double workerCost = 0.0;
-    int totalTasks = 0;
-    if (taskComplexities != null) {
-      for (String c : taskComplexities) {
-        totalTasks++;
-        AgentTier tier =
-            switch (c == null ? "MEDIUM" : c.toUpperCase()) {
-              case "LOW" -> AgentTier.LIGHTWEIGHT;
-              case "HIGH" -> AgentTier.PLANNING;
-              default -> AgentTier.WORKHORSE;
-            };
-        ResolvedModel resolved = modelResolver.resolve("WorkerAgent", p, tier);
-        double[] r = rates(resolved.getActualProvider().name().toLowerCase(), resolved.getModel());
-        int[] band = bandFor(c);
-        workerCost += (band[0] / 1_000_000.0) * r[0] + (band[1] / 1_000_000.0) * r[1];
-      }
-    }
-
-    // ── Planning-phase overhead, strategy-shaped. ─────────────────────
-    double planningPhaseCost = computePlanningPhaseCost(p, strategy, totalTasks);
-
-    double low = workerCost + planningPhaseCost;
-    double high = low * HIGH_MULTIPLIER;
-    double buffered = (low + high) / 2.0 * 1.10;
-    int credits = Math.max(1, (int) Math.ceil(buffered / USD_PER_CREDIT));
-    double hardCap = credits * USD_PER_CREDIT;
-    return new Estimate(low, high, credits, hardCap, totalTasks);
+    // 2026-05-13 audit Stage 1: route through the 5-arg variant with defaults that match
+    // pre-audit behaviour (1 repo, NOT project-scoped → no codemap cost). New callers should
+    // pass explicit repoCount + isProjectScoped instead of using this back-compat path.
+    return estimateRunTierAware(provider, taskComplexities, strategy, 1, false);
   }
 
   // ── Strategy-aware planning-phase cost ─────────────────────────────────
@@ -361,6 +443,54 @@ public class RunCostTracker {
 
   /** Children-per-EPIC assumption (Classification.MEDIUM caps at 4). */
   private static final int LEGACY_CHILDREN_PER_EPIC = 3;
+
+  // ── Post-planning agents the estimator USED to ignore (Stage 1, audit 2026-05-13) ──
+
+  /**
+   * ReviewerAgent general pass: PLANNING tier, reads many files + emits structured patches.
+   * Calibrated against run 6024f510 (51,780 in / 4,750 out — that was BOTH general + wiring on a
+   * 3-repo project; single-pass alone is ~half that). Per-repo multiplier handles multi-repo
+   * project workspaces where wiring scans across multiple repos.
+   */
+  private static final int[] REVIEWER_GENERAL_PASS_TOKENS = {18_000, 2_500};
+
+  /**
+   * ReviewerAgent wiring pass: same tier, narrower scope but reads ALL routers / barrels / import
+   * graphs. Skipped when {@code skipWiringPass=true} (single-repo × single-task runs).
+   */
+  private static final int[] REVIEWER_WIRING_PASS_TOKENS = {15_000, 2_000};
+
+  /**
+   * Extra reviewer cost PER additional linked repo beyond the first. Captures multi-repo wiring
+   * scans + cross-repo invariant checks. Applied to the wiring-pass band.
+   */
+  private static final int[] REVIEWER_PER_EXTRA_REPO_TOKENS = {8_000, 1_000};
+
+  /**
+   * AccuracyAssessmentService: PLANNING tier, scores spec adherence. Calibrated to ~6k in / 1k out
+   * per run on the kind of file tree + key-files sample size we feed it.
+   */
+  private static final int[] ACCURACY_ASSESSMENT_TOKENS = {6_000, 1_000};
+
+  /**
+   * ValidationReportGenerator (WORKHORSE) — produces the markdown report at run end. Small; mostly
+   * summary tokens.
+   */
+  private static final int[] VALIDATION_REPORT_TOKENS = {4_000, 1_500};
+
+  /**
+   * Codemap generation per repo (project-scoped runs only). Project-level runs invoke {@code
+   * CodeMapGenerator} per linked repo at plan-time when the codemap is stale or missing. Calibrated
+   * to ~3k in / 1.5k out per repo. PLANNING tier in practice.
+   */
+  private static final int[] CODEMAP_PER_REPO_TOKENS = {3_000, 1_500};
+
+  /**
+   * Anthropic cache-write overhead. The 5-minute cache write costs 125% of the input rate per
+   * tokens written. For a typical run the cache write is ~30% of total input. Apply only to
+   * Anthropic runs.
+   */
+  private static final double ANTHROPIC_CACHE_WRITE_INPUT_FRACTION = 0.30;
 
   private double computePlanningPhaseCost(
       LlmProvider p, com.navneet.executespec.agent.PlanStrategy strategy, int totalTasks) {

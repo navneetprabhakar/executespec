@@ -16,6 +16,7 @@ import {
   Github,
   Archive,
   RefreshCw,
+  ExternalLink,
 } from 'lucide-react';
 import {useIsMobile} from '@/hooks/useIsMobile';
 import GlowDot from '@/components/shared/GlowDot';
@@ -722,6 +723,24 @@ export default function RunDetail() {
                   </>
                 )}
                 <div className='flex items-center gap-2 ml-auto'>
+                  {/* PR link — surface prominently when a PR has been opened by this run.
+                      Audit 2026-05-13 UX: previously the PR link was only on the Summary tab
+                      (RunDetailTabs.RunPrList), invisible until the user scrolled / switched
+                      tabs. Show it next to the action buttons so the next-step affordance is
+                      always one click away. */}
+                  {(activeRun.scmPrUrl || activeRun.githubPrUrl) && (
+                    <a
+                      href={activeRun.scmPrUrl ?? activeRun.githubPrUrl ?? '#'}
+                      target='_blank'
+                      rel='noopener noreferrer'
+                      className='flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-accent-blue hover:underline whitespace-nowrap'
+                      title='Open the pull request opened by this run'
+                    >
+                      <Github className='h-3.5 w-3.5' />
+                      View PR
+                      <ExternalLink className='h-3 w-3' />
+                    </a>
+                  )}
                   {['COMPLETE', 'PARTIAL'].includes(activeRun.status) && (
                     <button
                       onClick={handleScmPush}
