@@ -194,6 +194,74 @@ public class GitHubRepoService {
   }
 
   /**
+   * PR-H (2026-05-14) — delete a remote branch via the GitHub Git Refs API. Used by the
+   * stale-branch sweeper to reclaim {@code executespec/*} branches left behind by terminated /
+   * abandoned runs.
+   *
+   * <p>Idempotent on common error codes — 422 (already deleted) is treated as success, 404 is
+   * treated as success (already gone). Network / auth failures return false so the sweeper can
+   * record a partial failure without aborting the pass.
+   *
+   * @param repoFullName e.g. "owner/repo"
+   * @param branch e.g. "executespec/abc123" (NOT a refs path — caller passes the branch name)
+   * @param overridePat caller's PAT (must have repo:write to delete refs)
+   * @return true on success (or already-deleted); false on real failure (network / 403 / 401)
+   */
+  public boolean deleteBranch(String repoFullName, String branch, String overridePat) {
+    String effectivePat = resolve(overridePat, pat);
+    if (effectivePat == null || effectivePat.isBlank()) return false;
+    if (repoFullName == null || !repoFullName.contains("/")) return false;
+    if (branch == null || branch.isBlank()) return false;
+    // Protect against accidentally deleting protected branches via a typo upstream.
+    if ("main".equals(branch) || "master".equals(branch) || "develop".equals(branch)) {
+      log.warn(
+          "[GitHubRepoService] deleteBranch refusing to delete protected branch {} on {}",
+          branch,
+          repoFullName);
+      return false;
+    }
+
+    try {
+      HttpClient client = HttpClient.newHttpClient();
+      // GitHub Git Refs API: DELETE /repos/{o}/{r}/git/refs/heads/{branch}
+      HttpRequest request =
+          HttpRequest.newBuilder()
+              .uri(
+                  URI.create(
+                      "https://api.github.com/repos/" + repoFullName + "/git/refs/heads/" + branch))
+              .header("Authorization", "Bearer " + effectivePat)
+              .header("Accept", "application/vnd.github+json")
+              .DELETE()
+              .build();
+      HttpResponse<String> res = client.send(request, HttpResponse.BodyHandlers.ofString());
+      int sc = res.statusCode();
+      if (sc == 204) {
+        log.info("[GitHubRepoService] Deleted branch {} on {}", branch, repoFullName);
+        return true;
+      }
+      if (sc == 404 || sc == 422) {
+        log.info(
+            "[GitHubRepoService] Branch {} on {} already gone (HTTP {})", branch, repoFullName, sc);
+        return true;
+      }
+      log.warn(
+          "[GitHubRepoService] deleteBranch {} on {} returned {}: {}",
+          branch,
+          repoFullName,
+          sc,
+          res.body());
+      return false;
+    } catch (Exception e) {
+      log.warn(
+          "[GitHubRepoService] deleteBranch {} on {} failed: {}",
+          branch,
+          repoFullName,
+          e.getMessage());
+      return false;
+    }
+  }
+
+  /**
    * Install a {@code pull_request} webhook on the given repo so the {@link
    * com.navneet.executespec.project.pr.GitHubWebhookController} receives merge events. Best-effort:
    * logs a warning and returns {@code false} on any failure (no PAT, no callback URL, network
