@@ -147,6 +147,24 @@ export default function RunDetailTabs() {
     loadFiles(activeRun.runId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeRun?.runId, filesTick, loadFiles]);
+
+  // PR-C (2026-05-13) — push-driven file-tree refresh on SSE FILE_WRITTEN. Mirrors the V3
+  // RunDetailPage wiring: useSse bumps fileWrittenTickAt on each tool-call write; we debounce
+  // 300ms to coalesce bursts and then re-fetch via the existing loadFiles path. Without this,
+  // the file tree only refreshed on the 5s polling fallback (the user's report: "files don't
+  // update in real time when the agent edits").
+  const fileWrittenTickAt = useSseStore((s) => s.fileWrittenTickAt);
+  const fileWriteDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!activeRun || !fileWrittenTickAt) return;
+    if (fileWriteDebounceRef.current) clearTimeout(fileWriteDebounceRef.current);
+    fileWriteDebounceRef.current = setTimeout(() => {
+      loadFiles(activeRun.runId);
+    }, 300);
+    return () => {
+      if (fileWriteDebounceRef.current) clearTimeout(fileWriteDebounceRef.current);
+    };
+  }, [activeRun, fileWrittenTickAt, loadFiles]);
   // Test generation tasks — only fetch after test gen has started (avoids 404 noise)
   const [testTasks, setTestTasks] = useState<TestTaskDto[]>([]);
   const sseEntries = useSseStore((s) => s.entries);
