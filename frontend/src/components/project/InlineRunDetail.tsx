@@ -433,6 +433,22 @@ export default function InlineRunDetail({
               Download code
             </button>
           )}
+          {/* PR link in the primary action cluster — was only shown below the report footer
+              (~30 lines down). Audit 2026-05-13 UX: surfacing here so the next-step
+              affordance is alongside the other actions. */}
+          {terminal && (run.scmPrUrl || run.githubPrUrl) && (
+            <a
+              href={run.scmPrUrl ?? run.githubPrUrl ?? '#'}
+              target='_blank'
+              rel='noopener noreferrer'
+              className='inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue hover:bg-accent-blue/20'
+              title='Open the pull request opened by this run'
+            >
+              <Github className='h-3 w-3' />
+              View PR
+              <ExternalLink className='h-2.5 w-2.5' />
+            </a>
+          )}
           {terminal && (
             <div className='inline-flex items-center gap-1 text-[11px] rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] px-1 py-0.5'>
               <GitBranch className='h-3 w-3 text-muted' />

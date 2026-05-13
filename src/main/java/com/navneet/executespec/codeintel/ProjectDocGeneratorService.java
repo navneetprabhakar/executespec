@@ -56,6 +56,7 @@ public class ProjectDocGeneratorService {
   private final ProjectArchitectureService architectureService;
   private final ProjectWorkspaceService workspace;
   private final ProjectGeneratedDocRepository docRepo;
+  private final VersionRetentionService versionRetention;
   private final ProjectRepository projectRepo;
   private final ProjectRepoLinkRepository linkRepo;
   private final ProjectRepoRepository repoRepo;
@@ -214,6 +215,7 @@ public class ProjectDocGeneratorService {
             .costUsd(cost)
             .build();
     doc = docRepo.save(doc);
+    versionRetention.pruneGeneratedDoc(projectId, docType);
 
     // Mirror to disk so the UI can use the same read path as summary.md.
     try {
