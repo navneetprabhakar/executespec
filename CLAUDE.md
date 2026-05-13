@@ -22,7 +22,7 @@ RunOrchestrator
   │   └─ for LARGE/LEGACY: SKELETON_ONLY → parallel TaskExpanderAgent (WORKHORSE) → CoherencePlannerAgent (LIGHTWEIGHT)
   ├─ plan gate (PRODUCTION pauses at AWAITING_APPROVAL; PROTOTYPE bypasses)
   ├─ SequentialExecutor                            per-task tier-routed WorkerAgent + per-task buildProject smoke
-  ├─ ReviewerAgent (PLANNING)                      general + wiring passes (project-type aware)
+  ├─ ReviewerAgent (PLANNING)                      general + wiring passes (project-type aware) + PostEditFormatter
   ├─ ValidationReport persistence + verifiedScore
   └─ auto-preview kickoff + test generation in background
 ```
