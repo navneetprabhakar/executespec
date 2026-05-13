@@ -187,10 +187,21 @@ export interface RunSummary {
    *   CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS |
    *   FINAL_BUILD_FAILED | TESTS_FAILED:<n>_OF_<m> |
    *   REVIEWER_UNRESOLVED | REVIEWER_FAILED |
-   *   ALL_TASKS_FAILED | LEGACY_UNKNOWN
+   *   ALL_TASKS_FAILED | LEGACY_UNKNOWN | NO_REVIEW_RESULT (PR #120)
    * Null on in-flight runs and on pre-v2.5.10 terminal runs that were never backfilled.
    */
   statusReason?: string | null;
+  /**
+   * PR-B (2026-05-13) — SCM-agnostic pull-request URL raised by this run (GitHub or Bitbucket).
+   * Prefer this over {@link githubPrUrl}. Null when no PR has been opened yet.
+   */
+  scmPrUrl?: string | null;
+  /**
+   * PR-B (2026-05-13) — legacy GitHub-only PR URL. Identical to {@link scmPrUrl} on runs written
+   * after the v2.5.x SCM split; retained for back-compat with pre-split runs that never got
+   * migrated. UI should fall back to this when scmPrUrl is null.
+   */
+  githubPrUrl?: string | null;
 }
 
 export interface TaskSummary {
