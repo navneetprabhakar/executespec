@@ -2,6 +2,7 @@ package com.navneet.executespec.project.pr;
 
 import java.time.Instant;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 
 import com.navneet.executespec.repo.GitHubRepoService;
@@ -47,7 +48,16 @@ public class PrRefreshService {
 
   /** V82 contract — back-compat for non-controller callers. */
   public RefreshResult refreshProject(String projectId) {
-    return refreshProject(projectId, null);
+    return refreshProject(projectId, null, false);
+  }
+
+  /**
+   * 2-arg back-compat overload. Defaults to {@code forceAll=false} so existing callers get the
+   * faster open-only path. New callers that need to re-poll merged/closed history (e.g. UI
+   * cache-invalidation) pass {@code forceAll=true} to the 3-arg variant.
+   */
+  public RefreshResult refreshProject(String projectId, String callerPat) {
+    return refreshProject(projectId, callerPat, false);
   }
 
   /**
@@ -72,8 +82,14 @@ public class PrRefreshService {
    * own scope. Refresh is also a logically idempotent operation, so per-row commit semantics match
    * what users expect (partial progress on a flaky network is preferable to "all or nothing").
    * Pairs with the cascade null-runId fix in {@code PostMergeCascadeService}.
+   *
+   * <p>2026-05-13 — added {@code forceAll} parameter. Default {@code false} restricts the DB fetch
+   * to OPEN PRs only — merged + closed PRs are terminal at GitHub and never change, so pulling them
+   * just to skip in-loop wastes a DB round-trip per refresh. Audit run 6024f510's project had 28+
+   * PRs but only a few were open at a time. Pass {@code forceAll=true} when the caller needs to
+   * re-sync everything (e.g. backfill after a long outage).
    */
-  public RefreshResult refreshProject(String projectId, String callerPat) {
+  public RefreshResult refreshProject(String projectId, String callerPat, boolean forceAll) {
     Set<String> projectRunIds = new HashSet<>();
     pipelineRunRepo
         .findByProjectIdOrderByStartedAtDesc(projectId, PageRequest.of(0, 500))
@@ -84,13 +100,23 @@ public class PrRefreshService {
     java.util.LinkedHashMap<java.util.UUID, PullRequestRecord> toCheck =
         new java.util.LinkedHashMap<>();
     for (String runId : projectRunIds) {
-      for (PullRequestRecord rec : prRepo.findByRunIdOrderByCreatedAtAsc(runId)) {
+      // Open-only fast path (default). forceAll=true falls back to the V82 contract.
+      List<PullRequestRecord> rows =
+          forceAll
+              ? prRepo.findByRunIdOrderByCreatedAtAsc(runId)
+              : prRepo.findByRunIdAndStatusOrderByCreatedAtAsc(
+                  runId, PullRequestRecord.Status.OPEN);
+      for (PullRequestRecord rec : rows) {
         toCheck.putIfAbsent(rec.getId(), rec);
       }
     }
-    for (PullRequestRecord rec :
-        prRepo.findByProjectIdAndKindNotOrderByCreatedAtDesc(
-            projectId, PullRequestRecord.Kind.RUN)) {
+    List<PullRequestRecord> systemRows =
+        forceAll
+            ? prRepo.findByProjectIdAndKindNotOrderByCreatedAtDesc(
+                projectId, PullRequestRecord.Kind.RUN)
+            : prRepo.findByProjectIdAndKindNotAndStatusOrderByCreatedAtDesc(
+                projectId, PullRequestRecord.Kind.RUN, PullRequestRecord.Status.OPEN);
+    for (PullRequestRecord rec : systemRows) {
       toCheck.putIfAbsent(rec.getId(), rec);
     }
     if (toCheck.isEmpty()) return new RefreshResult(0, 0, 0);

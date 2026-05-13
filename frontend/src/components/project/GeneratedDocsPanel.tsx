@@ -118,6 +118,12 @@ export default function GeneratedDocsPanel({projectId}: Props) {
         <span className='mx-1 text-secondary'>Analyse</span> first to refresh source material, then
         generate.
       </p>
+      <p
+        className='text-[10px] text-muted leading-relaxed'
+        title='Only the most recent 20 versions of each doc are kept. Older versions are pruned automatically when a new one is generated.'
+      >
+        Only the latest 20 versions are retained per doc type.
+      </p>
     </section>
   );
 }

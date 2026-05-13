@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
@@ -35,6 +36,7 @@ import com.navneet.executespec.billing.cost.RunCostLog;
 import com.navneet.executespec.billing.cost.RunCostLogRepository;
 import com.navneet.executespec.codeintel.RunCodeMapService;
 import com.navneet.executespec.config.AgentProperties;
+import com.navneet.executespec.cost.CostHistoryService;
 import com.navneet.executespec.cost.RunCostTracker;
 import com.navneet.executespec.harness.ExecutionRequest;
 import com.navneet.executespec.harness.ExecutionResult;
@@ -51,6 +53,7 @@ import com.navneet.executespec.report.ValidationReportService;
 import com.navneet.executespec.report.model.CompileResult;
 import com.navneet.executespec.report.model.ReportInput;
 import com.navneet.executespec.reviewer.AccuracyAssessmentService;
+import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.reviewer.ReviewerAgent;
 import com.navneet.executespec.reviewer.ReviewerRequest;
 import com.navneet.executespec.reviewer.ReviewerResult;
@@ -127,6 +130,7 @@ public class RunOrchestrator {
   private final SmartClassifierAgent smartClassifier;
   private final SequentialExecutor executor;
   private final ReviewerAgent reviewer;
+  private final PostEditFormatter postEditFormatter;
 
   /**
    * V182 (2026-05-08) — patch-mode entry. Used by the {@code runPatchPipeline} branch when {@link
@@ -147,6 +151,9 @@ public class RunOrchestrator {
   private final ObjectMapper objectMapper;
   private final AgentProperties agentProps;
   private final RunCostTracker costTracker;
+  // 2026-05-13 audit Stage 2 — k-NN over historical run costs. Records on terminal; the
+  // estimator falls back to it before the Stage-1 formula once ≥10 similar runs exist.
+  private final CostHistoryService costHistoryService;
   private final com.navneet.executespec.cost.RunTokenAttributor tokenAttributor;
   private final RunCostLogRepository runCostLogRepo;
   private final WorkspaceInitService workspaceInit;
@@ -1244,19 +1251,25 @@ public class RunOrchestrator {
           programBenchContainerStore != null && programBenchContainerStore.get(runId) != null
               ? 80
               : null;
-      // 2026-05-13 — skip wiring pass on simple single-repo runs where it's pure cost overhead.
-      // Audit run 6024f510 (Black formatting fix, SINGLE_SHOT, 1 repo) spent ~$0.62 of $1.04
-      // total on a 3-repo wiring scan that found nothing actionable. Wiring pass is valuable on
-      // multi-component / multi-repo plans where the worker can leave routes / barrels /
-      // imports orphaned; on a SINGLE_SHOT against a single repo there is nothing to wire.
+      // 2026-05-13 — skip wiring pass on simple runs where it's pure cost overhead.
+      // Original gate (SINGLE_SHOT × single-repo) missed run e5f40b8a where classifier picked
+      // SMALL on the same kind of "format 6 files" spec — wiring still ran. The wiring pass is
+      // valuable when the worker can leave routes / barrels / imports orphaned across multiple
+      // tasks or repos; on a single-task plan touching a single repo there's nothing to wire
+      // regardless of which strategy the classifier picked. Broadened to:
+      //   • single linked repo (count ≤ 1) AND
+      //   • single task in the plan
+      // This covers SINGLE_SHOT-and-SMALL when both shrink to 1 task. Multi-task SMALL/MEDIUM/
+      // LARGE/LEGACY still get the full reviewer because cross-task wiring concerns are real.
       int linkedRepoCount = selectedRepoIds == null ? 0 : selectedRepoIds.size();
-      boolean skipWiring =
-          plan.classification() == Classification.SINGLE_SHOT && linkedRepoCount <= 1;
+      int planTaskCount = plan.tasks() == null ? 0 : plan.tasks().size();
+      boolean skipWiring = linkedRepoCount <= 1 && planTaskCount <= 1;
       if (skipWiring) {
         log.info(
-            "RunOrchestrator run={} skipping reviewer wiring pass — SINGLE_SHOT × single-repo"
-                + " (audit 2026-05-13 cost-control)",
-            runId);
+            "RunOrchestrator run={} skipping reviewer wiring pass — single-repo × single-task"
+                + " (classification={}, audit 2026-05-13 cost-control)",
+            runId,
+            plan.classification());
       }
       try {
         reviewResult =
@@ -1675,6 +1688,27 @@ public class RunOrchestrator {
     if (("COMPLETE".equals(terminalStatus) || "PARTIAL".equals(terminalStatus))
         && run.getSourceType() != null
         && run.getSourceType().startsWith("finding:")) {
+      // 2026-05-13 audit Fix-A — same PostEditFormatter pass the BUILD-mode reviewer
+      // runs. Without this, autofix surfaces (PR Review / TechDebt / CI failure /
+      // Code Review severity buckets) pushed unformatted code to the existing PR
+      // branch and CI's `black --check` / `prettier --check` rejected it — making
+      // the autofix look like it "didn't fix anything". Idempotent + never throws.
+      try {
+        PostEditFormatter.Result fmt = postEditFormatter.run(rootCtx.workspaceRoot(), runId);
+        if (fmt.filesReformatted() > 0 || !fmt.errors().isEmpty()) {
+          log.info(
+              "PATCH run={} post-edit formatter — reformatted={} formatters={} errors={}",
+              runId,
+              fmt.filesReformatted(),
+              fmt.formattersRun(),
+              fmt.errors());
+        }
+      } catch (Exception fmtEx) {
+        log.warn(
+            "PATCH run={} post-edit formatter threw (continuing to push): {}",
+            runId,
+            fmtEx.getMessage());
+      }
       try {
         PipelineRun fresh = runRepo.findById(runId).orElse(null);
         if (fresh != null) {
@@ -3020,6 +3054,10 @@ public class RunOrchestrator {
               // one testable place. Fires only on COMPLETE + non-null owner;
               // ReferralService.onRefereeFirstReadyRun itself is idempotent.
               referralCompletionHook.onTerminalStatus(runId, r.getStatus(), r.getCreatedByUserId());
+
+              // Audit 2026-05-13 Stage 2 — record (feature vector → actual cost) for k-NN
+              // cost estimation. Best-effort; failures swallowed inside the service.
+              costHistoryService.recordOnTerminal(runId);
             });
     broadcaster.emit(runId, RunEvent.runStatus(runId, finalStatus));
     broadcaster.emit(runId, RunEvent.costUpdate(runId, cost.costUsd()));
@@ -3437,6 +3475,24 @@ public class RunOrchestrator {
 
   // ─── cost helpers ───────────────────────────────────────────────────────
 
+  /**
+   * Best-effort repo count for the cost estimate. For project-scoped runs the count is the number
+   * of selected/linked repos in the workspace. For standalone runs the count is 1 when a repo URL
+   * is set, 0 otherwise. Audit 2026-05-13 Stage 1 — feeds the reviewer's per-extra- repo wiring
+   * overhead in the estimator.
+   */
+  private static int computeRepoCountForEstimate(PipelineRun runRow) {
+    if (runRow == null) return 1;
+    if (runRow.getProjectId() != null) {
+      List<UUID> ids = deserializeRepoIds(runRow.getSelectedRepoIds());
+      if (!ids.isEmpty()) return ids.size();
+      // Project run with no explicit selectedRepoIds — fall back to 1 to avoid a
+      // 0-cost codemap term that hides per-repo overhead on legacy rows.
+      return 1;
+    }
+    return (runRow.getRepoUrl() != null && !runRow.getRepoUrl().isBlank()) ? 1 : 0;
+  }
+
   private void persistEstimate(String runId, String provider, String model, Plan plan) {
     java.util.List<String> complexities =
         plan.tasks().stream()
@@ -3453,8 +3509,29 @@ public class RunOrchestrator {
             .map(PipelineRun::getPlanStrategy)
             .map(PlanStrategy::fromStringSafe)
             .orElse(null);
+    // 2026-05-13 audit Stage 1 — feed repoCount + isProjectScoped to the estimator so
+    // post-planning costs (reviewer × per-repo wiring, codemap per repo) are accounted for.
+    // Run 6024f510 (1 LOW task × 3 repos × project-scoped × Anthropic) was estimated at
+    // $0.05-$0.09 against an actual $1.04 — the missing reviewer/codemap/cache-write
+    // overhead was the bulk of the gap.
+    PipelineRun runRow = runRepo.findById(runId).orElse(null);
+    int repoCount = computeRepoCountForEstimate(runRow);
+    boolean isProjectScoped = runRow != null && runRow.getProjectId() != null;
+
+    // Audit 2026-05-13 Stage 2 — try historical k-NN first. Falls back to the Stage-1
+    // formula when fewer than CostHistoryService.MIN_SAMPLES similar runs exist. As the
+    // historical table fills (after deploy), this kicks in for popular shapes and the
+    // formula remains the bootstrap fallback for novel shapes.
+    String providerKey = provider == null ? null : provider.toUpperCase();
+    String strategyKey = strategy == null ? null : strategy.name();
+    Optional<RunCostTracker.Estimate> historical =
+        costHistoryService.estimateFromHistory(
+            strategyKey, providerKey, repoCount, complexities.size());
     RunCostTracker.Estimate est =
-        costTracker.estimateRunTierAware(provider, complexities, strategy);
+        historical.orElseGet(
+            () ->
+                costTracker.estimateRunTierAware(
+                    provider, complexities, strategy, repoCount, isProjectScoped));
     runRepo
         .findById(runId)
         .ifPresent(
