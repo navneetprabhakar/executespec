@@ -16,8 +16,9 @@ import org.springframework.data.jpa.repository.JpaRepository;
  * key {@code FilePurposeSummaryService} uses for the SHA-keyed short-circuit.
  *
  * <p>{@link #findByGeneratedAtBefore} powers a future eviction sweeper (PR-H sibling) that ages out
- * rows older than ~90 days regardless of churn. Not wired into a scheduled job yet — the cost-audit
- * gate from the design doc (pending-codemap-enhancements.md) still applies.
+ * rows older than ~90 days regardless of churn. Not wired into a scheduled job yet — defer the
+ * sweeper until cost telemetry shows enough churn to justify the runtime overhead (the original
+ * deferred-handoff doc was deleted once PR-N2 shipped; this comment is the surviving rationale).
  */
 public interface FilePurposeSummaryRepository extends JpaRepository<FilePurposeSummary, UUID> {
 
