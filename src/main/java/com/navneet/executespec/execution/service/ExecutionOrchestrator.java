@@ -122,11 +122,22 @@ public class ExecutionOrchestrator {
           resumable.size());
       for (ExecutionRun r : resumable) {
         try {
-          log.info(
-              "ExecutionOrchestrator boot-resume: re-dispatching exec={} (status was EXECUTING"
-                  + " at boot)",
-              r.getId());
-          executeApprovedPlan(r.getId());
+          if (r.getPipelineRunId() != null && !r.getPipelineRunId().isBlank()) {
+            // V188 (2026-05-13) unified path: the @Async pollAndMirrorV2 thread died with the
+            // previous JVM; rearm it so the V3 terminal-status mirror still fires. The underlying
+            // V2 PipelineRun is resumed independently by StartupRunResumer.
+            log.info(
+                "ExecutionOrchestrator boot-resume: re-polling unified exec={} V2={}",
+                r.getId(),
+                r.getPipelineRunId());
+            pollAndMirrorV2(r.getId(), r.getPipelineRunId());
+          } else {
+            log.info(
+                "ExecutionOrchestrator boot-resume: re-dispatching legacy exec={} (status was"
+                    + " EXECUTING at boot)",
+                r.getId());
+            executeApprovedPlan(r.getId());
+          }
         } catch (Exception e) {
           // Per-row safety net — one bad row never blocks the rest.
           log.error(
@@ -827,8 +838,30 @@ public class ExecutionOrchestrator {
    * Cancel every V2 PipelineRun still in flight for this ExecutionRun. Without this, the Abort
    * button flips ExecutionRun.status=ABORTED but each solution's downstream V2 run keeps executing
    * (the Launches tab then shows "RUNNING" even though the user already aborted).
+   *
+   * <p>V188 (2026-05-13) — also cancels the unified-dispatch V2 run linked via {@code
+   * ExecutionRun.pipelineRunId}. Per-Solution cancellation still fires below for any legacy
+   * in-flight executions during the deprecation window.
    */
   private void cancelActiveV2Runs(ExecutionRun run) {
+    // V188 — unified path: one V2 run for the whole execution. Cancel it.
+    if (run.getPipelineRunId() != null && !run.getPipelineRunId().isBlank()) {
+      try {
+        boolean cancelled = v2Orchestrator.cancel(run.getPipelineRunId());
+        log.info(
+            "abort exec={} (unified) pipelineRun={} cancel={}",
+            run.getId(),
+            run.getPipelineRunId(),
+            cancelled);
+      } catch (Exception e) {
+        log.warn(
+            "abort exec={} (unified) pipelineRun={} cancel failed: {}",
+            run.getId(),
+            run.getPipelineRunId(),
+            e.getMessage());
+      }
+    }
+
     Set<String> terminalSolStatus = Set.of("DONE", "SKIPPED", "FAILED");
     List<ExecutionSolution> solutions =
         solutionRepo.findByExecutionRun_IdOrderBySequenceNumberAsc(run.getId());
