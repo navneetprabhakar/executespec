@@ -42,4 +42,11 @@ public interface ProjectRepository extends JpaRepository<Project, String> {
    * double-charged for a project they've deleted but the sweeper hasn't reaped yet.
    */
   long countByOrgIdAndStatusAndDeletedAtIsNull(String orgId, String status);
+
+  /**
+   * PR-H (2026-05-13) — used by {@code DataRetentionService.hardDeleteTombstonedProjects} to find
+   * projects whose 30-day undo window has expired. Spring Data derives the query from the method
+   * name — equivalent to {@code WHERE deleted_at < :cutoff}.
+   */
+  List<Project> findByDeletedAtBefore(java.time.Instant cutoff);
 }
