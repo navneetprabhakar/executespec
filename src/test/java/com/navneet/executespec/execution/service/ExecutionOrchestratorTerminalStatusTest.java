@@ -40,6 +40,9 @@ class ExecutionOrchestratorTerminalStatusTest {
   @Mock com.navneet.executespec.repo.GitHubRepoService gitHub;
   @Mock com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
+  @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
+  @Mock com.navneet.executespec.harness.GateStore gateStore;
+  @Mock ExecutionPlannerService plannerService;
 
   @Mock
   org.springframework.beans.factory.ObjectProvider<com.navneet.executespec.folder.BootstrapService>
@@ -70,7 +73,10 @@ class ExecutionOrchestratorTerminalStatusTest {
             gitHub,
             v2Orchestrator,
             prRecordRepo,
-            runCas);
+            runCas,
+            pipelineRunRepo,
+            gateStore,
+            plannerService);
   }
 
   @Test

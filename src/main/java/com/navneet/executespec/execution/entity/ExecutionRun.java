@@ -162,6 +162,16 @@ public class ExecutionRun {
   @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
   private String selectedRepoIds;
 
+  /**
+   * V188 (2026-05-13) — unified-dispatch link. When non-null, points at the single V2 {@code
+   * pipeline_run} that drives execution for this V3 launch (one V2 run for the whole execution;
+   * multi-repo PRs handled by {@code ScmPushService.pushMultiRepo}). NULL for legacy rows that
+   * fanned out into per-{@link ExecutionSolution} V2 runs — those keep using the original
+   * Solution-dispatch path during the deprecation window.
+   */
+  @Column(name = "pipeline_run_id", length = 64)
+  private String pipelineRunId;
+
   @OneToMany(mappedBy = "executionRun", fetch = FetchType.LAZY)
   @OrderBy("sequenceNumber ASC")
   private List<ExecutionSolution> solutions;

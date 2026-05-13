@@ -37,6 +37,7 @@ class SolutionExecutionServiceAccumulateCasTest {
   @Mock com.navneet.executespec.execution.repository.ExecutionSolutionRunRepository solutionRunRepo;
   @Mock com.navneet.executespec.project.repository.ProjectRepoRepository projectRepoRepo;
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
+  @Mock com.navneet.executespec.state.repository.AgentTaskRepository agentTaskRepo;
   @Mock com.navneet.executespec.auth.repository.AppUserRepository appUserRepo;
   @Mock com.navneet.executespec.sse.SseBroadcaster broadcaster;
   @Mock com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
@@ -57,6 +58,7 @@ class SolutionExecutionServiceAccumulateCasTest {
             solutionRunRepo,
             projectRepoRepo,
             pipelineRunRepo,
+            agentTaskRepo,
             appUserRepo,
             broadcaster,
             gitHubRepoService,

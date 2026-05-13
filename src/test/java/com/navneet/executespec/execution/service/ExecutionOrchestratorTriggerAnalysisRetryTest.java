@@ -51,6 +51,9 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
   @Mock RunOrchestrator v2Orchestrator;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   @Mock ObjectProvider<com.navneet.executespec.folder.BootstrapService> bootstrapServiceProvider;
+  @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
+  @Mock com.navneet.executespec.harness.GateStore gateStore;
+  @Mock ExecutionPlannerService plannerService;
   // Use a real ExecutionRunCasUpdater wired to the runRepo mock so CAS
   // semantics (refetch + retry on optimistic lock) exercise the same
   // findById/save sequences the test assertions count.
@@ -76,7 +79,10 @@ class ExecutionOrchestratorTriggerAnalysisRetryTest {
             gitHub,
             v2Orchestrator,
             prRecordRepo,
-            runCas);
+            runCas,
+            pipelineRunRepo,
+            gateStore,
+            plannerService);
   }
 
   @Test
