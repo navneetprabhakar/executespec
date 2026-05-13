@@ -32,10 +32,13 @@ public class PipelineRun {
   /**
    * v2.5.10 (V107) — explicit reason for the terminal status so the UI can show "PARTIAL because
    * tests failed" vs "PARTIAL because final build failed" instead of the silent badge today.
-   * Populated by {@code RunOrchestrator} when the {@code scoring.v2-verified} flag is on; V108
-   * backfills historical rows. Values: CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS |
-   * FINAL_BUILD_FAILED | TESTS_FAILED:&lt;n&gt;_OF_&lt;m&gt; | REVIEWER_UNRESOLVED |
-   * REVIEWER_FAILED | ALL_TASKS_FAILED | LEGACY_UNKNOWN.
+   * Populated by {@code RunOrchestrator} unconditionally as of 2026-05-13 (the audit found the
+   * {@code scoring.v2-verified} flag was gating the REASON derivation too — net effect: any run
+   * with the flag off had a useless statusReason). V108 backfilled historical rows with {@code
+   * LEGACY_UNKNOWN}; new runs use {@code NO_REVIEW_RESULT} when the reviewer didn't run. Values:
+   * CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS | FINAL_BUILD_FAILED |
+   * TESTS_FAILED:&lt;n&gt;_OF_&lt;m&gt; | REVIEWER_UNRESOLVED | REVIEWER_FAILED | ALL_TASKS_FAILED
+   * | NO_REVIEW_RESULT | LEGACY_UNKNOWN (V108 backfill only).
    */
   @Column(name = "status_reason", length = 80)
   private String statusReason;

@@ -15,6 +15,20 @@ const STATUS_COLOR: Record<string, string> = {
   QUEUED: 'bg-[var(--gray-200)] text-muted border-[var(--border-default)]',
 };
 
+// 2026-05-13 audit — distinguish "user clicked Skip" from "system auto-skipped after
+// retries exhausted". Both write status=SKIPPED in the DB (only SKIP / ATTEMPT_ANYWAY
+// decisions land there), but only the auto-skip carries a failureReason mentioning
+// retries — the user-skip path doesn't set failureReason at all. Surface the difference
+// in the badge so customers don't read "skipped" as "skipped on purpose" when the
+// system actually gave up.
+function isAutoSkippedAfterFailure(solution: SolutionDto): boolean {
+  return (
+    solution.status === 'SKIPPED' &&
+    !!solution.failureReason &&
+    /consecutive attempts|aborting retries|retries exhausted/i.test(solution.failureReason)
+  );
+}
+
 interface Props {
   executionId: string;
   solution: SolutionDto;
@@ -29,7 +43,14 @@ interface Props {
 export default function SolutionSection({executionId, solution}: Props) {
   const [expanded, setExpanded] = useState(false);
   const [runs, setRuns] = useState<SolutionRun[] | null>(null);
-  const color = STATUS_COLOR[solution.status] ?? STATUS_COLOR.QUEUED;
+  const autoSkipped = isAutoSkippedAfterFailure(solution);
+  // When the solution was auto-skipped after exhausting retries, render it as a
+  // failure (red) — the muted SKIPPED grey reads as "intentionally skipped" and
+  // hides the fact that the system gave up.
+  const color = autoSkipped
+    ? STATUS_COLOR.FAILED
+    : (STATUS_COLOR[solution.status] ?? STATUS_COLOR.QUEUED);
+  const displayStatus = autoSkipped ? 'FAILED' : solution.status;
   const totalTokens =
     runs == null
       ? solution.actualTokens
@@ -50,8 +71,16 @@ export default function SolutionSection({executionId, solution}: Props) {
         className='w-full flex items-center gap-2 px-3 py-2 text-left text-sm'
       >
         {expanded ? <ChevronDown className='h-3 w-3' /> : <ChevronRight className='h-3 w-3' />}
-        <span className={cn('text-[11px] px-1.5 py-0.5 rounded border', color)}>
-          {solution.status}
+        <span
+          className={cn('text-[11px] px-1.5 py-0.5 rounded border', color)}
+          title={
+            autoSkipped
+              ? `System gave up after retries — ${solution.failureReason ?? 'no reason recorded'}`
+              : undefined
+          }
+        >
+          {displayStatus}
+          {autoSkipped && <span className='ml-1 text-[9px] opacity-80'>(auto)</span>}
         </span>
         <span className='font-mono text-[11px] text-muted'>S{solution.sequenceNumber}</span>
         <span className='truncate flex-1'>{solution.title}</span>
@@ -83,7 +112,10 @@ export default function SolutionSection({executionId, solution}: Props) {
           {solution.description && <div className='text-secondary'>{solution.description}</div>}
           {solution.failureReason && (
             <div className='text-accent-red'>
-              <span className='font-medium'>Failed ({solution.failurePhase}):</span>{' '}
+              <span className='font-medium'>
+                {autoSkipped ? 'Auto-skipped after failure' : 'Failed'}
+                {solution.failurePhase ? ` (${solution.failurePhase})` : ''}:
+              </span>{' '}
               {solution.failureReason}
             </div>
           )}
@@ -112,12 +144,24 @@ export default function SolutionSection({executionId, solution}: Props) {
                         'text-[11px] px-1.5 py-0.5 rounded border',
                         r.terminalStatus === 'COMPLETE'
                           ? 'text-status-success border-status-success/40'
-                          : r.terminalStatus === 'PARTIAL'
-                            ? 'text-status-waiting border-status-waiting/40'
+                          : // 2026-05-13 — when the parent solution didn't recover from
+                            // a PARTIAL attempt (status FAILED or auto-skipped after
+                            // retries), the attempt's amber "PARTIAL" reads as "still
+                            // making progress" — misleading. Promote it to red so the
+                            // user can see at a glance which attempts actually failed.
+                            r.terminalStatus === 'PARTIAL'
+                            ? autoSkipped || solution.status === 'FAILED'
+                              ? 'text-accent-red border-status-error/40'
+                              : 'text-status-waiting border-status-waiting/40'
                             : r.terminalStatus
                               ? 'text-accent-red border-status-error/40'
                               : 'text-muted border-[var(--border-default)]',
                       )}
+                      title={
+                        r.terminalStatus === 'PARTIAL'
+                          ? "Worker didn't call completeTask or hit a budget/iteration limit; see the run for details"
+                          : undefined
+                      }
                     >
                       {r.terminalStatus ?? 'RUNNING'}
                     </span>

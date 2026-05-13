@@ -1,6 +1,6 @@
 import {useEffect, useState} from 'react';
 import {Link, useLocation, useNavigate, useParams} from 'react-router-dom';
-import {ArrowLeft, Rocket, Info} from 'lucide-react';
+import {ArrowLeft, Rocket, Info, ExternalLink} from 'lucide-react';
 import {useExecutionStore} from '@/stores/useExecutionStore';
 import {useExecutionSse} from '@/hooks/useExecutionSse';
 import {getProject, type ProjectDto} from '@/lib/api';
@@ -137,6 +137,15 @@ export default function ExecutionViewPage() {
               <span className='text-[10px] font-mono text-muted'>
                 {executionRun.id.substring(0, 8)}
               </span>
+            )}
+            {executionRun?.pipelineRunId && (
+              <Link
+                to={`/runs/${executionRun.pipelineRunId}`}
+                className='inline-flex items-center gap-1 text-[11px] text-accent-blue hover:underline'
+                title='Open the underlying V2 run — task progress, worker logs, PRs'
+              >
+                V2 run <ExternalLink className='h-3 w-3' />
+              </Link>
             )}
           </div>
           <div className='flex items-center gap-3'>

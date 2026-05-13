@@ -107,6 +107,11 @@ class AsyncAllowlistTest {
               "ExecutionOrchestrator#approvePlanAndExecute",
               "ExecutionOrchestrator#executeApprovedPlan",
               "ExecutionPlannerService#generatePlan",
+              // V188 (2026-05-13) unified-dispatch path: both methods read the V2 PipelineRun via
+              // pipelineRunRepo.findById (no lazy navigation) and ExecutionRun via the CAS bean.
+              // No @OneToMany dereference, so the 3a17e9aa class of bug doesn't apply.
+              "ExecutionOrchestrator#dispatchUnified",
+              "ExecutionOrchestrator#pollAndMirrorV2",
 
               // project workspace — @Async + writeRawFile (file I/O, DB read only)
               "ProjectWorkspaceWarmer#warmDiskCache",
