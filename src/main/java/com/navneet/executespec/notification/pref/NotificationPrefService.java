@@ -88,6 +88,11 @@ public class NotificationPrefService {
         EnumSet.of(
             ActivityEventType.RUN_FAILED,
             ActivityEventType.RUN_PLAN_READY, // user must approve
+            // PR-O (2026-05-13) — user explicitly asked for a GitHub-CI-style email on every
+            // run completion, not just failures. Lands as opt-in by default; users can flip it
+            // off in the notification matrix UI if they find it noisy. Only the SUBMITTING user
+            // gets the email — the RunCompletionEmailListener filters by createdByUserId.
+            ActivityEventType.RUN_COMPLETED,
             ActivityEventType.LAUNCH_PAUSED, // needs intervention
             ActivityEventType.CONTRACT_BREAKING_CHANGE, // needs explicit ack
             ActivityEventType.CONTRACT_DRIFT_DETECTED,
