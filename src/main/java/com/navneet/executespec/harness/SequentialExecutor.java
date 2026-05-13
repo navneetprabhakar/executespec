@@ -556,7 +556,15 @@ end and only call completeTask if it exits 0.
         // v2.5.12 — populate a concrete failureReason for every terminal
         // worker outcome so RunMapper doesn't have to fall back to
         // "unknown — see worker logs". This closes Bug D from the eval.
-        persistTaskStatus(runId, task.id(), "FAILED", describeWorkerFailure(primary));
+        // V190 (2026-05-13, PR-A) — also persist the structured diagnostic JSON so the UI can
+        // surface "outcome=STOPPED_WITHOUT_COMPLETE, iters=47/75, last tool call: writeFile
+        // app/x.py failed" without operators SSHing the VM log.
+        persistTaskStatus(
+            runId,
+            task.id(),
+            "FAILED",
+            describeWorkerFailure(primary),
+            buildFailureDiagnosticJson(primary, cfg.maxIter));
         broadcaster.emit(runId, RunEvent.taskStatus(runId, task.id(), "FAILED"));
         return TaskOutcome.builder()
             .taskId(task.id())
@@ -1119,6 +1127,33 @@ end and only call completeTask if it exits 0.
       backoff = @org.springframework.retry.annotation.Backoff(delay = 100, multiplier = 2.0))
   public void persistTaskStatus(
       String runId, String taskIdShort, String status, String failureReason) {
+    persistTaskStatus(runId, taskIdShort, status, failureReason, null);
+  }
+
+  /**
+   * V190 (2026-05-13, PR-A) — overload that also persists the {@code failure_diagnostic_json}
+   * column on non-COMPLETE outcomes. The diagnostic JSON carries the {@link WorkerResult.Outcome}
+   * enum, iteration count, last tool call, last LLM error, and a 240-char tail of the last
+   * assistant text — enough for an operator to debug a stuck task without SSH access to the app
+   * log.
+   *
+   * <p>Building the JSON is the caller's responsibility: see {@link
+   * #buildFailureDiagnosticJson(WorkerResult, int)} for the canonical shape.
+   *
+   * <p>For COMPLETE tasks, callers should pass null for the diagnostic — the column is
+   * intentionally NULL on success rows so it doubles as a "did this task have problems" filter.
+   */
+  @org.springframework.transaction.annotation.Transactional
+  @org.springframework.retry.annotation.Retryable(
+      retryFor = {org.springframework.dao.DataAccessException.class},
+      maxAttempts = 3,
+      backoff = @org.springframework.retry.annotation.Backoff(delay = 100, multiplier = 2.0))
+  public void persistTaskStatus(
+      String runId,
+      String taskIdShort,
+      String status,
+      String failureReason,
+      String failureDiagnosticJson) {
     String key = runId.substring(0, 8) + "_" + taskIdShort;
     try {
       var existing = taskRepo.findById(key);
@@ -1176,6 +1211,16 @@ end and only call completeTask if it exits 0.
         }
         t.setLastLlmFailure(reason);
       }
+      if (failureDiagnosticJson != null && !failureDiagnosticJson.isBlank()) {
+        // V190 (2026-05-13, PR-A) — defensive cap matching last_llm_failure. The diagnostic JSON
+        // is bounded to ~600 chars at the build site (240-char text tail + numeric fields), but
+        // belt-and-braces here too in case a future caller passes a larger payload.
+        String diag = failureDiagnosticJson;
+        if (diag.length() > 8000) {
+          diag = diag.substring(0, 8000) + "\"… [truncated]\"}";
+        }
+        t.setFailureDiagnosticJson(diag);
+      }
       taskRepo.saveAndFlush(t);
       log.info(
           "persistTaskStatus: {} -> {}{}",
@@ -1185,6 +1230,79 @@ end and only call completeTask if it exits 0.
     } catch (Exception e) {
       log.warn("persistTaskStatus: {} -> {} failed: {}", key, status, e.getMessage(), e);
     }
+  }
+
+  /**
+   * V190 (2026-05-13, PR-A) — builds the structured failure-diagnostic JSON stored on {@code
+   * agent_task.failure_diagnostic_json}. Compact + bounded (~600 chars max).
+   *
+   * <p>Schema:
+   *
+   * <pre>{
+   *   "outcome":          "STOPPED_WITHOUT_COMPLETE",
+   *   "iterations":       47,
+   *   "iterBudget":       75,
+   *   "toolCallsTotal":   132,
+   *   "totalLatencyMs":   1837451,
+   *   "lastToolCall":     "writeFile(app/x.py) → ERR: permission denied",
+   *   "lastAssistantText":"Let me also check..."
+   * }</pre>
+   *
+   * <p>JSON is hand-built (vs Jackson) to keep the persistence path allocation-light + guarantee
+   * the bounded length the column comment promises.
+   */
+  static String buildFailureDiagnosticJson(WorkerResult r, int iterBudget) {
+    if (r == null || r.outcome() == null) {
+      return "{\"outcome\":\"UNKNOWN\"}";
+    }
+    StringBuilder b = new StringBuilder(600);
+    b.append('{');
+    b.append("\"outcome\":\"").append(r.outcome().name()).append("\",");
+    b.append("\"iterations\":").append(r.iterations()).append(',');
+    b.append("\"iterBudget\":").append(iterBudget).append(',');
+    b.append("\"toolCallsTotal\":").append(r.toolCallsDispatched()).append(',');
+    b.append("\"totalLatencyMs\":").append(r.totalLatencyMs());
+    java.util.List<String> log = r.toolCallLog();
+    if (log != null && !log.isEmpty()) {
+      String last = log.get(log.size() - 1);
+      if (last != null) {
+        if (last.length() > 200) last = last.substring(0, 200) + "…";
+        b.append(",\"lastToolCall\":\"").append(jsonEscape(last)).append('"');
+      }
+    }
+    String tail = r.finalAssistantText();
+    if (tail != null && !tail.isBlank()) {
+      if (tail.length() > 240) tail = tail.substring(0, 240) + "…";
+      b.append(",\"lastAssistantText\":\"").append(jsonEscape(tail)).append('"');
+    }
+    b.append('}');
+    return b.toString();
+  }
+
+  /** Minimal JSON string escape — handles the chars that break a JSON string literal. */
+  private static String jsonEscape(String s) {
+    if (s == null) return "";
+    StringBuilder out = new StringBuilder(s.length() + 8);
+    for (int i = 0; i < s.length(); i++) {
+      char c = s.charAt(i);
+      switch (c) {
+        case '"' -> out.append("\\\"");
+        case '\\' -> out.append("\\\\");
+        case '\b' -> out.append("\\b");
+        case '\f' -> out.append("\\f");
+        case '\n' -> out.append("\\n");
+        case '\r' -> out.append("\\r");
+        case '\t' -> out.append("\\t");
+        default -> {
+          if (c < 0x20) {
+            out.append(String.format("\\u%04x", (int) c));
+          } else {
+            out.append(c);
+          }
+        }
+      }
+    }
+    return out.toString();
   }
 
   /**

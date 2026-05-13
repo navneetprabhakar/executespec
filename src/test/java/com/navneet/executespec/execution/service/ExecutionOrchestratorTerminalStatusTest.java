@@ -43,6 +43,7 @@ class ExecutionOrchestratorTerminalStatusTest {
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
   @Mock com.navneet.executespec.harness.GateStore gateStore;
   @Mock ExecutionPlannerService plannerService;
+  @Mock ExecutionCostAggregator costAggregator;
 
   @Mock
   org.springframework.beans.factory.ObjectProvider<com.navneet.executespec.folder.BootstrapService>
@@ -76,7 +77,8 @@ class ExecutionOrchestratorTerminalStatusTest {
             runCas,
             pipelineRunRepo,
             gateStore,
-            plannerService);
+            plannerService,
+            costAggregator);
   }
 
   @Test

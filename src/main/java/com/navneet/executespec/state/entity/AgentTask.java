@@ -94,6 +94,28 @@ public class AgentTask {
   @Column(name = "last_llm_failure", columnDefinition = "TEXT")
   private String lastLlmFailure; // LlmFailure type name or special flag
 
+  /**
+   * V190 (2026-05-13, PR-A) — structured worker-outcome diagnostic for non-COMPLETE tasks.
+   * Populated by {@code SequentialExecutor.persistTaskStatus} at terminal time when the task status
+   * is anything other than COMPLETE. NULL on COMPLETE tasks. JSON shape (all keys optional):
+   *
+   * <pre>{
+   *   "outcome":           "STOPPED_WITHOUT_COMPLETE",
+   *   "iterations":         47,
+   *   "iterBudget":         75,
+   *   "tokensIn":           12450, "tokensOut": 3120,
+   *   "lastToolCall":      {"name":"writeFile","args":"...","exitOk":false,"error":"..."},
+   *   "lastLlmError":      "Anthropic 529: overloaded_error",
+   *   "lastAssistantText": "Let me also check..."
+   * }</pre>
+   *
+   * <p>Surfaced via {@code GET /api/runs/{id}} so operators can diagnose stuck/FAILED tasks without
+   * SSH access to the app log. Replaces the lossy single-string {@code error_message} / {@code
+   * last_llm_failure} that buried the worker outcome enum + tool history.
+   */
+  @Column(name = "failure_diagnostic_json", columnDefinition = "TEXT")
+  private String failureDiagnosticJson;
+
   @Column(name = "tenant_id", nullable = false)
   @Builder.Default
   private String tenantId = "default";

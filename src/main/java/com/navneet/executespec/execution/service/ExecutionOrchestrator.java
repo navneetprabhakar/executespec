@@ -62,6 +62,7 @@ public class ExecutionOrchestrator {
   private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
   private final com.navneet.executespec.harness.GateStore gateStore;
   private final ExecutionPlannerService plannerService;
+  private final ExecutionCostAggregator costAggregator;
 
   /**
    * V188 (2026-05-13) — toggle for the unified V2-dispatch path. When true (default), V3 launches
@@ -545,20 +546,12 @@ public class ExecutionOrchestrator {
           case "CANCELLED", "ABORTED" -> "ABORTED";
           default -> "FAILED";
         };
-    runCas.casUpdate(
-        executionRunId,
-        r -> {
-          r.setStatus(v3Status);
-          if (v2Run.getActualCostUsd() != null && v2Run.getActualCostUsd() > 0d) {
-            r.setTotalCostUsd(java.math.BigDecimal.valueOf(v2Run.getActualCostUsd()));
-          }
-          long tok =
-              (v2Run.getTotalInputTokens() == null ? 0L : v2Run.getTotalInputTokens().longValue())
-                  + (v2Run.getTotalOutputTokens() == null
-                      ? 0L
-                      : v2Run.getTotalOutputTokens().longValue());
-          if (tok > 0L) r.setTotalActualTokens(tok);
-        });
+    runCas.casUpdate(executionRunId, r -> r.setStatus(v3Status));
+    // PR-A (2026-05-13) — recompute totals from the source-of-truth pipeline_run rows rather
+    // than reading the in-memory v2Run snapshot (which may lag if V2's cost flush + status flip
+    // raced our poll). The aggregator handles both unified (single linked pipeline_run) and any
+    // legacy attempt history on this execution row.
+    costAggregator.recomputeAndPersist(executionRunId);
     String eventType =
         "COMPLETE".equals(v3Status)
             ? ExecutionEventTypes.EXEC_COMPLETE
