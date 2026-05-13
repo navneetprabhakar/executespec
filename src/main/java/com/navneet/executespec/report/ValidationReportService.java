@@ -137,6 +137,19 @@ public class ValidationReportService {
               unfixedCritical,
               endpointCoveragePercent);
 
+      // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
+      // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
+      // headline. The rubric awards points dimension-by-dimension so a run that compiled
+      // cleanly but had a flaky test still reads 80/100 instead of 0/100.
+      int rubricScore =
+          computeRubricScore(
+              finalBuildPassed,
+              testsPassedCount,
+              testsTotalCount,
+              reviewerVerdict,
+              unfixedCritical,
+              endpointCoveragePercent);
+
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
       // 3c. Pilot R6 — six-dimension score derived deterministically from
@@ -182,6 +195,7 @@ public class ValidationReportService {
               .testsTotal(ts != null ? testsTotalCount : null)
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
+              .rubricScore(rubricScore)
               .previewUrl(input.previewUrl())
               .status("COMPLETE")
               .build();
@@ -945,6 +959,76 @@ public class ValidationReportService {
     double raw =
         100.0 * buildFactor * testFactor * reviewerFactor * endpointFactor * criticalDamper;
     return (int) Math.max(0, Math.min(100, Math.round(raw)));
+  }
+
+  /**
+   * PR-E Phase A (2026-05-13) — additive rubric. Each dimension contributes points independently so
+   * a single zero factor doesn't collapse the headline number the way the multiplicative {@link
+   * #computeVerifiedScoreMultiplicative} does. Sum is clamped to [0, 100].
+   *
+   * <ul>
+   *   <li><b>Build (25 pts):</b> finalBuildPassed=true → 25; else 0
+   *   <li><b>Tests (20 pts):</b> linear testsPassed/testsTotal × 20; testsTotal=0 → 10 (neutral)
+   *   <li><b>Reviewer (20 pts):</b> CLEAN=20 / FIXED_ISSUES=15 / UNRESOLVED_ISSUES=5 /
+   *       REVIEW_FAILED=0 / null=10 (neutral)
+   *   <li><b>Endpoints (15 pts):</b> linear endpointCoveragePercent × 0.15; null=15 (n/a)
+   *   <li><b>Critical-damper (10 pts):</b> max(0, 10 − unfixedCriticalCount)
+   *   <li><b>Code quality (10 pts):</b> reviewerVerdict ≠ REVIEW_FAILED → 10; else 0
+   * </ul>
+   *
+   * <p>Same signals as the multiplicative formula but a different aggregation shape — both persist
+   * alongside each other (verifiedScore + rubricScore) so the UI can pick the more informative one
+   * per run.
+   */
+  int computeRubricScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent) {
+    int total = 0;
+
+    // Build — binary 25 / 0
+    if (Boolean.TRUE.equals(finalBuildPassed)) total += 25;
+
+    // Tests — linear ratio scaled to 20 pts; 10 (neutral) when no tests captured
+    if (testsTotal <= 0) {
+      total += 10;
+    } else {
+      double ratio = (double) testsPassed / Math.max(1, testsTotal);
+      total += (int) Math.round(20.0 * Math.max(0.0, Math.min(1.0, ratio)));
+    }
+
+    // Reviewer verdict — 20 / 15 / 5 / 0 / 10 (null = neutral)
+    if (reviewerVerdictName == null) {
+      total += 10;
+    } else {
+      total +=
+          switch (reviewerVerdictName) {
+            case "CLEAN" -> 20;
+            case "FIXED_ISSUES" -> 15;
+            case "UNRESOLVED_ISSUES" -> 5;
+            case "REVIEW_FAILED" -> 0;
+            default -> 10;
+          };
+    }
+
+    // Endpoint coverage — linear 15 pts; n/a → 15 (no spec endpoints means signal not relevant)
+    if (endpointCoveragePercent == null) {
+      total += 15;
+    } else {
+      double ratio = Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
+      total += (int) Math.round(15.0 * ratio);
+    }
+
+    // Critical-issue damper — 10 minus 1 per critical, floored at 0
+    total += Math.max(0, 10 - Math.max(0, unfixedCriticalCount));
+
+    // Code quality — 10 pts if the reviewer ran at all (anything except REVIEW_FAILED)
+    if (!"REVIEW_FAILED".equals(reviewerVerdictName)) total += 10;
+
+    return Math.max(0, Math.min(100, total));
   }
 
   /**
