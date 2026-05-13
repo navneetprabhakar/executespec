@@ -62,6 +62,22 @@ public class ExecutionRun {
   @Column(nullable = false, length = 30)
   private String status;
 
+  /**
+   * V193 (PR-I, 2026-05-13) — short human-readable reason for a non-clean terminal state, set on
+   * every FAILED transition by {@link
+   * com.navneet.executespec.execution.service.ExecutionOrchestrator}. Three known producers today:
+   *
+   * <ul>
+   *   <li>{@code "V2 submitRun failed: <exception-message>"} — planner couldn't even kick off
+   *   <li>{@code "Planner timed out after 4h waiting for AWAITING_APPROVAL"} — planner stuck
+   *   <li>The mirrored V2 statusReason on PROTOTYPE early-fail (e.g. {@code "FINAL_BUILD_FAILED"})
+   * </ul>
+   *
+   * <p>Null on in-flight runs and on clean (COMPLETE) terminations.
+   */
+  @Column(name = "failure_reason", columnDefinition = "TEXT")
+  private String failureReason;
+
   @Column(nullable = false, columnDefinition = "TEXT")
   private String requirement;
 
