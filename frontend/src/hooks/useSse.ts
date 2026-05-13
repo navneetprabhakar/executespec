@@ -7,7 +7,7 @@ import {refreshUsageBadge} from '@/components/billing/UsageBadge';
 const BACKOFF = [1000, 2000, 4000, 8000, 16000, 30000];
 
 export function useSse(runId: string | null) {
-  const {setStatus, addEntry, clearEntries, setRunId} = useSseStore();
+  const {setStatus, addEntry, clearEntries, setRunId, bumpFileWrittenTick} = useSseStore();
   const {patchRunStatus, fetchRun} = useRunStore();
   const esRef = useRef<EventSource | null>(null);
   const attemptRef = useRef(0);
@@ -147,6 +147,14 @@ export function useSse(runId: string | null) {
           ) {
             // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
             fetchRun(runId!);
+          }
+          // PR-C (2026-05-13) — file-tree push. FILE_WRITTEN fires from WriteFileTool +
+          // EditFileTool the moment a worker tool call lands. Bump the store tick; the
+          // file-tree component subscribes to it and re-fetches (debounced) on change.
+          // We deliberately don't call fetchRun() here — file changes don't affect run
+          // metadata, only the listing endpoint, so this stays cheap.
+          if (data.type === 'FILE_WRITTEN') {
+            bumpFileWrittenTick();
           }
         } catch {}
       };
