@@ -295,6 +295,16 @@ SCORE COMPUTATION GUIDANCE:
         report.setOverallAccuracyGrade(gradeFromScore(report.getSpecAdherenceScore()));
       }
 
+      // 2026-05-13 — Layer 4 execution-time filter (audit run 6024f510 RC-2). The accuracy
+      // LLM marks "commit with message X" / "push to branch" / "verify by running X --check
+      // exit 0" as MISSING because the post-run workspace snapshot has no commit log or
+      // process output. Those steps DID happen (auto-push at run-end + buildProject smoke)
+      // but they're not visible in static file evidence. Drop those requirements from
+      // missingRequirements before they synthesize CRITICAL ReviewIssues and tank
+      // verifiedScore. Runs against `repos/<name>/` subdirs hit this hardest because the
+      // workspace evidence is even further from the post-push state.
+      filterExecutionTimeRequirements(runId, report);
+
       // 2026-05-10 — Layer 3 grep-verify: programmatic anti-hallucination pass. The LLM
       // sometimes marks requirements as MISSING because the implementing file wasn't picked
       // into the 6/18-file KEY SOURCE FILES snippet, even with the new prompt nudging UNKNOWN
@@ -320,6 +330,84 @@ SCORE COMPUTATION GUIDANCE:
     } catch (Exception e) {
       log.error("[AccuracyAssessment] Unexpected failure for run {}: {}", runId, e.getMessage(), e);
       return defaultReport(issues);
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Layer 4 — drop requirements whose evidence is execution-time / VCS-only.
+  // The pipeline's post-run snapshot can't show whether `git commit` happened,
+  // whether a push landed, or whether a `--check` invocation exited 0. Those
+  // steps run AFTER the file-evidence snapshot used by the accuracy LLM, so
+  // the LLM marks them MISSING even when they did happen. Audit run 6024f510
+  // (Black formatting fix) verifiedScore tanked from a near-CLEAN ~85 to 43
+  // because three execution-time requirements (commit message, push, --check
+  // exit code) all dropped to MISSING and synthesized CRITICAL issues.
+  // ──────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Patterns that mark a requirement as execution-time / VCS — i.e. its truth cannot be established
+   * from the post-run workspace snapshot the accuracy LLM sees. Conservative list: each pattern
+   * matches the requirement as a whole (case-insensitive, regex). Adding a pattern here drops every
+   * matching requirement out of the {@code missingRequirements} list before those become CRITICAL
+   * ReviewIssues.
+   */
+  private static final java.util.List<java.util.regex.Pattern> EXECUTION_TIME_PATTERNS =
+      java.util.List.of(
+          // Git VCS verbs
+          java.util.regex.Pattern.compile(
+              "(?i).*\\b(commit|committing|committed)\\b.*\\bmessage\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\bpush(es|ed|ing)?\\b\\s+to\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\bpush(es|ed|ing)?\\b\\s+the\\s+.*branch\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\bopen\\s+(a\\s+)?pull\\s+request\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\b(open|create)\\s+(a\\s+)?PR\\b.*"),
+          // Verify-by-running execution claims
+          java.util.regex.Pattern.compile("(?i).*\\bverify\\b.*\\b(by\\s+)?running\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\bexits?\\b\\s+with\\s+code\\s*0\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\bexit\\s+code\\s*0\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\bconfirm(ing|ed)?\\b.*\\bexits?\\b.*"),
+          // Reformatting / formatter execution (the file content is the evidence; the
+          // "ran black" claim is not separately verifiable from a snapshot).
+          java.util.regex.Pattern.compile("(?i).*\\brun\\s+black\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\bblack\\s+--check\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\brun\\s+prettier\\b.*"),
+          java.util.regex.Pattern.compile("(?i).*\\brun\\s+(npm\\s+)?(lint|test)\\b.*"));
+
+  /**
+   * Drop missingRequirements entries that look like execution-time / VCS steps which aren't visible
+   * in the workspace evidence the accuracy LLM was given. Mutates the report in-place. Audit
+   * 2026-05-13 run 6024f510 RC-2.
+   */
+  private void filterExecutionTimeRequirements(String runId, AccuracyReport report) {
+    java.util.List<String> missing = report.getMissingRequirements();
+    if (missing == null || missing.isEmpty()) return;
+
+    java.util.List<String> kept = new java.util.ArrayList<>();
+    java.util.List<String> dropped = new java.util.ArrayList<>();
+    for (String req : missing) {
+      if (req == null || req.isBlank()) continue;
+      boolean isExecutionTime = false;
+      for (java.util.regex.Pattern p : EXECUTION_TIME_PATTERNS) {
+        if (p.matcher(req).matches()) {
+          isExecutionTime = true;
+          break;
+        }
+      }
+      if (isExecutionTime) {
+        dropped.add(req);
+      } else {
+        kept.add(req);
+      }
+    }
+
+    if (!dropped.isEmpty()) {
+      log.info(
+          "[AccuracyAssessment] run {}: dropped {} of {} missingRequirements as"
+              + " execution-time/VCS (not verifiable from workspace snapshot): {}",
+          runId,
+          dropped.size(),
+          missing.size(),
+          dropped);
+      report.setMissingRequirements(kept);
     }
   }
 
