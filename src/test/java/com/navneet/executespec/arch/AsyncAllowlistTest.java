@@ -94,6 +94,10 @@ class AsyncAllowlistTest {
               "BillingNotificationService#sendUsageWarning",
               "InvoiceEmailService#sendInvoice",
               "RunQuotaRefundListener#onRunFailed",
+              // PR-G (2026-05-13) — cost-outlier detector. Reads scalar fields on PipelineRun
+              // (actualCostUsd, costEstimateHigh, aiProvider). No lazy collections — safe @Async.
+              "CostOutlierDetector#onRunCompleted",
+              "CostOutlierDetector#onRunFailed",
 
               // notification — reads simple scalar fields on PipelineRun, no lazy collections
               "RunCompletionNotifier#onRunCompleted",
