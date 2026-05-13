@@ -147,6 +147,10 @@ public class ProjectArchitectureService {
     List<String> repoFullNames = new ArrayList<>();
     List<RepoArchitectureDoc> repoArchDocs = new ArrayList<>();
     java.util.LinkedHashMap<String, String> shasByRepo = new java.util.LinkedHashMap<>();
+    // V192 (PR-M, 2026-05-13) — track the branch each codemap was generated from so
+    // StalenessService can probe HEAD of the same branch instead of always assuming
+    // defaultBranch (fixes permanent-STALE for non-default-branch regenerations).
+    java.util.LinkedHashMap<String, String> branchesByRepo = new java.util.LinkedHashMap<>();
 
     for (ProjectRepoLink link : links) {
       ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
@@ -158,6 +162,7 @@ public class ProjectArchitectureService {
       codeMaps.add(cm);
       repoFullNames.add(repo.getGithubRepoFullName());
       shasByRepo.put(repo.getGithubRepoFullName(), cm.getGeneratedFromSha());
+      branchesByRepo.put(repo.getGithubRepoFullName(), effectiveBranch);
 
       // ── Step 2: per-repo architecture doc (idempotent by codemap) ─────
       RepoArchitectureDoc rad = ensureRepoArchDoc(projectId, repo, cm, provider);
@@ -224,6 +229,13 @@ public class ProjectArchitectureService {
     } catch (Exception e) {
       log.warn("Failed to serialise generatedFromShas: {}", e.getMessage());
     }
+    // V192 (PR-M) — serialise the branches map alongside.
+    String branchesJson = null;
+    try {
+      branchesJson = objectMapper.writeValueAsString(branchesByRepo);
+    } catch (Exception e) {
+      log.warn("Failed to serialise generatedFromBranches: {}", e.getMessage());
+    }
     // v2.6.4 (V174) — compute USD cost for the combined-arch synthesis. Skipped (= 0) on the
     // deterministic-fallback path since no LLM call happened there.
     double archCost =
@@ -240,6 +252,7 @@ public class ProjectArchitectureService {
             .version(nextVersion)
             .content(combined.markdown())
             .generatedFromShas(shasJson)
+            .generatedFromBranches(branchesJson)
             .costUsd(archCost)
             .build();
     archDocRepo.save(doc);

@@ -92,6 +92,9 @@ public class StalenessService {
   private StalenessReport compute(String projectId, String overridePat) {
     ProjectArchitectureDoc latest = archService.latest(projectId).orElse(null);
     Map<String, String> generatedShas = parseShas(latest);
+    // V192 (PR-M, 2026-05-13) — per-repo branches the codemap was generated from. Falls back to
+    // defaultBranch on legacy rows that never had this column populated.
+    Map<String, String> generatedBranches = parseBranches(latest);
 
     List<ProjectRepoLink> links = linkRepo.findByProjectId(projectId);
     List<RepoStaleness> repoReports = new java.util.ArrayList<>();
@@ -100,11 +103,13 @@ public class StalenessService {
       ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
       if (repo == null) continue;
       String generated = generatedShas.get(repo.getGithubRepoFullName());
+      // V192 (PR-M) — probe the branch the codemap was generated from. Legacy rows
+      // (generatedBranches empty for this repo) keep the old defaultBranch behaviour.
+      String probeBranch =
+          generatedBranches.getOrDefault(repo.getGithubRepoFullName(), repo.getDefaultBranch());
       String current =
           gitHub.getBranchHeadSha(
-              "https://github.com/" + repo.getGithubRepoFullName(),
-              repo.getDefaultBranch(),
-              overridePat);
+              "https://github.com/" + repo.getGithubRepoFullName(), probeBranch, overridePat);
       boolean stale = current != null && (generated == null || !generated.equals(current));
       if (stale) staleCount++;
       repoReports.add(new RepoStaleness(repo.getGithubRepoFullName(), generated, current, stale));
@@ -124,6 +129,27 @@ public class StalenessService {
           doc.getProjectId(),
           e.getMessage());
       return new LinkedHashMap<>();
+    }
+  }
+
+  /**
+   * V192 (PR-M) — parse the per-repo branch map. Returns empty map on null/blank/malformed input so
+   * the caller's getOrDefault gracefully falls back to defaultBranch.
+   */
+  private Map<String, String> parseBranches(ProjectArchitectureDoc doc) {
+    if (doc == null
+        || doc.getGeneratedFromBranches() == null
+        || doc.getGeneratedFromBranches().isBlank()) {
+      return Map.of();
+    }
+    try {
+      return objectMapper.readValue(doc.getGeneratedFromBranches(), new TypeReference<>() {});
+    } catch (Exception e) {
+      log.warn(
+          "Failed to parse generatedFromBranches for project {}: {}",
+          doc.getProjectId(),
+          e.getMessage());
+      return Map.of();
     }
   }
 }
