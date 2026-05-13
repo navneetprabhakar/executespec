@@ -92,8 +92,15 @@ class CodeMapGeneratorFunctionMapTest {
     List<String> syms = CodeMapGenerator.extractSymbols("src/main/java/UserService.java", src);
 
     assertTrue(syms.contains("class UserService"));
-    assertTrue(syms.contains("class UserDto"), "record counts as a class-tier declaration");
-    assertTrue(syms.contains("class UserGateway"), "interface counts as a class-tier declaration");
+    // PR-N1 (2026-05-14) — AST extractor distinguishes record / interface / class. Pre-PR-N1
+    // the regex lumped these all as "class X"; the AST output is more precise. Both styles
+    // still convey the type information so downstream agents (planner, chat) read either.
+    assertTrue(
+        syms.contains("record UserDto") || syms.contains("class UserDto"),
+        "AST emits 'record UserDto'; regex fallback emits 'class UserDto'");
+    assertTrue(
+        syms.contains("interface UserGateway") || syms.contains("class UserGateway"),
+        "AST emits 'interface UserGateway'; regex fallback emits 'class UserGateway'");
     assertTrue(syms.contains("getUser"));
     assertTrue(syms.contains("listUsers"));
     assertTrue(syms.contains("deleteUser"), "should pick up methods with throws clauses");
