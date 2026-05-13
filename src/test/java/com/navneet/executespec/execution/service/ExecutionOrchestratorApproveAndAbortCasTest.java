@@ -46,6 +46,9 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
   @Mock GitHubRepoService gitHub;
   @Mock RunOrchestrator v2Orchestrator;
   @Mock com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
+  @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
+  @Mock com.navneet.executespec.harness.GateStore gateStore;
+  @Mock ExecutionPlannerService plannerService;
 
   ExecutionOrchestrator orchestrator;
   ExecutionRunCasUpdater runCas;
@@ -68,7 +71,10 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
             gitHub,
             v2Orchestrator,
             prRecordRepo,
-            runCas);
+            runCas,
+            pipelineRunRepo,
+            gateStore,
+            plannerService);
   }
 
   @Test
