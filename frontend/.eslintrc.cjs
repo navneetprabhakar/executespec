@@ -132,6 +132,40 @@ module.exports = {
     // is intentional + correct under the `u` flag where needed; the lint
     // false-positives where actual usage is fine.
     'no-misleading-character-class': 'off',
+
+    // PR-L (2026-05-14) — async onClick handlers without loading state are
+    // the most-common UX bug we've shipped (user complaint 2026-05-13: "we
+    // just submit and wait"). Catch them at lint time by warning on inline
+    // `onClick={async () => {...}}` JSX. Suggested fix: use the
+    // `useAsyncAction` hook (frontend/src/hooks/useAsyncAction.ts) which
+    // exposes a `[pending, run]` tuple and handles disable + double-tap
+    // protection. Existing call sites that intentionally don't need a
+    // loading indicator (one-shot toggles, navigation-only handlers) can
+    // suppress with `// eslint-disable-next-line no-restricted-syntax`
+    // and a one-line rationale.
+    //
+    // Set to 'warn' (not 'error') so existing un-migrated surfaces don't
+    // block the format pass. The lint:fix workflow lists the warning
+    // count so reviewers see the trend.
+    'no-restricted-syntax': [
+      'warn',
+      {
+        selector:
+          "JSXAttribute[name.name='onClick'] > JSXExpressionContainer > ArrowFunctionExpression[async=true]",
+        message:
+          'Inline async onClick without loading state. Use useAsyncAction() hook' +
+          ' from @/hooks/useAsyncAction so the button shows pending state' +
+          ' and is debounced against double-tap, OR add an eslint-disable' +
+          ' line with a one-line rationale.',
+      },
+      {
+        selector:
+          "JSXAttribute[name.name='onSubmit'] > JSXExpressionContainer > ArrowFunctionExpression[async=true]",
+        message:
+          'Inline async onSubmit without loading state. Same recommendation' +
+          ' as onClick — use useAsyncAction() or an explicit pending state.',
+      },
+    ],
   },
   overrides: [
     {

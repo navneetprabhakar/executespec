@@ -1,6 +1,7 @@
 import {useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {useAuthStore} from '@/stores/useAuthStore';
+import {useAsyncAction} from '@/hooks/useAsyncAction';
 import TierBadge from './TierBadge';
 import ContactModal from './ContactModal';
 
@@ -9,6 +10,15 @@ export default function UserMenu() {
   const [open, setOpen] = useState(false);
   const [contactOpen, setContactOpen] = useState(false);
   const navigate = useNavigate();
+
+  // PR-L (2026-05-14) — canonical useAsyncAction demo. Pre-PR-L the logout button fired off
+  // an awaited logout() with zero visible feedback; on a slow network the user would tap,
+  // see the menu still open, tap again, and the second tap would hit a stale store.
+  const [logoutPending, runLogout] = useAsyncAction(async () => {
+    setOpen(false);
+    await logout();
+    navigate('/login');
+  });
 
   if (!user) return null;
 
@@ -106,14 +116,11 @@ export default function UserMenu() {
               </button>
               <hr className='my-1 border-[var(--border-default)]' />
               <button
-                onClick={async () => {
-                  setOpen(false);
-                  await logout();
-                  navigate('/login');
-                }}
-                className='w-full rounded-sm px-3 py-2 text-left text-sm text-accent-red hover:bg-[var(--gray-400)]'
+                onClick={() => void runLogout()}
+                disabled={logoutPending}
+                className='w-full rounded-sm px-3 py-2 text-left text-sm text-accent-red hover:bg-[var(--gray-400)] disabled:opacity-60 disabled:cursor-not-allowed'
               >
-                Log out
+                {logoutPending ? 'Logging out…' : 'Log out'}
               </button>
             </div>
           </div>

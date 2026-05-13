@@ -64,6 +64,26 @@ public class ProjectGeneratedDoc {
   @Builder.Default
   private Double costUsd = 0.0;
 
+  /**
+   * V195 (PR-Q, 2026-05-13) — the {@link ProjectArchitectureDoc#getVersion()} this doc was
+   * generated against. First half of the cache key for the short-circuit in {@code
+   * ProjectDocGeneratorService.generate}: a new arch version invalidates every generated doc
+   * downstream of it. Null on legacy rows (pre-V195) so the service falls through to regenerate,
+   * preserving existing behaviour for unmigrated history.
+   */
+  @Column(name = "source_arch_version")
+  private Integer sourceArchVersion;
+
+  /**
+   * V195 (PR-Q, 2026-05-13) — canonical serialised {repoFullName: sha} fingerprint of the per-repo
+   * SHAs at generation time. Identical in form to {@code
+   * ProjectArchitectureService.serialiseFingerprint} (sorted keys, JSON-shaped string). Second half
+   * of the cache key — combined with {@link #sourceArchVersion} so a same-version arch but
+   * different repo SHA still invalidates. Null on legacy rows.
+   */
+  @Column(name = "source_shas_fingerprint", length = 255)
+  private String sourceShasFingerprint;
+
   @PrePersist
   void prePersist() {
     if (generatedAt == null) generatedAt = Instant.now();

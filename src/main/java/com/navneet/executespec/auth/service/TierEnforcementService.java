@@ -293,7 +293,11 @@ public class TierEnforcementService {
     // is the only meaningful scope. If orgId is null we conservatively
     // skip enforcement (the create call will fail at persist anyway).
     if (orgId == null) return;
-    long current = projectRepo.countByOrgIdAndStatus(orgId, "ACTIVE");
+    // V191 (PR-B-part-2) — count only undeleted ACTIVE projects against the tier cap. A row
+    // that's still in the 30-day restore window is invisible to the user and should not be
+    // double-charged against their project quota. Soft-deleted projects are reaped by the
+    // cleanup sweeper (PR-H); until then we treat them as gone for cap-enforcement purposes.
+    long current = projectRepo.countByOrgIdAndStatusAndDeletedAtIsNull(orgId, "ACTIVE");
 
     if (current >= limit) {
       throw new ResponseStatusException(

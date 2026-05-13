@@ -5,6 +5,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.springframework.stereotype.Component;
 
@@ -25,6 +27,14 @@ import lombok.extern.slf4j.Slf4j;
 public class WriteFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
+
+  /**
+   * PR-C (2026-05-13) — used to push {@code FILE_WRITTEN} SSE events to subscribed RunDetail
+   * clients the moment a write lands. Without this, the file tree was relying on a 5s polling loop
+   * in {@code RunDetailTabs}; the SSE push collapses the worst-case "wrote a file → see it in the
+   * UI" gap from 5 seconds to ~100 ms.
+   */
+  private final SseBroadcaster sseBroadcaster;
 
   @Override
   public String name() {
@@ -89,6 +99,14 @@ public class WriteFileTool implements Tool {
         Files.createDirectories(parent);
       }
       Files.writeString(resolved, content);
+      // PR-C (2026-05-13) — push the write through SSE so RunDetail file-tree subscribers can
+      // refresh immediately instead of waiting for the 5s poll. Swallow broadcast failures so a
+      // transient Redis blip never fails a worker write.
+      try {
+        sseBroadcaster.emit(ctx.runId(), RunEvent.fileWritten(ctx.runId(), ctx.taskId(), path));
+      } catch (Exception ssee) {
+        log.debug("FILE_WRITTEN SSE broadcast failed path={} runId={}", path, ctx.runId(), ssee);
+      }
       return ToolResult.ok("wrote " + content.length() + " chars to " + path);
     } catch (SecurityException se) {
       return ToolResult.err(ToolResult.ErrorKind.FORBIDDEN, se.getMessage());

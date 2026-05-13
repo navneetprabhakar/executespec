@@ -7,6 +7,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.navneet.executespec.sse.RunEvent;
+import com.navneet.executespec.sse.SseBroadcaster;
 
 import org.springframework.stereotype.Component;
 
@@ -31,6 +33,13 @@ import lombok.extern.slf4j.Slf4j;
 public class EditFileTool implements Tool {
 
   private final FileSandboxPolicy fileSandboxPolicy;
+
+  /**
+   * PR-C (2026-05-13) — pushes {@code FILE_WRITTEN} events to RunDetail SSE subscribers the moment
+   * an edit lands; symmetric with the WriteFileTool wiring. See {@link
+   * com.navneet.executespec.tool.WriteFileTool} for design rationale.
+   */
+  private final SseBroadcaster sseBroadcaster;
 
   @Override
   public String name() {
@@ -138,6 +147,12 @@ public class EditFileTool implements Tool {
         idx++;
       }
       Files.writeString(resolved, working);
+      // PR-C (2026-05-13) — push the edit through SSE; see WriteFileTool for rationale.
+      try {
+        sseBroadcaster.emit(ctx.runId(), RunEvent.fileWritten(ctx.runId(), ctx.taskId(), path));
+      } catch (Exception ssee) {
+        log.debug("FILE_WRITTEN SSE broadcast failed path={} runId={}", path, ctx.runId(), ssee);
+      }
       return ToolResult.ok(
           "applied "
               + editsNode.size()

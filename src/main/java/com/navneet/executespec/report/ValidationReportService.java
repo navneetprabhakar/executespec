@@ -128,6 +128,12 @@ public class ValidationReportService {
           (accuracyReport != null && accuracyReport.getEndpointCoverage() != null)
               ? accuracyReport.getEndpointCoverage().getCoveragePercent()
               : null;
+      // PR-R (2026-05-14) — read the AccuracyAssessment testCoverageLevel signal once and
+      // thread it through both scorers. When testsTotal=0 this prevents the formula from
+      // mechanically capping at 50 on specs that legitimately needed no tests
+      // (testCoverageLevel=GOOD/COMPREHENSIVE means "coverage matches what spec implied").
+      String testCoverageLevel =
+          accuracyReport != null ? accuracyReport.getTestCoverageLevel() : null;
       int verifiedScore =
           computeVerifiedScore(
               finalBuildPassed,
@@ -135,7 +141,22 @@ public class ValidationReportService {
               testsTotalCount,
               reviewerVerdict,
               unfixedCritical,
-              endpointCoveragePercent);
+              endpointCoveragePercent,
+              testCoverageLevel);
+
+      // PR-E Phase A (2026-05-13) — additive rubric companion. Fixes the verifiedScore=0
+      // cliff where any single zero factor (failed build, REVIEW_FAILED) collapses the entire
+      // headline. The rubric awards points dimension-by-dimension so a run that compiled
+      // cleanly but had a flaky test still reads 80/100 instead of 0/100.
+      int rubricScore =
+          computeRubricScore(
+              finalBuildPassed,
+              testsPassedCount,
+              testsTotalCount,
+              reviewerVerdict,
+              unfixedCritical,
+              endpointCoveragePercent,
+              testCoverageLevel);
 
       boolean verifiedScoreFlag = featureFlagService.isEnabled(FLAG_VERIFIED_SCORE);
 
@@ -182,6 +203,7 @@ public class ValidationReportService {
               .testsTotal(ts != null ? testsTotalCount : null)
               .reviewerVerdict(reviewerVerdict)
               .verifiedScore(verifiedScore)
+              .rubricScore(rubricScore)
               .previewUrl(input.previewUrl())
               .status("COMPLETE")
               .build();
@@ -621,6 +643,7 @@ public class ValidationReportService {
         entity.getTestsTotal(),
         entity.getReviewerVerdict(),
         entity.getVerifiedScore(),
+        entity.getRubricScore(),
         entity.getPreviewUrl());
   }
 
@@ -791,7 +814,13 @@ public class ValidationReportService {
       String reviewerVerdictName,
       int unfixedCriticalCount) {
     return computeVerifiedScore(
-        finalBuildPassed, testsPassed, testsTotal, reviewerVerdictName, unfixedCriticalCount, null);
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        null,
+        null);
   }
 
   /**
@@ -818,13 +847,44 @@ public class ValidationReportService {
       String reviewerVerdictName,
       int unfixedCriticalCount,
       Integer endpointCoveragePercent) {
+    return computeVerifiedScore(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        null);
+  }
+
+  /**
+   * PR-R (2026-05-14) — spec-aware overload. Adds {@code testCoverageLevel} from {@link
+   * com.navneet.executespec.reviewer.model.AccuracyReport#getTestCoverageLevel()} so the formula
+   * can distinguish "no tests written because the spec didn't need any" (e.g. a hello.py script —
+   * testCoverageLevel=GOOD/COMPREHENSIVE) from "no tests written but the spec implied they were
+   * needed" (testCoverageLevel=NONE/PARTIAL).
+   *
+   * <p>Pre-PR-R, {@code testsTotal=0} unconditionally set the test factor to 0.5 (neutral), which
+   * capped the headline score at 50 even on a clean spec that genuinely required no tests. Now the
+   * AccuracyAssessmentService's already-emitted {@code testCoverageLevel} signal anchors the
+   * factor.
+   */
+  int computeVerifiedScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel) {
     return computeVerifiedScoreMultiplicative(
         finalBuildPassed,
         testsPassed,
         testsTotal,
         reviewerVerdictName,
         unfixedCriticalCount,
-        endpointCoveragePercent);
+        endpointCoveragePercent,
+        testCoverageLevel);
   }
 
   /**
@@ -874,14 +934,54 @@ public class ValidationReportService {
       String reviewerVerdictName,
       int unfixedCriticalCount,
       Integer endpointCoveragePercent) {
+    return computeVerifiedScoreMultiplicative(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        null);
+  }
+
+  /**
+   * PR-R (2026-05-14) — spec-aware version of the multiplicative formula. Adds {@code
+   * testCoverageLevel} as the test-factor anchor when no concrete tests were captured.
+   *
+   * <p>Bug it fixes: pre-PR-R, every run with {@code testsTotal=0} got {@code testFactor=0.5},
+   * which mathematically capped the verifiedScore at 50 — even on specs that genuinely required no
+   * tests (CLI scripts, single-file utilities, library refactors). User-reported case: a "hello.py"
+   * smoke run got verifiedScore=50 with reviewer=CLEAN + build=passed + testCoverageLevel="GOOD".
+   * The "GOOD" already meant "coverage matches what the spec implied"; we just weren't reading it.
+   *
+   * <p>Factor table when {@code testsTotal == 0}:
+   *
+   * <ul>
+   *   <li><b>GOOD / COMPREHENSIVE</b> — coverage matches what the spec implied → 1.0 (full credit)
+   *   <li><b>PARTIAL</b> — some coverage expected, less than what spec implied → 0.7
+   *   <li><b>NONE</b> — spec implied tests were needed, none captured → 0.3 (real damper)
+   *   <li><b>null</b> — AccuracyAssessment didn't run / pre-PR-R run → 0.5 (legacy neutral)
+   * </ul>
+   *
+   * <p>When {@code testsTotal > 0}, behaviour is unchanged: linear pass/total ratio.
+   */
+  int computeVerifiedScoreMultiplicative(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel) {
 
     double buildFactor = Boolean.TRUE.equals(finalBuildPassed) ? 1.0 : 0.0;
 
     double testFactor;
     if (testsTotal <= 0) {
-      // No tests captured — neither reward nor punish. The headline UI gates the verdict
-      // pill on testsTotal>0 so this neutral 0.5 doesn't turn into a misleading "verified".
-      testFactor = 0.5;
+      // PR-R (2026-05-14) — spec-aware. Trust AccuracyAssessment's testCoverageLevel signal:
+      // GOOD/COMPREHENSIVE means "coverage matches what the spec needed" (which for a no-test
+      // spec is zero); NONE means the spec implied tests but none were written.
+      testFactor = testFactorFromCoverageLevel(testCoverageLevel);
     } else {
       testFactor = Math.max(0.0, Math.min(1.0, (double) testsPassed / Math.max(1, testsTotal)));
     }
@@ -945,6 +1045,134 @@ public class ValidationReportService {
     double raw =
         100.0 * buildFactor * testFactor * reviewerFactor * endpointFactor * criticalDamper;
     return (int) Math.max(0, Math.min(100, Math.round(raw)));
+  }
+
+  /**
+   * PR-R (2026-05-14) — maps the AccuracyAssessment {@code testCoverageLevel} signal into a 0.0-1.0
+   * multiplicative test factor when no concrete tests were captured. Single chokepoint so the
+   * multiplicative + rubric scorers can't drift from each other.
+   *
+   * <p>The signal is the LLM-judged "how does delivered test coverage compare to what the spec
+   * implied was needed":
+   *
+   * <ul>
+   *   <li>{@code COMPREHENSIVE} / {@code GOOD} — spec didn't need more than what was delivered →
+   *       full credit (1.0)
+   *   <li>{@code PARTIAL} — some coverage was implied + delivered, but not all of it → 0.7
+   *   <li>{@code NONE} — spec implied tests were needed + none were written → 0.3 (real damper)
+   *   <li>{@code null} or unknown — AccuracyAssessment skipped / pre-PR-R run → 0.5 (legacy)
+   * </ul>
+   */
+  static double testFactorFromCoverageLevel(String testCoverageLevel) {
+    if (testCoverageLevel == null) return 0.5;
+    return switch (testCoverageLevel.toUpperCase()) {
+      case "COMPREHENSIVE", "GOOD" -> 1.0;
+      case "PARTIAL" -> 0.7;
+      case "NONE" -> 0.3;
+      default -> 0.5; // forward-compat with new values the AccuracyReport prompt might invent
+    };
+  }
+
+  /**
+   * PR-R (2026-05-14) — rubric-side equivalent of {@link #testFactorFromCoverageLevel}, scaled to
+   * the rubric's 20-point test slot. Same coverage-level → score mapping shape.
+   */
+  static int rubricTestPointsFromCoverageLevel(String testCoverageLevel) {
+    return (int) Math.round(20.0 * testFactorFromCoverageLevel(testCoverageLevel));
+  }
+
+  /**
+   * PR-E Phase A (2026-05-13) — additive rubric. Each dimension contributes points independently so
+   * a single zero factor doesn't collapse the headline number the way the multiplicative {@link
+   * #computeVerifiedScoreMultiplicative} does. Sum is clamped to [0, 100].
+   *
+   * <ul>
+   *   <li><b>Build (25 pts):</b> finalBuildPassed=true → 25; else 0
+   *   <li><b>Tests (20 pts):</b> linear testsPassed/testsTotal × 20; testsTotal=0 → {@link
+   *       #rubricTestPointsFromCoverageLevel} (PR-R, spec-aware)
+   *   <li><b>Reviewer (20 pts):</b> CLEAN=20 / FIXED_ISSUES=15 / UNRESOLVED_ISSUES=5 /
+   *       REVIEW_FAILED=0 / null=10 (neutral)
+   *   <li><b>Endpoints (15 pts):</b> linear endpointCoveragePercent × 0.15; null=15 (n/a)
+   *   <li><b>Critical-damper (10 pts):</b> max(0, 10 − unfixedCriticalCount)
+   *   <li><b>Code quality (10 pts):</b> reviewerVerdict ≠ REVIEW_FAILED → 10; else 0
+   * </ul>
+   *
+   * <p>Same signals as the multiplicative formula but a different aggregation shape — both persist
+   * alongside each other (verifiedScore + rubricScore) so the UI can pick the more informative one
+   * per run.
+   */
+  int computeRubricScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent) {
+    return computeRubricScore(
+        finalBuildPassed,
+        testsPassed,
+        testsTotal,
+        reviewerVerdictName,
+        unfixedCriticalCount,
+        endpointCoveragePercent,
+        null);
+  }
+
+  /**
+   * PR-R (2026-05-14) — spec-aware version. Mirrors the multiplicative formula's {@code
+   * testCoverageLevel} branch: when {@code testsTotal == 0} we anchor the test slot on the
+   * AccuracyAssessment coverage signal instead of the pre-PR-R hardcoded "10 pts neutral".
+   */
+  int computeRubricScore(
+      Boolean finalBuildPassed,
+      int testsPassed,
+      int testsTotal,
+      String reviewerVerdictName,
+      int unfixedCriticalCount,
+      Integer endpointCoveragePercent,
+      String testCoverageLevel) {
+    int total = 0;
+
+    // Build — binary 25 / 0
+    if (Boolean.TRUE.equals(finalBuildPassed)) total += 25;
+
+    // Tests — linear ratio scaled to 20 pts; spec-aware fallback when no tests captured (PR-R).
+    if (testsTotal <= 0) {
+      total += rubricTestPointsFromCoverageLevel(testCoverageLevel);
+    } else {
+      double ratio = (double) testsPassed / Math.max(1, testsTotal);
+      total += (int) Math.round(20.0 * Math.max(0.0, Math.min(1.0, ratio)));
+    }
+
+    // Reviewer verdict — 20 / 15 / 5 / 0 / 10 (null = neutral)
+    if (reviewerVerdictName == null) {
+      total += 10;
+    } else {
+      total +=
+          switch (reviewerVerdictName) {
+            case "CLEAN" -> 20;
+            case "FIXED_ISSUES" -> 15;
+            case "UNRESOLVED_ISSUES" -> 5;
+            case "REVIEW_FAILED" -> 0;
+            default -> 10;
+          };
+    }
+
+    // Endpoint coverage — linear 15 pts; n/a → 15 (no spec endpoints means signal not relevant)
+    if (endpointCoveragePercent == null) {
+      total += 15;
+    } else {
+      double ratio = Math.max(0.0, Math.min(1.0, endpointCoveragePercent / 100.0));
+      total += (int) Math.round(15.0 * ratio);
+    }
+
+    // Critical-issue damper — 10 minus 1 per critical, floored at 0
+    total += Math.max(0, 10 - Math.max(0, unfixedCriticalCount));
+
+    // Code quality — 10 pts if the reviewer ran at all (anything except REVIEW_FAILED)
+    if (!"REVIEW_FAILED".equals(reviewerVerdictName)) total += 10;
+
+    return Math.max(0, Math.min(100, total));
   }
 
   /**

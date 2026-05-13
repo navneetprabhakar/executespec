@@ -59,4 +59,18 @@ public record RunSummary(
      * runs and on pre-v2.5.10 terminal runs that were never backfilled. Populated by
      * RunOrchestrator when scoring.v2-verified is on.
      */
-    String statusReason) {}
+    String statusReason,
+    /**
+     * PR-B (2026-05-13) — SCM-agnostic pull-request URL raised by this run (GitHub / Bitbucket).
+     * Mirrors {@code PipelineRun.scmPrUrl}. Null when no PR has been opened yet (run still in
+     * flight, OR the run terminated without producing pushable changes). Frontend launches lists +
+     * dashboards render this as a click-through pill alongside the status badge.
+     */
+    String scmPrUrl,
+    /**
+     * PR-B (2026-05-13) — legacy GitHub-only PR URL field. Identical to {@link #scmPrUrl} on every
+     * row written after the v2.5.x SCM split; retained for back-compat with the small set of
+     * pre-split runs that never got migrated. Frontend should prefer {@code scmPrUrl} and fall back
+     * to this only when the SCM field is null.
+     */
+    String githubPrUrl) {}

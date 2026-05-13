@@ -80,6 +80,7 @@ public class SolutionExecutionService {
   private final SseBroadcaster broadcaster;
   private final com.navneet.executespec.repo.GitHubRepoService gitHubRepoService;
   private final ExecutionRunCasUpdater runCas;
+  private final ExecutionCostAggregator costAggregator;
 
   public void executeSolution(ExecutionSolution solution, ExecutionRun run) {
     // Entry-point marker: either first attempt or retry.
@@ -294,7 +295,11 @@ public class SolutionExecutionService {
     // v2.5.7 UX-fix: bubble solution-level tokens + cost up to the ExecutionRun
     // so dashboards and run cards show accurate aggregates. Without this, the
     // ExecutionRun totals stay at 0 even when solutions burned millions of tokens.
-    accumulateExecutionRunTotals(run, solution);
+    // PR-A (2026-05-13) — replaces the legacy per-Solution incrementer with a recompute from
+    // the source-of-truth pipeline_run rows. The old accumulator only counted COMPLETE attempts
+    // (skipping PARTIAL + FAILED that ran on the customer's dime) and dropped contributions on
+    // CAS conflict. Live repro on exec 85778e63: rollup $0.81, real spend $5.55 (6.8× under).
+    costAggregator.recomputeAndPersist(run.getId());
 
     // Write handover contracts to every direct dependent solution.
     // Use the @EntityGraph-eager dependencies fetch — even though the
@@ -433,6 +438,10 @@ public class SolutionExecutionService {
     solution.setCompletedAt(Instant.now());
     solutionRepo.save(solution);
 
+    // PR-A (2026-05-13) — even on failure, the V2 attempts burned tokens. Recompute totals so the
+    // execution's cost reflects what was actually spent (legacy incrementer skipped this entirely).
+    costAggregator.recomputeAndPersist(run.getId());
+
     if (alreadyTerminal) {
       log.info(
           "handleFailure skipping PAUSED flip — exec {} already {}", run.getId(), currentStatus);
@@ -555,50 +564,11 @@ public class SolutionExecutionService {
     solutionRunRepo.save(attempt);
   }
 
-  /**
-   * v2.5.7 UX-fix — aggregate a completing solution's tokens + cost into the parent ExecutionRun's
-   * totals. Re-reads the run row to avoid stomping on concurrent solution completions (parallel
-   * layers). Runs in its own tiny transaction so the totals are visible even if the caller crashes
-   * later.
-   *
-   * <p>2026-04-26 hotfix — covered by ExecutionRunCasUpdater. The previous implementation did its
-   * own findById + save dance and silently dropped the increment when @Version moved on between the
-   * two; parallel sibling layers completing within the same SSE tick lost their token + cost
-   * accumulation. The CAS bean's mutator runs the increment on every retry fetch so concurrent
-   * completers all converge.
-   */
-  protected void accumulateExecutionRunTotals(ExecutionRun run, ExecutionSolution solution) {
-    try {
-      final long solutionTokens =
-          solution.getActualTokens() == null ? 0L : solution.getActualTokens();
-      final java.math.BigDecimal solutionCost =
-          solution.getCostUsd() == null ? java.math.BigDecimal.ZERO : solution.getCostUsd();
-      if (solutionTokens == 0L && solutionCost.signum() == 0) return;
-
-      boolean ok =
-          runCas.casUpdate(
-              run.getId(),
-              r -> {
-                long prevTokens = r.getTotalActualTokens() == null ? 0L : r.getTotalActualTokens();
-                java.math.BigDecimal prevCost =
-                    r.getTotalCostUsd() == null ? java.math.BigDecimal.ZERO : r.getTotalCostUsd();
-                r.setTotalActualTokens(prevTokens + solutionTokens);
-                r.setTotalCostUsd(prevCost.add(solutionCost));
-              });
-      if (!ok) {
-        log.warn(
-            "Failed to accumulate totals for exec {} solution {} (CAS exhausted)",
-            run.getId(),
-            solution.getId());
-      }
-    } catch (Exception e) {
-      log.warn(
-          "Failed to accumulate totals for exec {} solution {}: {}",
-          run.getId(),
-          solution.getId(),
-          e.getMessage());
-    }
-  }
+  // 2026-05-13 PR-A — accumulateExecutionRunTotals(...) deleted; replaced by
+  // ExecutionCostAggregator
+  // which recomputes totals from source-of-truth pipeline_run rows rather than incrementing
+  // per-Solution (the old approach dropped contributions on CAS conflict + skipped non-COMPLETE
+  // attempts entirely, causing the $0.81-vs-$5.55 under-report observed on exec 85778e63).
 
   private String shortMsg(Throwable e) {
     String msg =

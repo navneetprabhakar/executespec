@@ -82,6 +82,18 @@ export interface ExecutionRunDto {
    */
   pipelineRunId?: string | null;
   /**
+   * PR-B (2026-05-13) — primary SCM PR URL for this launch. Populated for {@code
+   * kind=PIPELINE_RUN} entries from the underlying {@code pipeline_run.scm_pr_url}. EXECUTION-kind
+   * entries leave it null — they aggregate multiple PRs across solutions; drill into the execution
+   * detail page for the full list. UI surfaces this as a click-through pill on the launches list.
+   */
+  scmPrUrl?: string | null;
+  /**
+   * PR-B (2026-05-13) — legacy githubPrUrl fallback. Use {@link scmPrUrl} first; fall back to this
+   * for pre-SCM-split rows.
+   */
+  githubPrUrl?: string | null;
+  /**
    * 2026-05-04 — discriminator for the merged Launches list.
    * - `EXECUTION` — real `execution_run` row, viewable at `/projects/{id}/executions/{id}`.
    * - `PIPELINE_RUN` — V2 `pipeline_run` synthesised into the same list (project chat / V3

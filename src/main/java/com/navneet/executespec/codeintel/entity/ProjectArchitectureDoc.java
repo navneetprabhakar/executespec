@@ -38,6 +38,17 @@ public class ProjectArchitectureDoc {
   @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
   private String generatedFromShas;
 
+  /**
+   * V192 (PR-M, 2026-05-13) — JSON map {repoFullName: branch} captured alongside the SHAs. Lets
+   * {@link com.navneet.executespec.codeintel.StalenessService} probe the SAME branch the codemap
+   * came from instead of always defaultBranch — fixes the permanent-STALE-badge bug on projects
+   * regenerated with a {@code ?branch=&lt;non-default&gt;} override. Nullable: legacy pre-V192 rows
+   * fall back to defaultBranch (existing behaviour).
+   */
+  @Column(name = "generated_from_branches", columnDefinition = "jsonb")
+  @org.hibernate.annotations.JdbcTypeCode(org.hibernate.type.SqlTypes.JSON)
+  private String generatedFromBranches;
+
   @Column(name = "generated_at", nullable = false)
   @Builder.Default
   private Instant generatedAt = Instant.now();

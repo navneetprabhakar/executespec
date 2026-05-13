@@ -1,0 +1,23 @@
+-- V193 (PR-I, 2026-05-13) — capture a human-readable failure reason on execution_run rows so
+-- operators can diagnose stuck / failed unified-dispatch runs without SSH'ing the VM to grep
+-- logs.
+--
+-- Bug. dispatchUnified has at least three terminal failure paths that all leave the
+-- ExecutionRun in a useless state:
+--   1. V2 submitRun throws → status FAILED, error swallowed into the application log only
+--   2. The 4-hour poll deadline expires waiting for AWAITING_APPROVAL → status stays in
+--      PLANNING forever (frontend pins the spinner; the operator has no idea why)
+--   3. V2 terminates without an approval gate (PROTOTYPE early-fail) → mirrorV2Terminal copies
+--      the V2 statusReason but ExecutionRun-side has no place to land an EXEC-specific reason
+--
+-- This column gives all three paths somewhere to record what went wrong. Format mirrors
+-- AgentTask.failure_diagnostic_json (PR-A) in spirit — short, one-line message plus a key=value
+-- payload — but stored as plain TEXT here so the dashboard can render it directly without
+-- per-call JSON parsing.
+--
+-- Companion code change (this PR):
+--   * ExecutionRun entity gains failureReason field
+--   * ExecutionOrchestrator.dispatchUnified catch + deadline branches populate it
+--   * V3 dashboard surfaces it in the run detail header when present
+
+ALTER TABLE execution_run ADD COLUMN failure_reason TEXT;

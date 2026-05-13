@@ -34,6 +34,16 @@ public class CodeMapGenerator {
 
   private final GitHubRepoService github;
 
+  /**
+   * PR-N2 (2026-05-14) — optional LLM-summary path. Flag-gated via {@code
+   * codemap.purpose-summaries}; when disabled (default) every call to the service is a no-op so
+   * codemap rendering is unchanged from pre-PR-N2. Lazy via ObjectProvider so admin tooling that
+   * builds a CodeMapGenerator without the Spring AI chain (some unit-test fixtures) won't blow up
+   * at bean construction.
+   */
+  private final org.springframework.beans.factory.ObjectProvider<FilePurposeSummaryService>
+      purposeSummaryProvider;
+
   private static final Pattern SPRING_ROUTE =
       Pattern.compile(
           "@(?:Get|Post|Put|Delete|Patch|Request)Mapping\\s*\\(\\s*(?:value\\s*=\\s*)?\"([^\"]+)\"");
@@ -169,9 +179,33 @@ public class CodeMapGenerator {
           .append(" symbol")
           .append(total == 1 ? "" : "s")
           .append(" total).\n\n");
+      // PR-N2 (2026-05-14) — fetch a purpose summary per file when the
+      // codemap.purpose-summaries flag is on. Lazy + best-effort: a missing bean (test
+      // fixture) or a service exception leaves the markdown identical to pre-PR-N2.
+      FilePurposeSummaryService summarizer = purposeSummaryProvider.getIfAvailable();
+      boolean summariesOn = summarizer != null && summarizer.shouldGenerate();
       functions.forEach(
           (path, fns) -> {
             md.append("### `").append(path).append("`\n\n");
+            if (summariesOn) {
+              // Re-fetch the file content for the summarizer. The function-extraction pass
+              // already paid for this read, but we don't keep it around to bound memory. The
+              // service handles its own cache so repeated regens on the same SHA pay once.
+              try {
+                String content =
+                    github.readRepoFile(
+                        "https://github.com/" + repoFullName, path, defaultBranch, pat);
+                summarizer
+                    .summariseFile(repoFullName, path, content, null)
+                    .ifPresent(s -> md.append("**Purpose:** ").append(s).append("\n\n"));
+              } catch (Exception e) {
+                log.debug(
+                    "CodeMapGenerator: purpose-summary read failed for {}:{}: {}",
+                    repoFullName,
+                    path,
+                    e.getMessage());
+              }
+            }
             for (String fn : fns) md.append("- `").append(fn).append("`\n");
             md.append("\n");
           });
@@ -263,7 +297,18 @@ public class CodeMapGenerator {
     Set<String> seen = new HashSet<>();
     switch (ext) {
       case "java":
-        emitClassThenMethods(content, JAVA_CLASS, JAVA_METHOD, out, seen);
+        // PR-N1 (2026-05-14) — Java AST path. JavaParser handles multi-line signatures,
+        // records, sealed types, generics + throws clauses that the regex misses. Fall back
+        // to the regex path if the AST extractor returned nothing (parse failure on
+        // malformed source) so we never regress: AST result > 0 → AST wins; empty → regex.
+        List<String> astSymbols = JavaAstSymbolExtractor.extract(content);
+        if (!astSymbols.isEmpty()) {
+          for (String s : astSymbols) {
+            if (seen.add(s)) out.add(s);
+          }
+        } else {
+          emitClassThenMethods(content, JAVA_CLASS, JAVA_METHOD, out, seen);
+        }
         break;
       case "kt":
       case "kts":
