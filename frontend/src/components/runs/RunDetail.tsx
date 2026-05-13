@@ -37,6 +37,8 @@ import {
   pushToScm,
   updateGithubSettings,
   archiveRun,
+  unarchiveRun,
+  softDeleteRun,
   retryTask,
   getValidationReport,
   type ReviewReport,
@@ -766,21 +768,65 @@ export default function RunDetail() {
                     !activeRun.archivedAt && (
                       <button
                         onClick={() => setShowArchiveConfirm(true)}
-                        className='flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-red transition-colors whitespace-nowrap'
-                        title='Archive this run'
+                        className='flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-accent-blue transition-colors whitespace-nowrap'
+                        title='Archive this run (reversible)'
                       >
                         <Archive className='h-3.5 w-3.5' />
                         Archive
                       </button>
                     )}
                   {activeRun.archivedAt && (
-                    <span
-                      className='flex items-center gap-1.5 px-2.5 py-2 text-xs text-muted whitespace-nowrap'
-                      title={`Archived on ${new Date(activeRun.archivedAt).toLocaleDateString()}`}
+                    <button
+                      onClick={async () => {
+                        if (!activeRun?.runId) return;
+                        // V191 (PR-B-part-2, 2026-05-13) — unarchive is non-destructive
+                        // so no confirm modal. The badge swaps to "Archive" on success.
+                        try {
+                          await unarchiveRun(activeRun.runId);
+                          addToast({type: 'success', message: 'Run unarchived'});
+                          // Refresh in place so the badge text + the action row update.
+                          await useRunStore.getState().fetchRun(activeRun.runId);
+                          await useRunStore.getState().fetchRuns();
+                        } catch (e) {
+                          addToast({type: 'error', message: errMsg(e) || 'Failed to unarchive'});
+                        }
+                      }}
+                      className='flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-accent-blue hover:text-primary transition-colors whitespace-nowrap'
+                      title={`Archived on ${new Date(activeRun.archivedAt).toLocaleDateString()} — click to unarchive`}
                     >
                       <Archive className='h-3.5 w-3.5' />
-                      Archived
-                    </span>
+                      Unarchive
+                    </button>
+                  )}
+                  {['COMPLETE', 'FAILED', 'CANCELLED', 'PARTIAL'].includes(activeRun.status) && (
+                    <button
+                      onClick={async () => {
+                        if (!activeRun?.runId) return;
+                        // V191 (PR-B-part-2) — explicit 30-day-window copy in the confirm so
+                        // the user can tell soft-delete from archive (otherwise the two prompts
+                        // look interchangeable).
+                        const ok = confirm(
+                          'Delete this run?\n\n' +
+                            'It will disappear from your runs list. You have 30 days to restore ' +
+                            'it via the support flow; after that the run + its workspace are ' +
+                            'permanently removed.',
+                        );
+                        if (!ok) return;
+                        try {
+                          await softDeleteRun(activeRun.runId);
+                          addToast({type: 'success', message: 'Run deleted (30-day undo)'});
+                          setActiveRunId(null);
+                          await useRunStore.getState().fetchRuns();
+                        } catch (e) {
+                          addToast({type: 'error', message: errMsg(e) || 'Failed to delete'});
+                        }
+                      }}
+                      className='flex items-center gap-1.5 px-2.5 py-2 min-h-[36px] text-xs text-muted hover:text-status-error transition-colors whitespace-nowrap'
+                      title='Delete with 30-day undo window'
+                    >
+                      <Trash2 className='h-3.5 w-3.5' />
+                      Delete
+                    </button>
                   )}
                 </div>
               </div>

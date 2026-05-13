@@ -2,7 +2,7 @@
 
 > This file is read by Claude Code at session start. Keep it accurate.
 
-**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V186**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
+**Version:** `1.0.0-M1` ([`Version`](Version)). Migration head: **V191**. Default branch: `main`. Dev environment: `dev.executespec.ai`.
 
 Spec-driven AI coding platform. Customer submits a spec in natural language → V2 pipeline plans, codes across one or more repos, builds + tests, opens a pull request with a deterministic verified score. Human approves at the plan gate; everything after is automatic.
 
@@ -123,7 +123,7 @@ Micrometer + OTel → Prometheus + Tempo + Grafana (local) / Cloud Trace + Cloud
 - **LLM prompts:** external files in `src/main/resources/prompts/*.md` (and rollback archives `.txt`). Assembled via `PromptAssembler.assemble(path, vars)` — resolves `{{include:fragment}}` markers from `prompts/fragments/` and `{{VAR}}` substitutions. Never use `Resource.getContentAsString()` directly in agents.
 - **Tool calling:** provider-native end-to-end. Strict JSON schemas on every entry in `tool/`. No XML `<tool_call>` parsing in V2.
 - **Naming:** `*Agent.java` for agents, `*Service.java` for services, `*Controller.java` for REST, `*Spec.java` for security specifications.
-- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V186**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
+- **DB migrations:** Flyway `V{n}__description.sql` in `src/main/resources/db/migration/` (head **V191**; immutable post-apply). When you add one, cross-link it from the matching package's `CLAUDE.md` migration log + the entity it touches.
 
 ### Patterns: MUST follow
 
@@ -398,7 +398,7 @@ OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4318/v1/traces
 | Prompt assembler                | [`agent/PromptAssembler.java`](src/main/java/com/navneet/executespec/agent/PromptAssembler.java) + `prompts/fragments/*.md` + `prompts/scaffolds/*.md`                                               |
 | LLM prompts                     | `src/main/resources/prompts/*.md`                                                                                                                                                                    |
 | App config                      | `src/main/resources/application.yml`                                                                                                                                                                 |
-| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V186)                                                                                                                                                 |
+| DB migrations                   | `src/main/resources/db/migration/V*.sql` (head V191)                                                                                                                                                 |
 | Frontend entry                  | `frontend/src/main.tsx`                                                                                                                                                                              |
 | Frontend API client             | `frontend/src/lib/api.ts`                                                                                                                                                                            |
 | Observability stack             | `observability/docker-compose.yml`                                                                                                                                                                   |

@@ -122,4 +122,31 @@ public class Project {
   @Column(name = "is_sandbox", nullable = false)
   @Builder.Default
   private boolean isSandbox = false;
+
+  /**
+   * V191 (PR-B-part-2, 2026-05-13) — when the user archived this project. NULL while {@link
+   * #status} is ACTIVE. Stamped by {@code ProjectService.archiveProject} and cleared back to NULL
+   * by {@code ProjectService.unarchiveProject}. Status field is kept in lockstep — both have to say
+   * the same thing — but the timestamp is what the cleanup sweeper (PR-H) gates on.
+   */
+  @Column(name = "archived_at")
+  private Instant archivedAt;
+
+  /**
+   * V191 (PR-B-part-2, 2026-05-13) — when the user soft-deleted this project. Soft-deleted projects
+   * are hidden from every listing but retained for 30 days so the user can undo the action via
+   * {@code POST /api/projects/{id}/restore}. After 30 days a sweeper job (PR-H) hard-deletes the
+   * row + its dependent ledger entries. Distinct from {@link #archivedAt} — archive is "park out of
+   * sight, stays visible under the archived toggle", delete is "I want this gone".
+   */
+  @Column(name = "deleted_at")
+  private Instant deletedAt;
+
+  public boolean isArchived() {
+    return archivedAt != null;
+  }
+
+  public boolean isSoftDeleted() {
+    return deletedAt != null;
+  }
 }
