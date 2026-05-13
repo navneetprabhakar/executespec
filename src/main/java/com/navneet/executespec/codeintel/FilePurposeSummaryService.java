@@ -32,7 +32,8 @@ import lombok.extern.slf4j.Slf4j;
  * LIGHTWEIGHT-tier LLM call, with SHA-keyed caching so unchanged files cost zero on subsequent
  * codemap regens.
  *
- * <p>Design (see {@code docs/plans/pending-codemap-enhancements.md} for the design call):
+ * <p>Design rationale (the deferred handoff doc that originally captured this work was deleted
+ * 2026-05-14 once both PR-N1 + PR-N2 shipped — full context in the PR-N2 commit message):
  *
  * <ul>
  *   <li>Per-file (not per-function) — keeps the call count proportional to file count (~40) not
