@@ -11,6 +11,7 @@ import com.navneet.executespec.agent.WorkerResult;
 import com.navneet.executespec.agent.WorkerTaskRequest;
 import com.navneet.executespec.config.AgentProperties;
 import com.navneet.executespec.integration.scm.ScmPushService;
+import com.navneet.executespec.reviewer.PostEditFormatter;
 import com.navneet.executespec.router.AgentTier;
 import com.navneet.executespec.router.LlmProvider;
 import com.navneet.executespec.router.ModelResolver;
@@ -75,6 +76,7 @@ public class ApplyService {
   private final AgentProperties agentProps;
   private final ApplyResultStore resultStore;
   private final ScmPushService scmPushService;
+  private final PostEditFormatter postEditFormatter;
 
   public record ApplyResult(
       int taskCount, List<TaskSummary> tasks, String workerOutcome, String summary) {}
@@ -203,6 +205,31 @@ public class ApplyService {
       log.error("ApplyService run={} worker failed: {}", runId, e.getMessage(), e);
       resultStore.put(pending.toFailed(e.getClass().getSimpleName() + ": " + e.getMessage()));
       throw new RuntimeException("Apply worker failed: " + e.getMessage(), e);
+    }
+
+    // 2026-05-13 audit Fix-A — run the same PostEditFormatter pass that the BUILD-mode
+    // reviewer runs before push. Without this, chat-driven applies on Python / JS / TS
+    // repos pushed unformatted code straight to the existing PR branch, and the
+    // customer's CI (`black --check`, `prettier --check`) immediately turned red — making
+    // the apply look like it "didn't fix anything". The worker prompt above explicitly
+    // forbids the worker from invoking formatters (they burn iters and most are sandbox-
+    // blocked anyway), so the formatter pass has to happen out-of-band, post-worker.
+    // Idempotent + never throws — safe to call regardless of worker outcome.
+    try {
+      PostEditFormatter.Result fmt = postEditFormatter.run(workspace, runId);
+      if (fmt.filesReformatted() > 0 || !fmt.errors().isEmpty()) {
+        log.info(
+            "ApplyService run={} post-edit formatter — reformatted={} formatters={} errors={}",
+            runId,
+            fmt.filesReformatted(),
+            fmt.formattersRun(),
+            fmt.errors());
+      }
+    } catch (Exception fmtEx) {
+      log.warn(
+          "ApplyService run={} post-edit formatter threw (continuing to push): {}",
+          runId,
+          fmtEx.getMessage());
     }
 
     // Fix L (2026-05-03) — push apply changes to each linked repo's existing PR
