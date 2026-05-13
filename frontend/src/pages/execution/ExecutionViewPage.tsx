@@ -39,6 +39,18 @@ const NEXT_ACTION: Record<ExecutionRunStatus, {label: string; hint: string}> = {
   },
   COMPLETE: {label: 'Done', hint: 'Launch complete. Review PRs and the execution report below.'},
   ABORTED: {label: 'Done', hint: 'Launch aborted. Start a new Launch to try again.'},
+  FAILED: {
+    label: 'Done',
+    hint: 'Launch failed before any solution started. Start a new Launch to try again.',
+  },
+};
+
+// 2026-05-13 — fallback used when the backend emits a status the frontend
+// type doesn't yet know about. Keeps the page rendering instead of crashing
+// the ErrorBoundary on every status drift.
+const NEXT_ACTION_FALLBACK = {
+  label: 'Unknown',
+  hint: 'Status not recognised by this client build — refresh, or check the launch from the dashboard.',
 };
 
 export default function ExecutionViewPage() {
@@ -100,7 +112,7 @@ export default function ExecutionViewPage() {
   // ids from reaching this page in the first place.
   const inSetup = !executionId;
   const status: ExecutionRunStatus = executionRun?.status ?? 'SETUP';
-  const next = NEXT_ACTION[status];
+  const next = NEXT_ACTION[status] ?? NEXT_ACTION_FALLBACK;
 
   return (
     <div className='h-full overflow-y-auto'>
@@ -129,7 +141,7 @@ export default function ExecutionViewPage() {
           </div>
           <div className='flex items-center gap-3'>
             <ExecutionStepper status={status} activeSince={executionRun?.updatedAt} />
-            {executionId && !['COMPLETE', 'ABORTED', 'SETUP'].includes(status) && (
+            {executionId && !['COMPLETE', 'ABORTED', 'SETUP', 'FAILED'].includes(status) && (
               <CancelLaunchButton executionId={executionId} projectId={projectId} />
             )}
           </div>
@@ -225,6 +237,26 @@ export default function ExecutionViewPage() {
                   <ExecutionComplete />
                   {executionId && <ExecutionReportPanel executionId={executionId} />}
                 </>
+              )}
+              {status === 'FAILED' && (
+                <div className='space-y-2 rounded-sm border border-status-error/30 bg-status-error/5 px-3 py-3 text-[12px]'>
+                  <div className='text-status-error font-medium'>
+                    Launch failed before any solution could start.
+                  </div>
+                  <div className='text-muted'>
+                    The planner couldn't produce a valid plan, or a setup-time error aborted the
+                    launch. Solutions never executed — no PRs were opened. Start a new Launch to try
+                    again.
+                  </div>
+                  <div>
+                    <Link
+                      to={`/projects/${projectId}/executions/new`}
+                      className='inline-flex items-center gap-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue text-[11px] px-2 py-1 hover:bg-accent-blue/20'
+                    >
+                      Start a new Launch
+                    </Link>
+                  </div>
+                </div>
               )}
             </>
           )}
