@@ -241,6 +241,13 @@ public class SolutionExecutionService {
     // running a 2-solution project launch (PRs #6 + #10 on GitHub, null on
     // both solution rows).
     if (solution.getPipelineRunId() != null) {
+      // 2026-05-13 audit — fix sync-back race observed on exec 85778e63 / S6: V2
+      // returned terminal=COMPLETE and we entered onV2Complete, but ScmPushService
+      // hadn't yet written scmPrUrl onto the pipeline_run row — net effect: the
+      // solution row recorded DONE with prUrl=null even though PR #35 was already
+      // OPEN on GitHub. Poll briefly with a tight backoff so the ScmPushService
+      // write has time to flush before we give up.
+      String syncedPrUrl = readPrUrlWithBriefRetry(solution.getPipelineRunId());
       pipelineRunRepo
           .findById(solution.getPipelineRunId())
           .ifPresent(
@@ -252,17 +259,21 @@ public class SolutionExecutionService {
                 if (pr.getActualCostUsd() != null) {
                   solution.setCostUsd(java.math.BigDecimal.valueOf(pr.getActualCostUsd()));
                 }
-                // Prefer the SCM-agnostic scmPrUrl (v2.5.x); fall back to the
-                // legacy githubPrUrl for runs that predate the SCM split.
-                String prUrl = pr.getScmPrUrl();
-                if (prUrl == null || prUrl.isBlank()) prUrl = pr.getGithubPrUrl();
-                if (prUrl != null && !prUrl.isBlank() && solution.getPrUrl() == null) {
-                  solution.setPrUrl(prUrl);
-                  Integer num = parsePrNumber(prUrl);
-                  if (num != null) solution.setPrNumber(num);
-                  if (solution.getPrStatus() == null) solution.setPrStatus("OPEN");
-                }
               });
+      if (syncedPrUrl != null && !syncedPrUrl.isBlank() && solution.getPrUrl() == null) {
+        solution.setPrUrl(syncedPrUrl);
+        Integer num = parsePrNumber(syncedPrUrl);
+        if (num != null) solution.setPrNumber(num);
+        if (solution.getPrStatus() == null) solution.setPrStatus("OPEN");
+      } else if (solution.getPrUrl() == null) {
+        log.warn(
+            "[exec={} sol={}] PR URL still null after retry — pipeline_run {} may not have"
+                + " pushed yet; manual sync via /api/runs/{}/push-github still works.",
+            run.getId(),
+            solution.getId(),
+            solution.getPipelineRunId(),
+            solution.getPipelineRunId());
+      }
     }
     solutionRepo.save(solution);
 
@@ -554,6 +565,33 @@ public class SolutionExecutionService {
     String msg =
         e == null ? "" : (e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage());
     return msg.length() > 300 ? msg.substring(0, 300) + "…" : msg;
+  }
+
+  /**
+   * 2026-05-13 audit — read the V2 pipeline_run's scmPrUrl / githubPrUrl, polling briefly when
+   * still null. Closes the sync-back race observed on exec 85778e63 / S6 where {@code onV2Complete}
+   * fired before {@code ScmPushService.push} flushed the prUrl write — leaving solution rows with
+   * status=DONE but prUrl=null even though the PR was OPEN on GitHub.
+   *
+   * <p>Total wall-clock cap ~6s (6 polls × 1s). Beyond that the caller logs + moves on; the user
+   * can use the manual "Open PR" path on the run detail page.
+   */
+  private String readPrUrlWithBriefRetry(String pipelineRunId) {
+    if (pipelineRunId == null) return null;
+    for (int i = 0; i < 6; i++) {
+      var pr = pipelineRunRepo.findById(pipelineRunId).orElse(null);
+      if (pr == null) return null;
+      String prUrl = pr.getScmPrUrl();
+      if (prUrl == null || prUrl.isBlank()) prUrl = pr.getGithubPrUrl();
+      if (prUrl != null && !prUrl.isBlank()) return prUrl;
+      try {
+        Thread.sleep(1000);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        return null;
+      }
+    }
+    return null;
   }
 
   /**
