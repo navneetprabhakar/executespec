@@ -80,6 +80,9 @@ class AsyncAllowlistTest {
               "MailService#sendRenewalReminder",
               "MailService#sendOrgUsageReport",
               "MailService#sendUserUsageReport",
+              // PR-O (2026-05-13) — GitHub-CI style run completion email; takes primitive args
+              // (no JPA entities), Thymeleaf render + SMTP send. Safe under @Async.
+              "MailService#sendRunCompletionEmail",
 
               // billing/service — all take primitive args, no JPA access
               "BillingNotificationService#sendSubscriptionActivated",
@@ -97,6 +100,12 @@ class AsyncAllowlistTest {
               "RunCompletionNotifier#onRunFailed",
               "RunCompletionNotifier#onGateOpened",
               "RunCompletionNotifier#onQuotaWarning",
+              // PR-O (2026-05-13) — email dispatcher for run-terminal events. Reads only scalar
+              // fields on PipelineRun (status, statusReason, runTitle, actualCostUsd, scmPrUrl,
+              // githubPrUrl, createdByUserId) + verifiedScore via separate repository query.
+              // No lazy collections, no JPA proxies — safe under @Async.
+              "RunCompletionEmailListener#onRunCompleted",
+              "RunCompletionEmailListener#onRunFailed",
 
               // sse — pushes heartbeat/events only, no JPA access
               "RunDetailSseService#onRunEvent",
