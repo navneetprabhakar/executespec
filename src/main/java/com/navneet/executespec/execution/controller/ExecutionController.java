@@ -177,7 +177,12 @@ public class ExecutionController {
       @PathVariable String id, @AuthenticationPrincipal AppUserDetails principal) {
     AppUser user = requireFeatureEnabled(principal);
     requireRunAccess(id, user);
-    plannerService.generatePlan(id);
+    // V188 (2026-05-13) — route through ExecutionOrchestrator.kickoffPlanning so the unified
+    // V2-dispatch path can pre-empt the legacy LLM-split planner when the
+    // execution.unified-dispatch.enabled flag is on (the default after V188). The orchestrator
+    // owns the dispatch decision so it stays observable in one place during the deprecation
+    // window — callers don't fork on the flag.
+    orchestrator.kickoffPlanning(id);
     return ResponseEntity.accepted().build();
   }
 

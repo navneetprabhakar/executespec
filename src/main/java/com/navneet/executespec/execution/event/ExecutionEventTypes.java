@@ -35,6 +35,14 @@ public final class ExecutionEventTypes {
   public static final String EXEC_COMPLETE = "EXEC_COMPLETE";
   public static final String EXEC_ABORTED = "EXEC_ABORTED";
 
+  /**
+   * V188 (2026-05-13) — terminal-FAILED notification. Used by the unified-dispatch path when the
+   * underlying V2 pipeline run terminates with status=FAILED, separate from the user-initiated
+   * EXEC_ABORTED. Frontend should treat both as terminal "no-PR" states; FAILED implies the run
+   * itself errored, ABORTED implies the user/system cancelled.
+   */
+  public static final String EXEC_FAILED = "EXEC_FAILED";
+
   // v2.5.2 (Phase 2.3) — cancel rollback compensations.
   /**
    * Per-step compensation update during cancel cleanup. payload = JSON {type, repo, prNumber?,

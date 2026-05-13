@@ -59,6 +59,28 @@ public class ExecutionOrchestrator {
   private final com.navneet.executespec.integration.RunOrchestrator v2Orchestrator;
   private final com.navneet.executespec.project.pr.PullRequestRecordRepository prRecordRepo;
   private final ExecutionRunCasUpdater runCas;
+  private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
+  private final com.navneet.executespec.harness.GateStore gateStore;
+  private final ExecutionPlannerService plannerService;
+
+  /**
+   * V188 (2026-05-13) — toggle for the unified V2-dispatch path. When true (default), V3 launches
+   * dispatch a single V2 run rather than fanning out per-{@link ExecutionSolution}. The legacy
+   * Solution-dispatch path is still wired for existing executions and emergency rollback.
+   */
+  @org.springframework.beans.factory.annotation.Value("${execution.unified-dispatch.enabled:true}")
+  private boolean unifiedDispatchEnabled;
+
+  /**
+   * V188 (2026-05-13) — V2 terminal status set. Mirrored from {@code
+   * SolutionExecutionService.V2_TERMINAL}; kept private here so the unified dispatch path doesn't
+   * cross-depend on the per-Solution executor we're retiring.
+   */
+  private static final java.util.Set<String> V2_TERMINAL =
+      java.util.Set.of("COMPLETE", "PARTIAL", "FAILED", "CANCELLED", "ABORTED");
+
+  private static final long UNIFIED_POLL_INTERVAL_MS = 5_000L;
+  private static final long UNIFIED_MAX_WAIT_MS = 4L * 60L * 60L * 1000L; // 4 hours
 
   // ── Boot-time crash resume ─────────────────────────────────────────────
 
@@ -320,6 +342,248 @@ public class ExecutionOrchestrator {
     runRepo.save(run);
   }
 
+  // ── Phase 4b: kickoffPlanning router (V188 unified vs legacy) ──────────
+
+  /**
+   * V188 (2026-05-13) — entry point the {@code POST /api/executions/{id}/plan} controller calls.
+   * When the unified-dispatch flag is on (default), dispatch a single V2 pipeline_run with the full
+   * requirement + all linked repos; V2's hierarchical planner emits tasks, pauses at
+   * AWAITING_APPROVAL, and the V3 plan-gate becomes a thin proxy over V2's plan-gate. When the flag
+   * is off, fall through to the legacy LLM-split planner that emits per-Solution rows.
+   *
+   * <p>Routing here (not in the controller) so both paths can be observed in one place during the
+   * deprecation window + so the unified path can poll/mirror without leaking V2 internals out of
+   * the orchestrator.
+   */
+  public void kickoffPlanning(String executionRunId) {
+    if (unifiedDispatchEnabled) {
+      dispatchUnified(executionRunId);
+    } else {
+      plannerService.generatePlan(executionRunId);
+    }
+  }
+
+  // ── V188 unified-dispatch — one V2 run per execution ──────────────────
+
+  /**
+   * V188 (2026-05-13) — dispatch a single V2 pipeline_run for this execution, then mirror its
+   * status back onto the ExecutionRun row. V2 handles classification + hierarchical planning +
+   * multi-repo workspace setup; we re-use the V2 plan-approval gate by passing {@code
+   * skipApproval=false} so the user's V3 plan-approve click flows through {@code
+   * gateStore.tryClaimPlanGate} to resume V2.
+   *
+   * <p>Phases (V3 status → V2 status):
+   *
+   * <ul>
+   *   <li>PLANNING → V2 PLANNING (classifier + outline planner) → V2 AWAITING_APPROVAL (V3 stays
+   *       PLANNING; frontend reads {@code executionPlan} mirror of {@code pipeline_run.planJson},
+   *       shows Approve button).
+   *   <li>(user clicks Approve at V3) → {@link #approvePlanAndExecute} claims V2's plan gate → V2
+   *       WORKING → V3 EXECUTING.
+   *   <li>V2 terminal (COMPLETE / PARTIAL / FAILED / ABORTED) → V3 mirrors via {@link
+   *       #mirrorV2Terminal}.
+   * </ul>
+   */
+  @Async
+  public void dispatchUnified(String executionRunId) {
+    ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
+    if (run == null) return;
+    boolean markedPlanning = runCas.casUpdate(executionRunId, r -> r.setStatus("PLANNING"));
+    if (!markedPlanning) {
+      log.warn("dispatchUnified: failed to mark exec {} PLANNING (stale row)", executionRunId);
+      return;
+    }
+    emit(executionRunId, ExecutionEventTypes.EXEC_PLANNING_STARTED, null);
+
+    java.util.List<java.util.UUID> selectedRepoIds = parseSelectedRepoIds(run.getSelectedRepoIds());
+    String githubPat =
+        appUserRepo.findById(run.getCreatedBy()).map(AppUser::getGithubPat).orElse(null);
+
+    com.navneet.executespec.state.entity.PipelineRun v2Run;
+    try {
+      v2Run =
+          v2Orchestrator.submitRun(
+              run.getRequirement(),
+              "EXECUTION_VIEW",
+              /* repoUrl */ null,
+              /* repoMode */ "EXISTING",
+              githubPat,
+              /* githubOwner */ null,
+              /* skipApproval */ false,
+              /* autoMerge */ true,
+              /* modelName */ null,
+              run.getAiProvider(),
+              run.getCreatedBy(),
+              run.getOrgId(),
+              run.getProjectId(),
+              "PRODUCTION",
+              selectedRepoIds,
+              run.getFigmaUrl(),
+              /* tddMode */ false,
+              run.getBranch());
+    } catch (Exception e) {
+      log.error(
+          "dispatchUnified: V2 submitRun failed for exec {}: {}",
+          executionRunId,
+          e.getMessage(),
+          e);
+      runCas.casUpdate(
+          executionRunId,
+          r -> {
+            r.setStatus("FAILED");
+          });
+      emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, null);
+      return;
+    }
+
+    String pipelineRunId = v2Run.getRunId();
+    runCas.casUpdate(executionRunId, r -> r.setPipelineRunId(pipelineRunId));
+    log.info(
+        "dispatchUnified: exec {} → V2 pipeline_run {} ({} linked repo(s))",
+        executionRunId,
+        pipelineRunId,
+        selectedRepoIds.size());
+
+    // Poll V2 until it reaches AWAITING_APPROVAL or terminates without one (e.g. PROTOTYPE
+    // mode or an early failure). Mirror planJson onto ExecutionRun.executionPlan so the V3
+    // frontend can render the plan-approval UI.
+    long deadline = System.currentTimeMillis() + UNIFIED_MAX_WAIT_MS;
+    while (System.currentTimeMillis() < deadline) {
+      try {
+        Thread.sleep(UNIFIED_POLL_INTERVAL_MS);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+      var freshV2 = pipelineRunRepo.findById(pipelineRunId).orElse(null);
+      if (freshV2 == null) continue;
+      // Mirror plan JSON the moment it lands — frontend polls on this.
+      if (freshV2.getPlanJson() != null) {
+        runCas.casUpdate(
+            executionRunId,
+            r -> {
+              if (r.getExecutionPlan() == null) r.setExecutionPlan(freshV2.getPlanJson());
+              if (r.getTotalEstimatedTokens() == null
+                  && freshV2.getCostEstimateHigh() != null
+                  && freshV2.getCostEstimateHigh() > 0) {
+                // Rough token estimate proxy — frontend already renders cost separately.
+                r.setTotalEstimatedTokens(0L);
+              }
+            });
+      }
+      String v2Status = freshV2.getStatus();
+      if ("AWAITING_APPROVAL".equals(v2Status)) {
+        // Planner done; V3 stays in PLANNING (frontend shows approve button). Return from this
+        // async task; the next phase fires when the user clicks /plan/approve, which routes to
+        // approvePlanAndExecute → claims the V2 plan gate.
+        emit(executionRunId, ExecutionEventTypes.EXEC_PLAN_READY, pipelineRunId);
+        return;
+      }
+      if (V2_TERMINAL.contains(v2Status)) {
+        // V2 terminated without an approval gate (PROTOTYPE / early failure). Mirror status
+        // immediately and stop polling.
+        mirrorV2Terminal(executionRunId, freshV2);
+        return;
+      }
+    }
+    log.warn(
+        "dispatchUnified: exec {} → V2 {} still not at AWAITING_APPROVAL after 4h; giving up poll",
+        executionRunId,
+        pipelineRunId);
+  }
+
+  /**
+   * V188 (2026-05-13) — polls the V2 pipeline_run until terminal, mirroring its terminal state onto
+   * the ExecutionRun. Called from {@link #approvePlanAndExecute} once the V2 plan gate has been
+   * claimed.
+   */
+  @Async
+  public void pollAndMirrorV2(String executionRunId, String pipelineRunId) {
+    long deadline = System.currentTimeMillis() + UNIFIED_MAX_WAIT_MS;
+    while (System.currentTimeMillis() < deadline) {
+      try {
+        Thread.sleep(UNIFIED_POLL_INTERVAL_MS);
+      } catch (InterruptedException ie) {
+        Thread.currentThread().interrupt();
+        return;
+      }
+      var fresh = pipelineRunRepo.findById(pipelineRunId).orElse(null);
+      if (fresh == null) continue;
+      if (V2_TERMINAL.contains(fresh.getStatus())) {
+        mirrorV2Terminal(executionRunId, fresh);
+        return;
+      }
+    }
+    log.warn(
+        "pollAndMirrorV2: exec {} → V2 {} did not terminate within 4h; status stays as last seen",
+        executionRunId,
+        pipelineRunId);
+  }
+
+  /**
+   * V188 (2026-05-13) — map V2 terminal status to V3 ExecutionRun status + bubble token / cost
+   * totals up. PARTIAL collapses to COMPLETE on the V3 surface because the PR is still raised and
+   * the customer can review it; the per-Solution skip/retry granularity that used to live at V3 is
+   * moot in the unified architecture (the V2 task list + reviewer issues carry the same signal).
+   */
+  private void mirrorV2Terminal(
+      String executionRunId, com.navneet.executespec.state.entity.PipelineRun v2Run) {
+    String v3Status =
+        switch (v2Run.getStatus()) {
+          case "COMPLETE", "PARTIAL" -> "COMPLETE";
+          case "CANCELLED", "ABORTED" -> "ABORTED";
+          default -> "FAILED";
+        };
+    runCas.casUpdate(
+        executionRunId,
+        r -> {
+          r.setStatus(v3Status);
+          if (v2Run.getActualCostUsd() != null && v2Run.getActualCostUsd() > 0d) {
+            r.setTotalCostUsd(java.math.BigDecimal.valueOf(v2Run.getActualCostUsd()));
+          }
+          long tok =
+              (v2Run.getTotalInputTokens() == null ? 0L : v2Run.getTotalInputTokens().longValue())
+                  + (v2Run.getTotalOutputTokens() == null
+                      ? 0L
+                      : v2Run.getTotalOutputTokens().longValue());
+          if (tok > 0L) r.setTotalActualTokens(tok);
+        });
+    String eventType =
+        "COMPLETE".equals(v3Status)
+            ? ExecutionEventTypes.EXEC_COMPLETE
+            : "FAILED".equals(v3Status)
+                ? ExecutionEventTypes.EXEC_FAILED
+                : ExecutionEventTypes.EXEC_ABORTED;
+    emit(executionRunId, eventType, v2Run.getRunId());
+    log.info(
+        "mirrorV2Terminal: exec {} ← V2 {} terminal={} → V3 status={}",
+        executionRunId,
+        v2Run.getRunId(),
+        v2Run.getStatus(),
+        v3Status);
+  }
+
+  private static java.util.List<java.util.UUID> parseSelectedRepoIds(String json) {
+    if (json == null || json.isBlank() || "[]".equals(json.trim())) return java.util.List.of();
+    java.util.List<java.util.UUID> out = new java.util.ArrayList<>();
+    com.fasterxml.jackson.databind.ObjectMapper mapper =
+        new com.fasterxml.jackson.databind.ObjectMapper();
+    try {
+      java.util.List<String> ids =
+          mapper.readValue(json, new com.fasterxml.jackson.core.type.TypeReference<>() {});
+      for (String s : ids) {
+        try {
+          out.add(java.util.UUID.fromString(s));
+        } catch (IllegalArgumentException ignored) {
+          // skip malformed ids; legacy rows may have non-UUID strings
+        }
+      }
+    } catch (Exception e) {
+      // unparseable → empty list; downstream will treat as "all linked repos"
+    }
+    return out;
+  }
+
   // ── Phase 5: plan approval + execute ──────────────────────────────────
 
   @Async
@@ -338,6 +602,28 @@ public class ExecutionOrchestrator {
               + " proceeding to execute regardless",
           executionRunId);
     }
+    // V188 (2026-05-13) — when the unified-dispatch path is in use, the V3
+    // plan-approve click maps to V2's plan gate. Claim the gate; V2 resumes
+    // execution; we transition V3 to EXECUTING and poll V2 until terminal.
+    ExecutionRun run = runRepo.findById(executionRunId).orElse(null);
+    if (run != null && run.getPipelineRunId() != null) {
+      String pipelineRunId = run.getPipelineRunId();
+      boolean claimed = gateStore.tryClaimPlanGate(pipelineRunId, true);
+      if (!claimed) {
+        log.warn(
+            "approvePlanAndExecute: V2 plan gate already resolved for exec {} (V2 run {});"
+                + " polling anyway to mirror terminal state",
+            executionRunId,
+            pipelineRunId);
+      }
+      runCas.casUpdate(executionRunId, r -> r.setStatus("EXECUTING"));
+      emit(executionRunId, ExecutionEventTypes.EXEC_STARTED, pipelineRunId);
+      pollAndMirrorV2(executionRunId, pipelineRunId);
+      return;
+    }
+    // Legacy path — per-Solution dispatch, retained for in-flight executions
+    // that were created before V188 and emergency rollback when the unified
+    // flag is off.
     executeApprovedPlan(executionRunId);
   }
 
