@@ -79,12 +79,20 @@ public class ProjectDocGeneratorService {
       One bullet per repo: name, purpose, primary tech stack.
 
       ## High-level architecture
-      2-4 paragraphs describing how the pieces fit together. No diagrams. Reference
-      specific components from the codemap where relevant.
+      2-4 paragraphs describing how the pieces fit together. Reference specific
+      components from the codemap where relevant. PR-P (2026-05-13): include ONE
+      mermaid diagram (```mermaid ... ```) when the architecture has 3+ components
+      with clear relationships — flowchart LR or graph TB are the right shapes.
+      Skip the diagram for single-repo / two-component projects where it would add
+      visual noise without information.
 
       ## Key data flows
       Numbered list of 3-6 end-to-end flows (e.g. "User signs up" → HTTP route → service
       → DB write → event fired → ...). Cite file paths from the codemap as evidence.
+      PR-P (2026-05-13): for the most complex flow (the one with the most hops or
+      cross-component boundaries), include a mermaid sequenceDiagram showing the
+      messages between participants. One sequence diagram max — the rest stay
+      bullet-listed.
 
       ## Where to contribute
       Short list of common change patterns (add a feature, fix a bug, add a test) and
@@ -94,6 +102,11 @@ public class ProjectDocGeneratorService {
       - Plain markdown. No backticks around section headings.
       - Do not invent components. If the architecture / codemap doesn't show it, don't
         claim it exists.
+      - Mermaid syntax MUST be valid — node names without spaces (use camelCase or
+        underscores), edges typed correctly (--> for flowchart, ->> for sequence).
+        GitHub renders mermaid in markdown previews, so syntax errors are visible.
+      - Use mermaid only where it earns its keep — 2 diagrams maximum across the
+        whole document. Prose + bullet lists are still the default.
       - Aim for 600-1200 words. Dense, scannable, citation-rich.
       """;
 
@@ -122,7 +135,18 @@ public class ProjectDocGeneratorService {
       start the service in dev mode. Label each block with the repo name.
 
       ## Running the full stack locally
-      Recommended order of services to bring up + health-check URLs.
+      Recommended order of services to bring up + health-check URLs. PR-P (2026-05-13):
+      include an ASCII service-topology diagram in a ``` fenced block when 3+ services
+      are involved. Aim for the form:
+          ┌──────────┐    ┌──────────┐    ┌──────────┐
+          │ frontend │ -> │ backend  │ -> │ postgres │
+          └──────────┘    └──────────┘    └──────────┘
+                                │
+                                v
+                            ┌──────────┐
+                            │  redis   │
+                            └──────────┘
+      One ASCII diagram max. Keep arrows simple (-> or v). Box widths consistent.
 
       ## Troubleshooting
       3-5 common setup errors and their fix.
@@ -130,6 +154,8 @@ public class ProjectDocGeneratorService {
       Rules:
       - Use fenced code blocks for every command. Prefer `bash` for shell, `yaml` for
         config.
+      - ASCII diagram (if present) lives in its own ``` fenced block (no language tag,
+        renders monospace).
       - Do NOT invent env vars. Only include ones visible in the codemaps / architecture.
       - Aim for 500-1200 words.
       """;
