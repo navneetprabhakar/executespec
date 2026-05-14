@@ -54,7 +54,7 @@ export function useFreeCap() {
   return cap;
 }
 
-// ─── Toast (balance ≤ 1, free tier only) ────────────────────────────────────
+// ─── Toast (balance ≤ 1, free tier only) ───────────────────────────────────
 
 export function FreeCapToast() {
   const cap = useFreeCap();
@@ -134,7 +134,7 @@ export function FreeCapToast() {
   );
 }
 
-// ─── Blocking modal (balance == 0, before submit) ───────────────────────────
+// ─── Blocking modal (balance == 0, before submit) ──────────────────────────
 
 interface FreeCapBlockingModalProps {
   open: boolean;
@@ -268,6 +268,11 @@ export function FreeCapBlockingModal({open, onClose}: FreeCapBlockingModalProps)
               <input
                 type='email'
                 autoComplete='email'
+                inputMode='email'
+                autoCapitalize='off'
+                autoCorrect='off'
+                spellCheck='false'
+                enterKeyHint='send'
                 value={inviteEmail}
                 onChange={(e) => setInviteEmail(e.target.value)}
                 placeholder='friend@example.com'

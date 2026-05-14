@@ -255,6 +255,11 @@ export default function AuthPage() {
           <input
             type='email'
             autoComplete='email'
+            inputMode='email'
+            autoCapitalize='off'
+            autoCorrect='off'
+            spellCheck='false'
+            enterKeyHint='next'
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder='you@example.com'
