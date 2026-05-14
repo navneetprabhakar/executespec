@@ -36,7 +36,7 @@ export default function SharedReportPage() {
 
   if (loading) {
     return (
-      <div className='min-h-screen bg-[var(--geist-bg)] flex items-center justify-center'>
+      <div className='min-h-dvh bg-[var(--geist-bg)] flex items-center justify-center'>
         <Loader2 className='h-8 w-8 text-muted animate-spin' />
       </div>
     );
@@ -44,7 +44,7 @@ export default function SharedReportPage() {
 
   if (notFound || !report) {
     return (
-      <div className='min-h-screen bg-[var(--geist-bg)] flex flex-col items-center justify-center text-secondary gap-4'>
+      <div className='min-h-dvh bg-[var(--geist-bg)] flex flex-col items-center justify-center text-secondary gap-4'>
         <Shield className='h-12 w-12 text-muted' />
         <h1 className='text-xl font-semibold text-primary'>Report Not Found</h1>
         <p className='text-sm'>This validation report doesn't exist or has been removed.</p>
@@ -55,7 +55,7 @@ export default function SharedReportPage() {
   const issueCount = report.issues?.length ?? 0;
 
   return (
-    <div className='min-h-screen bg-[var(--geist-bg)] text-primary relative'>
+    <div className='min-h-dvh bg-[var(--geist-bg)] text-primary relative'>
       <div
         aria-hidden
         className='pointer-events-none absolute inset-0 -z-10 h-[340px]'

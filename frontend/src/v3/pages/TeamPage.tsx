@@ -140,7 +140,7 @@ export default function TeamPage() {
         </div>
       )}
 
-      {/* ── Free tier — dedicated upsell card ─────────────────────────── */}
+      {/* ── Free tier — dedicated upsell card ───────────────────────────── */}
       {!loading && isFreeTier && <FreeTierUpsellCard onUpgrade={() => navigate('/pricing')} />}
 
       {/* ── Pro tier — different upsell (BYOK + collaboration framing) ── */}
@@ -159,7 +159,7 @@ export default function TeamPage() {
   );
 }
 
-// ─── Anonymous preview ──────────────────────────────────────────────────────
+// ─── Anonymous preview ────────────────────────────────────────────────
 // Conversion-fix #A1 — the procurement-evaluator persona (Priya in the
 // assessment) needs to see what Team/Enterprise buys BEFORE signup. The old
 // page rendered a single "Pro+ feature · Upgrade" card that was a wall;
@@ -475,7 +475,7 @@ function PreviewSsoCard() {
   );
 }
 
-// ─── Free-tier card ─────────────────────────────────────────────────────────
+// ─── Free-tier card ────────────────────────────────────────────────────
 
 function FreeTierUpsellCard({onUpgrade}: {onUpgrade: () => void}) {
   return (
@@ -525,7 +525,7 @@ function FreeTierUpsellCard({onUpgrade}: {onUpgrade: () => void}) {
   );
 }
 
-// ─── Pro → Team upsell ─────────────────────────────────────────────────────
+// ─── Pro → Team upsell ────────────────────────────────────────────────
 // Different framing than Free → Pro: Pro already has unlimited managed
 // runs, so the value-prop is collaboration + BYOK economics, not raw run
 // volume. Per the audit fix: Pro on /team must not see the same Free
@@ -599,7 +599,7 @@ function ProTierUpsellCard({onUpgrade}: {onUpgrade: () => void}) {
   );
 }
 
-// ─── Seats card ─────────────────────────────────────────────────────────────
+// ─── Seats card ────────────────────────────────────────────────────────────
 
 function SeatsCard({
   org,
@@ -672,7 +672,7 @@ function SeatsCard({
   );
 }
 
-// ─── Members card ───────────────────────────────────────────────────────────
+// ─── Members card ──────────────────────────────────────────────────────────
 
 function MembersCard({members}: {members: OrgMemberDto[]}) {
   return (
@@ -722,7 +722,7 @@ function MembersCard({members}: {members: OrgMemberDto[]}) {
   );
 }
 
-// ─── Invite card ────────────────────────────────────────────────────────────
+// ─── Invite card ───────────────────────────────────────────────────────────
 
 function InviteCard() {
   const [email, setEmail] = useState('');
@@ -761,6 +761,12 @@ function InviteCard() {
       <form onSubmit={onSubmit} style={{display: 'flex', gap: 6, flexWrap: 'wrap'}}>
         <input
           type='email'
+          autoComplete='email'
+          inputMode='email'
+          autoCapitalize='off'
+          autoCorrect='off'
+          spellCheck='false'
+          enterKeyHint='send'
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder='teammate@example.com'
@@ -808,7 +814,7 @@ function InviteCard() {
   );
 }
 
-// ─── SSO panel (Enterprise only) ───────────────────────────────────────────
+// ─── SSO panel (Enterprise only) ────────────────────────────────────────
 
 function SsoPanel() {
   return (

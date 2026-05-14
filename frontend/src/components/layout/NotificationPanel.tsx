@@ -75,7 +75,7 @@ export default function NotificationPanel({onClose, onRead, onReadAll}: Props) {
         // when in a stand. max-h capped to the viewport height (minus header
         // and gutter) so the list never runs off the bottom on landscape.
         'fixed right-4 top-14 mt-1 w-[calc(100vw-2rem)] max-w-sm',
-        'max-h-[calc(100vh-5rem)]',
+        'max-h-[calc(100dvh-5rem)]',
         // Desktop: revert to the original dropdown-from-bell behaviour.
         'sm:absolute sm:right-0 sm:top-full sm:mt-1 sm:w-80 sm:max-h-96',
         'rounded-lg border border-[var(--border-default)] bg-[var(--geist-bg)] shadow-lg overflow-hidden z-50',
@@ -90,7 +90,7 @@ export default function NotificationPanel({onClose, onRead, onReadAll}: Props) {
           <CheckCheck className='h-3 w-3' /> Mark all read
         </button>
       </div>
-      <div className='overflow-y-auto max-h-[calc(100vh-9rem)] sm:max-h-80'>
+      <div className='overflow-y-auto overscroll-contain max-h-[calc(100dvh-9rem)] sm:max-h-80'>
         {loading && (
           <div className='flex items-center justify-center py-8'>
             <Loader2 className='h-4 w-4 animate-spin text-muted' />

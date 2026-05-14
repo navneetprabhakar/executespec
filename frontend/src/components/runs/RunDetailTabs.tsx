@@ -241,7 +241,7 @@ export default function RunDetailTabs() {
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab} className='flex flex-col'>
-      <Tabs.List className='flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 sm:px-3 lg:px-4 overflow-x-auto scrollbar-hide sticky top-0 z-10 bg-[var(--gray-100)]'>
+      <Tabs.List className='flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 sm:px-3 lg:px-4 overflow-x-auto scrollbar-hide v3-tab-strip sticky top-0 z-10 bg-[var(--gray-100)]'>
         {TABS.map((tab) => (
           <Tabs.Trigger
             key={tab.value}
@@ -326,11 +326,11 @@ export default function RunDetailTabs() {
           )}
         </Tabs.Content>
 
-        <Tabs.Content value='log' className='h-[calc(100vh-180px)]'>
+        <Tabs.Content value='log' className='h-[calc(100dvh-180px)]'>
           <LiveLog />
         </Tabs.Content>
 
-        <Tabs.Content value='code' className='h-[calc(100vh-180px)] overflow-hidden'>
+        <Tabs.Content value='code' className='h-[calc(100dvh-180px)] overflow-hidden'>
           <CodeTab
             runId={activeRun.runId}
             files={files}
@@ -346,7 +346,7 @@ export default function RunDetailTabs() {
           <TaskTimeline tasks={activeRun.tasks} runStartedAt={activeRun.startedAt} />
         </Tabs.Content>
 
-        <Tabs.Content value='preview' className='h-[calc(100vh-180px)] overflow-hidden'>
+        <Tabs.Content value='preview' className='h-[calc(100dvh-180px)] overflow-hidden'>
           {previewReady ? (
             <PreviewTab runId={activeRun.runId} />
           ) : (
@@ -359,7 +359,7 @@ export default function RunDetailTabs() {
           )}
         </Tabs.Content>
 
-        <Tabs.Content value='chat' className='h-[calc(100vh-180px)] overflow-hidden'>
+        <Tabs.Content value='chat' className='h-[calc(100dvh-180px)] overflow-hidden'>
           {chatReady ? (
             <RunConversation runId={activeRun.runId} />
           ) : (
@@ -1605,7 +1605,7 @@ function ReviewTab({run}: {run: RunDetail}) {
                     issue.fixSucceeded ? 'text-status-success' : 'text-accent-red',
                   )}
                 >
-                  {issue.fixSucceeded ? 'Auto-fixed \u2713' : 'Auto-fix failed'}
+                  {issue.fixSucceeded ? 'Auto-fixed ✓' : 'Auto-fix failed'}
                 </span>
               )}
             </div>

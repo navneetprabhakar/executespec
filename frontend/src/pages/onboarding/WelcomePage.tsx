@@ -68,7 +68,7 @@ export default function WelcomePage() {
   };
 
   return (
-    <div className='min-h-screen bg-[var(--geist-bg)] flex items-center justify-center p-4 sm:p-6'>
+    <div className='min-h-dvh bg-[var(--geist-bg)] flex items-center justify-center p-4 sm:p-6'>
       <div className='max-w-3xl w-full'>
         <header className='text-center mb-8'>
           <div className='inline-flex h-12 w-12 items-center justify-center rounded-full bg-accent-blue/15 border border-accent-blue/40 mb-4'>

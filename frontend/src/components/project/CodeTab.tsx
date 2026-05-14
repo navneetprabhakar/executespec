@@ -82,7 +82,7 @@ export default function CodeTab({
           2026-05-10 mobile sweep — scrollbar-hide + scroll-fade so the
           last tab ("Standards") doesn't read as truncated text on phones. */}
       <nav
-        className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x -mx-3 px-3'
+        className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip -mx-3 px-3'
         role='tablist'
         aria-label='Code surfaces'
       >

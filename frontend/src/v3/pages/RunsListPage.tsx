@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState, type ReactNode} from 'react';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {getRuns, type RunSummary, type ProjectDto, getProjects} from '@/lib/api';
 import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
+import Skeleton from '@/components/shared/Skeleton';
 
 function FilterPill({
   active,
@@ -268,8 +269,8 @@ export default function RunsListPage() {
       )}
 
       {loading && !runs && (
-        <div style={{padding: 24, color: 'var(--v3-text-muted)', textAlign: 'center'}}>
-          Loading runs…
+        <div style={{padding: 12}}>
+          <Skeleton variant='row' count={6} label='Loading runs' />
         </div>
       )}
 
@@ -416,14 +417,21 @@ export default function RunsListPage() {
                       · {runShort}
                     </span>
                   </div>
+                  {/* 2026-05-14 (P4) — was single-line truncate, cut titles mid-word
+                      ("Add Hello from ExecuteSpec audit run to RE…"). Mobile gets
+                      a 2-line clamp via the global CSS hammer; desktop stays
+                      one-line via .allow-truncate opt-out. */}
                   <div
+                    className='allow-truncate'
                     style={{
                       fontSize: 14,
                       fontWeight: 600,
                       color: 'var(--v3-text)',
-                      whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical' as const,
+                      wordBreak: 'break-word',
                     }}
                   >
                     {r.runTitle || r.userRequest || '(no spec text)'}

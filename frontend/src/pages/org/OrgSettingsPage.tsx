@@ -6,7 +6,7 @@ import * as api from '@/lib/api';
 import SsoConfigCard from '@/components/settings/SsoConfigCard';
 import OrgStandardsManager from '@/components/settings/OrgStandardsManager';
 
-// ── Create Organization Form ───────────────────────────────────────────────
+// ── Create Organization Form ───────────────────────────────────────
 
 function CreateOrgForm({onCreated}: {onCreated: () => void}) {
   const {user, loadMe} = useAuthStore();
@@ -97,6 +97,12 @@ function CreateOrgForm({onCreated}: {onCreated: () => void}) {
           <label className='text-sm text-secondary mb-1 block'>Admin Email</label>
           <input
             type='email'
+            autoComplete='email'
+            inputMode='email'
+            autoCapitalize='off'
+            autoCorrect='off'
+            spellCheck='false'
+            enterKeyHint='next'
             value={adminEmail}
             onChange={(e) => setAdminEmail(e.target.value)}
             required
@@ -122,7 +128,7 @@ function CreateOrgForm({onCreated}: {onCreated: () => void}) {
   );
 }
 
-// ── Main OrgSettingsPage ───────────────────────────────────────────────────
+// ── Main OrgSettingsPage ──────────────────────────────────────────
 
 export default function OrgSettingsPage() {
   const {user} = useAuthStore();
@@ -225,7 +231,7 @@ export default function OrgSettingsPage() {
           <h2 className='text-lg font-semibold text-primary mb-3'>Members ({members.length})</h2>
           <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-200)] overflow-hidden'>
             <div className='overflow-x-auto v3-scroll-fade-x'>
-              <table className='w-full text-sm min-w-[560px] md:min-w-0'>
+              <table className='w-full text-sm md:min-w-0 responsive-table'>
                 <thead className='bg-[var(--gray-300)] text-muted'>
                   <tr>
                     <th className='px-4 py-3 text-left'>Name</th>
@@ -238,19 +244,21 @@ export default function OrgSettingsPage() {
                 <tbody className='divide-y divide-[var(--border-default)]'>
                   {members.map((m) => (
                     <tr key={m.userId} className='hover:bg-[var(--gray-300)]/40'>
-                      <td className='px-4 py-3 text-primary'>
+                      <td className='px-4 py-3 text-primary' data-label='Name'>
                         {m.firstName} {m.lastName}
                       </td>
-                      <td className='px-4 py-3 text-muted'>{m.email}</td>
-                      <td className='px-4 py-3'>
+                      <td className='px-4 py-3 text-muted' data-label='Email'>
+                        {m.email}
+                      </td>
+                      <td className='px-4 py-3' data-label='Role'>
                         <span className='rounded-sm bg-accent-blue/20 px-2 py-0.5 text-xs text-accent-blue'>
                           {m.orgRole}
                         </span>
                       </td>
-                      <td className='px-4 py-3 text-muted'>
+                      <td className='px-4 py-3 text-muted' data-label='Joined'>
                         {new Date(m.joinedAt).toLocaleDateString()}
                       </td>
-                      <td className='px-4 py-3 flex gap-2'>
+                      <td className='px-4 py-3 flex gap-2' data-label=''>
                         {m.userId !== user?.id && (
                           <>
                             <button
@@ -282,6 +290,12 @@ export default function OrgSettingsPage() {
           <form onSubmit={handleInvite} className='flex gap-3 flex-wrap'>
             <input
               type='email'
+              autoComplete='email'
+              inputMode='email'
+              autoCapitalize='off'
+              autoCorrect='off'
+              spellCheck='false'
+              enterKeyHint='send'
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
               required

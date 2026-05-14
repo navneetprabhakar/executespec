@@ -68,14 +68,14 @@ export default function AuthCallbackPage() {
 
   if (error) {
     return (
-      <div className='flex min-h-screen items-center justify-center bg-[#0f1117]'>
+      <div className='flex min-h-dvh items-center justify-center bg-[#0f1117]'>
         <p className='text-accent-red'>{error}</p>
       </div>
     );
   }
 
   return (
-    <div className='flex min-h-screen items-center justify-center bg-[#0f1117]'>
+    <div className='flex min-h-dvh items-center justify-center bg-[#0f1117]'>
       <div className='text-center'>
         <div className='mx-auto mb-4 h-8 w-8 animate-spin rounded-full border-2 border-purple-500 border-t-transparent' />
         <p className='text-muted'>Completing sign in...</p>

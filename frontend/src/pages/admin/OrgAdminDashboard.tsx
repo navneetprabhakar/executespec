@@ -182,7 +182,11 @@ export default function OrgAdminDashboard() {
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-2'>
           <Activity className='h-5 w-5 text-secondary' />
-          <h2 className='text-lg font-semibold text-primary'>Analytics</h2>
+          {/* 2026-05-14 (responsive UX parity audit) — promoted from <h2>
+              to <h1> so the page has a top-level heading. Pre-fix the
+              page rendered an empty document title (probe captured
+              h1Text="" across all viewports + tiers). */}
+          <h1 className='text-lg font-semibold text-primary'>Analytics</h1>
         </div>
 
         {/* Period selector */}
@@ -248,10 +252,10 @@ export default function OrgAdminDashboard() {
                     <CartesianGrid strokeDasharray='3 3' stroke='rgba(255,255,255,0.05)' />
                     <XAxis
                       dataKey='date'
-                      tick={{fontSize: 10, fill: '#71717a'}}
+                      tick={{fontSize: 12, fill: '#71717a'}}
                       tickFormatter={(d) => d.slice(5)}
                     />
-                    <YAxis tick={{fontSize: 10, fill: '#71717a'}} allowDecimals={false} />
+                    <YAxis tick={{fontSize: 12, fill: '#71717a'}} allowDecimals={false} />
                     <Tooltip
                       contentStyle={{
                         background: '#18181b',
@@ -302,13 +306,13 @@ export default function OrgAdminDashboard() {
                       <CartesianGrid strokeDasharray='3 3' stroke='rgba(255,255,255,0.05)' />
                       <XAxis
                         type='number'
-                        tick={{fontSize: 10, fill: '#71717a'}}
+                        tick={{fontSize: 12, fill: '#71717a'}}
                         allowDecimals={false}
                       />
                       <YAxis
                         type='category'
                         dataKey='name'
-                        tick={{fontSize: 10, fill: '#71717a'}}
+                        tick={{fontSize: 12, fill: '#71717a'}}
                         width={120}
                       />
                       <Tooltip
@@ -380,7 +384,7 @@ export default function OrgAdminDashboard() {
               </div>
               {sortedMembers.length > 0 ? (
                 <div className='overflow-x-auto'>
-                  <table className='w-full text-xs min-w-[560px] md:min-w-0'>
+                  <table className='w-full text-xs md:min-w-0 responsive-table'>
                     <thead>
                       <tr className='border-b border-[var(--border-default)]'>
                         <th className='text-left py-2 px-2 text-muted font-medium'>Name</th>
@@ -415,14 +419,22 @@ export default function OrgAdminDashboard() {
                           className='border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors cursor-pointer'
                           title='Open per-member dashboard'
                         >
-                          <td className='py-2 px-2 text-primary'>
+                          <td className='py-2 px-2 text-primary' data-label='Name'>
                             {m.firstName} {m.lastName}
                           </td>
-                          <td className='py-2 px-2 text-secondary'>{m.email}</td>
-                          <td className='py-2 px-2 text-right text-primary font-mono'>
+                          <td className='py-2 px-2 text-secondary' data-label='Email'>
+                            {m.email}
+                          </td>
+                          <td
+                            className='py-2 px-2 text-right text-primary font-mono'
+                            data-label="toggleSort('runCount')} > Runs {sortCol === 'runCount' ? (sortDir === 'asc' ? '↑' : '↓') : ''}"
+                          >
                             {m.runCount}
                           </td>
-                          <td className='py-2 px-2 text-right'>
+                          <td
+                            className='py-2 px-2 text-right'
+                            data-label="toggleSort('successRate')} > Success %{' '} {sortCol === 'successRate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}"
+                          >
                             <span
                               className={cn(
                                 'font-mono',
@@ -436,7 +448,10 @@ export default function OrgAdminDashboard() {
                               {m.successRate}%
                             </span>
                           </td>
-                          <td className='py-2 px-2 text-right text-muted'>
+                          <td
+                            className='py-2 px-2 text-right text-muted'
+                            data-label="toggleSort('lastRunDate')} > Last Active{' '} {sortCol === 'lastRunDate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}"
+                          >
                             {m.lastRunDate ? new Date(m.lastRunDate).toLocaleDateString() : '-'}
                           </td>
                         </tr>

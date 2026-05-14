@@ -981,7 +981,11 @@ export default function IntegrationsPage() {
           <div className='h-12 w-12 rounded-sm bg-[var(--gray-200)] border border-[var(--border-default)] flex items-center justify-center mx-auto'>
             <Unplug className='h-6 w-6 text-muted' />
           </div>
-          <h2 className='text-lg font-semibold text-primary'>Integrations Unavailable</h2>
+          {/* 2026-05-14 (responsive UX parity audit) — promoted to h1 so
+              the tier-locked page still has a top-level heading. Pre-fix,
+              FREE / PRO / SUPER_ADMIN landing here saw an empty document
+              outline (probe captured h1Text="" across all viewports). */}
+          <h1 className='text-lg font-semibold text-primary'>Integrations Unavailable</h1>
           <p className='text-sm text-muted leading-relaxed'>
             Managing integrations requires a{' '}
             <span className='text-accent-blue font-medium'>PRO</span> or{' '}
@@ -1306,7 +1310,7 @@ export default function IntegrationsPage() {
             <h3 className='text-sm font-semibold text-primary'>Integration-triggered Runs</h3>
           </div>
           <div className='overflow-x-auto v3-scroll-fade-x'>
-            <table className='w-full text-sm min-w-[560px] md:min-w-0'>
+            <table className='w-full text-sm md:min-w-0 responsive-table'>
               <thead>
                 <tr className='border-b border-[var(--border-default)]'>
                   {['Run ID', 'Status', 'Goal', 'Created'].map((h) => (

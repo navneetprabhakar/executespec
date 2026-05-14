@@ -1,4 +1,4 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {createRun, estimateRun, type LaunchEstimate} from '@/lib/api';
 import ConversationModal from './ConversationModal';
@@ -6,6 +6,7 @@ import {useV3ProjectStore} from '../stores/useV3ProjectStore';
 import {useV3Ui} from '../stores/useV3Ui';
 import {trackV3, V3_EVENTS} from '../lib/events';
 import {PROVIDER_DISPLAY, RUN_MODE_PLAN_REVIEW, RUN_MODE_QUICK} from '../lib/terminology';
+import {useIsPhone} from '@/hooks/useIsMobile';
 
 /**
  * R-123 — single-textarea composer.
@@ -45,12 +46,47 @@ interface ComposerProps {
 }
 
 export default function Composer({projectId, isEmpty = false, defaultProvider}: ComposerProps) {
+  const isPhone = useIsPhone();
   const [text, setText] = useState('');
   const [mode, setMode] = useState<'plan' | 'quick'>('plan');
   const [provider, setProvider] = useState(defaultProvider ?? 'ANTHROPIC');
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // 2026-05-14 (mobile-first redesign) — recent-specs are a sheet on
+  // phones (was: an inline 3-chip wrap-row eating ~120px of fold). The
+  // user complaint was "chat history covered by composer + suggestions"
+  // — pulling these out frees up the thread by default; the user can
+  // tap "Recent" to surface them when they actually want re-launch.
+  const [recentSheetOpen, setRecentSheetOpen] = useState(false);
+  // 2026-05-14 (iOS keyboard avoidance) — when iOS Safari shows the
+  // keyboard, window.innerHeight stays constant but visualViewport.height
+  // shrinks. The composer is `position: sticky; bottom: 0` inside a flex
+  // column whose height is calc(100dvh - 60px), and dvh updates lag the
+  // keyboard. Result: textarea sits BEHIND the keyboard; user types blind.
+  // Listening to visualViewport.resize lets us translate the composer up
+  // by exactly the keyboard height (innerHeight - visualViewport.height).
+  const [kbOffset, setKbOffset] = useState(0);
+  const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => {
+    if (!isPhone) {
+      setKbOffset(0);
+      return;
+    }
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const sync = () => {
+      const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setKbOffset(kb);
+    };
+    vv.addEventListener('resize', sync);
+    vv.addEventListener('scroll', sync);
+    sync();
+    return () => {
+      vv.removeEventListener('resize', sync);
+      vv.removeEventListener('scroll', sync);
+    };
+  }, [isPhone]);
   // Audit r5 (#5, 2026-05-06) — staged-PR-before-push toggle. When on,
   // the run completes normally but the auto-push to GitHub is skipped
   // — the user can inspect the diff in Run Detail and manually push if
@@ -277,13 +313,26 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
 
   return (
     <form
+      ref={formRef}
       onSubmit={onSubmit}
       style={{
         position: isEmpty ? 'static' : 'sticky',
         bottom: 0,
         background: 'var(--v3-bg)',
         paddingTop: 12,
-        paddingBottom: 12,
+        // 2026-05-14 (responsive UX parity audit, iOS pass) — pad below the
+        // home-indicator on iPhones with notch / Dynamic Island. Pre-fix the
+        // Send button + Quick-run chip sat IN the home-indicator zone, which
+        // both made them harder to tap accurately AND caused iOS to interpret
+        // a tap-and-drag as a "swipe up to home" gesture. `max(12px, env(...))`
+        // preserves the desktop / non-notched height.
+        paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
+        // 2026-05-14 (iOS keyboard avoidance) — when the soft keyboard is
+        // open, lift the composer by `kbOffset` so the textarea + Submit
+        // button stay above the keyboard. transform avoids re-layout (the
+        // sticky bottom:0 anchor stays put, we just push it up visually).
+        transform: kbOffset > 0 ? `translateY(${-kbOffset}px)` : undefined,
+        transition: 'transform 0.18s ease-out',
         zIndex: 10,
       }}
       aria-label='New run composer'
@@ -302,15 +351,13 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         </div>
       )}
 
-      {/* Audit r5 (#9, 2026-05-06) — first-run coachmark. The empty-state
-          composer used to drop a new user straight into a textarea + 3
-          sample chips with no narrative for what happens next. Two lines
-          of plain English up front prevent the "I typed something, now
-          what?" moment when planner takes ~5–7s to come back. We only
-          show this on the empty hero (isEmpty) — the inline-thread
-          composer hides it because returning users have already seen
-          the flow. */}
-      {isEmpty && (
+      {/* Audit r5 (#9, 2026-05-06) — first-run coachmark. Hidden on
+          phone (2026-05-14 mobile-first redesign): a 60-80px four-line
+          paragraph above the textarea is wasted fold space when the
+          user can read the same explanation from the marketing site.
+          Desktop keeps the hand-hold; phones go straight to the
+          textarea + Submit so the thread (when present) stays in view. */}
+      {isEmpty && !isPhone && (
         <div
           style={{
             textAlign: 'center',
@@ -334,12 +381,13 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         </div>
       )}
 
-      {/* R-343 (P3) — recent-specs chip rail.  Renders only when the
-          textarea is empty (so we don't suggest re-launching a stale
-          spec while the user composes a new one) and the project has
-          at least one prior user-text bubble.  Click → seed the
-          textarea; the user can edit + submit. */}
-      {recentSpecs.length > 0 && text.trim().length === 0 && !isEmpty && (
+      {/* R-343 (P3) — recent-specs chip rail. Desktop only: a 1-3-pill
+          inline rail above the textarea. 2026-05-14 mobile-first
+          redesign: the same rail was eating ~120px of vertical fold on
+          phones AND covering up the chat history above. Phones get the
+          "Recent" button + bottom sheet instead (rendered further down
+          in this form). */}
+      {recentSpecs.length > 0 && text.trim().length === 0 && !isEmpty && !isPhone && (
         <div
           style={{
             display: 'flex',
@@ -458,18 +506,59 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           </div>
         )}
 
+        {/* 2026-05-14 (mobile-first redesign) — action row layout.
+            DESKTOP: secondary chips (Mode / Refine / Advanced) on the
+            left, Submit pill on the right (the muscle-memory layout
+            our existing users learned).
+            PHONE: Submit goes full-width FIRST (the visually heaviest
+            element on the screen, 48px tall — matches Linear / Stripe
+            / GitHub Mobile composer patterns), with secondary actions
+            as compact text-only links beneath it. Plus a "↻ Recent"
+            link when there are previous specs to re-launch (the same
+            chip rail that's been moved out of inline rendering above).
+            One row of links is ~32px vs the ~120px the chip rail used.
+        */}
         <div
           style={{
             display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
+            flexDirection: isPhone ? 'column' : 'row',
+            justifyContent: isPhone ? 'flex-start' : 'space-between',
+            alignItems: isPhone ? 'stretch' : 'center',
             gap: 8,
             marginTop: 8,
             paddingTop: 8,
             borderTop: '1px solid var(--v3-border)',
           }}
         >
-          <div style={{display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap'}}>
+          {isPhone && (
+            <button
+              type='submit'
+              disabled={!canSubmit}
+              style={{
+                width: '100%',
+                minHeight: 48,
+                fontSize: 15,
+                fontWeight: 600,
+                background: canSubmit ? 'var(--v3-brand)' : 'var(--v3-surface-elevated)',
+                color: canSubmit ? 'var(--v3-text-on-brand)' : 'var(--v3-text-subtle)',
+                border: 'none',
+                borderRadius: 10,
+                cursor: canSubmit ? 'pointer' : 'not-allowed',
+                fontFamily: 'inherit',
+              }}
+            >
+              {submitting ? 'Submitting…' : 'Submit'}
+            </button>
+          )}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: isPhone ? 12 : 6,
+              flexWrap: 'wrap',
+              justifyContent: isPhone ? 'space-between' : 'flex-start',
+            }}
+          >
             <button
               type='button'
               onClick={() => setMode((m) => (m === 'plan' ? 'quick' : 'plan'))}
@@ -479,14 +568,15 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
                   : 'Skip plan review and start immediately.'
               }
               style={{
-                padding: '3px 8px',
-                fontSize: 11,
+                padding: isPhone ? '6px 10px' : '3px 8px',
+                minHeight: isPhone ? 36 : undefined,
+                fontSize: isPhone ? 12 : 11,
                 fontWeight: 600,
                 background: mode === 'quick' ? 'rgba(245,158,11,0.16)' : 'var(--v3-bg)',
                 color: mode === 'quick' ? 'var(--v3-warning)' : 'var(--v3-text-muted)',
                 border:
                   '1px solid ' + (mode === 'quick' ? 'rgba(245,158,11,0.4)' : 'var(--v3-border)'),
-                borderRadius: 4,
+                borderRadius: 6,
                 cursor: 'pointer',
                 fontFamily: 'inherit',
               }}
@@ -498,8 +588,9 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
               onClick={() => setRefineOpen(true)}
               title='Chat with a requirements analyst to refine your spec before submitting.'
               style={{
-                padding: '3px 8px',
-                fontSize: 11,
+                padding: isPhone ? '6px 10px' : '3px 8px',
+                minHeight: isPhone ? 36 : undefined,
+                fontSize: isPhone ? 12 : 11,
                 fontWeight: 500,
                 background: 'transparent',
                 color: 'var(--accent-blue-text, var(--v3-brand))',
@@ -509,14 +600,36 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
                 fontFamily: 'inherit',
               }}
             >
-              ✨ Refine with assistant
+              {isPhone ? '✨ Refine' : '✨ Refine with assistant'}
             </button>
+            {isPhone && recentSpecs.length > 0 && (
+              <button
+                type='button'
+                onClick={() => setRecentSheetOpen(true)}
+                style={{
+                  padding: '6px 10px',
+                  minHeight: 36,
+                  fontSize: 12,
+                  fontWeight: 500,
+                  background: 'transparent',
+                  color: 'var(--v3-text-subtle)',
+                  border: '1px solid var(--v3-border)',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+                aria-haspopup='dialog'
+              >
+                ↻ Recent
+              </button>
+            )}
             <button
               type='button'
               onClick={() => setAdvancedOpen((a) => !a)}
               style={{
-                padding: '3px 8px',
-                fontSize: 11,
+                padding: isPhone ? '6px 10px' : '3px 8px',
+                minHeight: isPhone ? 36 : undefined,
+                fontSize: isPhone ? 12 : 11,
                 fontWeight: 500,
                 background: 'transparent',
                 color: 'var(--v3-text-subtle)',
@@ -529,23 +642,25 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
               {advancedOpen ? '▾ Less' : '▾ Advanced'}
             </button>
           </div>
-          <button
-            type='submit'
-            disabled={!canSubmit}
-            style={{
-              padding: '6px 16px',
-              fontSize: 13,
-              fontWeight: 600,
-              background: canSubmit ? 'var(--v3-brand)' : 'var(--v3-surface-elevated)',
-              color: canSubmit ? 'var(--v3-text-on-brand)' : 'var(--v3-text-subtle)',
-              border: 'none',
-              borderRadius: 6,
-              cursor: canSubmit ? 'pointer' : 'not-allowed',
-              fontFamily: 'inherit',
-            }}
-          >
-            {submitting ? 'Submitting…' : 'Submit'}
-          </button>
+          {!isPhone && (
+            <button
+              type='submit'
+              disabled={!canSubmit}
+              style={{
+                padding: '6px 16px',
+                fontSize: 13,
+                fontWeight: 600,
+                background: canSubmit ? 'var(--v3-brand)' : 'var(--v3-surface-elevated)',
+                color: canSubmit ? 'var(--v3-text-on-brand)' : 'var(--v3-text-subtle)',
+                border: 'none',
+                borderRadius: 6,
+                cursor: canSubmit ? 'pointer' : 'not-allowed',
+                fontFamily: 'inherit',
+              }}
+            >
+              {submitting ? 'Submitting…' : 'Submit'}
+            </button>
+          )}
         </div>
 
         {/* Quick-mode inline warning. Amber chip alone signaled "danger" but
@@ -791,6 +906,116 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           onUseSpec={(spec) => setText(spec)}
           onClose={() => setRefineOpen(false)}
         />
+      )}
+
+      {/* 2026-05-14 (mobile-first redesign) — Recent-specs bottom sheet.
+          Replaces the inline 3-chip wrap-row on phones (kept on desktop).
+          The sheet opens from the bottom, dims the page, and shows the
+          recent specs as full-width 48px-tappable rows. Tap one →
+          seed the textarea + close the sheet. Backdrop tap or the X
+          button closes. */}
+      {isPhone && recentSheetOpen && (
+        <div
+          role='dialog'
+          aria-modal='true'
+          aria-label='Re-launch a recent spec'
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 60,
+            display: 'flex',
+            flexDirection: 'column',
+            justifyContent: 'flex-end',
+          }}
+        >
+          <div
+            aria-hidden='true'
+            onClick={() => setRecentSheetOpen(false)}
+            style={{
+              position: 'absolute',
+              inset: 0,
+              background: 'rgba(0,0,0,0.55)',
+              backdropFilter: 'blur(2px)',
+              WebkitBackdropFilter: 'blur(2px)',
+            }}
+          />
+          <div
+            style={{
+              position: 'relative',
+              background: 'var(--v3-surface)',
+              borderTopLeftRadius: 14,
+              borderTopRightRadius: 14,
+              borderTop: '1px solid var(--v3-border)',
+              paddingTop: 14,
+              paddingBottom: 'max(14px, env(safe-area-inset-bottom))',
+              paddingLeft: 12,
+              paddingRight: 12,
+              maxHeight: '70vh',
+              overflowY: 'auto',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                paddingBottom: 10,
+                borderBottom: '1px solid var(--v3-border)',
+                marginBottom: 8,
+              }}
+            >
+              <div style={{fontSize: 14, fontWeight: 600, color: 'var(--v3-text)'}}>
+                Recent specs
+              </div>
+              <button
+                type='button'
+                onClick={() => setRecentSheetOpen(false)}
+                aria-label='Close'
+                style={{
+                  minWidth: 44,
+                  minHeight: 44,
+                  background: 'transparent',
+                  border: 'none',
+                  color: 'var(--v3-text-muted)',
+                  fontSize: 22,
+                  cursor: 'pointer',
+                  fontFamily: 'inherit',
+                }}
+              >
+                ×
+              </button>
+            </div>
+            <ul style={{listStyle: 'none', padding: 0, margin: 0}}>
+              {recentSpecs.map((s, i) => (
+                <li key={i}>
+                  <button
+                    type='button'
+                    onClick={() => {
+                      setText(s);
+                      setRecentSheetOpen(false);
+                    }}
+                    style={{
+                      width: '100%',
+                      textAlign: 'left',
+                      padding: '12px 12px',
+                      minHeight: 48,
+                      background: 'transparent',
+                      color: 'var(--v3-text)',
+                      border: 'none',
+                      borderBottom: '1px solid var(--v3-border)',
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      cursor: 'pointer',
+                      fontFamily: 'inherit',
+                    }}
+                  >
+                    {s}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       )}
     </form>
   );

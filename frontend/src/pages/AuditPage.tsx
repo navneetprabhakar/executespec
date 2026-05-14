@@ -91,14 +91,21 @@ function entityBadgeColor(entityType: string): string {
 }
 
 function formatTime(iso: string): string {
+  // 2026-05-14 (P8) — short relative ("5m ago", "3d ago") so audit-log rows
+  // don't blow a horizontal row on `13/5/2026, 8:28:52 PM`. Full ISO is
+  // surfaced in the title attribute below via <RelativeTime>; callers that
+  // still need the absolute long-form can switch to `verbose`.
   const d = new Date(iso);
-  return d.toLocaleString(undefined, {
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
+  const ms = Date.now() - d.getTime();
+  const sec = Math.round(ms / 1000);
+  if (sec < 60) return `${sec}s ago`;
+  const min = Math.round(sec / 60);
+  if (min < 60) return `${min}m ago`;
+  const hr = Math.round(min / 60);
+  if (hr < 24) return `${hr}h ago`;
+  const day = Math.round(hr / 24);
+  if (day < 7) return `${day}d ago`;
+  return d.toLocaleDateString(undefined, {month: 'short', day: 'numeric'});
 }
 
 /** Try to render a JSON string as compact key=value pairs. */
