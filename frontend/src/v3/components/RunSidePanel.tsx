@@ -35,6 +35,7 @@ import {
   type ReportIssue,
 } from '@/lib/api';
 import {useNavigate} from 'react-router-dom';
+import {fmtCost} from '@/lib/utils';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore, type LogEntry} from '@/stores/useSseStore';
 import PlanCard from './PlanCard';
@@ -908,7 +909,7 @@ function deriveMilestone(entry: LogEntry): MilestoneSpec | null {
     const costNum = Number((data as Record<string, unknown>)?.totalCost ?? Number(payloadStr) ?? 0);
     return {
       icon: <DollarSign className='h-3.5 w-3.5' />,
-      text: `Cost: $${costNum.toFixed(4)}`,
+      text: `Cost: ${fmtCost(costNum)}`,
       tone: 'greenSoft',
     };
   }
@@ -1686,7 +1687,7 @@ function OverviewPane({
       </KvSection>
 
       <KvSection label='Cost'>
-        <Kv k='Spent' v={cost != null ? `$${cost.toFixed(4)}` : '—'} mono />
+        <Kv k='Spent' v={cost != null ? fmtCost(cost) : '—'} mono />
         {(estLow != null || estHigh != null) && (
           <Kv
             k='Estimate'
@@ -2326,7 +2327,7 @@ function ChatPane({
       lines.push(`Tasks: ${done}/${tasks.length} complete.`);
     }
     if (detail.actualCostUsd != null) {
-      lines.push(`Cost so far: $${detail.actualCostUsd.toFixed(4)}.`);
+      lines.push(`Cost so far: ${fmtCost(detail.actualCostUsd)}.`);
     }
     if (detail.githubPrUrl) {
       lines.push(`Draft PR: ${detail.githubPrUrl}`);

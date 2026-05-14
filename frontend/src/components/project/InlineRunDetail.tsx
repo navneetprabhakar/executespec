@@ -40,7 +40,7 @@ import {
 import {useAuthStore} from '@/stores/useAuthStore';
 import {useRunStore} from '@/stores/useRunStore';
 import {useUiStore} from '@/stores/useUiStore';
-import {cn, errMsg} from '@/lib/utils';
+import {cn, errMsg, fmtCost} from '@/lib/utils';
 
 /**
  * Read-only inline run viewer. Shows the full run experience — request, stats,
@@ -512,9 +512,7 @@ export default function InlineRunDetail({
           })()}
           <Stat label='Tasks' value={`${completed}/${tasks.length}`} />
           {totalTokens > 0 && <Stat label='Tokens' value={totalTokens.toLocaleString()} />}
-          {run.actualCostUsd != null && (
-            <Stat label='Cost' value={`$${run.actualCostUsd.toFixed(4)}`} />
-          )}
+          {run.actualCostUsd != null && <Stat label='Cost' value={fmtCost(run.actualCostUsd)} />}
           {run.aiProvider && <Stat label='Provider' value={run.aiProvider} />}
         </div>
         {/* row 3 — REQUEST card. Collapsed to ~6 lines by default for long

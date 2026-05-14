@@ -1,10 +1,11 @@
 import {useEffect, useState} from 'react';
 import {createPortal} from 'react-dom';
 import {Link, NavLink, useLocation, useNavigate} from 'react-router-dom';
-import {Menu, X} from 'lucide-react';
+import {Menu, X, Command, Search} from 'lucide-react';
 import AvatarMenu from './AvatarMenu';
 import ProjectSwitcher from './ProjectSwitcher';
 import {UsageBadge} from '@/components/billing/UsageBadge';
+import {useV3Ui} from '../stores/useV3Ui';
 // Single-surface retirement (2026-05-06) — kept after v2 Header
 // deletion. NotificationBell + NotificationPanel are framework-
 // agnostic (they poll the existing /api/notifications endpoint and
@@ -523,13 +524,19 @@ export default function TopBar() {
          * marketing pages (e.g. /exec-demo) saw "Library" + "Migrations"
          * twice and "Runs" pointing at an auth-walled page. Gate the
          * center nav behind a logged-in user so anonymous visitors see
-         * only the marketing rail (no duplication, no dead links). */}
+         * only the marketing rail (no duplication, no dead links).
+         *
+         * 2026-05-14 UX overhaul — added the visible CmdK trigger to
+         * resurface the global command palette as a glance-able
+         * affordance (P0-8 in the assessment doc).
+         */}
         {!isMobile && user && (
           <div
             className='v3-topbar__center'
             style={{display: 'flex', alignItems: 'center', gap: 8}}
           >
             <ProjectSwitcher />
+            <CommandTrigger />
             <NavLink to='/runs' style={navLinkStyle} title='All runs across projects'>
               Runs
             </NavLink>
@@ -660,5 +667,73 @@ function TierChip() {
     >
       {label}
     </span>
+  );
+}
+
+/**
+ * 2026-05-14 UX overhaul — visible CmdK trigger.
+ *
+ * Resurrects the "Search ⌘K" button removed on 2026-04-29 (per the comment
+ * at the top of this file). The hotkey alone left mobile users with no
+ * way to reach CmdK and desktop users with no affordance hinting that the
+ * palette exists. P0-8 in docs/design/ux-assessment-2026-05-14.md.
+ *
+ * Visual: a slim search-style input lookalike, sized to read as "search
+ * field" at a glance but click-only (no actual typing — opens the palette
+ * instead). Matches the Linear / Cursor / Stripe Dashboard pattern.
+ */
+function CommandTrigger() {
+  const openCmdK = useV3Ui((s) => s.openCmdK);
+  const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad/.test(navigator.platform);
+  return (
+    <button
+      type='button'
+      onClick={() => openCmdK()}
+      aria-label='Open command palette (Cmd K)'
+      className='press-effect'
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '5px 8px 5px 10px',
+        minWidth: 220,
+        background: 'var(--surface-sunken)',
+        border: '1px solid var(--hairline)',
+        borderRadius: 'var(--radius-control)',
+        color: 'var(--v3-text-muted)',
+        fontFamily: 'inherit',
+        fontSize: 12.5,
+        fontWeight: 500,
+        cursor: 'pointer',
+        textAlign: 'left',
+      }}
+    >
+      <Search size={14} aria-hidden='true' style={{flexShrink: 0}} />
+      <span style={{flex: 1, whiteSpace: 'nowrap'}}>Search or jump to…</span>
+      <span
+        aria-hidden='true'
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 2,
+          padding: '1px 5px',
+          background: 'var(--surface-card)',
+          border: '1px solid var(--hairline)',
+          borderRadius: 4,
+          fontSize: 10,
+          fontWeight: 600,
+          color: 'var(--v3-text-subtle)',
+          letterSpacing: '0.02em',
+        }}
+      >
+        {isMac ? (
+          <>
+            <Command size={9} />K
+          </>
+        ) : (
+          'Ctrl K'
+        )}
+      </span>
+    </button>
   );
 }

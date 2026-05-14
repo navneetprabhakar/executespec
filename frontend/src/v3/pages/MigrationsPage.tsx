@@ -78,15 +78,46 @@ export default function MigrationsPage() {
 
   return (
     <div style={{padding: 16, paddingBottom: 48}}>
-      {/* Header */}
-      <div style={{marginBottom: 20}}>
-        <h1 style={{fontSize: 24, fontWeight: 700, color: 'var(--v3-text)', margin: 0}}>
-          Migrations
-        </h1>
-        <p style={{fontSize: 13, color: 'var(--v3-text-subtle)', margin: '6px 0 0', maxWidth: 700}}>
-          Pick a recipe → see what it'll do across your repos before you commit → click apply, get
-          PRs. Same recipe runs on every linked repo in your project.
-        </p>
+      {/* 2026-05-14 UX overhaul (P0-1) — was a 4-line marketing description
+          that pushed the first recipe card off the fold on phone. Replaced
+          with a compact title row that surfaces the recipe count instead.
+          Full pitch lives on the marketing site; this is the in-product
+          index. */}
+      <div
+        style={{
+          marginBottom: 16,
+          display: 'flex',
+          alignItems: 'baseline',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <h1
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              color: 'var(--v3-text)',
+              margin: 0,
+              letterSpacing: '-0.015em',
+              lineHeight: 1.15,
+            }}
+          >
+            Migrations
+          </h1>
+          <p
+            style={{
+              fontSize: 12.5,
+              color: 'var(--v3-text-muted)',
+              margin: '3px 0 0',
+            }}
+          >
+            {items.length > 0
+              ? `${items.length} ${items.length === 1 ? 'recipe' : 'recipes'}`
+              : 'No recipes yet'}
+          </p>
+        </div>
       </div>
 
       {/* Filters.
