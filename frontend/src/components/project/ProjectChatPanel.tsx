@@ -627,11 +627,23 @@ function LaunchFromChatModal({
       // modal panel never touches the screen edge on phones. max-h cap on
       // the panel + overflow-y-auto prevents the inner content (compiled
       // spec textarea + repos list) from running off the bottom in landscape.
+      //
+      // 2026-05-14 (mobile UX sweep) — backdrop now honours `env(safe-area-inset-*)`
+      // so the modal panel doesn't slide under the iPhone notch / Dynamic
+      // Island in landscape or under the home-indicator at the bottom.
+      // max-h switched to `100dvh` so iOS Safari's collapsing URL bar
+      // doesn't push the modal's bottom 60px under the address bar.
       className='fixed inset-0 z-40 bg-black/60 flex items-center justify-center p-3 sm:p-4'
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+      }}
       onClick={onClose}
     >
       <div
-        className='w-full max-w-xl max-h-[calc(100vh-2rem)] overflow-y-auto rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] shadow-xl p-4 space-y-3'
+        className='w-full max-w-xl max-h-[calc(100dvh-2rem)] overflow-y-auto overscroll-contain rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] shadow-xl p-4 space-y-3'
         onClick={(e) => e.stopPropagation()}
       >
         <div className='flex items-center justify-between'>
@@ -716,7 +728,7 @@ function LaunchFromChatModal({
               <label className='block text-[11px] uppercase tracking-wide text-muted mb-1'>
                 Repos ({selected.size} of {repos.length} selected)
               </label>
-              <div className='space-y-1 max-h-40 overflow-y-auto'>
+              <div className='space-y-1 max-h-40 sm:max-h-60 overflow-y-auto overscroll-contain'>
                 {repos.map((l) => (
                   <label
                     key={l.repo.id}
