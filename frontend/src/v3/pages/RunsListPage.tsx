@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState, type ReactNode} from 'react';
 import {Link, useNavigate, useSearchParams} from 'react-router-dom';
 import {getRuns, type RunSummary, type ProjectDto, getProjects} from '@/lib/api';
 import {useAuthStore, selectIsOrgAdmin} from '@/stores/useAuthStore';
+import Skeleton from '@/components/shared/Skeleton';
 
 function FilterPill({
   active,
@@ -268,8 +269,8 @@ export default function RunsListPage() {
       )}
 
       {loading && !runs && (
-        <div style={{padding: 24, color: 'var(--v3-text-muted)', textAlign: 'center'}}>
-          Loading runs…
+        <div style={{padding: 12}}>
+          <Skeleton variant='row' count={6} label='Loading runs' />
         </div>
       )}
 

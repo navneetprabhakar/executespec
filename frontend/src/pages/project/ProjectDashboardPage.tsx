@@ -456,7 +456,12 @@ export default function ProjectDashboardPage() {
               <div className='font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5'>
                 Project
               </div>
-              <h1 className='text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate'>
+              {/* 2026-05-14 mobile-first redesign — was text-lg (18px) on
+                  phone which made the project name visually smaller than the
+                  textarea placeholder. Bumped to text-2xl (24px) on phone,
+                  text-xl (20px) on sm, text-2xl (24px) again on lg so the
+                  H1 actually reads as a heading. */}
+              <h1 className='text-2xl sm:text-xl lg:text-2xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate'>
                 {project?.name ?? 'Project'}
               </h1>
             </div>
