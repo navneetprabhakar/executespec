@@ -568,7 +568,7 @@ export default function ProjectDashboardPage() {
             mask on phones so users see "more tabs to the right" instead of
             reading "Cha…" as a typo. */}
         <nav
-          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x -mx-4 px-4'
+          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip -mx-4 px-4'
           role='tablist'
           aria-label='Project sections'
         >
@@ -593,7 +593,7 @@ export default function ProjectDashboardPage() {
         {/* Runs sub-tab strip — only shown when in Runs tab */}
         {tab === 'runs' && (
           <nav
-            className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x -mx-4 px-4 pt-1'
+            className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip -mx-4 px-4 pt-1'
             role='tablist'
             aria-label='Runs sections'
           >

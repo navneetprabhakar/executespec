@@ -569,7 +569,7 @@ function AdminPageInner() {
           Organisations / Tier Config / Escalations / Top-Up Pkgs /
           Usage Reports / Payment Audit / Webhooks) don't squish or
           word-wrap on 375px viewports. */}
-      <div className='flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x'>
+      <div className='flex gap-1 px-4 sm:px-6 pt-3 flex-shrink-0 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip'>
         {TABS.map(({id, label, icon: Icon, count}) => (
           <button
             key={id}
