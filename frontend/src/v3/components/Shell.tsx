@@ -77,6 +77,24 @@ function classifyRoute(pathname: string): {wide: boolean; fill: boolean} {
   if (pathname === '/trust') return {wide: true, fill: false};
   if (pathname === '/billing') return {wide: true, fill: false};
   if (pathname === '/exec') return {wide: true, fill: false};
+  // 2026-05-14 (responsive UX parity audit) — operational + admin
+  // surfaces were rendering in the 960px-narrow centered column on
+  // 1280px+ desktops, leaving ~1000px of viewport empty AND forcing
+  // their `min-w-[600px]` data tables to horizontal-scroll within a
+  // ~280px usable area (Status column truncated to "PEND…" / "ACTIV…").
+  // Promote them to wide+fill so the dense console reads at desktop
+  // widths and the inner tables get room to lay out without clipping.
+  if (pathname === '/admin' || pathname.startsWith('/admin/'))
+    return {wide: true, fill: true};
+  if (pathname === '/audit') return {wide: true, fill: true};
+  if (pathname === '/accounting') return {wide: true, fill: true};
+  if (pathname === '/invoices') return {wide: true, fill: true};
+  if (pathname === '/deployments') return {wide: true, fill: true};
+  if (pathname === '/settings' || pathname.startsWith('/settings/'))
+    return {wide: true, fill: false};
+  if (pathname === '/integrations') return {wide: true, fill: false};
+  if (pathname === '/pricing') return {wide: true, fill: false};
+  if (pathname.startsWith('/org/')) return {wide: true, fill: true};
   // Default — narrow centered (Auth, EmptyProject, Landing/Composer).
   return {wide: false, fill: false};
 }

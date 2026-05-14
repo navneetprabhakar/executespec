@@ -182,7 +182,11 @@ export default function OrgAdminDashboard() {
       <div className='flex items-center justify-between'>
         <div className='flex items-center gap-2'>
           <Activity className='h-5 w-5 text-secondary' />
-          <h2 className='text-lg font-semibold text-primary'>Analytics</h2>
+          {/* 2026-05-14 (responsive UX parity audit) — promoted from <h2>
+              to <h1> so the page has a top-level heading. Pre-fix the
+              page rendered an empty document title (probe captured
+              h1Text="" across all viewports + tiers). */}
+          <h1 className='text-lg font-semibold text-primary'>Analytics</h1>
         </div>
 
         {/* Period selector */}
