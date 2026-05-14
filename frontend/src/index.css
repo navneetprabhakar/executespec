@@ -238,6 +238,116 @@ optgroup {
   font-family: inherit;
 }
 
+/* ── Responsive data tables (2026-05-14 mobile UX audit, PR-1) ──────────
+ *
+ * `.responsive-table` lets any `<table>` in the codebase opt into a
+ * CSS-only "table on desktop, card-list on mobile" reflow. The previous
+ * pattern was `<table class="min-w-[Npx] md:min-w-0">` wrapped in
+ * `<div class="overflow-x-auto">` — that forced phone users to scroll
+ * tables sideways one column at a time, which is the single biggest
+ * frustration on every admin / finance / org page.
+ *
+ * Usage:
+ *   1. Replace `min-w-[Npx] md:min-w-0` on the <table> with
+ *      `responsive-table`. The `overflow-x-auto` wrapper can stay
+ *      (no-op on mobile, helpful fallback if a row's content is wider
+ *      than the card on tablet).
+ *   2. Add `data-label="ColumnName"` to every `<td>` so the mobile
+ *      card layout renders the column header as a left-side label.
+ *      `data-label=""` (empty) hides the label and lets the cell
+ *      content occupy the full card width (good for action buttons).
+ *   3. If a `<td>` was hidden on mobile via `hidden md:table-cell`,
+ *      remove that — the whole point is to surface every column on
+ *      mobile as a labelled row inside the card.
+ *
+ * Below the `md` breakpoint (768px):
+ *   - `<thead>` is visually hidden but stays in the a11y tree.
+ *   - Each `<tr>` becomes a bordered card with vertical stacking.
+ *   - Each `<td>` becomes a flex row: 100px mono UPPERCASE label on
+ *     the left (from `data-label`), cell content on the right.
+ *
+ * Above `md`: the table renders normally — zero visual change from
+ * the previous styling, so no desktop regression. */
+.responsive-table {
+  width: 100%;
+}
+@media (max-width: 767px) {
+  .responsive-table thead {
+    /* Visually hide but keep in the accessibility tree (screen readers
+       still announce column headers). `position: absolute` + clip is the
+       canonical "visually-hidden" pattern. */
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  .responsive-table,
+  .responsive-table tbody {
+    display: block;
+  }
+  .responsive-table tr {
+    display: block;
+    padding: 12px 14px;
+    margin-bottom: 8px;
+    background: var(--gray-100);
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+  }
+  .responsive-table tr:last-child {
+    margin-bottom: 0;
+  }
+  /* Override the `divide-y` / `border-t` separators between rows from
+     desktop styles — on mobile each row IS its own bordered card so
+     stripes / dividers between them are visual noise. */
+  .responsive-table tbody > tr,
+  .responsive-table tbody > tr + tr {
+    border-top: 1px solid var(--border-default) !important;
+  }
+  .responsive-table td {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 0;
+    border: none !important;
+    text-align: left;
+    min-height: 28px;
+    /* Reveal cells that desktop hid via `hidden md:table-cell` —
+       mobile users need to see every column as a labelled row. */
+  }
+  /* Force-reveal cells hidden by Tailwind's hidden modifier on mobile.
+     The `display: flex` above already overrides `display: none` from
+     `.hidden` because of CSS specificity within the same media query. */
+  .responsive-table td.hidden {
+    display: flex !important;
+  }
+  .responsive-table td::before {
+    content: attr(data-label);
+    flex: 0 0 96px;
+    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 10.5px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    line-height: 1.4;
+    white-space: nowrap;
+  }
+  /* Cells with no data-label OR empty data-label flow full-width and
+     drop the label column (use for action button rows, status pills
+     where the value speaks for itself). */
+  .responsive-table td:not([data-label])::before,
+  .responsive-table td[data-label='']::before {
+    display: none;
+  }
+  .responsive-table td[data-label=''] {
+    margin-top: 4px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border-default) !important;
+  }
+}
+
 /* Scrollbar styling */
 ::-webkit-scrollbar {
   width: 6px;
