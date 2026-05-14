@@ -94,13 +94,16 @@ export default function WorkspaceHealthPanel({projectId}: {projectId: string}) {
             return (
               <div
                 key={r.repoId}
-                className='flex items-center justify-between gap-2 text-xs py-1 border-b border-[var(--border-default)] last:border-b-0'
+                /* 2026-05-14 (P10) — stacked layout on phone so the status
+                   chips don't collide with / overlap the repo name + branch.
+                   sm:flex-row preserves the dense desktop row. */
+                className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-2 text-xs py-2 sm:py-1 border-b border-[var(--border-default)] last:border-b-0'
               >
                 <div className='flex items-center gap-2 min-w-0'>
-                  <span className='font-mono truncate text-primary'>{r.repoName}</span>
-                  <span className='text-[11px] text-muted'>{r.defaultBranch}</span>
+                  <span className='font-mono truncate text-primary no-clamp'>{r.repoName}</span>
+                  <span className='text-[11px] text-muted no-clamp'>{r.defaultBranch}</span>
                 </div>
-                <div className='flex items-center gap-1.5 shrink-0'>
+                <div className='flex items-center gap-1.5 flex-wrap sm:flex-nowrap sm:shrink-0'>
                   <span
                     className={`inline-flex items-center rounded-sm px-1.5 py-0.5 text-[9px] ${freshness.cls}`}
                   >
