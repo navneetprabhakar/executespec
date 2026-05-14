@@ -192,7 +192,7 @@ function FeatureFlagsPageInner() {
               </h2>
               <div className='rounded-lg border border-[var(--border-default)] overflow-hidden'>
                 <div className='overflow-x-auto v3-scroll-fade-x'>
-                  <table className='w-full text-sm min-w-[640px] lg:min-w-0'>
+                  <table className='w-full text-sm lg:min-w-0 responsive-table'>
                     <thead>
                       <tr className='border-b border-[var(--border-default)] bg-[var(--gray-100)]'>
                         <th className='text-left px-4 py-2.5 text-muted font-medium'>Key</th>
@@ -214,10 +214,13 @@ function FeatureFlagsPageInner() {
                             key={flag.flagKey}
                             className='border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--gray-100)]'
                           >
-                            <td className='px-4 py-3 text-primary font-mono text-xs'>
+                            <td
+                              className='px-4 py-3 text-primary font-mono text-xs'
+                              data-label='Key'
+                            >
                               {flag.flagKey}
                             </td>
-                            <td className='px-4 py-3'>
+                            <td className='px-4 py-3' data-label='Value'>
                               {flag.valueType === 'BOOLEAN' ? (
                                 <ToggleSwitch
                                   enabled={flag.flagValue === 'true'}
@@ -251,7 +254,7 @@ function FeatureFlagsPageInner() {
                                 </div>
                               )}
                             </td>
-                            <td className='px-4 py-3'>
+                            <td className='px-4 py-3' data-label='Type'>
                               <span
                                 className={cn(
                                   'text-[10px] font-mono px-1.5 py-0.5 rounded',
@@ -267,8 +270,13 @@ function FeatureFlagsPageInner() {
                                 {flag.valueType}
                               </span>
                             </td>
-                            <td className='px-4 py-3 text-muted text-xs'>{flag.scope}</td>
-                            <td className='px-4 py-3 text-muted text-xs hidden lg:table-cell'>
+                            <td className='px-4 py-3 text-muted text-xs' data-label='Scope'>
+                              {flag.scope}
+                            </td>
+                            <td
+                              className='px-4 py-3 text-muted text-xs hidden lg:table-cell'
+                              data-label='Description'
+                            >
                               {flag.description || '-'}
                             </td>
                           </tr>

@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import Skeleton from '@/components/shared/Skeleton';
 import {listProjectAdrs, getProjectAdr, type AdrSummary, type AdrDetail} from '@/lib/api';
 import {MarkdownContent} from '@/components/shared/MarkdownContent';
 import {cn, errMsg} from '@/lib/utils';
@@ -79,7 +80,7 @@ export default function AdrPanel({projectId}: {projectId: string}) {
       <div className='grid grid-cols-1 lg:grid-cols-3 gap-3'>
         {/* List column */}
         <div className='lg:col-span-1 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] divide-y divide-[var(--border-default)] max-h-[480px] overflow-y-auto'>
-          {!list && !error && <p className='text-xs text-muted p-4'>Loading…</p>}
+          {!list && !error && <Skeleton variant='text' count={3} />}
           {list && list.length === 0 && (
             <p className='text-xs text-muted p-4'>
               No ADRs found{acceptedOnly ? ' (with status ACCEPTED)' : ''}. Add one to{' '}
@@ -112,7 +113,7 @@ export default function AdrPanel({projectId}: {projectId: string}) {
         {/* Detail column */}
         <div className='lg:col-span-2 rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] p-4 min-h-[200px]'>
           {!selectedId && <p className='text-xs text-muted'>Select an ADR to view its body.</p>}
-          {selectedId && detailLoading && <p className='text-xs text-muted'>Loading…</p>}
+          {selectedId && detailLoading && <Skeleton variant='text' count={3} />}
           {selected && (
             <article className='space-y-3'>
               <header>

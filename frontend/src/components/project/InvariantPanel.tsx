@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import Skeleton from '@/components/shared/Skeleton';
 import {
   listProjectInvariants,
   listProjectInvariantViolations,
@@ -62,7 +63,7 @@ export default function InvariantPanel({projectId}: {projectId: string}) {
       )}
 
       <div className='rounded-sm bg-[var(--gray-100)] border border-[var(--border-default)] divide-y divide-[var(--border-default)]'>
-        {!invariants && !error && <p className='text-xs text-muted p-4'>Loading…</p>}
+        {!invariants && !error && <Skeleton variant='text' count={3} />}
         {invariants && invariants.length === 0 && (
           <p className='text-xs text-muted p-4'>
             No invariants defined. Add one to <code>.executespec/arch/invariants.yaml</code> in any
