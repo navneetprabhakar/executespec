@@ -632,8 +632,30 @@
 
 .v3-rollup {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  /* 2026-05-14 UX feedback — was repeat(3, 1fr) flat. On 375px phones the
+     three 120px cells + 12px gaps overflow the viewport (Health & debt /
+     Knowledge / Activity each got ~118px of inner width, list rows like
+     "2 repos linked / codemaps current / Architecture current" were
+     truncating mid-word and pushing horizontal scroll). Stack vertically
+     under sm, 2-col under md, 3-col on desktop. */
+  /* minmax(0,1fr) lets the column shrink below its content-min-size; without
+     it a wide chip inside a rollup cell would force the column past viewport. */
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--v3-pad-3);
+}
+@media (min-width: 640px) {
+  .v3-rollup {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (min-width: 1024px) {
+  .v3-rollup {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+/* Cells need min-width:0 too so flex/grid children can shrink. */
+.v3-rollup-cell {
+  min-width: 0;
 }
 
 .v3-rollup-cell {
