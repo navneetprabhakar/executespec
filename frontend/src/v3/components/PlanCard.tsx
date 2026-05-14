@@ -2,6 +2,7 @@ import {useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {approveRun, getRun, type RunDetail} from '@/lib/api';
 import Pill from './Pill';
+import ActionCluster from '@/components/shared/ActionCluster';
 import {
   PLAN_GATE_APPROVE_CTA,
   PLAN_GATE_ADJUST_CTA,
@@ -300,62 +301,34 @@ export default function PlanCard({runId, onApproved}: PlanCardProps) {
             </ul>
           )}
 
-          <div style={{display: 'flex', gap: 6, flexWrap: 'wrap', marginTop: 8}}>
-            <button
-              type='button'
-              onClick={onApprove}
-              disabled={submitting}
-              style={{
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 600,
-                background: 'var(--v3-brand)',
-                color: 'var(--v3-text-on-brand)',
-                border: 'none',
-                borderRadius: 6,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit',
+          {/* 2026-05-14 (P2) — ActionCluster: primary = Approve (full-width
+              on phone, the visually heaviest control), secondary Adjust +
+              Cancel go inline on desktop / behind the `…` overflow sheet
+              on phone. Prevents accidental-tap on destructive Cancel
+              next to Approve & ship on a 375px viewport. */}
+          <div style={{marginTop: 8}}>
+            <ActionCluster
+              primary={{
+                label: submitting ? 'Submitting…' : PLAN_GATE_APPROVE_CTA,
+                onClick: onApprove,
+                disabled: submitting,
               }}
-            >
-              {submitting ? 'Submitting…' : PLAN_GATE_APPROVE_CTA}
-            </button>
-            <button
-              type='button'
-              onClick={onAdjust}
-              disabled={submitting}
-              style={{
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 500,
-                background: 'transparent',
-                color: 'var(--v3-text-muted)',
-                border: '1px solid var(--v3-border)',
-                borderRadius: 6,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit',
-              }}
-              title='Dismiss this plan and edit your spec — no credits charged.'
-            >
-              {PLAN_GATE_ADJUST_CTA}
-            </button>
-            <button
-              type='button'
-              onClick={onCancel}
-              disabled={submitting}
-              style={{
-                padding: '6px 14px',
-                fontSize: 12.5,
-                fontWeight: 500,
-                background: 'transparent',
-                color: 'var(--v3-text-subtle)',
-                border: '1px solid var(--v3-border)',
-                borderRadius: 6,
-                cursor: submitting ? 'not-allowed' : 'pointer',
-                fontFamily: 'inherit',
-              }}
-            >
-              {PLAN_GATE_CANCEL_CTA}
-            </button>
+              actions={[
+                {
+                  label: PLAN_GATE_ADJUST_CTA,
+                  onClick: onAdjust,
+                  disabled: submitting,
+                  title: 'Dismiss this plan and edit your spec — no credits charged.',
+                },
+                {
+                  label: PLAN_GATE_CANCEL_CTA,
+                  onClick: onCancel,
+                  disabled: submitting,
+                  danger: true,
+                },
+              ]}
+              ariaLabel='Plan-gate actions'
+            />
           </div>
         </>
       )}
