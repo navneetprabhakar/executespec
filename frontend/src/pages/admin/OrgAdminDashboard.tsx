@@ -252,10 +252,10 @@ export default function OrgAdminDashboard() {
                     <CartesianGrid strokeDasharray='3 3' stroke='rgba(255,255,255,0.05)' />
                     <XAxis
                       dataKey='date'
-                      tick={{fontSize: 10, fill: '#71717a'}}
+                      tick={{fontSize: 12, fill: '#71717a'}}
                       tickFormatter={(d) => d.slice(5)}
                     />
-                    <YAxis tick={{fontSize: 10, fill: '#71717a'}} allowDecimals={false} />
+                    <YAxis tick={{fontSize: 12, fill: '#71717a'}} allowDecimals={false} />
                     <Tooltip
                       contentStyle={{
                         background: '#18181b',
@@ -306,13 +306,13 @@ export default function OrgAdminDashboard() {
                       <CartesianGrid strokeDasharray='3 3' stroke='rgba(255,255,255,0.05)' />
                       <XAxis
                         type='number'
-                        tick={{fontSize: 10, fill: '#71717a'}}
+                        tick={{fontSize: 12, fill: '#71717a'}}
                         allowDecimals={false}
                       />
                       <YAxis
                         type='category'
                         dataKey='name'
-                        tick={{fontSize: 10, fill: '#71717a'}}
+                        tick={{fontSize: 12, fill: '#71717a'}}
                         width={120}
                       />
                       <Tooltip
