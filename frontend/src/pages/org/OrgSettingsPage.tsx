@@ -6,7 +6,7 @@ import * as api from '@/lib/api';
 import SsoConfigCard from '@/components/settings/SsoConfigCard';
 import OrgStandardsManager from '@/components/settings/OrgStandardsManager';
 
-// ── Create Organization Form ───────────────────────────────────────────────
+// ── Create Organization Form ───────────────────────────────────────
 
 function CreateOrgForm({onCreated}: {onCreated: () => void}) {
   const {user, loadMe} = useAuthStore();
@@ -97,6 +97,12 @@ function CreateOrgForm({onCreated}: {onCreated: () => void}) {
           <label className='text-sm text-secondary mb-1 block'>Admin Email</label>
           <input
             type='email'
+            autoComplete='email'
+            inputMode='email'
+            autoCapitalize='off'
+            autoCorrect='off'
+            spellCheck='false'
+            enterKeyHint='next'
             value={adminEmail}
             onChange={(e) => setAdminEmail(e.target.value)}
             required
@@ -122,7 +128,7 @@ function CreateOrgForm({onCreated}: {onCreated: () => void}) {
   );
 }
 
-// ── Main OrgSettingsPage ───────────────────────────────────────────────────
+// ── Main OrgSettingsPage ──────────────────────────────────────────
 
 export default function OrgSettingsPage() {
   const {user} = useAuthStore();
@@ -282,6 +288,12 @@ export default function OrgSettingsPage() {
           <form onSubmit={handleInvite} className='flex gap-3 flex-wrap'>
             <input
               type='email'
+              autoComplete='email'
+              inputMode='email'
+              autoCapitalize='off'
+              autoCorrect='off'
+              spellCheck='false'
+              enterKeyHint='send'
               value={inviteEmail}
               onChange={(e) => setInviteEmail(e.target.value)}
               required

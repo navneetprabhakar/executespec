@@ -60,8 +60,16 @@ export default function ResetWorkspaceSheet({projectId, onClose, onDone}: Props)
   };
 
   return (
-    <div className='fixed inset-0 z-50 bg-black/60 flex items-center justify-center'>
-      <div className='bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md p-4 w-full max-w-xl space-y-3'>
+    <div
+      className='fixed inset-0 z-50 bg-black/60 flex items-center justify-center'
+      style={{
+        paddingTop: 'env(safe-area-inset-top)',
+        paddingBottom: 'env(safe-area-inset-bottom)',
+        paddingLeft: 'env(safe-area-inset-left)',
+        paddingRight: 'env(safe-area-inset-right)',
+      }}
+    >
+      <div className='bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md p-4 w-full max-w-xl mx-3 space-y-3'>
         <div className='flex items-start justify-between gap-3'>
           <h3 className='text-[13px] font-medium text-primary'>Reset workspace</h3>
           <button

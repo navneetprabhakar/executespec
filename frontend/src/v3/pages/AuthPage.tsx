@@ -134,7 +134,7 @@ export default function AuthPage() {
         alignItems: 'center',
         gap: 16,
         padding: '64px 16px 32px',
-        minHeight: 'calc(100vh - 56px - 48px)',
+        minHeight: 'calc(100dvh - 56px - 48px)',
       }}
     >
       <div
@@ -255,6 +255,11 @@ export default function AuthPage() {
           <input
             type='email'
             autoComplete='email'
+            inputMode='email'
+            autoCapitalize='off'
+            autoCorrect='off'
+            spellCheck='false'
+            enterKeyHint='next'
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             placeholder='you@example.com'

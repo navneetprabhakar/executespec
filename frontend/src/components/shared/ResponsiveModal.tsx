@@ -129,15 +129,32 @@ export default function ResponsiveModal({
           />
 
           {/* Panel */}
+          {/* 2026-05-14 (mobile UX sweep) — mobile path uses `fixed inset-0`,
+              which on iPhones with notch / Dynamic Island pushes the header X
+              under the status-bar AND the body's last row under the home-
+              indicator. `style.paddingTop/Bottom` honour env(safe-area-inset)
+              so the modal chrome stays inside the safe rectangle. Desktop path
+              is centred + capped, no safe-area concern. Also switched 90vh →
+              90dvh so iOS Safari URL-bar collapse doesn't crop the bottom. */}
           <motion.div
             ref={panelRef}
             className={cn(
               'relative z-10 flex flex-col bg-[var(--gray-100)] border border-[var(--border-default)] overflow-hidden',
               isMobile
                 ? 'fixed inset-0'
-                : `w-full ${maxWidth} mx-4 rounded-lg shadow-xl max-h-[90vh]`,
+                : `w-full ${maxWidth} mx-4 rounded-lg shadow-xl max-h-[90dvh]`,
               className,
             )}
+            style={
+              isMobile
+                ? {
+                    paddingTop: 'env(safe-area-inset-top)',
+                    paddingBottom: 'env(safe-area-inset-bottom)',
+                    paddingLeft: 'env(safe-area-inset-left)',
+                    paddingRight: 'env(safe-area-inset-right)',
+                  }
+                : undefined
+            }
             variants={isMobile ? mobileVariants : desktopVariants}
             initial='hidden'
             animate='visible'

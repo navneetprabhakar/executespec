@@ -93,6 +93,14 @@ export default function AdminInviteModal({onClose, onSuccess}: Props) {
             onChange={setEmail}
             placeholder='jane@example.com'
             required
+            inputProps={{
+              autoComplete: 'email',
+              inputMode: 'email',
+              autoCapitalize: 'off',
+              autoCorrect: 'off',
+              spellCheck: false,
+              enterKeyHint: 'send',
+            }}
           />
         </Field>
 
@@ -223,12 +231,16 @@ function Input({
   onChange,
   placeholder,
   required,
+  inputProps,
 }: {
   type?: string;
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
   required?: boolean;
+  /** Pass-through native input attributes (autoComplete / inputMode / autoCapitalize /
+   *  enterKeyHint etc.) so callers can hint mobile keyboards without forking the shim. */
+  inputProps?: React.InputHTMLAttributes<HTMLInputElement>;
 }) {
   return (
     <input
@@ -237,6 +249,7 @@ function Input({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       required={required}
+      {...inputProps}
       className={cn(
         'w-full bg-[var(--gray-100)] border border-[var(--border-default)] rounded-sm px-3 py-2 text-sm text-primary placeholder:text-muted focus:outline-none focus:border-accent-blue/40',
       )}

@@ -7,10 +7,15 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Mobile / iOS Safari fixes ──────────────────────────────────────────── */
+/* ── Mobile / iOS Safari fixes ─────────────────────────────────── */
 html,
 body,
 #root {
+  /* 2026-05-14 (mobile UX sweep) — 100vh fallback first so older WebKit /
+     Firefox-pre-101 still get a sensible height; 100dvh override second so
+     modern engines pick the dynamic-viewport value that tracks the
+     collapsing iOS Safari URL bar. */
+  height: 100vh;
   height: 100dvh;
 }
 
@@ -30,6 +35,24 @@ body {
 .overflow-y-auto,
 .overflow-auto {
   overscroll-behavior: contain;
+  /* 2026-05-14 (mobile UX sweep) — iOS Safari turns off momentum scroll
+     when an ancestor sets `overflow: hidden` (the v3-main--fill shell
+     does exactly this). Re-enabling momentum at the scroll container is
+     a no-op on desktop and the difference between "list scrolls like
+     iOS native" vs "stops dead when finger lifts" on iPhone. */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 2026-05-14 (mobile UX sweep) — horizontal scrollers shouldn't fight
+   vertical page scroll. A diagonal finger-drag on a horizontal tab strip
+   without this rule triggers BOTH axes (tabs slide + page bounces), which
+   on iPhone reads as scroll-jitter. `pan-x` declares only the X axis;
+   vertical pans fall through to <body>. Already on `.v3-tab-strip`; this
+   catches every other `.overflow-x-auto` container too. */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 
 /* Safe area insets for notched devices (iPhone X+, dynamic island) */
@@ -46,12 +69,124 @@ body {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }
 
+/* 2026-05-14 (mobile UX sweep) — sticky / fixed bottom bars (composer,
+   mobile nav, modal footer CTAs) routinely sat in the iPhone home-indicator
+   zone, both reducing tap accuracy and triggering the "swipe up to home"
+   gesture on accidental drag. Apply `.sticky-bottom-bar` to any sticky/
+   fixed element pinned to the viewport bottom. `max(...)` preserves the
+   author-intended floor on devices without safe-area-inset. */
+.sticky-bottom-bar {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem));
+}
+
+/* 2026-05-14 (mobile UX sweep) — explicit dvh helpers for inline styles
+   where Tailwind's `h-dvh` / `min-h-dvh` / `max-h-dvh` aren't reachable
+   (e.g. inside `style={{...}}` objects on portal-mounted overlays). Layered
+   100vh fallback for older WebKit, then 100dvh override on the same
+   property so newer engines pick the dynamic-viewport value. */
+.h-screen-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+.min-h-screen-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.max-h-screen-dvh {
+  max-height: 100vh;
+  max-height: 100dvh;
+}
+
 /* Minimum touch target for mobile (Apple HIG: 44×44px) */
 @media (max-width: 1023px) {
   button,
   a[role='button'],
   [role='tab'] {
     min-height: 44px;
+  }
+}
+
+/* ── Mobile typography lift (2026-05-14 mobile UX sweep) ─────────────────
+ *
+ * The codebase shipped with 256 sites of sub-11px font-size (222 × text-[10px],
+ * 33 × text-[9px], 1 × text-[8px]) plus a v3 design system tuned for desktop
+ * density (--v3-fs-body: 13px). At arm's length on a 375-428px phone, anything
+ * under 12px sits below WCAG-recommended legibility AND below Apple HIG's
+ * comfortable-read threshold for non-affordance text.
+ *
+ * This block lifts the ENTIRE app's mobile typography scale at the source-of-
+ * truth layer instead of touching the 1300+ Tailwind call sites:
+ *
+ *   1. Bump every v3 design token (--v3-fs-*) by 1-1.5px on phones. The
+ *      token values flow through .v3-root, .v3-eyebrow, .v3-chip, etc., so
+ *      every consumer picks up the lift automatically.
+ *   2. Lift the small Tailwind arbitrary classes (text-[8px] … text-[11.5px])
+ *      to 12px floor via attribute-substring selector. This is parity with
+ *      Tailwind's `text-xs` (12px) so we don't violate the design language;
+ *      we just enforce that nothing gets smaller than xs on mobile.
+ *   3. Keep the desktop scale untouched — desktop information density is
+ *      intentional + works at typical 600mm viewing distance.
+ *
+ * !important is necessary because Tailwind arbitrary-class CSS rules win
+ * over the design-system layer by specificity (single class .text-\[10px\]
+ * beats the attribute selector). The floor is exactly 12px so it can't
+ * make any text BIGGER than what the author intended for desktop.
+ */
+@media (max-width: 1023px) {
+  :root {
+    --v3-fs-caption: 12.5px;
+    --v3-fs-body: 14px;
+    --v3-fs-ui: 15px;
+    --v3-fs-lead: 16.5px;
+    --v3-fs-h2: 22px;
+    --v3-fs-h1: 30px;
+  }
+  /* Tailwind arbitrary text-[Npx] classes below 12px get the WCAG floor.
+     Match by `text-[Np` substring so 9px / 9.5px / 10px / 10.5px / 11px /
+     11.5px are all caught without listing every micro-variant. */
+  [class*='text-[8p'],
+  [class*='text-[9p'],
+  [class*='text-[10p'],
+  [class*='text-[10.5p'],
+  [class*='text-[11p'],
+  [class*='text-[11.5p'] {
+    font-size: 12px !important;
+  }
+  /* Hard-coded font-size on v3 utility classes — bump these the same way. */
+  .v3-eyebrow,
+  .v3-statk {
+    font-size: 12px !important;
+  }
+  .v3-chip {
+    font-size: 12px !important;
+  }
+}
+
+/* ── Touch-device tap feedback (2026-05-14 mobile UX sweep) ──────────────
+ *
+ * On a touchscreen there's no `:hover` event — taps register `:hover` for
+ * 300ms then stick, and the app's `hover:bg-X` / `hover:text-X` classes
+ * give zero feedback at the moment of touch. Result: every button feels
+ * dead until the page navigates or state updates.
+ *
+ * This rule paints a tiny press animation on every interactive element for
+ * touch-only devices (`hover: none` excludes desktop where the existing
+ * hover styles already work). Scale + opacity together give the 'pressed'
+ * tactile cue without depending on per-component opt-in. Buttons inside
+ * forms, tabs, NavLinks, role='button' divs all get it.
+ *
+ * The 0.05s transition is short enough to feel instant; the 0.96 scale +
+ * 0.85 opacity match iOS's native UIButton press animation closely. */
+@media (hover: none) {
+  button:active,
+  a:active,
+  [role='button']:active,
+  [role='tab']:active {
+    transform: scale(0.97);
+    opacity: 0.85;
+    transition:
+      transform 0.05s ease-out,
+      opacity 0.05s ease-out;
   }
 }
 
@@ -150,7 +285,7 @@ optgroup {
   border-radius: inherit;
 }
 
-/* ── Reusable responsive page gutters ──────────────────────────────────── */
+/* ── Reusable responsive page gutters ───────────────────────────────── */
 .page-gutter {
   padding-left: var(--page-gutter-mobile);
   padding-right: var(--page-gutter-mobile);
