@@ -1,6 +1,7 @@
 import {Outlet, useLocation} from 'react-router-dom';
 import {useEffect} from 'react';
 import TopBar from './TopBar';
+import BottomNav from './BottomNav';
 import CmdK from './CmdK';
 import {FreeCapToast, FreeCapBlockingModal} from './FreeCapNudge';
 import UpgradeNudge from './UpgradeNudge';
@@ -147,6 +148,7 @@ export default function Shell({withTopBar = true}: {withTopBar?: boolean}) {
       <CmdK />
       <FreeCapToast />
       <CapModalMount />
+      <BottomNav />
     </div>
   );
 }
