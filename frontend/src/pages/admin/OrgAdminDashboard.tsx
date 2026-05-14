@@ -384,7 +384,7 @@ export default function OrgAdminDashboard() {
               </div>
               {sortedMembers.length > 0 ? (
                 <div className='overflow-x-auto'>
-                  <table className='w-full text-xs min-w-[560px] md:min-w-0'>
+                  <table className='w-full text-xs md:min-w-0 responsive-table'>
                     <thead>
                       <tr className='border-b border-[var(--border-default)]'>
                         <th className='text-left py-2 px-2 text-muted font-medium'>Name</th>
@@ -419,14 +419,22 @@ export default function OrgAdminDashboard() {
                           className='border-b border-[var(--gray-200)] hover:bg-[var(--gray-100)] transition-colors cursor-pointer'
                           title='Open per-member dashboard'
                         >
-                          <td className='py-2 px-2 text-primary'>
+                          <td className='py-2 px-2 text-primary' data-label='Name'>
                             {m.firstName} {m.lastName}
                           </td>
-                          <td className='py-2 px-2 text-secondary'>{m.email}</td>
-                          <td className='py-2 px-2 text-right text-primary font-mono'>
+                          <td className='py-2 px-2 text-secondary' data-label='Email'>
+                            {m.email}
+                          </td>
+                          <td
+                            className='py-2 px-2 text-right text-primary font-mono'
+                            data-label="toggleSort('runCount')} > Runs {sortCol === 'runCount' ? (sortDir === 'asc' ? '↑' : '↓') : ''}"
+                          >
                             {m.runCount}
                           </td>
-                          <td className='py-2 px-2 text-right'>
+                          <td
+                            className='py-2 px-2 text-right'
+                            data-label="toggleSort('successRate')} > Success %{' '} {sortCol === 'successRate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}"
+                          >
                             <span
                               className={cn(
                                 'font-mono',
@@ -440,7 +448,10 @@ export default function OrgAdminDashboard() {
                               {m.successRate}%
                             </span>
                           </td>
-                          <td className='py-2 px-2 text-right text-muted'>
+                          <td
+                            className='py-2 px-2 text-right text-muted'
+                            data-label="toggleSort('lastRunDate')} > Last Active{' '} {sortCol === 'lastRunDate' ? (sortDir === 'asc' ? '↑' : '↓') : ''}"
+                          >
                             {m.lastRunDate ? new Date(m.lastRunDate).toLocaleDateString() : '-'}
                           </td>
                         </tr>

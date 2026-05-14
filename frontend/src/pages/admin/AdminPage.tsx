@@ -760,7 +760,7 @@ function AdminPageInner() {
             </div>
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
               <div className='overflow-x-auto v3-scroll-fade-x'>
-                <table className='w-full text-sm min-w-[600px] md:min-w-0'>
+                <table className='w-full text-sm md:min-w-0 responsive-table'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
                       {['Org', 'Tier', 'Status', 'Run Limit', 'API Keys', 'Usage', 'Actions'].map(
@@ -909,7 +909,7 @@ function AdminPageInner() {
                 (Tier name + Monthly Limit input + Note text + actions cluster). */}
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
               <div className='overflow-x-auto v3-scroll-fade-x'>
-                <table className='w-full text-sm min-w-[560px] md:min-w-0'>
+                <table className='w-full text-sm md:min-w-0 responsive-table'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
                       <th className='px-4 py-3 text-left font-medium'>Tier</th>
@@ -923,7 +923,7 @@ function AdminPageInner() {
                       const editing = editingTiers[tc.tier];
                       return (
                         <tr key={tc.tier} className='hover:bg-[var(--gray-100)]'>
-                          <td className='px-4 py-3'>
+                          <td className='px-4 py-3' data-label='Tier'>
                             <span className='font-medium text-primary'>
                               {tc.displayName ?? tierLabel(tc.tier)}
                             </span>
@@ -931,7 +931,7 @@ function AdminPageInner() {
                               <span className='ml-2 text-xs text-muted'>(default fixed)</span>
                             )}
                           </td>
-                          <td className='px-4 py-3'>
+                          <td className='px-4 py-3' data-label='Monthly Limit'>
                             <div className='flex items-center gap-2'>
                               <input
                                 type='number'
@@ -951,7 +951,7 @@ function AdminPageInner() {
                               )}
                             </div>
                           </td>
-                          <td className='px-4 py-3 text-muted text-xs'>
+                          <td className='px-4 py-3 text-muted text-xs' data-label='Note'>
                             {tc.tier === 'ENTERPRISE'
                               ? 'Override; ENTERPRISE orgs with API keys get unlimited'
                               : tc.description}
@@ -1127,7 +1127,7 @@ function AdminPageInner() {
             {/* Packages table */}
             <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
               <div className='overflow-x-auto v3-scroll-fade-x'>
-                <table className='w-full text-sm min-w-[600px] md:min-w-0'>
+                <table className='w-full text-sm md:min-w-0 responsive-table'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
                       {[
@@ -1352,7 +1352,7 @@ function AdminPageInner() {
 
           <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
             <div className='overflow-x-auto v3-scroll-fade-x'>
-              <table className='w-full text-sm min-w-[600px] md:min-w-0'>
+              <table className='w-full text-sm md:min-w-0 responsive-table'>
                 <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                   <tr>
                     {['Event', 'Entity', 'Tier Change', 'Gateway', 'Amount', 'By', 'Date'].map(
@@ -1477,7 +1477,7 @@ function AdminPageInner() {
 
           <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
             <div className='overflow-x-auto v3-scroll-fade-x'>
-              <table className='w-full text-sm min-w-[600px] md:min-w-0'>
+              <table className='w-full text-sm md:min-w-0 responsive-table'>
                 <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                   <tr>
                     {['Gateway', 'Event ID', 'Event Type', 'Status', 'Attempts', 'Received'].map(
