@@ -43,16 +43,26 @@ body {
   -webkit-overflow-scrolling: touch;
 }
 
-/* 2026-05-14 (mobile UX sweep) — horizontal scrollers shouldn't fight
-   vertical page scroll. A diagonal finger-drag on a horizontal tab strip
-   without this rule triggers BOTH axes (tabs slide + page bounces), which
-   on iPhone reads as scroll-jitter. `pan-x` declares only the X axis;
-   vertical pans fall through to <body>. Already on `.v3-tab-strip`; this
-   catches every other `.overflow-x-auto` container too. */
+/* 2026-05-14 (mobile UX sweep, hot-fix) — horizontal scrollers shouldn't
+   fight vertical page scroll on TAB STRIPS. A diagonal finger-drag on a
+   horizontal tab strip without `touch-action: pan-x` triggers BOTH axes
+   (tabs slide + page bounces) which on iPhone reads as scroll-jitter.
+   But — the first version of this rule applied `touch-action: pan-x` to
+   EVERY .overflow-x-auto container, which silently broke vertical scroll
+   on every table wrapper (admin/audit/invoices/validation report), every
+   code block (chat / PR review / code review report), and any other
+   horizontal scroller where the user's intent might be "scroll the page
+   below this thing." `pan-x` tells the browser to neither handle nor
+   bubble vertical pans starting on the element — net effect = scroll
+   feels dead.
+   The narrower `.v3-tab-strip` selector targets the actual problem
+   (horizontal tab strips inside the v3 shell) without touching tables
+   or code blocks. Already declared in v3.css with full inertia + snap
+   + scroll-padding settings; this rule just keeps the keep-`-webkit-
+   overflow-scrolling: touch` floor on every other horizontal scroller
+   so iOS momentum stays on. */
 .overflow-x-auto {
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-x;
-  overscroll-behavior-x: contain;
 }
 
 /* Safe area insets for notched devices (iPhone X+, dynamic island) */
