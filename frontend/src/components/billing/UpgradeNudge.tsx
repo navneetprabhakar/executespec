@@ -23,13 +23,21 @@ export function UpgradeNudge({
   const metricLabel = metric === 'RUNS' ? 'runs' : metric === 'PROJECTS' ? 'projects' : 'storage';
 
   const nextTier = currentTier === 'FREE' ? 'Starter' : currentTier === 'STARTER' ? 'Pro' : 'Pro';
-  const nextPrice = currentTier === 'FREE' ? '\u20B91,499' : '\u20B99,999';
+  const nextPrice = currentTier === 'FREE' ? '₹1,499' : '₹9,999';
   const nextLimit = currentTier === 'FREE' ? 50 : 500;
 
   return (
-    <div className='fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-[var(--gray-200)]'>
+    <div
+      className='fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4 bg-[var(--gray-200)]'
+      style={{
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.5rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.5rem, env(safe-area-inset-right))',
+      }}
+    >
       <div
-        className='bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md max-w-md w-full mx-4 p-5 sm:p-8 text-center overflow-y-auto'
+        className='bg-[var(--gray-100)] border border(--border-default)] rounded-md max-w-md w-full mx-4 p-5 sm:p-8 text-center overflow-y-auto'
         style={{maxHeight: '95dvh'}}
       >
         <div className='text-4xl mb-4'>{'\u{1F680}'}</div>
