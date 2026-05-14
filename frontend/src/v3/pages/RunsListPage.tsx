@@ -145,64 +145,90 @@ export default function RunsListPage() {
     return (id?: string) => (id ? (map.get(id) ?? id.slice(0, 8)) : '');
   }, [projects]);
 
+  // 2026-05-14 UX overhaul (P0-1) — marketing headline ("Every PR you've
+  // shipped, in one place.") and 4-line description replaced with a
+  // status-first compact header. The marketing voice belongs on the
+  // landing page (executespec.ai); this is a console.
+  //
+  // Compact-header shape: title left + active-state counts + primary CTA
+  // right. ~64px tall on phone (was ~310px with marketing copy).
+  const activeCount = (runs ?? []).filter(
+    (r) =>
+      r.status === 'WORKING' ||
+      r.status === 'PLANNING' ||
+      r.status === 'REVIEWING' ||
+      r.status === 'AWAITING_APPROVAL',
+  ).length;
+
   return (
-    <div style={{maxWidth: 1280, margin: '0 auto', padding: '32px 24px'}}>
+    <div
+      style={{
+        maxWidth: 1280,
+        margin: '0 auto',
+        padding: 'clamp(20px, 4vw, 32px) clamp(16px, 4vw, 24px)',
+      }}
+    >
       <header
         style={{
-          marginBottom: 24,
+          marginBottom: 20,
           display: 'flex',
-          alignItems: 'flex-start',
+          alignItems: 'center',
           justifyContent: 'space-between',
-          gap: 16,
+          gap: 12,
           flexWrap: 'wrap',
         }}
       >
-        <div>
-          <div
+        <div style={{minWidth: 0}}>
+          <h1
             style={{
-              fontFamily: 'var(--v3-font-mono)',
-              fontSize: 11,
-              letterSpacing: '0.08em',
-              textTransform: 'uppercase',
-              color: 'var(--accent-blue-text, var(--accent-blue))',
-              display: 'inline-block',
-              padding: '4px 10px',
-              border: '1px solid rgba(91,141,239,0.30)',
-              borderRadius: 999,
-              marginBottom: 12,
+              margin: 0,
+              fontSize: 22,
+              fontWeight: 700,
+              color: 'var(--v3-text)',
+              letterSpacing: '-0.015em',
+              lineHeight: 1.15,
             }}
           >
             Runs
-          </div>
-          <h1 style={{fontSize: 28, fontWeight: 700, color: 'var(--v3-text)', margin: 0}}>
-            Every PR you've shipped, in one place.
           </h1>
-          <p style={{margin: '8px 0 0', color: 'var(--v3-text-muted)', maxWidth: 640}}>
-            The full feed of runs you've submitted across every project. Click in to read the
-            validation report, open the PR, or fork a re-run.
+          <p
+            style={{
+              margin: '4px 0 0',
+              fontSize: 12.5,
+              color: 'var(--v3-text-muted)',
+              fontFamily: 'inherit',
+            }}
+          >
+            {total > 0 ? `${total} total` : 'No runs yet'}
+            {activeCount > 0 && (
+              <>
+                {' · '}
+                <span style={{color: 'var(--accent-blue)', fontWeight: 600}}>
+                  {activeCount} active
+                </span>
+              </>
+            )}
           </p>
         </div>
-        {/* 2026-05-07 — top-right "Launch new run" CTA targets the
-            standalone /runs/new launcher (project picker is optional —
-            standalone is the default). The previous /home target
-            forced users into a specific project shell, breaking the
-            FREE / no-project use case the user flagged: "I should be
-            able to submit run even without a project, that is a
-            critical offering." */}
         <button
           type='button'
           onClick={() => navigate('/runs/new')}
+          className='press-effect'
           style={{
             background: 'var(--v3-brand)',
             color: 'var(--v3-text-on-brand)',
             border: 0,
-            padding: '10px 18px',
-            borderRadius: 8,
+            padding: '10px 16px',
+            borderRadius: 'var(--radius-control)',
             fontWeight: 600,
             fontSize: 13,
             cursor: 'pointer',
             fontFamily: 'inherit',
             whiteSpace: 'nowrap',
+            minHeight: 'var(--hit-min-mobile)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
           }}
         >
           + Launch new run
@@ -251,6 +277,38 @@ export default function RunsListPage() {
         <FilterPill active={status === 'FAILED'} onClick={() => setStatus('FAILED')}>
           Failed
         </FilterPill>
+        {/* 2026-05-14 UX overhaul (P1-2) — single Reset affordance when
+            any filter is active. Pre-fix users had to click each pill back
+            to its default; now one tap clears the lot. */}
+        {(scope !== 'mine' || status !== '') && (
+          <button
+            type='button'
+            onClick={() => {
+              setScope('mine');
+              setStatus('');
+            }}
+            className='press-effect'
+            style={{
+              marginLeft: 'auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              padding: '4px 10px',
+              fontSize: 12,
+              fontWeight: 500,
+              color: 'var(--v3-text-muted)',
+              background: 'transparent',
+              border: '1px solid var(--hairline)',
+              borderRadius: 'var(--radius-pill)',
+              cursor: 'pointer',
+              fontFamily: 'inherit',
+            }}
+            aria-label='Reset filters'
+            title='Reset all filters'
+          >
+            Reset
+          </button>
+        )}
       </div>
 
       {err && (

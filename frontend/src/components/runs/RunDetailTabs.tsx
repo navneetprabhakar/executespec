@@ -37,7 +37,7 @@ import TaskTimeline from './TaskTimeline';
 import PreviewTab from './PreviewTab';
 import {PIPELINE_STEPS, V2_LEGACY_UI} from '@/lib/constants';
 import {useSseStore} from '@/stores/useSseStore';
-import {fmtTokens, fmtMs, relativeTime, cn, errMsg} from '@/lib/utils';
+import {fmtTokens, fmtMs, relativeTime, cn, errMsg, fmtCost} from '@/lib/utils';
 import {
   ChevronDown,
   ChevronRight,
@@ -952,9 +952,9 @@ function OverviewTab({
               <p className='text-xs text-muted'>Live cost</p>
               <p className='text-sm text-accent-green mt-0.5 font-mono font-medium'>
                 {liveCost != null
-                  ? `$${liveCost.toFixed(4)}`
+                  ? fmtCost(liveCost)
                   : run.actualCostUsd != null
-                    ? `$${run.actualCostUsd.toFixed(4)}`
+                    ? fmtCost(run.actualCostUsd)
                     : '—'}
               </p>
               {run.costEstimateLow != null && run.costEstimateHigh != null && (
@@ -2745,8 +2745,10 @@ function PlannerPhaseBreakdown({run}: {run: RunDetail}) {
   if (populated.length === 0) return null;
 
   const totalCost = populated.reduce((acc, r) => acc + (r.cost ?? 0), 0);
-  const fmtCost = (v: number | null | undefined) =>
-    v == null || v === 0 ? '—' : `$${v.toFixed(4)}`;
+  // 2026-05-14 UX overhaul — was a locally-shadowed `fmtCost` that always
+  // rendered 4dp (`$1.0813`). Switched to the shared `fmtCost` from utils
+  // which uses 4dp only sub-cent, 2dp otherwise.
+  const fmtCostCell = (v: number | null | undefined) => (v == null || v === 0 ? '—' : fmtCost(v));
   const fmtTok = (v: number | null | undefined) =>
     v == null || v === 0 ? '—' : v.toLocaleString();
 
@@ -2778,7 +2780,7 @@ function PlannerPhaseBreakdown({run}: {run: RunDetail}) {
                 r.label
               )}
             </span>
-            <span className='text-muted'>{fmtCost(r.cost)}</span>
+            <span className='text-muted'>{fmtCostCell(r.cost)}</span>
             <span className='text-muted'>in {fmtTok(r.inTok)}</span>
             <span className='text-muted'>out {fmtTok(r.outTok)}</span>
           </div>

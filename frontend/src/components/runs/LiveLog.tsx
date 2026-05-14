@@ -1,6 +1,6 @@
 import {useEffect, useRef} from 'react';
 import {useSseStore, LogEntry} from '@/stores/useSseStore';
-import {cn} from '@/lib/utils';
+import {cn, fmtCost} from '@/lib/utils';
 import {
   CheckCircle2,
   XCircle,
@@ -210,7 +210,7 @@ function MilestoneBanner({entry}: {entry: LogEntry}) {
     icon = <DollarSign className='h-3.5 w-3.5' />;
     const cost = Number(data.totalCost ?? data.payload ?? 0);
     const tokens = data.totalTokens ?? '';
-    text = `Cost update: $${cost.toFixed(4)}${tokens ? ` · ${tokens} tokens` : ''}`;
+    text = `Cost update: ${fmtCost(cost)}${tokens ? ` · ${tokens} tokens` : ''}`;
     colorClass = 'border-accent-green/30 text-accent-green/70 bg-accent-green/[0.04]';
   }
 

@@ -10,6 +10,7 @@ import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import StatusBadge from '@/components/shared/StatusBadge';
 import MetaRow, {type MetaItem} from '@/components/shared/MetaRow';
+import SegmentedTabs from '@/components/shared/SegmentedTabs';
 import PulseTab from '@/components/project/PulseTab';
 import CodeTab, {type CodeSubTab} from '@/components/project/CodeTab';
 // Single-surface retirement (2026-05-06) — chat-thread + composer
@@ -448,57 +449,54 @@ export default function ProjectDashboardPage() {
             project name + icon instead of overflowing or truncating. The
             stacked layout on <sm: keeps every affordance reachable without
             horizontal scroll. */}
-        <header className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3'>
-          <div className='min-w-0 flex items-start gap-3'>
-            <span className='inline-flex h-9 w-9 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0'>
-              <FolderGit2 className='h-5 w-5' />
+        <header className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+          {/* 2026-05-14 UX overhaul (P0-3) — collapsed:
+                 • dropped the "PROJECT" eyebrow (it adds 18px vertical and
+                   no information beyond what the page surface already
+                   carries — every page under /projects/:id IS a project).
+                 • reduced icon size from 9×9 to 8×8 (more proportional to
+                   a single-line title).
+                 • forced line-clamp-1 always (was clamp-2 on phone) so the
+                   title doesn't push the hero card below the fold on
+                   long project names.
+                 Result on phone: header region drops from ~140px to ~52px,
+                 freeing ~90px above the fold for actual content. */}
+          <div className='min-w-0 flex items-center gap-2.5'>
+            <span className='inline-flex h-8 w-8 items-center justify-center rounded-md border border-[color-mix(in_srgb,var(--accent-blue)_30%,transparent)] bg-[color-mix(in_srgb,var(--accent-blue)_12%,transparent)] text-accent-blue flex-shrink-0'>
+              <FolderGit2 className='h-4 w-4' />
             </span>
-            <div className='min-w-0'>
-              <div className='font-mono text-[10.5px] font-medium uppercase tracking-[0.08em] text-accent-blue mb-0.5'>
-                Project
-              </div>
-              {/* 2026-05-14 mobile-first redesign — was text-lg (18px) on
-                  phone which made the project name visually smaller than the
-                  textarea placeholder. Bumped to text-2xl (24px) on phone,
-                  text-xl (20px) on sm, text-2xl (24px) again on lg so the
-                  H1 actually reads as a heading. Switched truncate →
-                  line-clamp-2 (P4) so long project names wrap instead of
-                  cutting mid-word like "Hostel Eval ANTHRO…". */}
-              <h1 className='text-2xl sm:text-xl lg:text-2xl font-semibold text-primary tracking-[-0.015em] leading-tight line-clamp-2 sm:line-clamp-1'>
-                {project?.name ?? 'Project'}
-              </h1>
-            </div>
+            <h1 className='text-lg sm:text-xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate min-w-0'>
+              {project?.name ?? 'Project'}
+            </h1>
           </div>
-          <div className='flex items-center gap-2 flex-wrap'>
-            {/* v2.7.2 — first-class Repos chip. Always visible; amber-tinted
-                when zero repos so users see the linkage gap before they
-                discover it via a failed Launch. Click opens AddRepoModal
-                directly via the shared openAddRepoFlow.
-                P-05 (UX audit, 2026-05-03): pre-fix the chip ALWAYS opened
-                the Add modal — including for users who already had repos
-                and just wanted to inspect them, which broke their muscle
-                memory ("show me what's there" vs. "add a new one"). Now
-                the chip splits behaviour: zero repos still opens the modal
-                (nothing to manage); ≥1 repo switches to Code → Repos tab,
-                with a separate small "+" button immediately to its right
-                for the add-another flow. */}
-            {repoCount === 0 ? (
+          {/* 2026-05-14 UX overhaul (P0-4) — incoherent 4-button action
+              cluster (Repos · N / + / Launch / Quick spec / …) collapsed to
+              just the primary "Launch" CTA on phone. On phone the Repos
+              chip + Quick spec + More all reach via the More drawer (☰)
+              or via the Repos tab — there is no functional loss.
+              On tablet+ (≥sm) the secondary chips are kept inline as
+              context buttons next to the primary. The zero-repo warning
+              chip is preserved on every viewport because it carries a
+              functional warning (no repos linked → Launch will fail). */}
+          <div className='flex items-center gap-2 flex-wrap justify-end'>
+            {repoCount === 0 && (
               <button
                 onClick={openAddRepoFlow}
                 aria-label='Link your first repository'
                 title='No repos linked — click to add one'
-                className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border transition-colors border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
+                className='press-effect inline-flex items-center gap-1 text-xs font-medium px-2.5 py-1.5 rounded-md border transition-colors border-status-waiting/40 bg-status-waiting/10 text-status-waiting hover:bg-status-waiting/20'
               >
                 <Plus className='h-3.5 w-3.5' />
-                <span>Repos · 0</span>
+                <span>Add a repo</span>
               </button>
-            ) : (
-              <div className='inline-flex items-center rounded-sm border border-[var(--border-default)] overflow-hidden'>
+            )}
+            {repoCount > 0 && (
+              <div className='hidden sm:inline-flex items-center rounded-md border border-[var(--border-default)] overflow-hidden'>
                 <button
                   onClick={() => onSwitchTab('repos')}
                   aria-label={`View ${repoCount} linked repositor${repoCount === 1 ? 'y' : 'ies'}`}
                   title={`View ${repoCount} linked repo${repoCount === 1 ? '' : 's'}`}
-                  className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
+                  className='press-effect inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
                 >
                   <FolderGit2 className='h-3.5 w-3.5' />
                   <span>Repos · {repoCount}</span>
@@ -508,42 +506,29 @@ export default function ProjectDashboardPage() {
                   onClick={openAddRepoFlow}
                   aria-label='Add another repository'
                   title='Add another repository'
-                  className='inline-flex items-center justify-center px-1.5 py-1 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
+                  className='press-effect inline-flex items-center justify-center px-1.5 py-1.5 text-secondary hover:text-primary hover:bg-[var(--gray-200)] transition-colors'
                 >
                   <Plus className='h-3.5 w-3.5' />
                 </button>
               </div>
             )}
             <NewExecutionButton projectId={projectId} repoCount={repoCount} />
-            {/* P-01 (UX audit, 2026-05-04) — reverse cross-link to the
-                ProjectHomePage composer surface ("What do you want to
-                build?" with one-shot spec textbox + iteration thread).
-                Pre-fix users on the dashboard had no path back to the
-                composer surface short of typing /projects/{id} into the
-                URL bar. This button closes that loop; ProjectHomePage's
-                "Dashboard →" button is the matching forward link. The
-                two surfaces stay distinct (per the Option C decision)
-                but each one knows about the other. */}
             <Link
               to={`/projects/${projectId}`}
               aria-label='Open the quick-spec composer view'
               title='Quick-spec composer — write a one-line goal, ship a draft PR.'
-              className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
+              className='press-effect hidden sm:inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
             >
               <Sparkles className='h-3.5 w-3.5' />
-              <span className='hidden sm:inline'>Quick spec</span>
+              <span>Quick spec</span>
             </Link>
             <button
               onClick={() => openDrawer('settings')}
               aria-label='Open more (settings, docs, memory, activity, team)'
               title='Settings, docs, memory, activity, team'
-              className='inline-flex items-center gap-1 text-xs font-medium px-2 py-1 rounded-sm border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
+              className='press-effect inline-flex items-center gap-1 text-xs font-medium px-2 py-1.5 rounded-md border border-[var(--border-default)] text-secondary hover:text-primary hover:border-accent-blue/40 transition-colors'
             >
               <MoreHorizontal className='h-3.5 w-3.5' />
-              {/* 2026-05-10 (mobile audit) — text label hidden on phones so the
-                  action cluster (Repos · N / + / New / Quick spec / More) never
-                  wraps to a third row on 320px viewports. The aria-label
-                  carries the full description for screen readers. */}
               <span className='hidden sm:inline'>More</span>
             </button>
           </div>
@@ -566,37 +551,22 @@ export default function ProjectDashboardPage() {
         {loading && <div className='text-xs text-muted'>Loading…</div>}
         {error && <div className='text-xs text-accent-red'>{error}</div>}
 
-        {/* Top-level 4-tab strip.
-            2026-05-10 (mobile audit) — `scrollbar-hide` so the horizontal
-            scroll affordance stays invisible until the user touches it; the
-            -mx-4 px-4 negative-margin pattern lets the strip bleed to the
-            page edges on mobile so the first/last tab isn't visually clipped
-            against the bordered card edge.
-            2026-05-10 sweep iter-3 — `v3-scroll-fade-x` adds a soft right-edge
-            mask on phones so users see "more tabs to the right" instead of
-            reading "Cha…" as a typo. */}
-        <nav
-          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip -mx-4 px-4'
-          role='tablist'
-          aria-label='Project sections'
-        >
-          {TAB_LABELS.map((t) => (
-            <button
-              key={t.key}
-              role='tab'
-              aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
-              className={cn(
-                'px-3 py-1.5 text-xs font-semibold whitespace-nowrap transition-colors border-b-2 -mb-px',
-                tab === t.key
-                  ? 'border-accent-blue text-primary'
-                  : 'border-transparent text-muted hover:text-secondary',
-              )}
-            >
-              {t.label}
-            </button>
-          ))}
-        </nav>
+        {/* 2026-05-14 UX overhaul (P0-5) — was a horizontal-scrolling tab
+            strip that clipped "Chat" to "Cha…" on 375px viewports. Replaced
+            with <SegmentedTabs overflowAs="menu" /> which keeps 4 tabs
+            visible on phone and collapses the rest into a "More ▾"
+            dropdown — no clipping, no horizontal scroll, animated underline
+            indicator. */}
+        <div className='-mx-4 px-4'>
+          <SegmentedTabs
+            ariaLabel='Project sections'
+            tabs={TAB_LABELS.map((t) => ({key: t.key, label: t.label}))}
+            active={tab}
+            onChange={(k) => setTab(k as TabKey)}
+            overflowAs='menu'
+            visibleOnPhone={4}
+          />
+        </div>
 
         {/* Runs sub-tab strip — only shown when in Runs tab */}
         {tab === 'runs' && (
@@ -759,18 +729,22 @@ function SummaryBar({
   totalCostUsd?: number;
   avgScore?: number;
 }) {
-  // 2026-05-14 (P1) — was a horizontally-scrolling dot-strip that wrapped
-  // to 5 rows on phones; now uses <MetaRow> which renders a 2-col
-  // label-above-value grid under sm: + dot-separated inline strip on
-  // desktop. Same data, better mobile hierarchy.
+  // 2026-05-14 UX overhaul (P0-6) — was a 6-cell label-above-value grid
+  // on phone that consumed ~180px of vertical space above any actual
+  // content. The single anchor stat (last-run verdict) belongs in the
+  // hero card. The supporting stats demote to a one-line dot strip on
+  // every viewport — same data, ~24px tall instead of ~180px.
+  //
+  // The user can still drill into the full numerics via the Pulse tab
+  // (no functional removal). This is presentation only.
   const items: (MetaItem | false | null)[] = [
-    status ? {label: 'Status', value: status, mono: true, tone: 'muted' as const} : null,
     provider ? {label: 'Provider', value: provider, mono: true} : null,
-    githubOwner ? {label: 'Owner', value: githubOwner, mono: true} : null,
     {label: 'Repos', value: String(repoCount), mono: true},
-    completedRuns != null ? {label: 'Done', value: String(completedRuns), mono: true} : null,
+    completedRuns != null && completedRuns > 0
+      ? {label: 'Done', value: String(completedRuns), mono: true}
+      : null,
     activeRuns != null && activeRuns > 0
-      ? {label: 'Active', value: String(activeRuns), mono: true}
+      ? {label: 'Active', value: String(activeRuns), mono: true, tone: 'brand' as const}
       : null,
     failedRuns != null && failedRuns > 0
       ? {label: 'Failed', value: String(failedRuns), mono: true, tone: 'danger' as const}
@@ -784,10 +758,23 @@ function SummaryBar({
   ];
 
   if (items.filter(Boolean).length === 0) {
+    // Status dropped from the meta-row since "ACTIVE" carries no glance
+    // value — every project rendering this page is active by definition.
+    // Keep it only as a fallback when nothing else is available.
+    if (status) {
+      return (
+        <p className='text-[11px] text-muted leading-tight'>
+          <span className='uppercase tracking-wider mr-1.5'>Status</span>
+          <span className='font-mono'>{status}</span>
+        </p>
+      );
+    }
     return <div className='text-[11px] text-muted'>No project metadata yet.</div>;
   }
 
-  return <MetaRow items={items} />;
+  // Force inline (dot-separated) on every viewport. Wraps to a second
+  // line only if the page is narrower than the row needs.
+  return <MetaRow items={items} inlineOnly />;
 }
 
 function RunsSidebar({

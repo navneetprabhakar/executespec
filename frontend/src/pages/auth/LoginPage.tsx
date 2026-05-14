@@ -221,9 +221,10 @@ export default function LoginPage() {
             <button
               type='button'
               onClick={() => setShowPassword(!showPassword)}
-              className='absolute right-2 top-1/2 -translate-y-1/2 p-1 text-muted hover:text-primary transition-colors'
+              className='press-effect absolute right-1 top-1/2 -translate-y-1/2 text-muted hover:text-primary transition-colors flex items-center justify-center'
               tabIndex={-1}
               aria-label={showPassword ? 'Hide password' : 'Show password'}
+              style={{minWidth: 44, minHeight: 44, padding: 0}}
             >
               {showPassword ? <EyeOff className='h-4 w-4' /> : <Eye className='h-4 w-4' />}
             </button>
@@ -250,7 +251,8 @@ export default function LoginPage() {
         <button
           type='submit'
           disabled={loading}
-          className='w-full rounded-md bg-accent-blue py-2.5 text-sm font-medium text-primary hover:bg-[var(--accent-blue-hover)] disabled:opacity-50 transition-colors'
+          className='press-effect w-full rounded-md bg-accent-blue py-3 text-sm font-semibold text-primary hover:bg-[var(--accent-blue-hover)] disabled:opacity-50 transition-colors'
+          style={{minHeight: 'var(--hit-comfort)'}}
         >
           {loading ? 'Signing in…' : 'Sign in'}
         </button>
@@ -310,7 +312,7 @@ export function AuthShell({children}: {children: React.ReactNode}) {
               The actual product line was already further down on the
               page; promoted to H1 so the hero says what we do plainly.
               "PRs" stays mixed-case as the brand pop-accent. */}
-          <h1 className='text-3xl xl:text-4xl font-semibold text-primary leading-[1.1] tracking-tight'>
+          <h1 className='reveal-on-mount text-3xl xl:text-4xl font-semibold text-primary leading-[1.1] tracking-tight'>
             Ship AI-written{' '}
             <span
               className='text-transparent bg-clip-text'
@@ -429,7 +431,8 @@ function OAuthButton({
   return (
     <a
       href={href}
-      className='flex w-full items-center justify-center gap-3 rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] px-4 py-2.5 text-sm font-medium text-primary transition-colors hover:bg-[var(--gray-200)] hover:border-[var(--border-hover)]'
+      className='press-effect flex w-full items-center justify-center gap-3 rounded-md border border-[var(--border-default)] bg-[var(--gray-100)] px-4 text-sm font-medium text-primary transition-colors hover:bg-[var(--gray-200)] hover:border-[var(--border-hover)]'
+      style={{minHeight: 'var(--hit-comfort)'}}
     >
       {provider === 'google' ? (
         <svg className='h-4 w-4' viewBox='0 0 24 24' aria-hidden>
