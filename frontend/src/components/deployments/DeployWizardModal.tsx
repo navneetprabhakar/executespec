@@ -93,7 +93,7 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
   const [deployError, setDeployError] = useState('');
   const pollRef = useRef<ReturnType<typeof setInterval>>();
 
-  // ── Load runs (Step 1) ──────────────────────────────────────────────────────
+  // ── Load runs (Step 1) ──────────────────────────────────────────
 
   useEffect(() => {
     if (step !== 'select-run') return;
@@ -111,7 +111,7 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
       r.runId.toLowerCase().includes(searchQuery.toLowerCase()),
   );
 
-  // ── Load credentials (Step 2) ───────────────────────────────────────────────
+  // ── Load credentials (Step 2) ────────────────────────────────────
 
   useEffect(() => {
     if (step !== 'credentials') return;
@@ -160,7 +160,7 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
     }
   };
 
-  // ── Analyze (Step 3) ────────────────────────────────────────────────────────
+  // ── Analyze (Step 3) ───────────────────────────────────────────────
 
   const runAnalysis = async () => {
     setStep('analyze');
@@ -181,7 +181,7 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
     }
   };
 
-  // ── Deploy (Step 5) ─────────────────────────────────────────────────────────
+  // ── Deploy (Step 5) ─────────────────────────────────────────────────
 
   const startDeploy = async () => {
     setStep('deploying');
@@ -249,12 +249,19 @@ export default function DeployWizardModal({onClose, onRefresh, preselectedRunId}
     };
   }, []);
 
-  // ── Render ──────────────────────────────────────────────────────────────────
+  // ── Render ─────────────────────────────────────────────────────────
 
   return (
     <div
       className='fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4'
-      style={{backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)'}}
+      style={{
+        backdropFilter: 'blur(4px)',
+        background: 'rgba(0,0,0,0.6)',
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.5rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.5rem, env(safe-area-inset-right))',
+      }}
       onClick={onClose}
     >
       <motion.div
