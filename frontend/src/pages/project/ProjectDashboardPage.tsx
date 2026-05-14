@@ -620,7 +620,7 @@ export default function ProjectDashboardPage() {
       {/* Body */}
       <div className='flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden'>
         {showLeftRunsList && (
-          <aside className='w-full lg:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] overflow-y-auto max-h-40 lg:max-h-none'>
+          <aside className='w-full lg:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] overflow-y-auto overscroll-contain max-h-[40dvh] lg:max-h-none'>
             <RunsSidebar
               tasks={tasks}
               selectedRunId={selectedRunId}
