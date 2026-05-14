@@ -42,7 +42,7 @@ const MAX_MESSAGES = 50;
 type Mode = 'compose' | 'chat';
 
 export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) {
-  // ── compose mode state ────────────────────────────────────────────────────
+  // ── compose mode state ─────────────────────────────────────────────
   const [goal, setGoal] = useState(initialConfig?.goal ?? '');
   // R-04 (UX audit, 2026-05-03): default flips for paid tiers. FREE / PRO get
   // the old "PROTOTYPE" default (fast first-run experience for evaluators);
@@ -65,7 +65,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
   const [showUpgradeNudge, setShowUpgradeNudge] = useState(false);
   const [upgradeInfo, setUpgradeInfo] = useState({metric: 'RUNS', current: 0, max: 0});
 
-  // ── github repo options ───────────────────────────────────────────────────
+  // ── github repo options ──────────────────────────────────────────────
   type RepoChoice = 'NONE' | 'NEW' | 'EXISTING';
   const [repoChoice, setRepoChoice] = useState<RepoChoice>(initialConfig?.repoMode ?? 'NONE');
   const [repoUrl, setRepoUrl] = useState(initialConfig?.repoUrl ?? '');
@@ -82,7 +82,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
   // types until they submit.
   const [userCostCap, setUserCostCap] = useState<string>('');
 
-  // ── chat mode state ───────────────────────────────────────────────────────
+  // ── chat mode state ────────────────────────────────────────────────────
   const [mode, setMode] = useState<Mode>('compose');
   const [messages, setMessages] = useState<ConversationMessage[]>([]);
   const [draft, setDraft] = useState('');
@@ -159,7 +159,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
     }
   };
 
-  // ── send a new user message ───────────────────────────────────────────────
+  // ── send a new user message ────────────────────────────────────────────
   const sendMessage = async () => {
     const text = draft.trim();
     if (!text || chatLoading || messages.length >= MAX_MESSAGES) return;
@@ -179,7 +179,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
     }
   };
 
-  // ── use an AI message as the goal, return to compose ─────────────────────
+  // ── use an AI message as the goal, return to compose ────────────────────
 
   /** Extract only the requirement summary, stripping conversational prefix/suffix. */
   const extractSummary = (text: string): string => {
@@ -227,7 +227,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
     }
   };
 
-  // ── launch the pipeline run ───────────────────────────────────────────────
+  // ── launch the pipeline run ────────────────────────────────────────────
   const handleSubmit = async () => {
     if (!goal.trim()) return;
     if (repoChoice === 'EXISTING' && !repoUrl.trim()) return;
@@ -287,7 +287,14 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
   return (
     <div
       className='fixed inset-0 z-50 flex items-center justify-center p-0 lg:p-4'
-      style={{backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)'}}
+      style={{
+        backdropFilter: 'blur(4px)',
+        background: 'rgba(0,0,0,0.6)',
+        paddingTop: 'max(0px, env(safe-area-inset-top))',
+        paddingBottom: 'max(0px, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0px, env(safe-area-inset-left))',
+        paddingRight: 'max(0px, env(safe-area-inset-right))',
+      }}
       onClick={onClose}
     >
       <motion.div
@@ -302,7 +309,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
         )}
         style={isMobile ? undefined : {maxHeight: mode === 'chat' ? 'min(95dvh, 80vh)' : '95dvh'}}
       >
-        {/* ── Header ───────────────────────────────────────────────────────── */}
+        {/* ── Header ──────────────────────────────────────────────────────── */}
         <div
           className='relative flex items-center justify-between px-6 py-5 border-b border-[var(--border-default)] flex-shrink-0 overflow-hidden'
           style={{
@@ -355,7 +362,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
           </div>
         </div>
 
-        {/* ── Compose mode ─────────────────────────────────────────────────── */}
+        {/* ── Compose mode ──────────────────────────────────────────────────── */}
         {mode === 'compose' && (
           <div className='flex-1 flex flex-col min-h-0 overflow-hidden'>
             <div className='p-6 space-y-4 overflow-y-auto flex-1 min-h-0'>
@@ -440,6 +447,11 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                 <label className='text-xs text-muted'>Figma URL (optional)</label>
                 <input
                   type='url'
+                  inputMode='url'
+                  autoCapitalize='off'
+                  autoCorrect='off'
+                  spellCheck='false'
+                  enterKeyHint='next'
                   value={figmaUrl}
                   onChange={(e) => setFigmaUrl(e.target.value)}
                   placeholder='https://www.figma.com/file/...'
@@ -520,7 +532,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                 Refine spec with AI assistant
               </button>
 
-              {/* ── Run options ─────────────────────────────────────────────────
+              {/* ── Run options ─────────────────────────────────────────────
                 R-190 (post-cutover) — these were previously Pro-only (hidden
                 in Vibe mode); with Vibe gone they always render. The matching
                 `</>` + `)}` at the bottom of this block were removed in the
@@ -686,6 +698,11 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
                             <Github className='h-3.5 w-3.5 text-muted flex-shrink-0' />
                             <input
                               type='url'
+                              inputMode='url'
+                              autoCapitalize='off'
+                              autoCorrect='off'
+                              spellCheck='false'
+                              enterKeyHint='next'
                               value={repoUrl}
                               onChange={(e) => setRepoUrl(e.target.value)}
                               placeholder='https://github.com/owner/repo'
@@ -873,7 +890,7 @@ export default function NewRunModal({onClose, initialConfig}: NewRunModalProps) 
   );
 }
 
-// ── Chat bubble ───────────────────────────────────────────────────────────────
+// ── Chat bubble ─────────────────────────────────────────────────────────────────
 
 function ChatBubble({
   msg,
