@@ -69,20 +69,26 @@ export default function ProjectRepoManager({projectId}: {projectId: string}) {
 
   return (
     <div className='space-y-4'>
-      {/* 2026-05-14 UX feedback — was an inline flex-row that on 375px
-          jammed the title against two long action buttons ("Reset
-          workspace…" + "+ Add repository") and pushed "Add repository"
-          off-canvas. Stack vertically on phone (title row, then action
-          row), inline on sm+. The action cluster gets its own gap-2 wrap
-          so neither button clips. */}
-      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'>
-        <h2 className='text-lg font-medium'>Linked repositories</h2>
-        <div className='flex items-center gap-2 flex-wrap'>
-          {/* P-25 (UX audit, 2026-05-03) — Reset + Add are admin-only on the
-              backend. Pre-fix the buttons rendered live for everyone, clicked
-              by DEVELOPER/VIEWER, returned 403. Now disable + tooltip the
-              cause so non-admins see a consistent "this is admin only"
-              treatment instead of a backend error. */}
+      {/* 2026-05-14 UX redesign — title + action header.
+          Hierarchy: H2 (16px medium) is a section heading, NOT a hero. Sits
+          inline with a tight action cluster. The two actions are PEER
+          operations (Reset workspace / Add repository) so they share the
+          same button size + shape + height. Add is brand-accent because it's
+          the primary creative action; Reset is ghost because it's
+          destructive-leaning. On phone the cluster wraps below the title
+          and both buttons share the row 50/50 via `flex-1`. */}
+      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3'>
+        <div>
+          <h2 className='text-[15px] sm:text-base font-semibold text-primary leading-tight'>
+            Linked repositories
+          </h2>
+          <p className='mt-0.5 text-[11.5px] text-muted'>
+            {repos.length === 0
+              ? 'No repos yet · add one to start launching'
+              : `${repos.length} ${repos.length === 1 ? 'repo' : 'repos'} linked`}
+          </p>
+        </div>
+        <div className='flex items-center gap-2 w-full sm:w-auto'>
           {repos.length > 0 && (
             <button
               onClick={() => isOrgAdmin && setShowResetSheet(true)}
@@ -93,13 +99,13 @@ export default function ProjectRepoManager({projectId}: {projectId: string}) {
                   : 'Preview SHA movement per repo, then pull origin HEAD + regenerate codemaps/architecture'
               }
               className={
-                'press-effect text-sm px-3 py-1.5 rounded border border-[var(--border-default)] whitespace-nowrap ' +
+                'press-effect inline-flex items-center justify-center text-[12.5px] font-medium h-9 px-3 rounded-md border border-[var(--border-default)] whitespace-nowrap flex-1 sm:flex-none ' +
                 (!isOrgAdmin
                   ? 'text-muted opacity-50 cursor-not-allowed'
-                  : 'text-muted hover:text-primary')
+                  : 'text-secondary hover:text-primary hover:border-[var(--border-hover)] hover:bg-[var(--surface-raised)]')
               }
             >
-              Reset workspace…
+              Reset workspace
             </button>
           )}
           <button
@@ -111,11 +117,13 @@ export default function ProjectRepoManager({projectId}: {projectId: string}) {
                 : 'Link an existing GitHub repo or create a new one'
             }
             className={
-              'press-effect text-sm px-3 py-1.5 bg-blue-600 text-white rounded whitespace-nowrap ' +
-              (!isOrgAdmin ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700')
+              'press-effect inline-flex items-center justify-center gap-1 text-[12.5px] font-semibold h-9 px-3 rounded-md whitespace-nowrap flex-1 sm:flex-none ' +
+              (!isOrgAdmin
+                ? 'bg-accent-blue/30 text-white opacity-60 cursor-not-allowed'
+                : 'bg-accent-blue text-white hover:bg-[var(--accent-blue-hover)]')
             }
           >
-            + Add repository
+            <span aria-hidden='true'>+</span> Add repository
           </button>
         </div>
       </div>
