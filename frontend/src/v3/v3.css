@@ -357,13 +357,22 @@
 @media (max-width: 640px) {
   .v3-main {
     padding: var(--v3-pad-4) var(--v3-pad-3);
+    /* 2026-05-14 (mobile-first, Track A.3) — leave space at the bottom for
+     * the persistent BottomNav (60px + safe-area). Scroll-bottom of every
+     * non-fill page now stops above the bottom nav instead of sliding under
+     * it. The fill variant gets its own height calc below. */
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px) + var(--v3-pad-4));
   }
   /* 2026-05-10 (mobile audit) — match v3-main--fill height to the smaller
    * topbar (52px) on small viewports so the page chrome doesn't cause a
-   * 4px scroll bleed at the bottom of the viewport. */
+   * 4px scroll bleed at the bottom of the viewport.
+   * 2026-05-14 (mobile-first, Track A.3) — also subtract the BottomNav
+   * 60px + safe-area-inset-bottom so the project/run/admin shells fit
+   * exactly between topbar and bottom nav with no overlap or scroll bleed.
+   */
   .v3-main--fill {
-    height: calc(100vh - 53px);
-    height: calc(100dvh - 53px);
+    height: calc(100vh - 53px - 60px - env(safe-area-inset-bottom, 0px));
+    height: calc(100dvh - 53px - 60px - env(safe-area-inset-bottom, 0px));
   }
 
   /* R-170 — TopBar: shrink the project switcher trigger so the

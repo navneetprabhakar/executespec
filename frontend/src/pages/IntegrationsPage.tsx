@@ -1310,7 +1310,7 @@ export default function IntegrationsPage() {
             <h3 className='text-sm font-semibold text-primary'>Integration-triggered Runs</h3>
           </div>
           <div className='overflow-x-auto v3-scroll-fade-x'>
-            <table className='w-full text-sm min-w-[560px] md:min-w-0'>
+            <table className='w-full text-sm md:min-w-0 responsive-table'>
               <thead>
                 <tr className='border-b border-[var(--border-default)]'>
                   {['Run ID', 'Status', 'Goal', 'Created'].map((h) => (
