@@ -84,8 +84,7 @@ function classifyRoute(pathname: string): {wide: boolean; fill: boolean} {
   // ~280px usable area (Status column truncated to "PEND…" / "ACTIV…").
   // Promote them to wide+fill so the dense console reads at desktop
   // widths and the inner tables get room to lay out without clipping.
-  if (pathname === '/admin' || pathname.startsWith('/admin/'))
-    return {wide: true, fill: true};
+  if (pathname === '/admin' || pathname.startsWith('/admin/')) return {wide: true, fill: true};
   if (pathname === '/audit') return {wide: true, fill: true};
   if (pathname === '/accounting') return {wide: true, fill: true};
   if (pathname === '/invoices') return {wide: true, fill: true};

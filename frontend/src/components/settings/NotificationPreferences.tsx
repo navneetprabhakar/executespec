@@ -246,70 +246,72 @@ export default function NotificationPreferences() {
                 </tr>
               </thead>
               <tbody>
-              {/* Audit r5 (P2-6, 2026-05-06) — 5-bucket grouping with
+                {/* Audit r5 (P2-6, 2026-05-06) — 5-bucket grouping with
                   section headers. Pre-fix every event type sat in one
                   flat alphabetical list (sorted only by HIGH_SIGNAL
                   vs ADMIN_TOGGLE). Now Runs lead, then PRs, then
                   Standards, etc., with a header row per category so
                   scanning is one row per section instead of 30+. */}
-              {eventsByCategory.map(({category, events: catEvents}) => (
-                <Fragment key={category}>
-                  <tr className='border-t border-[var(--border-default)]'>
-                    <td
-                      colSpan={3}
-                      className='px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted font-semibold'
-                    >
-                      {category}
-                    </td>
-                  </tr>
-                  {catEvents.map((eventType) => {
-                    const g = grouped[eventType];
-                    const isAdminTier = g.tier === 'ADMIN_TOGGLE';
-                    return (
-                      <tr key={eventType} className='border-t border-[var(--border-default)]'>
-                        <td className='px-2 py-2'>
-                          <span className='text-secondary font-mono'>{eventType}</span>
-                          {isAdminTier && (
-                            <span className='ml-2 text-[10px] uppercase tracking-wider text-muted'>
-                              admin
-                            </span>
-                          )}
-                        </td>
-                        {(['IN_APP', 'EMAIL'] as const).map((channel) => {
-                          const row = g[channel];
-                          const key = `${eventType}|${channel}`;
-                          if (!row)
+                {eventsByCategory.map(({category, events: catEvents}) => (
+                  <Fragment key={category}>
+                    <tr className='border-t border-[var(--border-default)]'>
+                      <td
+                        colSpan={3}
+                        className='px-2 pt-3 pb-1 text-[10px] uppercase tracking-wider text-muted font-semibold'
+                      >
+                        {category}
+                      </td>
+                    </tr>
+                    {catEvents.map((eventType) => {
+                      const g = grouped[eventType];
+                      const isAdminTier = g.tier === 'ADMIN_TOGGLE';
+                      return (
+                        <tr key={eventType} className='border-t border-[var(--border-default)]'>
+                          <td className='px-2 py-2'>
+                            <span className='text-secondary font-mono'>{eventType}</span>
+                            {isAdminTier && (
+                              <span className='ml-2 text-[10px] uppercase tracking-wider text-muted'>
+                                admin
+                              </span>
+                            )}
+                          </td>
+                          {(['IN_APP', 'EMAIL'] as const).map((channel) => {
+                            const row = g[channel];
+                            const key = `${eventType}|${channel}`;
+                            if (!row)
+                              return (
+                                <td key={channel} className='px-2 py-2 text-center text-muted'>
+                                  —
+                                </td>
+                              );
                             return (
-                              <td key={channel} className='px-2 py-2 text-center text-muted'>
-                                —
+                              <td key={channel} className='px-2 py-2 text-center'>
+                                <input
+                                  type='checkbox'
+                                  checked={row.enabled}
+                                  disabled={busyKey === key}
+                                  onChange={(e) =>
+                                    handleToggle(eventType, channel, e.target.checked)
+                                  }
+                                  aria-label={`${eventType} via ${channel === 'IN_APP' ? 'in-app' : 'email'}`}
+                                  className='accent-accent-blue cursor-pointer'
+                                />
+                                {row.override && (
+                                  <span
+                                    title="You've overridden the default"
+                                    className='ml-1 text-[10px] text-muted'
+                                  >
+                                    ·
+                                  </span>
+                                )}
                               </td>
                             );
-                          return (
-                            <td key={channel} className='px-2 py-2 text-center'>
-                              <input
-                                type='checkbox'
-                                checked={row.enabled}
-                                disabled={busyKey === key}
-                                onChange={(e) => handleToggle(eventType, channel, e.target.checked)}
-                                aria-label={`${eventType} via ${channel === 'IN_APP' ? 'in-app' : 'email'}`}
-                                className='accent-accent-blue cursor-pointer'
-                              />
-                              {row.override && (
-                                <span
-                                  title="You've overridden the default"
-                                  className='ml-1 text-[10px] text-muted'
-                                >
-                                  ·
-                                </span>
-                              )}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    );
-                  })}
-                </Fragment>
-              ))}
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </tbody>
             </table>
           </div>
