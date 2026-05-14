@@ -111,7 +111,7 @@ export default function SharedProjectPage() {
   }, [token]);
 
   return (
-    <div className='min-h-screen bg-[var(--bg-primary)] text-primary'>
+    <div className='min-h-dvh bg-[var(--bg-primary)] text-primary'>
       {/* Branded top-bar — un-authed visitors land here knowing where they are. */}
       <header className='flex items-center h-14 px-4 border-b border-[var(--border-default)] gap-3'>
         <Link to='/' className='text-primary font-semibold hover:text-accent-blue'>

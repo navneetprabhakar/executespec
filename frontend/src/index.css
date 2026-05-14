@@ -7,10 +7,15 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ── Mobile / iOS Safari fixes ──────────────────────────────────────────── */
+/* ── Mobile / iOS Safari fixes ─────────────────────────────────── */
 html,
 body,
 #root {
+  /* 2026-05-14 (mobile UX sweep) — 100vh fallback first so older WebKit /
+     Firefox-pre-101 still get a sensible height; 100dvh override second so
+     modern engines pick the dynamic-viewport value that tracks the
+     collapsing iOS Safari URL bar. */
+  height: 100vh;
   height: 100dvh;
 }
 
@@ -30,6 +35,24 @@ body {
 .overflow-y-auto,
 .overflow-auto {
   overscroll-behavior: contain;
+  /* 2026-05-14 (mobile UX sweep) — iOS Safari turns off momentum scroll
+     when an ancestor sets `overflow: hidden` (the v3-main--fill shell
+     does exactly this). Re-enabling momentum at the scroll container is
+     a no-op on desktop and the difference between "list scrolls like
+     iOS native" vs "stops dead when finger lifts" on iPhone. */
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 2026-05-14 (mobile UX sweep) — horizontal scrollers shouldn't fight
+   vertical page scroll. A diagonal finger-drag on a horizontal tab strip
+   without this rule triggers BOTH axes (tabs slide + page bounces), which
+   on iPhone reads as scroll-jitter. `pan-x` declares only the X axis;
+   vertical pans fall through to <body>. Already on `.v3-tab-strip`; this
+   catches every other `.overflow-x-auto` container too. */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  overscroll-behavior-x: contain;
 }
 
 /* Safe area insets for notched devices (iPhone X+, dynamic island) */
@@ -44,6 +67,34 @@ body {
   padding-right: env(safe-area-inset-right, 0px);
   padding-top: env(safe-area-inset-top, 0px);
   padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* 2026-05-14 (mobile UX sweep) — sticky / fixed bottom bars (composer,
+   mobile nav, modal footer CTAs) routinely sat in the iPhone home-indicator
+   zone, both reducing tap accuracy and triggering the "swipe up to home"
+   gesture on accidental drag. Apply `.sticky-bottom-bar` to any sticky/
+   fixed element pinned to the viewport bottom. `max(...)` preserves the
+   author-intended floor on devices without safe-area-inset. */
+.sticky-bottom-bar {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom, 0.75rem));
+}
+
+/* 2026-05-14 (mobile UX sweep) — explicit dvh helpers for inline styles
+   where Tailwind's `h-dvh` / `min-h-dvh` / `max-h-dvh` aren't reachable
+   (e.g. inside `style={{...}}` objects on portal-mounted overlays). Layered
+   100vh fallback for older WebKit, then 100dvh override on the same
+   property so newer engines pick the dynamic-viewport value. */
+.h-screen-dvh {
+  height: 100vh;
+  height: 100dvh;
+}
+.min-h-screen-dvh {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.max-h-screen-dvh {
+  max-height: 100vh;
+  max-height: 100dvh;
 }
 
 /* Minimum touch target for mobile (Apple HIG: 44×44px) */
@@ -150,7 +201,7 @@ optgroup {
   border-radius: inherit;
 }
 
-/* ── Reusable responsive page gutters ──────────────────────────────────── */
+/* ── Reusable responsive page gutters ───────────────────────────────── */
 .page-gutter {
   padding-left: var(--page-gutter-mobile);
   padding-right: var(--page-gutter-mobile);
