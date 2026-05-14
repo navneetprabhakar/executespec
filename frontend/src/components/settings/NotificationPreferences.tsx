@@ -157,16 +157,95 @@ export default function NotificationPreferences() {
       )}
 
       {grouped && events.length > 0 && (
-        <div className='overflow-x-auto -mx-1'>
-          <table className='w-full text-xs'>
-            <thead>
-              <tr className='text-left text-muted'>
-                <th className='px-2 py-2 font-medium'>Event</th>
-                <th className='px-2 py-2 font-medium text-center w-20'>In-app</th>
-                <th className='px-2 py-2 font-medium text-center w-20'>Email</th>
-              </tr>
-            </thead>
-            <tbody>
+        <>
+          {/* 2026-05-14 (responsive UX parity audit) — mobile reflow.
+              On <sm: the 3-col table forces the Email column off-screen
+              even with overflow-x-auto, so phone users only saw the
+              In-app toggle and a hidden horizontal scrollbar. Now each
+              event renders as a stacked row with In-app + Email toggles
+              inline, fitting 375px viewports with no horizontal scroll. */}
+          <div className='space-y-3 sm:hidden'>
+            {eventsByCategory.map(({category, events: catEvents}) => (
+              <div key={`m-${category}`}>
+                <div className='text-[10px] uppercase tracking-wider text-muted font-semibold pb-1 border-b border-[var(--border-default)]'>
+                  {category}
+                </div>
+                <ul className='divide-y divide-[var(--border-default)]'>
+                  {catEvents.map((eventType) => {
+                    const g = grouped[eventType];
+                    const isAdminTier = g.tier === 'ADMIN_TOGGLE';
+                    return (
+                      <li
+                        key={`m-${eventType}`}
+                        className='py-2.5 flex items-center justify-between gap-3'
+                      >
+                        <div className='min-w-0 flex-1'>
+                          <span className='text-secondary font-mono text-xs break-all'>
+                            {eventType}
+                          </span>
+                          {isAdminTier && (
+                            <span className='ml-1.5 text-[10px] uppercase tracking-wider text-muted'>
+                              admin
+                            </span>
+                          )}
+                        </div>
+                        <div className='flex items-center gap-3 flex-shrink-0'>
+                          {(['IN_APP', 'EMAIL'] as const).map((channel) => {
+                            const row = g[channel];
+                            const key = `m-${eventType}|${channel}`;
+                            const label = channel === 'IN_APP' ? 'In-app' : 'Email';
+                            if (!row)
+                              return (
+                                <div
+                                  key={channel}
+                                  className='flex flex-col items-center gap-0.5 text-muted'
+                                >
+                                  <span className='text-[10px] uppercase tracking-wider'>
+                                    {label}
+                                  </span>
+                                  <span className='text-xs'>—</span>
+                                </div>
+                              );
+                            return (
+                              <label
+                                key={channel}
+                                className='flex flex-col items-center gap-0.5 cursor-pointer'
+                              >
+                                <span className='text-[10px] uppercase tracking-wider text-muted'>
+                                  {label}
+                                </span>
+                                <input
+                                  type='checkbox'
+                                  checked={row.enabled}
+                                  disabled={busyKey === key}
+                                  onChange={(e) =>
+                                    handleToggle(eventType, channel, e.target.checked)
+                                  }
+                                  aria-label={`${eventType} via ${label}`}
+                                  className='accent-accent-blue h-4 w-4'
+                                />
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+
+          <div className='hidden sm:block overflow-x-auto -mx-1'>
+            <table className='w-full text-xs'>
+              <thead>
+                <tr className='text-left text-muted'>
+                  <th className='px-2 py-2 font-medium'>Event</th>
+                  <th className='px-2 py-2 font-medium text-center w-20'>In-app</th>
+                  <th className='px-2 py-2 font-medium text-center w-20'>Email</th>
+                </tr>
+              </thead>
+              <tbody>
               {/* Audit r5 (P2-6, 2026-05-06) — 5-bucket grouping with
                   section headers. Pre-fix every event type sat in one
                   flat alphabetical list (sorted only by HIGH_SIGNAL
@@ -231,9 +310,10 @@ export default function NotificationPreferences() {
                   })}
                 </Fragment>
               ))}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </GlassPanel>
   );
