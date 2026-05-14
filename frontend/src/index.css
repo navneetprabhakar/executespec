@@ -116,6 +116,42 @@ body {
   }
 }
 
+/* ── Mobile typography floor ─────────────────────────────────────────────
+ * 2026-05-14 (mobile-first redesign, Track A.1) — 562+ usages of arbitrary
+ * `text-[10/10.5/11/11.5/12px]` Tailwind classes across the codebase. On a
+ * 393px-wide iPhone with 3× DPR these read as 30–36 device pixels, fine
+ * in isolation but exhausting at 30+ tokens per screen. Below 767px we
+ * bump every arbitrary-value font-size in the 10–12px band up to 13px
+ * floor (with !important so it overrides Tailwind's specificity). Above
+ * 767px the desktop density is preserved.
+ *
+ * This is intentionally a heavy hammer — the alternative is editing 562
+ * line-items by hand. It catches all the chip labels, mono metadata,
+ * column headers, and helper text that drove the audit's D2 (typography)
+ * score to 1–2. */
+@media (max-width: 767px) {
+  [class*='text-[10px'],
+  [class*='text-[10.5'],
+  [class*='text-[10.5px'],
+  [class*='text-[11px'],
+  [class*='text-[11.5'],
+  [class*='text-[11.5px'] {
+    font-size: 13px !important;
+    line-height: 1.4 !important;
+  }
+  /* Very small inline font-size on style="…" elements (recharts ticks,
+   * legacy Pill text, inline-styled timestamps). Bump anything under
+   * 13px to 13px when wrapped in our v3 chrome. */
+  .v3-root [style*='font-size: 9'],
+  .v3-root [style*='font-size:9'],
+  .v3-root [style*='font-size: 10'],
+  .v3-root [style*='font-size:10'],
+  .v3-root [style*='font-size: 11'],
+  .v3-root [style*='font-size:11'] {
+    font-size: 13px !important;
+  }
+}
+
 /* ── Mobile typography lift (2026-05-14 mobile UX sweep) ─────────────────
  *
  * The codebase shipped with 256 sites of sub-11px font-size (222 × text-[10px],

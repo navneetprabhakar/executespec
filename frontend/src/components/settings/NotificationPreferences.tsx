@@ -1,4 +1,5 @@
 import {errMsg} from '@/lib/utils';
+import Skeleton from '@/components/shared/Skeleton';
 import {Fragment, useEffect, useMemo, useState} from 'react';
 import GlassPanel from '@/components/shared/GlassPanel';
 import {
@@ -150,7 +151,7 @@ export default function NotificationPreferences() {
         </div>
       )}
 
-      {!grouped && !error && <p className='text-xs text-muted'>Loading…</p>}
+      {!grouped && !error && <Skeleton variant='text' count={3} />}
 
       {grouped && events.length === 0 && (
         <p className='text-xs text-muted'>No notification events available.</p>

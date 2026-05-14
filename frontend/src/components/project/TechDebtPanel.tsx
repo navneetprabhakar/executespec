@@ -143,7 +143,7 @@ export default function TechDebtPanel({projectId}: {projectId: string}) {
               .map(([name, count]) => ({name, count}));
             if (data.length === 0) return <div className='text-muted'>None</div>;
             return (
-              <ResponsiveContainer width='100%' height={Math.max(80, data.length * 22)}>
+              <ResponsiveContainer width='100%' height={Math.max(96, data.length * 28)}>
                 <BarChart
                   data={data}
                   layout='vertical'
@@ -153,8 +153,8 @@ export default function TechDebtPanel({projectId}: {projectId: string}) {
                   <YAxis
                     type='category'
                     dataKey='name'
-                    width={96}
-                    tick={{fontSize: 10, fill: resolveVar('--text-muted')}}
+                    width={104}
+                    tick={{fontSize: 12, fill: resolveVar('--text-muted')}}
                     axisLine={false}
                     tickLine={false}
                   />
