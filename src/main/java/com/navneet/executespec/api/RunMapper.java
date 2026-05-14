@@ -67,7 +67,12 @@ public class RunMapper {
         r.getSourceRunId(),
         r.getHarnessVersion(),
         r.getActualCostUsd(),
-        r.getStatusReason());
+        r.getStatusReason(),
+        // PR-B (2026-05-13) — hydrate PR URLs in the listing endpoint so the project launches
+        // surface can render PR pills without a per-row drill-down. Prefer scm-agnostic
+        // scmPrUrl; the legacy githubPrUrl ships alongside for pre-SCM-split back-compat.
+        r.getScmPrUrl(),
+        r.getGithubPrUrl());
   }
 
   /** Resolves a project ID to its human-readable name, or null if not found / not set. */

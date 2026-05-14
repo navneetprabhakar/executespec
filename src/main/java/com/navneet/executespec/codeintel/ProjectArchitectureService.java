@@ -147,6 +147,10 @@ public class ProjectArchitectureService {
     List<String> repoFullNames = new ArrayList<>();
     List<RepoArchitectureDoc> repoArchDocs = new ArrayList<>();
     java.util.LinkedHashMap<String, String> shasByRepo = new java.util.LinkedHashMap<>();
+    // V192 (PR-M, 2026-05-13) — track the branch each codemap was generated from so
+    // StalenessService can probe HEAD of the same branch instead of always assuming
+    // defaultBranch (fixes permanent-STALE for non-default-branch regenerations).
+    java.util.LinkedHashMap<String, String> branchesByRepo = new java.util.LinkedHashMap<>();
 
     for (ProjectRepoLink link : links) {
       ProjectRepo repo = repoRepo.findById(link.getRepoId()).orElse(null);
@@ -158,10 +162,37 @@ public class ProjectArchitectureService {
       codeMaps.add(cm);
       repoFullNames.add(repo.getGithubRepoFullName());
       shasByRepo.put(repo.getGithubRepoFullName(), cm.getGeneratedFromSha());
+      branchesByRepo.put(repo.getGithubRepoFullName(), effectiveBranch);
 
       // ── Step 2: per-repo architecture doc (idempotent by codemap) ─────
       RepoArchitectureDoc rad = ensureRepoArchDoc(projectId, repo, cm, provider);
       repoArchDocs.add(rad);
+    }
+
+    // PR-K (2026-05-13) — fingerprint cache. The combined-arch LLM call is the most
+    // expensive step in the whole pipeline (60s+ on multi-repo projects, $0.05-0.20+ in tokens).
+    // It's also the most-frequently wasted: users hit "Regenerate" expecting the dashboard to
+    // refresh, but if no repo SHA has actually moved since the last generation the LLM produces
+    // a byte-identical document. Short-circuit: if every linked repo's current SHA matches the
+    // SHAs captured on the most recent ProjectArchitectureDoc AND its content is non-empty,
+    // return that doc unchanged instead of burning the LLM call.
+    //
+    // Cache key is the JSON-serialised shasByRepo map. Equality is structural — the LinkedHashMap
+    // preserves insertion order and we sort keys before serialise so the comparison isn't
+    // sensitive to repo-link iteration order changing across calls.
+    String currentFingerprint = serialiseFingerprint(shasByRepo);
+    ProjectArchitectureDoc cached =
+        archDocRepo
+            .findFirstByProjectIdOrderByVersionDesc(projectId)
+            .filter(d -> d.getContent() != null && !d.getContent().isBlank())
+            .filter(d -> fingerprintMatches(d.getGeneratedFromShas(), currentFingerprint))
+            .orElse(null);
+    if (cached != null) {
+      log.info(
+          "[{}] arch regen short-circuit — same SHAs as v{} (fingerprint match); skipped LLM",
+          projectId,
+          cached.getVersion());
+      return cached;
     }
 
     // ── Step 3: combined architecture doc (always regenerates) ────────
@@ -198,6 +229,13 @@ public class ProjectArchitectureService {
     } catch (Exception e) {
       log.warn("Failed to serialise generatedFromShas: {}", e.getMessage());
     }
+    // V192 (PR-M) — serialise the branches map alongside.
+    String branchesJson = null;
+    try {
+      branchesJson = objectMapper.writeValueAsString(branchesByRepo);
+    } catch (Exception e) {
+      log.warn("Failed to serialise generatedFromBranches: {}", e.getMessage());
+    }
     // v2.6.4 (V174) — compute USD cost for the combined-arch synthesis. Skipped (= 0) on the
     // deterministic-fallback path since no LLM call happened there.
     double archCost =
@@ -214,6 +252,7 @@ public class ProjectArchitectureService {
             .version(nextVersion)
             .content(combined.markdown())
             .generatedFromShas(shasJson)
+            .generatedFromBranches(branchesJson)
             .costUsd(archCost)
             .build();
     archDocRepo.save(doc);
@@ -372,6 +411,60 @@ public class ProjectArchitectureService {
 
   private static String shortSha(String sha) {
     return sha == null ? "null" : sha.length() > 8 ? sha.substring(0, 8) : sha;
+  }
+
+  /**
+   * PR-K (2026-05-13) — canonical serialisation of the per-repo SHA fingerprint. Keys are sorted
+   * alphabetically so the resulting string is stable across re-orderings of the linked-repo list
+   * (e.g. when a customer adds or removes a project_repo_link, the unaffected repos hash to the
+   * same value).
+   *
+   * <p>Returns null if the input is null or empty so the caller's null-guard does the right thing:
+   * a missing fingerprint is "always regenerate", never an accidental cache-hit.
+   */
+  static String serialiseFingerprint(java.util.Map<String, String> shasByRepo) {
+    if (shasByRepo == null || shasByRepo.isEmpty()) return null;
+    java.util.TreeMap<String, String> sorted = new java.util.TreeMap<>(shasByRepo);
+    StringBuilder sb = new StringBuilder("{");
+    boolean first = true;
+    for (var e : sorted.entrySet()) {
+      if (!first) sb.append(",");
+      sb.append("\"").append(e.getKey()).append("\":\"").append(e.getValue()).append("\"");
+      first = false;
+    }
+    sb.append("}");
+    return sb.toString();
+  }
+
+  /**
+   * PR-K (2026-05-13) — compares the stored fingerprint (from {@code generated_from_shas} JSON
+   * column) against the freshly-computed one. Tolerates the legacy column shape — the original
+   * {@code generate} flow serialises an unsorted LinkedHashMap, so a v1 row might have a JSON value
+   * that's logically equal but textually different. We re-parse + re-canonicalise both sides
+   * through {@code serialiseFingerprint} before comparing.
+   */
+  boolean fingerprintMatches(String storedJson, String currentFingerprint) {
+    return fingerprintMatches(objectMapper, storedJson, currentFingerprint);
+  }
+
+  /**
+   * PR-K (2026-05-13) — static overload that takes the ObjectMapper explicitly. Allows the unit
+   * test to exercise the comparison logic without building the full 19-arg
+   * ProjectArchitectureService constructor. The instance method delegates to this overload.
+   */
+  static boolean fingerprintMatches(
+      ObjectMapper objectMapper, String storedJson, String currentFingerprint) {
+    if (storedJson == null || currentFingerprint == null) return false;
+    try {
+      @SuppressWarnings("unchecked")
+      java.util.Map<String, String> stored =
+          objectMapper.readValue(storedJson, java.util.Map.class);
+      String canonicalStored = serialiseFingerprint(stored);
+      return currentFingerprint.equals(canonicalStored);
+    } catch (Exception e) {
+      // Malformed legacy row — treat as miss so we regenerate (safe default).
+      return false;
+    }
   }
 
   private void persistToWorkspace(

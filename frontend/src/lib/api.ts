@@ -187,10 +187,21 @@ export interface RunSummary {
    *   CLEAN_COMPLETION | CLEAN_WITH_INTERMEDIATE_WARNINGS |
    *   FINAL_BUILD_FAILED | TESTS_FAILED:<n>_OF_<m> |
    *   REVIEWER_UNRESOLVED | REVIEWER_FAILED |
-   *   ALL_TASKS_FAILED | LEGACY_UNKNOWN
+   *   ALL_TASKS_FAILED | LEGACY_UNKNOWN | NO_REVIEW_RESULT (PR #120)
    * Null on in-flight runs and on pre-v2.5.10 terminal runs that were never backfilled.
    */
   statusReason?: string | null;
+  /**
+   * PR-B (2026-05-13) — SCM-agnostic pull-request URL raised by this run (GitHub or Bitbucket).
+   * Prefer this over {@link githubPrUrl}. Null when no PR has been opened yet.
+   */
+  scmPrUrl?: string | null;
+  /**
+   * PR-B (2026-05-13) — legacy GitHub-only PR URL. Identical to {@link scmPrUrl} on runs written
+   * after the v2.5.x SCM split; retained for back-compat with pre-split runs that never got
+   * migrated. UI should fall back to this when scmPrUrl is null.
+   */
+  githubPrUrl?: string | null;
 }
 
 export interface TaskSummary {
@@ -1519,6 +1530,14 @@ export interface ProjectDto {
   defaultReviewers?: string | null;
   /** v2.5.7 — default GitHub org/owner for repos created under this project. */
   githubOwner?: string | null;
+  /** V191 (PR-B-part-2, 2026-05-13) — when this project was archived (null = ACTIVE). */
+  archivedAt?: string | null;
+  /**
+   * V191 (PR-B-part-2) — when this project was soft-deleted (null = not deleted). Soft-deleted
+   * rows are normally filtered server-side; this field is non-null only when an admin tool
+   * fetches the tombstone explicitly.
+   */
+  deletedAt?: string | null;
 }
 
 export interface ProjectMemberDto {
@@ -1548,6 +1567,40 @@ export const updateProjectSettings = (
 
 export const archiveProject = (id: string) =>
   req<ProjectDto>(`/projects/${id}/archive`, {method: 'PUT'});
+
+/**
+ * V191 (PR-B-part-2, 2026-05-13) — reverse of {@link archiveProject}. Idempotent on the backend:
+ * unarchiving an already-active project returns 200 OK with no audit row.
+ */
+export const unarchiveProject = (id: string) =>
+  req<ProjectDto>(`/projects/${id}/unarchive`, {method: 'PUT'});
+
+/**
+ * V191 (PR-B-part-2) — soft-delete with 30-day undo window. The project disappears from the
+ * listing immediately; call {@link restoreProject} within 30 days to bring it back. After that
+ * the cleanup sweeper (PR-H) hard-deletes it.
+ */
+export const deleteProject = (id: string) => req<void>(`/projects/${id}`, {method: 'DELETE'});
+
+/** V191 (PR-B-part-2) — undo a soft-delete within the 30-day window. */
+export const restoreProject = (id: string) =>
+  req<ProjectDto>(`/projects/${id}/restore`, {method: 'POST'});
+
+/** V191 (PR-B-part-2) — reverse of run archive. Idempotent. */
+export const unarchiveRun = (runId: string) =>
+  req<{message: string}>(`/runs/${runId}/unarchive`, {method: 'POST'});
+
+/**
+ * V191 (PR-B-part-2) — soft-delete a run with 30-day undo window. Distinct from cancelling an
+ * in-flight run (which uses DELETE /api/runs/{id}); soft-delete is for tombstoning terminal
+ * runs. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be soft-deleted.
+ */
+export const softDeleteRun = (runId: string) =>
+  req<{message: string}>(`/runs/${runId}/soft-delete`, {method: 'POST'});
+
+/** V191 (PR-B-part-2) — undo a run soft-delete within the 30-day window. */
+export const restoreRun = (runId: string) =>
+  req<{message: string}>(`/runs/${runId}/restore`, {method: 'POST'});
 
 /** v2.5.7 — Fetch PR review comments (inline + top-level reviews) for the Address Review flow. */
 export const fetchPrReviewComments = (projectId: string, prNumber: number, repoFullName: string) =>

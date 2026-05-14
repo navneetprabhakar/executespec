@@ -779,8 +779,11 @@ public class RunController {
   }
 
   /**
-   * Archive a run. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be archived. This
-   * is irreversible — archived runs are permanently deleted after 90 days.
+   * Archive a run. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be archived.
+   *
+   * <p>V191 (PR-B-part-2, 2026-05-13) — archive is now reversible via {@link #unarchiveRun}; the
+   * cleanup sweeper (PR-H) hard-deletes archived rows after their retention window expires.
+   * Idempotent: re-archiving returns 200 OK without writing a duplicate audit row.
    */
   @PostMapping("/{runId}/archive")
   public ResponseEntity<Map<String, String>> archiveRun(
@@ -803,6 +806,100 @@ public class RunController {
       throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     } catch (IllegalStateException e) {
       throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    }
+  }
+
+  /**
+   * V191 (PR-B-part-2) — reverse of {@link #archiveRun}. Idempotent: unarchiving an already-active
+   * run returns 200 OK with no audit row. Refuses with 409 if the run is soft-deleted; the caller
+   * must restore first.
+   */
+  @PostMapping("/{runId}/unarchive")
+  public ResponseEntity<Map<String, String>> unarchiveRun(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(runId, userDetails);
+    log.info("POST /api/runs/{}/unarchive (actor={})", runId, userDetails.getUser().getId());
+    try {
+      stateStore.unarchiveRun(runId);
+      activityAuditService.record(
+          com.navneet.executespec.auth.entity.ActivityAudit.builder()
+              .eventType("RUN_UNARCHIVED")
+              .entityType("RUN")
+              .entityId(runId)
+              .actorId(userDetails.getUser().getId())
+              .orgId(userDetails.getUser().getOrgId())
+              .build());
+      return ResponseEntity.ok(Map.of("message", "Run unarchived successfully"));
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (IllegalStateException e) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    }
+  }
+
+  /**
+   * V191 (PR-B-part-2) — soft-delete a run with a 30-day undo window. Distinct from {@link
+   * #cancel}: cancel aborts an in-flight run; soft-delete tombstones a terminal run so it
+   * disappears from listings but can be restored within 30 days via {@link #restoreRun}. After the
+   * window expires the cleanup sweeper (PR-H) hard-deletes the row + workspace.
+   *
+   * <p>Uses POST verb (not DELETE) because {@code DELETE /api/runs/{id}} is already the
+   * cancel-in-flight endpoint. Idempotent — re-deleting does not extend the 30-day window.
+   */
+  @PostMapping("/{runId}/soft-delete")
+  public ResponseEntity<Map<String, String>> softDeleteRun(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    guard.requireRunAccess(runId, userDetails);
+    log.info("POST /api/runs/{}/soft-delete (actor={})", runId, userDetails.getUser().getId());
+    try {
+      PipelineRun run = stateStore.softDeleteRun(runId);
+      activityAuditService.record(
+          com.navneet.executespec.auth.entity.ActivityAudit.builder()
+              .eventType("RUN_DELETED")
+              .entityType("RUN")
+              .entityId(runId)
+              .actorId(userDetails.getUser().getId())
+              .orgId(userDetails.getUser().getOrgId())
+              .oldValue(run.getStatus())
+              .newValue("{\"deletedAt\":\"" + run.getDeletedAt() + "\"}")
+              .build());
+      return ResponseEntity.ok(
+          Map.of("message", "Run deleted — restorable for 30 days via POST /restore"));
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (IllegalStateException e) {
+      throw new ResponseStatusException(HttpStatus.CONFLICT, e.getMessage());
+    }
+  }
+
+  /**
+   * V191 (PR-B-part-2) — undo a soft-delete within the 30-day window. 404 if the run is not
+   * currently soft-deleted (so the frontend can disambiguate "no such run" from "already
+   * restored"). Archive state is preserved.
+   */
+  @PostMapping("/{runId}/restore")
+  public ResponseEntity<Map<String, String>> restoreRun(
+      @PathVariable String runId, @AuthenticationPrincipal AppUserDetails userDetails) {
+    // requireRunAccess() pulls the run by id including soft-deleted rows (visibility guards
+    // operate on org + project membership, not on the deletedAt tombstone). Confirmed by
+    // reading PipelineRunRepository.findById which is the standard JPA finder.
+    guard.requireRunAccess(runId, userDetails);
+    log.info("POST /api/runs/{}/restore (actor={})", runId, userDetails.getUser().getId());
+    try {
+      stateStore.restoreRun(runId);
+      activityAuditService.record(
+          com.navneet.executespec.auth.entity.ActivityAudit.builder()
+              .eventType("RUN_RESTORED")
+              .entityType("RUN")
+              .entityId(runId)
+              .actorId(userDetails.getUser().getId())
+              .orgId(userDetails.getUser().getOrgId())
+              .build());
+      return ResponseEntity.ok(Map.of("message", "Run restored successfully"));
+    } catch (IllegalArgumentException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
+    } catch (IllegalStateException e) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, e.getMessage());
     }
   }
 

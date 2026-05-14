@@ -1,7 +1,26 @@
 # Cost estimation — Stage 3 design (per-spec LLM judge)
 
-> Status: **design only — no code.** Build only if Stage 2 (historical k-NN) is still > 2× off on > 10% of runs after ~3 weeks of collected data.
-> Author: 2026-05-13 audit, run 6024f510.
+> Status: **deliberately deferred per the decision gate at the bottom of this doc.**
+> Stages 1 + 2 are shipped + live; the gate that authorises Stage 3 has not fired.
+> Author: 2026-05-13 audit, run 6024f510. Status confirmed 2026-05-14.
+
+## Status update — 2026-05-14
+
+- **Stage 1 (RunCostTracker formula)** — SHIPPED. Lives at
+  `src/main/java/com/navneet/executespec/cost/RunCostTracker.java`. Adds reviewer + accuracy +
+  codemap + cache-write components on top of the static formula.
+- **Stage 2 (CostHistoryService k-NN)** — SHIPPED. Lives at
+  `src/main/java/com/navneet/executespec/cost/CostHistoryService.java`. Returns P25/P75 of
+  actual costs from `run_cost_history` when ≥ 10 similar historical runs exist for a
+  `(planStrategy, provider, repoCount, taskCount)` tuple. Wired in `RunOrchestrator.persistEstimate`.
+  Falls back to Stage 1 for novel shapes.
+- **Stage 3 (per-spec LLM judge)** — NOT shipped, and correctly NOT shipped. The decision
+  gate below says "build only after Stage 2 has 30+ days of collected data + at least one
+  trigger fires." We're at day 1 of the Stage-2 deployment on this branch's runs. **Building
+  Stage 3 today would violate the doc's own gate.** Re-evaluate this in mid-June 2026 once
+  Stage 2 has the data needed to know whether Stage 3's marginal accuracy gain is justified.
+
+The doc below is preserved as the design ready to pick up *if* the gate fires.
 
 ## What Stages 1 + 2 already do
 

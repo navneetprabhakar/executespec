@@ -387,6 +387,22 @@
       <groupId>com.github.ben-manes.caffeine</groupId>
       <artifactId>caffeine</artifactId>
     </dependency>
+
+    <!--
+      PR-N1 (2026-05-14) — JavaParser for AST-based function extraction on .java files in
+      the codemap. The existing regex extractor in CodeMapGenerator works on 7 languages but
+      misses Java-specific patterns: lambdas, records, sealed/permits, multi-line method
+      signatures with generics + throws clauses. JavaParser handles all of these correctly.
+      Other languages keep the regex path; we only swap Java where we can do better.
+
+      Symbol-solver is intentionally NOT added — name-resolution would add ~50MB of typesolver
+      JARs for marginal value at the per-file extraction grain. The AST itself is enough.
+    -->
+    <dependency>
+      <groupId>com.github.javaparser</groupId>
+      <artifactId>javaparser-core</artifactId>
+      <version>3.26.2</version>
+    </dependency>
   </dependencies>
 
   <build>

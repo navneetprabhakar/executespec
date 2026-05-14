@@ -43,6 +43,11 @@ export default function ProjectLaunchesList({projectId}: {projectId: string}) {
                 requirement: r.runTitle ?? r.userRequest ?? '(no spec)',
                 createdAt: r.startedAt,
                 solutions: [],
+                // PR-B (2026-05-13) — bubble PR URL up to the launches row so the listing surfaces
+                // a click-through pill without a per-row drill-down. Without this, every chat-
+                // launched run showed pr=- in the project page even when a PR had been raised.
+                scmPrUrl: r.scmPrUrl,
+                githubPrUrl: r.githubPrUrl,
               }) as unknown as ExecutionRunDto,
           );
           setLaunches(fallback);
@@ -111,6 +116,15 @@ export default function ProjectLaunchesList({projectId}: {projectId: string}) {
         // PipelineRun entries don't have solutions (they're a single V2 run, not a multi-repo
         // launch with per-solution rows), so the "repos × N · M/N done" right-rail line is
         // misleading. Show the V2 token count instead.
+        // PR-B (2026-05-13) — prefer scm-agnostic PR URL; fall back to githubPrUrl for pre-SCM-
+        // split rows. Only PIPELINE_RUN rows surface a single-PR pill in the listing; EXECUTION
+        // rows aggregate multiple PRs across solutions and surface those at the detail page.
+        const prUrl = isPipelineRun ? (l.scmPrUrl ?? l.githubPrUrl ?? null) : null;
+        const prNumber = (() => {
+          if (!prUrl) return null;
+          const m = prUrl.match(/\/(?:pull|pull-requests)\/(\d+)/);
+          return m ? m[1] : null;
+        })();
         return (
           <Link
             key={l.id}
@@ -120,6 +134,18 @@ export default function ProjectLaunchesList({projectId}: {projectId: string}) {
             <StatusBadge status={l.status} className='text-[11px]' />
             <span className='font-mono text-[11px] text-muted'>{l.id.substring(0, 8)}</span>
             <span className='truncate flex-1'>{l.requirement.split('\n')[0]}</span>
+            {prUrl && (
+              <a
+                href={prUrl}
+                target='_blank'
+                rel='noreferrer'
+                onClick={(e) => e.stopPropagation()}
+                className='inline-flex items-center gap-1 rounded-sm border border-accent-blue/40 bg-accent-blue/10 text-accent-blue text-[10px] px-1.5 py-0.5 hover:bg-accent-blue/20'
+                title='Open the pull request raised by this run'
+              >
+                PR{prNumber ? ` #${prNumber}` : ''}
+              </a>
+            )}
             <span className='text-[11px] text-muted'>
               {isPipelineRun
                 ? `${l.totalActualTokens ?? 0} tok`

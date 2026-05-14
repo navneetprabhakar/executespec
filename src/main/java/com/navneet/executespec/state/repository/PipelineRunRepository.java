@@ -315,4 +315,22 @@ public interface PipelineRunRepository
           + "AND r.status NOT IN ('COMPLETE', 'FAILED', 'PARTIAL', 'CANCELLED', 'ABORTED') "
           + "ORDER BY r.startedAt DESC")
   List<PipelineRun> findActiveByTriggeredByFinding(@Param("key") String findingKey);
+
+  /**
+   * 2026-05-13 PR-A — aggregate cost + tokens across a set of pipeline_run rows. Used by {@code
+   * ExecutionCostAggregator} to recompute {@code ExecutionRun} totals from source-of-truth instead
+   * of relying on per-Solution incremental writes (which dropped contributions on CAS conflict).
+   *
+   * <p>Returns a 3-element row: {@code [SUM(actualCostUsd), SUM(totalInputTokens),
+   * SUM(totalOutputTokens)]}. Nulls treated as 0 via COALESCE.
+   *
+   * <p>Caller passes an empty set → returns {@code [0, 0, 0]} (we still execute the query, JPA
+   * handles empty IN gracefully via Hibernate's parameter expansion).
+   */
+  @Query(
+      "SELECT COALESCE(SUM(r.actualCostUsd), 0.0d), "
+          + "COALESCE(SUM(r.totalInputTokens), 0), "
+          + "COALESCE(SUM(r.totalOutputTokens), 0) "
+          + "FROM PipelineRun r WHERE r.runId IN :runIds")
+  Object[] aggregateCostAndTokens(@Param("runIds") java.util.Collection<String> runIds);
 }

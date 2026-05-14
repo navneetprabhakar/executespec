@@ -15,6 +15,7 @@ import java.util.Map;
 import com.navneet.executespec.repo.GitHubRepoService;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.ObjectProvider;
 
 /**
  * Pins the function-map extraction added 2026-05-10. Pre-fix the codemap was a header "Files: N"
@@ -91,8 +92,15 @@ class CodeMapGeneratorFunctionMapTest {
     List<String> syms = CodeMapGenerator.extractSymbols("src/main/java/UserService.java", src);
 
     assertTrue(syms.contains("class UserService"));
-    assertTrue(syms.contains("class UserDto"), "record counts as a class-tier declaration");
-    assertTrue(syms.contains("class UserGateway"), "interface counts as a class-tier declaration");
+    // PR-N1 (2026-05-14) — AST extractor distinguishes record / interface / class. Pre-PR-N1
+    // the regex lumped these all as "class X"; the AST output is more precise. Both styles
+    // still convey the type information so downstream agents (planner, chat) read either.
+    assertTrue(
+        syms.contains("record UserDto") || syms.contains("class UserDto"),
+        "AST emits 'record UserDto'; regex fallback emits 'class UserDto'");
+    assertTrue(
+        syms.contains("interface UserGateway") || syms.contains("class UserGateway"),
+        "AST emits 'interface UserGateway'; regex fallback emits 'class UserGateway'");
     assertTrue(syms.contains("getUser"));
     assertTrue(syms.contains("listUsers"));
     assertTrue(syms.contains("deleteUser"), "should pick up methods with throws clauses");
@@ -202,7 +210,9 @@ class CodeMapGeneratorFunctionMapTest {
   @Test
   void scanFunctions_skips_test_files_and_node_modules() {
     GitHubRepoService gh = mock(GitHubRepoService.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
 
     List<String> files =
         List.of(
@@ -245,7 +255,9 @@ class CodeMapGeneratorFunctionMapTest {
   @Test
   void scanFunctions_caps_files_at_max() {
     GitHubRepoService gh = mock(GitHubRepoService.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
 
     // 60 service files — extractor should cap at MAX_FUNCTION_FILES (40).
     List<String> files =
@@ -263,7 +275,9 @@ class CodeMapGeneratorFunctionMapTest {
   @Test
   void scanFunctions_caps_functions_per_file() {
     GitHubRepoService gh = mock(GitHubRepoService.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
 
     StringBuilder content = new StringBuilder();
     for (int i = 0; i < 50; i++) {
@@ -290,7 +304,9 @@ class CodeMapGeneratorFunctionMapTest {
   @Test
   void generate_includes_functions_section_when_any_match() {
     GitHubRepoService gh = mock(GitHubRepoService.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
 
     when(gh.listRepoFiles(any(), any(), any()))
         .thenReturn(List.of("src/services/user.service.ts", "package.json", "README.md"));
@@ -311,7 +327,9 @@ class CodeMapGeneratorFunctionMapTest {
     // No interesting source files → no Functions section. The header + Top-level layout still
     // render so the generator's other contracts are unbroken.
     GitHubRepoService gh = mock(GitHubRepoService.class);
-    CodeMapGenerator gen = new CodeMapGenerator(gh);
+    @SuppressWarnings("unchecked")
+    ObjectProvider<FilePurposeSummaryService> nullSummaryProvider = mock(ObjectProvider.class);
+    CodeMapGenerator gen = new CodeMapGenerator(gh, nullSummaryProvider);
 
     when(gh.listRepoFiles(any(), any(), any()))
         .thenReturn(List.of("README.md", "LICENSE", "package.json"));

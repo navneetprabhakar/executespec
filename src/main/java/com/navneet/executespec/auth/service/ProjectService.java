@@ -107,7 +107,10 @@ public class ProjectService {
   public List<ProjectDto> listProjectsForUser(String orgId, String userId, boolean isOrgAdmin) {
     // All org members can see all org projects — projects are a shared grouping tool.
     // Write operations (create/archive/manage members) are still restricted to ORG_ADMIN.
-    return projectRepo.findByOrgId(orgId).stream()
+    // V191 (PR-B-part-2) — exclude soft-deleted tombstones from this dashboard listing.
+    // Archived projects ARE returned (UI toggles them in/out via the "Show archived" switch);
+    // only deletedAt-stamped rows are hidden entirely until the 30-day undo window lapses.
+    return projectRepo.findByOrgIdAndDeletedAtIsNull(orgId).stream()
         .map(ProjectDto::from)
         .collect(Collectors.toList());
   }
@@ -119,6 +122,13 @@ public class ProjectService {
             .findById(projectId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    // V191 (PR-B-part-2) — soft-deleted projects 404 from the normal GET endpoint. The restore
+    // flow is the only legitimate path to bring one back; allowing direct GET would let a user
+    // bookmark a tombstone and stumble into confusing "dead project" UI states. SUPER_ADMIN
+    // bypasses this so support can inspect a deleted project before restore.
+    if (project.getDeletedAt() != null && !isSuperAdmin) {
+      throw new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found");
+    }
     // All org members can view any project in their org (projects are a shared grouping tool).
     // Org membership is already validated by the controller's auth check.
     if (!isSuperAdmin) {
@@ -131,6 +141,18 @@ public class ProjectService {
     return ProjectDto.from(project);
   }
 
+  /**
+   * V191 (PR-B-part-2) — admin-only fetch that includes soft-deleted rows. Used by the restore
+   * endpoint so an ORG_ADMIN can see what they're about to bring back before clicking. Bypasses the
+   * deletedAt 404 in {@link #getProject}.
+   */
+  public ProjectDto getProjectIncludingDeleted(String projectId) {
+    return projectRepo
+        .findById(projectId)
+        .map(ProjectDto::from)
+        .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+  }
+
   @Transactional
   public ProjectDto archiveProject(String projectId, String actorId) {
     Project project =
@@ -138,9 +160,24 @@ public class ProjectService {
             .findById(projectId)
             .orElseThrow(
                 () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    // V191 (PR-B-part-2) — idempotency. Re-archiving an already-archived project is a no-op,
+    // not a duplicate audit row. The frontend confirm-then-archive flow can double-tap on a slow
+    // network and we don't want two PROJECT_ARCHIVED events for one user intent.
+    if (project.getArchivedAt() != null) {
+      return ProjectDto.from(project);
+    }
+    // V191 (PR-B-part-2) — refuse to archive a soft-deleted project. Caller must restore first
+    // then archive; otherwise the state machine would have a row in two terminal states (deleted +
+    // archived) which the cleanup sweeper can't reason about.
+    if (project.getDeletedAt() != null) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Project is deleted — restore before archiving.");
+    }
     String oldStatus = project.getStatus();
+    Instant now = Instant.now();
     project.setStatus("ARCHIVED");
-    project.setUpdatedAt(Instant.now());
+    project.setArchivedAt(now);
+    project.setUpdatedAt(now);
     ProjectDto result = ProjectDto.from(projectRepo.save(project));
 
     auditService.record(
@@ -151,9 +188,122 @@ public class ProjectService {
             .orgId(project.getOrgId())
             .actorId(actorId)
             .oldValue("{\"status\":\"" + oldStatus + "\"}")
-            .newValue("{\"status\":\"ARCHIVED\"}")
+            .newValue("{\"status\":\"ARCHIVED\",\"archivedAt\":\"" + now + "\"}")
             .build());
 
+    return result;
+  }
+
+  /**
+   * V191 (PR-B-part-2) — reverse of {@link #archiveProject(String, String)}. Flips status back to
+   * ACTIVE and clears the archive timestamp; the cleanup sweeper will leave the row alone after
+   * this. Idempotent — re-unarchiving a project that's already ACTIVE is a no-op.
+   */
+  @Transactional
+  public ProjectDto unarchiveProject(String projectId, String actorId) {
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    if (project.getDeletedAt() != null) {
+      throw new ResponseStatusException(
+          HttpStatus.CONFLICT, "Project is deleted — restore (not unarchive) to bring it back.");
+    }
+    if (project.getArchivedAt() == null) {
+      // Already active — idempotent return.
+      return ProjectDto.from(project);
+    }
+    Instant now = Instant.now();
+    project.setStatus("ACTIVE");
+    project.setArchivedAt(null);
+    project.setUpdatedAt(now);
+    ProjectDto result = ProjectDto.from(projectRepo.save(project));
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("PROJECT_UNARCHIVED")
+            .entityType("PROJECT")
+            .entityId(projectId)
+            .orgId(project.getOrgId())
+            .actorId(actorId)
+            .oldValue("{\"status\":\"ARCHIVED\"}")
+            .newValue("{\"status\":\"ACTIVE\"}")
+            .build());
+
+    return result;
+  }
+
+  /**
+   * V191 (PR-B-part-2) — soft-delete with 30-day undo window. The row stays in the DB so {@link
+   * #restoreProject(String, String)} can bring it back; after 30 days the cleanup sweeper (PR-H)
+   * hard-deletes it along with its dependent ledger + run-summary rows. Idempotent on re-call.
+   */
+  @Transactional
+  public void softDeleteProject(String projectId, String actorId) {
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    if (project.getDeletedAt() != null) {
+      // Already deleted — idempotent no-op. We deliberately do NOT update the timestamp on
+      // re-delete; a user clicking "delete" twice should not extend their restore window.
+      return;
+    }
+    Instant now = Instant.now();
+    project.setDeletedAt(now);
+    project.setUpdatedAt(now);
+    projectRepo.save(project);
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("PROJECT_DELETED")
+            .entityType("PROJECT")
+            .entityId(projectId)
+            .orgId(project.getOrgId())
+            .actorId(actorId)
+            .oldValue("{\"status\":\"" + project.getStatus() + "\"}")
+            .newValue("{\"deletedAt\":\"" + now + "\"}")
+            .build());
+
+    log.info("Project soft-deleted: {} (actor={}, undoWindow=30d)", projectId, actorId);
+  }
+
+  /**
+   * V191 (PR-B-part-2) — reverse of {@link #softDeleteProject(String, String)}. Only succeeds if
+   * the project is currently soft-deleted; refuses (404) otherwise so the frontend can tell
+   * "already restored" from "doesn't exist". Resets {@code deletedAt} to NULL; the status field is
+   * not touched (a project that was archived-then-deleted comes back archived, not active).
+   */
+  @Transactional
+  public ProjectDto restoreProject(String projectId, String actorId) {
+    Project project =
+        projectRepo
+            .findById(projectId)
+            .orElseThrow(
+                () -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Project not found"));
+    if (project.getDeletedAt() == null) {
+      throw new ResponseStatusException(
+          HttpStatus.NOT_FOUND, "Project is not deleted — nothing to restore.");
+    }
+    Instant now = Instant.now();
+    project.setDeletedAt(null);
+    project.setUpdatedAt(now);
+    ProjectDto result = ProjectDto.from(projectRepo.save(project));
+
+    auditService.record(
+        ActivityAudit.builder()
+            .eventType("PROJECT_RESTORED")
+            .entityType("PROJECT")
+            .entityId(projectId)
+            .orgId(project.getOrgId())
+            .actorId(actorId)
+            .oldValue("{\"deletedAt\":\"present\"}")
+            .newValue("{\"deletedAt\":null,\"status\":\"" + project.getStatus() + "\"}")
+            .build());
+
+    log.info("Project restored: {} (actor={})", projectId, actorId);
     return result;
   }
 

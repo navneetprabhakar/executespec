@@ -22,6 +22,20 @@ public record RunEvent(
   }
 
   /**
+   * PR-C (2026-05-13) — emitted by {@link com.navneet.executespec.tool.WriteFileTool} and {@link
+   * com.navneet.executespec.tool.EditFileTool} after every successful write. Payload is the
+   * workspace-relative path so the v2/v3 RunDetail file-tree can update the moment a tool call
+   * lands rather than waiting for the 5-second poll.
+   *
+   * <p>Cheap to emit (one Redis publish per write); listeners debounce client-side so a burst of 30
+   * edits in a hot iteration only fires one re-fetch. taskId is non-null when the write happened
+   * inside a worker task; null on out-of-band writes (e.g. the initial workspace scaffold).
+   */
+  public static RunEvent fileWritten(String runId, String taskId, String relativePath) {
+    return new RunEvent("FILE_WRITTEN", runId, taskId, relativePath, Instant.now());
+  }
+
+  /**
    * 2026-05-07 — emitted by {@link com.navneet.executespec.lint.LintPass} after the deterministic
    * auto-fixers run between executor and reviewer. Payload is a one-line summary (e.g. {@code
    * "prettier+spotless-maven · 14 file(s) changed in 3.2s"}). LogPane on the v3 RunSidePanel
