@@ -102,11 +102,17 @@ export default function MetaRow({items, className, inlineOnly = false}: MetaRowP
         </dl>
       )}
 
-      {/* ── Desktop: dot-separated inline strip ────────────────────────── */}
+      {/* ── Desktop: dot-separated inline strip ──────────────────────────
+          BUG fix 2026-05-14 — the previous classlist was
+          `hidden sm:flex flex flex-wrap …`, where the later static `flex`
+          overrode `hidden` on phone, rendering BOTH the phone grid AND the
+          desktop strip stacked on the same screen. Splitting the layout
+          mode into the conditional half so `hidden sm:flex` actually
+          hides the strip under sm:. */}
       <div
         className={cn(
-          inlineOnly ? '' : 'hidden sm:flex',
-          'flex flex-wrap items-baseline gap-x-2 gap-y-1 text-xs',
+          inlineOnly ? 'flex' : 'hidden sm:flex',
+          'flex-wrap items-baseline gap-x-2 gap-y-1 text-xs',
           className,
         )}
       >
