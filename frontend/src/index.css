@@ -209,6 +209,72 @@ body {
   display: none;
 }
 
+/* ── Responsive table → cards on phone ───────────────────────────────────
+ * 2026-05-14 (mobile-first redesign, Track B) — opt-in utility.
+ *
+ * Add `responsive-table` to any <table>. Each <td> declares its column
+ * header via `data-label="Status"` (or empty/missing for cells that should
+ * render label-less). On phones (<md = 768px) the table reflows into a
+ * stack of cards: <thead> hides, each <tr> becomes a card with a 1px
+ * border and 8px-radius, each <td> renders its label on the left + value
+ * on the right.
+ *
+ * This avoids the desktop-density `min-w-[600px] + overflow-x-auto`
+ * pattern that forced phone users to swipe horizontally to reach the
+ * Status / Actions columns. Best-in-class (Stripe, Linear, GitHub Mobile)
+ * all use the same card-reflow pattern. */
+@media (max-width: 767px) {
+  table.responsive-table {
+    display: block;
+    width: 100%;
+    border: none;
+    min-width: 0 !important;
+  }
+  table.responsive-table thead {
+    display: none;
+  }
+  table.responsive-table tbody {
+    display: block;
+  }
+  table.responsive-table tr {
+    display: block;
+    border: 1px solid var(--border-default);
+    border-radius: 8px;
+    padding: 10px 12px;
+    margin-bottom: 8px;
+    background: var(--gray-100);
+  }
+  table.responsive-table td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 12px;
+    padding: 6px 0;
+    border: none;
+    text-align: left;
+    min-height: 24px;
+  }
+  table.responsive-table td::before {
+    content: attr(data-label);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    flex-shrink: 0;
+  }
+  /* Cells with no data-label (or an empty one) render full-width
+   * left-aligned without a leading label — useful for action-button rows. */
+  table.responsive-table td[data-label='']::before,
+  table.responsive-table td:not([data-label])::before {
+    content: none;
+  }
+  table.responsive-table td[data-label=''],
+  table.responsive-table td:not([data-label]) {
+    justify-content: flex-start;
+  }
+}
+
 body {
   background: var(--geist-bg);
   color: var(--text-primary);
