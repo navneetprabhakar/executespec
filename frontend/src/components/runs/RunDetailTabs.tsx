@@ -241,7 +241,7 @@ export default function RunDetailTabs() {
 
   return (
     <Tabs.Root value={activeTab} onValueChange={setActiveTab} className='flex flex-col'>
-      <Tabs.List className='flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 sm:px-3 lg:px-4 overflow-x-auto scrollbar-hide sticky top-0 z-10 bg-[var(--gray-100)]'>
+      <Tabs.List className='flex gap-0 border-b border-[var(--border-default)] flex-shrink-0 px-2 sm:px-3 lg:px-4 overflow-x-auto scrollbar-hide v3-tab-strip sticky top-0 z-10 bg-[var(--gray-100)]'>
         {TABS.map((tab) => (
           <Tabs.Trigger
             key={tab.value}
