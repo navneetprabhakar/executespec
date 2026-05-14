@@ -80,3 +80,66 @@ jobs:
           echo "::error::  npm --prefix frontend run format"
           echo "::error::  npm --prefix frontend run lint:fix"
           echo "::error::See docs/design/code-style.md for the documented deviations."
+
+  # 2026-05-14 — npm audit gate, warn-only initially.
+  #
+  # Runs `npm audit` against the resolved package-lock.json on every PR so
+  # newly-disclosed CVEs in our frontend dependencies surface in the PR
+  # checks tab without anyone having to remember to run audit locally.
+  #
+  # Why warn-only (`continue-on-error: true`) right now:
+  #   1. There's a known existing backlog of high-severity advisories in
+  #      dev-only transitives (esbuild dev-server XSS via vite 5.x — see
+  #      the 2026-05-14 security triage). Flipping straight to enforcing
+  #      would block every unrelated PR on day-one until the backlog clears.
+  #   2. New CVEs can land between a PR opening and merging — those should
+  #      be a signal, not a wall.
+  #
+  # To flip to enforcing once the backlog is clear:
+  #   - Remove the `continue-on-error: true` line below.
+  #   - (Optional) raise `--audit-level=high` to `critical` for a stricter
+  #     gate, or drop to `moderate` if we want broader coverage.
+  #
+  # Dev-deps are included via the default audit scope. `--omit=dev` would
+  # mirror the production bundle, but dev-deps like vite/esbuild are still
+  # exposed during local development on team laptops, so we want visibility
+  # there. Use `--production` flag if that ever changes.
+  frontend-audit:
+    name: Frontend · npm audit (warn-only)
+    runs-on: ubuntu-latest
+    needs: [frontend-lint]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 'lts/*'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # `npm audit` doesn't need a full install — it consults the registry
+      # using package-lock.json directly. Skipping install keeps this job
+      # under 30s.
+      - name: npm audit (high + critical)
+        id: audit
+        continue-on-error: true
+        run: |
+          cd frontend
+          # --audit-level=high → only flag high + critical findings.
+          # JSON output captured for the summary step; pretty output streamed
+          # to the log for human readers.
+          npm audit --audit-level=high
+          echo "audit_exit=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        if: always()
+        run: |
+          if [ "${{ steps.audit.outcome }}" = "failure" ]; then
+            echo "::warning::npm audit reported high or critical findings."
+            echo "::warning::This job is currently WARN-ONLY — see docs/security/audit-policy.md (TBD)."
+            echo "::warning::Run \`npm --prefix frontend audit\` locally for details."
+          else
+            echo "::notice::npm audit clean (no high/critical advisories)."
+          fi
