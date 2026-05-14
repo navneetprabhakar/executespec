@@ -124,6 +124,7 @@ function BubbleView({bubble}: {bubble: Bubble}) {
       }}
     >
       <div
+        className='chat-bubble-content'
         style={{
           maxWidth: 640,
           padding: '8px 12px',
@@ -134,6 +135,8 @@ function BubbleView({bubble}: {bubble: Bubble}) {
           fontSize: 13,
           lineHeight: 1.55,
           whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
       >
         {bubble.kind === 'status' && bubble.status === 'planning' ? (

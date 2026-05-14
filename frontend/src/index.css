@@ -599,6 +599,60 @@ optgroup {
   overflow: hidden;
 }
 
+/* ── Mobile opt-out: single-line truncate is a worst-case mobile failure
+ *    (titles cut mid-word, repo names rendered as "p…"). Convert every
+ *    `.truncate` to a 2-line clamp on phones; consumers can opt-out via
+ *    `.no-clamp` or `.allow-truncate` for currency / numeric / status
+ *    pills where one-line is intentional.
+ *
+ *    2026-05-14 (mobile-first redesign, P4). One CSS hammer beats 80+
+ *    surgical edits across list components. */
+@media (max-width: 767px) {
+  .truncate:not(.no-clamp):not(.allow-truncate) {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    text-overflow: clip;
+    white-space: normal;
+  }
+}
+
+/* ── Code-block overflow wrapper for chat bubbles (P13) ─────────────────
+ * Markdown <pre> already gets overflow-x-auto via MarkdownContent, but
+ * inside a chat bubble the bubble's own max-width clamps the <pre>
+ * narrower than the <pre> can show, and the right edge clips unreadably.
+ * Forcing the bubble itself to allow a horizontal scrollbar at the
+ * <pre> level fixes the affordance.
+ *
+ * Opt-in: parents add `.chat-bubble-content` and any nested <pre>
+ * gets proper scroll-x with a thin scrollbar on mobile. */
+.chat-bubble-content pre {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+.chat-bubble-content pre::-webkit-scrollbar {
+  height: 4px;
+}
+.chat-bubble-content pre::-webkit-scrollbar-thumb {
+  background: var(--border-default);
+  border-radius: 2px;
+}
+
+/* ── File-tree indent reduction on phones (P9) ───────────────────────────
+ * Desktop file trees indent 24px/level for visual hierarchy, but at
+ * level 4 on a 375px viewport the filename has <60px to render before
+ * `truncate` chops it. Halve to 12px/level on phones via an opt-in
+ * utility class on the tree's outer container (consumers add
+ * `.compact-tree-indent` to the file-tree root). The CSS reads a
+ * `--tree-depth` custom prop the consumer sets per row. */
+@media (max-width: 767px) {
+  .compact-tree-indent .tree-row {
+    padding-left: calc(12px * var(--tree-depth, 1)) !important;
+  }
+}
+
 /* Motion — respect prefers-reduced-motion */
 @media (prefers-reduced-motion: reduce) {
   *,

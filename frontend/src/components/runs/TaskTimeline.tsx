@@ -298,9 +298,14 @@ export default function TaskTimeline({tasks, runStartedAt}: Props) {
                 </span>
               </div>
 
-              {/* Hover tooltip */}
+              {/* Hover tooltip.
+                  2026-05-14 (P12) — on phones the absolute `left-48 min-w-[280px]`
+                  popover overflows the right viewport edge (192 + 280 = 472 > 375).
+                  Clamp the position to the viewport on small screens by switching
+                  `left-48` to `left-2 right-2` (full-width minus 16px gutter) below
+                  `sm:`. Desktop keeps the dense fly-out next to the row label. */}
               {isHover && (
-                <div className='absolute top-full left-48 z-10 mt-1 rounded-sm bg-[var(--gray-100)] border border-white/10 p-3 text-xs shadow-xl min-w-[280px]'>
+                <div className='absolute top-full left-2 right-2 sm:left-48 sm:right-auto z-10 mt-1 rounded-sm bg-[var(--gray-100)] border border-white/10 p-3 text-xs shadow-xl sm:min-w-[280px]'>
                   <div className='font-medium text-[var(--text-primary)] truncate'>{r.title}</div>
                   <div className='mt-1 grid grid-cols-2 gap-x-3 gap-y-1 text-[var(--text-muted)]'>
                     <span>Status</span>
