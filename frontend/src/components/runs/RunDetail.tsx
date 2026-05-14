@@ -870,7 +870,13 @@ export default function RunDetail() {
       {/* GitHub PAT Modal */}
       {showGitHubModal && (
         <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'
+          className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3'
+          style={{
+            paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+          }}
           onClick={() => setShowGitHubModal(false)}
         >
           <div
@@ -927,7 +933,13 @@ export default function RunDetail() {
       {/* Archive Confirmation Modal */}
       {showArchiveConfirm && (
         <div
-          className='fixed inset-0 z-50 flex items-center justify-center bg-black/50'
+          className='fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-3'
+          style={{
+            paddingTop: 'max(0.75rem, env(safe-area-inset-top))',
+            paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom))',
+            paddingLeft: 'max(0.75rem, env(safe-area-inset-left))',
+            paddingRight: 'max(0.75rem, env(safe-area-inset-right))',
+          }}
           onClick={() => setShowArchiveConfirm(false)}
         >
           <div
@@ -984,7 +996,7 @@ export default function RunDetail() {
   );
 }
 
-// ── Mobile-friendly collapsible reports section ──────────────────────────
+// ── Mobile-friendly collapsible reports section ─────────────────────────
 
 /**
  * Returns true when the reviewer's final-build passed. Used to show a green
@@ -1093,7 +1105,7 @@ interface GateBannerProps {
 // status. V2 never emits that status; the V1 clarify path returned 410
 // Gone. Clean removal.
 
-// ── Gate Banner ───────────────────────────────────────────────────────────
+// ── Gate Banner ──────────────────────────────────────────────────────────
 
 function GateBanner({
   message,

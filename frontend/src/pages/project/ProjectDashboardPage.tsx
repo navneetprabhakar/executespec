@@ -568,7 +568,7 @@ export default function ProjectDashboardPage() {
             mask on phones so users see "more tabs to the right" instead of
             reading "Cha…" as a typo. */}
         <nav
-          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x -mx-4 px-4'
+          className='flex gap-0.5 border-b border-[var(--border-default)] overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip -mx-4 px-4'
           role='tablist'
           aria-label='Project sections'
         >
@@ -593,7 +593,7 @@ export default function ProjectDashboardPage() {
         {/* Runs sub-tab strip — only shown when in Runs tab */}
         {tab === 'runs' && (
           <nav
-            className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x -mx-4 px-4 pt-1'
+            className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip -mx-4 px-4 pt-1'
             role='tablist'
             aria-label='Runs sections'
           >
@@ -620,7 +620,7 @@ export default function ProjectDashboardPage() {
       {/* Body */}
       <div className='flex-1 min-h-0 flex flex-col lg:flex-row overflow-hidden'>
         {showLeftRunsList && (
-          <aside className='w-full lg:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] overflow-y-auto max-h-40 lg:max-h-none'>
+          <aside className='w-full lg:w-[300px] flex-shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)] overflow-y-auto overscroll-contain max-h-[40dvh] lg:max-h-none'>
             <RunsSidebar
               tasks={tasks}
               selectedRunId={selectedRunId}

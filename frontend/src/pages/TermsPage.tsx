@@ -2,7 +2,7 @@ import {Link} from 'react-router-dom';
 
 export default function TermsPage() {
   return (
-    <div className='min-h-screen bg-[var(--geist-bg)] text-secondary relative'>
+    <div className='min-h-dvh bg-[var(--geist-bg)] text-secondary relative'>
       <div
         aria-hidden
         className='pointer-events-none absolute inset-0 -z-10'

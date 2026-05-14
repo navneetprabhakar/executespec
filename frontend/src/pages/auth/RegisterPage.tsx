@@ -222,6 +222,11 @@ export default function RegisterPage() {
             onChange={set('email')}
             required
             autoComplete='email'
+            inputMode='email'
+            autoCapitalize='off'
+            autoCorrect='off'
+            spellCheck='false'
+            enterKeyHint='next'
             className='w-full rounded-md border border-[var(--border-default)] bg-[var(--gray-200)] px-3 py-2.5 text-base sm:text-sm text-primary placeholder-[var(--text-muted)] focus:border-accent-blue focus:outline-none transition-colors'
             placeholder='you@company.com'
           />

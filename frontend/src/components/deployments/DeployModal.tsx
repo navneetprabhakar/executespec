@@ -33,7 +33,14 @@ export default function DeployModal({onClose, onRefresh}: DeployModalProps) {
   return (
     <div
       className='fixed inset-0 z-50 flex items-center justify-center p-2 md:p-4'
-      style={{backdropFilter: 'blur(4px)', background: 'rgba(0,0,0,0.6)'}}
+      style={{
+        backdropFilter: 'blur(4px)',
+        background: 'rgba(0,0,0,0.6)',
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top))',
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom))',
+        paddingLeft: 'max(0.5rem, env(safe-area-inset-left))',
+        paddingRight: 'max(0.5rem, env(safe-area-inset-right))',
+      }}
       onClick={onClose}
     >
       <motion.div

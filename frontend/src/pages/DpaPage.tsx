@@ -2,7 +2,7 @@ import {Link} from 'react-router-dom';
 
 export default function DpaPage() {
   return (
-    <div className='min-h-screen bg-[var(--geist-bg)] text-secondary'>
+    <div className='min-h-dvh bg-[var(--geist-bg)] text-secondary'>
       {/* Header */}
       <header className='border-b border-[var(--border-default)]'>
         <div className='max-w-3xl mx-auto px-4 sm:px-6 py-4 flex items-center justify-between'>

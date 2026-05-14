@@ -429,6 +429,43 @@
   }
 }
 
+/* 2026-05-14 (responsive UX parity audit) — iOS-smooth tab strip utility.
+ *
+ * Mount on horizontal tab strips (ProjectDashboard tabs, Runs sub-tabs,
+ * Code-tab sub-strip, AdminPage tabs, RunDetailTabs). Three layered fixes
+ * for the "shaky / doesn't move as a unit" feel reported on iPhone 16:
+ *
+ *   1. `-webkit-overflow-scrolling: touch` — keeps the inertia path on
+ *      older iOS Safari (modern WebKit defaults to touch on overflow:auto
+ *      but leaves it off when scrollbar-hide overrides default scrolling).
+ *
+ *   2. `touch-action: pan-x` — declares the strip handles ONLY horizontal
+ *      pan gestures. Without it, a diagonal finger-drag triggers BOTH the
+ *      horizontal strip scroll AND the body's vertical scroll, so the
+ *      strip tugs sideways while the page tugs up — that's the "shaky"
+ *      sensation. With pan-x, vertical pans pass through to <body>.
+ *
+ *   3. `scroll-snap-type: x proximity` + `scroll-snap-align: start` on each
+ *      child — when the user lifts their finger, the strip glides to the
+ *      nearest tab boundary instead of free-stopping between two tabs.
+ *      `proximity` (not `mandatory`) lets users still scroll partway when
+ *      they want; `start` aligns each tab's left edge to the strip's
+ *      scroll-padding so the active tab anchors cleanly.
+ *
+ * Pair with `overflow-x-auto scrollbar-hide v3-scroll-fade-x` for the full
+ * "looks like one strip, behaves like one strip" iOS experience.
+ */
+.v3-tab-strip {
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scroll-snap-type: x proximity;
+  scroll-padding-left: 12px;
+  scroll-padding-right: 12px;
+}
+.v3-tab-strip > * {
+  scroll-snap-align: start;
+}
+
 /* 2026-05-10 mobile sweep iter-3 — scroll-fade utility.
  *
  * Apply to any horizontally scrolling container (tab strips, summary bars,

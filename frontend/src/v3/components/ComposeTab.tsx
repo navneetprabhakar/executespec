@@ -68,6 +68,14 @@ export default function ComposeTab({projectId, defaultProvider}: Props) {
           gap: 14,
           padding: '4px 0 16px',
           overflowY: 'auto',
+          // 2026-05-14 (iOS pass) — keep rubber-band scroll inside the
+          // thread, don't propagate to <body> (which would let the page
+          // pull-to-refresh accidentally on long swipes). `pan-y` matches
+          // index.css's body fix so the user's vertical pan stays in this
+          // container even mid-momentum.
+          overscrollBehavior: 'contain',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-y',
         }}
       >
         {loading && (

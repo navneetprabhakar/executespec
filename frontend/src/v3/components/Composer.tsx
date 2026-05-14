@@ -283,7 +283,13 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         bottom: 0,
         background: 'var(--v3-bg)',
         paddingTop: 12,
-        paddingBottom: 12,
+        // 2026-05-14 (responsive UX parity audit, iOS pass) — pad below the
+        // home-indicator on iPhones with notch / Dynamic Island. Pre-fix the
+        // Send button + Quick-run chip sat IN the home-indicator zone, which
+        // both made them harder to tap accurately AND caused iOS to interpret
+        // a tap-and-drag as a "swipe up to home" gesture. `max(12px, env(...))`
+        // preserves the desktop / non-notched height.
+        paddingBottom: 'max(12px, env(safe-area-inset-bottom))',
         zIndex: 10,
       }}
       aria-label='New run composer'
