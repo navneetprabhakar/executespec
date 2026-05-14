@@ -37,7 +37,7 @@ export function UpgradeNudge({
       }}
     >
       <div
-        className='bg-[var(--gray-100)] border border(--border-default)] rounded-md max-w-md w-full mx-4 p-5 sm:p-8 text-center overflow-y-auto'
+        className='bg-[var(--gray-100)] border border-[var(--border-default)] rounded-md max-w-md w-full mx-4 p-5 sm:p-8 text-center overflow-y-auto'
         style={{maxHeight: '95dvh'}}
       >
         <div className='text-4xl mb-4'>{'\u{1F680}'}</div>
