@@ -125,7 +125,7 @@ function TierLifecyclePageInner() {
           <p className='text-xs text-muted py-4 text-center'>Loading…</p>
         ) : (
           <div className='overflow-x-auto v3-scroll-fade-x'>
-            <table className='w-full text-sm min-w-[640px] md:min-w-0'>
+            <table className='w-full text-sm md:min-w-0 responsive-table'>
               <thead>
                 <tr className='text-[10px] text-muted uppercase tracking-wider border-b border-[var(--border-default)]'>
                   <th className='text-left py-2 px-2'>Tier</th>
@@ -145,11 +145,11 @@ function TierLifecyclePageInner() {
                       key={t.tier}
                       className='border-b border-[var(--border-default)]/50 text-secondary'
                     >
-                      <td className='py-2 px-2'>
+                      <td className='py-2 px-2' data-label='Tier'>
                         <div className='font-medium text-primary'>{t.displayName ?? t.tier}</div>
                         <div className='text-[10px] text-muted font-mono'>{t.tier}</div>
                       </td>
-                      <td className='py-2 px-2'>
+                      <td className='py-2 px-2' data-label='State'>
                         <span
                           className={`inline-block px-2 py-0.5 rounded text-[10px] font-semibold uppercase ${
                             t.state === 'LISTED'
@@ -162,8 +162,12 @@ function TierLifecyclePageInner() {
                           {t.state}
                         </span>
                       </td>
-                      <td className='py-2 px-2 text-right font-mono'>{t.activeSubscribers}</td>
-                      <td className='py-2 px-2 text-right font-mono'>${mrr}</td>
+                      <td className='py-2 px-2 text-right font-mono' data-label='Subscribers'>
+                        {t.activeSubscribers}
+                      </td>
+                      <td className='py-2 px-2 text-right font-mono' data-label='MRR (USD)'>
+                        ${mrr}
+                      </td>
                       {/* F-20 (round-3 audit) — show date only by default,
                         reason moved to hover. The previous inline-truncated
                         reason ("TEAM tier reinstated (V144) — pro...")
@@ -171,7 +175,7 @@ function TierLifecyclePageInner() {
                         whenever a screen-cap of this admin view escaped
                         SUPER_ADMIN scope. The full reason stays accessible
                         via tooltip for operators who actually need it. */}
-                      <td className='py-2 px-2 text-[11px] text-muted'>
+                      <td className='py-2 px-2 text-[11px] text-muted' data-label='Changed'>
                         <span
                           title={t.reason || undefined}
                           className={
@@ -183,7 +187,7 @@ function TierLifecyclePageInner() {
                           {changedAt}
                         </span>
                       </td>
-                      <td className='py-2 px-2 text-right space-x-1'>
+                      <td className='py-2 px-2 text-right space-x-1' data-label='Actions'>
                         {t.state !== 'LISTED' && (
                           <button
                             onClick={() => openTransition(t, 'LISTED')}
