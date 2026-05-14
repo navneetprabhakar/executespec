@@ -629,31 +629,39 @@ function AdminPageInner() {
               </div>
             </div>
 
-            <div className='rounded-sm border border-[var(--border-default)] overflow-hidden'>
-              <div className='overflow-x-auto v3-scroll-fade-x'>
-                <table className='w-full text-sm min-w-[600px] md:min-w-0'>
+            {/* 2026-05-14 mobile UX audit, PR-1 — `responsive-table` swaps
+                the `min-w-[600px] md:min-w-0` horizontal-scroll-on-mobile
+                pattern for a CSS-only "table → labelled card list" reflow
+                under 768px. Every td gets a `data-label` matching its
+                column header so the mobile card surfaces the column name
+                next to the value. `hidden md:table-cell` removed because
+                the whole point is to surface every column on mobile as a
+                labelled row inside the card. */}
+            <div className='rounded-sm border border-[var(--border-default)] overflow-hidden md:border'>
+              <div className='overflow-x-auto v3-scroll-fade-x md:overflow-visible'>
+                <table className='responsive-table text-sm'>
                   <thead className='bg-[var(--gray-100)] text-muted text-xs'>
                     <tr>
                       <th className='px-4 py-3 text-left font-medium'>Name / Email</th>
                       <th className='px-4 py-3 text-left font-medium'>Status</th>
-                      <th className='px-4 py-3 text-left font-medium hidden md:table-cell'>Tier</th>
-                      <th className='px-4 py-3 text-left font-medium hidden md:table-cell'>Role</th>
-                      <th className='px-4 py-3 text-left font-medium hidden lg:table-cell'>
-                        Org Role
-                      </th>
+                      <th className='px-4 py-3 text-left font-medium'>Tier</th>
+                      <th className='px-4 py-3 text-left font-medium'>Role</th>
+                      <th className='px-4 py-3 text-left font-medium'>Org Role</th>
                       <th className='px-4 py-3 text-left font-medium'>Actions</th>
                     </tr>
                   </thead>
                   <tbody className='divide-y divide-[var(--border-default)]'>
                     {filteredUsers.map((u) => (
                       <tr key={u.id} className='hover:bg-[var(--gray-100)] transition-colors'>
-                        <td className='px-4 py-3'>
-                          <p className='text-primary font-medium'>
-                            {u.firstName} {u.lastName}
-                          </p>
-                          <p className='text-muted text-xs'>{u.email}</p>
+                        <td className='px-4 py-3' data-label='Name'>
+                          <div>
+                            <p className='text-primary font-medium'>
+                              {u.firstName} {u.lastName}
+                            </p>
+                            <p className='text-muted text-xs'>{u.email}</p>
+                          </div>
                         </td>
-                        <td className='px-4 py-3'>
+                        <td className='px-4 py-3' data-label='Status'>
                           <span
                             className={cn(
                               'px-2 py-0.5 rounded-sm text-xs font-medium',
@@ -663,7 +671,7 @@ function AdminPageInner() {
                             {u.status}
                           </span>
                         </td>
-                        <td className='px-4 py-3 hidden md:table-cell'>
+                        <td className='px-4 py-3' data-label='Tier'>
                           <select
                             value={u.tier}
                             onChange={(e) => changeUserTier(u.id, e.target.value)}
@@ -679,7 +687,7 @@ function AdminPageInner() {
                             ))}
                           </select>
                         </td>
-                        <td className='px-4 py-3 hidden md:table-cell'>
+                        <td className='px-4 py-3' data-label='Role'>
                           <select
                             value={u.globalRole}
                             onChange={(e) => changeUserRole(u.id, e.target.value)}
@@ -692,10 +700,16 @@ function AdminPageInner() {
                             ))}
                           </select>
                         </td>
-                        <td className='px-4 py-3 text-secondary text-xs hidden lg:table-cell'>
+                        <td
+                          className='px-4 py-3 text-secondary text-xs'
+                          data-label='Org Role'
+                        >
                           {u.orgRole ?? '—'}
                         </td>
-                        <td className='px-4 py-3 flex items-center gap-1.5'>
+                        <td
+                          className='px-4 py-3 flex items-center gap-1.5'
+                          data-label=''
+                        >
                           <button
                             onClick={() =>
                               setGrantTarget({
