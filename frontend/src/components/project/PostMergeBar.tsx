@@ -51,23 +51,36 @@ export default function PostMergeBar({projectId}: {projectId: string}) {
       {visible.map((bar, i) => (
         <div
           key={`${bar.repoFullName}-${bar.prNumber}`}
-          className='flex items-center justify-between gap-3 rounded-sm border border-status-success/40 bg-status-success/10 px-3 py-1.5 text-xs text-status-success'
+          /* 2026-05-14 (P1/P3) — stack on phone so the "Start next →"
+             CTA + dismiss don't collapse out of view, and the long
+             repo/owner#NN identifier wraps cleanly instead of clipping
+             with a trailing dash. Uses `owner/repo#NN` semantic
+             ordering rather than dumping the raw repoFullName. */
+          className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-1.5 sm:gap-3 rounded-sm border border-status-success/40 bg-status-success/10 px-3 py-2 sm:py-1.5 text-xs text-status-success'
         >
-          <div className='min-w-0 truncate'>
-            ✓ PR #{bar.prNumber} merged on <span className='font-mono'>{bar.repoFullName}</span> —
-            workspace refreshed.
+          <div className='min-w-0 break-words sm:truncate'>
+            ✓{' '}
+            <span className='font-mono'>
+              {bar.repoFullName}#{bar.prNumber}
+            </span>{' '}
+            merged — workspace refreshed.
           </div>
-          <div className='flex items-center gap-2 shrink-0'>
+          <div className='flex items-center gap-2 sm:shrink-0'>
             {i === 0 && (
               <button
                 onClick={startNext}
-                className='text-[11px] font-medium px-2 py-0.5 rounded-sm bg-status-success/20 hover:bg-status-success/30'
+                className='text-[11px] font-medium px-3 py-1 min-h-[36px] rounded-sm bg-status-success/20 hover:bg-status-success/30'
               >
                 Start next requirement →
               </button>
             )}
             {i === 0 && (
-              <button onClick={close} title='Dismiss all' className='text-muted hover:text-primary'>
+              <button
+                onClick={close}
+                title='Dismiss all'
+                aria-label='Dismiss merge banner'
+                className='text-muted hover:text-primary min-w-[36px] min-h-[36px] inline-flex items-center justify-center'
+              >
                 ×
               </button>
             )}

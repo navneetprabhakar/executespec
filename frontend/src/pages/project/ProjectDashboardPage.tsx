@@ -461,8 +461,10 @@ export default function ProjectDashboardPage() {
                   phone which made the project name visually smaller than the
                   textarea placeholder. Bumped to text-2xl (24px) on phone,
                   text-xl (20px) on sm, text-2xl (24px) again on lg so the
-                  H1 actually reads as a heading. */}
-              <h1 className='text-2xl sm:text-xl lg:text-2xl font-semibold text-primary tracking-[-0.015em] leading-tight truncate'>
+                  H1 actually reads as a heading. Switched truncate →
+                  line-clamp-2 (P4) so long project names wrap instead of
+                  cutting mid-word like "Hostel Eval ANTHRO…". */}
+              <h1 className='text-2xl sm:text-xl lg:text-2xl font-semibold text-primary tracking-[-0.015em] leading-tight line-clamp-2 sm:line-clamp-1'>
                 {project?.name ?? 'Project'}
               </h1>
             </div>

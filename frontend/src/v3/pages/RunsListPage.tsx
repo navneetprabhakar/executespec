@@ -417,14 +417,21 @@ export default function RunsListPage() {
                       · {runShort}
                     </span>
                   </div>
+                  {/* 2026-05-14 (P4) — was single-line truncate, cut titles mid-word
+                      ("Add Hello from ExecuteSpec audit run to RE…"). Mobile gets
+                      a 2-line clamp via the global CSS hammer; desktop stays
+                      one-line via .allow-truncate opt-out. */}
                   <div
+                    className='allow-truncate'
                     style={{
                       fontSize: 14,
                       fontWeight: 600,
                       color: 'var(--v3-text)',
-                      whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis',
+                      display: '-webkit-box',
+                      WebkitLineClamp: 2,
+                      WebkitBoxOrient: 'vertical' as const,
+                      wordBreak: 'break-word',
                     }}
                   >
                     {r.runTitle || r.userRequest || '(no spec text)'}
