@@ -22,6 +22,7 @@ import WorkspaceHealthPanel from './WorkspaceHealthPanel';
 import AdrPanel from './AdrPanel';
 import InvariantPanel from './InvariantPanel';
 import {cn} from '@/lib/utils';
+import SegmentedTabs from '@/components/shared/SegmentedTabs';
 
 export type CodeSubTab =
   | 'architecture'
@@ -78,31 +79,25 @@ export default function CodeTab({
 
   return (
     <div className='space-y-3'>
-      {/* Sub-tab strip — reuses the same chip pattern as the parent IA.
-          2026-05-10 mobile sweep — scrollbar-hide + scroll-fade so the
-          last tab ("Standards") doesn't read as truncated text on phones. */}
-      <nav
-        className='flex gap-0.5 overflow-x-auto scrollbar-hide v3-scroll-fade-x v3-tab-strip -mx-3 px-3'
-        role='tablist'
-        aria-label='Code surfaces'
-      >
-        {SUB_TABS.map((t) => (
-          <button
-            key={t.key}
-            role='tab'
-            aria-selected={sub === t.key}
-            onClick={() => setSub(t.key)}
-            className={cn(
-              'px-2.5 py-1 text-[11px] font-medium whitespace-nowrap rounded-sm transition-colors',
-              sub === t.key
-                ? 'bg-accent-blue/10 text-accent-blue border border-accent-blue/30'
-                : 'border border-transparent text-muted hover:text-secondary hover:border-[var(--border-default)]',
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
-      </nav>
+      {/* 2026-05-14 UX feedback — swapped horizontal-scroll chip strip for
+          SegmentedTabs (animated underline + More overflow). Pre-fix the
+          phone showed "Tech d…" clipped against the viewport edge; now
+          tab 5+ collapse into a "More ▾" dropdown so every label renders
+          fully or under disclosure. Same controlled state, same behaviour. */}
+      <div className='-mx-3 px-3'>
+        <SegmentedTabs
+          ariaLabel='Code surfaces'
+          tabs={SUB_TABS.map((t) => ({key: t.key, label: t.label}))}
+          active={sub}
+          onChange={(k) => setSub(k as CodeSubTab)}
+          overflowAs='menu'
+          // Code tab has 8 surfaces; on 375px with "Code review" (~120px)
+          // alone any visible-count > 2 pushes "More" off-canvas. 2 keeps
+          // the two most-trafficked (Architecture + Health) inline; the
+          // rest live in More.
+          visibleOnPhone={2}
+        />
+      </div>
 
       <div role='tabpanel' aria-labelledby={sub}>
         {sub === 'architecture' && (

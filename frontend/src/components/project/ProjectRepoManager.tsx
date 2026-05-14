@@ -69,9 +69,15 @@ export default function ProjectRepoManager({projectId}: {projectId: string}) {
 
   return (
     <div className='space-y-4'>
-      <div className='flex items-center justify-between'>
+      {/* 2026-05-14 UX feedback — was an inline flex-row that on 375px
+          jammed the title against two long action buttons ("Reset
+          workspace…" + "+ Add repository") and pushed "Add repository"
+          off-canvas. Stack vertically on phone (title row, then action
+          row), inline on sm+. The action cluster gets its own gap-2 wrap
+          so neither button clips. */}
+      <div className='flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2'>
         <h2 className='text-lg font-medium'>Linked repositories</h2>
-        <div className='flex items-center gap-2'>
+        <div className='flex items-center gap-2 flex-wrap'>
           {/* P-25 (UX audit, 2026-05-03) — Reset + Add are admin-only on the
               backend. Pre-fix the buttons rendered live for everyone, clicked
               by DEVELOPER/VIEWER, returned 403. Now disable + tooltip the
@@ -87,9 +93,10 @@ export default function ProjectRepoManager({projectId}: {projectId: string}) {
                   : 'Preview SHA movement per repo, then pull origin HEAD + regenerate codemaps/architecture'
               }
               className={
-                !isOrgAdmin
-                  ? 'text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted opacity-50 cursor-not-allowed'
-                  : 'text-sm px-3 py-1.5 rounded border border-[var(--border-default)] text-muted hover:text-primary'
+                'press-effect text-sm px-3 py-1.5 rounded border border-[var(--border-default)] whitespace-nowrap ' +
+                (!isOrgAdmin
+                  ? 'text-muted opacity-50 cursor-not-allowed'
+                  : 'text-muted hover:text-primary')
               }
             >
               Reset workspace…
@@ -104,9 +111,8 @@ export default function ProjectRepoManager({projectId}: {projectId: string}) {
                 : 'Link an existing GitHub repo or create a new one'
             }
             className={
-              !isOrgAdmin
-                ? 'text-sm px-3 py-1.5 bg-blue-600 text-white rounded opacity-50 cursor-not-allowed'
-                : 'text-sm px-3 py-1.5 bg-blue-600 text-white rounded hover:bg-blue-700'
+              'press-effect text-sm px-3 py-1.5 bg-blue-600 text-white rounded whitespace-nowrap ' +
+              (!isOrgAdmin ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700')
             }
           >
             + Add repository

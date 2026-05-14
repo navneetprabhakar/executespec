@@ -319,7 +319,11 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         position: isEmpty ? 'static' : 'sticky',
         bottom: 0,
         background: 'var(--v3-bg)',
-        paddingTop: 12,
+        // 2026-05-14 UX feedback — was paddingTop:12 always (24px of dead
+        // space top+bottom on the in-thread composer). Empty-state keeps
+        // 12 so the hero composer breathes; in-thread drops to 6 so the
+        // chat history claws back ~12px.
+        paddingTop: isEmpty ? 12 : 6,
         // 2026-05-14 (responsive UX parity audit, iOS pass) — pad below the
         // home-indicator on iPhones with notch / Dynamic Island. Pre-fix the
         // Send button + Quick-run chip sat IN the home-indicator zone, which
@@ -444,14 +448,20 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
           background: 'var(--v3-surface)',
           border: '1px solid var(--v3-border-strong)',
           borderRadius: 10,
-          padding: 12,
+          // 2026-05-14 UX feedback — was padding:12 always, which inflated
+          // the in-thread composer to ~220px (40% of the 555px tab body),
+          // squeezing the chat history to ~310px. Empty-state still gets
+          // 12 so the hero composer reads as a primary action; non-empty
+          // (sticky/in-thread) gets 8 to claw ~16px back for the thread.
+          padding: isEmpty ? 12 : 8,
         }}
       >
         <textarea
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder={placeholder}
-          rows={isEmpty ? 4 : 2}
+          // Was rows={2} on non-empty — typical user message is 1 line.
+          rows={isEmpty ? 4 : 1}
           aria-label='What do you want to build'
           style={{
             width: '100%',
@@ -463,7 +473,9 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
             fontFamily: 'inherit',
             fontSize: 14,
             lineHeight: 1.55,
-            minHeight: isEmpty ? 96 : 56,
+            // Was minHeight: 56 — drops one row's worth so the in-thread
+            // composer doesn't crowd the history. Auto-grows on input.
+            minHeight: isEmpty ? 96 : 40,
           }}
           onKeyDown={(e) => {
             // Submit on Cmd/Ctrl + Enter to match Linear / Slack.
@@ -525,8 +537,11 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
             justifyContent: isPhone ? 'flex-start' : 'space-between',
             alignItems: isPhone ? 'stretch' : 'center',
             gap: 8,
-            marginTop: 8,
-            paddingTop: 8,
+            // 2026-05-14 UX feedback — was marginTop:8 + paddingTop:8 + borderTop
+            // (17px gap between textarea and action row). Tightened to 4/6 so the
+            // in-thread composer is visually one compact pill, not a stacked card.
+            marginTop: isEmpty ? 8 : 4,
+            paddingTop: isEmpty ? 8 : 6,
             borderTop: '1px solid var(--v3-border)',
           }}
         >
@@ -887,7 +902,12 @@ export default function Composer({projectId, isEmpty = false, defaultProvider}: 
         </div>
       )}
 
-      {!error && (
+      {/* 2026-05-14 UX feedback — was a permanent "⌘ + Enter to submit"
+          hint occupying ~16px below the composer on every render. Hidden
+          when in-thread (non-empty) to give the chat history that space;
+          empty-state keeps the hint as a discoverability nudge for first-
+          time users. */}
+      {!error && isEmpty && (
         <div
           style={{
             marginTop: 8,

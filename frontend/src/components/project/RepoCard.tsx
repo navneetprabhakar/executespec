@@ -69,7 +69,13 @@ export default function RepoCard({
 
   return (
     <div className='rounded-sm border border-[var(--border-default)] bg-[var(--gray-100)] p-3'>
-      <div className='flex items-start justify-between gap-4'>
+      {/* 2026-05-14 UX feedback — was `flex items-start justify-between gap-4`
+          unconditionally. On 375px the right-side action cluster (Sync /
+          Install webhook / Unlink) squeezed the meta column to <50% of the
+          card and the "webhook: not set up" chip rendered BEHIND the Unlink
+          button. Stack vertically on phone (meta first, full-width action
+          row below), inline on sm+. */}
+      <div className='flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 sm:gap-4'>
         <div className='min-w-0'>
           <div className='flex items-center gap-2'>
             <span className='font-mono text-xs truncate text-primary'>
@@ -85,7 +91,7 @@ export default function RepoCard({
               {repo.scope}
             </span>
           </div>
-          <div className='mt-1 flex items-center gap-2 text-[11px] text-muted'>
+          <div className='mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted'>
             <StackBadge stack={stack} />
             <span>branch: {repo.defaultBranch}</span>
             {/* R-322 — surface the customer-declared monorepo project root
@@ -128,10 +134,10 @@ export default function RepoCard({
             </span>
           </div>
         </div>
-        <div className='flex gap-1.5 shrink-0'>
+        <div className='flex flex-wrap gap-1.5 sm:shrink-0'>
           <button
             onClick={() => onSync(repo.id)}
-            className='text-[11px] px-2 py-0.5 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary'
+            className='press-effect text-[11px] px-2.5 py-1 rounded-sm border border-[var(--border-default)] text-muted hover:text-primary'
           >
             Sync
           </button>
@@ -140,14 +146,14 @@ export default function RepoCard({
               onClick={doInstallHook}
               disabled={installingHook}
               title='Install a pull_request webhook using your GitHub PAT (requires admin:repo_hook)'
-              className='text-[11px] px-2 py-0.5 rounded-sm border border-accent-amber/40 text-accent-amber hover:bg-accent-amber/10 disabled:opacity-50'
+              className='press-effect text-[11px] px-2.5 py-1 rounded-sm border border-accent-amber/40 text-accent-amber hover:bg-accent-amber/10 disabled:opacity-50'
             >
               {installingHook ? 'Installing…' : 'Install webhook'}
             </button>
           )}
           <button
             onClick={() => onUnlink(repo.id)}
-            className='text-[11px] px-2 py-0.5 rounded-sm border border-accent-red/40 text-accent-red hover:bg-accent-red/10'
+            className='press-effect text-[11px] px-2.5 py-1 rounded-sm border border-accent-red/40 text-accent-red hover:bg-accent-red/10 ml-auto sm:ml-0'
           >
             Unlink
           </button>
