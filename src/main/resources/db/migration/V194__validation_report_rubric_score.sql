@@ -1,0 +1,27 @@
+-- V194 (PR-E Phase A, 2026-05-13) — additive rubric companion to the existing multiplicative
+-- verifiedScore.
+--
+-- Bug. verifiedScore is multiplicative: any zero factor (failed build, zero tests passed,
+-- REVIEW_FAILED verdict) collapses the entire headline number to 0. The user reported this
+-- pattern across all 28 historical runs on the audit project — "scoring is broken, every run
+-- shows 0/100." The mathematical interpretation is correct (zero × anything = zero), but the
+-- UX is broken: a run that built cleanly but had a flaky test ranks identically with a run that
+-- didn't compile, didn't get reviewed, and produced no test signal.
+--
+-- Fix (Phase A). Add an ADDITIVE rubric_score alongside verifiedScore. Each dimension
+-- contributes points to the rubric independently; missing a single dimension drops only its own
+-- share, not the whole score. The frontend can surface whichever is more informative for a
+-- given run (and PR-E Phase B will pick the dashboard headline).
+--
+-- Rubric (out of 100):
+--   * Build passed:                25 points
+--   * Tests passed (linear):       20 points
+--   * Reviewer verdict:            20 points (CLEAN=20 / FIXED_ISSUES=15 / UNRESOLVED=5 / FAILED=0)
+--   * Endpoint coverage (linear):  15 points
+--   * Critical-issue damper:       10 points (10 − 1 per critical, floored at 0)
+--   * Code quality (no review fail): 10 points
+--
+-- Nullable column — populated on every new ValidationReport write. Legacy rows stay NULL until
+-- a backfill ships in Phase B.
+
+ALTER TABLE validation_report ADD COLUMN rubric_score INTEGER;

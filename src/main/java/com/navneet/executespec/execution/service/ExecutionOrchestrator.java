@@ -62,6 +62,7 @@ public class ExecutionOrchestrator {
   private final com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
   private final com.navneet.executespec.harness.GateStore gateStore;
   private final ExecutionPlannerService plannerService;
+  private final ExecutionCostAggregator costAggregator;
 
   /**
    * V188 (2026-05-13) — toggle for the unified V2-dispatch path. When true (default), V3 launches
@@ -438,10 +439,16 @@ public class ExecutionOrchestrator {
           executionRunId,
           e.getMessage(),
           e);
+      // PR-I (2026-05-13) — preserve the exception message on the row so the dashboard can show
+      // "Planner crashed: <reason>" instead of a bare FAILED badge. Truncate to 4000 chars so a
+      // stack-trace-wrapped error can't blow the TEXT column out unexpectedly. (V184 set the
+      // analogous cap on agent_task.last_llm_failure for the same reason.)
+      String reason = "V2 submitRun failed: " + truncate(safeMessage(e), 3900);
       runCas.casUpdate(
           executionRunId,
           r -> {
             r.setStatus("FAILED");
+            r.setFailureReason(reason);
           });
       emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, null);
       return;
@@ -501,6 +508,39 @@ public class ExecutionOrchestrator {
         "dispatchUnified: exec {} → V2 {} still not at AWAITING_APPROVAL after 4h; giving up poll",
         executionRunId,
         pipelineRunId);
+    // PR-I (2026-05-13) — transition to FAILED + record reason. Pre-PR-I this method returned
+    // silently and left the ExecutionRun pinned in PLANNING forever — the frontend's plan-
+    // approval spinner never gave up, and operators couldn't tell a stuck planner from a
+    // healthy slow one. Now we fail loudly so the dashboard chip flips and the support flow
+    // has something to query.
+    runCas.casUpdate(
+        executionRunId,
+        r -> {
+          // Only flip to FAILED if we're still in PLANNING — a concurrent terminal transition
+          // (e.g. V2 finishing right at the deadline boundary) wins.
+          if ("PLANNING".equals(r.getStatus())) {
+            r.setStatus("FAILED");
+            r.setFailureReason(
+                "Planner timed out after "
+                    + (UNIFIED_MAX_WAIT_MS / 60_000)
+                    + " minutes waiting for AWAITING_APPROVAL on V2 run "
+                    + pipelineRunId);
+          }
+        });
+    emit(executionRunId, ExecutionEventTypes.EXEC_FAILED, null);
+  }
+
+  /** PR-I (2026-05-13) — null-safe Throwable.getMessage() with a sensible fallback. */
+  private static String safeMessage(Throwable t) {
+    if (t == null) return "unknown error";
+    if (t.getMessage() != null && !t.getMessage().isBlank()) return t.getMessage();
+    return t.getClass().getSimpleName();
+  }
+
+  /** PR-I (2026-05-13) — truncate to a max-length budget to keep TEXT columns bounded. */
+  private static String truncate(String s, int max) {
+    if (s == null) return null;
+    return s.length() <= max ? s : s.substring(0, max);
   }
 
   /**
@@ -545,20 +585,31 @@ public class ExecutionOrchestrator {
           case "CANCELLED", "ABORTED" -> "ABORTED";
           default -> "FAILED";
         };
+    // PR-I (2026-05-13) — propagate the V2 status reason / failure reason into the
+    // ExecutionRun.failureReason so the V3 dashboard surfaces a non-empty diagnostic on
+    // non-clean terminals. Prefer the explicit statusReason (PARTIAL with FINAL_BUILD_FAILED,
+    // TESTS_FAILED:2_OF_7, etc.); fall back to failureReason on hard FAILED rows.
+    boolean nonClean = !"COMPLETE".equals(v3Status);
+    String reason = null;
+    if (nonClean) {
+      reason =
+          v2Run.getStatusReason() != null && !v2Run.getStatusReason().isBlank()
+              ? v2Run.getStatusReason()
+              : v2Run.getFailureReason();
+      reason = truncate(reason, 3900);
+    }
+    final String reasonFinal = reason;
     runCas.casUpdate(
         executionRunId,
         r -> {
           r.setStatus(v3Status);
-          if (v2Run.getActualCostUsd() != null && v2Run.getActualCostUsd() > 0d) {
-            r.setTotalCostUsd(java.math.BigDecimal.valueOf(v2Run.getActualCostUsd()));
-          }
-          long tok =
-              (v2Run.getTotalInputTokens() == null ? 0L : v2Run.getTotalInputTokens().longValue())
-                  + (v2Run.getTotalOutputTokens() == null
-                      ? 0L
-                      : v2Run.getTotalOutputTokens().longValue());
-          if (tok > 0L) r.setTotalActualTokens(tok);
+          if (reasonFinal != null) r.setFailureReason(reasonFinal);
         });
+    // PR-A (2026-05-13) — recompute totals from the source-of-truth pipeline_run rows rather
+    // than reading the in-memory v2Run snapshot (which may lag if V2's cost flush + status flip
+    // raced our poll). The aggregator handles both unified (single linked pipeline_run) and any
+    // legacy attempt history on this execution row.
+    costAggregator.recomputeAndPersist(executionRunId);
     String eventType =
         "COMPLETE".equals(v3Status)
             ? ExecutionEventTypes.EXEC_COMPLETE

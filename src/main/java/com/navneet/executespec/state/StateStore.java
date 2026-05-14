@@ -786,6 +786,10 @@ public class StateStore {
     } else {
       combined = combined.and((root, q, cb) -> cb.isNull(root.get("archivedAt")));
     }
+    // V191 (PR-B-part-2) — always hide soft-deleted runs from every listing. Tombstones in the
+    // 30-day undo window are not even visible under the archived toggle; only the restore
+    // endpoint (POST /api/runs/{id}/restore) can pull them back.
+    combined = combined.and((root, q, cb) -> cb.isNull(root.get("deletedAt")));
 
     if (status != null && !status.isBlank()) {
       final String s = status;
@@ -806,22 +810,92 @@ public class StateStore {
   }
 
   /**
-   * Archive a run. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be archived. This
-   * is irreversible.
+   * Archive a run. Only terminal runs (COMPLETE, FAILED, CANCELLED, PARTIAL) can be archived.
+   *
+   * <p>V191 (PR-B-part-2, 2026-05-13) — archive is now reversible via {@link
+   * #unarchiveRun(String)}. The cleanup sweeper (PR-H) hard-deletes archived rows after the
+   * configured retention window. Re-archiving an already-archived run is a no-op (returns current
+   * state, no audit-log churn) so the frontend confirm-then-archive flow can double-tap on a slow
+   * network without erroring.
    */
   public PipelineRun archiveRun(String runId) {
     PipelineRun run =
         runRepo
             .findById(runId)
             .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+    // Idempotent: already-archived returns the current row instead of throwing.
     if (run.isArchived()) {
-      throw new IllegalStateException("Run is already archived");
+      return run;
+    }
+    if (run.isSoftDeleted()) {
+      throw new IllegalStateException("Run is deleted — restore before archiving.");
     }
     if (!List.of("COMPLETE", "FAILED", "CANCELLED", "PARTIAL").contains(run.getStatus())) {
       throw new IllegalStateException(
           "Only terminal runs can be archived. Current status: " + run.getStatus());
     }
     run.markArchived();
+    return runRepo.save(run);
+  }
+
+  /**
+   * V191 (PR-B-part-2) — reverse of {@link #archiveRun(String)}. Idempotent: unarchiving a run that
+   * isn't archived is a no-op. Cannot unarchive a soft-deleted run; restore first.
+   */
+  public PipelineRun unarchiveRun(String runId) {
+    PipelineRun run =
+        runRepo
+            .findById(runId)
+            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+    if (run.isSoftDeleted()) {
+      throw new IllegalStateException("Run is deleted — restore (not unarchive) to bring it back.");
+    }
+    if (!run.isArchived()) {
+      return run; // idempotent
+    }
+    run.setArchivedAt(null);
+    return runRepo.save(run);
+  }
+
+  /**
+   * V191 (PR-B-part-2) — soft-delete with 30-day undo window. The row disappears from every listing
+   * immediately; {@link #restoreRun(String)} brings it back within the window. After 30 days the
+   * cleanup sweeper (PR-H) hard-deletes the row.
+   *
+   * <p>Idempotent: re-deleting an already-deleted run does NOT extend the restore window. The
+   * timestamp is only stamped on the first transition.
+   */
+  public PipelineRun softDeleteRun(String runId) {
+    PipelineRun run =
+        runRepo
+            .findById(runId)
+            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+    if (run.isSoftDeleted()) {
+      return run; // idempotent — do not refresh the deletion timestamp
+    }
+    if (!List.of("COMPLETE", "FAILED", "CANCELLED", "PARTIAL").contains(run.getStatus())) {
+      throw new IllegalStateException(
+          "Only terminal runs can be deleted. Cancel an in-flight run first. Current status: "
+              + run.getStatus());
+    }
+    run.setDeletedAt(java.time.Instant.now());
+    return runRepo.save(run);
+  }
+
+  /**
+   * V191 (PR-B-part-2) — undo a soft-delete within the 30-day window. 404 if the run is not
+   * currently soft-deleted (caller bug or already-restored race). The archive state is preserved —
+   * a run that was archived-then-deleted comes back archived, not active.
+   */
+  public PipelineRun restoreRun(String runId) {
+    PipelineRun run =
+        runRepo
+            .findById(runId)
+            .orElseThrow(() -> new IllegalArgumentException("Run not found: " + runId));
+    if (!run.isSoftDeleted()) {
+      throw new IllegalStateException("Run is not deleted — nothing to restore.");
+    }
+    run.setDeletedAt(null);
     return runRepo.save(run);
   }
 

@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title th:text="${'Run ' + status + ' · ' + (runTitle != null ? runTitle : runId)}">Run complete</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+</head>
+<body style="margin:0;padding:0;background:#0B0D10;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;color:#ededed;line-height:1.55;">
+<!--
+  PR-O (2026-05-13) — GitHub-CI-style run completion email.
+  Layout mirrors GitHub's "All checks have passed / Some checks were not successful":
+    1. Hero band with status badge + run title (colour-coded green/amber/red)
+    2. Signal chips: verifiedScore · cost · PR pill
+    3. Optional one-liner with statusReason for non-CLEAN_COMPLETION terminations
+    4. Primary CTA → RunDetail page; secondary CTA → PR if pushed
+  Submitting user only (the dispatcher filters by createdByUserId).
+-->
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#0B0D10;">
+  <tr><td align="center" style="padding:24px 12px;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:560px;border-collapse:collapse;background:#14171C;border:1px solid #242A33;border-radius:14px;overflow:hidden;">
+
+      <!-- Hero band — colour-coded by status -->
+      <tr><td th:style="${
+              'padding:32px 28px 22px;border-bottom:1px solid #242A33;background:linear-gradient(135deg,' +
+              (isSuccess ? 'rgba(16,185,129,0.22),rgba(16,185,129,0.08)' :
+               isPartial ? 'rgba(245,158,11,0.22),rgba(245,158,11,0.08)' :
+                           'rgba(239,68,68,0.22),rgba(239,68,68,0.08)') +
+              ' 60%,transparent);'
+            }">
+        <div style="display:inline-flex;align-items:center;gap:10px;margin-bottom:18px;">
+          <span style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;background:#ededed;color:#0B0D10;border-radius:6px;font-weight:700;font-size:12px;">ES</span>
+          <span style="color:#ededed;font-weight:600;font-size:15px;letter-spacing:-0.01em;">ExecuteSpec</span>
+        </div>
+        <!-- Status pill with GitHub-style ✓/✗/⚠ glyph -->
+        <div th:style="${
+                'display:inline-block;border-radius:999px;padding:4px 12px;font-size:11px;letter-spacing:0.08em;text-transform:uppercase;margin-bottom:14px;border:1px solid ' +
+                (isSuccess ? 'rgba(16,185,129,0.45);background:rgba(16,185,129,0.14);color:#10B981' :
+                 isPartial ? 'rgba(245,158,11,0.45);background:rgba(245,158,11,0.14);color:#F59E0B' :
+                             'rgba(239,68,68,0.45);background:rgba(239,68,68,0.14);color:#EF4444')
+              }">
+          <span th:text="${isSuccess ? '✓ ' : isPartial ? '⚠ ' : '✗ '}">✓ </span><span th:text="${status}">COMPLETE</span>
+        </div>
+        <h1 style="margin:0;color:#ededed;font-size:22px;line-height:1.2;letter-spacing:-0.02em;font-weight:600;" th:text="${runTitle != null and !runTitle.isBlank() ? runTitle : 'Run ' + runId.substring(0,8)}">Run title here</h1>
+        <p th:if="${statusReason != null and !statusReason.isBlank() and !isSuccess}"
+           style="margin:10px 0 0;color:#C9D1DB;font-size:13px;line-height:1.5;"
+           th:text="${'Status reason: ' + statusReason}">Status reason: TESTS_FAILED:2_OF_7</p>
+      </td></tr>
+
+      <!-- Signal chip row -->
+      <tr><td style="padding:22px 28px 8px;">
+        <p style="margin:0 0 16px;color:#C9D1DB;font-size:14.5px;">Hi <span th:text="${firstName}" style="color:#ededed;font-weight:500;">there</span>,</p>
+        <p style="margin:0 0 16px;color:#C9D1DB;font-size:14.5px;">
+          <span th:if="${isSuccess}">Your run finished cleanly. Here's the summary:</span>
+          <span th:if="${isPartial}">Your run completed but some signals need attention:</span>
+          <span th:if="${isFailure}">Your run didn't finish. Details below:</span>
+        </p>
+
+        <table role="presentation" cellspacing="0" cellpadding="0" style="margin:8px 0 16px;">
+          <tr>
+            <td th:if="${verifiedScore != null}"
+                style="padding:8px 14px;background:#1A1E25;border:1px solid #242A33;border-radius:8px;margin-right:8px;font-size:12.5px;color:#C9D1DB;">
+              <span style="color:#8A94A6;">Verified&nbsp;score:&nbsp;</span><span style="color:#ededed;font-weight:600;" th:text="${#numbers.formatInteger(verifiedScore, 1) + '/100'}">87/100</span>
+            </td>
+          </tr>
+          <tr>
+            <td th:if="${costUsd != null}"
+                style="padding:8px 14px;background:#1A1E25;border:1px solid #242A33;border-radius:8px;margin-top:6px;font-size:12.5px;color:#C9D1DB;">
+              <span style="color:#8A94A6;">Cost:&nbsp;</span><span style="color:#ededed;font-weight:600;" th:text="${'$' + #numbers.formatDecimal(costUsd, 1, 2)}">$1.42</span>
+            </td>
+          </tr>
+        </table>
+
+        <!-- Primary CTA — RunDetail page -->
+        <table role="presentation" cellspacing="0" cellpadding="0" style="margin-top:8px;">
+          <tr><td>
+            <a th:href="${runUrl}" href="#"
+               style="display:inline-block;background:#5B8DEF;color:#ffffff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:500;font-size:14px;letter-spacing:-0.005em;margin-right:8px;">
+              View run &rarr;
+            </a>
+          </td>
+          <td th:if="${prUrl != null}">
+            <a th:href="${prUrl}" href="#"
+               style="display:inline-block;background:transparent;color:#C9D1DB;text-decoration:none;padding:12px 18px;border:1px solid #242A33;border-radius:8px;font-weight:500;font-size:14px;letter-spacing:-0.005em;">
+              View PR
+            </a>
+          </td></tr>
+        </table>
+
+        <p style="margin:22px 0 0;color:#8A94A6;font-size:12px;">
+          You're getting this email because run-completion alerts are enabled for your account.
+          <a th:href="${baseUrl + '/settings/notifications'}" href="#" style="color:#C9D1DB;text-decoration:underline;">Change your preferences</a>.
+        </p>
+      </td></tr>
+
+      <tr><td style="padding:18px 28px 22px;border-top:1px solid #242A33;background:#14171C;color:#8A94A6;font-size:11.5px;">
+        &copy; 2026 ExecuteSpec &middot; <a th:href="${baseUrl}" style="color:#C9D1DB;text-decoration:none;" href="#">executespec.ai</a>
+      </td></tr>
+    </table>
+  </td></tr>
+</table>
+</body></html>

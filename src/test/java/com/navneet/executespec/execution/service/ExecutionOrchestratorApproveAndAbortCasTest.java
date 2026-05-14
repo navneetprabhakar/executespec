@@ -49,6 +49,7 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
   @Mock com.navneet.executespec.state.repository.PipelineRunRepository pipelineRunRepo;
   @Mock com.navneet.executespec.harness.GateStore gateStore;
   @Mock ExecutionPlannerService plannerService;
+  @Mock ExecutionCostAggregator costAggregator;
 
   ExecutionOrchestrator orchestrator;
   ExecutionRunCasUpdater runCas;
@@ -74,7 +75,8 @@ class ExecutionOrchestratorApproveAndAbortCasTest {
             runCas,
             pipelineRunRepo,
             gateStore,
-            plannerService);
+            plannerService,
+            costAggregator);
   }
 
   @Test

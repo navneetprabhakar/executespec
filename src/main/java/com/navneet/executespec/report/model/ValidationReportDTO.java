@@ -42,6 +42,14 @@ public record ValidationReportDTO(
     Integer testsTotal,
     String reviewerVerdict, // CLEAN | FIXED_ISSUES | UNRESOLVED_ISSUES | REVIEW_FAILED
     Integer verifiedScore, // 0-100 deterministic score; primary UI badge
+    /**
+     * PR-E Phase A (2026-05-13, V194) — additive rubric score 0-100. Each dimension contributes
+     * points independently so a single zero factor doesn't collapse the headline number the way the
+     * multiplicative {@link #verifiedScore} does. UI picks the more informative of the two per run
+     * (typically: rubricScore when verifiedScore < rubricScore by ≥20 points). Null on pre-V194
+     * rows.
+     */
+    Integer rubricScore,
     // Preview URL at time of report generation (nullable — batch runs and expired previews won't
     // have this)
     String previewUrl) {}

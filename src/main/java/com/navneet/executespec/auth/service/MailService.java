@@ -323,6 +323,73 @@ public class MailService {
         toEmail, "Your executespec account has been suspended", "email/account-suspended", ctx);
   }
 
+  /**
+   * PR-O (2026-05-13) — GitHub-CI-style email sent to the run submitter when a run reaches a
+   * terminal state. The visual hierarchy mirrors GitHub's "All checks have passed" / "Some checks
+   * were not successful" mail: status badge first, run title second, key signals as a chip row,
+   * then the action buttons. Submitting user only — the dispatcher filters by {@code
+   * createdByUserId} so cross-org members don't get spammed.
+   *
+   * <p>Fields:
+   *
+   * <ul>
+   *   <li>{@code status} — COMPLETE / PARTIAL / FAILED / CANCELLED; drives the colour band
+   *   <li>{@code statusReason} — optional one-liner (e.g. "FINAL_BUILD_FAILED" / "TESTS_FAILED:
+   *       2_OF_7"); null for clean completions
+   *   <li>{@code runTitle} — short planner-generated title (falls back to truncated requirement)
+   *   <li>{@code verifiedScore} — 0-100 multiplicative score from the validation report; null when
+   *       scoring is skipped (e.g. cancelled before reviewer)
+   *   <li>{@code costUsd} — actual spend so the user knows what was billed
+   *   <li>{@code prUrl} — PR URL if the run pushed code; null otherwise
+   *   <li>{@code runUrl} — deep link back to the RunDetail page
+   * </ul>
+   */
+  @Async
+  public void sendRunCompletionEmail(
+      String toEmail,
+      String firstName,
+      String runId,
+      String status,
+      String statusReason,
+      String runTitle,
+      Double verifiedScore,
+      Double costUsd,
+      String prUrl,
+      String runUrl) {
+    Context ctx = new Context();
+    ctx.setVariable("firstName", firstName);
+    ctx.setVariable("runId", runId);
+    ctx.setVariable("status", status);
+    ctx.setVariable("statusReason", statusReason);
+    ctx.setVariable("runTitle", runTitle);
+    ctx.setVariable("verifiedScore", verifiedScore);
+    ctx.setVariable("costUsd", costUsd);
+    ctx.setVariable("prUrl", prUrl);
+    ctx.setVariable("runUrl", runUrl);
+    ctx.setVariable("baseUrl", baseUrl);
+    // Status-colour mapping for the email's hero band. Mirrors the StatusBadge palette so the
+    // visual cue is consistent between the in-app UI and the email.
+    boolean isSuccess = "COMPLETE".equals(status);
+    boolean isPartial = "PARTIAL".equals(status);
+    boolean isFailure = "FAILED".equals(status) || "CANCELLED".equals(status);
+    ctx.setVariable("isSuccess", isSuccess);
+    ctx.setVariable("isPartial", isPartial);
+    ctx.setVariable("isFailure", isFailure);
+    // Subject line follows GitHub's pattern: "✓ Run complete: <title>" / "✗ Run failed: <title>".
+    String emoji = isSuccess ? "✓" : isPartial ? "⚠" : "✗";
+    String verb =
+        isSuccess
+            ? "complete"
+            : isPartial ? "partially complete" : "FAILED".equals(status) ? "failed" : "cancelled";
+    String subject =
+        emoji
+            + " Run "
+            + verb
+            + ": "
+            + (runTitle != null && !runTitle.isBlank() ? runTitle : runId.substring(0, 8));
+    sendHtml(toEmail, subject, "email/run-completion", ctx);
+  }
+
   @Async
   public void sendBonusRunsEmail(String toEmail, String firstName, int quantity) {
     Context ctx = new Context();

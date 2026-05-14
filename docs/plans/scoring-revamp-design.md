@@ -1,7 +1,49 @@
 # Scoring revamp — context-driven, goal-graded reporting
 
-> Status: **design draft for discussion** (no code yet).
+> Status: **Phase A foundation SHIPPED (2026-05-14).** Phase B (UI swap) + Phase C (legacy retire) are still scoped here for follow-up.
 > Author: 2026-05-13 audit, run 6024f510 + user feedback "I don't trust the scoring."
+
+## Phase A status (shipped 2026-05-14)
+
+The foundational plumbing landed in branch `fix/project-a092ffaa-permanent-fixes-2026-05-13`:
+
+- **V197 migration** — `run_rubric_row` table with the full per-row schema (criterion,
+  verificationType, verificationSpec, category, weight, status, evidence, verifiedAt).
+- **Entity + repository** — `RunRubricRow.java` + `RunRubricRowRepository.java` (under
+  `com.navneet.executespec.scoring`). Stable status enum values (`PENDING / PASS / FAIL /
+  UNKNOWN`) and verification-type constants (`shell / file-exists / file-content / endpoint /
+  pr-state / manual`) live on the entity to keep the planner + verifier in lockstep.
+- **Verification engine** — `RunRubricVerifier` walks every PENDING row for a run after task
+  execution and dispatches to a handler keyed on `verificationType`. Phase A ships three
+  native handlers:
+  - `shell` — runs a command in the workspace dir, asserts exit code (60s timeout)
+  - `file-exists` — checks the workspace tree for a relative path (path-traversal guarded)
+  - `file-content` — reads a file + grep-style regex match
+  The remaining types (`endpoint`, `pr-state`, `manual`) return UNKNOWN with an explicit
+  "Phase B handler" evidence string — so a planner using them today doesn't break the run.
+- **Tests** — 23 unit tests pin every handler + the path-traversal safety + the
+  unknown-type fallback. No Spring context; real `@TempDir` filesystem.
+- **Empty-rubric short-circuit** — `verifier.verifyRubric(runId)` returns immediately when no
+  rows exist for the run. Existing pipeline runs (planner doesn't emit a rubric yet) pay
+  zero cost. Non-breaking by construction.
+
+**Sibling work (PR-R + PR-E, shipped on the same branch):** PR-R fixed the
+mechanical-test-factor bug (verifiedScore=50 on no-test-needed specs → 100 when
+`testCoverageLevel=GOOD`). PR-E added the additive `rubric_score` column so the UI can already
+display a confidence-banded score today. Both are running in production now; this Phase A
+foundation is the deeper redesign that supersedes them once Phase B ships.
+
+**What's NOT yet shipped (Phase A follow-up, separate session):**
+
+1. **Planner emits a rubric** — the new `submitRubric` tool needs to be added to
+   `ToolRegistry`, and `OutlinePlannerAgent`'s system prompt needs the rubric-emission
+   instructions. Until this lands, the `run_rubric_row` table stays empty in production.
+2. **Wire `RunRubricVerifier.verifyRubric(runId)` into the run-terminal flow** — call it from
+   `RunOrchestrator` right before the validation-report step. Cheap (short-circuits on empty
+   rubric) so it can land before the planner change.
+
+The work in this branch is the durable foundation. Phase A's "make verification happen if the
+planner emits a rubric" path works end-to-end; only the planner emitter is missing.
 
 ## Why the current scoring isn't trusted
 

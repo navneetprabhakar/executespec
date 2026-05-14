@@ -15,7 +15,15 @@ public record ProjectDto(
     String branchNamingPattern,
     String targetBranch,
     String defaultReviewers,
-    String githubOwner) {
+    String githubOwner,
+    /** V191 (PR-B-part-2) — when this project was archived (null = ACTIVE). */
+    Instant archivedAt,
+    /**
+     * V191 (PR-B-part-2) — when this project was soft-deleted (null = not deleted). Soft-deleted
+     * rows are normally filtered from listings; this field is only populated when an admin tool or
+     * a tombstone-restore view requests the raw row.
+     */
+    Instant deletedAt) {
   public static ProjectDto from(Project p) {
     return new ProjectDto(
         p.getId(),
@@ -28,6 +36,8 @@ public record ProjectDto(
         p.getBranchNamingPattern(),
         p.getTargetBranch(),
         p.getDefaultReviewers(),
-        p.getGithubOwner());
+        p.getGithubOwner(),
+        p.getArchivedAt(),
+        p.getDeletedAt());
   }
 }
