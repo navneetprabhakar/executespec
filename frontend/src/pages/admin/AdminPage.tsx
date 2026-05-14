@@ -700,16 +700,10 @@ function AdminPageInner() {
                             ))}
                           </select>
                         </td>
-                        <td
-                          className='px-4 py-3 text-secondary text-xs'
-                          data-label='Org Role'
-                        >
+                        <td className='px-4 py-3 text-secondary text-xs' data-label='Org Role'>
                           {u.orgRole ?? '—'}
                         </td>
-                        <td
-                          className='px-4 py-3 flex items-center gap-1.5'
-                          data-label=''
-                        >
+                        <td className='px-4 py-3 flex items-center gap-1.5' data-label=''>
                           <button
                             onClick={() =>
                               setGrantTarget({
