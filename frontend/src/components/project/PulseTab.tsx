@@ -30,6 +30,7 @@ import {
 import ScoreRing from '@/components/runs/ScoreRing';
 import StatusBadge from '@/components/shared/StatusBadge';
 import EmptyState from '@/components/shared/EmptyState';
+import Skeleton from '@/components/shared/Skeleton';
 import {useEffect, useState} from 'react';
 import * as api from '@/lib/api';
 import {useProjectStore} from '@/stores/useProjectStore';
@@ -525,7 +526,7 @@ function HealthCard({projectId, onOpenCode}: {projectId: string; onOpenCode: () 
         </h2>
       </div>
       {!health ? (
-        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>Loading…</div>
+        <Skeleton variant='text' count={3} className='mt-1' label='Loading workspace health' />
       ) : totalRepos === 0 ? (
         <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>No repos linked yet.</div>
       ) : (
@@ -742,7 +743,7 @@ function ActivityCard({
         </h2>
       </div>
       {loading ? (
-        <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>Loading…</div>
+        <Skeleton variant='text' count={4} className='mt-1' label='Loading recent activity' />
       ) : entries.length === 0 ? (
         <div style={{fontSize: 11.5, color: 'var(--v3-text-muted)'}}>
           No events in the last 30 days.

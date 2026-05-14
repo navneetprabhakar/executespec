@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import Skeleton from '@/components/shared/Skeleton';
 import {
   listOrgStandards,
   createOrgStandard,
@@ -68,7 +69,7 @@ export default function OrgStandardsManager({orgId}: {orgId: string}) {
         </div>
       )}
 
-      {!items && !error && <p className='text-xs text-muted'>Loading…</p>}
+      {!items && !error && <Skeleton variant='text' count={3} />}
 
       {items && items.length === 0 && (
         <p className='text-xs text-muted py-4 text-center'>

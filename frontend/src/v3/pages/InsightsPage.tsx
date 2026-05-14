@@ -403,21 +403,43 @@ export default function InsightsPage() {
           </div>
 
           {/* ── Spend by project ──────────────────────────────────────── */}
+          {/* 2026-05-14 (Phase 4) — mobile-first layout. Rows stack as
+              [name + total] on one line and [bar] below on phones; flow
+              back to inline (label / bar / total) at sm:+ where horizontal
+              space is comfortable. Bigger font (13px) on phone for
+              readability. */}
           {spendByProject.length > 0 && (
             <Section title='Spend by project'>
               {spendByProject.map((e) => (
                 <div
                   key={e.project.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 12,
-                    padding: '6px 0',
-                    fontSize: 12,
-                  }}
+                  className='py-2 sm:py-1.5 flex flex-col sm:flex-row sm:items-center sm:gap-3'
+                  style={{fontSize: 13}}
                 >
-                  <div style={{flex: '0 0 160px', color: 'var(--v3-text)'}}>{e.project.name}</div>
-                  <div style={{flex: 1, minWidth: 0}}>
+                  <div
+                    className='flex items-baseline justify-between sm:contents'
+                    style={{minWidth: 0}}
+                  >
+                    <div
+                      className='text-secondary sm:flex-[0_0_160px]'
+                      style={{color: 'var(--v3-text)', minWidth: 0}}
+                    >
+                      <span className='truncate inline-block max-w-full align-bottom'>
+                        {e.project.name}
+                      </span>
+                    </div>
+                    <div
+                      className='sm:order-3 sm:flex-[0_0_120px] sm:text-right sm:ml-3'
+                      style={{
+                        color: 'var(--v3-text-muted)',
+                        textAlign: 'right',
+                        fontVariantNumeric: 'tabular-nums',
+                      }}
+                    >
+                      {e.runCount} runs · ${e.spend.toFixed(2)}
+                    </div>
+                  </div>
+                  <div className='mt-1.5 sm:mt-0 sm:flex-1' style={{minWidth: 0}}>
                     <div
                       style={{
                         height: 8,
@@ -435,11 +457,6 @@ export default function InsightsPage() {
                         }}
                       />
                     </div>
-                  </div>
-                  <div
-                    style={{flex: '0 0 100px', textAlign: 'right', color: 'var(--v3-text-muted)'}}
-                  >
-                    {e.runCount} runs · ${e.spend.toFixed(2)}
                   </div>
                 </div>
               ))}

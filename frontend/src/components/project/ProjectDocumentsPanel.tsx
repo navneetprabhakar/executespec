@@ -1,4 +1,5 @@
 import {useEffect, useRef, useState} from 'react';
+import Skeleton from '@/components/shared/Skeleton';
 import {Upload, FileText, Trash2, Loader2, CheckCircle2, AlertCircle} from 'lucide-react';
 import * as api from '@/lib/api';
 import type {ProjectDocumentRow} from '@/lib/api';
@@ -100,7 +101,7 @@ export default function ProjectDocumentsPanel({projectId}: {projectId: string}) 
       </div>
 
       {error && <div className='text-xs text-accent-red'>{error}</div>}
-      {loading && <div className='text-xs text-muted'>Loading…</div>}
+      {loading && <Skeleton variant='text' count={3} />}
 
       {!loading && docs.length === 0 && (
         <div className='text-xs text-muted border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)]'>

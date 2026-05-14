@@ -753,12 +753,12 @@ export default function RunConversation({runId}: Props) {
                 bubble can't push the bubble past viewport width. */}
             {msg.role === 'user' ? (
               /* User message — plain text bubble */
-              <div className='max-w-[85%] min-w-0 overflow-hidden rounded-sm px-3 sm:px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary rounded-br-sm'>
+              <div className='chat-bubble-content max-w-[85%] min-w-0 overflow-hidden rounded-sm px-3 sm:px-4 py-3 text-sm leading-relaxed bg-accent-blue/20 text-primary rounded-br-sm'>
                 <p className='whitespace-pre-wrap break-words'>{msg.content}</p>
               </div>
             ) : (
               /* Assistant message — rendered markdown */
-              <div className='max-w-[92%] sm:max-w-[90%] min-w-0 overflow-hidden rounded-sm px-3 sm:px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary rounded-bl-sm'>
+              <div className='chat-bubble-content max-w-[92%] sm:max-w-[90%] min-w-0 overflow-hidden rounded-sm px-3 sm:px-4 py-3 bg-[var(--gray-300)] border border-[var(--border-default)] text-secondary rounded-bl-sm'>
                 <MarkdownContent content={msg.content} compact />
               </div>
             )}

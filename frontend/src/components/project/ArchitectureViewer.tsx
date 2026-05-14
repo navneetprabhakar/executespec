@@ -1,4 +1,5 @@
 import {useEffect, useState} from 'react';
+import Skeleton from '@/components/shared/Skeleton';
 import {Loader2, Sparkles} from 'lucide-react';
 import * as api from '@/lib/api';
 import type {StalenessReport} from '@/lib/api';
@@ -216,7 +217,7 @@ export default function ArchitectureViewer({
       </div>
 
       {error && <div className='text-xs text-accent-red'>{error}</div>}
-      {loading && <div className='text-xs text-muted'>Loading…</div>}
+      {loading && <Skeleton variant='text' count={3} />}
 
       {!loading && !shown && (
         <div className='text-xs border border-dashed border-[var(--border-default)] rounded-sm p-6 text-center bg-[var(--gray-100)] space-y-1'>

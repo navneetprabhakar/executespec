@@ -68,6 +68,14 @@ export default function ComposeTab({projectId, defaultProvider}: Props) {
           gap: 14,
           padding: '4px 0 16px',
           overflowY: 'auto',
+          // 2026-05-14 (iOS pass) — keep rubber-band scroll inside the
+          // thread, don't propagate to <body> (which would let the page
+          // pull-to-refresh accidentally on long swipes). `pan-y` matches
+          // index.css's body fix so the user's vertical pan stays in this
+          // container even mid-momentum.
+          overscrollBehavior: 'contain',
+          WebkitOverflowScrolling: 'touch',
+          touchAction: 'pan-y',
         }}
       >
         {loading && (
@@ -116,6 +124,7 @@ function BubbleView({bubble}: {bubble: Bubble}) {
       }}
     >
       <div
+        className='chat-bubble-content'
         style={{
           maxWidth: 640,
           padding: '8px 12px',
@@ -126,6 +135,8 @@ function BubbleView({bubble}: {bubble: Bubble}) {
           fontSize: 13,
           lineHeight: 1.55,
           whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          overflowWrap: 'anywhere',
         }}
       >
         {bubble.kind === 'status' && bubble.status === 'planning' ? (
