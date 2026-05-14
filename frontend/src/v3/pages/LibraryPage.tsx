@@ -2,6 +2,7 @@ import {errMsg} from '@/lib/utils';
 import {useEffect, useMemo, useState} from 'react';
 import {Link} from 'react-router-dom';
 import {getLibraryFacets, listLibrary, type LibraryFacets, type ReadymadeListItem} from '@/lib/api';
+import FilterSheet from '@/components/shared/FilterSheet';
 
 /**
  * R-330 — Readymade Solutions gallery.
@@ -124,15 +125,22 @@ export default function LibraryPage() {
         </div>
       )}
 
-      {/* Filters row */}
-      <div style={{display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap'}}>
+      {/* Filters row.
+          2026-05-14 (P6) — desktop keeps the inline wrap-row that admins
+          like; phone collapses the 3 selects + search + "Hide locked"
+          button into a single "Filter (N)" bottom-sheet trigger via
+          FilterSheet so the rail doesn't eat 3-4 viewport rows. The
+          search input stays inline above the trigger because typing
+          is the most-common phone interaction. */}
+      <div className='mb-4 space-y-2 sm:space-y-0'>
         <input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder='Search solutions…'
+          className='w-full sm:w-auto sm:flex-[1_1_280px]'
           style={{
-            flex: '1 1 280px',
-            padding: '8px 12px',
+            display: 'block',
+            padding: '10px 12px',
             background: 'var(--v3-bg)',
             color: 'var(--v3-text)',
             border: '1px solid var(--v3-border)',
@@ -140,61 +148,64 @@ export default function LibraryPage() {
             fontSize: 13,
             outline: 'none',
             fontFamily: 'inherit',
+            minHeight: 44,
+            width: '100%',
           }}
         />
-        <select
-          value={categoryFilter}
-          onChange={(e) => setCategoryFilter(e.target.value)}
-          style={selectStyle}
+        <FilterSheet
+          activeCount={(categoryFilter ? 1 : 0) + (tierFilter ? 1 : 0) + (hideLocked ? 1 : 0)}
+          onReset={() => {
+            setCategoryFilter('');
+            setTierFilter('');
+            setHideLocked(false);
+          }}
+          inlineClassName='flex flex-wrap gap-2 mt-2 sm:mt-2'
         >
-          <option value=''>All categories</option>
-          {categories.map(({key}) => (
-            <option key={key} value={key}>
-              {humanize(key)}
-            </option>
-          ))}
-        </select>
-        <select
-          value={tierFilter}
-          onChange={(e) => setTierFilter(e.target.value)}
-          style={selectStyle}
-        >
-          <option value=''>All tiers</option>
-          <option value='FREE'>Free</option>
-          <option value='PRO'>Pro</option>
-          <option value='TEAM'>Team</option>
-          <option value='ENTERPRISE'>Enterprise</option>
-        </select>
-        {/* Audit r5 (P2-5, 2026-05-06) — quick "hide locked" toggle.
-            FREE users with ~3 unlocked / 28 cards saw mostly padlocks
-            on first paint. This pill flips the locked items off
-            without forcing them onto a hunt through filters. Locked
-            count surfaces honestly so the upgrade path stays visible. */}
-        {lockedCount > 0 && (
-          <button
-            type='button'
-            onClick={() => setHideLocked((v) => !v)}
-            aria-pressed={hideLocked}
-            style={{
-              padding: '8px 12px',
-              background: hideLocked ? 'var(--v3-brand)' : 'var(--v3-bg)',
-              color: hideLocked ? 'var(--v3-text-on-brand)' : 'var(--v3-text-muted)',
-              border: '1px solid ' + (hideLocked ? 'var(--v3-brand)' : 'var(--v3-border)'),
-              borderRadius: 6,
-              cursor: 'pointer',
-              fontSize: 12.5,
-              fontFamily: 'inherit',
-              fontWeight: 500,
-            }}
-            title={
-              hideLocked
-                ? `Showing only items your tier can use. ${lockedCount} hidden.`
-                : `Hide ${lockedCount} locked items. Upgrade options stay one click away on /pricing.`
-            }
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            style={selectStyle}
           >
-            {hideLocked ? `Show all (${lockedCount} locked)` : 'Hide locked'}
-          </button>
-        )}
+            <option value=''>All categories</option>
+            {categories.map(({key}) => (
+              <option key={key} value={key}>
+                {humanize(key)}
+              </option>
+            ))}
+          </select>
+          <select
+            value={tierFilter}
+            onChange={(e) => setTierFilter(e.target.value)}
+            style={selectStyle}
+          >
+            <option value=''>All tiers</option>
+            <option value='FREE'>Free</option>
+            <option value='PRO'>Pro</option>
+            <option value='TEAM'>Team</option>
+            <option value='ENTERPRISE'>Enterprise</option>
+          </select>
+          {lockedCount > 0 && (
+            <button
+              type='button'
+              onClick={() => setHideLocked((v) => !v)}
+              aria-pressed={hideLocked}
+              style={{
+                padding: '10px 12px',
+                background: hideLocked ? 'var(--v3-brand)' : 'var(--v3-bg)',
+                color: hideLocked ? 'var(--v3-text-on-brand)' : 'var(--v3-text-muted)',
+                border: '1px solid ' + (hideLocked ? 'var(--v3-brand)' : 'var(--v3-border)'),
+                borderRadius: 6,
+                cursor: 'pointer',
+                fontSize: 13,
+                fontFamily: 'inherit',
+                fontWeight: 500,
+                minHeight: 44,
+              }}
+            >
+              {hideLocked ? `Show all (${lockedCount} locked)` : 'Hide locked'}
+            </button>
+          )}
+        </FilterSheet>
       </div>
 
       {/* Body */}

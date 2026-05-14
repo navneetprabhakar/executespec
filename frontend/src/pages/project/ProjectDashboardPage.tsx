@@ -9,6 +9,7 @@ import InlineRunDetail from '@/components/project/InlineRunDetail';
 import ProjectLaunchesList from '@/components/project/ProjectLaunchesList';
 import PostMergeBar from '@/components/project/PostMergeBar';
 import StatusBadge from '@/components/shared/StatusBadge';
+import MetaRow, {type MetaItem} from '@/components/shared/MetaRow';
 import PulseTab from '@/components/project/PulseTab';
 import CodeTab, {type CodeSubTab} from '@/components/project/CodeTab';
 // Single-surface retirement (2026-05-06) — chat-thread + composer
@@ -756,50 +757,35 @@ function SummaryBar({
   totalCostUsd?: number;
   avgScore?: number;
 }) {
-  // Render a single scrollable row of facts. Only show segments that
-  // actually have data so empty projects don't have 8 "—" placeholders.
-  const segments: {label: string; value: string; muted?: boolean}[] = [];
-  if (status) segments.push({label: '', value: status, muted: true});
-  if (provider) segments.push({label: '', value: provider});
-  if (githubOwner) segments.push({label: 'owner', value: githubOwner});
-  segments.push({label: 'repos', value: String(repoCount)});
-  if (completedRuns != null) segments.push({label: 'done', value: String(completedRuns)});
-  if (activeRuns != null && activeRuns > 0)
-    segments.push({label: 'active', value: String(activeRuns)});
-  if (failedRuns != null && failedRuns > 0)
-    segments.push({label: 'failed', value: String(failedRuns)});
-  if (avgScore != null && avgScore > 0) {
-    segments.push({label: 'score', value: `${Math.round(avgScore)}`});
-  }
-  if (totalCostUsd != null && totalCostUsd > 0) {
-    segments.push({label: 'spend', value: `$${totalCostUsd.toFixed(2)}`});
-  }
+  // 2026-05-14 (P1) — was a horizontally-scrolling dot-strip that wrapped
+  // to 5 rows on phones; now uses <MetaRow> which renders a 2-col
+  // label-above-value grid under sm: + dot-separated inline strip on
+  // desktop. Same data, better mobile hierarchy.
+  const items: (MetaItem | false | null)[] = [
+    status ? {label: 'Status', value: status, mono: true, tone: 'muted' as const} : null,
+    provider ? {label: 'Provider', value: provider, mono: true} : null,
+    githubOwner ? {label: 'Owner', value: githubOwner, mono: true} : null,
+    {label: 'Repos', value: String(repoCount), mono: true},
+    completedRuns != null ? {label: 'Done', value: String(completedRuns), mono: true} : null,
+    activeRuns != null && activeRuns > 0
+      ? {label: 'Active', value: String(activeRuns), mono: true}
+      : null,
+    failedRuns != null && failedRuns > 0
+      ? {label: 'Failed', value: String(failedRuns), mono: true, tone: 'danger' as const}
+      : null,
+    avgScore != null && avgScore > 0
+      ? {label: 'Score', value: String(Math.round(avgScore)), mono: true}
+      : null,
+    totalCostUsd != null && totalCostUsd > 0
+      ? {label: 'Spend', value: `$${totalCostUsd.toFixed(2)}`, mono: true}
+      : null,
+  ];
 
-  if (segments.length === 0) {
+  if (items.filter(Boolean).length === 0) {
     return <div className='text-[11px] text-muted'>No project metadata yet.</div>;
   }
 
-  return (
-    // X-10 (UX audit, 2026-05-03) — on <sm screens this collapses to a
-    // horizontally-scrollable row so it stays one line even with 9 segments
-    // (was wrapping to 5 rows on phones). Desktop keeps the wrap behaviour
-    // so power users can still see everything at once.
-    // 2026-05-10 mobile sweep iter-3 — add v3-scroll-fade-x so the last
-    // overflowing pill ("DON…", "SC…") reads as "more to scroll", not a bug.
-    <div className='flex sm:flex-wrap items-center gap-x-3 gap-y-1 text-[11px] overflow-x-auto scrollbar-hide v3-scroll-fade-x sm:overflow-visible sm:[mask-image:none] whitespace-nowrap sm:whitespace-normal -mx-3 px-3 sm:mx-0 sm:px-0'>
-      {segments.map((s, i) => (
-        <span key={i} className='inline-flex items-center gap-1 flex-shrink-0'>
-          {s.label && (
-            <span className='text-muted font-mono uppercase tracking-wider'>{s.label}</span>
-          )}
-          <span className={cn('font-mono', s.muted ? 'text-muted' : 'text-secondary')}>
-            {s.value}
-          </span>
-          {i < segments.length - 1 && <span className='text-muted'>·</span>}
-        </span>
-      ))}
-    </div>
-  );
+  return <MetaRow items={items} />;
 }
 
 function RunsSidebar({
