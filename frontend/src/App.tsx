@@ -142,6 +142,15 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 // chat-thread + composer is the default `Compose` tab inside
 // ProjectDashboardPage now.
 import Shell from '@/v3/components/Shell';
+// 2026-05-15 — agentic v2 A/B alternate. Lives entirely under /a/* routes.
+// See docs/design/agentic-v2-2026-05-15.md for the full thesis.
+import AgenticShell from '@/agentic/AgenticShell';
+import AgenticHome from '@/agentic/pages/HomePage';
+import AgenticActivity from '@/agentic/pages/ActivityPage';
+import AgenticProject from '@/agentic/pages/ProjectPage';
+import AgenticRun from '@/agentic/pages/RunPage';
+import AgenticLibrary from '@/agentic/pages/LibraryPage';
+import AgenticSettings from '@/agentic/pages/SettingsPage';
 import HomeRedirectPage from '@/v3/pages/HomeRedirectPage';
 // R-341 (2026-04-29): LandingPage route converted to a Navigate redirect
 // to root (the static marketing site at executespec.ai is now the
@@ -355,6 +364,26 @@ export default function App() {
         {/* Legacy /v3/* paths — redirect to the unified URLs.  Single
           catch-all keeps existing bookmarks + marketing copy working. */}
         <Route path='/v3/*' element={<LegacyUrlRedirect />} />
+
+        {/* ── Agentic v2 (A/B alternate) ─────────────────────────────
+            Lives under /a/*. Shares auth + API client + stores with the
+            v3 routes above. Toggle in/out via AvatarMenu → "Try the new
+            UI". Reuse of v3 pages happens by linking back to the legacy
+            URLs from inside v2 (e.g. RunPage links to /runs/:id?tab=plan
+            for full plan view). See docs/design/agentic-v2-2026-05-15.md. */}
+        <Route element={<ProtectedRoute />}>
+          <Route path='/a' element={<AgenticShell />}>
+            <Route index element={<Navigate to='/a/home' replace />} />
+            <Route path='home' element={<AgenticHome />} />
+            <Route path='activity' element={<AgenticActivity />} />
+            <Route path='projects/:projectId' element={<AgenticProject />} />
+            <Route path='projects/:projectId/runs/:runId' element={<AgenticRun />} />
+            <Route path='runs/:runId' element={<AgenticRun />} />
+            <Route path='library' element={<AgenticLibrary />} />
+            <Route path='migrations' element={<AgenticLibrary />} />
+            <Route path='settings' element={<AgenticSettings />} />
+          </Route>
+        </Route>
 
         {/* ── Protected app routes ──
          * Single-surface retirement (2026-05-06) — every protected

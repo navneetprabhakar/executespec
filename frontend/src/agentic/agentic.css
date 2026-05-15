@@ -1,0 +1,281 @@
+/* Agentic v2 — scoped tokens + utilities.
+ *
+ * 2026-05-15 — every selector is scoped under `.agentic-root` so v3 + v2
+ * tokens cohabit without leakage. Same Graphite + Signal palette as v3
+ * for visual continuity; the additions are role-specific (glass surfaces,
+ * spring motion, list-row primitives).
+ *
+ * See docs/design/agentic-v2-2026-05-15.md for the full design thesis.
+ */
+
+.agentic-root {
+  /* ── Surface ladder ─────────────────────────────────────────────── */
+  --a-bg: var(--c-graphite-0);
+  --a-surface: var(--c-graphite-2);
+  --a-surface-up: var(--c-graphite-3);
+  --a-surface-sunken: var(--c-graphite-1);
+
+  --a-glass: color-mix(in srgb, var(--c-graphite-0) 78%, transparent);
+  --a-glass-strong: color-mix(in srgb, var(--c-graphite-0) 92%, transparent);
+
+  /* ── Text ───────────────────────────────────────────────────────── */
+  --a-text: var(--c-ink-100);
+  --a-text-muted: var(--c-ink-300);
+  --a-text-subtle: var(--c-ink-400);
+
+  /* ── Borders ────────────────────────────────────────────────────── */
+  --a-hairline: color-mix(in srgb, var(--c-graphite-5) 60%, transparent);
+  --a-border: var(--c-graphite-6);
+  --a-border-strong: var(--c-graphite-7);
+
+  /* ── Brand ──────────────────────────────────────────────────────── */
+  --a-brand: #5b8def;
+  --a-brand-hover: #7aa5f5;
+  --a-brand-soft: color-mix(in srgb, #5b8def 14%, transparent);
+  --a-brand-ring: 0 0 0 4px color-mix(in srgb, #5b8def 20%, transparent);
+
+  /* ── Status (multichannel: colour + icon) ───────────────────────── */
+  --a-success: var(--c-success);
+  --a-progress: #5b89e0;
+  --a-warn: var(--c-warning);
+  --a-fail: var(--c-error);
+  --a-queued: var(--c-graphite-6);
+
+  /* ── Motion ─────────────────────────────────────────────────────── */
+  --a-spring: cubic-bezier(0.22, 1, 0.36, 1);
+  --a-spring-bounce: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --a-dur-fast: 140ms;
+  --a-dur: 220ms;
+  --a-dur-slow: 360ms;
+
+  /* ── Depth ──────────────────────────────────────────────────────── */
+  --a-shadow-rest:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --a-shadow-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 24px rgba(0, 0, 0, 0.55);
+  --a-shadow-sheet: 0 -16px 48px rgba(0, 0, 0, 0.55);
+  --a-shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.65);
+
+  /* ── Layout ─────────────────────────────────────────────────────── */
+  --a-radius-card: 14px;
+  --a-radius-pill: 9999px;
+  --a-radius-control: 10px;
+  --a-hit: 44px;
+
+  /* ── Type scale (single source of truth — JetBrains Mono) ───────── */
+  --a-text-2xs: 10.5px;
+  --a-text-xs: 11.5px;
+  --a-text-sm: 13px;
+  --a-text-base: 15px;
+  --a-text-lg: 17px;
+  --a-text-xl: 20px;
+  --a-text-2xl: 24px;
+  --a-text-3xl: 32px;
+  --a-text-4xl: 40px;
+
+  background: var(--a-bg);
+  color: var(--a-text);
+  font-family:
+    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-feature-settings: 'cv11' 1;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Light theme override — same role-tokens, paper surfaces. */
+[data-theme='light'] .agentic-root {
+  --a-bg: var(--c-paper-0);
+  --a-surface: var(--c-paper-1);
+  --a-surface-up: #ffffff;
+  --a-surface-sunken: var(--c-paper-2);
+
+  --a-glass: color-mix(in srgb, var(--c-paper-0) 78%, transparent);
+  --a-glass-strong: color-mix(in srgb, var(--c-paper-0) 92%, transparent);
+
+  --a-text: var(--c-graphite-0);
+  --a-text-muted: var(--c-graphite-5);
+  --a-text-subtle: #6e7785;
+
+  --a-hairline: var(--c-paper-3);
+  --a-border: var(--c-paper-4);
+  --a-border-strong: #a0a8b5;
+
+  --a-brand: #2563eb;
+  --a-brand-hover: #1d4ed8;
+  --a-brand-soft: color-mix(in srgb, #2563eb 14%, transparent);
+  --a-brand-ring: 0 0 0 4px color-mix(in srgb, #2563eb 18%, transparent);
+
+  --a-fail: #dc2626;
+  --a-warn: #d97706;
+
+  --a-shadow-rest:
+    inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --a-shadow-hover:
+    inset 0 1px 0 rgba(255, 255, 255, 0.8), 0 8px 24px rgba(15, 23, 42, 0.1);
+}
+
+/* ── Chrome heights (shared with JS via getComputedStyle / data attrs) ─ */
+.agentic-root {
+  --a-top: 56px;
+  /* Desktop: no bottom nav — the floating AgentInput sits 12px above the
+     viewport bottom. Mobile override (below) lifts it to 60px above the
+     bottom nav. */
+  --a-bottom: 12px;
+}
+@media (max-width: 768px) {
+  .agentic-root {
+    --a-top: 52px;
+    --a-bottom: 60px;
+  }
+}
+
+/* ── Layouts ──────────────────────────────────────────────────────── */
+.agentic-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+.agentic-main {
+  flex: 1;
+  width: 100%;
+  margin: 0 auto;
+  max-width: 880px;
+  padding: 12px clamp(16px, 4vw, 24px)
+    calc(env(safe-area-inset-bottom, 0px) + 96px);
+}
+@media (min-width: 768px) {
+  .agentic-main {
+    padding-bottom: 120px;
+  }
+}
+
+/* ── Cards ────────────────────────────────────────────────────────── */
+.a-card {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-card);
+  box-shadow: var(--a-shadow-rest);
+  transition:
+    transform var(--a-dur-fast) var(--a-spring),
+    box-shadow var(--a-dur) var(--a-spring),
+    background var(--a-dur) var(--a-spring),
+    border-color var(--a-dur) var(--a-spring);
+}
+.a-card.is-tappable {
+  cursor: pointer;
+}
+.a-card.is-tappable:hover {
+  background: var(--a-surface-up);
+  box-shadow: var(--a-shadow-hover);
+  border-color: var(--a-border-strong);
+}
+.a-card.is-tappable:active {
+  transform: scale(0.99);
+}
+
+/* ── Press effect (universal) ────────────────────────────────────── */
+.a-press {
+  transition: transform 80ms cubic-bezier(0.4, 0, 0.6, 1);
+}
+.a-press:active {
+  transform: scale(0.96);
+}
+
+/* ── List group (iOS-style inset list) ───────────────────────────── */
+.a-list {
+  background: var(--a-surface);
+  border: 1px solid var(--a-border);
+  border-radius: var(--a-radius-card);
+  overflow: hidden;
+}
+.a-list-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  min-height: 52px;
+  font-size: var(--a-text-sm);
+  color: var(--a-text);
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--a-hairline);
+  text-align: left;
+  width: 100%;
+  cursor: pointer;
+  font-family: inherit;
+}
+.a-list-row:last-child {
+  border-bottom: none;
+}
+.a-list-row:hover {
+  background: var(--a-surface-up);
+}
+.a-list-row__chevron {
+  margin-left: auto;
+  color: var(--a-text-subtle);
+}
+.a-list-group__label {
+  font-size: var(--a-text-2xs);
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--a-text-subtle);
+  padding: 18px 14px 6px;
+}
+
+/* ── Reveal on mount (large-title style) ─────────────────────────── */
+@keyframes a-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.a-reveal {
+  animation: a-reveal 360ms var(--a-spring) both;
+}
+
+/* ── Status dot ──────────────────────────────────────────────────── */
+.a-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+.a-dot--success {
+  background: var(--a-success);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-success) 22%, transparent);
+}
+.a-dot--progress {
+  background: var(--a-progress);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-progress) 22%, transparent);
+  animation: a-pulse 1.4s ease-in-out infinite;
+}
+.a-dot--warn {
+  background: var(--a-warn);
+}
+.a-dot--fail {
+  background: var(--a-fail);
+}
+.a-dot--queued {
+  background: var(--a-queued);
+}
+@keyframes a-pulse {
+  0%, 100% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--a-progress) 22%, transparent); }
+  50%      { box-shadow: 0 0 0 6px color-mix(in srgb, var(--a-progress) 12%, transparent); }
+}
+
+/* ── Reduced motion ──────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .agentic-root *,
+  .agentic-root *::before,
+  .agentic-root *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
