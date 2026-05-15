@@ -1,5 +1,5 @@
 /**
- * Agentic v2 shell — the chrome wrapper for every /a/* route.
+ * v4 shell — the chrome wrapper for every /v4/* route.
  *
  * Wraps every route in:
  *   - <TopBar/>      sticky glass header
@@ -8,8 +8,9 @@
  *   - <AgentInput/>  always-reachable agent composer
  *
  * Mounts ErrorBoundary at the page level so a broken route can't blank
- * the entire v2 surface. Adds `agentic-root` to <html> so the scoped
- * tokens cascade.
+ * the entire v4 surface. Adds `v4-root` to the body so the scoped
+ * tokens cascade. v4 is the next generation after the v3 chrome — the
+ * A/B alternate the user is evaluating.
  */
 import {useEffect} from 'react';
 import {Outlet, useLocation} from 'react-router-dom';
@@ -18,31 +19,31 @@ import TopBar from './components/TopBar';
 import BottomNav from './components/BottomNav';
 import AgentInput from './components/AgentInput';
 import {useAuthStore} from '@/stores/useAuthStore';
-import './agentic.css';
+import './v4.css';
 
 interface Props {
   /** When false, suppresses the AgentInput (used by auth pages). */
   withAgentInput?: boolean;
 }
 
-export default function AgenticShell({withAgentInput = true}: Props) {
+export default function V4Shell({withAgentInput = true}: Props) {
   const location = useLocation();
   const user = useAuthStore((s) => s.user);
 
   useEffect(() => {
-    document.documentElement.classList.add('agentic-active');
+    document.documentElement.classList.add('v4-active');
     return () => {
-      document.documentElement.classList.remove('agentic-active');
+      document.documentElement.classList.remove('v4-active');
     };
   }, []);
 
   // Hide the agent input on auth pages / read-only public surfaces.
   const HIDE_INPUT_PREFIXES = [
-    '/a/login',
-    '/a/register',
-    '/a/forgot-password',
-    '/a/reset-password',
-    '/a/verify-email',
+    '/v4/login',
+    '/v4/register',
+    '/v4/forgot-password',
+    '/v4/reset-password',
+    '/v4/verify-email',
   ];
   const inputHidden =
     !withAgentInput ||
@@ -50,10 +51,10 @@ export default function AgenticShell({withAgentInput = true}: Props) {
     HIDE_INPUT_PREFIXES.some((p) => location.pathname.startsWith(p));
 
   return (
-    <div className='agentic-root agentic-shell'>
+    <div className='v4-root v4-shell'>
       <TopBar />
-      <main id='main' tabIndex={-1} className='agentic-main'>
-        <ErrorBoundary key={location.pathname} region='agentic-shell'>
+      <main id='main' tabIndex={-1} className='v4-main'>
+        <ErrorBoundary key={location.pathname} region='v4-shell'>
           <Outlet />
         </ErrorBoundary>
       </main>

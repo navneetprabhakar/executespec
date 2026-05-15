@@ -1,5 +1,5 @@
 /**
- * Tiny global store for the agent input's contextual label.
+ * v4 — tiny global store for the agent input's contextual label.
  *
  * When a page sets a context (e.g. ProjectPage sets "Hostel Eval"), the
  * shell-mounted AgentInput shows "In <name>" above the textarea so users
@@ -9,14 +9,14 @@
  */
 import {create} from 'zustand';
 
-interface AgentContext {
+interface V4Context {
   label?: string;
   projectId?: string;
   set: (ctx: {label?: string; projectId?: string}) => void;
   clear: () => void;
 }
 
-export const useAgentContext = create<AgentContext>((set) => ({
+export const useV4Context = create<V4Context>((set) => ({
   label: undefined,
   projectId: undefined,
   set: (ctx) => set({label: ctx.label, projectId: ctx.projectId}),

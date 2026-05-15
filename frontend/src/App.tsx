@@ -142,15 +142,20 @@ import RunsNewLanding from '@/pages/onboarding/RunsNewLanding';
 // chat-thread + composer is the default `Compose` tab inside
 // ProjectDashboardPage now.
 import Shell from '@/v3/components/Shell';
-// 2026-05-15 — agentic v2 A/B alternate. Lives entirely under /a/* routes.
-// See docs/design/agentic-v2-2026-05-15.md for the full thesis.
-import AgenticShell from '@/agentic/AgenticShell';
-import AgenticHome from '@/agentic/pages/HomePage';
-import AgenticActivity from '@/agentic/pages/ActivityPage';
-import AgenticProject from '@/agentic/pages/ProjectPage';
-import AgenticRun from '@/agentic/pages/RunPage';
-import AgenticLibrary from '@/agentic/pages/LibraryPage';
-import AgenticSettings from '@/agentic/pages/SettingsPage';
+// 2026-05-15 — v4 A/B alternate. Lives entirely under /v4/* routes. v3
+// is the current production chrome; v4 is the next-generation agent-first
+// alternate the user is evaluating. See docs/design/v4-2026-05-15.md for
+// the full thesis.
+import V4Shell from '@/v4/Shell';
+import V4Home from '@/v4/pages/HomePage';
+import V4Activity from '@/v4/pages/ActivityPage';
+import V4Project from '@/v4/pages/ProjectPage';
+import V4ProjectInspect from '@/v4/pages/ProjectInspectPage';
+import V4ProjectRepos from '@/v4/pages/ProjectReposPage';
+import V4Embed from '@/v4/pages/EmbedPage';
+import V4Run from '@/v4/pages/RunPage';
+import V4Library from '@/v4/pages/LibraryPage';
+import V4Settings from '@/v4/pages/SettingsPage';
 import HomeRedirectPage from '@/v3/pages/HomeRedirectPage';
 // R-341 (2026-04-29): LandingPage route converted to a Navigate redirect
 // to root (the static marketing site at executespec.ai is now the
@@ -365,23 +370,36 @@ export default function App() {
           catch-all keeps existing bookmarks + marketing copy working. */}
         <Route path='/v3/*' element={<LegacyUrlRedirect />} />
 
-        {/* ── Agentic v2 (A/B alternate) ─────────────────────────────
-            Lives under /a/*. Shares auth + API client + stores with the
-            v3 routes above. Toggle in/out via AvatarMenu → "Try the new
-            UI". Reuse of v3 pages happens by linking back to the legacy
-            URLs from inside v2 (e.g. RunPage links to /runs/:id?tab=plan
-            for full plan view). See docs/design/agentic-v2-2026-05-15.md. */}
+        {/* ── v4 (A/B alternate) ──────────────────────────────────────
+            Lives under /v4/*. Shares auth + API client + stores with the
+            v3 routes above. Toggle in/out via AvatarMenu → "✨ Try v4".
+            Every deep surface (architecture, tech-debt, code-review,
+            repos manager, run sub-pages) renders inside the v4 chrome —
+            users never leave v4 by clicking inside it. See
+            docs/design/v4-2026-05-15.md. */}
         <Route element={<ProtectedRoute />}>
-          <Route path='/a' element={<AgenticShell />}>
-            <Route index element={<Navigate to='/a/home' replace />} />
-            <Route path='home' element={<AgenticHome />} />
-            <Route path='activity' element={<AgenticActivity />} />
-            <Route path='projects/:projectId' element={<AgenticProject />} />
-            <Route path='projects/:projectId/runs/:runId' element={<AgenticRun />} />
-            <Route path='runs/:runId' element={<AgenticRun />} />
-            <Route path='library' element={<AgenticLibrary />} />
-            <Route path='migrations' element={<AgenticLibrary />} />
-            <Route path='settings' element={<AgenticSettings />} />
+          <Route path='/v4' element={<V4Shell />}>
+            <Route index element={<Navigate to='/v4/home' replace />} />
+            <Route path='home' element={<V4Home />} />
+            <Route path='activity' element={<V4Activity />} />
+            <Route path='projects/:projectId' element={<V4Project />} />
+            <Route
+              path='projects/:projectId/repos'
+              element={<V4ProjectRepos />}
+            />
+            <Route
+              path='projects/:projectId/inspect/:panel'
+              element={<V4ProjectInspect />}
+            />
+            <Route
+              path='projects/:projectId/runs/:runId'
+              element={<V4Run />}
+            />
+            <Route path='runs/:runId' element={<V4Run />} />
+            <Route path='library' element={<V4Library />} />
+            <Route path='migrations' element={<V4Library />} />
+            <Route path='settings' element={<V4Settings />} />
+            <Route path='settings/:surface' element={<V4Embed />} />
           </Route>
         </Route>
 

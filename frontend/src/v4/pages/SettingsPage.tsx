@@ -82,7 +82,7 @@ export default function SettingsPage() {
 
       {/* Identity card */}
       <section
-        className='a-card a-reveal'
+        className='v4-card v4-reveal'
         style={{
           padding: '16px',
           marginBottom: 20,
@@ -100,8 +100,8 @@ export default function SettingsPage() {
             width: 48,
             height: 48,
             borderRadius: 9999,
-            background: 'var(--a-brand-soft)',
-            color: 'var(--a-brand)',
+            background: 'var(--v4-brand-soft)',
+            color: 'var(--v4-brand)',
             fontWeight: 700,
             fontSize: 18,
           }}
@@ -111,9 +111,9 @@ export default function SettingsPage() {
         <div style={{flex: 1, minWidth: 0}}>
           <div
             style={{
-              fontSize: 'var(--a-text-base)',
+              fontSize: 'var(--v4-text-base)',
               fontWeight: 600,
-              color: 'var(--a-text)',
+              color: 'var(--v4-text)',
               whiteSpace: 'nowrap',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -123,8 +123,8 @@ export default function SettingsPage() {
           </div>
           <div
             style={{
-              fontSize: 'var(--a-text-xs)',
-              color: 'var(--a-text-subtle)',
+              fontSize: 'var(--v4-text-xs)',
+              color: 'var(--v4-text-subtle)',
               marginTop: 2,
             }}
           >
@@ -150,7 +150,7 @@ export default function SettingsPage() {
           title='Password & sign-in'
           detail='Change password, MFA'
           chevron
-          onClick={() => navigate('/settings')}
+          onClick={() => navigate('/v4/settings/account')}
         />
       </ListGroup>
 
@@ -161,7 +161,7 @@ export default function SettingsPage() {
           title='Billing & plan'
           detail={`${tierLabel} · usage + invoices`}
           chevron
-          onClick={() => navigate('/billing')}
+          onClick={() => navigate('/v4/settings/billing')}
         />
         <ListGroup.Row
           icon={theme === 'light' ? <Moon size={14} /> : <Sun size={14} />}
@@ -179,7 +179,7 @@ export default function SettingsPage() {
           title='GitHub'
           detail={user?.hasGithubPat ? 'PAT configured' : 'Not connected'}
           chevron
-          onClick={() => navigate('/integrations')}
+          onClick={() => navigate('/v4/settings/integrations')}
         />
         <ListGroup.Row
           icon={<Github size={14} />}
@@ -187,7 +187,7 @@ export default function SettingsPage() {
           title='Bitbucket'
           detail={user?.hasBitbucketAppPassword ? 'App password set' : 'Not connected'}
           chevron
-          onClick={() => navigate('/integrations')}
+          onClick={() => navigate('/v4/settings/integrations')}
         />
         <ListGroup.Row
           icon={<Bell size={14} />}
@@ -195,7 +195,7 @@ export default function SettingsPage() {
           title='Notifications'
           detail='In-app, email, Slack'
           chevron
-          onClick={() => navigate('/settings#notifications')}
+          onClick={() => navigate('/v4/settings/account')}
         />
       </ListGroup>
 
@@ -206,7 +206,7 @@ export default function SettingsPage() {
             iconBg='#7AD1C8'
             title='Team & invites'
             chevron
-            onClick={() => navigate('/team')}
+            onClick={() => navigate('/v4/settings/team')}
           />
           <ListGroup.Row
             icon={<ShieldCheck size={14} />}
@@ -214,7 +214,7 @@ export default function SettingsPage() {
             title='Org settings'
             detail='Standards, SSO, default branch'
             chevron
-            onClick={() => navigate('/settings#org')}
+            onClick={() => navigate('/v4/settings/account')}
           />
         </ListGroup>
       )}
@@ -224,7 +224,7 @@ export default function SettingsPage() {
           title='Trust pack'
           detail='Security · privacy · DPA'
           chevron
-          href='/trust'
+          href='/v4/settings/trust'
         />
         <ListGroup.Row
           title='Export my data'
@@ -240,7 +240,7 @@ export default function SettingsPage() {
       >
         <ListGroup.Row
           icon={<ArrowLeftRight size={14} />}
-          iconBg='var(--a-brand)'
+          iconBg='var(--v4-brand)'
           title='Back to classic UI'
           detail='The current production interface'
           chevron
@@ -251,7 +251,7 @@ export default function SettingsPage() {
       <ListGroup>
         <ListGroup.Row
           icon={<LogOut size={14} />}
-          iconBg='var(--a-fail)'
+          iconBg='var(--v4-fail)'
           title='Sign out'
           destructive
           onClick={handleSignOut}
