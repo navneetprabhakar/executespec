@@ -28,7 +28,7 @@ export default function StatusDot({
 }) {
   return (
     <span
-      className={['a-dot', `a-dot--${tone}`, className].filter(Boolean).join(' ')}
+      className={['v4-dot', `a-dot--${tone}`, className].filter(Boolean).join(' ')}
       role='img'
       aria-label={LABEL[tone]}
       style={{width: size, height: size, ...(style || {})}}

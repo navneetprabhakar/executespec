@@ -22,10 +22,10 @@ const navLinkStyle = ({isActive}: {isActive: boolean}): CSSProperties => ({
   fontSize: 13,
   fontWeight: 500,
   textDecoration: 'none',
-  color: isActive ? 'var(--a-text)' : 'var(--a-text-muted)',
-  background: isActive ? 'var(--a-surface-up)' : 'transparent',
-  border: `1px solid ${isActive ? 'var(--a-border)' : 'transparent'}`,
-  transition: 'background 200ms var(--a-spring), color 200ms var(--a-spring)',
+  color: isActive ? 'var(--v4-text)' : 'var(--v4-text-muted)',
+  background: isActive ? 'var(--v4-surface-up)' : 'transparent',
+  border: `1px solid ${isActive ? 'var(--v4-border)' : 'transparent'}`,
+  transition: 'background 200ms var(--v4-spring), color 200ms var(--v4-spring)',
 });
 
 export default function TopBar() {
@@ -50,28 +50,28 @@ export default function TopBar() {
         position: 'sticky',
         top: 0,
         zIndex: 30,
-        height: 'var(--a-top)',
+        height: 'var(--v4-top)',
         display: 'flex',
         alignItems: 'center',
         gap: 10,
         padding: '0 clamp(12px, 4vw, 20px)',
-        background: 'var(--a-glass)',
+        background: 'var(--v4-glass)',
         backdropFilter: 'blur(18px) saturate(180%)',
         WebkitBackdropFilter: 'blur(18px) saturate(180%)',
-        borderBottom: '1px solid var(--a-hairline)',
+        borderBottom: '1px solid var(--v4-hairline)',
         paddingTop: 'env(safe-area-inset-top, 0px)',
       }}
     >
       <Link
-        to='/a/home'
-        aria-label='ExecuteSpec — agentic home'
-        className='a-press'
+        to='/v4/home'
+        aria-label='ExecuteSpec — v4 home'
+        className='v4-press'
         style={{
           display: 'inline-flex',
           alignItems: 'center',
           gap: 8,
           textDecoration: 'none',
-          color: 'var(--a-text)',
+          color: 'var(--v4-text)',
         }}
       >
         <span
@@ -84,12 +84,12 @@ export default function TopBar() {
             height: 28,
             borderRadius: 8,
             background:
-              'linear-gradient(135deg, var(--a-brand), var(--c-signal-teal))',
+              'linear-gradient(135deg, var(--v4-brand), var(--c-signal-teal))',
             color: '#fff',
             fontSize: 11,
             fontWeight: 800,
             letterSpacing: '0.02em',
-            boxShadow: 'var(--a-shadow-rest)',
+            boxShadow: 'var(--v4-shadow-rest)',
           }}
         >
           es
@@ -125,7 +125,7 @@ export default function TopBar() {
           <button
             type='button'
             onClick={() => openCmdK()}
-            className='a-press'
+            className='v4-press'
             aria-label='Open command palette'
             style={{
               display: 'inline-flex',
@@ -133,10 +133,10 @@ export default function TopBar() {
               gap: 8,
               padding: '6px 10px 6px 12px',
               minWidth: 240,
-              background: 'var(--a-surface-sunken)',
-              border: '1px solid var(--a-hairline)',
+              background: 'var(--v4-surface-sunken)',
+              border: '1px solid var(--v4-hairline)',
               borderRadius: 10,
-              color: 'var(--a-text-muted)',
+              color: 'var(--v4-text-muted)',
               fontFamily: 'inherit',
               fontSize: 12.5,
               fontWeight: 500,
@@ -153,12 +153,12 @@ export default function TopBar() {
                 alignItems: 'center',
                 gap: 2,
                 padding: '1px 5px',
-                background: 'var(--a-surface)',
-                border: '1px solid var(--a-hairline)',
+                background: 'var(--v4-surface)',
+                border: '1px solid var(--v4-hairline)',
                 borderRadius: 4,
                 fontSize: 10,
                 fontWeight: 600,
-                color: 'var(--a-text-subtle)',
+                color: 'var(--v4-text-subtle)',
               }}
             >
               <Command size={9} />K
@@ -174,27 +174,27 @@ export default function TopBar() {
           aria-label='Sections'
           style={{display: 'flex', alignItems: 'center', gap: 4}}
         >
-          <NavLink to='/a/activity' style={navLinkStyle}>
+          <NavLink to='/v4/activity' style={navLinkStyle}>
             Activity
           </NavLink>
-          <NavLink to='/a/library' style={navLinkStyle}>
+          <NavLink to='/v4/library' style={navLinkStyle}>
             Catalog
           </NavLink>
-          <NavLink to='/a/settings' style={navLinkStyle}>
+          <NavLink to='/v4/settings' style={navLinkStyle}>
             You
           </NavLink>
           <button
             type='button'
             onClick={() => navigate('/home')}
-            className='a-press'
+            className='v4-press'
             title='Switch to classic UI'
             style={{
               marginLeft: 6,
               padding: '4px 8px',
-              border: '1px solid var(--a-hairline)',
+              border: '1px solid var(--v4-hairline)',
               borderRadius: 8,
               background: 'transparent',
-              color: 'var(--a-text-subtle)',
+              color: 'var(--v4-text-subtle)',
               fontFamily: 'inherit',
               fontSize: 11,
               cursor: 'pointer',
@@ -207,15 +207,15 @@ export default function TopBar() {
         <button
           type='button'
           onClick={() => navigate('/home')}
-          className='a-press'
+          className='v4-press'
           title='Switch to classic UI'
           style={{
             marginLeft: 'auto',
             padding: '4px 8px',
-            border: '1px solid var(--a-hairline)',
+            border: '1px solid var(--v4-hairline)',
             borderRadius: 8,
             background: 'transparent',
-            color: 'var(--a-text-subtle)',
+            color: 'var(--v4-text-subtle)',
             fontFamily: 'inherit',
             fontSize: 10.5,
             cursor: 'pointer',

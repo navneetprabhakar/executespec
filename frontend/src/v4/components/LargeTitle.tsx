@@ -39,7 +39,7 @@ export default function LargeTitle({title, subtitle, trailing}: Props) {
           of this primitive; reserved for a future polish pass). */}
       <div ref={sentinelRef} aria-hidden='true' style={{height: 1}} />
       <header
-        className='a-reveal'
+        className='v4-reveal'
         style={{
           display: 'flex',
           alignItems: 'flex-end',
@@ -47,7 +47,7 @@ export default function LargeTitle({title, subtitle, trailing}: Props) {
           gap: 12,
           padding: '8px 0 16px',
           minHeight: compact ? 44 : 64,
-          transition: 'min-height 220ms var(--a-spring)',
+          transition: 'min-height 220ms var(--v4-spring)',
         }}
       >
         <div style={{minWidth: 0, flex: 1}}>
@@ -58,10 +58,10 @@ export default function LargeTitle({title, subtitle, trailing}: Props) {
               fontWeight: 700,
               letterSpacing: '-0.02em',
               lineHeight: 1.1,
-              color: 'var(--a-text)',
+              color: 'var(--v4-text)',
               fontFamily: 'inherit',
               transition:
-                'transform 220ms var(--a-spring), opacity 220ms var(--a-spring)',
+                'transform 220ms var(--v4-spring), opacity 220ms var(--v4-spring)',
               transform: compact ? 'translateY(-2px) scale(0.85)' : 'none',
               transformOrigin: 'left bottom',
             }}
@@ -72,11 +72,11 @@ export default function LargeTitle({title, subtitle, trailing}: Props) {
             <p
               style={{
                 margin: '4px 0 0',
-                fontSize: 'var(--a-text-sm)',
-                color: 'var(--a-text-muted)',
+                fontSize: 'var(--v4-text-sm)',
+                color: 'var(--v4-text-muted)',
                 lineHeight: 1.4,
                 opacity: compact ? 0 : 1,
-                transition: 'opacity 220ms var(--a-spring)',
+                transition: 'opacity 220ms var(--v4-spring)',
               }}
             >
               {subtitle}

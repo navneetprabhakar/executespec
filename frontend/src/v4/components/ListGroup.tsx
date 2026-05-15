@@ -22,14 +22,14 @@ interface GroupProps {
 function ListGroup({label, footer, children}: GroupProps) {
   return (
     <section style={{marginBottom: 20}}>
-      {label && <div className='a-list-group__label'>{label}</div>}
-      <div className='a-list'>{children}</div>
+      {label && <div className='v4-list-group__label'>{label}</div>}
+      <div className='v4-list'>{children}</div>
       {footer && (
         <p
           style={{
             margin: '8px 14px 0',
-            fontSize: 'var(--a-text-xs)',
-            color: 'var(--a-text-subtle)',
+            fontSize: 'var(--v4-text-xs)',
+            color: 'var(--v4-text-subtle)',
             lineHeight: 1.4,
           }}
         >
@@ -84,7 +84,7 @@ function Row({
             width: 28,
             height: 28,
             borderRadius: 8,
-            background: iconBg ?? 'var(--a-surface-up)',
+            background: iconBg ?? 'var(--v4-surface-up)',
             color: '#fff',
             flexShrink: 0,
           }}
@@ -103,8 +103,8 @@ function Row({
       >
         <span
           style={{
-            color: destructive ? 'var(--a-fail)' : 'var(--a-text)',
-            fontSize: 'var(--a-text-sm)',
+            color: destructive ? 'var(--v4-fail)' : 'var(--v4-text)',
+            fontSize: 'var(--v4-text-sm)',
             fontWeight: 500,
           }}
         >
@@ -113,8 +113,8 @@ function Row({
         {detail != null && (
           <span
             style={{
-              color: 'var(--a-text-subtle)',
-              fontSize: 'var(--a-text-xs)',
+              color: 'var(--v4-text-subtle)',
+              fontSize: 'var(--v4-text-xs)',
             }}
           >
             {detail}
@@ -124,8 +124,8 @@ function Row({
       {trailing != null && (
         <span
           style={{
-            color: 'var(--a-text-muted)',
-            fontSize: 'var(--a-text-sm)',
+            color: 'var(--v4-text-muted)',
+            fontSize: 'var(--v4-text-sm)',
             flexShrink: 0,
           }}
         >
@@ -136,7 +136,7 @@ function Row({
         <ChevronRight
           size={16}
           aria-hidden='true'
-          className='a-list-row__chevron'
+          className='v4-list-row__chevron'
         />
       )}
     </>
@@ -146,7 +146,7 @@ function Row({
     return (
       <a
         href={href}
-        className='a-list-row a-press'
+        className='v4-list-row v4-press'
         style={{textDecoration: 'none'}}
       >
         {inner}
@@ -155,12 +155,12 @@ function Row({
   }
   if (onClick) {
     return (
-      <button type='button' onClick={onClick} className='a-list-row a-press'>
+      <button type='button' onClick={onClick} className='v4-list-row v4-press'>
         {inner}
       </button>
     );
   }
-  return <div className='a-list-row' style={{cursor: 'default'}}>{inner}</div>;
+  return <div className='v4-list-row' style={{cursor: 'default'}}>{inner}</div>;
 }
 
 ListGroup.Row = Row;

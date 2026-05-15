@@ -17,18 +17,18 @@ import {useIsPhone} from '@/hooks/useIsMobile';
 import {useAuthStore} from '@/stores/useAuthStore';
 
 const HIDDEN_PREFIXES = [
-  '/a/login',
-  '/a/register',
-  '/a/forgot-password',
-  '/a/reset-password',
-  '/a/verify-email',
+  '/v4/login',
+  '/v4/register',
+  '/v4/forgot-password',
+  '/v4/reset-password',
+  '/v4/verify-email',
 ];
 
 const SLOTS: {to: string; label: string; Icon: LucideIcon}[] = [
-  {to: '/a/home', label: 'Home', Icon: Home},
-  {to: '/a/activity', label: 'Activity', Icon: Activity},
-  {to: '/a/library', label: 'Catalog', Icon: Library},
-  {to: '/a/settings', label: 'You', Icon: User},
+  {to: '/v4/home', label: 'Home', Icon: Home},
+  {to: '/v4/activity', label: 'Activity', Icon: Activity},
+  {to: '/v4/library', label: 'Catalog', Icon: Library},
+  {to: '/v4/settings', label: 'You', Icon: User},
 ];
 
 export default function BottomNav() {
@@ -45,9 +45,9 @@ export default function BottomNav() {
         return s.to;
       }
     }
-    if (location.pathname.startsWith('/a/projects/')) return '/a/home';
-    if (location.pathname.startsWith('/a/runs/')) return '/a/activity';
-    if (location.pathname.startsWith('/a/migrations')) return '/a/library';
+    if (location.pathname.startsWith('/v4/projects/')) return '/v4/home';
+    if (location.pathname.startsWith('/v4/runs/')) return '/v4/activity';
+    if (location.pathname.startsWith('/v4/migrations')) return '/v4/library';
     return null;
   })();
 
@@ -86,12 +86,12 @@ export default function BottomNav() {
         zIndex: 40,
         display: 'flex',
         alignItems: 'stretch',
-        background: 'var(--a-glass-strong)',
+        background: 'var(--v4-glass-strong)',
         backdropFilter: 'blur(18px) saturate(180%)',
         WebkitBackdropFilter: 'blur(18px) saturate(180%)',
-        borderTop: '1px solid var(--a-hairline)',
+        borderTop: '1px solid var(--v4-hairline)',
         paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-        height: 'calc(var(--a-bottom) + env(safe-area-inset-bottom, 0px))',
+        height: 'calc(var(--v4-bottom) + env(safe-area-inset-bottom, 0px))',
       }}
     >
       {pill && (
@@ -104,9 +104,9 @@ export default function BottomNav() {
             width: pill.width,
             height: 3,
             borderRadius: 9999,
-            background: 'var(--a-brand)',
+            background: 'var(--v4-brand)',
             transition:
-              'left 260ms var(--a-spring), width 260ms var(--a-spring)',
+              'left 260ms var(--v4-spring), width 260ms var(--v4-spring)',
           }}
         />
       )}
@@ -118,8 +118,8 @@ export default function BottomNav() {
             else slotRefs.current.delete(to);
           }}
           to={to}
-          end={to === '/a/home'}
-          className='a-press'
+          end={to === '/v4/home'}
+          className='v4-press'
           aria-current={activeKey === to ? 'page' : undefined}
           style={{
             flex: 1,
@@ -130,7 +130,7 @@ export default function BottomNav() {
             gap: 3,
             padding: '10px 4px 6px',
             textDecoration: 'none',
-            color: activeKey === to ? 'var(--a-brand)' : 'var(--a-text-muted)',
+            color: activeKey === to ? 'var(--v4-brand)' : 'var(--v4-text-muted)',
             fontSize: 10.5,
             fontWeight: activeKey === to ? 600 : 500,
             letterSpacing: '0.02em',

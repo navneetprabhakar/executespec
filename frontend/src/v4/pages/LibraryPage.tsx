@@ -115,8 +115,8 @@ export default function LibraryPage() {
               display: 'inline-flex',
               gap: 0,
               padding: 3,
-              background: 'var(--a-surface-sunken)',
-              border: '1px solid var(--a-hairline)',
+              background: 'var(--v4-surface-sunken)',
+              border: '1px solid var(--v4-hairline)',
               borderRadius: 9999,
             }}
           >
@@ -125,14 +125,14 @@ export default function LibraryPage() {
               role='tab'
               aria-selected={mode === 'solutions'}
               onClick={() => setMode('solutions')}
-              className='a-press'
+              className='v4-press'
               style={{
                 padding: '4px 12px',
                 fontSize: 11.5,
                 fontWeight: 600,
-                color: mode === 'solutions' ? '#fff' : 'var(--a-text-muted)',
+                color: mode === 'solutions' ? '#fff' : 'var(--v4-text-muted)',
                 background:
-                  mode === 'solutions' ? 'var(--a-brand)' : 'transparent',
+                  mode === 'solutions' ? 'var(--v4-brand)' : 'transparent',
                 border: 'none',
                 borderRadius: 9999,
                 cursor: 'pointer',
@@ -146,14 +146,14 @@ export default function LibraryPage() {
               role='tab'
               aria-selected={mode === 'migrations'}
               onClick={() => setMode('migrations')}
-              className='a-press'
+              className='v4-press'
               style={{
                 padding: '4px 12px',
                 fontSize: 11.5,
                 fontWeight: 600,
-                color: mode === 'migrations' ? '#fff' : 'var(--a-text-muted)',
+                color: mode === 'migrations' ? '#fff' : 'var(--v4-text-muted)',
                 background:
-                  mode === 'migrations' ? 'var(--a-brand)' : 'transparent',
+                  mode === 'migrations' ? 'var(--v4-brand)' : 'transparent',
                 border: 'none',
                 borderRadius: 9999,
                 cursor: 'pointer',
@@ -181,7 +181,7 @@ export default function LibraryPage() {
             left: 12,
             top: '50%',
             transform: 'translateY(-50%)',
-            color: 'var(--a-text-subtle)',
+            color: 'var(--v4-text-subtle)',
           }}
         />
         <input
@@ -195,10 +195,10 @@ export default function LibraryPage() {
           style={{
             width: '100%',
             padding: '10px 12px 10px 34px',
-            background: 'var(--a-surface-sunken)',
-            border: '1px solid var(--a-hairline)',
+            background: 'var(--v4-surface-sunken)',
+            border: '1px solid var(--v4-hairline)',
             borderRadius: 10,
-            color: 'var(--a-text)',
+            color: 'var(--v4-text)',
             fontFamily: 'inherit',
             fontSize: 13.5,
             outline: 'none',
@@ -219,7 +219,7 @@ export default function LibraryPage() {
           <button
             type='button'
             onClick={() => setCategory('')}
-            className='a-press'
+            className='v4-press'
             style={chipStyle(!category)}
           >
             All
@@ -229,7 +229,7 @@ export default function LibraryPage() {
               key={k}
               type='button'
               onClick={() => setCategory(category === k ? '' : k)}
-              className='a-press'
+              className='v4-press'
               style={chipStyle(category === k)}
             >
               {humanize(k)} <span style={{opacity: 0.6, marginLeft: 4}}>{n}</span>
@@ -239,15 +239,15 @@ export default function LibraryPage() {
       )}
 
       {items == null ? (
-        <p style={{color: 'var(--a-text-subtle)'}}>Loading catalog…</p>
+        <p style={{color: 'var(--v4-text-subtle)'}}>Loading catalog…</p>
       ) : filtered.length === 0 ? (
         <div
-          className='a-card'
+          className='v4-card'
           style={{
             padding: 28,
             textAlign: 'center',
-            color: 'var(--a-text-muted)',
-            fontSize: 'var(--a-text-sm)',
+            color: 'var(--v4-text-muted)',
+            fontSize: 'var(--v4-text-sm)',
           }}
         >
           No matches. Try a different search or category.
@@ -265,7 +265,7 @@ export default function LibraryPage() {
             <Link
               key={it.slug}
               to={`${detailBase}/${it.slug}`}
-              className='a-card is-tappable'
+              className='v4-card is-tappable'
               style={{
                 padding: 14,
                 textDecoration: 'none',
@@ -291,8 +291,8 @@ export default function LibraryPage() {
                     width: 28,
                     height: 28,
                     borderRadius: 8,
-                    background: 'var(--a-brand-soft)',
-                    color: 'var(--a-brand)',
+                    background: 'var(--v4-brand-soft)',
+                    color: 'var(--v4-brand)',
                     flexShrink: 0,
                   }}
                 >
@@ -304,9 +304,9 @@ export default function LibraryPage() {
                 </span>
                 <span
                   style={{
-                    fontSize: 'var(--a-text-sm)',
+                    fontSize: 'var(--v4-text-sm)',
                     fontWeight: 600,
-                    color: 'var(--a-text)',
+                    color: 'var(--v4-text)',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -319,7 +319,7 @@ export default function LibraryPage() {
                   aria-hidden='true'
                   style={{
                     marginLeft: 'auto',
-                    color: 'var(--a-text-subtle)',
+                    color: 'var(--v4-text-subtle)',
                     flexShrink: 0,
                   }}
                 />
@@ -328,8 +328,8 @@ export default function LibraryPage() {
                 <p
                   style={{
                     margin: 0,
-                    fontSize: 'var(--a-text-xs)',
-                    color: 'var(--a-text-muted)',
+                    fontSize: 'var(--v4-text-xs)',
+                    color: 'var(--v4-text-muted)',
                     lineHeight: 1.5,
                     display: '-webkit-box',
                     WebkitLineClamp: 2,
@@ -378,9 +378,9 @@ function chipStyle(active: boolean): React.CSSProperties {
     fontSize: 12,
     fontWeight: 500,
     borderRadius: 9999,
-    border: `1px solid ${active ? 'var(--a-brand)' : 'var(--a-border)'}`,
-    background: active ? 'var(--a-brand-soft)' : 'transparent',
-    color: active ? 'var(--a-brand)' : 'var(--a-text-muted)',
+    border: `1px solid ${active ? 'var(--v4-brand)' : 'var(--v4-border)'}`,
+    background: active ? 'var(--v4-brand-soft)' : 'transparent',
+    color: active ? 'var(--v4-brand)' : 'var(--v4-text-muted)',
     cursor: 'pointer',
     fontFamily: 'inherit',
   };
@@ -393,11 +393,11 @@ function Pill({children}: {children: React.ReactNode}) {
         display: 'inline-flex',
         alignItems: 'center',
         padding: '2px 7px',
-        background: 'var(--a-surface-sunken)',
-        border: '1px solid var(--a-hairline)',
+        background: 'var(--v4-surface-sunken)',
+        border: '1px solid var(--v4-hairline)',
         borderRadius: 4,
         fontSize: 10.5,
-        color: 'var(--a-text-subtle)',
+        color: 'var(--v4-text-subtle)',
       }}
     >
       {children}

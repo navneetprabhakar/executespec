@@ -73,7 +73,7 @@ export default function MissionCard({run}: {run: MissionRun}) {
 
   return (
     <article
-      className='a-card a-reveal'
+      className='v4-card v4-reveal'
       style={{padding: '18px 18px 14px'}}
     >
       {/* Header — status dot + verdict label inline */}
@@ -88,20 +88,20 @@ export default function MissionCard({run}: {run: MissionRun}) {
         <StatusDot tone={tone} size={10} />
         <span
           style={{
-            fontSize: 'var(--a-text-2xs)',
+            fontSize: 'var(--v4-text-2xs)',
             fontWeight: 700,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
             color:
               tone === 'success'
-                ? 'var(--a-success)'
+                ? 'var(--v4-success)'
                 : tone === 'warn'
-                  ? 'var(--a-warn)'
+                  ? 'var(--v4-warn)'
                   : tone === 'fail'
-                    ? 'var(--a-fail)'
+                    ? 'var(--v4-fail)'
                     : tone === 'progress'
-                      ? 'var(--a-progress)'
-                      : 'var(--a-text-muted)',
+                      ? 'var(--v4-progress)'
+                      : 'var(--v4-text-muted)',
           }}
         >
           {heroLabel}
@@ -109,8 +109,8 @@ export default function MissionCard({run}: {run: MissionRun}) {
         <span
           style={{
             marginLeft: 'auto',
-            fontSize: 'var(--a-text-xs)',
-            color: 'var(--a-text-subtle)',
+            fontSize: 'var(--v4-text-xs)',
+            color: 'var(--v4-text-subtle)',
           }}
         >
           {timeAgo(run.completedAt ?? run.startedAt)}
@@ -121,10 +121,10 @@ export default function MissionCard({run}: {run: MissionRun}) {
       <h3
         style={{
           margin: 0,
-          fontSize: 'var(--a-text-lg)',
+          fontSize: 'var(--v4-text-lg)',
           fontWeight: 600,
           lineHeight: 1.3,
-          color: 'var(--a-text)',
+          color: 'var(--v4-text)',
           letterSpacing: '-0.01em',
         }}
       >
@@ -149,24 +149,24 @@ export default function MissionCard({run}: {run: MissionRun}) {
               flexDirection: 'column',
               alignItems: 'center',
               padding: '6px 10px',
-              background: 'var(--a-surface-sunken)',
-              border: '1px solid var(--a-hairline)',
+              background: 'var(--v4-surface-sunken)',
+              border: '1px solid var(--v4-hairline)',
               borderRadius: 12,
               minWidth: 64,
             }}
           >
             <span
               style={{
-                fontSize: 'var(--a-text-2xl)',
+                fontSize: 'var(--v4-text-2xl)',
                 fontWeight: 700,
                 lineHeight: 1,
                 fontVariantNumeric: 'tabular-nums',
                 color:
                   score >= 80
-                    ? 'var(--a-success)'
+                    ? 'var(--v4-success)'
                     : score >= 60
-                      ? 'var(--a-warn)'
-                      : 'var(--a-fail)',
+                      ? 'var(--v4-warn)'
+                      : 'var(--v4-fail)',
               }}
             >
               {Math.round(score)}
@@ -177,7 +177,7 @@ export default function MissionCard({run}: {run: MissionRun}) {
                 fontWeight: 600,
                 letterSpacing: '0.08em',
                 textTransform: 'uppercase',
-                color: 'var(--a-text-subtle)',
+                color: 'var(--v4-text-subtle)',
                 marginTop: 2,
               }}
             >
@@ -190,8 +190,8 @@ export default function MissionCard({run}: {run: MissionRun}) {
             display: 'flex',
             flexWrap: 'wrap',
             gap: 8,
-            fontSize: 'var(--a-text-xs)',
-            color: 'var(--a-text-muted)',
+            fontSize: 'var(--v4-text-xs)',
+            color: 'var(--v4-text-muted)',
           }}
         >
           {run.buildOk != null && (
@@ -227,20 +227,20 @@ export default function MissionCard({run}: {run: MissionRun}) {
         <Link
           to={
             run.projectId
-              ? `/a/projects/${run.projectId}/runs/${run.runId}`
-              : `/a/runs/${run.runId}`
+              ? `/v4/projects/${run.projectId}/runs/${run.runId}`
+              : `/v4/runs/${run.runId}`
           }
-          className='a-press'
+          className='v4-press'
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: 6,
             padding: '0 14px',
             height: 36,
-            background: 'var(--a-brand)',
+            background: 'var(--v4-brand)',
             color: '#fff',
             borderRadius: 10,
-            fontSize: 'var(--a-text-sm)',
+            fontSize: 'var(--v4-text-sm)',
             fontWeight: 600,
             textDecoration: 'none',
             flex: '1 1 auto',
@@ -255,18 +255,18 @@ export default function MissionCard({run}: {run: MissionRun}) {
             href={run.githubPrUrl}
             target='_blank'
             rel='noreferrer'
-            className='a-press'
+            className='v4-press'
             style={{
               display: 'inline-flex',
               alignItems: 'center',
               gap: 6,
               padding: '0 14px',
               height: 36,
-              background: 'var(--a-surface-up)',
-              color: 'var(--a-text)',
-              border: '1px solid var(--a-border)',
+              background: 'var(--v4-surface-up)',
+              color: 'var(--v4-text)',
+              border: '1px solid var(--v4-border)',
               borderRadius: 10,
-              fontSize: 'var(--a-text-sm)',
+              fontSize: 'var(--v4-text-sm)',
               fontWeight: 600,
               textDecoration: 'none',
               flex: '1 1 auto',
@@ -284,12 +284,12 @@ export default function MissionCard({run}: {run: MissionRun}) {
 function Chip({tone, children}: {tone: 'success' | 'fail' | 'warn' | 'neutral'; children: React.ReactNode}) {
   const colour =
     tone === 'success'
-      ? 'var(--a-success)'
+      ? 'var(--v4-success)'
       : tone === 'fail'
-        ? 'var(--a-fail)'
+        ? 'var(--v4-fail)'
         : tone === 'warn'
-          ? 'var(--a-warn)'
-          : 'var(--a-text-muted)';
+          ? 'var(--v4-warn)'
+          : 'var(--v4-text-muted)';
   return (
     <span
       style={{
@@ -297,8 +297,8 @@ function Chip({tone, children}: {tone: 'success' | 'fail' | 'warn' | 'neutral'; 
         alignItems: 'center',
         gap: 4,
         padding: '3px 8px',
-        background: 'var(--a-surface-sunken)',
-        border: '1px solid var(--a-hairline)',
+        background: 'var(--v4-surface-sunken)',
+        border: '1px solid var(--v4-hairline)',
         borderRadius: 9999,
         color: colour,
         fontSize: 11,

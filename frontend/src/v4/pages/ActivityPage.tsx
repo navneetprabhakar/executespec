@@ -1,6 +1,6 @@
 /**
  * Activity — flat list of every run across every project. Replaces the
- * v3 /runs page; same data, agentic shape.
+ * v3 /runs page; same data, v4 shape.
  *
  * Filter row: Scope (Mine / Org / All) · Status pill. One Reset chip
  * when any filter is non-default. No marketing copy.
@@ -48,17 +48,17 @@ function Chip({
     <button
       type='button'
       onClick={onClick}
-      className='a-press'
+      className='v4-press'
       style={{
         display: 'inline-flex',
         alignItems: 'center',
         padding: '4px 12px',
-        fontSize: 'var(--a-text-xs)',
+        fontSize: 'var(--v4-text-xs)',
         fontWeight: 500,
         borderRadius: 9999,
-        border: `1px solid ${active ? 'var(--a-brand)' : 'var(--a-border)'}`,
-        background: active ? 'var(--a-brand-soft)' : 'transparent',
-        color: active ? 'var(--a-brand)' : 'var(--a-text-muted)',
+        border: `1px solid ${active ? 'var(--v4-brand)' : 'var(--v4-border)'}`,
+        background: active ? 'var(--v4-brand-soft)' : 'transparent',
+        color: active ? 'var(--v4-brand)' : 'var(--v4-text-muted)',
         cursor: 'pointer',
         fontFamily: 'inherit',
       }}
@@ -174,14 +174,14 @@ export default function ActivityPage() {
               setScope('mine');
               setStatus('');
             }}
-            className='a-press'
+            className='v4-press'
             style={{
               marginLeft: 'auto',
               padding: '4px 10px',
-              fontSize: 'var(--a-text-xs)',
-              color: 'var(--a-text-muted)',
+              fontSize: 'var(--v4-text-xs)',
+              color: 'var(--v4-text-muted)',
               background: 'transparent',
-              border: '1px solid var(--a-hairline)',
+              border: '1px solid var(--v4-hairline)',
               borderRadius: 9999,
               cursor: 'pointer',
               fontFamily: 'inherit',
@@ -193,33 +193,33 @@ export default function ActivityPage() {
       </section>
 
       {runs == null ? (
-        <p style={{color: 'var(--a-text-subtle)', fontSize: 'var(--a-text-sm)'}}>
+        <p style={{color: 'var(--v4-text-subtle)', fontSize: 'var(--v4-text-sm)'}}>
           Loading…
         </p>
       ) : runs.length === 0 ? (
         <div
-          className='a-card'
+          className='v4-card'
           style={{
             padding: 32,
             textAlign: 'center',
-            color: 'var(--a-text-muted)',
-            fontSize: 'var(--a-text-sm)',
+            color: 'var(--v4-text-muted)',
+            fontSize: 'var(--v4-text-sm)',
           }}
         >
           Nothing here yet. Type something into the agent below to start a run.
         </div>
       ) : (
-        <div className='a-list'>
+        <div className='v4-list'>
           {runs.map((r) => {
             const proj = r.projectId ? projectsById.get(r.projectId) : null;
             const dest = r.projectId
-              ? `/a/projects/${r.projectId}/runs/${r.runId}`
-              : `/a/runs/${r.runId}`;
+              ? `/v4/projects/${r.projectId}/runs/${r.runId}`
+              : `/v4/runs/${r.runId}`;
             return (
               <Link
                 key={r.runId}
                 to={dest}
-                className='a-list-row a-press'
+                className='v4-list-row v4-press'
                 style={{textDecoration: 'none'}}
               >
                 <StatusDot tone={toneFor(r.status)} />
@@ -234,8 +234,8 @@ export default function ActivityPage() {
                 >
                   <span
                     style={{
-                      color: 'var(--a-text)',
-                      fontSize: 'var(--a-text-sm)',
+                      color: 'var(--v4-text)',
+                      fontSize: 'var(--v4-text-sm)',
                       fontWeight: 500,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
@@ -246,8 +246,8 @@ export default function ActivityPage() {
                   </span>
                   <span
                     style={{
-                      color: 'var(--a-text-subtle)',
-                      fontSize: 'var(--a-text-xs)',
+                      color: 'var(--v4-text-subtle)',
+                      fontSize: 'var(--v4-text-xs)',
                     }}
                   >
                     {proj?.name ?? 'standalone'} · {r.status.toLowerCase()}
@@ -258,8 +258,8 @@ export default function ActivityPage() {
                 </div>
                 <span
                   style={{
-                    color: 'var(--a-text-subtle)',
-                    fontSize: 'var(--a-text-xs)',
+                    color: 'var(--v4-text-subtle)',
+                    fontSize: 'var(--v4-text-xs)',
                     flexShrink: 0,
                   }}
                 >

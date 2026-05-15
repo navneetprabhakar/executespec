@@ -29,7 +29,6 @@ import {Link, useNavigate, useParams} from 'react-router-dom';
 import {
   ChevronRight,
   FolderGit2,
-  ExternalLink,
   Activity as ActivityIcon,
 } from 'lucide-react';
 import {
@@ -45,7 +44,7 @@ import {fmtCost} from '@/lib/utils';
 import LargeTitle from '../components/LargeTitle';
 import MissionCard, {type MissionRun} from '../components/MissionCard';
 import StatusDot, {type StatusTone} from '../components/StatusDot';
-import {useAgentContext} from '../lib/useAgentContext';
+import {useV4Context} from '../lib/useV4Context';
 
 function toneFor(s: string): StatusTone {
   if (s === 'COMPLETE') return 'success';
@@ -71,11 +70,11 @@ export default function ProjectPage() {
   const [dashboard, setDashboard] = useState<ProjectDashboardDTO | null>(null);
   const [repos, setRepos] = useState<ProjectRepoLink[]>([]);
   const [runs, setRuns] = useState<RunSummary[]>([]);
-  const setAgentCtx = useAgentContext((s) => s.set);
-  const clearAgentCtx = useAgentContext((s) => s.clear);
+  const setAgentCtx = useV4Context((s) => s.set);
+  const clearAgentCtx = useV4Context((s) => s.clear);
 
   // Tell the shell-mounted AgentInput which project we're in. Resets on
-  // unmount so navigating to /a/home / /a/library / etc. drops the chip.
+  // unmount so navigating to /v4/home / /v4/library / etc. drops the chip.
   useEffect(() => {
     if (project?.name) {
       setAgentCtx({label: project.name, projectId});
@@ -138,33 +137,11 @@ export default function ProjectPage() {
 
   return (
     <>
-      <LargeTitle
-        title={project?.name ?? 'Workspace'}
-        subtitle={subtitle}
-        trailing={
-          <Link
-            to={`/projects/${projectId}`}
-            className='a-press'
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 4,
-              padding: '6px 12px',
-              fontSize: 'var(--a-text-xs)',
-              color: 'var(--a-text-muted)',
-              background: 'var(--a-surface-up)',
-              border: '1px solid var(--a-border)',
-              borderRadius: 9999,
-              textDecoration: 'none',
-              whiteSpace: 'nowrap',
-            }}
-            title='Open the full v3 workspace (architecture / tech-debt / contracts / …)'
-          >
-            Workbench
-            <ExternalLink size={11} aria-hidden='true' />
-          </Link>
-        }
-      />
+      {/* 2026-05-15 — Workbench escape hatch removed. Every inspect
+          surface (architecture / tech-debt / review / repos / docs /
+          memory / health) now lives at /v4/projects/:id/inspect/:panel
+          or /v4/projects/:id/repos so users never leave v4. */}
+      <LargeTitle title={project?.name ?? 'Workspace'} subtitle={subtitle} />
 
       {heroRun && (
         <div style={{marginBottom: 20}}>
@@ -185,17 +162,17 @@ export default function ProjectPage() {
           <h2
             style={{
               margin: 0,
-              fontSize: 'var(--a-text-base)',
+              fontSize: 'var(--v4-text-base)',
               fontWeight: 600,
             }}
           >
             Repos
           </h2>
           <Link
-            to={`/projects/${projectId}?tab=repos`}
+            to={`/v4/projects/${projectId}/repos`}
             style={{
-              fontSize: 'var(--a-text-xs)',
-              color: 'var(--a-brand)',
+              fontSize: 'var(--v4-text-xs)',
+              color: 'var(--v4-brand)',
               textDecoration: 'none',
             }}
           >
@@ -205,15 +182,15 @@ export default function ProjectPage() {
         {repos.length === 0 ? (
           <button
             type='button'
-            onClick={() => navigate(`/projects/${projectId}?tab=repos`)}
-            className='a-card is-tappable'
+            onClick={() => navigate(`/v4/projects/${projectId}/repos`)}
+            className='v4-card is-tappable'
             style={{
               width: '100%',
               padding: '14px',
-              border: '1px dashed var(--a-border)',
+              border: '1px dashed var(--v4-border)',
               background: 'transparent',
-              color: 'var(--a-text-muted)',
-              fontSize: 'var(--a-text-sm)',
+              color: 'var(--v4-text-muted)',
+              fontSize: 'var(--v4-text-sm)',
               fontFamily: 'inherit',
               cursor: 'pointer',
               textAlign: 'left',
@@ -222,15 +199,15 @@ export default function ProjectPage() {
             No repos linked yet — tap to add one.
           </button>
         ) : (
-          <div className='a-list'>
+          <div className='v4-list'>
             {repos.slice(0, 5).map((r) => (
-              <div key={r.repo.id} className='a-list-row' style={{cursor: 'default'}}>
-                <FolderGit2 size={16} aria-hidden='true' style={{color: 'var(--a-text-muted)'}} />
+              <div key={r.repo.id} className='v4-list-row' style={{cursor: 'default'}}>
+                <FolderGit2 size={16} aria-hidden='true' style={{color: 'var(--v4-text-muted)'}} />
                 <div style={{flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2}}>
                   <span
                     style={{
                       fontFamily: 'inherit',
-                      fontSize: 'var(--a-text-sm)',
+                      fontSize: 'var(--v4-text-sm)',
                       fontWeight: 500,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
@@ -242,8 +219,8 @@ export default function ProjectPage() {
                   </span>
                   <span
                     style={{
-                      fontSize: 'var(--a-text-xs)',
-                      color: 'var(--a-text-subtle)',
+                      fontSize: 'var(--v4-text-xs)',
+                      color: 'var(--v4-text-subtle)',
                     }}
                   >
                     {r.repo.defaultBranch}
@@ -270,29 +247,29 @@ export default function ProjectPage() {
             <h2
               style={{
                 margin: 0,
-                fontSize: 'var(--a-text-base)',
+                fontSize: 'var(--v4-text-base)',
                 fontWeight: 600,
               }}
             >
               Recent runs
             </h2>
             <Link
-              to={`/a/activity?projectId=${projectId}`}
+              to={`/v4/activity?projectId=${projectId}`}
               style={{
-                fontSize: 'var(--a-text-xs)',
-                color: 'var(--a-brand)',
+                fontSize: 'var(--v4-text-xs)',
+                color: 'var(--v4-brand)',
                 textDecoration: 'none',
               }}
             >
               See all →
             </Link>
           </div>
-          <div className='a-list'>
+          <div className='v4-list'>
             {runs.slice(1, 6).map((r) => (
               <Link
                 key={r.runId}
-                to={`/a/projects/${projectId}/runs/${r.runId}`}
-                className='a-list-row a-press'
+                to={`/v4/projects/${projectId}/runs/${r.runId}`}
+                className='v4-list-row v4-press'
                 style={{textDecoration: 'none'}}
               >
                 <StatusDot tone={toneFor(r.status)} />
@@ -307,8 +284,8 @@ export default function ProjectPage() {
                 >
                   <span
                     style={{
-                      color: 'var(--a-text)',
-                      fontSize: 'var(--a-text-sm)',
+                      color: 'var(--v4-text)',
+                      fontSize: 'var(--v4-text-sm)',
                       fontWeight: 500,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
@@ -319,8 +296,8 @@ export default function ProjectPage() {
                   </span>
                   <span
                     style={{
-                      color: 'var(--a-text-subtle)',
-                      fontSize: 'var(--a-text-xs)',
+                      color: 'var(--v4-text-subtle)',
+                      fontSize: 'var(--v4-text-xs)',
                     }}
                   >
                     {r.status.toLowerCase()}
@@ -329,13 +306,13 @@ export default function ProjectPage() {
                 </div>
                 <span
                   style={{
-                    color: 'var(--a-text-subtle)',
-                    fontSize: 'var(--a-text-xs)',
+                    color: 'var(--v4-text-subtle)',
+                    fontSize: 'var(--v4-text-xs)',
                   }}
                 >
                   {timeAgo(r.completedAt ?? r.startedAt)}
                 </span>
-                <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--a-text-subtle)'}} />
+                <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--v4-text-subtle)'}} />
               </Link>
             ))}
           </div>
@@ -345,49 +322,49 @@ export default function ProjectPage() {
       {/* Architecture / quality jump rows */}
       <section style={{marginBottom: 20}}>
         <div style={{padding: '0 4px 8px'}}>
-          <h2 style={{margin: 0, fontSize: 'var(--a-text-base)', fontWeight: 600}}>
+          <h2 style={{margin: 0, fontSize: 'var(--v4-text-base)', fontWeight: 600}}>
             Inspect
           </h2>
         </div>
-        <div className='a-list'>
+        <div className='v4-list'>
           <Link
-            to={`/projects/${projectId}?tab=code&codeSub=architecture`}
-            className='a-list-row a-press'
+            to={`/v4/projects/${projectId}/inspect/architecture`}
+            className='v4-list-row v4-press'
             style={{textDecoration: 'none'}}
           >
-            <ActivityIcon size={16} aria-hidden='true' style={{color: 'var(--a-brand)'}} />
-            <span style={{flex: 1, fontSize: 'var(--a-text-sm)', fontWeight: 500}}>
+            <ActivityIcon size={16} aria-hidden='true' style={{color: 'var(--v4-brand)'}} />
+            <span style={{flex: 1, fontSize: 'var(--v4-text-sm)', fontWeight: 500}}>
               Architecture doc
             </span>
-            <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--a-text-subtle)'}} />
+            <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--v4-text-subtle)'}} />
           </Link>
           <Link
-            to={`/projects/${projectId}?tab=code&codeSub=tech-debt`}
-            className='a-list-row a-press'
+            to={`/v4/projects/${projectId}/inspect/tech-debt`}
+            className='v4-list-row v4-press'
             style={{textDecoration: 'none'}}
           >
-            <ActivityIcon size={16} aria-hidden='true' style={{color: 'var(--a-warn)'}} />
-            <span style={{flex: 1, fontSize: 'var(--a-text-sm)', fontWeight: 500}}>
+            <ActivityIcon size={16} aria-hidden='true' style={{color: 'var(--v4-warn)'}} />
+            <span style={{flex: 1, fontSize: 'var(--v4-text-sm)', fontWeight: 500}}>
               Tech debt
             </span>
-            <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--a-text-subtle)'}} />
+            <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--v4-text-subtle)'}} />
           </Link>
           <Link
-            to={`/projects/${projectId}?tab=code&codeSub=review`}
-            className='a-list-row a-press'
+            to={`/v4/projects/${projectId}/inspect/review`}
+            className='v4-list-row v4-press'
             style={{textDecoration: 'none'}}
           >
-            <ActivityIcon size={16} aria-hidden='true' style={{color: 'var(--a-fail)'}} />
-            <span style={{flex: 1, fontSize: 'var(--a-text-sm)', fontWeight: 500}}>
+            <ActivityIcon size={16} aria-hidden='true' style={{color: 'var(--v4-fail)'}} />
+            <span style={{flex: 1, fontSize: 'var(--v4-text-sm)', fontWeight: 500}}>
               Code review
             </span>
-            <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--a-text-subtle)'}} />
+            <ChevronRight size={14} aria-hidden='true' style={{color: 'var(--v4-text-subtle)'}} />
           </Link>
         </div>
       </section>
 
       {/* AgentInput is mounted by AgenticShell. ProjectPage sets context
-          via useAgentContext above so the shell input shows "In <project>"
+          via useV4Context above so the shell input shows "In <project>"
           and submits with this projectId pre-filled. */}
     </>
   );

@@ -138,35 +138,35 @@ export default function HomePage() {
             <h2
               style={{
                 margin: 0,
-                fontSize: 'var(--a-text-base)',
+                fontSize: 'var(--v4-text-base)',
                 fontWeight: 600,
-                color: 'var(--a-text)',
+                color: 'var(--v4-text)',
               }}
             >
               Recent
             </h2>
             <Link
-              to='/a/activity'
+              to='/v4/activity'
               style={{
-                fontSize: 'var(--a-text-xs)',
-                color: 'var(--a-brand)',
+                fontSize: 'var(--v4-text-xs)',
+                color: 'var(--v4-brand)',
                 textDecoration: 'none',
               }}
             >
               See all →
             </Link>
           </div>
-          <div className='a-list'>
+          <div className='v4-list'>
             {runs.slice(1, 5).map((r) => {
               const proj = r.projectId ? projectsById.get(r.projectId) : null;
               const dest = r.projectId
-                ? `/a/projects/${r.projectId}/runs/${r.runId}`
-                : `/a/runs/${r.runId}`;
+                ? `/v4/projects/${r.projectId}/runs/${r.runId}`
+                : `/v4/runs/${r.runId}`;
               return (
                 <Link
                   key={r.runId}
                   to={dest}
-                  className='a-list-row a-press'
+                  className='v4-list-row v4-press'
                   style={{textDecoration: 'none'}}
                 >
                   <StatusDot tone={toneFor(r.status)} />
@@ -181,8 +181,8 @@ export default function HomePage() {
                   >
                     <span
                       style={{
-                        color: 'var(--a-text)',
-                        fontSize: 'var(--a-text-sm)',
+                        color: 'var(--v4-text)',
+                        fontSize: 'var(--v4-text-sm)',
                         fontWeight: 500,
                         whiteSpace: 'nowrap',
                         overflow: 'hidden',
@@ -193,8 +193,8 @@ export default function HomePage() {
                     </span>
                     <span
                       style={{
-                        color: 'var(--a-text-subtle)',
-                        fontSize: 'var(--a-text-xs)',
+                        color: 'var(--v4-text-subtle)',
+                        fontSize: 'var(--v4-text-xs)',
                       }}
                     >
                       {proj?.name ?? 'standalone'} · {r.status.toLowerCase()}
@@ -202,8 +202,8 @@ export default function HomePage() {
                   </div>
                   <span
                     style={{
-                      color: 'var(--a-text-subtle)',
-                      fontSize: 'var(--a-text-xs)',
+                      color: 'var(--v4-text-subtle)',
+                      fontSize: 'var(--v4-text-xs)',
                     }}
                   >
                     {timeAgo(r.completedAt ?? r.startedAt)}
@@ -222,9 +222,9 @@ export default function HomePage() {
             <h2
               style={{
                 margin: 0,
-                fontSize: 'var(--a-text-base)',
+                fontSize: 'var(--v4-text-base)',
                 fontWeight: 600,
-                color: 'var(--a-text)',
+                color: 'var(--v4-text)',
               }}
             >
               Workspaces
@@ -241,8 +241,8 @@ export default function HomePage() {
             {projects.slice(0, 4).map((p) => (
               <Link
                 key={p.id}
-                to={`/a/projects/${p.id}`}
-                className='a-card is-tappable'
+                to={`/v4/projects/${p.id}`}
+                className='v4-card is-tappable'
                 style={{
                   padding: '14px',
                   textDecoration: 'none',
@@ -268,15 +268,15 @@ export default function HomePage() {
                       width: 24,
                       height: 24,
                       borderRadius: 6,
-                      background: 'var(--a-brand-soft)',
-                      color: 'var(--a-brand)',
+                      background: 'var(--v4-brand-soft)',
+                      color: 'var(--v4-brand)',
                     }}
                   >
                     <GitBranch size={12} />
                   </span>
                   <span
                     style={{
-                      fontSize: 'var(--a-text-sm)',
+                      fontSize: 'var(--v4-text-sm)',
                       fontWeight: 600,
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
@@ -290,8 +290,8 @@ export default function HomePage() {
                   style={{
                     display: 'flex',
                     gap: 12,
-                    fontSize: 'var(--a-text-xs)',
-                    color: 'var(--a-text-subtle)',
+                    fontSize: 'var(--v4-text-xs)',
+                    color: 'var(--v4-text-subtle)',
                   }}
                 >
                   <span>{p.aiProvider?.toLowerCase() ?? 'mixed'}</span>
@@ -314,8 +314,8 @@ export default function HomePage() {
         }}
       >
         <Link
-          to='/a/library'
-          className='a-card is-tappable'
+          to='/v4/library'
+          className='v4-card is-tappable'
           style={{
             padding: '16px',
             textDecoration: 'none',
@@ -334,8 +334,8 @@ export default function HomePage() {
               width: 32,
               height: 32,
               borderRadius: 10,
-              background: 'var(--a-brand-soft)',
-              color: 'var(--a-brand)',
+              background: 'var(--v4-brand-soft)',
+              color: 'var(--v4-brand)',
             }}
           >
             <Library size={18} />
@@ -343,17 +343,17 @@ export default function HomePage() {
           <div style={{flex: 1, minWidth: 0}}>
             <div
               style={{
-                fontSize: 'var(--a-text-sm)',
+                fontSize: 'var(--v4-text-sm)',
                 fontWeight: 600,
-                color: 'var(--a-text)',
+                color: 'var(--v4-text)',
               }}
             >
               Browse catalog
             </div>
             <div
               style={{
-                fontSize: 'var(--a-text-xs)',
-                color: 'var(--a-text-subtle)',
+                fontSize: 'var(--v4-text-xs)',
+                color: 'var(--v4-text-subtle)',
               }}
             >
               Ready-made solutions + migrations
@@ -362,16 +362,16 @@ export default function HomePage() {
           <ArrowUpRight
             size={16}
             aria-hidden='true'
-            style={{color: 'var(--a-text-subtle)'}}
+            style={{color: 'var(--v4-text-subtle)'}}
           />
         </Link>
         <button
           type='button'
           onClick={() => navigate('/runs/new')}
-          className='a-card is-tappable'
+          className='v4-card is-tappable'
           style={{
             padding: '16px',
-            border: '1px solid var(--a-border)',
+            border: '1px solid var(--v4-border)',
             display: 'flex',
             alignItems: 'center',
             gap: 12,
@@ -390,9 +390,9 @@ export default function HomePage() {
               width: 32,
               height: 32,
               borderRadius: 10,
-              background: 'var(--a-surface-up)',
-              color: 'var(--a-text)',
-              border: '1px dashed var(--a-border)',
+              background: 'var(--v4-surface-up)',
+              color: 'var(--v4-text)',
+              border: '1px dashed var(--v4-border)',
             }}
           >
             <Plus size={18} />
@@ -400,7 +400,7 @@ export default function HomePage() {
           <div style={{flex: 1, minWidth: 0}}>
             <div
               style={{
-                fontSize: 'var(--a-text-sm)',
+                fontSize: 'var(--v4-text-sm)',
                 fontWeight: 600,
               }}
             >
@@ -408,8 +408,8 @@ export default function HomePage() {
             </div>
             <div
               style={{
-                fontSize: 'var(--a-text-xs)',
-                color: 'var(--a-text-subtle)',
+                fontSize: 'var(--v4-text-xs)',
+                color: 'var(--v4-text-subtle)',
               }}
             >
               Or just type into the agent below

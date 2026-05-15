@@ -6,7 +6,7 @@
  *   expands into a multi-line composer on focus.
  *
  * Desktop: floats at bottom-center of the viewport, max-width 720px,
- *   centered on the agentic-main column.
+ *   centered on the v4-main column.
  *
  * Behaviour:
  *   - Tap / focus → expand to multi-line, show send button.
@@ -14,7 +14,7 @@
  *   - Blur with empty text → collapse.
  *   - Pressing Escape closes the expanded state.
  *
- * Submission: navigates to /a/runs/new with the prefilled spec OR (if
+ * Submission: navigates to /v4/runs/new with the prefilled spec OR (if
  * a `onSubmit` callback is provided) calls the callback. For the v1 of
  * this primitive we just navigate; the rest of the new-run flow lives in
  * the existing v3 surfaces we'll wire in next iteration.
@@ -22,7 +22,7 @@
 import {useEffect, useRef, useState, type KeyboardEvent} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {ArrowUp, Sparkles} from 'lucide-react';
-import {useAgentContext} from '../lib/useAgentContext';
+import {useV4Context} from '../lib/useV4Context';
 
 interface Props {
   /** Optional placeholder; defaults to "Ask the agent…". */
@@ -30,7 +30,7 @@ interface Props {
   /** Called instead of default-navigation on submit. */
   onSubmit?: (text: string) => void;
   /** Context label shown left of the input. If undefined, falls back to
-   *  whatever the current page set via useAgentContext. */
+   *  whatever the current page set via useV4Context. */
   contextLabel?: string;
 }
 
@@ -39,8 +39,8 @@ export default function AgentInput({
   onSubmit,
   contextLabel,
 }: Props) {
-  const ctxLabel = useAgentContext((s) => s.label);
-  const ctxProjectId = useAgentContext((s) => s.projectId);
+  const ctxLabel = useV4Context((s) => s.label);
+  const ctxProjectId = useV4Context((s) => s.projectId);
   const effectiveLabel = contextLabel ?? ctxLabel;
   const [text, setText] = useState('');
   const [focused, setFocused] = useState(false);
@@ -86,7 +86,7 @@ export default function AgentInput({
         position: 'fixed',
         left: 0,
         right: 0,
-        bottom: 'var(--a-bottom)',
+        bottom: 'var(--v4-bottom)',
         zIndex: 35,
         padding:
           '8px clamp(12px, 4vw, 24px) calc(env(safe-area-inset-bottom, 0px) + 8px)',
@@ -98,14 +98,14 @@ export default function AgentInput({
           maxWidth: 720,
           margin: '0 auto',
           pointerEvents: 'auto',
-          background: 'var(--a-glass-strong)',
+          background: 'var(--v4-glass-strong)',
           backdropFilter: 'blur(18px) saturate(180%)',
           WebkitBackdropFilter: 'blur(18px) saturate(180%)',
-          border: '1px solid var(--a-border)',
+          border: '1px solid var(--v4-border)',
           borderRadius: focused ? 18 : 22,
-          boxShadow: focused ? 'var(--a-shadow-hover)' : 'var(--a-shadow-rest)',
+          boxShadow: focused ? 'var(--v4-shadow-hover)' : 'var(--v4-shadow-rest)',
           transition:
-            'border-radius 280ms var(--a-spring), box-shadow 280ms var(--a-spring), transform 280ms var(--a-spring)',
+            'border-radius 280ms var(--v4-spring), box-shadow 280ms var(--v4-spring), transform 280ms var(--v4-spring)',
           transform: focused ? 'translateY(-2px)' : 'none',
         }}
       >
@@ -113,15 +113,15 @@ export default function AgentInput({
           <div
             style={{
               padding: '6px 14px 0',
-              fontSize: 'var(--a-text-2xs)',
+              fontSize: 'var(--v4-text-2xs)',
               fontWeight: 600,
               letterSpacing: '0.06em',
               textTransform: 'uppercase',
-              color: 'var(--a-text-subtle)',
+              color: 'var(--v4-text-subtle)',
             }}
           >
             <span style={{opacity: 0.7}}>In</span>{' '}
-            <span style={{color: 'var(--a-text-muted)'}}>{effectiveLabel}</span>
+            <span style={{color: 'var(--v4-text-muted)'}}>{effectiveLabel}</span>
           </div>
         )}
         <div
@@ -136,11 +136,11 @@ export default function AgentInput({
             size={16}
             aria-hidden='true'
             style={{
-              color: 'var(--a-brand)',
+              color: 'var(--v4-brand)',
               flexShrink: 0,
               marginBottom: 10,
               opacity: focused || text ? 1 : 0.7,
-              transition: 'opacity 200ms var(--a-spring)',
+              transition: 'opacity 200ms var(--v4-spring)',
             }}
           />
           <textarea
@@ -163,9 +163,9 @@ export default function AgentInput({
               outline: 'none',
               resize: 'none',
               fontFamily: 'inherit',
-              fontSize: 'var(--a-text-base)',
+              fontSize: 'var(--v4-text-base)',
               lineHeight: 1.5,
-              color: 'var(--a-text)',
+              color: 'var(--v4-text)',
               padding: '8px 0',
               maxHeight: 132,
               overflowY: text.split('\n').length > 4 ? 'auto' : 'hidden',
@@ -176,7 +176,7 @@ export default function AgentInput({
             onClick={submit}
             disabled={!canSubmit}
             aria-label='Submit to agent'
-            className='a-press'
+            className='v4-press'
             style={{
               flexShrink: 0,
               width: 34,
@@ -184,15 +184,15 @@ export default function AgentInput({
               borderRadius: 999,
               border: 'none',
               background: canSubmit
-                ? 'var(--a-brand)'
-                : 'var(--a-surface-up)',
-              color: canSubmit ? '#fff' : 'var(--a-text-subtle)',
+                ? 'var(--v4-brand)'
+                : 'var(--v4-surface-up)',
+              color: canSubmit ? '#fff' : 'var(--v4-text-subtle)',
               cursor: canSubmit ? 'pointer' : 'not-allowed',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
               transition:
-                'background 220ms var(--a-spring), transform 80ms var(--a-spring)',
+                'background 220ms var(--v4-spring), transform 80ms var(--v4-spring)',
             }}
           >
             <ArrowUp size={16} aria-hidden='true' />
