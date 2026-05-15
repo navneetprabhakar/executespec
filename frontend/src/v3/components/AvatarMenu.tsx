@@ -126,6 +126,10 @@ export default function AvatarMenu() {
     caption?: string;
   };
   const items: MenuItem[] = [
+    // 2026-05-15 — agentic v2 A/B alternate. First menu item so testers
+    // can find it easily; persists nothing in localStorage so the next
+    // visit lands on whichever URL they last navigated.
+    {label: '✨ Try the new UI', onClick: () => navigate('/a/home')},
     {label: 'Account', onClick: () => navigate('/settings')},
     {label: 'Billing & plan', onClick: () => navigate('/billing')},
     {label: 'Pricing', onClick: () => navigate('/pricing')},
