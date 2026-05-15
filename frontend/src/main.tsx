@@ -3,6 +3,9 @@ import ReactDOM from 'react-dom/client';
 import {BrowserRouter} from 'react-router-dom';
 import App from './App';
 import './index.css';
+// Signal is the only design — load its tokens + component CSS globally
+// so public routes (login, pricing, trust, etc.) get the chrome too.
+import '@/signal/signal.css';
 // Syntax highlighting theme for the IDE file viewer (Code tab)
 import 'highlight.js/styles/github-dark-dimmed.css';
 // OpenTelemetry browser telemetry (traces + fetch instrumentation)
@@ -24,6 +27,23 @@ if (
   window.addEventListener('load', () => {
     navigator.serviceWorker.register('/sw.js').catch(() => {});
   });
+}
+
+// Signal is the only design — apply the .signal-app token scope to <html>
+// + restore the saved theme before first paint so there's no FOUC.
+if (typeof document !== 'undefined') {
+  document.documentElement.classList.add('signal-app');
+  try {
+    const saved = localStorage.getItem('signal:theme');
+    const sysDark =
+      window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    document.documentElement.setAttribute(
+      'data-signal-theme',
+      saved || (sysDark ? 'dark' : 'light'),
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
 // eslint-disable-next-line @typescript-eslint/no-non-null-assertion

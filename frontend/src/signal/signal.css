@@ -1,0 +1,1890 @@
+/* ─────────────────────────────────────────────────────────────
+   Signal — design tokens + component CSS
+   Scoped to the .signal-app root so it never leaks into v3/v4.
+   Theme via [data-signal-theme="dark"] on the same root.
+   ───────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap');
+
+.signal-app {
+  /* surfaces */
+  --signal-bg: #FBFAF6;
+  --signal-card-bg: #FFFFFF;
+  --signal-card-elev: #F4F2EB;
+  --signal-bg-translucent: rgba(251, 250, 246, 0.88);
+  --signal-phone-frame: #0E0F12;
+
+  /* text */
+  --signal-ink: #0E0F12;
+  --signal-ink-soft: #2D2E33;
+  --signal-text-dim: #6B6960;
+  --signal-text-mute: #9A968A;
+
+  /* feature dark card */
+  --signal-hero-bg-1: #0E0F12;
+  --signal-hero-bg-2: #15161B;
+  --signal-hero-text: #FBFAF6;
+  --signal-hero-text-dim: rgba(251, 250, 246, 0.6);
+  --signal-hero-text-mute: rgba(251, 250, 246, 0.15);
+  --signal-hero-glow: rgba(244, 211, 94, 0.18);
+  --signal-hero-btn-bg: rgba(255, 255, 255, 0.10);
+  --signal-hero-btn-bg-hover: rgba(255, 255, 255, 0.18);
+
+  /* hairlines */
+  --signal-hairline: #E6E2D8;
+  --signal-hairline-strong: #BFB9A8;
+
+  /* accents */
+  --signal-y: #F4D35E;
+  --signal-y-soft: #FBEEC0;
+  --signal-y-text: #5a4a08;
+  --signal-coral: #FF6B6B;
+  --signal-coral-soft: #FFD9D5;
+  --signal-coral-text: #8a2828;
+  --signal-mint: #7CE3B4;
+  --signal-mint-soft: #D6F4E2;
+  --signal-mint-text: #0E0F12;
+  --signal-mint-text-on-light: #1d6543;
+  --signal-lavender: #C4B8E0;
+  --signal-lavender-soft: #E8E2F3;
+  --signal-ocean: #5C9DDB;
+
+  /* radii + shadow */
+  --signal-r-sm: 10px;
+  --signal-r-md: 16px;
+  --signal-r-lg: 22px;
+  --signal-r-xl: 28px;
+  --signal-shadow: 0 6px 16px -6px rgba(14, 15, 18, 0.08);
+  --signal-shadow-strong: rgba(14, 15, 18, 0.18);
+}
+
+.signal-app[data-signal-theme="dark"] {
+  --signal-bg: #0F1014;
+  --signal-card-bg: #1B1C22;
+  --signal-card-elev: #0F1014;
+  --signal-bg-translucent: rgba(15, 16, 20, 0.88);
+  --signal-phone-frame: #34363D;
+
+  --signal-ink: #F3F1ED;
+  --signal-ink-soft: #D6D3CA;
+  --signal-text-dim: #9A9B95;
+  --signal-text-mute: #6E6E68;
+
+  --signal-hero-bg-1: #1F2028;
+  --signal-hero-bg-2: #15161B;
+  --signal-hero-text-dim: rgba(251, 250, 246, 0.55);
+  --signal-hero-text-mute: rgba(255, 255, 255, 0.08);
+  --signal-hero-glow: rgba(244, 211, 94, 0.22);
+  --signal-hero-btn-bg: rgba(255, 255, 255, 0.07);
+  --signal-hero-btn-bg-hover: rgba(255, 255, 255, 0.14);
+
+  --signal-hairline: rgba(255, 255, 255, 0.08);
+  --signal-hairline-strong: rgba(255, 255, 255, 0.16);
+
+  --signal-y-soft: rgba(244, 211, 94, 0.18);
+  --signal-y-text: #F4D35E;
+  --signal-coral-soft: rgba(255, 107, 107, 0.18);
+  --signal-coral-text: #FF8585;
+  --signal-mint-soft: rgba(124, 227, 180, 0.18);
+  --signal-mint-text-on-light: #7CE3B4;
+  --signal-lavender-soft: rgba(196, 184, 224, 0.16);
+}
+
+.signal-app, .signal-app * {
+  box-sizing: border-box;
+}
+
+.signal-app {
+  background: var(--signal-bg);
+  color: var(--signal-ink);
+  font-family: 'Space Grotesk', system-ui, sans-serif;
+  font-size: 16px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  min-height: 100vh;
+}
+.signal-app a { color: inherit; text-decoration: none; }
+.signal-app button { font-family: inherit; cursor: pointer; border: 0; background: transparent; color: inherit; }
+.signal-app input, .signal-app textarea, .signal-app select { font-family: inherit; color: inherit; }
+.signal-app .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+
+/* ─────────────────────────────────────────────────────────────
+   App shell — responsive sidebar + main content
+   2026-05-15 rewrite: replaces the prototype-review phone-frame
+   layout with a real desktop app shell.
+
+   Mobile  (<=767px): hamburger drawer, no sidebar visible, mobile
+                       header bar at top, bottom tab bar at bottom.
+   Tablet  (768-1023px): same as mobile (sidebar = drawer).
+   Desktop (>=1024px): persistent left sidebar (260px), main content
+                        area uses remaining width with safe max-width.
+   ───────────────────────────────────────────────────────────── */
+.signal-app.signal-shell {
+  min-height: 100vh;
+  display: flex;
+  background: var(--signal-bg);
+}
+
+/* Sidebar — drawer on mobile, persistent on desktop */
+.signal-app .signal-sidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 280px;
+  max-width: 86vw;
+  background: var(--signal-card-bg);
+  border-right: 1px solid var(--signal-hairline);
+  display: flex;
+  flex-direction: column;
+  z-index: 60;
+  transform: translateX(-100%);
+  transition: transform 0.24s ease;
+  overscroll-behavior: contain;
+}
+.signal-app .signal-sidebar.is-open { transform: translateX(0); }
+.signal-app .sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  z-index: 55;
+  animation: signal-fade-in 0.2s ease;
+}
+@keyframes signal-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (min-width: 1024px) {
+  .signal-app .signal-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    transform: none;
+    transition: none;
+    flex-shrink: 0;
+  }
+  .signal-app .sidebar-backdrop { display: none; }
+}
+
+.signal-app .sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 18px 14px;
+  border-bottom: 1px solid var(--signal-hairline);
+  flex-shrink: 0;
+}
+.signal-app .sidebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15.5px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--signal-ink);
+}
+.signal-app .logo-chip {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 15px;
+}
+.signal-app .logo-chip-sm {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  display: inline-grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 13px;
+  margin-right: 6px;
+  vertical-align: middle;
+}
+.signal-app .sidebar-close {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: transparent;
+  border: 0;
+  color: var(--signal-text-dim);
+  font-size: 18px;
+  cursor: pointer;
+}
+.signal-app .sidebar-close:hover { background: var(--signal-card-elev); color: var(--signal-ink); }
+@media (min-width: 1024px) {
+  .signal-app .sidebar-close { display: none; }
+}
+
+.signal-app .sidebar-nav {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px 10px 24px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--signal-hairline) transparent;
+}
+.signal-app .nav-group { margin-bottom: 18px; }
+.signal-app .nav-group:last-child { margin-bottom: 0; }
+.signal-app .nav-group-title {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--signal-text-mute);
+  padding: 10px 12px 6px;
+}
+.signal-app .nav-link {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--signal-text-dim);
+  text-decoration: none;
+  transition: background 0.1s, color 0.1s;
+}
+.signal-app .nav-link:hover {
+  background: var(--signal-card-elev);
+  color: var(--signal-ink);
+}
+.signal-app .nav-link.active {
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  font-weight: 600;
+}
+.signal-app .nav-link.active .nav-icon { color: var(--signal-bg); }
+.signal-app .nav-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  font-size: 14px;
+  color: var(--signal-text-mute);
+  flex-shrink: 0;
+}
+
+.signal-app .sidebar-foot {
+  border-top: 1px solid var(--signal-hairline);
+  padding: 12px 14px;
+  flex-shrink: 0;
+}
+.signal-app .sidebar-theme {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: transparent;
+  border: 1px solid var(--signal-hairline);
+  color: var(--signal-ink);
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+.signal-app .sidebar-theme:hover { background: var(--signal-card-elev); }
+.signal-app .sidebar-theme .theme-moon,
+.signal-app .sidebar-theme .theme-sun { display: inline-flex; }
+
+/* Light theme: show moon icon + "Dark mode" label */
+.signal-app[data-signal-theme='light'] .theme-sun,
+.signal-app[data-signal-theme='light'] .theme-lbl-light { display: none; }
+.signal-app[data-signal-theme='light'] .theme-moon,
+.signal-app[data-signal-theme='light'] .theme-lbl-dark { display: inline-flex; }
+/* Dark theme: show sun icon + "Light mode" label */
+.signal-app[data-signal-theme='dark'] .theme-moon,
+.signal-app[data-signal-theme='dark'] .theme-lbl-dark { display: none; }
+.signal-app[data-signal-theme='dark'] .theme-sun,
+.signal-app[data-signal-theme='dark'] .theme-lbl-light { display: inline-flex; }
+
+/* Main column */
+.signal-app .signal-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Mobile header bar (hamburger + brand + theme) */
+.signal-app .mobile-bar {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  background: var(--signal-bg-translucent);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  border-bottom: 1px solid var(--signal-hairline);
+  padding-top: max(10px, env(safe-area-inset-top));
+}
+.signal-app .mobile-menu-btn {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--signal-card-elev);
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  cursor: pointer;
+}
+.signal-app .mobile-menu-btn span {
+  display: block;
+  width: 16px;
+  height: 1.6px;
+  background: var(--signal-ink);
+  border-radius: 1px;
+}
+.signal-app .mobile-brand {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--signal-ink);
+}
+.signal-app .mobile-theme {
+  width: 38px;
+  height: 38px;
+  border-radius: 9px;
+  background: var(--signal-card-elev);
+  border: 0;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  color: var(--signal-ink);
+}
+@media (min-width: 1024px) {
+  .signal-app .mobile-bar { display: none; }
+}
+
+/* Content canvas — pages render their TopBar + Feed inside this. */
+.signal-app .signal-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-bottom: 80px; /* leave room for the mobile tabbar */
+}
+@media (min-width: 1024px) {
+  .signal-app .signal-content { padding-bottom: 0; }
+}
+
+/* Mobile bottom tab bar */
+.signal-app .mobile-tabs {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--signal-bg-translucent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--signal-hairline);
+  padding: 6px 8px max(6px, env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: space-around;
+  z-index: 25;
+}
+.signal-app .mobile-tabs .tab {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 4px;
+  color: var(--signal-text-mute);
+  text-decoration: none;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 8px;
+}
+.signal-app .mobile-tabs .tab.active { color: var(--signal-ink); }
+.signal-app .mobile-tabs .tab.fab {
+  flex: 0 0 56px;
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  border-radius: 50%;
+  width: 52px;
+  height: 52px;
+  margin-top: -16px;
+  align-self: center;
+}
+.signal-app .mobile-tabs .tab.fab.active { background: var(--signal-ink); }
+@media (min-width: 1024px) {
+  .signal-app .mobile-tabs { display: none; }
+}
+
+/* ─────────── Top app bar ─────────── */
+.signal-topbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px 10px;
+  background: var(--signal-bg-translucent);
+  backdrop-filter: saturate(180%) blur(16px);
+  -webkit-backdrop-filter: saturate(180%) blur(16px);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-shrink: 0;
+}
+@media (max-width: 919px) {
+  .signal-topbar { padding-top: 56px; }
+}
+.signal-back-btn {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--signal-card-elev);
+  color: var(--signal-ink);
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.signal-back-btn:hover { background: var(--signal-hairline); }
+.signal-back-btn svg { width: 16px; height: 16px; }
+.signal-topbar h1 {
+  flex: 1;
+  min-width: 0;
+  font-size: 19px;
+  font-weight: 600;
+  margin: 0;
+  letter-spacing: -0.02em;
+  color: var(--signal-ink);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.signal-topbar h1 .sub {
+  display: block;
+  font-size: 12px;
+  color: var(--signal-text-dim);
+  font-weight: 400;
+  margin-top: 2px;
+  letter-spacing: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.signal-icon-btn {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--signal-ink);
+  position: relative;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.signal-icon-btn:hover { background: var(--signal-card-elev); }
+.signal-icon-btn svg { width: 18px; height: 18px; }
+.signal-icon-btn .badge {
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 8px; height: 8px;
+  background: var(--signal-coral);
+  border-radius: 50%;
+}
+.signal-avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--signal-y), var(--signal-coral));
+  display: flex; align-items: center; justify-content: center;
+  color: var(--signal-ink);
+  font-weight: 600;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+/* ─────────── Feed ───────────
+   Mobile-first: full width + bottom padding for the tab bar.
+   Tablet (≥768): centered with max-width.
+   Desktop (≥1024): wider max-width, no tab-bar padding (sidebar takes over).
+   ───────────────────────────────────────────────────────────── */
+.signal-feed {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px 20px 110px;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  width: 100%;
+}
+@media (min-width: 768px) {
+  .signal-feed {
+    max-width: 760px;
+    margin: 0 auto;
+    padding: 16px 32px 110px;
+  }
+}
+@media (min-width: 1024px) {
+  .signal-feed {
+    max-width: 880px;
+    padding: 24px 40px 48px;
+  }
+}
+@media (min-width: 1280px) {
+  .signal-feed { max-width: 960px; padding: 28px 48px 56px; }
+}
+.signal-feed::-webkit-scrollbar { width: 4px; }
+.signal-feed::-webkit-scrollbar-thumb { background: var(--signal-hairline); border-radius: 4px; }
+
+/* TopBar — also needs to centre on desktop so it lines up with the feed. */
+@media (min-width: 768px) {
+  .signal-app .signal-shell .signal-topbar {
+    max-width: 760px;
+    margin: 0 auto;
+    width: 100%;
+    padding-left: 32px;
+    padding-right: 32px;
+  }
+}
+@media (min-width: 1024px) {
+  .signal-app .signal-shell .signal-topbar {
+    max-width: 880px;
+    padding: 18px 40px 14px;
+    /* On desktop, the floating Prototypes / Theme pills are gone — drop the
+       extra top padding the mobile rules added. */
+    padding-top: 18px;
+  }
+}
+@media (min-width: 1280px) {
+  .signal-app .signal-shell .signal-topbar { max-width: 960px; padding: 20px 48px 16px; }
+}
+
+/* The old absolute-positioned tabbar inside the phone screen — neutralise it
+   for the new shell layout (it's replaced by .mobile-tabs in the Shell). */
+.signal-app.signal-shell .signal-tabbar:not(.mobile-tabs) { display: none; }
+/* The old floating Prototypes link is gone with the rewrite. */
+.signal-app.signal-shell .signal-top-back,
+.signal-app.signal-shell .signal-top-theme { display: none; }
+
+/* ─────────── Bottom tab bar ─────────── */
+.signal-tabbar {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  background: var(--signal-bg-translucent);
+  backdrop-filter: saturate(180%) blur(20px);
+  -webkit-backdrop-filter: saturate(180%) blur(20px);
+  border-top: 1px solid var(--signal-hairline);
+  padding: 8px 16px calc(8px + env(safe-area-inset-bottom));
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  z-index: 30;
+}
+.signal-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 10px;
+  color: var(--signal-text-mute);
+  flex: 1;
+  transition: color 0.15s;
+  background: transparent;
+}
+.signal-tab.active { color: var(--signal-ink); }
+.signal-tab svg { width: 22px; height: 22px; }
+.signal-tab .tab-label { font-size: 10px; font-weight: 600; letter-spacing: 0.02em; }
+.signal-tab.fab {
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  border-radius: 50%;
+  width: 52px;
+  height: 52px;
+  margin-top: -16px;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+.signal-tab.fab .tab-label { display: none; }
+
+/* ─────────── Floating pills (Prototypes back + theme toggle) ─────────── */
+.signal-top-back, .signal-top-theme {
+  position: fixed;
+  top: 16px;
+  background: var(--signal-phone-frame);
+  color: var(--signal-hero-text);
+  padding: 9px 14px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 100;
+  backdrop-filter: saturate(150%) blur(12px);
+  -webkit-backdrop-filter: saturate(150%) blur(12px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  box-shadow: 0 6px 16px -6px var(--signal-shadow-strong);
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.15s;
+}
+.signal-top-back:hover, .signal-top-theme:hover { transform: translateY(-1px); }
+.signal-top-back { left: 16px; }
+.signal-top-theme { right: 16px; }
+.signal-top-back svg, .signal-top-theme svg { width: 13px; height: 13px; }
+@media (max-width: 600px) {
+  .signal-top-back, .signal-top-theme { top: 10px; padding: 7px 12px; font-size: 11px; }
+  .signal-top-back { left: 10px; }
+  .signal-top-theme { right: 10px; }
+}
+
+/* ─────────── Cards + rows ─────────── */
+.signal-section-h {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--signal-text-mute);
+  margin: 22px 0 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+.signal-section-h .see-all { color: var(--signal-coral); font-weight: 600; }
+
+.signal-card {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-md);
+  padding: 16px;
+  margin-bottom: 10px;
+  transition: transform 0.15s, border-color 0.15s;
+  display: block;
+}
+.signal-card:active { transform: scale(0.99); }
+.signal-card-link:hover { border-color: var(--signal-hairline-strong); }
+
+.signal-row {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-md);
+  padding: 14px 16px;
+  margin-bottom: 8px;
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  transition: transform 0.15s, border-color 0.15s;
+  color: inherit;
+  /* Make the 1fr column actually constrain its children. Without min-width:0
+   * a long title would push the row wider than its parent (CSS grid intrinsic
+   * sizing). The minmax(0, 1fr) above does the same job declaratively, but
+   * older browsers need both. */
+}
+.signal-row > div { min-width: 0; }
+.signal-row:active { transform: scale(0.99); }
+.signal-row .pill-dot {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--signal-text-mute);
+  margin: 0 auto;
+  flex-shrink: 0;
+}
+.signal-row .pill-dot.mint { background: var(--signal-mint); box-shadow: 0 0 8px rgba(124, 227, 180, 0.4); }
+.signal-row .pill-dot.coral { background: var(--signal-coral); box-shadow: 0 0 8px rgba(255, 107, 107, 0.4); }
+.signal-row .pill-dot.signal { background: var(--signal-y); box-shadow: 0 0 8px rgba(244, 211, 94, 0.4); }
+.signal-row .pill-dot.lavender { background: var(--signal-lavender); }
+.signal-row .pill-dot.ocean { background: var(--signal-ocean); }
+.signal-row .pill-dot.live {
+  background: var(--signal-coral);
+  box-shadow: 0 0 0 5px rgba(255, 107, 107, 0.16);
+  animation: signal-pulse 1.4s infinite;
+}
+@keyframes signal-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.92); }
+}
+.signal-row .row-title {
+  font-size: 14.5px;
+  font-weight: 500;
+  color: var(--signal-ink);
+  line-height: 1.3;
+  margin-bottom: 2px;
+  /* Single-line ellipsis — v3 parity. Run titles in particular can be very
+   * long ("Refactor session-store module to use Redis instead of …") and
+   * wrapping pushes the row trailing pill down, breaking the rhythm. */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+.signal-row .row-meta {
+  font-size: 12px;
+  color: var(--signal-text-dim);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.signal-row .row-meta > * { flex-shrink: 0; }
+.signal-row .row-meta .mono { font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+.signal-row .trailing {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12.5px;
+  font-weight: 600;
+  text-align: right;
+  color: var(--signal-ink);
+}
+.signal-row .trailing.good { color: var(--signal-mint-text-on-light); }
+.signal-row .trailing.warn { color: var(--signal-y-text); }
+.signal-row .trailing.fail { color: var(--signal-coral); }
+.signal-row .trailing .lbl { display: block; font-size: 10px; color: var(--signal-text-mute); font-weight: 500; margin-top: 2px; }
+.signal-row .chev { width: 14px; height: 14px; color: var(--signal-text-mute); }
+
+/* ─────────── Buttons ─────────── */
+.signal-btn {
+  padding: 13px 18px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  transition: transform 0.15s, background 0.15s;
+  font-family: inherit;
+}
+.signal-btn:active { transform: scale(0.98); }
+.signal-btn.primary { background: var(--signal-ink); color: var(--signal-bg); }
+.signal-btn.primary:hover { background: var(--signal-ink-soft); }
+.signal-btn.secondary { background: var(--signal-card-elev); color: var(--signal-ink); border: 1px solid var(--signal-hairline); }
+.signal-btn.secondary:hover { background: var(--signal-hairline); }
+.signal-btn.mint { background: var(--signal-mint); color: var(--signal-mint-text); }
+.signal-btn.coral { background: var(--signal-coral-soft); color: var(--signal-coral-text); }
+.signal-btn.ghost { color: var(--signal-text-dim); padding: 13px 0; background: transparent; }
+.signal-btn.block { width: 100%; }
+.signal-btn.sm { padding: 9px 14px; font-size: 13px; border-radius: 10px; }
+
+/* ─────────── Chips + pills ─────────── */
+.signal-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  background: var(--signal-card-elev);
+  color: var(--signal-ink-soft);
+  border: 1px solid var(--signal-hairline);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.signal-chip:active { transform: scale(0.96); }
+.signal-chip.active { background: var(--signal-ink); color: var(--signal-bg); border-color: var(--signal-ink); }
+.signal-chip.signal { background: var(--signal-y-soft); color: var(--signal-y-text); border-color: transparent; }
+.signal-chip.mint { background: var(--signal-mint-soft); color: var(--signal-mint-text-on-light); border-color: transparent; }
+.signal-chip.coral { background: var(--signal-coral-soft); color: var(--signal-coral-text); border-color: transparent; }
+.signal-chip.lavender { background: var(--signal-lavender-soft); color: var(--signal-ink); border-color: transparent; }
+
+.signal-status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  background: var(--signal-card-elev);
+  color: var(--signal-text-dim);
+}
+.signal-status-pill.live { background: var(--signal-coral-soft); color: var(--signal-coral-text); }
+.signal-status-pill.live::before {
+  content: "";
+  width: 6px; height: 6px;
+  background: var(--signal-coral);
+  border-radius: 50%;
+  animation: signal-pulse 1.4s infinite;
+}
+.signal-status-pill.shipped { background: var(--signal-mint-soft); color: var(--signal-mint-text-on-light); }
+.signal-status-pill.needs { background: var(--signal-y-soft); color: var(--signal-y-text); }
+.signal-status-pill.failed { background: var(--signal-coral-soft); color: var(--signal-coral-text); }
+
+/* ─────────── Hero (live-now) ─────────── */
+.signal-live-hero {
+  background: linear-gradient(135deg, var(--signal-hero-bg-1), var(--signal-hero-bg-2));
+  color: var(--signal-hero-text);
+  border-radius: var(--signal-r-xl);
+  padding: 22px;
+  margin-bottom: 16px;
+  position: relative;
+  overflow: hidden;
+}
+.signal-live-hero::before {
+  content: "";
+  position: absolute;
+  top: -40px; right: -40px;
+  width: 180px; height: 180px;
+  background: radial-gradient(circle, var(--signal-hero-glow), transparent 65%);
+  pointer-events: none;
+}
+.signal-live-hero .row1 {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 11px; font-weight: 700;
+  letter-spacing: 0.14em; text-transform: uppercase;
+  color: var(--signal-y);
+  margin-bottom: 12px;
+}
+.signal-live-hero .row1 .blink {
+  width: 8px; height: 8px;
+  background: var(--signal-y);
+  border-radius: 50%;
+  box-shadow: 0 0 8px var(--signal-y);
+  animation: signal-pulse 1.2s infinite;
+}
+.signal-live-hero h2 {
+  font-size: 21px; font-weight: 600;
+  line-height: 1.25; margin: 0 0 16px;
+  color: var(--signal-hero-text);
+  letter-spacing: -0.015em;
+}
+.signal-live-hero .progress {
+  height: 5px; background: var(--signal-hero-text-mute); border-radius: 3px;
+  overflow: hidden; margin-bottom: 14px;
+}
+.signal-live-hero .progress .fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--signal-y), var(--signal-mint));
+  border-radius: 3px;
+  animation: signal-stretch 6s ease-in-out infinite;
+}
+@keyframes signal-stretch { 0%, 100% { width: 58%; } 50% { width: 66%; } }
+.signal-live-hero .stats {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px;
+  font-size: 10px; font-weight: 600;
+  color: var(--signal-hero-text-dim);
+  letter-spacing: 0.06em; text-transform: uppercase;
+}
+.signal-live-hero .stats .stat .v {
+  display: block;
+  font-size: 19px; font-weight: 600;
+  color: var(--signal-hero-text); letter-spacing: -0.015em;
+  text-transform: none; margin-bottom: 2px;
+}
+.signal-live-hero .stats .stat .v.signal { color: var(--signal-y); }
+.signal-live-hero .stats .stat .v.mint { color: var(--signal-mint); }
+.signal-live-hero .actions {
+  display: flex; gap: 8px; margin-top: 16px;
+}
+.signal-live-hero .actions .btn-hero {
+  flex: 1; background: var(--signal-hero-btn-bg);
+  color: var(--signal-hero-text);
+  padding: 11px;
+  border-radius: 12px;
+  font-size: 13px; font-weight: 600;
+  text-align: center;
+}
+.signal-live-hero .actions .btn-hero:hover { background: var(--signal-hero-btn-bg-hover); }
+.signal-live-hero .actions .btn-hero.primary {
+  background: var(--signal-y); color: var(--signal-mint-text);
+}
+.signal-live-hero .actions .btn-hero.primary:hover { background: #f1c945; }
+
+/* ─────────── Quick grid ─────────── */
+.signal-quick-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.signal-quick-card {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-md);
+  padding: 14px;
+  transition: transform 0.15s, border-color 0.15s;
+  text-align: left;
+  display: block;
+  color: inherit;
+}
+.signal-quick-card:active { transform: scale(0.98); }
+.signal-quick-card:hover { border-color: var(--signal-hairline-strong); }
+.signal-quick-card .icon-bg {
+  width: 32px; height: 32px;
+  border-radius: 9px;
+  background: var(--signal-y-soft);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 10px;
+}
+.signal-quick-card .icon-bg svg { width: 16px; height: 16px; color: var(--signal-y-text); }
+.signal-quick-card.mint .icon-bg { background: var(--signal-mint-soft); }
+.signal-quick-card.mint .icon-bg svg { color: var(--signal-mint-text-on-light); }
+.signal-quick-card.coral .icon-bg { background: var(--signal-coral-soft); }
+.signal-quick-card.coral .icon-bg svg { color: var(--signal-coral-text); }
+.signal-quick-card.lavender .icon-bg { background: var(--signal-lavender-soft); }
+.signal-quick-card.lavender .icon-bg svg { color: #5443a8; }
+.signal-quick-card h4 { font-size: 13px; font-weight: 600; margin: 0 0 2px; }
+.signal-quick-card .count { font-size: 11px; color: var(--signal-text-dim); font-family: 'JetBrains Mono', monospace; }
+
+/* ─────────── Stream cards (live log) ─────────── */
+.signal-stream-card {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-md);
+  padding: 12px 14px;
+  margin-bottom: 8px;
+  border-left: 3px solid var(--signal-lavender);
+}
+.signal-stream-card.tool { border-left-color: var(--signal-lavender); }
+.signal-stream-card.llm { border-left-color: var(--signal-coral); }
+.signal-stream-card.warn { border-left-color: var(--signal-y); background: var(--signal-y-soft); }
+.signal-stream-card.ok { border-left-color: var(--signal-mint); }
+.signal-stream-card .top {
+  display: flex; gap: 8px;
+  font-size: 10.5px; font-weight: 700;
+  color: var(--signal-text-dim);
+  letter-spacing: 0.08em; text-transform: uppercase;
+  margin-bottom: 4px;
+}
+.signal-stream-card .top .ts {
+  font-family: 'JetBrains Mono', monospace;
+  margin-left: auto;
+  color: var(--signal-text-mute);
+  letter-spacing: 0; text-transform: none;
+}
+.signal-stream-card .body { font-size: 13.5px; color: var(--signal-ink); line-height: 1.45; }
+.signal-stream-card .body code {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  background: var(--signal-card-elev);
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+/* ─────────── Score card (result) ─────────── */
+.signal-score-card {
+  background: linear-gradient(135deg, var(--signal-mint), #5BC196);
+  color: var(--signal-mint-text);
+  border-radius: var(--signal-r-xl);
+  padding: 22px;
+  margin-bottom: 14px;
+  position: relative;
+  overflow: hidden;
+}
+.signal-score-card::before {
+  content: "";
+  position: absolute;
+  top: -50px; right: -50px;
+  width: 200px; height: 200px;
+  background: radial-gradient(circle, rgba(14,15,18,0.07), transparent 60%);
+}
+.signal-score-card .verdict {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.signal-score-card h2 {
+  font-size: 56px; font-weight: 600;
+  letter-spacing: -0.04em; line-height: 0.95;
+  margin: 0 0 4px;
+  font-feature-settings: "tnum" on;
+}
+.signal-score-card h2 .pct { font-size: 26px; opacity: 0.45; }
+.signal-score-card .label { font-size: 13px; margin-bottom: 16px; }
+.signal-score-card .grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+  padding-top: 14px; border-top: 1px solid rgba(14,15,18,0.18);
+}
+.signal-score-card .grid .cell .v { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.signal-score-card .grid .cell .l {
+  font-size: 10px; font-weight: 700;
+  text-transform: uppercase; letter-spacing: 0.08em;
+  opacity: 0.7; margin-top: 2px;
+}
+
+/* ─────────── PR card ─────────── */
+.signal-pr-card {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-md);
+  padding: 16px;
+  margin-bottom: 8px;
+}
+.signal-pr-card .label-row {
+  font-size: 10px; font-weight: 700;
+  color: var(--signal-mint-text-on-light);
+  letter-spacing: 0.16em; text-transform: uppercase;
+  margin-bottom: 8px;
+}
+.signal-pr-card .pr-title { font-size: 15px; font-weight: 600; line-height: 1.3; margin: 0 0 8px; }
+.signal-pr-card .pr-meta {
+  display: flex; gap: 8px; flex-wrap: wrap;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--signal-text-dim);
+  align-items: center;
+}
+.signal-pr-card .pr-meta .add { color: var(--signal-mint-text-on-light); font-weight: 600; }
+.signal-pr-card .pr-meta .rem { color: var(--signal-coral-text); font-weight: 600; }
+.signal-pr-card .pr-meta .ci-ok { color: var(--signal-mint-text-on-light); font-weight: 600; }
+.signal-pr-card .pr-actions { display: flex; gap: 8px; margin-top: 12px; }
+.signal-pr-card .pr-actions button {
+  flex: 1;
+  background: var(--signal-card-elev);
+  border: 1px solid var(--signal-hairline);
+  padding: 10px;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--signal-ink);
+  font-family: inherit;
+}
+.signal-pr-card .pr-actions button.primary { background: var(--signal-ink); color: var(--signal-bg); border-color: var(--signal-ink); }
+
+/* ─────────── Tabs strip (horizontal scroll) ─────────── */
+.signal-tabs-strip {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 2px 0 14px;
+  margin: 6px -4px 8px;
+  scroll-snap-type: x mandatory;
+}
+.signal-tabs-strip::-webkit-scrollbar { display: none; }
+.signal-tabs-strip a, .signal-tabs-strip button {
+  padding: 8px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--signal-text-dim);
+  white-space: nowrap;
+  scroll-snap-align: start;
+  flex-shrink: 0;
+  background: var(--signal-card-elev);
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  font-family: inherit;
+}
+.signal-tabs-strip a:hover, .signal-tabs-strip button:hover { color: var(--signal-ink); }
+.signal-tabs-strip a.active, .signal-tabs-strip button.active {
+  background: var(--signal-ink); color: var(--signal-bg);
+  font-weight: 600;
+}
+
+/* ─────────── Spec composer ─────────── */
+.signal-composer-card {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-xl);
+  padding: 18px;
+  margin-bottom: 14px;
+}
+.signal-composer-card .composer-h {
+  display: flex; justify-content: space-between; align-items: baseline;
+  margin-bottom: 12px;
+}
+.signal-composer-card .composer-h h3 { font-size: 17px; font-weight: 600; margin: 0; }
+.signal-composer-card .composer-h .est {
+  font-family: 'JetBrains Mono', monospace;
+  background: var(--signal-y-soft);
+  color: var(--signal-y-text);
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.signal-composer-card textarea {
+  width: 100%;
+  background: var(--signal-card-elev);
+  border: 1px solid var(--signal-hairline);
+  border-radius: 12px;
+  padding: 14px;
+  font-family: inherit;
+  font-size: 15px;
+  color: var(--signal-ink);
+  resize: vertical; min-height: 140px;
+  outline: none;
+  line-height: 1.5;
+}
+.signal-composer-card textarea:focus { border-color: var(--signal-ink); }
+.signal-composer-card textarea::placeholder { color: var(--signal-text-mute); }
+.signal-composer-card .composer-chips {
+  display: flex; gap: 6px; flex-wrap: wrap;
+  margin-top: 12px;
+}
+.signal-composer-card .composer-submit {
+  width: 100%; margin-top: 12px;
+  padding: 14px;
+  background: var(--signal-ink); color: var(--signal-bg);
+  border-radius: 14px;
+  font-size: 15px; font-weight: 600;
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  font-family: inherit;
+}
+
+/* ─────────── Plan-gate task list ─────────── */
+.signal-task-line {
+  display: grid;
+  grid-template-columns: 22px 1fr auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--signal-hairline);
+}
+.signal-task-line:last-child { border-bottom: 0; }
+.signal-task-line .check {
+  width: 18px; height: 18px;
+  border: 1.5px solid var(--signal-hairline-strong);
+  border-radius: 5px;
+  background: var(--signal-card-elev);
+}
+.signal-task-line.done .check {
+  background: var(--signal-mint); border-color: var(--signal-mint);
+  position: relative;
+}
+.signal-task-line.done .check::after {
+  content: "✓";
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  color: var(--signal-mint-text); font-size: 11px; font-weight: 700;
+}
+.signal-task-line.live .check {
+  border-color: var(--signal-coral); background: var(--signal-coral-soft);
+  position: relative;
+}
+.signal-task-line.live .check::after {
+  content: ""; position: absolute; inset: 3px;
+  border: 1.5px solid var(--signal-coral); border-top-color: transparent;
+  border-radius: 50%; animation: signal-spin 1s linear infinite;
+}
+@keyframes signal-spin { to { transform: rotate(360deg); } }
+.signal-task-line .title { font-size: 14px; color: var(--signal-ink); line-height: 1.4; font-weight: 500; }
+.signal-task-line .title .sub {
+  display: block;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px; color: var(--signal-text-mute);
+  margin-top: 2px; font-weight: 400;
+}
+.signal-task-line .tag {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  padding: 2px 7px;
+  border-radius: 4px;
+  background: var(--signal-card-elev);
+  border: 1px solid var(--signal-hairline);
+  color: var(--signal-text-dim);
+  font-weight: 600;
+}
+
+/* ─────────── KV list ─────────── */
+.signal-kv-list { display: grid; gap: 10px; }
+.signal-kv-list .kv {
+  display: flex; justify-content: space-between;
+  font-size: 14px;
+}
+.signal-kv-list .kv .k { color: var(--signal-text-dim); }
+.signal-kv-list .kv .v {
+  color: var(--signal-ink); font-weight: 500;
+  font-family: 'JetBrains Mono', monospace; font-size: 13px;
+}
+
+/* ─────────── Form fields ─────────── */
+.signal-field {
+  margin-bottom: 14px;
+}
+.signal-field label {
+  display: block;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--signal-text-dim);
+  margin-bottom: 6px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.signal-field input, .signal-field textarea, .signal-field select {
+  width: 100%;
+  background: var(--signal-card-elev);
+  border: 1px solid var(--signal-hairline);
+  border-radius: 12px;
+  padding: 12px 14px;
+  font-size: 15px;
+  color: var(--signal-ink);
+  outline: none;
+  transition: border-color 0.15s;
+  font-family: inherit;
+}
+.signal-field input:focus, .signal-field textarea:focus, .signal-field select:focus { border-color: var(--signal-ink); }
+.signal-field textarea { resize: vertical; min-height: 110px; line-height: 1.5; }
+.signal-field input::placeholder, .signal-field textarea::placeholder { color: var(--signal-text-mute); }
+.signal-field .hint { font-size: 12px; color: var(--signal-text-dim); margin-top: 6px; }
+
+/* ─────────── Splash (auth/onboarding pages) ─────────── */
+.signal-splash {
+  flex: 1;
+  display: flex; flex-direction: column;
+  padding: 48px 28px 24px;
+  overflow-y: auto;
+}
+@media (max-width: 919px) {
+  .signal-splash { padding-top: 76px; }
+}
+.signal-splash .brand {
+  display: flex; align-items: center; gap: 10px;
+  margin-bottom: 36px;
+}
+.signal-splash .brand .logo {
+  width: 36px; height: 36px;
+  border-radius: 9px;
+  background: var(--signal-ink); color: var(--signal-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: 18px;
+}
+.signal-splash h1 {
+  font-size: clamp(28px, 6vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  margin: 0 0 14px;
+}
+.signal-splash h1 em { font-style: normal; color: var(--signal-coral); }
+.signal-splash .lede {
+  font-size: 16px;
+  color: var(--signal-text-dim);
+  margin: 0 0 32px;
+  max-width: 320px;
+  line-height: 1.5;
+}
+.signal-splash .footer-link {
+  text-align: center;
+  margin-top: auto;
+  font-size: 13px;
+  color: var(--signal-text-dim);
+  padding-top: 24px;
+}
+.signal-splash .footer-link a { color: var(--signal-coral); font-weight: 600; }
+
+/* ─────────── Rails (desktop) ─────────── */
+.signal-rail-eyebrow {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--signal-text-mute);
+  margin-bottom: 10px;
+}
+.signal-rail-title {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.05;
+  margin: 0 0 12px;
+}
+.signal-rail-title em { font-style: normal; color: var(--signal-coral); }
+.signal-rail-prose {
+  font-size: 14px;
+  color: var(--signal-text-dim);
+  line-height: 1.55;
+  max-width: 320px;
+  margin: 0 0 24px;
+}
+.signal-rail-nav {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-md);
+  padding: 6px;
+}
+.signal-rail-nav-section {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--signal-text-mute);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 10px 12px 4px;
+}
+.signal-rail-nav a {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 12px;
+  border-radius: 8px;
+  color: var(--signal-text-dim);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.1s, color 0.1s;
+}
+.signal-rail-nav a:hover { color: var(--signal-ink); background: var(--signal-card-elev); }
+.signal-rail-nav a.active { color: var(--signal-ink); background: var(--signal-card-elev); font-weight: 600; }
+
+/* Toast */
+.signal-toast {
+  position: fixed;
+  bottom: 100px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  z-index: 200;
+  box-shadow: 0 12px 32px -8px var(--signal-shadow-strong);
+  pointer-events: none;
+}
+
+/* Theme icon visibility */
+.signal-app:not([data-signal-theme="dark"]) .theme-sun,
+.signal-app:not([data-signal-theme="dark"]) .theme-lbl-light { display: none; }
+.signal-app[data-signal-theme="dark"] .theme-moon,
+.signal-app[data-signal-theme="dark"] .theme-lbl-dark { display: none; }
+
+/* Notif rows */
+.signal-notif {
+  display: grid;
+  grid-template-columns: 38px 1fr auto;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-md);
+  margin-bottom: 8px;
+  align-items: start;
+}
+.signal-notif.unread { background: var(--signal-y-soft); border-color: transparent; }
+.signal-notif .icon-circle {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  background: var(--signal-card-elev);
+  display: flex; align-items: center; justify-content: center;
+}
+.signal-notif .icon-circle svg { width: 16px; height: 16px; color: var(--signal-ink); }
+.signal-notif .icon-circle.coral { background: var(--signal-coral-soft); }
+.signal-notif .icon-circle.coral svg { color: var(--signal-coral-text); }
+.signal-notif .icon-circle.mint { background: var(--signal-mint-soft); }
+.signal-notif .icon-circle.mint svg { color: var(--signal-mint-text-on-light); }
+.signal-notif .icon-circle.signal { background: var(--signal-y); }
+.signal-notif .body .title { font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+.signal-notif .body .desc { font-size: 13px; color: var(--signal-text-dim); line-height: 1.4; }
+.signal-notif .ts {
+  font-size: 11px;
+  color: var(--signal-text-mute);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Onboarding (welcome / sandbox-picker) preset cards
+   Added 2026-05-15 — was missing from the React port.
+   ───────────────────────────────────────────────────────────── */
+.signal-app .welcome-step {
+  flex: 1;
+  overflow-y: auto;
+  padding: 32px 24px 24px;
+}
+@media (max-width: 919px) {
+  .signal-app .welcome-step { padding-top: 60px; }
+}
+.signal-app .welcome-step .step-indicator {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--signal-text-mute);
+  letter-spacing: 0.1em;
+  margin-bottom: 14px;
+}
+.signal-app .welcome-step .step-indicator b { color: var(--signal-coral); }
+.signal-app .welcome-step h2 {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  margin: 0 0 12px;
+  color: var(--signal-ink);
+}
+.signal-app .welcome-step p {
+  color: var(--signal-text-dim);
+  font-size: 15px;
+  margin: 0 0 24px;
+  line-height: 1.5;
+}
+.signal-app .preset-card {
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: var(--signal-r-lg, 22px);
+  padding: 18px;
+  margin-bottom: 10px;
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+  transition: border-color 0.15s, transform 0.15s;
+}
+.signal-app .preset-card:active { transform: scale(0.99); }
+.signal-app .preset-card:hover { border-color: var(--signal-ink); }
+.signal-app .preset-card .icon {
+  width: 36px; height: 36px;
+  border-radius: 10px;
+  background: var(--signal-lavender-soft);
+  display: grid; place-items: center;
+  margin-bottom: 12px;
+  font-size: 18px;
+}
+.signal-app .preset-card.signal .icon { background: var(--signal-y-soft); }
+.signal-app .preset-card.mint .icon { background: var(--signal-mint-soft); }
+.signal-app .preset-card.coral .icon { background: var(--signal-coral-soft); }
+.signal-app .preset-card h4 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0 0 4px;
+  letter-spacing: -0.01em;
+  color: var(--signal-ink);
+}
+.signal-app .preset-card .desc {
+  font-size: 13px;
+  color: var(--signal-text-dim);
+  line-height: 1.45;
+  margin: 0;
+}
+.signal-app .preset-card .meta {
+  margin-top: 12px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--signal-text-mute);
+  display: flex;
+  gap: 12px;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Splash brand block (used on Login / Signup / Verify / Forgot)
+   ───────────────────────────────────────────────────────────── */
+.signal-app .signal-splash .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 36px;
+}
+.signal-app .signal-splash .brand .logo {
+  width: 36px; height: 36px;
+  border-radius: 9px;
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700;
+  font-size: 18px;
+}
+.signal-app .signal-splash h1 {
+  font-size: clamp(28px, 6vw, 36px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.05;
+  margin: 0 0 14px;
+  color: var(--signal-ink);
+}
+.signal-app .signal-splash h1 em { font-style: normal; color: var(--signal-coral); }
+.signal-app .signal-splash .lede {
+  font-size: 16px;
+  color: var(--signal-text-dim);
+  margin: 0 0 32px;
+  max-width: 320px;
+  line-height: 1.5;
+}
+.signal-app .signal-splash .lede strong { color: var(--signal-ink); font-weight: 600; }
+.signal-app .signal-splash .oauth-btn {
+  width: 100%;
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  color: var(--signal-ink);
+  padding: 13px 16px;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-family: inherit;
+  cursor: pointer;
+}
+.signal-app .signal-splash .oauth-btn:hover { background: var(--signal-card-elev); }
+.signal-app .signal-splash .oauth-btn svg { width: 18px; height: 18px; }
+.signal-app .signal-splash .or-row {
+  display: flex; align-items: center; gap: 10px;
+  color: var(--signal-text-mute); font-size: 12px; font-weight: 600;
+  margin: 14px 0;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+.signal-app .signal-splash .or-row::before,
+.signal-app .signal-splash .or-row::after {
+  content: ""; flex: 1; height: 1px; background: var(--signal-hairline);
+}
+.signal-app .signal-splash .footer-link {
+  text-align: center;
+  margin-top: 24px;
+  font-size: 13px;
+  color: var(--signal-text-dim);
+  padding-top: 16px;
+}
+.signal-app .signal-splash .footer-link a { color: var(--signal-coral); font-weight: 600; }
+
+/* Disabled / pending state for buttons (added 2026-05-15 with auth wiring). */
+.signal-app .signal-btn.is-disabled,
+.signal-app .signal-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   AuthLayout — split-grid wrapper for splash-style auth pages.
+   Mobile-first: single column, form fills viewport.
+   Desktop (>920px): 2-column with brand/preview panel on the right.
+   Added 2026-05-15 alongside AuthLayout component.
+   ───────────────────────────────────────────────────────────── */
+.signal-app .signal-auth-layout {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--signal-bg);
+}
+.signal-app .signal-auth-layout .auth-form-col {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.signal-app .signal-auth-layout .auth-form-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+/* Make the inner splash centre on tablet+, expand naturally on mobile. */
+.signal-app .signal-auth-layout .auth-form-inner > .signal-splash,
+.signal-app .signal-auth-layout .auth-form-inner > .welcome-step {
+  width: 100%;
+  max-width: 480px;
+  margin: 0 auto;
+  padding: 56px 28px 32px;
+}
+.signal-app .signal-auth-layout .auth-brand-col { display: none; }
+
+@media (min-width: 920px) {
+  .signal-app .signal-auth-layout {
+    flex-direction: row;
+  }
+  .signal-app .signal-auth-layout .auth-form-col {
+    flex: 1 1 50%;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 32px;
+  }
+  .signal-app .signal-auth-layout .auth-form-inner > .signal-splash,
+  .signal-app .signal-auth-layout .auth-form-inner > .welcome-step {
+    max-width: 420px;
+    padding: 40px 8px;
+  }
+  .signal-app .signal-auth-layout .auth-brand-col {
+    display: flex;
+    flex: 1 1 50%;
+    background: linear-gradient(135deg, var(--signal-hero-bg-1), var(--signal-hero-bg-2));
+    color: var(--signal-hero-text);
+    align-items: center;
+    justify-content: center;
+    padding: 48px 56px;
+    position: relative;
+    overflow: hidden;
+  }
+  /* Decorative signal-yellow glow */
+  .signal-app .signal-auth-layout .auth-brand-col::before {
+    content: '';
+    position: absolute;
+    top: -120px;
+    right: -120px;
+    width: 480px;
+    height: 480px;
+    background: radial-gradient(circle, var(--signal-hero-glow), transparent 60%);
+    pointer-events: none;
+  }
+  .signal-app .signal-auth-layout .auth-brand-col::after {
+    content: '';
+    position: absolute;
+    bottom: -200px;
+    left: -120px;
+    width: 400px;
+    height: 400px;
+    background: radial-gradient(circle, rgba(124, 227, 180, 0.10), transparent 60%);
+    pointer-events: none;
+  }
+}
+
+@media (min-width: 1280px) {
+  .signal-app .signal-auth-layout .auth-form-col { flex-basis: 44%; }
+  .signal-app .signal-auth-layout .auth-brand-col { flex-basis: 56%; padding: 64px; }
+}
+
+.signal-app .auth-brand-inner {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 480px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+.signal-app .auth-brand-top .brand-line {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 24px;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--signal-hero-text);
+}
+.signal-app .auth-brand-top .brand-line .logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+  background: var(--signal-y);
+  color: var(--signal-mint-text);
+  display: grid;
+  place-items: center;
+  font-weight: 700;
+  font-size: 18px;
+}
+.signal-app .auth-brand-headline {
+  font-family: inherit;
+  font-size: clamp(28px, 3vw, 38px);
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+  margin: 0 0 14px;
+  color: var(--signal-hero-text);
+  max-width: 18ch;
+}
+.signal-app .auth-brand-headline em {
+  font-style: normal;
+  color: var(--signal-coral);
+}
+.signal-app .auth-brand-lede {
+  font-size: 15.5px;
+  color: var(--signal-hero-text-dim);
+  margin: 0;
+  line-height: 1.55;
+  max-width: 38ch;
+}
+.signal-app .auth-brand-lede strong { color: var(--signal-hero-text); font-weight: 600; }
+
+/* Live-run preview card on the brand panel */
+.signal-app .auth-preview-card {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 18px;
+  padding: 20px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.signal-app .auth-preview-card .preview-ribbon {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--signal-y);
+  margin-bottom: 12px;
+}
+.signal-app .auth-preview-card .preview-ribbon .blink {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--signal-y);
+  box-shadow: 0 0 8px var(--signal-y);
+  animation: signal-pulse 1.4s ease-in-out infinite;
+}
+@keyframes signal-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.85); }
+}
+.signal-app .auth-preview-card .preview-title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--signal-hero-text);
+  margin-bottom: 14px;
+  line-height: 1.35;
+}
+.signal-app .auth-preview-card .preview-bar {
+  height: 5px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.signal-app .auth-preview-card .preview-bar-fill {
+  height: 100%;
+  width: 62%;
+  background: linear-gradient(90deg, var(--signal-y), var(--signal-mint));
+  border-radius: 3px;
+  animation: signal-bar 6s ease-in-out infinite;
+}
+@keyframes signal-bar {
+  0%, 100% { width: 58%; }
+  50% { width: 66%; }
+}
+.signal-app .auth-preview-card .preview-stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+  font-size: 10.5px;
+  color: var(--signal-hero-text-dim);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.signal-app .auth-preview-card .preview-stats .v {
+  display: block;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--signal-hero-text);
+  letter-spacing: -0.015em;
+  text-transform: none;
+  margin-bottom: 2px;
+}
+.signal-app .auth-preview-card .preview-stats .v.signal { color: var(--signal-y); }
+.signal-app .auth-preview-card .preview-stats .v.mint { color: var(--signal-mint); }
+.signal-app .auth-preview-card .preview-stats .l { font-size: 10px; }
+
+/* Trust bullets at the bottom of the brand panel */
+.signal-app .auth-brand-bullets {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.signal-app .auth-brand-bullets li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--signal-hero-text);
+}
+.signal-app .auth-brand-bullets li .dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.signal-app .auth-brand-bullets li .dot.mint { background: var(--signal-mint); }
+.signal-app .auth-brand-bullets li .dot.signal { background: var(--signal-y); }
+.signal-app .auth-brand-bullets li .dot.coral { background: var(--signal-coral); }
+
+/* Tighten the inner splash padding now that AuthLayout owns the centering. */
+.signal-app .signal-auth-layout .auth-form-inner > .signal-splash {
+  flex: initial;
+  overflow: visible;
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Responsive grid utility — wraps repeating cards on desktop.
+   Pages add `.signal-grid` (and optional cols-2 / cols-3) around
+   their card list. Mobile = single column always.
+   ───────────────────────────────────────────────────────────── */
+.signal-app .signal-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+@media (min-width: 768px) {
+  .signal-app .signal-grid.cols-2,
+  .signal-app .signal-grid.auto { grid-template-columns: repeat(2, 1fr); }
+}
+@media (min-width: 1024px) {
+  .signal-app .signal-grid.cols-3,
+  .signal-app .signal-grid.auto { grid-template-columns: repeat(3, 1fr); gap: 14px; }
+}
+@media (min-width: 1280px) {
+  .signal-app .signal-grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+}
+/* When a grid wraps Cards, drop their per-card bottom margin so the gap rules. */
+.signal-app .signal-grid .signal-card { margin-bottom: 0; }
+
+/* ─────────────────────────────────────────────────────────────
+   Split-pane for ProjectRunsPage Runs tab — list left, detail right
+   on desktop; stacked on mobile so the user can scroll the list and
+   tap into a run to expand the detail below.
+   ───────────────────────────────────────────────────────────── */
+.signal-app .signal-split-runs {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+}
+.signal-app .signal-split-runs .split-list,
+.signal-app .signal-split-runs .split-detail { min-width: 0; }
+.signal-app .signal-split-runs .split-list .signal-row { margin-bottom: 8px; }
+@media (min-width: 1024px) {
+  .signal-app .signal-split-runs {
+    grid-template-columns: minmax(0, 5fr) minmax(0, 4fr);
+    align-items: start;
+  }
+  .signal-app .signal-split-runs .split-detail {
+    position: sticky;
+    top: 12px;
+    max-height: calc(100dvh - 24px);
+    overflow-y: auto;
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   Glossary — hover/focus tooltip for term definitions. v3 parity.
+   ───────────────────────────────────────────────────────────── */
+.signal-glossary {
+  position: relative;
+  display: inline-flex;
+  align-items: baseline;
+  border-bottom: 1px dotted var(--signal-text-mute);
+  cursor: help;
+  text-decoration: none;
+  color: inherit;
+}
+.signal-glossary > .signal-glossary-tip {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--signal-ink);
+  color: var(--signal-bg);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.45;
+  letter-spacing: 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  max-width: 280px;
+  width: max-content;
+  z-index: 100;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease-out, transform 0.18s ease-out;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25);
+}
+.signal-glossary:hover > .signal-glossary-tip,
+.signal-glossary:focus > .signal-glossary-tip,
+.signal-glossary:focus-within > .signal-glossary-tip {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(-50%) translateY(-2px);
+  transition-delay: 0.2s;
+}
