@@ -26,10 +26,10 @@ export default function AuthLayout({children}: {children: ReactNode}) {
               <span className='word'>ExecuteSpec</span>
             </div>
             <h2 className='auth-brand-headline'>
-              AI that ships <em>pull requests</em> your team actually merges.
+              An <em>agentic</em> engineer that ships PRs your team can actually merge.
             </h2>
             <p className='auth-brand-lede'>
-              Write a one-line spec. We plan it, code it, test it, and open a PR with a verdict attached. <strong>You merge it.</strong>
+              Describe the change. ExecuteSpec classifies, plans, codes across one repo or twenty, runs your tests, files the PR — and attaches a verified score so you know whether to merge before you open the diff.
             </p>
           </div>
 

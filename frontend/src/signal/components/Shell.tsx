@@ -28,7 +28,7 @@ function buildSidebar(opts: {tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'; isSup
         {path: '/library', label: 'Library', icon: '✦'},
         {path: '/migrations', label: 'Migrations', icon: '⇄'},
         {path: '/templates', label: 'Templates', icon: '✎'},
-        ...(opts.canDeploy ? [{path: '/deployments', label: 'Deployments', icon: '⌁'} as SidebarItem] : []),
+        ...(opts.canDeploy ? [{path: '/deployments', label: 'Deployments', icon: '⌁'} satisfies SidebarItem] : []),
       ],
     },
     {
@@ -38,11 +38,11 @@ function buildSidebar(opts: {tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'; isSup
         {path: '/integrations', label: 'Integrations', icon: '◇'},
         // BYOK is PRO+. Hide for FREE so the sidebar matches what the user
         // can actually do (the page itself also gates).
-        ...(opts.tier !== 'FREE' ? [{path: '/api-keys', label: 'API keys', icon: '⎈'} as SidebarItem] : []),
+        ...(opts.tier !== 'FREE' ? [{path: '/api-keys', label: 'API keys', icon: '⎈'} satisfies SidebarItem] : []),
         {path: '/org-members', label: 'Team', icon: '◐'},
         // Audit log is TEAM+ only.
         ...((opts.tier === 'TEAM' || opts.tier === 'ENTERPRISE' || opts.isSuperAdmin)
-          ? [{path: '/audit', label: 'Audit log', icon: '☷'} as SidebarItem]
+          ? [{path: '/audit', label: 'Audit log', icon: '☷'} satisfies SidebarItem]
           : []),
       ],
     },
@@ -53,7 +53,7 @@ function buildSidebar(opts: {tier: 'FREE' | 'PRO' | 'TEAM' | 'ENTERPRISE'; isSup
         {path: '/search', label: 'Search', icon: '⌕'},
         {path: '/account', label: 'Account', icon: '◍'},
         // Admin link only for SUPER_ADMIN — non-admins were getting bounced to /home.
-        ...(opts.isSuperAdmin ? [{path: '/admin', label: 'Admin', icon: '✦'} as SidebarItem] : []),
+        ...(opts.isSuperAdmin ? [{path: '/admin', label: 'Admin', icon: '✦'} satisfies SidebarItem] : []),
       ],
     },
   ];

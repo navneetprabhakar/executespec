@@ -2,6 +2,7 @@ import {useEffect, useState} from 'react';
 import {useNavigate} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Chip, Button, KvList} from '@/signal/components/Primitives';
+import {LoadingState} from '@/signal/components/Loaders';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 import {useUiStore} from '@/stores/useUiStore';
 import * as api from '@/lib/api';
@@ -15,6 +16,30 @@ export default function AccountPage() {
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
   const [busy, setBusy] = useState(false);
+  const [notifPrefs, setNotifPrefs] = useState<api.NotificationPrefRow[] | null>(null);
+  const [notifBusy, setNotifBusy] = useState<string | null>(null);
+
+  // Load notification preferences for the dedicated panel below.
+  useEffect(() => {
+    api.getNotificationPreferences().then(setNotifPrefs).catch(() => setNotifPrefs([]));
+  }, []);
+
+  async function togglePref(eventType: string, channel: string, enabled: boolean) {
+    const key = `${eventType}:${channel}`;
+    // Narrow channel to the typed literal union — the row is dynamic but the
+    // API only accepts IN_APP | EMAIL.
+    const typedChannel: 'IN_APP' | 'EMAIL' = channel === 'EMAIL' ? 'EMAIL' : 'IN_APP';
+    setNotifBusy(key);
+    try {
+      await api.updateNotificationPreference(eventType, typedChannel, enabled);
+      const next = await api.getNotificationPreferences();
+      setNotifPrefs(next);
+    } catch {
+      /* swallow */
+    } finally {
+      setNotifBusy(null);
+    }
+  }
 
   // Ensure permissions are loaded.
   useEffect(() => {
@@ -82,7 +107,10 @@ export default function AccountPage() {
         <Row to='/api-keys' dot='ocean' title='API keys (BYOK)' meta={<span>Bypass cost cap with your own keys</span>} showChev />
         <Row to='/integrations' dot='lavender' title='Integrations' meta={<span>GitHub, Slack, Razorpay, Stripe</span>} showChev />
         {(user?.orgRole === 'ORG_ADMIN' || user?.globalRole === 'SUPER_ADMIN') && (
-          <Row to='/org-members' title='Org members' meta={<span>Invite teammates · manage roles</span>} showChev />
+          <>
+            <Row to='/org-members' title='Org members' meta={<span>Invite teammates · manage roles</span>} showChev />
+            <Row to='/org/settings' title='Org settings' meta={<span>SSO · domains · audit · DPA</span>} showChev />
+          </>
         )}
 
         <SectionHeader>Preferences</SectionHeader>
@@ -119,6 +147,66 @@ export default function AccountPage() {
             ]}
           />
         </Card>
+
+        <SectionHeader>Notifications</SectionHeader>
+        {notifPrefs == null ? (
+          <LoadingState label='Loading notification preferences…' />
+        ) : notifPrefs.length === 0 ? (
+          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No notification events to configure yet.</p></Card>
+        ) : (
+          <Card style={{padding: 0}}>
+            {notifPrefs.map((row, i) => {
+              const rAny = row as unknown as {eventType?: string; channel?: string; enabled?: boolean; description?: string};
+              const eventType = rAny.eventType || `event-${i}`;
+              const channel = rAny.channel || 'EMAIL';
+              const key = `${eventType}:${channel}`;
+              const enabled = rAny.enabled !== false;
+              return (
+                <div
+                  key={key}
+                  style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 16px', borderBottom: i < notifPrefs.length - 1 ? '1px solid var(--signal-hairline)' : 0}}
+                >
+                  <div style={{minWidth: 0, flex: 1}}>
+                    <div style={{fontSize: 13.5, fontWeight: 500, color: 'var(--signal-ink)'}}>{eventType.replace(/_/g, ' ').toLowerCase()}</div>
+                    <div style={{fontSize: 11.5, color: 'var(--signal-text-dim)'}}>
+                      {rAny.description || `${channel.toLowerCase()} channel`}
+                    </div>
+                  </div>
+                  <button
+                    type='button'
+                    aria-pressed={enabled}
+                    onClick={() => togglePref(eventType, channel, !enabled)}
+                    disabled={notifBusy === key}
+                    style={{
+                      position: 'relative',
+                      width: 40,
+                      height: 22,
+                      background: enabled ? 'var(--signal-mint)' : 'var(--signal-card-elev)',
+                      border: '1px solid var(--signal-hairline)',
+                      borderRadius: 999,
+                      cursor: 'pointer',
+                      transition: 'background 0.2s',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: 1,
+                        left: enabled ? 18 : 1,
+                        width: 18,
+                        height: 18,
+                        background: 'white',
+                        borderRadius: '50%',
+                        transition: 'left 0.2s',
+                      }}
+                    />
+                  </button>
+                </div>
+              );
+            })}
+          </Card>
+        )}
 
         <SectionHeader>Security &amp; data</SectionHeader>
         <Row to='/reset-password' title='Change password' meta={<span>Reset link sent to your email</span>} showChev />

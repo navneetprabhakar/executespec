@@ -139,6 +139,10 @@ export default function PlansPage() {
           ]}
         />
 
+        {/* On desktop, lay the three tier cards side-by-side so the comparison
+            fits above the fold instead of forcing a scroll past FREE to see
+            TEAM and ENTERPRISE. Stacks on mobile / tablet. */}
+        <div className='signal-plans-grid'>
         {plans.map((p) => {
           const price = cycle === 'monthly' ? p.monthly : p.yearly;
           const features = FEATURES[p.tier] || ['—'];
@@ -190,6 +194,7 @@ export default function PlansPage() {
             </Card>
           );
         })}
+        </div>
       </Feed>
     </>
   );

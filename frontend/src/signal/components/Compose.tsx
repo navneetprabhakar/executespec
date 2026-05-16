@@ -11,6 +11,7 @@ export function LiveHero({
   elapsed,
   spent,
   actions,
+  phaseLabel,
 }: {
   runId: string;
   title: ReactNode;
@@ -18,12 +19,16 @@ export function LiveHero({
   elapsed: string;
   spent: string;
   actions?: ReactNode;
+  /** Override the default "Running now" badge — e.g. "Reviewing changes" when
+   *  the run is in the post-worker validation phase. Honest labels build trust
+   *  when the user opens Live and sees the reviewer log instead of code edits. */
+  phaseLabel?: string;
 }) {
   return (
     <div className='signal-live-hero'>
       <div className='row1'>
         <span className='blink' />
-        Running now · {runId}
+        {phaseLabel || 'Running now'} · {runId}
       </div>
       <h2>{title}</h2>
       <div className='progress'>

@@ -2,12 +2,16 @@ import {useEffect, useMemo, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, KvList, TabsStrip, Button} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ScoreCard, PrCard, TaskLine} from '@/signal/components/Compose';
 import {Share} from '@/signal/icons/icons';
 import {Glossary} from '@/signal/components/Glossary';
+import {GitHubLogo} from '@/signal/components/BrandLogos';
+import {CodeView} from '@/signal/components/CodeView';
+import {Markdown} from '@/signal/components/Markdown';
 import * as api from '@/lib/api';
 
-type ResultTab = 'overview' | 'tasks' | 'cost' | 'pr' | 'validation';
+type ResultTab = 'overview' | 'tasks' | 'timeline' | 'code' | 'cost' | 'pr' | 'validation' | 'tests' | 'chat';
 
 function shortStatusReason(r?: string | null): string {
   if (!r) return '—';
@@ -23,6 +27,24 @@ export default function ResultPage() {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
+  // Timeline / Code / Chat — three regression fixes for v3-parity.
+  const [timeline, setTimeline] = useState<api.TimelineData | null>(null);
+  const [files, setFiles] = useState<api.FileWithStatus[] | null>(null);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<api.RunChatMessage[] | null>(null);
+  const [chatInput, setChatInput] = useState('');
+  const [chatBusy, setChatBusy] = useState(false);
+  const [retryingTaskId, setRetryingTaskId] = useState<string | null>(null);
+  const [showDiff, setShowDiff] = useState(false);
+  const [fileDiff, setFileDiff] = useState<string | null>(null);
+  const [testReport, setTestReport] = useState<api.TestReportData | null>(null);
+  const [testReportLoading, setTestReportLoading] = useState(false);
+  // Re-run on a different provider — fires `createRun` with the same spec
+  // against the chosen provider so the user can A/B providers without
+  // re-typing. Used to ship as a single "Iterate" row that always rebuilt on
+  // the same provider; that hid the most valuable comparison.
+  const [rerunBusy, setRerunBusy] = useState<string | null>(null);
 
   useEffect(() => {
     if (!id) return;
@@ -38,6 +60,105 @@ export default function ResultPage() {
     };
   }, [id]);
 
+  // Lazy-load tab-specific data so we don't fetch the whole world up-front.
+  useEffect(() => {
+    if (!id) return;
+    if (tab === 'timeline' && timeline == null) {
+      api.getTimeline(id).then(setTimeline).catch(() => setTimeline({tasks: []} as api.TimelineData));
+    }
+    if (tab === 'code' && files == null) {
+      api.getFilesWithStatus(id).then(setFiles).catch(() => setFiles([]));
+    }
+    if (tab === 'chat' && chatMessages == null) {
+      api.getRunChat(id).then(setChatMessages).catch(() => setChatMessages([]));
+    }
+    if (tab === 'tests' && testReport == null && !testReportLoading) {
+      setTestReportLoading(true);
+      api.getTestReport(id)
+        .then((tr) => setTestReport(tr ?? ({results: []} as unknown as api.TestReportData)))
+        .catch(() => setTestReport({results: []} as unknown as api.TestReportData))
+        .finally(() => setTestReportLoading(false));
+    }
+  }, [id, tab, timeline, files, chatMessages, testReport, testReportLoading]);
+
+  // Load file content when user picks a file from the Code tab list.
+  useEffect(() => {
+    if (!id || !selectedFile) {
+      setFileContent(null);
+      return;
+    }
+    let cancelled = false;
+    setFileContent('Loading…');
+    api.getFile(id, selectedFile)
+      .then((c) => { if (!cancelled) setFileContent(typeof c === 'string' ? c : JSON.stringify(c, null, 2)); })
+      .catch(() => { if (!cancelled) setFileContent('Failed to load file.'); });
+    return () => { cancelled = true; };
+  }, [id, selectedFile]);
+
+  async function sendChat() {
+    if (!id || !chatInput.trim() || chatBusy) return;
+    setChatBusy(true);
+    const text = chatInput.trim();
+    setChatInput('');
+    // Optimistic insert.
+    const userMsg: api.RunChatMessage = {role: 'user', content: text};
+    setChatMessages((prev) => [...(prev || []), userMsg]);
+    try {
+      const resp = await api.sendRunChatMessage(id, text);
+      const reply = (resp as unknown as {reply?: string; message?: string}).reply || (resp as unknown as {message?: string}).message || '(no reply)';
+      const assistantMsg: api.RunChatMessage = {role: 'assistant', content: reply};
+      setChatMessages((prev) => [...(prev || []), assistantMsg]);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Chat failed.');
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function iterateAsNewRun() {
+    if (!id || !chatInput.trim()) return;
+    setChatBusy(true);
+    try {
+      const resp = await api.iterateRun(id, chatInput.trim());
+      const newId = (resp as unknown as {runId?: string}).runId;
+      if (newId) window.location.href = `/plan/${newId}`;
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Iterate failed.');
+    } finally {
+      setChatBusy(false);
+    }
+  }
+
+  async function rerunOnProvider(provider: 'ANTHROPIC' | 'OPENAI' | 'GEMINI') {
+    if (!run) return;
+    const spec = (run as unknown as {userRequest?: string})?.userRequest?.trim();
+    if (!spec) {
+      setErr('Cannot re-run: source spec is missing.');
+      return;
+    }
+    setRerunBusy(provider);
+    try {
+      // Mirror the original run's executionMode so a PROTOTYPE re-run stays
+      // PROTOTYPE (no plan gate). Project context (if any) is preserved.
+      const projectId = (run as unknown as {projectId?: string})?.projectId;
+      const execMode = ((run as unknown as {executionMode?: string})?.executionMode === 'PRODUCTION'
+        ? 'PRODUCTION' : 'PROTOTYPE') as 'PROTOTYPE' | 'PRODUCTION';
+      const resp = await api.createRun({
+        userRequest: spec,
+        aiProvider: provider,
+        executionMode: execMode,
+        skipApproval: execMode === 'PROTOTYPE',
+        projectId,
+      });
+      const newId = (resp as unknown as {runId?: string}).runId;
+      if (newId) window.location.href = `/live/${newId}`;
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Re-run failed.');
+    } finally {
+      setRerunBusy(null);
+    }
+  }
+
   const score = (run as unknown as {verifiedScore?: number})?.verifiedScore ??
     (run as unknown as {accuracyScore?: number})?.accuracyScore ?? 0;
   const status = run?.status as string | undefined;
@@ -46,7 +167,11 @@ export default function ResultPage() {
   const prUrl = (run as unknown as {scmPrUrl?: string; githubPrUrl?: string})?.scmPrUrl ||
     (run as unknown as {githubPrUrl?: string})?.githubPrUrl;
   const statusReason = (run as unknown as {statusReason?: string})?.statusReason;
-  const verdict = score >= 90 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
+  // Match the 4-band palette used by RunCard/ScoreRing/AllRunsPage/HomePage:
+  // ≥85 = green / Shippable, 70-84 = amber / Needs review, <70 = red / Failed.
+  // The previous 90 threshold here put green-band runs (85-89) into "Needs
+  // review" which directly contradicted the chip colour everywhere else.
+  const verdict = score >= 85 ? 'Shippable' : score >= 70 ? 'Needs review' : 'Failed';
   const tasks = run?.tasks || [];
 
   const reportAny = (report || {}) as unknown as {
@@ -132,6 +257,43 @@ export default function ResultPage() {
     }
   }
 
+  async function retryTask(taskId: string) {
+    if (!id) return;
+    setRetryingTaskId(taskId);
+    setErr('');
+    setMsg('');
+    try {
+      await api.retryTask(id, taskId);
+      setMsg(`Task ${taskId.slice(0, 6)} retry queued. Refresh in a few seconds to see progress.`);
+      // Refresh the run so the task's status updates.
+      const r = await api.getRun(id);
+      setRun(r);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : 'Retry failed.');
+    } finally {
+      setRetryingTaskId(null);
+    }
+  }
+
+  // Lazy-load file diff when the user toggles "Diff" on a selected file.
+  useEffect(() => {
+    if (!id || !selectedFile || !showDiff) {
+      setFileDiff(null);
+      return;
+    }
+    let cancelled = false;
+    setFileDiff('Loading…');
+    api.getFileDiff(id, selectedFile)
+      .then((d) => {
+        if (cancelled) return;
+        const diffText = (d as unknown as {diff?: string; content?: string}).diff ||
+          (d as unknown as {content?: string}).content || '';
+        setFileDiff(diffText || 'No diff (file unchanged or newly added).');
+      })
+      .catch(() => { if (!cancelled) setFileDiff('Failed to load diff.'); });
+    return () => { cancelled = true; };
+  }, [id, selectedFile, showDiff]);
+
   async function pushScm() {
     if (!id) return;
     try {
@@ -183,9 +345,13 @@ export default function ResultPage() {
           items={[
             {label: 'Overview', active: tab === 'overview', onClick: () => setTab('overview')},
             {label: `Tasks · ${tasks.length}`, active: tab === 'tasks', onClick: () => setTab('tasks')},
+            {label: 'Timeline', active: tab === 'timeline', onClick: () => setTab('timeline')},
+            {label: `Code · ${files?.length ?? '—'}`, active: tab === 'code', onClick: () => setTab('code')},
             {label: 'Cost', active: tab === 'cost', onClick: () => setTab('cost')},
             {label: prUrl ? 'PR' : 'PR · —', active: tab === 'pr', onClick: () => setTab('pr')},
             {label: 'Validation', active: tab === 'validation', onClick: () => setTab('validation')},
+            {label: 'Tests', active: tab === 'tests', onClick: () => setTab('tests')},
+            {label: 'Chat', active: tab === 'chat', onClick: () => setTab('chat')},
           ]}
         />
 
@@ -206,12 +372,29 @@ export default function ResultPage() {
             <Card>
               <KvList
                 pairs={[
-                  {k: 'Build', v: <span style={{color: reportAny.buildStatus === 'PASSING' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{reportAny.buildStatus ?? '—'}</span>},
-                  {k: 'Tests', v: reportAny.testsTotal != null ? `${reportAny.testsPassed ?? 0} of ${reportAny.testsTotal}` : '—'},
-                  {k: 'Coverage', v: reportAny.coverageDelta != null ? `${reportAny.coverageDelta >= 0 ? '+' : ''}${reportAny.coverageDelta.toFixed(1)}%` : '—'},
-                  {k: <Glossary term='wiring pass'>Reviewer</Glossary>, v: <span>{reportAny.reviewerStatus ?? '—'}</span>},
-                  {k: 'Security', v: <span style={{color: reportAny.securityStatus === 'CLEAN' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{reportAny.securityStatus ?? '—'}</span>},
-                  {k: 'Architecture', v: <span style={{color: reportAny.architectureStatus === 'CLEAN' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{reportAny.architectureStatus ?? '—'}</span>},
+                  // Render "not measured" (muted) instead of "—" when the
+                  // backend simply didn't run that check (single-shot or
+                  // patch-mode runs skip parts of the validation pipeline).
+                  // A literal dash makes the user think the value is zero
+                  // and the page is broken; "not measured" is honest.
+                  {k: 'Build', v: reportAny.buildStatus
+                    ? <span style={{color: reportAny.buildStatus === 'PASSING' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{reportAny.buildStatus}</span>
+                    : <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>},
+                  {k: 'Tests', v: reportAny.testsTotal != null
+                    ? `${reportAny.testsPassed ?? 0} of ${reportAny.testsTotal}`
+                    : <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>},
+                  {k: 'Coverage', v: reportAny.coverageDelta != null
+                    ? `${reportAny.coverageDelta >= 0 ? '+' : ''}${reportAny.coverageDelta.toFixed(1)}%`
+                    : <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>},
+                  {k: <Glossary term='wiring pass'>Reviewer</Glossary>, v: reportAny.reviewerStatus
+                    ? <span>{reportAny.reviewerStatus}</span>
+                    : <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>},
+                  {k: 'Security', v: reportAny.securityStatus
+                    ? <span style={{color: reportAny.securityStatus === 'CLEAN' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{reportAny.securityStatus}</span>
+                    : <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>},
+                  {k: 'Architecture', v: reportAny.architectureStatus
+                    ? <span style={{color: reportAny.architectureStatus === 'CLEAN' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{reportAny.architectureStatus}</span>
+                    : <span style={{color: 'var(--signal-text-mute)'}}>not measured</span>},
                   {k: <Glossary term='status reason'>Status reason</Glossary>, v: shortStatusReason(reportAny.statusReason || statusReason)},
                 ]}
               />
@@ -219,6 +402,35 @@ export default function ResultPage() {
 
             <SectionHeader>What now</SectionHeader>
             <Row to='/compose' dot='signal' title='Iterate on this run' meta={<span>Reuse the spec in the composer</span>} showChev />
+            {(() => {
+              // Re-run on a different provider — surfaces the A/B comparison
+              // the user actually wants to make when a score is mediocre.
+              // Excludes the provider this run already used.
+              const currentProvider = (run as unknown as {aiProvider?: string})?.aiProvider?.toUpperCase();
+              const others = (['ANTHROPIC', 'OPENAI', 'GEMINI'] as const).filter((p) => p !== currentProvider);
+              return (
+                <Row
+                  dot='signal'
+                  title='Try another provider'
+                  meta={<span>Re-run this exact spec on a different model</span>}
+                  trailing={
+                    <div style={{display: 'flex', gap: 6}}>
+                      {others.map((p) => (
+                        <Button
+                          key={p}
+                          kind='secondary'
+                          sm
+                          disabled={rerunBusy != null}
+                          onClick={() => rerunOnProvider(p)}
+                        >
+                          {rerunBusy === p ? '…' : p[0] + p.slice(1).toLowerCase()}
+                        </Button>
+                      ))}
+                    </div>
+                  }
+                />
+              );
+            })()}
             <Row dot='lavender' title='Preview deploy' meta={<span>Cloud Run · 5min TTL</span>} trailing={<Button kind='secondary' sm onClick={startPreview}>Start</Button>} />
             <Row dot='lavender' title='Download report (PDF)' meta={<span>signed validation report</span>} trailing={<Button kind='secondary' sm onClick={downloadPdf} disabled={busy}>{busy ? '…' : 'PDF'}</Button>} />
             <Row dot='lavender' title='Share read-only report' meta={<span>public link · 30d expiry</span>} trailing={<Button kind='secondary' sm onClick={share}>Share</Button>} />
@@ -227,24 +439,48 @@ export default function ResultPage() {
         )}
 
         {tab === 'tasks' && (
-          <Card style={{padding: 0}}>
+          <>
             {tasks.length === 0 ? (
-              <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 14}}>No tasks recorded.</p>
+              <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No tasks recorded.</p></Card>
             ) : (
               tasks.map((t, i) => {
-                const tAny = t as unknown as {taskId?: string; title?: string; status?: string; complexity?: string; iterations?: number};
+                const tAny = t as unknown as {taskId?: string; title?: string; status?: string; complexity?: string; iterations?: number; failureReason?: string};
+                const failed = tAny.status === 'FAILED';
+                const partial = tAny.status === 'PARTIAL';
+                const canRetry = failed || partial;
                 return (
-                  <TaskLine
-                    key={tAny.taskId || i}
-                    status={tAny.status === 'COMPLETED' || tAny.status === 'DONE' ? 'done' : tAny.status === 'EXECUTING' || tAny.status === 'RUNNING' ? 'live' : 'todo'}
-                    title={tAny.title || `Task ${i + 1}`}
-                    sub={tAny.iterations ? `${tAny.iterations} iters` : undefined}
-                    tag={tAny.complexity || 'AUTO'}
-                  />
+                  <div key={tAny.taskId || i} style={{marginBottom: 8, background: 'var(--signal-card-bg)', border: '1px solid var(--signal-hairline)', borderRadius: 14, overflow: 'hidden'}}>
+                    <TaskLine
+                      status={tAny.status === 'COMPLETED' || tAny.status === 'DONE' ? 'done' : tAny.status === 'EXECUTING' || tAny.status === 'RUNNING' ? 'live' : 'todo'}
+                      title={tAny.title || `Task ${i + 1}`}
+                      sub={
+                        [
+                          tAny.iterations ? `${tAny.iterations} iters` : null,
+                          tAny.status ? tAny.status.toLowerCase() : null,
+                        ].filter(Boolean).join(' · ') || undefined
+                      }
+                      tag={tAny.complexity || 'AUTO'}
+                    />
+                    {canRetry && tAny.taskId && (
+                      <div style={{padding: '10px 14px', borderTop: '1px solid var(--signal-hairline)', display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'center'}}>
+                        <span style={{fontSize: 12, color: 'var(--signal-coral-text)', minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>
+                          {failed ? 'Failed' : 'Partial'}{tAny.failureReason ? ` · ${tAny.failureReason.slice(0, 80)}` : ''}
+                        </span>
+                        <Button
+                          kind='primary'
+                          sm
+                          disabled={retryingTaskId === tAny.taskId}
+                          onClick={() => retryTask(tAny.taskId!)}
+                        >
+                          {retryingTaskId === tAny.taskId ? 'Retrying…' : 'Retry task'}
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 );
               })
             )}
-          </Card>
+          </>
         )}
 
         {tab === 'cost' && (
@@ -297,7 +533,12 @@ export default function ResultPage() {
                 <strong style={{color: 'var(--signal-ink)'}}>{status?.toLowerCase() || 'in progress'}</strong>. PRs open automatically once the executor finishes pushing.
               </p>
               <div style={{display: 'flex', gap: 6, marginTop: 12}}>
-                <Button kind='secondary' sm onClick={pushScm}>Push to SCM</Button>
+                <Button kind='secondary' sm onClick={pushScm}>
+                  <span style={{display: 'inline-flex', alignItems: 'center', gap: 8}}>
+                    <GitHubLogo size={14} />
+                    Push to GitHub
+                  </span>
+                </Button>
               </div>
             </Card>
           )
@@ -347,6 +588,282 @@ export default function ResultPage() {
             <div style={{display: 'flex', gap: 6, marginTop: 12}}>
               <Button kind='secondary' block onClick={downloadPdf} disabled={busy}>{busy ? '…' : 'Download PDF'}</Button>
               <Button kind='ghost' block onClick={retryReport}>Retry</Button>
+            </div>
+          </>
+        )}
+
+        {tab === 'timeline' && (
+          timeline == null ? (
+            <LoadingState label="Loading timeline…" />
+          ) : (timeline.tasks || []).length === 0 ? (
+            <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No timeline data yet. Tasks populate as the run progresses.</p></Card>
+          ) : (
+            <Card style={{padding: 14}}>
+              {(() => {
+                const allTasks = timeline.tasks || [];
+                const minT = Math.min(...allTasks.map((t) => new Date(t.startedAt).getTime()));
+                const maxT = Math.max(...allTasks.map((t) => t.completedAt ? new Date(t.completedAt).getTime() : Date.now()));
+                const span = Math.max(1, maxT - minT);
+                return allTasks.map((t, i) => {
+                  const start = new Date(t.startedAt).getTime();
+                  const end = t.completedAt ? new Date(t.completedAt).getTime() : Date.now();
+                  const leftPct = ((start - minT) / span) * 100;
+                  const widthPct = Math.max(2, ((end - start) / span) * 100);
+                  const durMs = end - start;
+                  const m = Math.floor(durMs / 60000);
+                  const s = Math.floor((durMs % 60000) / 1000);
+                  const dur = m > 0 ? `${m}m ${s}s` : `${s}s`;
+                  const isDone = t.status === 'COMPLETED' || t.status === 'DONE';
+                  const isFailed = t.status === 'FAILED';
+                  return (
+                    <div key={t.taskId || i} style={{marginBottom: 12}}>
+                      <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 4, gap: 8}}>
+                        <div style={{fontSize: 13, color: 'var(--signal-ink)', minWidth: 0, flex: 1, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{t.title || `Task ${i + 1}`}</div>
+                        <div style={{fontSize: 11, color: 'var(--signal-text-dim)', fontFamily: "'JetBrains Mono', monospace", flexShrink: 0}}>{dur}</div>
+                      </div>
+                      <div style={{position: 'relative', height: 8, background: 'var(--signal-card-elev)', borderRadius: 4, overflow: 'hidden'}}>
+                        <div
+                          style={{
+                            position: 'absolute',
+                            left: `${leftPct}%`,
+                            width: `${widthPct}%`,
+                            top: 0,
+                            bottom: 0,
+                            background: isFailed ? 'var(--signal-coral)' : isDone ? 'var(--signal-mint)' : 'var(--signal-y)',
+                            borderRadius: 4,
+                          }}
+                        />
+                      </div>
+                    </div>
+                  );
+                });
+              })()}
+            </Card>
+          )
+        )}
+
+        {tab === 'code' && (
+          files == null ? (
+            <LoadingState label="Loading files…" />
+          ) : files.length === 0 ? (
+            <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No files touched by this run yet.</p></Card>
+          ) : (
+            <div className='signal-split-runs'>
+              <div className='split-list' style={{maxHeight: 'calc(100dvh - 200px)', overflowY: 'auto'}}>
+                {files.map((f) => {
+                  const fAny = f as unknown as {path?: string; status?: string};
+                  const isSelected = selectedFile === fAny.path;
+                  const status = (fAny.status || 'MODIFIED').toUpperCase();
+                  const dot: 'mint' | 'signal' | 'lavender' = status === 'ADDED' ? 'mint' : status === 'MODIFIED' ? 'signal' : 'lavender';
+                  return (
+                    <div
+                      key={fAny.path}
+                      className='signal-row'
+                      style={{cursor: 'pointer', borderColor: isSelected ? 'var(--signal-ink)' : undefined, padding: '10px 12px'}}
+                      onClick={() => fAny.path && setSelectedFile(fAny.path)}
+                    >
+                      <div className={`pill-dot ${dot}`} />
+                      <div style={{minWidth: 0}}>
+                        <div className='row-title' style={{fontSize: 13, fontFamily: "'JetBrains Mono', monospace"}}>{fAny.path}</div>
+                        <div className='row-meta'><span>{status.toLowerCase()}</span></div>
+                      </div>
+                    </div>
+                  );
+                })}
+                <Button kind='secondary' sm block style={{marginTop: 8}} onClick={() => id && api.downloadWorkspace(id).catch(() => undefined)}>
+                  Download workspace
+                </Button>
+              </div>
+              <div className='split-detail'>
+                {!selectedFile ? (
+                  <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Pick a file on the left to view its contents.</p></Card>
+                ) : (
+                  <>
+                    <div style={{display: 'flex', gap: 6, marginBottom: 8}}>
+                      <Button kind={!showDiff ? 'primary' : 'secondary'} sm onClick={() => setShowDiff(false)}>Content</Button>
+                      <Button kind={showDiff ? 'primary' : 'secondary'} sm onClick={() => setShowDiff(true)}>Diff</Button>
+                    </div>
+                    <CodeView
+                      path={selectedFile}
+                      content={showDiff ? undefined : (fileContent ?? '')}
+                      diff={showDiff ? (fileDiff ?? '') : undefined}
+                      maxHeight={520}
+                    />
+                  </>
+                )}
+              </div>
+            </div>
+          )
+        )}
+
+        {tab === 'tests' && (
+          testReport == null ? (
+            <LoadingState label='Loading test report…' />
+          ) : (
+            (() => {
+              const tr = testReport as unknown as {results?: api.TestResultDetail[]; totalRun?: number; totalPassed?: number; totalFailed?: number; suggestions?: api.FailureSuggestion[]; rootCauses?: api.RootCauseGroup[]};
+              const results = tr.results || [];
+              const passed = tr.totalPassed ?? results.filter((r) => (r as unknown as {status?: string}).status === 'PASSED').length;
+              const failed = tr.totalFailed ?? results.filter((r) => (r as unknown as {status?: string}).status === 'FAILED').length;
+              const total = tr.totalRun ?? (passed + failed);
+              const rootCauses = tr.rootCauses || [];
+              const suggestions = tr.suggestions || [];
+              return (
+                <>
+                  <Card style={{padding: 16}}>
+                    <KvList
+                      pairs={[
+                        {k: 'Total', v: String(total)},
+                        {k: 'Passed', v: <span style={{color: 'var(--signal-mint-text-on-light)'}}>{passed}</span>},
+                        {k: 'Failed', v: <span style={{color: 'var(--signal-coral-text)'}}>{failed}</span>},
+                        {k: 'Pass rate', v: total > 0 ? `${Math.round((passed / total) * 100)}%` : '—'},
+                      ]}
+                    />
+                  </Card>
+
+                  <Button kind='secondary' block style={{marginTop: 10}} onClick={async () => {
+                    if (!id) return;
+                    try {
+                      await api.runTests(id);
+                      setMsg('Test re-run queued.');
+                    } catch (e: unknown) {
+                      setErr(e instanceof Error ? e.message : 'Re-run failed.');
+                    }
+                  }}>Re-run tests</Button>
+
+                  {rootCauses.length > 0 && (
+                    <>
+                      <SectionHeader>Root causes · {rootCauses.length}</SectionHeader>
+                      {rootCauses.map((g, i) => {
+                        const gAny = g as unknown as {signature?: string; description?: string; failureCount?: number; suggestedFix?: string};
+                        return (
+                          <Card key={i} style={{marginBottom: 10}}>
+                            <div style={{fontSize: 14, fontWeight: 600, marginBottom: 6}}>
+                              {gAny.description || gAny.signature || `Root cause ${i + 1}`}
+                            </div>
+                            <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginBottom: 10}}>
+                              {gAny.failureCount ?? 0} affected test{(gAny.failureCount ?? 0) === 1 ? '' : 's'}
+                            </div>
+                            {gAny.suggestedFix && (
+                              <div style={{background: 'var(--signal-card-elev)', padding: '10px 12px', borderRadius: 8, fontSize: 13, lineHeight: 1.5}}>
+                                <Markdown>{gAny.suggestedFix}</Markdown>
+                              </div>
+                            )}
+                            {gAny.signature && id && (
+                              <Button kind='primary' sm style={{marginTop: 10}} onClick={async () => {
+                                try {
+                                  await api.applyTestFixes(id, gAny.signature);
+                                  setMsg('Test-fix run queued.');
+                                } catch (e: unknown) {
+                                  setErr(e instanceof Error ? e.message : 'Apply fix failed.');
+                                }
+                              }}>Apply fix as new run</Button>
+                            )}
+                          </Card>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  {suggestions.length > 0 && (
+                    <>
+                      <SectionHeader>Suggestions · {suggestions.length}</SectionHeader>
+                      {suggestions.map((s, i) => {
+                        const sAny = s as unknown as {title?: string; description?: string};
+                        return (
+                          <Card key={i} style={{marginBottom: 8}}>
+                            <div style={{fontSize: 13.5, fontWeight: 600}}>{sAny.title || `Suggestion ${i + 1}`}</div>
+                            {sAny.description && <div style={{fontSize: 12, color: 'var(--signal-text-dim)', marginTop: 4}}>{sAny.description}</div>}
+                          </Card>
+                        );
+                      })}
+                    </>
+                  )}
+
+                  <SectionHeader>All tests · {results.length}</SectionHeader>
+                  {results.slice(0, 30).map((r, i) => {
+                    const rAny = r as unknown as {id?: string | number; testName?: string; testClass?: string; status?: string; durationMs?: number; failureMessage?: string};
+                    const status = (rAny.status || 'UNKNOWN').toUpperCase();
+                    return (
+                      <Row
+                        key={rAny.id || i}
+                        dot={status === 'PASSED' ? 'mint' : status === 'FAILED' ? 'coral' : 'lavender'}
+                        title={rAny.testName || `Test ${i + 1}`}
+                        meta={
+                          <>
+                            {rAny.testClass && <span className='mono'>{rAny.testClass}</span>}
+                            {rAny.durationMs != null && (<><span>·</span><span>{(rAny.durationMs / 1000).toFixed(2)}s</span></>)}
+                          </>
+                        }
+                        trailing={status}
+                        trailingKind={status === 'PASSED' ? 'good' : status === 'FAILED' ? 'fail' : 'default'}
+                      />
+                    );
+                  })}
+                </>
+              );
+            })()
+          )
+        )}
+
+        {tab === 'chat' && (
+          <>
+            <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent', marginBottom: 12}}>
+              <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.55}}>
+                Run-scoped chat — ask the agent to explain decisions, iterate on the implementation, or kick off a new run. "Iterate as new run" forks the spec.
+              </div>
+            </Card>
+            <div style={{display: 'flex', flexDirection: 'column', gap: 10, marginBottom: 12, maxHeight: 360, overflowY: 'auto'}}>
+              {chatMessages == null ? (
+                <LoadingState label="Loading chat…" />
+              ) : chatMessages.length === 0 && !chatBusy ? (
+                <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No messages yet. Ask the agent anything about this run.</p></Card>
+              ) : (
+                chatMessages.map((m, i) => {
+                  const isUser = (m as unknown as {role?: string}).role === 'user';
+                  const content = (m as unknown as {content?: string}).content || '';
+                  const ts = (m as unknown as {timestamp?: string; sentAt?: string}).timestamp || (m as unknown as {sentAt?: string}).sentAt;
+                  return (
+                    <div
+                      key={i}
+                      style={{
+                        alignSelf: isUser ? 'flex-end' : 'flex-start',
+                        maxWidth: '85%',
+                        padding: '10px 14px',
+                        background: isUser ? 'var(--signal-ink)' : 'var(--signal-card-bg)',
+                        color: isUser ? 'var(--signal-bg)' : 'var(--signal-ink)',
+                        borderRadius: 14,
+                        ...(isUser ? {borderBottomRightRadius: 4} : {borderBottomLeftRadius: 4, border: '1px solid var(--signal-hairline)'}),
+                      }}
+                    >
+                      <div style={{fontFamily: "'JetBrains Mono', monospace", fontSize: 10, opacity: 0.6, marginBottom: 4}}>
+                        {isUser ? 'YOU' : 'RUN COPILOT'}{ts && ` · ${new Date(ts).toLocaleTimeString()}`}
+                      </div>
+                      <div style={{fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>{content}</div>
+                    </div>
+                  );
+                })
+              )}
+              {chatBusy && (
+                <div style={{alignSelf: 'flex-start', padding: '8px 14px', color: 'var(--signal-text-dim)', fontSize: 12}}>Thinking…</div>
+              )}
+            </div>
+            <div style={{display: 'flex', gap: 8, alignItems: 'flex-end'}}>
+              <textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendChat(); }
+                }}
+                placeholder='Ask anything about this run…'
+                rows={2}
+                disabled={chatBusy}
+                style={{flex: 1, background: 'var(--signal-card-elev)', border: '1px solid var(--signal-hairline)', borderRadius: 12, padding: '10px 14px', fontFamily: 'inherit', fontSize: 14, color: 'var(--signal-ink)', resize: 'vertical', outline: 'none', minHeight: 60, maxHeight: 200}}
+              />
+              <div style={{display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0}}>
+                <Button kind='primary' sm onClick={sendChat} disabled={chatBusy || !chatInput.trim()}>Send</Button>
+                <Button kind='secondary' sm onClick={iterateAsNewRun} disabled={chatBusy || !chatInput.trim()}>Iterate as new run</Button>
+              </div>
             </div>
           </>
         )}

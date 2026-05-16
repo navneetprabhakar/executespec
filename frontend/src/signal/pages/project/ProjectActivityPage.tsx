@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, TabsStrip} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import * as api from '@/lib/api';
@@ -39,14 +40,26 @@ export default function ProjectActivityPage() {
   const [filter, setFilter] = useState<ActivityFilter>('all');
   const [err, setErr] = useState('');
 
+  // Activity events are written async by the run-completion pipeline, so the
+  // feed can be empty for ~15-60s after a run terminates. Poll every 30s so
+  // the user doesn't have to mash refresh waiting for their just-finished
+  // run to show up.
   useEffect(() => {
     if (!id) return;
     let cancelled = false;
-    api.getActivityFeed(id, {limit: 50, sinceDays: 90})
-      .then((a) => { if (!cancelled) setPage(a); })
-      .catch(() => { if (!cancelled) setErr('Failed to load activity.'); });
+    let timer: number | undefined;
+    function load() {
+      api.getActivityFeed(id, {limit: 50, sinceDays: 90})
+        .then((a) => { if (!cancelled) setPage(a); })
+        .catch(() => { if (!cancelled) setErr('Failed to load activity.'); })
+        .finally(() => {
+          if (!cancelled) timer = window.setTimeout(load, 30_000);
+        });
+    }
+    load();
     return () => {
       cancelled = true;
+      if (timer) clearTimeout(timer);
     };
   }, [id]);
 
@@ -81,7 +94,7 @@ export default function ProjectActivityPage() {
         {err && <div style={{background: 'var(--signal-coral-soft)', color: 'var(--signal-coral-text)', border: '1px solid var(--signal-coral)', borderRadius: 10, padding: '10px 14px', marginBottom: 12, fontSize: 13}}>{err}</div>}
 
         {page == null ? (
-          <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading activity…</p></Card>
+          <LoadingState label="Loading activity…" />
         ) : filtered.length === 0 ? (
           <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No activity yet for this filter.</p></Card>
         ) : (

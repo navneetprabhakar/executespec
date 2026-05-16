@@ -73,7 +73,7 @@ src/main/java/com/navneet/executespec/
 ├── saga/                                # Side-effect outbox (compensation)
 ├── scoring/                             # 6-dimension scoring + verifiedScore
 ├── security/                            # Sanitizers, abuse scanner, guardrail levels (+ guardrail/ sub)
-├── sharing/                             # External project sharing — cross-org ProjectMember + public share links (V175)
+├── sharing/                             # External project sharing — cross-org ProjectMember + public share links (V175 + V198 org-flag gate)
 ├── smoketest/                           # CliSmokeRunner
 ├── sse/                                 # SSE channel — RunEvent, broadcaster
 ├── standards/                           # Engineering standards as binding policy — AST/LLM checks + override (E3)
@@ -312,6 +312,7 @@ Full filenames in `src/main/resources/db/migration/`. Head: **V186** (2026-05-11
 | V165–V168 | Drop MAX tier, rename to TEAM @ $39 (V165), align FREE billing plan run limit (V166), revert FREE to 5 (V167), pause/resume columns (V168). |
 | V169–V178 | PR record project_id + kind (V169), CI auto-fix attempts (V170), R09 reconcile pipeline_result with status_reason (V171), PR Review + Code Review agent schema (V172), widen review user_id columns (V173), arch-doc cost columns (V174), external project sharing (V175), un-hide PRO as Solo (V176, retired by V185), Solo annual + founder pricing (V177), user_cost_cap on pipeline_run (V178). |
 | V179–V186 | Drop product split (V179), lint autofix flag (V180), PR comment inbox (V181), `pipeline_run.run_mode = BUILD \| PATCH` (V182), `pipeline_run.triggered_by_finding` (V183), widen `agent_task.last_llm_failure` VARCHAR(255) → TEXT (V184), retire Solo branding (V185), pull_request CI status columns (V186). |
+| V187–V198 | `execution_run.failure_reason` (V193), `validation_report.rubric_score` (V194), `generated_doc.source_fingerprint` (V195), `file.purpose_summary` (V196), `pipeline_run.rubric` rubric breakdown row (V197), **per-org `external_sharing_enabled` BOOLEAN flag** (V198) gating cross-org project invites on top of the existing tier check. |
 
 ---
 

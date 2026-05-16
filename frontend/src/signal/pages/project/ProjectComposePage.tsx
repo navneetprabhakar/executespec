@@ -3,6 +3,8 @@ import {useNavigate, useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Chip, KvList, Button, StatusPill} from '@/signal/components/Primitives';
 import {ComposerCard, LiveHero, LiveHeroAction} from '@/signal/components/Compose';
+import {SkeletonRow} from '@/signal/components/Loaders';
+import {SpecChat} from '@/signal/components/SpecChat';
 import {Share, More} from '@/signal/icons/icons';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
@@ -54,7 +56,8 @@ export default function ProjectComposePage() {
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [selectedRepoIds, setSelectedRepoIds] = useState<string[]>([]);
   const [estimate, setEstimate] = useState<api.LaunchEstimate | null>(null);
-  const [recent, setRecent] = useState<api.RunSummary[]>([]);
+  // null = still loading; [] = loaded with no results.
+  const [recent, setRecent] = useState<api.RunSummary[] | null>(null);
   const [liveRun, setLiveRun] = useState<api.RunSummary | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -105,7 +108,7 @@ export default function ProjectComposePage() {
         return s === 'CLASSIFYING' || s === 'PLANNING' || s === 'EXECUTING' || s === 'AWAITING_APPROVAL' || s === 'RUNNING';
       });
       setLiveRun(live ?? null);
-    }).catch(() => {/* swallow */});
+    }).catch(() => { setRecent([]); });
   }, [id]);
 
   // Estimate p25/p75 cost + tasks for the current spec.
@@ -204,6 +207,12 @@ export default function ProjectComposePage() {
           }
         />
 
+        <SpecChat
+          projectId={id}
+          draftSpec={spec}
+          onApply={(refined) => setSpec(refined)}
+        />
+
         {repos.length > 0 && (
           <>
             <SectionHeader>Repos the agent may touch</SectionHeader>
@@ -246,7 +255,12 @@ export default function ProjectComposePage() {
         )}
 
         <SectionHeader action={<a href={`/projects/${id}/runs`}>All runs</a>}>Recent runs in this project</SectionHeader>
-        {recent.length === 0 ? (
+        {recent === null ? (
+          <>
+            <SkeletonRow lines={2} />
+            <SkeletonRow lines={2} />
+          </>
+        ) : recent.length === 0 ? (
           <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No runs yet. Submit a spec above to start.</p></Card>
         ) : (
           recent.slice(0, 4).map((r) => {

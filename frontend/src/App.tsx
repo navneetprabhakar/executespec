@@ -71,6 +71,7 @@ import {
   DeploymentsPage,
   SpecTemplatesPage,
 } from '@/signal/pages/ExtraPages';
+import {TermsPage, PrivacyPage, DpaPage, OrgSettingsPage} from '@/signal/pages/LegalPages';
 
 /**
  * Legacy URL redirects so old bookmarks + marketing links keep working.
@@ -86,6 +87,11 @@ function LegacyRedirect() {
   path = path.replace(/^\/p\/empty\b/, '/projects/empty');
   path = path.replace(/^\/p\/([^/]+)\/r\//, '/projects/$1/runs/');
   path = path.replace(/^\/p\//, '/projects/');
+  // Executions (v3 launch system) is currently being rebuilt — collapse any
+  // legacy /projects/:id/executions/* link to the project Compose tab so
+  // bookmarks don't 404. The redirect-only behaviour is intentional and
+  // documented in the gap report (P0 #3).
+  path = path.replace(/^\/projects\/([^/]+)\/executions(\/.*)?$/, '/projects/$1');
   // v2 routes folded into Signal equivalents
   if (path === '/dashboard') path = '/insights';
   if (path === '/legacy/billing') path = '/billing';
@@ -93,7 +99,7 @@ function LegacyRedirect() {
   if (path === '/accounting' || path === '/invoices') path = '/billing';
   if (path === '/team') path = '/org-members';
   if (path === '/org/projects') path = '/projects';
-  if (path === '/org/settings') path = '/account';
+  // /org/settings now has a real page (SSO + standards + profile) — no redirect needed.
   if (path === '/governance/audit') path = '/audit';
   if (path === '/runs/new') path = '/compose';
   if (path === '/runs/new/sandbox') path = '/welcome';
@@ -128,6 +134,9 @@ export default function App() {
       <Route path='/welcome' element={<WelcomePage />} />
       <Route path='/pricing' element={<PublicPricingPage />} />
       <Route path='/trust' element={<TrustPage />} />
+      <Route path='/terms' element={<TermsPage />} />
+      <Route path='/privacy' element={<PrivacyPage />} />
+      <Route path='/dpa' element={<DpaPage />} />
       <Route path='/shared/:token' element={<SharedPage />} />
       <Route path='/reports/shared/:token' element={<SharedPage />} />
       <Route path='/projects/snapshot/:token' element={<SharedPage />} />
@@ -176,6 +185,7 @@ export default function App() {
           <Route path='/integrations' element={<IntegrationsPage />} />
           <Route path='/api-keys' element={<ApiKeysPage />} />
           <Route path='/org-members' element={<OrgMembersPage />} />
+          <Route path='/org/settings' element={<OrgSettingsPage />} />
 
           {/* Discover */}
           <Route path='/insights' element={<InsightsPage />} />

@@ -3,6 +3,7 @@ import {useNavigate} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Chip, KvList, Card} from '@/signal/components/Primitives';
 import {ComposerCard} from '@/signal/components/Compose';
+import {SpecChat} from '@/signal/components/SpecChat';
 import * as api from '@/lib/api';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
 
@@ -179,6 +180,12 @@ export default function ComposePage() {
               </Chip>
             </>
           }
+        />
+
+        <SpecChat
+          projectId={projectId || undefined}
+          draftSpec={spec}
+          onApply={(refined) => setSpec(refined)}
         />
 
         <SectionHeader>Project</SectionHeader>

@@ -7,12 +7,23 @@ import * as api from '@/lib/api';
  * Project tab strip — shared across every project sub-page. Counts on each
  * tab (repos · runs · code · members) come from the dashboard endpoint so
  * the active set lines up with what the user actually has.
+ *
+ * UX-fix 2026-05-15:
+ *   - `Members · -1` regression — the dashboard cast was reading non-existent
+ *     fields (repoCount/totalRuns/openFindings) and `m.length` could land
+ *     before the array was actually populated, yielding negative/garbage
+ *     counts in the tab strip. Now we read the real dashboard fields
+ *     (activeRuns/completedRuns/failedRuns/totalRepos) and clamp every count
+ *     to `>= 0` before rendering.
+ *   - Architecture is now a real top-level tab. Previously the only entry
+ *     was Repos → "View architecture", which 404'd on projects with no linked
+ *     repos.
  */
-export function ProjectTabs({active}: {active: 'compose' | 'pulse' | 'repos' | 'runs' | 'code' | 'chat' | 'activity' | 'members' | 'settings'}) {
+export function ProjectTabs({active}: {active: 'compose' | 'pulse' | 'repos' | 'runs' | 'code' | 'chat' | 'activity' | 'members' | 'architecture' | 'settings'}) {
   const {projectId} = useParams();
   const id = projectId || '';
   const base = `/projects/${id}`;
-  const [counts, setCounts] = useState<{repos?: number; runs?: number; code?: number; members?: number; chat?: number}>({});
+  const [counts, setCounts] = useState<{repos?: number; runs?: number; code?: number; members?: number}>({});
 
   useEffect(() => {
     if (!id) return;
@@ -20,15 +31,25 @@ export function ProjectTabs({active}: {active: 'compose' | 'pulse' | 'repos' | '
     Promise.allSettled([
       api.getProjectDashboard(id).catch(() => null),
       api.getProjectMembers(id).catch(() => [] as api.ProjectMemberDto[]),
-    ]).then(([dash, members]) => {
+      api.getProjectRepos(id).catch(() => [] as Array<Record<string, unknown>>),
+    ]).then(([dash, members, repos]) => {
       if (cancelled) return;
-      const d = (dash.status === 'fulfilled' ? dash.value : null) as unknown as {repoCount?: number; totalRuns?: number; openFindings?: number} | null;
-      const m = members.status === 'fulfilled' ? members.value : [];
+      const d = (dash.status === 'fulfilled' ? dash.value : null) as unknown as {
+        activeRuns?: number; completedRuns?: number; failedRuns?: number;
+        openFindings?: number; totalRepos?: number;
+      } | null;
+      const memberArr: api.ProjectMemberDto[] = members.status === 'fulfilled' && Array.isArray(members.value) ? members.value : [];
+      const repoArr = repos.status === 'fulfilled' && Array.isArray(repos.value) ? repos.value : [];
+
+      const totalRuns = d ? (d.activeRuns ?? 0) + (d.completedRuns ?? 0) + (d.failedRuns ?? 0) : undefined;
+      // Clamp every count to `>= 0` so any garbage signed-int leak (the bug
+      // that produced "Members · -1") can never reach the badge.
+      const safe = (n?: number) => (typeof n === 'number' && n >= 0 ? n : undefined);
       setCounts({
-        repos: d?.repoCount,
-        runs: d?.totalRuns,
-        code: d?.openFindings,
-        members: m.length,
+        repos: safe(d?.totalRepos) ?? safe(repoArr.length),
+        runs: safe(totalRuns),
+        code: safe(d?.openFindings),
+        members: safe(memberArr.length),
       });
     });
     return () => {
@@ -50,6 +71,7 @@ export function ProjectTabs({active}: {active: 'compose' | 'pulse' | 'repos' | '
         {label: 'Chat', to: `${base}/chat`, active: active === 'chat'},
         {label: 'Activity', to: `${base}/activity`, active: active === 'activity'},
         {label: label('Members', counts.members), to: `${base}/members`, active: active === 'members'},
+        {label: 'Architecture', to: `${base}/architecture`, active: active === 'architecture'},
         {label: 'Settings', to: `${base}/settings`, active: active === 'settings'},
       ]}
     />

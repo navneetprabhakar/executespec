@@ -85,7 +85,7 @@ POST /api/runs  →  RunOrchestrator
 - **Per-run codemap + 3-step project architecture** — per-repo codemap → per-repo HLD/LLD → cross-repo synthesis. Idempotent by SHA. Versioned. Lazy-refreshed before each run.
 - **Project memory** — every completed run appends a digest; compaction rewrites a versioned snapshot every 10 runs. Planner reads it as `{{PROJECT_MEMORY}}`.
 - **Always-on RAG** — Tika + pgvector + OpenAI embeddings. User-uploaded docs indexed; planner + chat read narrowed retrieval at run-time.
-- **External project sharing** (V175) — cross-org `ProjectMember` invites + public read-only share links (6 surfaces, tier-gated).
+- **External project sharing** (V175 + V198) — cross-org `ProjectMember` invites + public read-only share links (6 surfaces, tier-gated). V198 (2026-05-16) adds a per-org `external_sharing_enabled` flag (default false) so each org explicitly opts in to inviting any-email-domain collaborators; gate fires before the existing tier check; only ORG_ADMIN of the inviting org or SUPER_ADMIN may flip it via `PUT /api/org/me/settings/external-sharing`.
 - **PR Review + Code Review agents** (V172) — single-call PR review with line-anchored comments + whole-repo semgrep-augmented code review with markdown report.
 - **Multi-repo runs** — clone each linked repo into `<workspace>/<runId>/repos/<name>/`; per-repo codemap; per-repo PR with cross-link.
 - **TDD mode + spec templates + heuristic launch estimate + tech debt panel + workspace health rollup + post-merge cascade banner + cancel rollback** (closes any opened PRs idempotently with a live cleanup SSE channel).
@@ -166,6 +166,7 @@ Configurable headers (CSP, HSTS, X-Frame-Options) via `SecurityProperties`. Thre
 | V165–V168 | Drop MAX tier (rename to TEAM @ $39) + FREE→5 revert + pause/resume |
 | V169–V178 | PR record `project_id`/`kind`, CI auto-fix counter, R09 reconcile, PR/Code review agents, external sharing, Solo tier (introduced V176/177, retired V179/185), user cost cap |
 | V179–V186 | Product-split retired, lint autofix flag, PR comment inbox, run_mode (BUILD/PATCH), triggered_by_finding, widen last_llm_failure, Solo branding retired, PR CI status columns |
+| V187–V198 | Validation rubric row, file purpose summary, generated-doc fingerprint, execution_run.failure_reason, **per-org `external_sharing_enabled` flag** (V198) gating cross-org invites |
 
 ---
 
@@ -176,7 +177,7 @@ YAML is the single source of truth (`application.yml model-matrix.*`). `ModelReg
 | Agent tier | Anthropic | OpenAI | Gemini |
 |------------|-----------|--------|--------|
 | PLANNING | `claude-sonnet-4-6` | `gpt-5.4` | `gemini-3-pro-preview` |
-| WORKHORSE | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-pro-preview` |
+| WORKHORSE | `claude-sonnet-4-6` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
 | LIGHTWEIGHT | `claude-haiku-4-5-20251001` | `gpt-5.4-mini` | `gemini-3-flash-preview` |
 
 **Default provider:** Anthropic (changed from OpenAI in 1.0.0-M1). User-selectable per project. Failover chain via YAML `failover-order:`. Reviewer routes Gemini to WORKHORSE tier so Flash's 1024-token implicit-cache threshold actually fires (Pro at 4096 was hitting 0% cache hit rate empirically).

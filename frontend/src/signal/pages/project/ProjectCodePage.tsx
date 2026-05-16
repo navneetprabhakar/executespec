@@ -2,13 +2,15 @@ import {useEffect, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar, SectionHeader} from '@/signal/components/Chrome';
 import {Feed, Row, Card, Button, StatusPill, TabsStrip} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
+import {useAuthStore} from '@/stores/useAuthStore';
 import * as api from '@/lib/api';
 /* useProjectMeta delivers project name from cached project list quickly,
    and refreshes from /api/projects/{id} in the background. */
 
-type Sub = 'debt' | 'review' | 'docs';
+type Sub = 'debt' | 'review' | 'health' | 'standards' | 'docs';
 
 export default function ProjectCodePage() {
   const {projectId} = useParams();
@@ -21,6 +23,10 @@ export default function ProjectCodePage() {
   // (called in render below) handles that. Repos are fetched here directly.
   const [repos, setRepos] = useState<Array<Record<string, unknown>>>([]);
   const [reviews, setReviews] = useState<Record<string, unknown> | null>(null);
+  // P1 regression fixes: workspace health + org standards compliance.
+  const [health, setHealth] = useState<api.WorkspaceHealthReport | null>(null);
+  const [standards, setStandards] = useState<api.ComplianceReport | null>(null);
+  const user = useAuthStore((s) => s.user);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState('');
   const [msg, setMsg] = useState('');
@@ -49,6 +55,20 @@ export default function ProjectCodePage() {
     void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  // Workspace health — per-repo coverage/lint/build pass status. Lazy on tab open.
+  useEffect(() => {
+    if (sub !== 'health' || !id || health != null) return;
+    api.getWorkspaceHealth(id).then(setHealth).catch(() => setHealth(null));
+  }, [sub, id, health]);
+
+  // Org standards compliance — TEAM+ feature. Loads on tab open.
+  useEffect(() => {
+    if (sub !== 'standards' || !id || standards != null) return;
+    const orgId = user?.orgId;
+    if (!orgId) return;
+    api.getStandardsReport(id, orgId, 30).then(setStandards).catch(() => setStandards({violations: [], summary: {}} as unknown as api.ComplianceReport));
+  }, [sub, id, standards, user?.orgId]);
 
   useEffect(() => {
     if (sub !== 'review' || !id || repos.length === 0) return;
@@ -140,13 +160,15 @@ export default function ProjectCodePage() {
 
   return (
     <>
-      <TopBar title='Code & quality' sub={`${projectName} · last scan ${debt && (debt as unknown as {lastScannedAt?: string}).lastScannedAt ? new Date((debt as unknown as {lastScannedAt: string}).lastScannedAt).toLocaleString() : 'unknown'}`} back backTo={`/projects/${id}`} />
+      <TopBar title='Code & quality' sub={`${projectName} · ${debt && (debt as unknown as {lastScannedAt?: string}).lastScannedAt ? `last scan ${new Date((debt as unknown as {lastScannedAt: string}).lastScannedAt).toLocaleString()}` : 'no scan yet'}`} back backTo={`/projects/${id}`} />
       <Feed>
         <ProjectTabs active='code' />
         <TabsStrip
           items={[
             {label: `Tech debt · ${cats.length}`, active: sub === 'debt', onClick: () => setSub('debt')},
             {label: 'Code review', active: sub === 'review', onClick: () => setSub('review')},
+            {label: 'Health', active: sub === 'health', onClick: () => setSub('health')},
+            {label: 'Standards', active: sub === 'standards', onClick: () => setSub('standards')},
             {label: `Docs · ${docs?.length ?? 0}`, active: sub === 'docs', onClick: () => setSub('docs')},
           ]}
         />
@@ -156,7 +178,7 @@ export default function ProjectCodePage() {
 
         {sub === 'debt' && (
           debt == null ? (
-            <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading tech debt…</p></Card>
+            <LoadingState label="Loading tech debt…" />
           ) : cats.length === 0 ? (
             <Card>
               <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
@@ -202,7 +224,7 @@ export default function ProjectCodePage() {
               </p>
             </Card>
           ) : reviews == null ? (
-            <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading scan results…</p></Card>
+            <LoadingState label="Loading scan results…" />
           ) : (
             <>
               <SectionHeader>Per-repo scan</SectionHeader>
@@ -239,6 +261,93 @@ export default function ProjectCodePage() {
                   </Card>
                 );
               })}
+            </>
+          )
+        )}
+
+        {sub === 'health' && (
+          health == null ? (
+            <LoadingState label='Loading workspace health…' />
+          ) : (health.repos || []).length === 0 ? (
+            <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No repos linked. <a href={`/projects/${id}/repos`} style={{color: 'var(--signal-coral)'}}>Link a repo →</a></p></Card>
+          ) : (
+            <>
+              <SectionHeader>Per-repo workspace health</SectionHeader>
+              {health.repos.map((r) => {
+                const rAny = r as unknown as {repoId?: string; name?: string; headSha?: string; commitsBehind?: number; webhookInstalled?: boolean; openPrs?: number; coveragePct?: number; buildStatus?: string; lintStatus?: string; lastAnalysedAt?: string};
+                const cov = rAny.coveragePct != null ? `${rAny.coveragePct.toFixed(1)}%` : '—';
+                return (
+                  <Card key={rAny.repoId || rAny.name} style={{marginBottom: 10}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10, gap: 10}}>
+                      <div style={{minWidth: 0, flex: 1}}>
+                        <div style={{fontSize: 14.5, fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis'}}>{rAny.name}</div>
+                        <div style={{fontSize: 12, color: 'var(--signal-text-dim)'}}>
+                          {rAny.headSha?.slice(0, 7)} {rAny.commitsBehind && rAny.commitsBehind > 0 ? `· ${rAny.commitsBehind} commits behind origin` : '· in sync'}
+                        </div>
+                      </div>
+                      <StatusPill kind={(rAny.commitsBehind ?? 0) > 0 ? 'needs' : 'shipped'}>{(rAny.commitsBehind ?? 0) > 0 ? 'Drift' : 'Healthy'}</StatusPill>
+                    </div>
+                    <div style={{display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 10, paddingTop: 10, borderTop: '1px solid var(--signal-hairline)', fontSize: 12}}>
+                      <div>
+                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Coverage</div>
+                        <div style={{fontWeight: 600, marginTop: 2}}>{cov}</div>
+                      </div>
+                      <div>
+                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Build</div>
+                        <div style={{fontWeight: 600, marginTop: 2, color: rAny.buildStatus === 'PASSING' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{rAny.buildStatus ?? '—'}</div>
+                      </div>
+                      <div>
+                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Lint</div>
+                        <div style={{fontWeight: 600, marginTop: 2, color: rAny.lintStatus === 'CLEAN' ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{rAny.lintStatus ?? '—'}</div>
+                      </div>
+                      <div>
+                        <div style={{color: 'var(--signal-text-dim)', fontSize: 10, textTransform: 'uppercase', letterSpacing: '0.1em'}}>Webhook</div>
+                        <div style={{fontWeight: 600, marginTop: 2, color: rAny.webhookInstalled ? 'var(--signal-mint-text-on-light)' : 'var(--signal-coral-text)'}}>{rAny.webhookInstalled ? '✓' : '○'}</div>
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </>
+          )
+        )}
+
+        {sub === 'standards' && (
+          standards == null ? (
+            <LoadingState label='Loading standards compliance…' />
+          ) : (
+            <>
+              <Card style={{background: 'var(--signal-lavender-soft)', borderColor: 'transparent', marginBottom: 12}}>
+                <div style={{fontSize: 11, fontWeight: 700, color: '#5443a8', letterSpacing: '0.14em', textTransform: 'uppercase', marginBottom: 6}}>Org standards · last 30 days</div>
+                <div style={{fontSize: 13, color: '#5443a8', lineHeight: 1.5}}>
+                  Naming conventions, lint rules, coverage SLAs and other policies your org has set. PROJECT_ADMIN can request overrides per finding.
+                </div>
+              </Card>
+              {(() => {
+                const sAny = standards as unknown as {violations?: api.ViolationEntry[]; summary?: Record<string, number>; standardCount?: number};
+                const viols = sAny.violations || [];
+                if (viols.length === 0) {
+                  return <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>No standards violations in the last 30 days.</p></Card>;
+                }
+                return viols.map((v, i) => {
+                  const vAny = v as unknown as {id?: string; standardId?: string; standardName?: string; severity?: string; description?: string; filePath?: string; line?: number; createdAt?: string};
+                  const sev = (vAny.severity || 'MINOR').toUpperCase();
+                  return (
+                    <Row
+                      key={vAny.id || i}
+                      dot={sev === 'CRITICAL' ? 'coral' : sev === 'MAJOR' ? 'signal' : 'lavender'}
+                      title={vAny.standardName || vAny.standardId || 'Standard violation'}
+                      meta={
+                        <>
+                          {vAny.filePath && <span className='mono'>{vAny.filePath}{vAny.line ? `:${vAny.line}` : ''}</span>}
+                          {vAny.description && <><span>·</span><span>{vAny.description.slice(0, 60)}</span></>}
+                        </>
+                      }
+                      trailing={sev}
+                    />
+                  );
+                });
+              })()}
             </>
           )
         )}

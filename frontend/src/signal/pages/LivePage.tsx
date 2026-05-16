@@ -1,8 +1,11 @@
-import {useEffect, useState} from 'react';
+import {useEffect, useRef, useState} from 'react';
 import {useNavigate, useParams} from 'react-router-dom';
 import {TopBar, SectionHeader, IconButton} from '@/signal/components/Chrome';
 import {Feed, Card} from '@/signal/components/Primitives';
+import {Spinner} from '@/signal/components/Loaders';
+import {CostProgressBar} from '@/signal/components/CostProgressBar';
 import {LiveHero, LiveHeroAction, StreamCard, TaskLine} from '@/signal/components/Compose';
+import {ConfirmModal} from '@/signal/components/Modal';
 import {useSse} from '@/hooks/useSse';
 import {useSseStore} from '@/stores/useSseStore';
 import * as api from '@/lib/api';
@@ -29,6 +32,8 @@ export default function LivePage() {
   const navigate = useNavigate();
   const [run, setRun] = useState<api.RunDetail | null>(null);
   const [err, setErr] = useState('');
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelBusy, setCancelBusy] = useState(false);
 
   // ── Real-time event stream ──
   // useSse subscribes to /api/runs/{id}/events using a scoped JWT and
@@ -39,6 +44,12 @@ export default function LivePage() {
   const sseEntries = useSseStore((s) => s.entries);
   const sseStatus = useSseStore((s) => s.status);
   const fileTick = useSseStore((s) => s.fileWrittenTickAt);
+  // Auto-scroll the live log to the latest entry as the stream comes in.
+  const logScrollRef = useRef<HTMLDivElement | null>(null);
+  const logBottomRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    logBottomRef.current?.scrollIntoView({behavior: 'smooth', block: 'end'});
+  }, [sseEntries.length]);
 
   // Background poll for status transitions + cost updates. SSE drives the log
   // and per-task progress; this is the safety net so we never miss a terminal
@@ -77,14 +88,17 @@ export default function LivePage() {
     };
   }, [runId, navigate, fileTick]);
 
-  async function cancelRun() {
+  async function performCancel() {
     if (!runId) return;
-    if (!window.confirm('Cancel this run? This cannot be undone.')) return;
+    setCancelBusy(true);
     try {
       await api.cancelRun(runId);
       navigate('/home');
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : 'Cancel failed.');
+    } finally {
+      setCancelBusy(false);
+      setConfirmCancel(false);
     }
   }
 
@@ -124,7 +138,7 @@ export default function LivePage() {
         backTo='/home'
         actions={
           <>
-            <IconButton ariaLabel='Cancel' onClick={cancelRun}>
+            <IconButton ariaLabel='Cancel' onClick={() => setConfirmCancel(true)}>
               <svg viewBox='0 0 24 24' style={{width: 18, height: 18}} fill='none' stroke='currentColor' strokeWidth={2} strokeLinecap='round'>
                 <circle cx='12' cy='12' r='10' />
                 <line x1='15' y1='9' x2='9' y2='15' />
@@ -157,6 +171,19 @@ export default function LivePage() {
           tasks={total ? `${completed}/${total}` : '—'}
           elapsed={elapsed}
           spent={spent ? `$${spent.toFixed(2)}` : '$0.00'}
+          // Map backend status to a human phase label. The user lands on Live
+          // and sees the reviewer working — calling that "Running now" is a
+          // small lie; "Reviewing changes" matches what's on screen.
+          phaseLabel={(() => {
+            const s = (status || '').toUpperCase();
+            if (s === 'CLASSIFYING') return 'Classifying';
+            if (s === 'PLANNING') return 'Planning';
+            if (s === 'AWAITING_APPROVAL') return 'Awaiting approval';
+            if (s === 'REVIEWING') return 'Reviewing changes';
+            if (s === 'PROVIDER_SWITCHING') return 'Switching provider';
+            if (s === 'PAUSED') return 'Paused';
+            return 'Running now';
+          })()}
           actions={
             <>
               <LiveHeroAction to='/billing'>Raise cap</LiveHeroAction>
@@ -164,6 +191,19 @@ export default function LivePage() {
             </>
           }
         />
+
+        {/* Live cost vs hard-cap bar — green 0-80%, amber 80-100%, red ≥100%.
+            Restores v3 parity (CostProgressBar) so users see how close they
+            are to the cap before it's hit. */}
+        {((run as unknown as {hardCapUsd?: number})?.hardCapUsd ?? 0) > 0 && (
+          <Card style={{padding: 14, marginTop: 12, marginBottom: 4}}>
+            <CostProgressBar
+              spent={spent || 0}
+              cap={((run as unknown as {hardCapUsd: number}).hardCapUsd) || 0}
+              label='Spend vs hard cap'
+            />
+          </Card>
+        )}
 
         {tasksRaw.length > 0 && (
           <>
@@ -197,26 +237,38 @@ export default function LivePage() {
 
         {/* Prefer SSE entries when connected — those arrive in real time as
             the agent makes tool calls / LLM completions. Fall back to the
-            polled `run.events` blob only when SSE hasn't started yet. */}
+            polled `run.events` blob only when SSE hasn't started yet. The
+            log lives in a scroll-locked container so the latest entries
+            stay pinned to the bottom while older ones scroll out of view —
+            that way you can always see what's happening NOW. */}
         {(() => {
-          const sseToShow = sseEntries.slice(-30);
+          const sseToShow = sseEntries.slice(-100);
           const useSseLog = sseToShow.length > 0;
-          const polledToShow = events.slice(-30);
+          const polledToShow = events.slice(-100);
           const list = useSseLog ? sseToShow : polledToShow;
-          const sseLabel = sseStatus === 'CONNECTED'
-            ? 'live · sse connected'
+          const sseConnected = sseStatus === 'CONNECTED';
+          const sseLabel = sseConnected
+            ? 'live · streaming'
             : sseStatus === 'CONNECTING'
-              ? 'live · connecting…'
+              ? 'connecting…'
               : sseStatus === 'RECONNECTING'
-                ? 'live · reconnecting…'
+                ? 'reconnecting…'
                 : 'polling';
+          const dotColor = sseConnected ? 'var(--signal-mint)' : sseStatus === 'CONNECTING' || sseStatus === 'RECONNECTING' ? 'var(--signal-y)' : 'var(--signal-text-mute)';
+          const sseStatusChip = (
+            <span style={{display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 11, fontFamily: "'JetBrains Mono', monospace", color: 'var(--signal-text-dim)'}}>
+              <span style={{width: 7, height: 7, borderRadius: '50%', background: dotColor, boxShadow: sseConnected ? '0 0 6px var(--signal-mint)' : 'none'}} />
+              {sseLabel}
+            </span>
+          );
           if (list.length === 0) {
             return (
               <>
-                <SectionHeader action={<span>{sseLabel}</span>}>Live log</SectionHeader>
-                <Card>
+                <SectionHeader action={sseStatusChip}>Live log</SectionHeader>
+                <Card style={{display: 'flex', alignItems: 'center', gap: 12, padding: '18px 16px'}}>
+                  <Spinner size={16} />
                   <p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
-                    Waiting for the first tool call… the agent is warming up. The log will populate here as the run streams.
+                    Waiting for the first tool call… the agent is warming up.
                   </p>
                 </Card>
               </>
@@ -224,7 +276,8 @@ export default function LivePage() {
           }
           return (
             <>
-              <SectionHeader action={<span>{sseLabel}</span>}>Live log</SectionHeader>
+              <SectionHeader action={sseStatusChip}>Live log · {list.length}</SectionHeader>
+              <div ref={logScrollRef} style={{maxHeight: '50vh', overflowY: 'auto', paddingRight: 4, borderRadius: 14, border: '1px solid var(--signal-hairline)', background: 'var(--signal-card-bg)', padding: 8}}>
               {list.map((ev, i) => {
                 if (useSseLog) {
                   // SSE entries: {id, type, timestamp, data:{message,payload}}
@@ -259,10 +312,23 @@ export default function LivePage() {
                   </StreamCard>
                 );
               })}
+              <div ref={logBottomRef} />
+              </div>
             </>
           );
         })()}
       </Feed>
+
+      <ConfirmModal
+        open={confirmCancel}
+        title='Cancel this run?'
+        body='The agent will be interrupted immediately. Already-completed tasks are preserved; in-flight changes are discarded. This cannot be undone.'
+        confirmLabel='Cancel run'
+        danger
+        busy={cancelBusy}
+        onClose={() => setConfirmCancel(false)}
+        onConfirm={performCancel}
+      />
     </>
   );
 }

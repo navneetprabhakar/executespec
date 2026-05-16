@@ -2,6 +2,7 @@ import {useEffect, useMemo, useState} from 'react';
 import {useParams} from 'react-router-dom';
 import {TopBar} from '@/signal/components/Chrome';
 import {Feed, Row, Card, TabsStrip, Button, Chip, StatusPill} from '@/signal/components/Primitives';
+import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {ScoreCard, PrCard, TaskLine} from '@/signal/components/Compose';
@@ -221,7 +222,7 @@ export default function ProjectRunsPage() {
 
   return (
     <>
-      <TopBar title='Runs' sub={`${projectName} · ${runs?.length ?? 0} runs`} back backTo={`/projects/${id}`} />
+      <TopBar title='Runs' sub={`${projectName} · ${runs?.length ?? 0} ${(runs?.length ?? 0) === 1 ? 'run' : 'runs'}`} back backTo={`/projects/${id}`} />
       <Feed>
         <ProjectTabs active='runs' />
         <TabsStrip
@@ -247,7 +248,7 @@ export default function ProjectRunsPage() {
             />
 
             {runs === null ? (
-              <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading runs…</p></Card>
+              <LoadingState label="Loading runs…" />
             ) : filtered.length === 0 ? (
               <Card>
                 <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
@@ -299,7 +300,7 @@ export default function ProjectRunsPage() {
                         </p>
                       </Card>
                     ) : !selectedRun ? (
-                      <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading run…</p></Card>
+                      <LoadingState label="Loading run…" />
                     ) : (
                       <InlineRunDetailPane run={selectedRun} report={report} />
                     )}
@@ -318,7 +319,7 @@ export default function ProjectRunsPage() {
               </Button>
             </div>
             {prs === null ? (
-              <Card><p style={{fontSize: 13.5, color: 'var(--signal-text-dim)', margin: 0}}>Loading pull requests…</p></Card>
+              <LoadingState label="Loading pull requests…" />
             ) : prs.length === 0 ? (
               <Card>
                 <p style={{fontSize: 14, color: 'var(--signal-text-dim)', margin: 0, lineHeight: 1.5}}>
