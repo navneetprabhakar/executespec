@@ -2350,7 +2350,18 @@ body {
    Added 2026-05-15 alongside AuthLayout component.
    ───────────────────────────────────────────────────────────── */
 .signal-app .signal-auth-layout {
-  min-height: 100vh;
+  /* html + body are globally `overflow: hidden` (in-app shell relies on
+     this for its own internal scrollers). Auth pages render OUTSIDE the
+     shell, so they must establish their own scroll container — otherwise
+     on a small viewport (mobile) the form's bottom (Sign-in button +
+     "Create an account" link) is clipped with no way to reach it.
+     `height: 100dvh + overflow-y: auto` makes the auth layout itself the
+     scroller; mobile gets a vertical scroll, desktop's two-column layout
+     still fits naturally without ever needing it. */
+  height: 100dvh;
+  min-height: 100dvh;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
   display: flex;
   flex-direction: column;
   background: var(--signal-bg);
