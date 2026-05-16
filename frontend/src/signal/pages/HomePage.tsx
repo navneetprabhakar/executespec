@@ -256,7 +256,12 @@ export default function HomePage() {
                 : recent === null
                   ? '…'
                   : recent.length
-                    ? `${recent.length}+ total`
+                    ? // SDET 2026-05-16 (BUG-021) — only append the "+" qualifier when we actually
+                      // hit the home-fetch page size of 6. With <6 runs we know the count is exact,
+                      // so "3 total" reads cleaner than "3+ total".
+                      recent.length >= 6
+                      ? `${recent.length}+ total`
+                      : `${recent.length} total`
                     : 'No runs yet'}
             </div>
           </a>

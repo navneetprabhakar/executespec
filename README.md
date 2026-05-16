@@ -166,7 +166,7 @@ Configurable headers (CSP, HSTS, X-Frame-Options) via `SecurityProperties`. Thre
 | V165–V168 | Drop MAX tier (rename to TEAM @ $39) + FREE→5 revert + pause/resume |
 | V169–V178 | PR record `project_id`/`kind`, CI auto-fix counter, R09 reconcile, PR/Code review agents, external sharing, Solo tier (introduced V176/177, retired V179/185), user cost cap |
 | V179–V186 | Product-split retired, lint autofix flag, PR comment inbox, run_mode (BUILD/PATCH), triggered_by_finding, widen last_llm_failure, Solo branding retired, PR CI status columns |
-| V187–V198 | Validation rubric row, file purpose summary, generated-doc fingerprint, execution_run.failure_reason, **per-org `external_sharing_enabled` flag** (V198) gating cross-org invites |
+| V187–V199 | Validation rubric row, file purpose summary, generated-doc fingerprint, execution_run.failure_reason, **per-org `external_sharing_enabled` flag** (V198) gating cross-org invites, **org.tier sync backfill** (V199) — aligns each `org.tier` with the highest active subscription/member tier so the Plans page no longer mismatches paid users' permission view |
 
 ---
 

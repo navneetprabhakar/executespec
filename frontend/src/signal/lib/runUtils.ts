@@ -154,3 +154,29 @@ export function repoIdFor(r: unknown): string {
   const rec = r as {repoId?: string | null; id?: string | null};
   return String(rec.repoId || rec.id || '');
 }
+
+/**
+ * SDET 2026-05-16 (BUG-022) — single helper for picking a run title across all
+ * five list views (Home, AllRuns, ProjectRuns split-list, ProjectPulse, project
+ * compose recent-runs row). Previously some sites trimmed and some didn't; an
+ * agent that returned `runTitle: "   "` (whitespace) would render the full
+ * 600-char spec on the un-trimmed surfaces.
+ *
+ * Order: agent-generated `runTitle` (trimmed) → raw `userRequest` (trimmed) →
+ * synthetic `Run R-xxxxxx` from runId → `Untitled run`.
+ */
+export function runTitleFor(r: unknown): string {
+  const rec = r as {
+    runTitle?: string | null;
+    userRequest?: string | null;
+    runId?: string | null;
+    id?: string | null;
+  };
+  const title = rec.runTitle?.trim();
+  if (title) return title;
+  const spec = rec.userRequest?.trim();
+  if (spec) return spec;
+  const id = rec.runId || rec.id;
+  if (id) return `Run R-${String(id).slice(0, 6)}`;
+  return 'Untitled run';
+}

@@ -9,7 +9,7 @@ import {Share, More} from '@/signal/icons/icons';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
-import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
+import {repoDisplayName, repoIdFor, runTitleFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
 type Provider = 'anthropic' | 'openai' | 'gemini';
@@ -374,11 +374,9 @@ export default function ProjectComposePage() {
                         ? 'coral'
                         : 'lavender'
                 }
-                title={
-                  r.userRequest ||
-                  (r as unknown as {runTitle?: string}).runTitle ||
-                  `Run R-${r.runId.slice(0, 6)}`
-                }
+                // SDET 2026-05-16 (BUG-022) — shared runTitleFor helper trims
+                // empty / whitespace-only runTitle before falling back.
+                title={runTitleFor(r)}
                 meta={
                   <>
                     <span className='mono'>R-{r.runId.slice(0, 6)}</span>

@@ -127,22 +127,23 @@
       <artifactId>spring-boot-starter-oauth2-client</artifactId>
     </dependency>
 
-    <!-- JWT (JJWT 0.12.x) -->
+    <!-- JWT (JJWT 0.13.x) — 2026-05-16: pulled from Dependabot patch-minor group (PR #132).
+         Backward-compatible minor bump, no API changes affecting our callsites. -->
     <dependency>
       <groupId>io.jsonwebtoken</groupId>
       <artifactId>jjwt-api</artifactId>
-      <version>0.12.6</version>
+      <version>0.13.0</version>
     </dependency>
     <dependency>
       <groupId>io.jsonwebtoken</groupId>
       <artifactId>jjwt-impl</artifactId>
-      <version>0.12.6</version>
+      <version>0.13.0</version>
       <scope>runtime</scope>
     </dependency>
     <dependency>
       <groupId>io.jsonwebtoken</groupId>
       <artifactId>jjwt-jackson</artifactId>
-      <version>0.12.6</version>
+      <version>0.13.0</version>
       <scope>runtime</scope>
     </dependency>
 
@@ -191,11 +192,14 @@
       <version>3.50.0</version>
     </dependency>
 
-    <!-- Apache Commons Compress — tar.gz for Cloud Build source upload -->
+    <!-- Apache Commons Compress — tar.gz for Cloud Build source upload.
+         2026-05-16: pulled from Dependabot patch-minor (#132). Includes CVE patches
+         in zip/tar handling — relevant because we use it to package customer build
+         contexts for Cloud Build uploads. -->
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-compress</artifactId>
-      <version>1.26.1</version>
+      <version>1.28.0</version>
     </dependency>
 
     <!-- Google Cloud Artifact Registry — deploy engine: manage user's container repos -->
@@ -250,11 +254,13 @@
       <version>1.34.1</version>
     </dependency>
 
-    <!-- Apache Commons Codec — HMAC signature verification for Razorpay webhooks -->
+    <!-- Apache Commons Codec — HMAC signature verification for Razorpay webhooks.
+         2026-05-16: pulled from Dependabot patch-minor (#132). Stable lib, only
+         additive changes since 1.16; HMAC code path unchanged. -->
     <dependency>
       <groupId>commons-codec</groupId>
       <artifactId>commons-codec</artifactId>
-      <version>1.16.1</version>
+      <version>1.18.0</version>
     </dependency>
 
     <!-- Spring AOP — required for @Aspect (TenantConnectionInterceptor) -->

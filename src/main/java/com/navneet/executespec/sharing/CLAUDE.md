@@ -19,7 +19,7 @@
 - `repository/ProjectInviteRepository.java`, `ProjectShareLinkRepository.java`.
 - `service/ProjectInviteService.java` — invite lifecycle (create / accept / revoke). Tier-gated to PRO+ for `createInvite`. Email send via `MailService.sendProjectInviteEmail` (best-effort, never fails the invite).
 - `service/ProjectShareLinkService.java` — link lifecycle (create / resolve / revoke / view-counter). Tier-gated by `tier_config.share_link_active_cap` (FREE 3, PRO 25, TEAM/MAX/ENTERPRISE -1=unlimited).
-- `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview.
+- `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview. **SDET 2026-05-16 (BUG-002/003):** `CreateInviteRequest` now has `@Email` + `@NotBlank` + `@Size(254)` on the email field and `@NotBlank` + `@Pattern("PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER")` + `@JsonAlias("role")` on the role field (renamed `role` → `projectRole` to match the wire contract used by `frontend/src/lib/api.ts`). `@Valid` on the controller param wires bean validation — garbage emails and unknown roles now fail loud at 400.
 - `controller/ProjectShareLinkController.java` — auth-protected admin endpoints (create/list/revoke).
 - `controller/ProjectSharePublicController.java` — **no-auth** public read paths (`/api/shared/{token}/...`).
 

@@ -57,14 +57,28 @@ export function InsightsPage() {
   const shipped = mAny.shipped ?? 0;
   const needs = mAny.needs ?? 0;
   const failed = mAny.failed ?? 0;
-  const avgScore = mAny.avgVerifiedScore != null ? `${mAny.avgVerifiedScore.toFixed(1)}%` : '—';
+  // SDET 2026-05-16 (BUG-011) — distinguish "metrics not loaded yet" (loading skeleton state)
+  // from "the answer is genuinely 0/0%/$0". Previously every empty showed "—" which made the
+  // page look broken to FREE-tier users with 0 runs in the window. Now: while `metrics` is
+  // still null (initial fetch in flight) we keep "—"; once it arrives, fall through to the
+  // computed number even if it's zero. Same logic applied to avg-score and spend.
+  const metricsLoaded = metrics != null;
+  const avgScore =
+    mAny.avgVerifiedScore != null
+      ? `${mAny.avgVerifiedScore.toFixed(1)}%`
+      : metricsLoaded
+        ? '0%'
+        : '—';
   const avgDuration = (() => {
-    if (!mAny.avgDurationMs) return '—';
-    const m = Math.floor(mAny.avgDurationMs / 60000);
-    const s = Math.floor((mAny.avgDurationMs % 60000) / 1000);
-    return `${m}m ${s}s`;
+    if (mAny.avgDurationMs != null) {
+      const m = Math.floor(mAny.avgDurationMs / 60000);
+      const s = Math.floor((mAny.avgDurationMs % 60000) / 1000);
+      return `${m}m ${s}s`;
+    }
+    return metricsLoaded ? '0m 0s' : '—';
   })();
-  const spend = mAny.totalSpend != null ? `$${mAny.totalSpend.toFixed(2)}` : '—';
+  const spend =
+    mAny.totalSpend != null ? `$${mAny.totalSpend.toFixed(2)}` : metricsLoaded ? '$0.00' : '—';
   const mcAny = (byProvider || {}) as unknown as {
     byProvider?: Array<{provider?: string; spend?: number; cacheHitRate?: number}>;
   };
@@ -183,12 +197,20 @@ export function InsightsPage() {
                 <path d='M9 11l3 3L22 4' />
               </svg>
             </div>
-            <h4>Runs shipped</h4>
+            {/*
+             * SDET 2026-05-16 (BUG-012) — "Runs shipped: 0 / 5" was easily misread as
+             * "5-run quota, 0 used" because the FREE tier's monthly cap is also 5. The metric
+             * is actually "shipped (=completed with merged PR) / total runs submitted". Relabel
+             * to "Runs completed" (matches the harness's COMPLETE status) and qualify with the
+             * window so the user reads it as a metric, not a quota.
+             */}
+            <h4>Runs completed</h4>
             <div
               className='count'
               style={{color: 'var(--signal-ink)', fontSize: 17, fontWeight: 600}}
             >
-              {shipped} / {total}
+              {shipped}{' '}
+              <span style={{color: 'var(--signal-text-dim)', fontSize: 13}}>of {total}</span>
             </div>
           </div>
         </div>
