@@ -21,7 +21,7 @@
   <version>1.0.0-M1</version>
   <packaging>jar</packaging>
   <name>executespec</name>
-  <description>Multi-Agent Coding System — Core Loop</description>
+  <description>Spec-driven AI coding platform — spec in, multi-repo PR out, with a verified score</description>
 
   <properties>
     <java.version>21</java.version>

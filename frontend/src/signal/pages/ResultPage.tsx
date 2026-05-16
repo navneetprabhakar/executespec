@@ -1485,9 +1485,13 @@ export default function ResultPage() {
                         {isUser ? 'YOU' : 'RUN COPILOT'}
                         {ts && ` · ${new Date(ts).toLocaleTimeString()}`}
                       </div>
-                      <div style={{fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
-                        {content}
-                      </div>
+                      {isUser ? (
+                        <div style={{fontSize: 14, lineHeight: 1.5, whiteSpace: 'pre-wrap'}}>
+                          {content}
+                        </div>
+                      ) : (
+                        <Markdown>{content}</Markdown>
+                      )}
                     </div>
                   );
                 })
