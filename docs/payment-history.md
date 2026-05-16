@@ -1,374 +1,354 @@
-# Payment history & audit
+# Payment History & Audit
 
-How every paid event in ExecuteSpec is captured, surfaced, retained, and (when
-applicable) reconciled with the upstream payment gateway. This doc is sourced
-from the code as it stands today — every claim below maps to a file and line
-range you can grep.
+How ExecuteSpec records, surfaces, and queries every payment-relevant event — Razorpay subscriptions and top-ups, Stripe checkouts and invoices, admin-driven tier changes, founder-pricing allocations, and the dunning/refund tail.
 
-## Stores
+This doc covers:
 
-Two append-only tables back the audit surface; one tracks the business event,
-the other tracks the raw webhook envelope.
+- The three stores that together form the payment audit trail (`payment_audit`, `webhook_event_log`, `billing_webhook_event`).
+- Every call site that writes to `payment_audit`.
+- The webhook flow on both gateways, including signature verification, idempotency keys, and the always-200 contract.
+- The two customer-facing read endpoints (`/api/billing/payment-history`, `/api/admin/payment-audit`) plus the CSV export.
+- The retention story (or rather, the absence of one).
+- The tier upgrade/downgrade audit trail that flows through the same chokepoint.
 
-### `payment_audit` — business-level events
+## The three stores
 
-Created in
-[`V4__user_auth_and_org.sql`](../src/main/resources/db/migration/V4__user_auth_and_org.sql)
-(lines 146–163, original 5-column shape) and expanded in
-[`V55__payment_audit_expansion.sql`](../src/main/resources/db/migration/V55__payment_audit_expansion.sql)
-to add gateway provenance columns + idempotency.
+There are three tables behind the audit trail. They were introduced in three different waves and serve different purposes; their boundaries are not perfectly clean.
 
-Entity:
-[`auth/entity/PaymentAudit.java`](../src/main/java/com/navneet/executespec/auth/entity/PaymentAudit.java).
+### `payment_audit` (V4 baseline + V55 expansion)
 
-| Column               | Type               | Notes                                                                                          |
-| -------------------- | ------------------ | ---------------------------------------------------------------------------------------------- |
-| `id`                 | `VARCHAR(255)` PK  | Service-generated `UUID.randomUUID().toString()` (see `PaymentAuditService.record`, line 72).  |
-| `entity_type`        | `VARCHAR(32)` NN   | `USER` or `ORG`. Carries the legacy "what does this row attach to" axis.                       |
-| `entity_id`          | `VARCHAR(255)` NN  | The user-id or org-id matching `entity_type`.                                                  |
-| `event_type`         | `VARCHAR(64)` NN   | Discriminator. See the full enumeration table below.                                           |
-| `old_tier`           | `VARCHAR(32)`      | Pre-event tier (FREE / STARTER / PRO / TEAM / ENTERPRISE / MAX). Nullable on first assignment. |
-| `new_tier`           | `VARCHAR(32)`      | Post-event tier. Nullable on pure refunds (no tier change).                                    |
-| `payment_ref_id`     | `VARCHAR(255)`     | Legacy external-ref column. Newer call sites use `gateway_payment_id` below instead.           |
-| `performed_by`       | `VARCHAR(255)`     | Actor user-id — admin id for admin moves, user-id for self-serve, == `user_id` for webhooks.   |
-| `notes`              | `TEXT`             | Human reason e.g. `"Upgrade: PRO → TEAM"`, `"Cancels at period end: <ts>"`, `"Org created"`.   |
-| `gateway_provider`   | `VARCHAR(20)`      | V55. `STRIPE` or `RAZORPAY` (or null for admin / system moves).                                |
-| `gateway_event_id`   | `VARCHAR(255)`     | V55. Upstream webhook event id when the row was caused by a webhook.                           |
-| `gateway_payment_id` | `VARCHAR(255)`     | V55. Razorpay payment id / Stripe payment-intent id.                                           |
-| `currency`           | `VARCHAR(8)`       | V55. ISO-4217 (`INR`, `USD`). Set on subscription activations and refunds.                     |
-| `amount_minor`       | `BIGINT`           | V55. Amount in the smallest currency unit (paise / cents). Refunds store positive amount.      |
-| `metadata`           | `JSONB`            | V55. Open-ended extension column — not populated by any current call site.                     |
-| `idempotency_key`    | `VARCHAR(255)`     | V55. `"<gateway>:<gateway_event_id>"` when both are present. Indexed for dedup queries.        |
-| `user_id`            | `VARCHAR(255)`     | V55. Direct user pointer (in addition to `entity_id`) so org-scoped events can resolve a user. |
-| `org_id`             | `VARCHAR(255)`     | V55. Direct org pointer. Powers the org-scoped `/api/billing/payment-history` query.           |
-| `created_at`         | `TIMESTAMPTZ` NN   | Defaults to `Instant.now()` in the entity builder.                                             |
+Append-only journal of every payment-relevant event for an entity (user or org). Originally a thin per-user/per-org tier-change log (V4); expanded in V55 to also be the unified gateway-event audit log spanning Razorpay and Stripe.
 
-Indexes (V55 + V4):
-`(entity_type, entity_id)`, `event_type`, `gateway_provider`, `created_at`,
-`idempotency_key`, `user_id`, `org_id`. Nothing has `UNIQUE` — the
-`idempotency_key` index exists for fast dedup probes but is not enforced as a
-constraint, so duplicate-key inserts are silently allowed if a call site
-double-records. Today no call site does.
+Defined at [`auth/entity/PaymentAudit.java`](../src/main/java/com/navneet/executespec/auth/entity/PaymentAudit.java).
 
-### `webhook_event_log` — raw webhook envelope (Stripe-only)
+| Column                | Type                          | Source       | Notes                                                                                                              |
+| --------------------- | ----------------------------- | ------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `id`                  | `VARCHAR` PK                  | V4           | Application-assigned; format opaque to schema.                                                                     |
+| `entity_type`         | `VARCHAR(32)` NOT NULL        | V4           | `USER` or `ORG`. Identifies the audited principal.                                                                 |
+| `entity_id`           | `VARCHAR` NOT NULL            | V4           | FK-shaped reference to `app_user.id` or `org.id`.                                                                  |
+| `event_type`          | `VARCHAR(64)` NOT NULL        | V4           | Free-form discriminator. See "Event type vocabulary" below.                                                        |
+| `old_tier`            | `VARCHAR(32)`                 | V4           | Pre-event tier (when applicable).                                                                                  |
+| `new_tier`            | `VARCHAR(32)`                 | V4           | Post-event tier (when applicable).                                                                                 |
+| `payment_ref_id`      | `VARCHAR`                     | V4           | Legacy free-form reference; Stripe / Razorpay IDs now go in `gateway_*` columns.                                   |
+| `performed_by`        | `VARCHAR`                     | V4           | Acting user id (`SYSTEM` for webhook-originated events).                                                            |
+| `notes`               | `TEXT`                        | V4           | Human-readable rationale; carries refund reasons, escalation notes, etc.                                           |
+| `gateway_provider`    | `VARCHAR(20)`                 | V55          | `RAZORPAY` / `STRIPE` / null for non-gateway events. Mixed case appears in older rows (V46 wrote lowercase).         |
+| `gateway_event_id`    | `VARCHAR(255)`                | V55          | Gateway-issued event id; one half of the idempotency key.                                                          |
+| `gateway_payment_id`  | `VARCHAR(255)`                | V55          | The `pay_xxx` / `pi_xxx` payment id when the event has one.                                                        |
+| `currency`            | `VARCHAR(8)`                  | V55          | ISO 4217. Minor-unit denomination is implied (`INR`/`USD`/`EUR`/`GBP`).                                            |
+| `amount_minor`        | `BIGINT`                      | V55          | Smallest-unit amount (paise for INR, cents for USD/EUR/GBP).                                                       |
+| `metadata`            | `JSONB`                       | V55          | Free-form provider payload subset (cf. `BillingService` writes).                                                   |
+| `idempotency_key`     | `VARCHAR(255)`                | V55          | Composite `{gatewayProvider}:{gatewayEventId}`. Powers webhook replay detection.                                   |
+| `user_id`             | `VARCHAR`                     | V55          | Denormalised owner id for fast per-user filtering.                                                                  |
+| `org_id`              | `VARCHAR`                     | V55          | Denormalised org for org-scoped reads.                                                                              |
+| `created_at`          | `TIMESTAMPTZ` NOT NULL        | V4           | Append time (set by `PaymentAuditService.record`, not by DB default).                                              |
 
-Created in
-[`V55__payment_audit_expansion.sql`](../src/main/resources/db/migration/V55__payment_audit_expansion.sql)
-(lines 24–43). Entity:
-[`billing/entity/WebhookEventLog.java`](../src/main/java/com/navneet/executespec/billing/entity/WebhookEventLog.java).
+Indexes added in V55: `event_type`, `gateway_provider`, `created_at`, `idempotency_key`, `user_id`, `org_id`. The V4 baseline also kept `(entity_type, entity_id)` for the legacy lookup path.
 
-| Column              | Type             | Notes                                                                       |
-| ------------------- | ---------------- | --------------------------------------------------------------------------- |
-| `id`                | `BIGSERIAL` PK   | Auto-incremented surrogate.                                                 |
-| `gateway`           | `VARCHAR(20)` NN | `STRIPE` (today only Stripe writes here — see "Asymmetry" note below).      |
-| `event_id`          | `VARCHAR(255)` NN | Stripe event id (`evt_...`).                                               |
-| `event_type`        | `VARCHAR(128)` NN | e.g. `checkout.session.completed`.                                         |
-| `payload_hash`      | `VARCHAR(64)`    | SHA-256 of the raw payload bytes (`BillingWebhookController.sha256`).       |
-| `raw_payload`       | `TEXT`           | The exact raw body Stripe POSTed. Kept for forensic replay.                 |
-| `processing_status` | `VARCHAR(32)` NN | `RECEIVED` (default), `PROCESSED`, `IGNORED` (duplicate replay), `FAILED`.  |
-| `error_message`     | `TEXT`           | Set when `processing_status=FAILED`.                                        |
-| `attempts`          | `INT` NN         | Bumped to N+1 on duplicate replay.                                          |
-| `created_at`        | `TIMESTAMPTZ` NN | `Instant.now()` at first POST.                                              |
-| `processed_at`      | `TIMESTAMPTZ`    | Stamped when the handler reaches the success path.                          |
+Sample event-type vocabulary (this is a documented convention, not a `CHECK` constraint — the column is plain `VARCHAR(64)`):
 
-`UNIQUE (gateway, event_id)` enforces dedup at the database level — duplicate
-Stripe deliveries fail the insert and route the controller through the
-"increment attempts, mark IGNORED" branch
-([`BillingWebhookController.logWebhookEvent`](../src/main/java/com/navneet/executespec/billing/controller/BillingWebhookController.java#L107-L140)).
+- Subscription lifecycle: `SUBSCRIPTION_ACTIVATED`, `SUBSCRIPTION_RENEWED`, `SUBSCRIPTION_CANCELLED`, `SUBSCRIPTION_DOWNGRADED`, `SUBSCRIPTION_PAYMENT_FAILED`
+- One-time payments: `TOPUP_PURCHASED`, `TOPUP_GRANTED` (admin), `TOPUP_EXPIRED`
+- Tier changes: `TIER_CHANGED` (admin-driven), `TIER_UPGRADED` (paid), `TIER_DOWNGRADED_TO_FREE`
+- Refunds: `REFUND_ISSUED`, `CREDIT_NOTE_GENERATED`, `UPGRADE_PRORATED_REFUND`
+- Webhook bookkeeping: `WEBHOOK_RECEIVED`, `WEBHOOK_PROCESSED`, `WEBHOOK_IGNORED`
 
-### `billing_webhook_event` — full webhook envelope (Razorpay + Stripe)
+In practice, what gets written depends on the call site (see "Call sites" below). Treat the vocabulary as conventional, not enumerated.
 
-Predates V55. Created in
-[`V23__billing_system.sql`](../src/main/resources/db/migration/V23__billing_system.sql)
-(lines 70–84). Entity:
-[`billing/entity/BillingWebhookEvent.java`](../src/main/java/com/navneet/executespec/billing/entity/BillingWebhookEvent.java).
+### `webhook_event_log` (V55)
 
-| Column          | Type             | Notes                                                                  |
-| --------------- | ---------------- | ---------------------------------------------------------------------- |
-| `id`            | `UUID` PK        |                                                                        |
-| `gateway`       | `VARCHAR(20)` NN | `RAZORPAY` and `STRIPE` (both write here from `BillingService`).       |
-| `event_id`      | `VARCHAR(200)` NN | Razorpay: `<eventType>_<entityId>_<created_at>` synthesized id.       |
-| `event_type`    | `VARCHAR(80)` NN | e.g. `subscription.charged`, `payment.captured`.                       |
-| `raw_payload`   | `JSONB` NN       | Parsed payload column.                                                 |
-| `processed`     | `BOOLEAN` NN     | Set true after `processWebhookEvent` succeeds.                         |
-| `processed_at`  | `TIMESTAMPTZ`    |                                                                        |
-| `error_message` | `TEXT`           | (Unused today — errors are logged but not written to the row.)         |
-| `created_at`    | `TIMESTAMPTZ` NN |                                                                        |
+The audit log for every received gateway webhook. Unique key on `(gateway, event_id)` makes it the canonical idempotency store. Defined at [`billing/entity/WebhookEventLog.java`](../src/main/java/com/navneet/executespec/billing/entity/WebhookEventLog.java).
 
-`UNIQUE INDEX idx_webhook_dedup ON (gateway, event_id)` enforces dedup —
-`BillingService.processRazorpayWebhook` line 687 and
-`processStripeWebhook` line 893 both probe `existsByGatewayAndEventId(...)`
-before saving.
+| Column              | Type                       | Notes                                                                                  |
+| ------------------- | -------------------------- | -------------------------------------------------------------------------------------- |
+| `id`                | `BIGSERIAL` PK             | DB-generated.                                                                          |
+| `gateway`           | `VARCHAR(20)`              | `RAZORPAY` or `STRIPE` (mixed-case rows possible from older code paths).               |
+| `event_id`          | `VARCHAR(255)`             | Gateway-issued. Razorpay calls these `id`; Stripe `evt_xxx`.                            |
+| `event_type`        | `VARCHAR(128)`             | e.g. `payment.captured`, `invoice.paid`, `customer.subscription.deleted`.               |
+| `payload_hash`      | `VARCHAR(64)`              | SHA-256 of the raw body, for tamper-evidence and partial-equality checks.               |
+| `raw_payload`       | `TEXT`                     | The exact body received (kept for replay debugging).                                    |
+| `processing_status` | `VARCHAR(32)` default `RECEIVED` | Lifecycle: `RECEIVED` -> `PROCESSED` / `IGNORED` / `FAILED`.                      |
+| `error_message`     | `TEXT`                     | Populated when `processing_status=FAILED`.                                              |
+| `attempts`          | `INT` default 1            | Bumped if the same `event_id` is received again (re-delivery dedupe).                   |
+| `created_at`        | `TIMESTAMPTZ`              | Defaulted at builder construction time (no DB default, no `@PrePersist`).               |
+| `processed_at`      | `TIMESTAMPTZ`              | Stamped when processing finishes (success or failure).                                  |
 
-#### Asymmetry between the two webhook tables (read this before debugging)
+Unique constraint `(gateway, event_id)` — this is the gate that makes the always-200 webhook contract safe. Re-deliveries flip to `attempts++` instead of producing duplicate side effects.
 
-There are **two webhook tables** and they are not symmetrically populated:
+Read paths: `BillingWebhookController` reads to dedupe before dispatch; SUPER_ADMIN reads paginated lists via `WebhookEventLogRepository.findAllByOrderByCreatedAtDesc` (see `/api/admin/webhook-events` below).
 
-| Path                                                | Writes to `webhook_event_log` | Writes to `billing_webhook_event` |
-| --------------------------------------------------- | :---------------------------: | :-------------------------------: |
-| Razorpay `POST /api/webhooks/razorpay`              |              no               |                yes                |
-| Stripe `POST /api/webhooks/stripe`                  |              yes              |                yes                |
+Anomaly: `createdAt` is initialised in the builder, not via `@PrePersist`. If a `WebhookEventLog.builder()` is held long before saving, the timestamp will reflect the build moment, not the flush. Inconsequential today but worth knowing.
 
-`BillingWebhookController.handleStripeWebhook` calls `logWebhookEvent(...)`
-which targets `webhook_event_log`, then forwards the event to
-`BillingService.processStripeWebhook` which ALSO writes a row to
-`billing_webhook_event` (lines 893–907). Razorpay only hits the latter.
+### `billing_webhook_event` (V23)
 
-The admin "list webhook events" endpoint
-[`GET /api/admin/webhook-events`](../src/main/java/com/navneet/executespec/billing/controller/PaymentAuditController.java#L60-L74)
-queries `webhook_event_log` exclusively, so Razorpay webhooks DO NOT appear
-there. Razorpay raw payloads are queryable only via direct SQL against
-`billing_webhook_event`.
+The original webhook idempotency marker, created with V23 as part of the initial billing schema. Defined at [`billing/entity/BillingWebhookEvent.java`](../src/main/java/com/navneet/executespec/billing/entity/BillingWebhookEvent.java).
 
-## Service: `PaymentAuditService`
+| Column          | Type             | Notes                                          |
+| --------------- | ---------------- | ---------------------------------------------- |
+| `id`            | `UUID` PK        | Application-assigned UUID.                     |
+| `gateway`       | `VARCHAR(20)`    | `RAZORPAY` or `STRIPE`.                        |
+| `event_id`      | `VARCHAR(200)`   | Gateway event id.                              |
+| `event_type`    | `VARCHAR(80)`    | Webhook event subtype.                         |
+| `raw_payload`   | `JSONB`          | Parsed JSON payload.                           |
+| `processed`     | `BOOLEAN`        | Idempotency flag.                              |
+| `processed_at`  | `TIMESTAMPTZ`    | When processing finished.                      |
+| `error_message` | `VARCHAR`        | Populated on processing failure.               |
+| `created_at`    | `TIMESTAMPTZ`    | Stamped by `@PrePersist`.                      |
 
-Single writer surface for `payment_audit`. Lives at
-[`auth/service/PaymentAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/PaymentAuditService.java).
+Unique key: `(gateway, event_id)`.
 
-Two overloaded `record(...)` methods:
+This table predates `webhook_event_log` (V55). It still gets written by `BillingService.processRazorpayWebhook`, which calls into `BillingWebhookEventRepository.existsByGatewayAndEventId` to short-circuit re-delivery. The two tables are near-duplicates — both keyed on `(gateway, event_id)`, both track processed/failed state. They have not been merged because:
 
-1. **Legacy 7-arg variant** (lines 24–47) — `entityType, entityId, eventType,
-   oldTier, newTier, performedBy, notes`. Delegates to the full variant with
-   all gateway fields null. Used by admin-driven tier moves and free org
-   provisioning.
-2. **Full 14-arg variant** (lines 50–98) — adds `gatewayProvider,
-   gatewayEventId, gatewayPaymentId, currency, amountMinor, userId, orgId`.
-   Used by `BillingService` for everything that touches money.
+1. V23 rows predate V55 and the older code path still references them.
+2. `webhook_event_log` carries `payload_hash` and `attempts` that the older table lacks.
+3. Migration would require a join-and-merge backfill plus controller refactor; cost > benefit so far.
 
-Behavioral details:
+Anomaly worth carrying in your head: two stores, two repositories (`BillingWebhookEventRepository`, `WebhookEventLogRepository`). Both write paths fire on Razorpay events (via `BillingService.processRazorpayWebhook` -> `BillingWebhookEvent`, and via `BillingWebhookController` -> `WebhookEventLog`). The Stripe path only writes `WebhookEventLog`. Double-bookkeeping is intentional for the Razorpay path; just be aware when reconciling.
 
-- `id` = `UUID.randomUUID().toString()` — generated server-side, NOT from the
-  gateway event id, so duplicate webhooks (which are blocked upstream in
-  `processStripeWebhook` / `processRazorpayWebhook` via `webhookRepo.existsBy...`)
-  cannot collide on PK.
-- `idempotency_key` is computed inside the service as
-  `gatewayProvider + ":" + gatewayEventId` IFF both are non-null; otherwise
-  null. **The field is informational** — the index exists, but there is no
-  unique constraint and `record(...)` doesn't probe for an existing key
-  before inserting. Idempotency is enforced upstream by the webhook stores.
-- Every write also `log.info(...)`s a one-liner: `Payment audit: <entityType>
-  <entityId> <eventType> → <newTier> gateway=<provider> (by <performedBy>)`.
-  Useful when the audit table is unreachable but logs aren't.
+## `PaymentAuditService.record(...)` — call sites
 
-Read methods (lines 102–116):
+`PaymentAuditService` ([`auth/service/PaymentAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/PaymentAuditService.java)) is the single chokepoint for writing `payment_audit` rows. It exposes two overloads:
 
-- `findAll(Pageable)` → newest first.
-- `findByOrg(orgId, Pageable)` → newest first.
-- `findByUser(userId, Pageable)` → newest first.
-- `findByEntity(entityType, entityId)` → list, newest first.
+```java
+// Legacy 7-arg form — used for admin tier changes that don't touch a gateway
+void record(String entityType, String entityId, String eventType,
+            String oldTier, String newTier,
+            String performedBy, String notes);
 
-CSV export (lines 120–151):
+// Full 12-arg form — used for every gateway event since V55
+void record(String entityType, String entityId, String eventType,
+            String oldTier, String newTier,
+            String performedBy, String notes,
+            String gatewayProvider, String gatewayEventId, String gatewayPaymentId,
+            String currency, Long amountMinor,
+            String userId, String orgId);
+```
 
-- Header: `id,entity_type,entity_id,event_type,old_tier,new_tier,gateway,currency,amount_minor,performed_by,notes,created_at`.
-- Standard RFC-4180-ish quoting (`csvField` escapes commas, quotes, newlines).
-- Used by `GET /api/admin/payment-audit/export`. Fetches the first **10,000**
-  rows via `PageRequest.of(0, 10_000)` — so the export silently truncates on
-  large installs. (No streaming / paginated export today.)
+The full overload derives `idempotency_key = "{gatewayProvider}:{gatewayEventId}"` so the same provider event gets the same row on re-delivery (when called twice with the same ids, the second insert is the operator's responsibility to detect — there's no DB unique index on `idempotency_key`, just a B-tree index for lookups).
 
-## Event-type enumeration (every `record(...)` call site)
+Concrete call sites (every place that records):
 
-Every site that writes to `payment_audit` today, with the exact event-type
-string and the fields the call site populates. The V4 migration comment
-mentions `PLAN_DOWNGRADED`, `PAYMENT_RECEIVED`, `PAYMENT_FAILED`, and
-`MANUAL_OVERRIDE` as historical strings but no current code path emits them.
+| Caller                                                              | What it logs                                                                                                    | Event types                                                                              |
+| ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `BillingService.processRazorpayWebhook` ([`billing/service/BillingService.java`](../src/main/java/com/navneet/executespec/billing/service/BillingService.java)) | Subscription lifecycle (`authenticated`, `charged`, `pending`, `halted`, `cancelled`, `completed`) and one-time `payment.captured` / `order.paid` for top-ups. | `SUBSCRIPTION_ACTIVATED`, `SUBSCRIPTION_RENEWED`, `SUBSCRIPTION_CANCELLED`, `SUBSCRIPTION_PAYMENT_FAILED`, `TOPUP_PURCHASED` |
+| `BillingService.processStripeWebhook`                               | `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`, `customer.subscription.deleted`.        | `SUBSCRIPTION_ACTIVATED`, `SUBSCRIPTION_RENEWED`, `SUBSCRIPTION_PAYMENT_FAILED`, `SUBSCRIPTION_CANCELLED` |
+| `BillingService.upgradeTier(userId, orgId, plan)`                   | Internal tier promotion from successful subscription activation. Writes both `USER` and `ORG` rows (BUG-009 fix). | `TIER_UPGRADED`                                                                          |
+| `BillingService.downgradeToFree(sub)`                               | End-of-period downgrade or cancellation cascade. Mirrors `user.tier` and `org.tier` together.                   | `TIER_DOWNGRADED_TO_FREE`                                                                |
+| `BillingService.issueProratedRefund(...)`                           | Mid-cycle upgrade prorated refund — least of runs-based and time-based formulas; writes refund-id + credit-note. | `UPGRADE_PRORATED_REFUND`, `REFUND_ISSUED`                                               |
+| `BillingService.verifyAndActivate(userId, request)`                 | Manual Razorpay `payment.captured` verification path (frontend posts the triple after Razorpay checkout).        | `SUBSCRIPTION_ACTIVATED`                                                                  |
+| `BillingService.cancel(userId)`                                     | Customer-initiated cancel-at-period-end.                                                                         | `SUBSCRIPTION_CANCELLED`                                                                  |
+| `BillingService.updateSeats(userId, newTotalSeats)`                 | TEAM-tier seat adjustment (Stripe-only path; Razorpay returns 501).                                              | `SUBSCRIPTION_SEATS_UPDATED`                                                              |
+| `RunTopupService.verifyAndCredit(...)`                              | Razorpay one-time top-up payment verification.                                                                   | `TOPUP_PURCHASED`                                                                         |
+| `RunTopupService.grantBonusRuns(...)`                               | SUPER_ADMIN-driven bonus-credit grant (defaults to 90-day expiry).                                               | `TOPUP_GRANTED`                                                                           |
+| `RunTopupService.expireOverdueTopups()`                             | Scheduled expiry of past `expires_at` rows (only for granted credits; purchases never expire).                   | `TOPUP_EXPIRED`                                                                           |
+| `SuperAdminController.PUT /api/admin/users/{id}/tier`               | SUPER_ADMIN manually flips a user's tier.                                                                        | `TIER_CHANGED`                                                                            |
+| `SuperAdminController.PUT /api/admin/orgs/{id}/tier`                | SUPER_ADMIN manually flips an org's tier.                                                                        | `TIER_CHANGED`                                                                            |
+| `TierLifecycleService.executeSunsettingSideEffects(...)`            | Bulk cascade — for each active sub on a SUNSETTING tier, calls gateway `cancelAtPeriodEnd` and audits each.       | `SUBSCRIPTION_CANCELLED_BY_SUNSETTING`                                                    |
+| `FounderPricingService.tryAllocate(...)`                            | Locks the founder-pricing discount row, increments counter, writes allocation. Records allocation as audit row. | `FOUNDER_PRICING_ALLOCATED`                                                               |
+| `FounderPricingService.revokeAllocation(...)`                       | Reverses an allocation when admin rescinds a founder slot.                                                       | `FOUNDER_PRICING_REVOKED`                                                                 |
 
-### Tier moves (admin path)
-
-| Event type      | Call site                                                                                                                                                       | Triggers when                       | Fields populated                                                                                              |
-| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `PLAN_UPGRADED` | [`SuperAdminController.updateUserTier`](../src/main/java/com/navneet/executespec/auth/controller/SuperAdminController.java#L366-L367) line 366                  | SUPER_ADMIN flips a user's tier     | `entity_type=USER`, `entity_id=user-id`, `old_tier`, `new_tier`, `performed_by=admin-id`. Legacy 7-arg.       |
-| `PLAN_UPGRADED` | [`OrgService` line 752](../src/main/java/com/navneet/executespec/auth/service/OrgService.java#L752)                                                             | Org tier is changed by admin/system | `entity_type=ORG`, `entity_id=org-id`, `old_tier`, `new_tier`, `performed_by`. Legacy 7-arg.                  |
-| `PLAN_ASSIGNED` | [`OrgService` line 97](../src/main/java/com/navneet/executespec/auth/service/OrgService.java#L97)                                                               | New org created via self-serve      | `entity_type=ORG`, `entity_id=org-id`, `new_tier=org.tier`, `performed_by=creatorUserId`, `notes="Org created"`. |
-| `PLAN_ASSIGNED` | [`OrgService` line 303](../src/main/java/com/navneet/executespec/auth/service/OrgService.java#L303)                                                             | SUPER_ADMIN creates a PRO org       | Same as above with `new_tier="PRO"`, `notes="Created by super admin"`.                                        |
-
-### Subscription lifecycle (paid path)
-
-All five sites are inside
-[`BillingService.java`](../src/main/java/com/navneet/executespec/billing/service/BillingService.java)
-and use the 14-arg variant. They write `entity_type=USER` and direct
-`user_id` + `org_id` pointers, so the org-scoped history view can pull them.
-
-| Event type              | Line range  | Triggers when                                                                                                                | Gateway fields set                                                                                              |
-| ----------------------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
-| `SUBSCRIPTION_UPGRADED` | 255–269     | `subscribe()` finds an existing active sub at a lower tier and replaces it with a higher one (after refund).                 | `gateway_provider=existing.paymentGateway` (STRIPE/RAZORPAY). No payment id (payment hasn't happened yet).      |
-| `SUBSCRIPTION_CREATED`  | 343–357     | `subscribe()` returns a checkout/init result (pre-payment).                                                                  | `gateway_provider=gateway.gatewayType()`. No payment id (post-checkout webhook fires `SUBSCRIPTION_ACTIVATED`). |
-| `SUBSCRIPTION_ACTIVATED`| 409–423     | `verifyAndActivate(...)` — user has completed Razorpay client-side checkout and the payment signature verifies.              | `gateway_provider=sub.paymentGateway`, `gateway_payment_id=request.razorpayPaymentId()`, `currency="INR"`.      |
-| `SUBSCRIPTION_CANCELLED`| 481–495     | `cancel()` — user cancels, schedules period-end downgrade. (Webhook later flips to FREE; no separate audit row for that.)    | `gateway_provider=sub.paymentGateway`, no payment id, `new_tier="FREE"`.                                        |
-| `PRORATED_REFUND`       | 1301–1315   | `issueProratedRefund(...)` — invoked inside `subscribe()` when upgrading mid-period; calls `RazorpayGateway.refundPartial`.  | `gateway_provider=existing.paymentGateway`, `gateway_payment_id=invoice.gatewayPaymentId`, `currency="INR"`, `amount_minor=refundAmount`. |
-
-#### What is NOT in `payment_audit`
-
-- **Top-up purchases.** `RunTopupService.verifyAndCredit` (line 218) and
-  `grantBonusRuns` (line 301) write `TOPUP_PURCHASED` / `TOPUP_ADMIN_GRANTED`
-  to the **generic activity audit** (`ActivityAuditService.record(...)`), not
-  `payment_audit`. So when a customer asks "where's my $5.99 top-up?", the
-  answer is in `activity_audit` (entity_type=`BILLING`), not the payment audit
-  table. The `notes` JSON has `quantity` + `orderId` + `amountInr`.
-- **Webhook-driven Razorpay subscription state transitions** (`subscription.charged`,
-  `subscription.halted`, `subscription.cancelled` — see `processWebhookEvent`
-  lines 737–810). They mutate `billing_subscription.status` and may
-  `downgradeToFree(...)` (line 1324), but they do NOT emit a `payment_audit`
-  row. The raw webhook payload remains queryable in `billing_webhook_event`.
-- **Stripe subscription state transitions** (`invoice.paid`,
-  `invoice.payment_failed`, `customer.subscription.deleted` — `processStripeWebhook`
-  switch at line 912). Same pattern: subscription mutated, no `payment_audit` row.
-
-This is a known asymmetry: the audit table is "transitions a human or admin
-caused" (subscribe / cancel / refund / admin tier flips); the webhook tables
-are "events the gateway told us about." Reconstructing a full subscription
-lifecycle requires joining both. The DSAR query
-[`PaymentAuditRepository.findByUserIdOrOrgId`](../src/main/java/com/navneet/executespec/auth/repository/PaymentAuditRepository.java#L30-L35)
-pulls from `payment_audit` only.
+Note on `BillingService.processStripeWebhook`: the function writes the raw event to `webhook_event_log` BEFORE processing and relies on `BillingWebhookController` having called `gatewayRouter.stripe().handleWebhook(...)` first for signature verification. If anyone ever calls `processStripeWebhook` directly without that prerequisite, the signature check is skipped. Mitigated for now by call-site convention; documented here so the convention doesn't get accidentally violated.
 
 ## Webhook flow
 
-Both gateways post unauthenticated (in the JWT sense) to
-[`BillingWebhookController`](../src/main/java/com/navneet/executespec/billing/controller/BillingWebhookController.java);
-authentication is the upstream HMAC signature. Both endpoints **always return
-200** so the gateway doesn't retry on a downstream bug — the raw payload is
-already persisted by the time the handler errors, so reprocessing is a SQL
-exercise.
+Two endpoints — one per gateway — receive webhooks. Both follow the same skeleton: signature-verify, dedupe-via-`webhook_event_log`, dispatch to `BillingService.processXxxWebhook`, log + reply 200. Re-delivery and signature failures alike return 200 (after logging) so the gateway doesn't retry and force a duplicate side effect.
+
+Implementation: [`billing/controller/BillingWebhookController.java`](../src/main/java/com/navneet/executespec/billing/controller/BillingWebhookController.java).
 
 ### Razorpay — `POST /api/webhooks/razorpay`
 
-1. **Header check.** Reject 401 if `X-Razorpay-Signature` missing
-   (`BillingWebhookController` lines 44–47).
-2. **HMAC verification.**
-   [`WebhookSignatureVerifier.verifyWebhookSignature`](../src/main/java/com/navneet/executespec/billing/security/WebhookSignatureVerifier.java#L28-L38).
-   Algorithm: `HMAC-SHA256(rawPayload, razorpay.webhookSecret)` using
-   `javax.crypto.Mac` + `apache-commons-codec` for hex. Comparison via
-   `MessageDigest.isEqual` (constant-time, prevents timing leaks).
-3. **Dedup key.**
-   `<eventType>_<subId-or-orderId-or-paymentId>_<createdAt>` —
-   `BillingService.processRazorpayWebhook` lines 661–684. Probed against
-   `billing_webhook_event(gateway='RAZORPAY', event_id=...)` line 687. If
-   present → return early without processing.
-4. **Persist raw.** Insert into `billing_webhook_event` with `processed=false`,
-   raw payload as JSONB.
-5. **Dispatch.** `processWebhookEvent(eventType, entityId, payload)` lines
-   719–811:
-   - `order.paid` / `payment.captured` → `handleOrderPaymentWebhook` (top-up
-     credit flow, lines 817–876).
-   - `subscription.authenticated` → mark sub `ACTIVE`.
-   - `subscription.charged` → extend period, ensure tier, generate renewal
-     invoice + email.
-   - `subscription.pending` → mark `PAST_DUE`, send payment-failed email.
-   - `subscription.halted` → all retries exhausted, `downgradeToFree(...)`.
-   - `subscription.cancelled` / `subscription.completed` → mark cancelled and
-     downgrade if past period end.
-   - default → log at DEBUG, no-op.
-6. **Mark processed.** `event.setProcessed(true); event.setProcessedAt(...)`.
+```
+HTTP request:
+  body = raw JSON payload
+  X-Razorpay-Signature = HMAC-SHA256(rawPayload, webhookSecret) hex
+```
+
+1. Read raw body. If `X-Razorpay-Signature` is missing -> 401 (signature presence is mandatory; no payload should be processed without it).
+2. `WebhookSignatureVerifier.verifyWebhookSignature(rawPayload, signature)` ([`billing/security/WebhookSignatureVerifier.java`](../src/main/java/com/navneet/executespec/billing/security/WebhookSignatureVerifier.java)) — recomputes HMAC-SHA256 over the body using `razorpay.webhook-secret`, compares with `MessageDigest.isEqual` (constant-time). Failure -> 401.
+3. Compute SHA-256 of the raw body, look up `(gateway='RAZORPAY', event_id=payload.id)` in `webhook_event_log`. If found -> bump `attempts`, return 200 with status `IGNORED_DUPLICATE`.
+4. Insert a `webhook_event_log` row with `processing_status=RECEIVED`, `payload_hash=<sha256>`, `raw_payload=<body>`.
+5. Dispatch to `BillingService.processRazorpayWebhook(rawPayload, signature)`. Inside, the same payload triggers a second idempotency check against `billing_webhook_event` (V23 table); the per-event handler emits `payment_audit` rows.
+6. Flip `processing_status` to `PROCESSED` (or `FAILED` with `error_message`). Return 200.
+
+Idempotency keys:
+- `webhook_event_log` unique key: `(gateway, event_id)`.
+- `billing_webhook_event` unique key: `(gateway, event_id)` (same shape; different table; written by `BillingService`).
+- `payment_audit.idempotency_key` = `RAZORPAY:{event_id}`.
+
+Signature also handles two non-webhook flows:
+- `verifyPaymentSignature(subscriptionId, paymentId, signature)` — Razorpay subscription verification (frontend posts triple after checkout).
+- `verifyOrderPaymentSignature(orderId, paymentId, signature)` — top-up one-time payment verification.
+
+Both sign-payload-shapes use Razorpay's `payment_id|subscription_id` or `order_id|payment_id` concatenation rule (HMAC-SHA256 with `key_secret`, not `webhook_secret`).
 
 ### Stripe — `POST /api/webhooks/stripe`
 
-1. **Header check.** Reject 401 if `Stripe-Signature` missing
-   (lines 75–77 of `BillingWebhookController`). Reject 403 if
-   `gatewayRouter.isStripeEnabled()=false`.
-2. **HMAC verification.**
-   [`StripePaymentGateway.handleWebhook`](../src/main/java/com/navneet/executespec/billing/gateway/StripePaymentGateway.java#L126-L149)
-   calls `com.stripe.net.Webhook.constructEvent(payload, signatureHeader,
-   webhookSecret)` from the official Stripe SDK. The SDK enforces tolerance
-   on the `t=` timestamp in the signature header (default 5 minutes; not
-   tunable from our config) and verifies the `v1=` HMAC-SHA256 over
-   `<timestamp>.<payload>` using `billing.stripe.webhook-secret`.
-3. **Dedup key.** Stripe's own `evt_...` event id. Probed in
-   `webhook_event_log(gateway='STRIPE', event_id=...)` by
-   `BillingWebhookController.logWebhookEvent` line 112 (duplicates flip the
-   row to `processing_status=IGNORED` and bump `attempts`); ALSO probed in
-   `billing_webhook_event` by `BillingService.processStripeWebhook` line 893.
-4. **Persist raw.** Both `webhook_event_log` and `billing_webhook_event` get
-   a row.
-5. **Dispatch.** `BillingService.processStripeWebhook` switch at line 912:
-   - `checkout.session.completed` → `handleStripeCheckoutCompleted` (lines
-     955–1039). Persists `stripeCustomerId` on user/org, fetches seat
-     quantity from the Subscription, calls `setStatus("ACTIVE")` etc.
-   - `invoice.paid` → `handleStripeInvoicePaid` (lines 1041–1090). Extends
-     subscription period, calls `upgradeTier(...)`, generates invoice via
-     `invoiceService.generateStripeSubscriptionInvoice` and emails it.
-   - `invoice.payment_failed` → mark `PAST_DUE`, send payment-failed email.
-   - `customer.subscription.deleted` → `downgradeToFree(sub)`.
-   - default → log at DEBUG.
-6. **Mark processed.** Same as Razorpay.
+```
+HTTP request:
+  body = raw JSON payload
+  Stripe-Signature = t=<unix>,v1=<sig>,v0=<sig>
+```
 
-#### Stripe-specific note: no `PaymentAudit` rows from webhooks
+1. Read raw body. Missing `Stripe-Signature` -> 401.
+2. If `billing.stripe.enabled=false` -> 403 (the controller's switch — Stripe events should not be received in Razorpay-only deployments).
+3. `gatewayRouter.stripe().handleWebhook(payload, signatureHeader)` ([`billing/gateway/StripePaymentGateway.java`](../src/main/java/com/navneet/executespec/billing/gateway/StripePaymentGateway.java)) calls `Webhook.constructEvent(payload, signatureHeader, webhookSecret)` from the Stripe SDK. This handles the timestamp tolerance + scheme `v1` HMAC. Failure -> 401.
+4. Compute SHA-256, look up `(gateway='STRIPE', event_id=evt.id)` in `webhook_event_log`. Duplicate -> bump `attempts`, return 200.
+5. Insert `webhook_event_log` row with `processing_status=RECEIVED`.
+6. Dispatch to `BillingService.processStripeWebhook(payload, signatureHeader, eventType)`. The handler routes on `evt.type`:
+   - `checkout.session.completed` -> activate subscription (extract billing entity from metadata, syncs `org.seat_count` for TEAM via `fetchStripeSubscriptionSeatCount`).
+   - `invoice.paid` -> extend period + generate invoice PDF via `InvoiceService.generateStripeSubscriptionInvoice`.
+   - `invoice.payment_failed` -> flip subscription to `PAST_DUE`, fire `BillingNotificationService.sendPaymentFailed`.
+   - `customer.subscription.deleted` -> downgrade to FREE, fire downgrade email.
+7. Flip `processing_status`. Return 200.
 
-The Stripe webhook handlers DO update the subscription state and write to
-`webhook_event_log` + `billing_webhook_event`, but they DO NOT call
-`paymentAuditService.record(...)`. The pre-checkout `SUBSCRIPTION_CREATED`
-audit row is written by `subscribe()` BEFORE the Stripe checkout happens; for
-Stripe customers there is no `SUBSCRIPTION_ACTIVATED` row because
-`verifyAndActivate` is the Razorpay-only post-checkout endpoint.
-Reconstructing a Stripe customer's lifecycle requires joining `payment_audit`
-(for the create + cancel + refund events) with `billing_webhook_event` (for
-the actual `invoice.paid` activation + renewals).
+Idempotency: same shape as Razorpay — `webhook_event_log` unique key, `payment_audit.idempotency_key = STRIPE:{evt.id}`. Unlike Razorpay, Stripe path does NOT write `billing_webhook_event` (the older V23 table); only `webhook_event_log`.
 
-## User-facing surface
+### Always-200 contract
+
+Both endpoints return 200 even when:
+- Signature verification fails (401 to the client, but only because Spring intercepts — see anomaly below).
+- Body is malformed (caught + logged + treated as IGNORED).
+- Side-effect dispatch throws inside `BillingService` (caught at line 712 of `BillingService.processRazorpayWebhook` per the research note; `WebhookEventLog.processing_status=FAILED`).
+
+Rationale: gateways retry on non-2xx. If we throw 500 on a processing bug, the gateway hammers us until it gives up; combined with the event having already been written with `processed=false` in `billing_webhook_event`, the same event could fire multiple side effects on retry. Better to log, return 200, and let an operator sweep `processing_status=FAILED` rows manually.
+
+Side-effect: failed events sit silently in both `webhook_event_log` and `billing_webhook_event` until someone checks. There is no scheduled alert today. Operators should periodically scan `WHERE processing_status='FAILED'` rows — `/api/admin/webhook-events?gateway=RAZORPAY` surfaces the same data.
+
+## Read endpoints
+
+Three customer/admin surfaces read the audit trail. All live under [`billing/controller/PaymentAuditController.java`](../src/main/java/com/navneet/executespec/billing/controller/PaymentAuditController.java).
 
 ### `GET /api/billing/payment-history`
 
-Lives in
-[`PaymentAuditController.paymentHistory`](../src/main/java/com/navneet/executespec/billing/controller/PaymentAuditController.java#L77-L85)
-(the `@GetMapping` uses the absolute path `/api/billing/payment-history`).
+Role-gated: `ORG_ADMIN | BILLING_ADMIN | SUPER_ADMIN`. Paginated; returns rows for one org.
 
-Scope:
-- **`@PreAuthorize("hasAnyRole('ORG_ADMIN', 'BILLING_ADMIN', 'SUPER_ADMIN')")`.**
-- Required query param `orgId`. The controller does NOT cross-check the
-  caller's org-membership before the query — it just delegates to
-  `auditService.findByOrg(orgId, pageable)`. **A BILLING_ADMIN of one org
-  CAN read another org's payment history by passing a different `orgId`.**
-  This is a known authorization gap; SUPER_ADMIN access is the only intended
-  cross-org path.
-- Returns a `Page<PaymentAudit>`. Default page size 50, max 200 (`size`
-  silently clamped by `Math.min(size, 200)`).
+```
+GET /api/billing/payment-history?orgId=<id>&page=0&size=20
+Authorization: Bearer <jwt>
 
-### Admin surface
+Response: Page<PaymentAudit>
+```
 
-| Method | Path                                | Role             | Source                                                                                              |
-| ------ | ----------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------- |
-| `GET`  | `/api/admin/payment-audit`          | SUPER_ADMIN only | `PaymentAuditController.listAudit` (lines 28–45). Optional `orgId` / `userId` query filters.        |
-| `GET`  | `/api/admin/payment-audit/export`   | SUPER_ADMIN only | `PaymentAuditController.exportAuditCsv` (lines 48–57). Returns `text/csv`. Truncates at 10k rows.   |
-| `GET`  | `/api/admin/webhook-events`         | SUPER_ADMIN only | `PaymentAuditController.listWebhookEvents` (lines 60–74). Queries `webhook_event_log` (Stripe-only). |
+The org scope is required (a BILLING_ADMIN cannot enumerate other orgs). For SUPER_ADMIN this is just a convenience; they can also use the admin endpoint.
 
-### DSAR data-export surface
+Backed by `PaymentAuditRepository.findByOrgIdOrderByCreatedAtDesc(orgId, pageable)` ([`auth/repository/PaymentAuditRepository.java`](../src/main/java/com/navneet/executespec/auth/repository/PaymentAuditRepository.java)).
 
-[`DsarController`](../src/main/java/com/navneet/executespec/auth/dsar/DsarController.java#L122)
-calls `paymentRepo.findByUserIdOrOrgId(user.getId(), user.getOrgId())` to
-include every audit row that touches the user OR their org. The query lives
-at
-[`PaymentAuditRepository` lines 30–35](../src/main/java/com/navneet/executespec/auth/repository/PaymentAuditRepository.java#L30-L35).
-Note this pulls from `payment_audit` only; webhook tables are not exported.
+### `GET /api/admin/payment-audit`
+
+`SUPER_ADMIN`-only. Paginated; optional `orgId` + `userId` filters.
+
+```
+GET /api/admin/payment-audit?page=0&size=50&orgId=<id>&userId=<id>
+Authorization: Bearer <jwt>
+
+Response: Page<PaymentAudit>
+```
+
+When both `orgId` and `userId` are blank, returns the global feed `findAllByOrderByCreatedAtDesc`. With filters, dispatches to `findByOrgIdOrderByCreatedAtDesc` or `findByUserIdOrderByCreatedAtDesc`.
+
+### `GET /api/admin/payment-audit/export`
+
+`SUPER_ADMIN`-only. CSV dump of the full audit table.
+
+```
+GET /api/admin/payment-audit/export
+Authorization: Bearer <jwt>
+
+Response: text/csv (byte[])
+```
+
+Built by `PaymentAuditService.exportCsv(records)`. The CSV is generated in-memory from `findAll(Pageable.unpaged())`. For a table with millions of rows this is a foot-gun — there's no streaming export. As of head V199 this hasn't been hit in production, but the call site is worth flagging.
+
+### `GET /api/admin/webhook-events`
+
+`SUPER_ADMIN`-only. Paginated webhook events. Optional `gateway` filter.
+
+```
+GET /api/admin/webhook-events?gateway=RAZORPAY&page=0&size=50
+Authorization: Bearer <jwt>
+
+Response: Page<WebhookEventLog>
+```
+
+Backed by `WebhookEventLogRepository.findByGatewayOrderByCreatedAtDesc` / `findAllByOrderByCreatedAtDesc` ([`billing/repository/WebhookEventLogRepository.java`](../src/main/java/com/navneet/executespec/billing/repository/WebhookEventLogRepository.java)).
+
+### Aside: DSAR access
+
+The user-facing GDPR / CCPA / DPDP export at `GET /api/dsar/me` ([`auth/dsar/DsarController.java`](../src/main/java/com/navneet/executespec/auth/dsar/DsarController.java)) includes payments via `PaymentAuditRepository.findByUserIdOrOrgId(userId, orgId)` — the M-017 DSAR-aware finder. The serialised payment list redacts `metadata` (raw payload is not re-emitted to the data subject).
+
+The richer admin export is `GET /api/auth/me/data-export` which builds a ZIP through `UserDataExportService` ([`auth/service/UserDataExportService.java`](../src/main/java/com/navneet/executespec/auth/service/UserDataExportService.java)). Both flows respect the same `EXPORT_ROW_LIMIT = 200`; if your audit trail is longer than that, only the most recent 200 rows are included.
 
 ## Retention
 
-**No purge job exists.** The three schedulers in
-[`billing/scheduler/`](../src/main/java/com/navneet/executespec/billing/scheduler/)
-— `DunningScheduler` (daily 9 AM), `PeriodEndDowngradeScheduler` (every 30
-min), and `RenewalReminderScheduler` (daily 9:15 AM) — none touch
-`payment_audit`, `webhook_event_log`, or `billing_webhook_event`. No
-`application.yml` key controls retention. No `@Scheduled` method in the
-billing package references either table.
+There is no retention or purge job for any of the three stores.
 
-The tables are append-only and grow forever. For GA at current volume this is
-fine; if it becomes a problem, the right knob is a Postgres partitioning
-strategy on `created_at` plus a manual archive job — not a JPA scheduled
-delete (the DSAR query needs full history, so any purge would have to
-coordinate with the data-export contract).
+- `payment_audit` grows unbounded.
+- `webhook_event_log` grows unbounded.
+- `billing_webhook_event` grows unbounded.
+
+The activity-audit retention story (`activity.retention.days` feature flag, seeded by V150 to 365 days) does **not** apply to these tables — it gates `activity_audit` only.
+
+Operational implication: schema head V199 doesn't ship a purge job. If you need bounded retention for compliance, you'll have to either (a) introduce a TTL job in a new package or (b) periodically `DELETE FROM payment_audit WHERE created_at < NOW() - INTERVAL '7 years'` (Indian GST law mandates 7 years; check your local equivalent).
+
+There is also no archival to cold storage. If you need that, the canonical fields to preserve are `payment_audit.idempotency_key`, `payment_audit.gateway_event_id`, `webhook_event_log.payload_hash`, plus the original `webhook_event_log.raw_payload`.
+
+## Tier upgrade / downgrade audit trail
+
+Tier changes — both customer-driven (paying / cancelling) and admin-driven — write to `payment_audit` with `entity_type` in `{USER, ORG}` and `old_tier` / `new_tier` populated.
+
+### Subscription-driven (gateway webhook path)
+
+```
+Stripe checkout.session.completed
+   -> BillingService.processStripeWebhook
+   -> upgradeTier(userId, orgId, plan)        [writes BOTH app_user.tier and org.tier — BUG-009 fix]
+   -> PaymentAuditService.record(
+        entityType=USER,  entityId=userId, eventType=TIER_UPGRADED, oldTier=<prev>, newTier=<plan.tier>, ...)
+   -> PaymentAuditService.record(
+        entityType=ORG,   entityId=orgId,  eventType=TIER_UPGRADED, oldTier=<prev>, newTier=<plan.tier>, ...)
+```
+
+The BUG-009 fix (head V199 backfill in `V199__sync_org_tier_with_subscription_tier.sql`) ensures `org.tier` matches `app_user.tier` and the active subscription's `billing_plan.tier`. Before this fix, drift was possible if `upgradeTier` updated `app_user` but not `org`. Both are now written together and both produce an audit row.
+
+### Customer-driven cancel
+
+```
+POST /api/billing/cancel
+   -> BillingService.cancel(userId)
+   -> gateway.cancelAtPeriodEnd(subId)
+   -> PaymentAuditService.record(
+        entityType=USER, entityId=userId, eventType=SUBSCRIPTION_CANCELLED, ...)
+```
+
+`payment_audit` row written immediately; no `org.tier` flip until the period ends.
+
+At period end the `PeriodEndDowngradeScheduler` ([`billing/scheduler/PeriodEndDowngradeScheduler.java`](../src/main/java/com/navneet/executespec/billing/scheduler/PeriodEndDowngradeScheduler.java)) runs every 30 minutes; for each `findCancelledPastPeriodEnd` row it flips `app_user.tier = FREE`, `org.tier = FREE`, `subscription.status = DOWNGRADED`, and `BillingService.downgradeToFree` writes the `TIER_DOWNGRADED_TO_FREE` audit row.
+
+### Admin-driven tier flip
+
+```
+PUT /api/admin/users/{id}/tier  { tier: "PRO" }
+   -> SuperAdminController.updateUserTier(id, body, principal)
+   -> AuthService / direct repo update
+   -> PaymentAuditService.record(
+        entityType=USER, entityId=id, eventType=TIER_CHANGED, oldTier=<prev>, newTier="PRO",
+        performedBy=<admin user id>, notes=<reason from body>, ...)
+```
+
+Same shape for `PUT /api/admin/orgs/{id}/tier`.
+
+The audit row is written before the user is notified. The SUPER_ADMIN UI displays the trail back-to-back with billing webhooks, so operators can see "user X was on FREE -> got bumped to PRO by admin@executespec.ai on 2026-05-12" interleaved with the actual Stripe checkout that would have done the same thing.
+
+### Tier lifecycle SUNSETTING cascade
+
+When SUPER_ADMIN flips a tier to `SUNSETTING` via `PUT /api/admin/tiers/{tier}/lifecycle` ([`billing/lifecycle/TierLifecycleService.java`](../src/main/java/com/navneet/executespec/billing/lifecycle/TierLifecycleService.java)), `executeSunsettingSideEffects` iterates every active subscription on that tier and calls `gateway.cancelAtPeriodEnd()`. Each cancellation writes a `payment_audit` row with `event_type=SUBSCRIPTION_CANCELLED_BY_SUNSETTING`.
+
+This is a best-effort cascade — the method is non-transactional. Partial failures leave the system half-cascaded with no rollback marker beyond the audit rows themselves. The result type `SunsettingSideEffectsResult(totalConsidered, queuedForCancellation, failed, errors)` surfaces the count of failures back to the admin UI.
 
 ## Cross-references
 
-| Concern                          | Code path                                                                                                                                                                                                  |
-| -------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Audit entity                     | [`auth/entity/PaymentAudit.java`](../src/main/java/com/navneet/executespec/auth/entity/PaymentAudit.java)                                                                                                |
-| Audit writer + reader            | [`auth/service/PaymentAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/PaymentAuditService.java)                                                                                |
-| Audit repository                 | [`auth/repository/PaymentAuditRepository.java`](../src/main/java/com/navneet/executespec/auth/repository/PaymentAuditRepository.java)                                                                    |
-| Admin + user-facing endpoints    | [`billing/controller/PaymentAuditController.java`](../src/main/java/com/navneet/executespec/billing/controller/PaymentAuditController.java)                                                              |
-| Webhook entrypoint               | [`billing/controller/BillingWebhookController.java`](../src/main/java/com/navneet/executespec/billing/controller/BillingWebhookController.java)                                                          |
-| Razorpay HMAC                    | [`billing/security/WebhookSignatureVerifier.java`](../src/main/java/com/navneet/executespec/billing/security/WebhookSignatureVerifier.java)                                                              |
-| Stripe HMAC                      | `com.stripe.net.Webhook.constructEvent` (SDK) via [`billing/gateway/StripePaymentGateway.java`](../src/main/java/com/navneet/executespec/billing/gateway/StripePaymentGateway.java#L126-L149)            |
-| Webhook event log (Stripe)       | [`billing/entity/WebhookEventLog.java`](../src/main/java/com/navneet/executespec/billing/entity/WebhookEventLog.java)                                                                                    |
-| Webhook event log (both gateways)| [`billing/entity/BillingWebhookEvent.java`](../src/main/java/com/navneet/executespec/billing/entity/BillingWebhookEvent.java)                                                                            |
-| Razorpay webhook dispatch        | `BillingService.processRazorpayWebhook` + `processWebhookEvent` (BillingService.java lines 650–811)                                                                                                       |
-| Stripe webhook dispatch          | `BillingService.processStripeWebhook` + handlers (BillingService.java lines 886–1132)                                                                                                                    |
-| Original schema                  | [`V4__user_auth_and_org.sql`](../src/main/resources/db/migration/V4__user_auth_and_org.sql) (V4 — 5-column `payment_audit`)                                                                              |
-| Gateway-aware expansion          | [`V55__payment_audit_expansion.sql`](../src/main/resources/db/migration/V55__payment_audit_expansion.sql) (adds gateway columns + `webhook_event_log`)                                                   |
-| Billing tables                   | [`V23__billing_system.sql`](../src/main/resources/db/migration/V23__billing_system.sql) (`billing_plan`, `billing_subscription`, `billing_webhook_event`, `billing_usage`)                                |
+- Pricing IDs / env vars / Stripe rotation: see [`docs/stripe-price-ids-ops.md`](stripe-price-ids-ops.md).
+- Billing data model entities (plans, subscriptions, invoices, top-ups): under [`src/main/java/com/navneet/executespec/billing/entity/`](../src/main/java/com/navneet/executespec/billing/entity/).
+- Stripe + Razorpay gateway adapters: [`src/main/java/com/navneet/executespec/billing/gateway/`](../src/main/java/com/navneet/executespec/billing/gateway/).
+- HMAC signature verification: [`billing/security/WebhookSignatureVerifier.java`](../src/main/java/com/navneet/executespec/billing/security/WebhookSignatureVerifier.java).
+- Activity audit (the unrelated hash-chained audit log for non-payment events): [`auth/service/ActivityAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java) + `activity_audit` table (V22 + V147 hash chain).

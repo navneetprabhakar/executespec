@@ -1,2241 +1,1771 @@
-# JAVADOC.md — ExecuteSpec API reference
+# JAVADOC
 
-> Reference doc for the public Java surface — REST controllers, orchestration-level services, agents, V2 tools, JPA repositories, and JPA entities.
->
-> Companion to [`CODEMAP.md`](CODEMAP.md): CODEMAP is the package-level index, JAVADOC is the API contract. Compact and exhaustive — meant to be `grep`-d, not read end-to-end.
->
-> **Versions:** Java 21 · Spring Boot 3.5.14 · Spring AI 1.1.6 · ExecuteSpec `1.0.0-M1` · Migration head `V199`.
->
-> **Base package:** `com.navneet.executespec.*` — 72 top-level packages, 98 REST controllers, 80 JPA entities, 115 repositories, 17 agents, 12 worker tools.
-
----
+> Compact reference of the public Java surface for ExecuteSpec backend. Version `1.0.0-M1`. Migration head `V199`. All paths are relative to `src/main/java/com/navneet/executespec/` unless otherwise noted. Grep-friendly: one entity / method / class per line where possible.
 
 ## 1. Controllers (REST surface)
 
-Each entry below lists base path, method-level mapping (verb + full path), and a compact `methodName(args...) → ReturnType` signature. Args drop annotations (`@PathVariable`, `@RequestBody`, `@RequestParam`, `@AuthenticationPrincipal`) — assume the obvious annotation for each.
-
-### 1.1 Runs (lifecycle, conversation, SSE, timeline)
-
-#### RunController
-- Base: `/api/runs`
-- File: `api/controller/RunController.java`
-
-```
-POST   /api/runs
-  submit(AppUserDetails userDetails, RunRequest req) → ResponseEntity<RunSummary>
-GET    /api/runs
-  list(AppUserDetails userDetails, String status, String projectId, String scope, boolean archived, int page, int size) → ResponseEntity<Map<String,Object>>
-GET    /api/runs/{runId}
-  get(String runId, AppUserDetails userDetails) → ResponseEntity<RunDetail>
-GET    /api/runs/{runId}/cost
-  getLiveCost(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-POST   /api/runs/{runId}/approve
-  approvePlan(String runId, ApprovalRequest req, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/clarify
-  clarifyContext(String runId, ClarificationRequest req, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/merge
-  approveMerge(String runId, ApprovalRequest req, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/retry
-  retryRun(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/fork
-  forkRun(String runId, AppUserDetails userDetails, ForkOverrides overrides) → ResponseEntity<RunSummary>
-POST   /api/runs/{runId}/pause
-  pauseRun(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/edit-and-restart
-  editAndRestart(String runId, EditAndRestartRequest body, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/resume
-  resumeRun(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/push-github
-  pushToGitHub(AppUserDetails userDetails, String runId, String repoUrl, String repoMode) → ResponseEntity<Map<String,String>>
-POST   /api/runs/{runId}/sync
-  syncRun(AppUserDetails userDetails, String runId, String branch) → ResponseEntity<Map<String,Object>>
-POST   /api/runs/{runId}/sync/original
-  syncRunToOriginal(AppUserDetails userDetails, String runId) → ResponseEntity<Map<String,Object>>
-POST   /api/runs/{runId}/push-scm
-  pushToScm(AppUserDetails userDetails, String runId, String repoUrl, String repoMode) → ResponseEntity<Map<String,String>>
-PATCH  /api/runs/{runId}/project
-  updateRunProject(String runId, Map<String,String> body, AppUserDetails userDetails) → ResponseEntity<RunSummary>
-DELETE /api/runs/{runId}
-  cancel(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/archive
-  archiveRun(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-POST   /api/runs/{runId}/unarchive
-  unarchiveRun(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-POST   /api/runs/{runId}/soft-delete
-  softDeleteRun(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-POST   /api/runs/{runId}/restore
-  restoreRun(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-POST   /api/runs/{runId}/tasks/{taskId}/retry
-  retryTask(String runId, String taskId, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-POST   /api/runs/{runId}/implement-suggestions
-  implementSuggestions(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/rework
-  reworkRun(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/reopen-merge
-  reopenMerge(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/retry-validation
-  retryValidation(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-GET    /api/runs/{runId}/recovery
-  getRecovery(String runId, AppUserDetails userDetails) → ResponseEntity<List<RecoveryResponse>>
-GET    /api/runs/{runId}/messages
-  getMessages(String runId, AppUserDetails userDetails) → ResponseEntity<List<MessageResponse>>
-GET    /api/runs/{id}/download
-  downloadWorkspace(String id, String format, AppUserDetails userDetails) → ResponseEntity<?>
-GET    /api/runs/{id}/files
-  listWorkspaceFiles(String id, AppUserDetails userDetails) → ResponseEntity<List<String>>
-GET    /api/runs/{id}/files/status
-  listWorkspaceFilesWithStatus(String id, AppUserDetails userDetails) → ResponseEntity<List<WorkspaceFileService.FileEntry>>
-GET    /api/runs/{runId}/openapi.yaml
-  getOpenApiSpec(String runId, AppUserDetails userDetails) → ResponseEntity<String>
-GET    /api/runs/{id}/file
-  readWorkspaceFile(String id, String path, AppUserDetails userDetails) → ResponseEntity<String>
-GET    /api/runs/{id}/file/diff
-  readWorkspaceFileDiff(String id, String path, AppUserDetails userDetails) → ResponseEntity<WorkspaceFileService.FileDiff>
-GET    /api/runs/{runId}/plan-versions
-  getPlanVersions(String runId, AppUserDetails userDetails) → ResponseEntity<List<PlanVersion>>
-POST   /api/runs/{runId}/edit-plan
-  editPlan(String runId, EditPlanRequest req, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-GET    /api/runs/{runId}/task-graph
-  getTaskGraph(String runId, AppUserDetails userDetails) → ResponseEntity<List<TaskGraphNode>>
-```
-
-#### RunConversationController
-- Base: `/api/runs` — post-run conversation + apply-suggestion loop
-- File: `api/controller/RunConversationController.java`
-
-```
-GET    /api/runs/{runId}/chat
-  getHistory(String runId, AppUserDetails userDetails) → ResponseEntity<List<ChatHistoryItem>>
-POST   /api/runs/{runId}/chat
-  sendMessage(String runId, ChatMessageBody body, AppUserDetails userDetails) → ResponseEntity<ChatResponseBody>
-POST   /api/runs/{runId}/apply
-  applySuggestion(String runId, ApplyBody body, AppUserDetails userDetails) → CompletableFuture<ResponseEntity<ApplyResponseBody>>
-GET    /api/runs/{runId}/apply/status
-  applyStatus(String runId, AppUserDetails userDetails) → ResponseEntity<ApplyResultStore.ApplyState>
-POST   /api/runs/{runId}/iterate    (410 Gone — not implemented in V2)
-```
+### Run lifecycle
 
-#### AnonymousRunController
-- Base: `/api/v3` — R-111 anonymous trial endpoint
-- File: `api/AnonymousRunController.java`
-
+#### `api/controller/RunController` (base `/api/runs`)
+Lifecycle hub for V2 pipeline runs — submit, list, get, approve, cancel, archive, soft-delete, fork, retry, sync, push, workspace browse, plan-versions, task-graph. Removed-in-V2 endpoints return `410 Gone`.
 ```
-POST   /api/v3/anonymous-runs
-  submit(AnonymousRunRequest body, HttpServletRequest req) → ResponseEntity<AnonymousRunResponse>
-GET    /api/v3/anonymous-runs/{sessionToken}
-  status(String sessionToken) → ResponseEntity<AnonymousRunResponse>
+POST   /                                  submit(AppUserDetails, RunRequest) → RunSummary (202)
+GET    /                                  list(AppUserDetails, status?, projectId?, scope?, archived=false, page=0, size=20) → Map<String,Object>
+GET    /{runId}                           get(runId, AppUserDetails) → RunDetail
+GET    /{runId}/cost                      getLiveCost(runId, AppUserDetails) → Map<String,Object>
+POST   /{runId}/approve                   approvePlan(runId, ApprovalRequest, AppUserDetails) → Void
+POST   /{runId}/clarify                   410 Gone
+POST   /{runId}/merge                     410 Gone
+POST   /{runId}/retry                     410 Gone
+POST   /{runId}/fork                      forkRun(runId, AppUserDetails, ForkOverrides?) → RunSummary
+POST   /{runId}/pause                     pauseRun(runId, AppUserDetails) → Void
+POST   /{runId}/edit-and-restart          410 Gone
+POST   /{runId}/resume                    resumeRun(runId, AppUserDetails) → Void
+POST   /{runId}/push-github               pushToGitHub(AppUserDetails, runId, repoUrl?, repoMode=NEW) → Map<String,String>  @Deprecated
+POST   /{runId}/sync                      syncRun(AppUserDetails, runId, branch?) → Map<String,Object>
+POST   /{runId}/sync/original             syncRunToOriginal(AppUserDetails, runId) → Map<String,Object>
+POST   /{runId}/push-scm                  pushToScm(AppUserDetails, runId, repoUrl?, repoMode=EXISTING) → Map<String,String>
+PATCH  /{runId}/project                   updateRunProject(runId, Map<String,String>, AppUserDetails) → RunSummary
+DELETE /{runId}                           cancel(runId, AppUserDetails) → Void
+POST   /{runId}/archive                   archiveRun(runId, AppUserDetails) → Map<String,String>
+POST   /{runId}/unarchive                 unarchiveRun(runId, AppUserDetails) → Map<String,String>
+POST   /{runId}/soft-delete               softDeleteRun(runId, AppUserDetails) → Map<String,String>
+POST   /{runId}/restore                   restoreRun(runId, AppUserDetails) → Map<String,String>
+POST   /{runId}/tasks/{taskId}/retry      retryTask(runId, taskId, AppUserDetails) → Map<String,Object>
+POST   /{runId}/implement-suggestions     410 Gone
+POST   /{runId}/rework                    410 Gone
+POST   /{runId}/reopen-merge              410 Gone
+POST   /{runId}/retry-validation          retryValidation(runId, AppUserDetails) → Void
+GET    /{runId}/recovery                  getRecovery(runId, AppUserDetails) → List<RecoveryResponse>
+GET    /{runId}/messages                  getMessages(runId, AppUserDetails) → List<MessageResponse>
+GET    /{id}/download                     downloadWorkspace(id, format=zip, AppUserDetails) → ResponseEntity<?>
+GET    /{id}/files                        listWorkspaceFiles(id, AppUserDetails) → List<String>
+GET    /{id}/files/status                 listWorkspaceFilesWithStatus(id, AppUserDetails) → List<WorkspaceFileService.FileEntry>
+GET    /{runId}/openapi.yaml              getOpenApiSpec(runId, AppUserDetails) → String
+GET    /{id}/file                         readWorkspaceFile(id, path, AppUserDetails) → String
+GET    /{id}/file/diff                    readWorkspaceFileDiff(id, path, AppUserDetails) → FileDiff
+GET    /{runId}/plan-versions             getPlanVersions(runId, AppUserDetails) → List<PlanVersion>
+POST   /{runId}/edit-plan                 410 Gone
+GET    /{runId}/task-graph                getTaskGraph(runId, AppUserDetails) → List<TaskGraphNode>
 ```
-
-#### UserRunsController
-- Base: `/api`
 
+#### `api/controller/SseController` (base `/api/runs`)
+SSE token issuance + run event stream.
 ```
-GET    /api/user-runs-summary
-  userRunsSummary(int days, AppUserDetails userDetails) → ResponseEntity<UserRunsSummaryData>
+GET    /{runId}/sse-token                 getSseToken(runId, AppUserDetails) → Map<String,String>
+GET    /{runId}/events                    subscribe(runId, token?, Last-Event-ID?, AppUserDetails) → SseEmitter  (text/event-stream)
 ```
 
-#### SseController
-- Base: `/api/runs` — scoped 5-min SSE token + stream
-- File: `api/controller/SseController.java`
-
+#### `api/controller/RunConversationController` (base `/api/runs`)
+Post-run chat + async apply-suggestion dispatch.
 ```
-GET    /api/runs/{runId}/sse-token
-  getSseToken(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-GET    /api/runs/{runId}/events
-  subscribe(String runId, String token, String lastEventId, AppUserDetails userDetails) → SseEmitter
+GET    /{runId}/chat                      getHistory(runId, AppUserDetails) → List<ChatHistoryItem>
+POST   /{runId}/chat                      sendMessage(runId, ChatMessageBody, AppUserDetails) → ChatResponseBody
+POST   /{runId}/apply                     applySuggestion(runId, ApplyBody, AppUserDetails) → CompletableFuture<ApplyResponseBody>
+GET    /{runId}/apply/status              applyStatus(runId, AppUserDetails) → ApplyResultStore.ApplyState
+POST   /{runId}/iterate                   410 Gone
 ```
 
-#### TimelineController
-- Base: `/api`
-
+#### `api/controller/PreviewController` (base `/api/runs`)
+Preview lifecycle + in-container exec + API-docs probe.
 ```
-GET    /api/runs/{runId}/timeline
-  timeline(String runId, AppUserDetails userDetails) → ResponseEntity<TimelineData>
-GET    /api/model-comparison
-  modelComparison(int days, AppUserDetails userDetails) → ResponseEntity<ModelComparisonData>
+GET    /{runId}/preview/analyze           analyze(runId, AppUserDetails) → PreviewAnalysisDto
+GET    /{runId}/preview/status            getStatus(runId, AppUserDetails) → PreviewStatusDto
+POST   /{runId}/preview/start             start(runId, PreviewStartRequest?, AppUserDetails) → PreviewStatusDto
+POST   /{runId}/preview/rebuild           rebuild(runId, AppUserDetails) → PreviewStatusDto
+DELETE /{runId}/preview/stop              stop(runId, AppUserDetails) → Void
+GET    /{runId}/preview/logs              getLogs(runId, lines=0, filter=all, AppUserDetails) → PreviewLogsDto
+GET    /{runId}/preview/probe-api-docs    probeApiDocs(runId, AppUserDetails) → ApiDocsProbeResult
+POST   /{runId}/preview/exec              execInContainer(runId, ExecRequest, AppUserDetails) → ExecResponse
 ```
-
-#### ConversationController
-- Base: `/api/conversation` — pre-flight requirement-refinement chat
 
+#### `api/controller/TimelineController` (base `/api`)
 ```
-POST   /api/conversation
-  chat(ConversationRequest req, AppUserDetails userDetails) → ResponseEntity<ConversationResponse>
+GET    /runs/{runId}/timeline             timeline(runId, AppUserDetails) → TimelineData
+GET    /model-comparison                  modelComparison(days=30, AppUserDetails) → ModelComparisonData
 ```
 
-#### RolloutRunController
-- Base: `/api/v2/runs` — rollout canary surface
-
+#### `api/controller/UserRunsController` (base `/api`)
 ```
-POST   /api/v2/runs
-  submit(SubmitRequest body) → ResponseEntity<Map<String,Object>>
-GET    /api/v2/runs/{runId}
-  poll(String runId) → ResponseEntity<Map<String,Object>>
+GET    /user-runs-summary                 userRunsSummary(days=30, AppUserDetails) → UserRunsSummaryData
 ```
-
-### 1.2 Projects (workspace, repos, dashboard, scores, templates, RAG, sharing)
-
-#### ProjectArchitectureController
-- Project architecture pipeline + per-repo HLD/LLD
-- File: `codeintel/ProjectArchitectureController.java`
 
+#### `api/controller/MetricsController` (base `/api/metrics`)
 ```
-POST   /api/projects/{projectId}/architecture/generate
-  generate(AppUserDetails userDetails, String projectId) → ResponseEntity<ArchDocDto>
-POST   /api/projects/{projectId}/analyse
-  analyse(AppUserDetails userDetails, String projectId, String branch) → ResponseEntity<ArchDocDto>
-GET    /api/projects/{projectId}/summary
-  summary(String projectId, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-GET    /api/projects/{projectId}/architecture/staleness
-  staleness(String projectId, AppUserDetails userDetails) → ResponseEntity<StalenessService.StalenessReport>
-GET    /api/projects/{projectId}/architecture
-  latest(String projectId, AppUserDetails userDetails) → ResponseEntity<ArchDocDto>
-GET    /api/projects/{projectId}/architecture/versions
-  versions(String projectId, AppUserDetails userDetails) → ResponseEntity<List<ArchDocDto>>
-GET    /api/projects/{projectId}/architecture/diff
-  diff(String projectId, int from, int to, AppUserDetails userDetails) → ResponseEntity<ArchitectureDiffService.DiffReport>
-PUT    /api/projects/{projectId}/architecture/annotate
-  annotate(String projectId, Map<String,String> body, AppUserDetails userDetails) → ResponseEntity<ArchDocDto>
-GET    /api/projects/{projectId}/repos/{repoId}/codemap
-  codemap(String projectId, UUID repoId, AppUserDetails userDetails) → ResponseEntity<CodeMapDto>
-GET    /api/projects/{projectId}/repos/{repoId}/architecture
-  repoArchitecture(String projectId, UUID repoId, AppUserDetails userDetails) → ResponseEntity<RepoArchDto>
-GET    /api/projects/{projectId}/repos/{repoId}/files
-  listRepoFiles(String projectId, UUID repoId, AppUserDetails userDetails) → ResponseEntity<RepoFileListDto>
-GET    /api/projects/{projectId}/repos/{repoId}/file
-  readRepoFile(String projectId, UUID repoId, String path, AppUserDetails userDetails) → ResponseEntity<RepoFileDto>
+GET    /                                  metrics(days=0, AppUserDetails) → MetricsResponse
 ```
 
-#### ProjectDocGeneratorController
-
+#### `api/controller/FeasibilityController` (base `/api/feasibility`)
 ```
-POST   /api/projects/{projectId}/docs/{docType}/generate
-  generate(String projectId, String docType, AppUserDetails userDetails) → ResponseEntity<GeneratedDocDto>
-GET    /api/projects/{projectId}/docs/{docType}
-  latest(String projectId, String docType, AppUserDetails userDetails) → ResponseEntity<GeneratedDocDto>
-GET    /api/projects/{projectId}/docs/{docType}/download
-  download(String projectId, String docType, AppUserDetails userDetails) → ResponseEntity<String>
+POST   /                                  estimate(FeasibilityRequest) → 410 Gone  (V1 retired)
 ```
 
-#### ProjectRepoController
-- Per-org / per-project repo registry + GitHub webhook installation
-- File: `project/controller/ProjectRepoController.java`
-
+#### `api/controller/ConversationController` (base `/api/conversation`)
+Pre-flight requirement-refinement chat (all tiers).
 ```
-GET    /api/repos/github
-  listGitHubRepos(AppUserDetails userDetails, String owner) → ResponseEntity<List<RemoteRepo>>
-POST   /api/repos
-  createRepo(AppUserDetails userDetails, CreateRepoRequest req) → ResponseEntity<ProjectRepoDto>
-GET    /api/repos
-  listRepos(AppUserDetails userDetails, String scope) → ResponseEntity<List<ProjectRepoDto>>
-POST   /api/repos/{repoId}/sync
-  syncRepo(AppUserDetails userDetails, UUID repoId) → ResponseEntity<ProjectRepoDto>
-POST   /api/repos/{repoId}/webhook
-  installRepoWebhook(AppUserDetails userDetails, UUID repoId) → ResponseEntity<Map<String,Object>>
-DELETE /api/repos/{repoId}
-  deleteRepo(AppUserDetails userDetails, UUID repoId) → ResponseEntity<Void>
-GET    /api/projects/{projectId}/repos
-  listProjectRepos(AppUserDetails userDetails, String projectId) → ResponseEntity<List<ProjectRepoLinkDto>>
-POST   /api/projects/{projectId}/repos/{repoId}
-  linkToProject(AppUserDetails userDetails, String projectId, UUID repoId) → ResponseEntity<ProjectRepoLinkDto>
-DELETE /api/projects/{projectId}/repos/{repoId}
-  unlinkFromProject(AppUserDetails userDetails, String projectId, UUID repoId) → ResponseEntity<Void>
-PUT    /api/projects/{projectId}/repos/{repoId}/relationships
-  updateRelationships(AppUserDetails userDetails, String projectId, UUID repoId, UpdateRelationshipsRequest req) → ResponseEntity<ProjectRepoLinkDto>
+POST   /                                  chat(ConversationRequest, AppUserDetails) → ConversationResponse
 ```
 
-#### ProjectDashboardController
+### Project workbench
 
+#### `auth/controller/ProjectController` (base `/api/projects`)
 ```
-GET    /api/projects/{projectId}/dashboard
-  dashboard(String projectId, AppUserDetails userDetails) → ResponseEntity<DashboardDto>
-GET    /api/projects/{projectId}/workspace-health
-  workspaceHealth(String projectId, AppUserDetails userDetails) → ResponseEntity<WorkspaceHealthService.HealthReport>
-GET    /api/projects/{projectId}/post-merge-bar
-  postMergeBar(String projectId, AppUserDetails userDetails) → ResponseEntity<List<PostMergeBarRow>>
-GET    /api/projects/{projectId}/estimate
-  estimate(String projectId, String requirement, AppUserDetails userDetails) → ResponseEntity<EstimationService.HeuristicEstimate>
-GET    /api/projects/{projectId}/tech-debt
-  techDebt(String projectId, int since, AppUserDetails userDetails) → ResponseEntity<TechDebtService.TechDebtReport>
+POST   /                                  createProject(AppUserDetails, CreateProjectRequest) → ProjectDto (201)
+GET    /                                  listProjects(AppUserDetails) → List<ProjectDto>
+GET    /{id}                              getProject(id, AppUserDetails) → ProjectDto
+PATCH  /{id}/settings                     updateSettings(id, UpdateProjectSettingsRequest, AppUserDetails) → ProjectDto
+PUT    /{id}/archive                      archive(id, AppUserDetails) → ProjectDto
+PUT    /{id}/unarchive                    unarchive(id, AppUserDetails) → ProjectDto
+DELETE /{id}                              softDelete(id, AppUserDetails) → Void
+POST   /{id}/restore                      restore(id, AppUserDetails) → ProjectDto
+GET    /{id}/members                      listMembers(id, AppUserDetails) → List<ProjectMemberDto>
+POST   /{id}/members                      addMember(id, Map<String,String>, AppUserDetails) → Void (201)
+DELETE /{id}/members/{userId}             removeMember(id, userId, AppUserDetails) → Void
 ```
-
-#### ProjectScoresController
 
+#### `project/dashboard/ProjectDashboardController` (no base)
 ```
-GET    /api/projects/{projectId}/scores
-  scoresForProject(String projectId, AppUserDetails userDetails) → ResponseEntity<List<ScoreEntry>>
+GET    /api/projects/{projectId}/dashboard          dashboard(projectId, AppUserDetails) → DashboardDto
+GET    /api/projects/{projectId}/workspace-health   workspaceHealth(projectId, AppUserDetails) → WorkspaceHealthService.Report
+GET    /api/projects/{projectId}/post-merge-bar     postMergeBars(projectId, AppUserDetails) → List<PostMergeBar>
+GET    /api/projects/{projectId}/estimate           estimate(projectId, requirement?, AppUserDetails) → Estimate
+GET    /api/projects/{projectId}/tech-debt          techDebt(projectId, since?, AppUserDetails) → TechDebtService.Report
+POST   /api/projects/{projectId}/tech-debt/fix      fixTechDebt(projectId, FixTechDebtRequest, AppUserDetails) → FixTechDebtResponse (202)
+DELETE /api/projects/{projectId}/post-merge-bar     dismissPostMergeBars(projectId, AppUserDetails) → Void
 ```
 
-#### SpecTemplateController
-
+#### `codeintel/ProjectArchitectureController` (no base)
 ```
-GET    /api/projects/{projectId}/templates
-  listForProject(String projectId, AppUserDetails user) → ResponseEntity<List<SpecTemplateService.TemplateDto>>
-POST   /api/projects/{projectId}/templates
-  createForProject(String projectId, SpecTemplateService.CreateRequest req, AppUserDetails user) → ResponseEntity<SpecTemplateService.TemplateDto>
-POST   /api/orgs/{orgId}/templates
-  createForOrg(String orgId, SpecTemplateService.CreateRequest req, AppUserDetails user) → ResponseEntity<SpecTemplateService.TemplateDto>
-DELETE /api/projects/{projectId}/templates/{templateId}
-  delete(String projectId, String templateId, AppUserDetails user) → ResponseEntity<Void>
+POST   /api/projects/{projectId}/architecture/generate  generate(projectId, AppUserDetails) → ArchDocDto
+POST   /api/projects/{projectId}/analyse                analyse(projectId, branch?, AppUserDetails) → ArchDocDto
+GET    /api/projects/{projectId}/summary                summary(projectId, AppUserDetails) → Map<String,String>
+GET    /api/projects/{projectId}/architecture/staleness staleness(projectId, AppUserDetails) → StalenessReport
+GET    /api/projects/{projectId}/architecture           latest(projectId, AppUserDetails) → ArchDocDto
+GET    /api/projects/{projectId}/architecture/versions  versions(projectId, AppUserDetails) → List<ArchDocDto>
+GET    /api/projects/{projectId}/architecture/diff      diff(projectId, from, to, AppUserDetails) → DiffReport
+PUT    /api/projects/{projectId}/architecture/annotate  annotate(projectId, Map<String,String>, AppUserDetails) → ArchDocDto
+GET    /api/projects/{projectId}/repos/{repoId}/codemap        codemap(projectId, repoId, AppUserDetails) → CodeMapDto
+GET    /api/projects/{projectId}/repos/{repoId}/architecture   repoArch(projectId, repoId, AppUserDetails) → RepoArchDto
+GET    /api/projects/{projectId}/repos/{repoId}/files          listRepoFiles(projectId, repoId, AppUserDetails) → RepoFileListDto
+GET    /api/projects/{projectId}/repos/{repoId}/file           readRepoFile(projectId, repoId, path, AppUserDetails) → RepoFileDto
 ```
 
-#### ProjectChatController
-- Base: `/api/projects/{projectId}/chat`
-
+#### `codeintel/ProjectDocGeneratorController` (no base)
 ```
-GET    /api/projects/{projectId}/chat
-  history(AppUserDetails principal, String projectId) → ResponseEntity<List<ProjectChatMessage>>
-GET    /api/projects/{projectId}/chat/info
-  info(AppUserDetails principal, String projectId) → ResponseEntity<ChatInfo>
-POST   /api/projects/{projectId}/chat
-  send(AppUserDetails principal, String projectId, ChatRequest body) → ResponseEntity<ProjectChatMessage>
-POST   /api/projects/{projectId}/chat/compile
-  compile(AppUserDetails principal, String projectId) → ResponseEntity<Map<String,String>>
-DELETE /api/projects/{projectId}/chat
-  clear(AppUserDetails principal, String projectId) → ResponseEntity<Map<String,Integer>>
-POST   /api/projects/{projectId}/chat/compact
-  compact(AppUserDetails principal, String projectId) → ResponseEntity<ProjectChatService.CompactResult>
+POST   /api/projects/{projectId}/docs/{docType}/generate   generate(projectId, docType, AppUserDetails) → GeneratedDocDto (201)
+GET    /api/projects/{projectId}/docs/{docType}            latest(projectId, docType, AppUserDetails) → GeneratedDocDto
+GET    /api/projects/{projectId}/docs/{docType}/download   download(projectId, docType, AppUserDetails) → String (text/markdown)
 ```
-
-#### ProjectMemoryController
-- Base: `/api/projects/{projectId}/memory`
 
+#### `project/controller/ProjectRepoController` (no base)
 ```
-GET    /api/projects/{projectId}/memory
-  getMemory(String projectId, AppUserDetails userDetails) → ResponseEntity<ProjectMemoryResponse>
-GET    /api/projects/{projectId}/memory/ledger
-  getLedger(String projectId, AppUserDetails userDetails) → ResponseEntity<List<ProjectRunLedger>>
-POST   /api/projects/{projectId}/memory/compact
-  compact(String projectId, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
+GET    /api/repos/github                                listGitHubRepos(AppUserDetails, owner?) → List<RemoteRepo>
+POST   /api/repos                                       createRepo(AppUserDetails, CreateRepoRequest) → ProjectRepoDto (201)
+GET    /api/repos                                       listAvailable(AppUserDetails, scope?) → List<ProjectRepoDto>
+POST   /api/repos/{repoId}/sync                         syncRepo(AppUserDetails, repoId) → ProjectRepoDto
+POST   /api/repos/{repoId}/webhook                      installWebhook(AppUserDetails, repoId) → Map<String,Object>
+DELETE /api/repos/{repoId}                              deleteRepo(AppUserDetails, repoId) → Void
+GET    /api/projects/{projectId}/repos                  listProjectRepos(AppUserDetails, projectId) → List<ProjectRepoLinkDto>
+POST   /api/projects/{projectId}/repos/{repoId}         linkToProject(AppUserDetails, projectId, repoId) → ProjectRepoLinkDto (201)
+DELETE /api/projects/{projectId}/repos/{repoId}         unlinkFromProject(AppUserDetails, projectId, repoId) → Void
+PUT    /api/projects/{projectId}/repos/{repoId}/relationships  updateRelationships(AppUserDetails, projectId, repoId, UpdateRelationshipsRequest) → ProjectRepoLinkDto
 ```
 
-#### ProjectDocumentController
-- Base: `/api/projects/{projectId}/documents` — pgvector RAG upload + async index
-
+#### `project/template/SpecTemplateController` (no base)
 ```
-POST   /api/projects/{projectId}/documents
-  upload(AppUserDetails principal, String projectId, MultipartFile file) → ResponseEntity<ProjectDocument>
-GET    /api/projects/{projectId}/documents
-  list(AppUserDetails principal, String projectId) → ResponseEntity<List<ProjectDocument>>
-DELETE /api/projects/{projectId}/documents/{documentId}
-  delete(AppUserDetails principal, String projectId, String documentId) → ResponseEntity<Map<String,String>>
+GET    /api/projects/{projectId}/templates                       listForProject(projectId, AppUserDetails) → List<TemplateDto>
+POST   /api/projects/{projectId}/templates                       createForProject(projectId, CreateRequest, AppUserDetails) → TemplateDto
+POST   /api/orgs/{orgId}/templates                               createForOrg(orgId, CreateRequest, AppUserDetails) → TemplateDto
+DELETE /api/projects/{projectId}/templates/{templateId}          delete(projectId, templateId, AppUserDetails) → Void
 ```
-
-#### ProjectExportController
-- Base: `/api/projects/{projectId}/export` — bundle of every `.executespec/` artefact
-
-#### ProjectLaunchController
 
+#### `project/scores/ProjectScoresController` (no base)
 ```
-GET    /api/projects/{projectId}/launches
-  listLaunches(String projectId, int page, int size, AppUserDetails principal) → ResponseEntity<Page<ExecutionRunDto>>
-GET    /api/projects/{projectId}/prs
-  projectPrs(String projectId, AppUserDetails principal) → ResponseEntity<List<PrRollupEntry>>
-GET    /api/projects/{projectId}/overview
-  overview(String projectId, AppUserDetails principal) → ResponseEntity<ProjectOverview>
-POST   /api/projects/{projectId}/launches/validate-repo-access
-  validateOwner(String projectId, ValidateOwnerRequest body, AppUserDetails principal) → ResponseEntity<ValidateOwnerResult>
+GET    /api/projects/{projectId}/scores                 scores(projectId, AppUserDetails) → List<ScoreEntry>
 ```
 
-#### ProjectInviteController
-- V175 + V198 cross-org invites — requires `org.external_sharing_enabled=true`
-
+#### `project/rag/ProjectDocumentController` (base `/api/projects/{projectId}/documents`)
 ```
-POST   /api/projects/{projectId}/invites
-  create(String projectId, CreateInviteRequest req, AppUserDetails userDetails) → ResponseEntity<ProjectInviteDto>
-GET    /api/projects/{projectId}/invites
-  listPending(String projectId, AppUserDetails userDetails) → ResponseEntity<List<ProjectInviteDto>>
-DELETE /api/projects/{projectId}/invites/{inviteId}
-  revoke(String projectId, UUID inviteId, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/invites/accept
-  accept(String token, AppUserDetails userDetails) → ResponseEntity<AcceptResponse>
-GET    /api/invites/preview
-  preview(String token) → ResponseEntity<InvitePreview>
+POST   /                                  upload(projectId, MultipartFile, AppUserDetails) → ProjectDocument (202)
+GET    /                                  list(projectId, AppUserDetails) → List<ProjectDocument>
+DELETE /{documentId}                      delete(projectId, documentId, AppUserDetails) → Map<String,String>
 ```
 
-#### ProjectShareLinkController
-- V175 public read-only share links
-
+#### `memory/ProjectMemoryController` (base `/api/projects/{projectId}/memory`)
 ```
-POST   /api/projects/{projectId}/share-links
-  create(String projectId, CreateShareLinkRequest req, AppUserDetails userDetails) → ResponseEntity<ShareLinkDto>
-GET    /api/projects/{projectId}/share-links
-  list(String projectId, AppUserDetails userDetails) → ResponseEntity<ShareLinkListResponse>
-DELETE /api/projects/{projectId}/share-links/{linkId}
-  revoke(String projectId, UUID linkId, AppUserDetails userDetails) → ResponseEntity<Void>
+GET    /                                  getMemory(projectId, AppUserDetails) → ProjectMemoryResponse
+GET    /ledger                            getLedger(projectId, AppUserDetails) → List<ProjectRunLedger>
+POST   /compact                           compact(projectId, AppUserDetails) → Map<String,Object>
 ```
-
-#### ProjectSharePublicController
-- Public (no-auth) read endpoints, gated on a valid share-link token
 
+#### `memory/ProjectChatController` (base `/api/projects/{projectId}/chat`)
 ```
-GET    /api/shared/{token}/meta
-  meta(String token) → ResponseEntity<SharedLinkMeta>
-GET    /api/shared/{token}/run
-  sharedRun(String token) → ResponseEntity<SharedRun>
-GET    /api/shared/{token}/validation-report
-  sharedReport(String token) → ResponseEntity<SharedValidationReport>
-GET    /api/shared/{token}/code-review
-  sharedCodeReview(String token) → ResponseEntity<SharedCodeReview>
-GET    /api/shared/{token}/pr-review
-  sharedPrReview(String token) → ResponseEntity<SharedPrReview>
-GET    /api/shared/{token}/architecture
-  sharedArchitecture(String token) → ResponseEntity<SharedArchitecture>
+GET    /                                  history(AppUserDetails, projectId) → List<ProjectChatMessage>
+GET    /info                              info(AppUserDetails, projectId) → ChatInfo
+POST   /                                  send(AppUserDetails, projectId, ChatRequest) → ProjectChatMessage
+POST   /compile                           compile(AppUserDetails, projectId) → Map<String,String>
+DELETE /                                  clear(AppUserDetails, projectId) → Map<String,Integer>
+POST   /compact                           compact(AppUserDetails, projectId) → CompactResult
 ```
 
-### 1.3 Auth (JWT, OAuth2, org, project membership, DSAR, SSO)
-
-#### AuthController
-- Base: `/api/auth`
-
+#### `project/pr/PullRequestController` (no base)
 ```
-POST   /api/auth/register
-  register(RegisterRequest req) → ResponseEntity<UserDto>
-POST   /api/auth/login
-  login(LoginRequest req, HttpServletResponse response) → ResponseEntity<LoginResponse>
-POST   /api/auth/refresh
-  refresh(String refreshToken, HttpServletResponse response) → ResponseEntity<LoginResponse>
-DELETE /api/auth/logout
-  logout(String refreshToken, HttpServletResponse response) → ResponseEntity<Void>
-GET    /api/auth/verify-email
-  verifyEmail(String token, HttpServletResponse response) → ResponseEntity<LoginResponse>
-POST   /api/auth/resend-verification
-  resendVerification(Map<String,String> body) → ResponseEntity<Map<String,String>>
-POST   /api/auth/forgot-password
-  forgotPassword(Map<String,String> body) → ResponseEntity<Map<String,String>>
-POST   /api/auth/reset-password
-  resetPassword(Map<String,String> body) → ResponseEntity<Map<String,String>>
-POST   /api/auth/change-password
-  changePassword(AppUserDetails userDetails, ChangePasswordRequest req) → ResponseEntity<Map<String,String>>
-GET    /api/auth/me
-  me(AppUserDetails userDetails) → ResponseEntity<UserDto>
-POST   /api/auth/invalidate-sessions
-  invalidateSessions(AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-GET    /api/auth/me/permissions
-  myPermissions(AppUserDetails userDetails) → ResponseEntity<TierPermissionService.TierPermissions>
-GET    /api/auth/me/data-export
-  exportMyData(AppUserDetails userDetails) → ResponseEntity<byte[]>
-DELETE /api/auth/me/data
-  eraseMyData(AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-PUT    /api/auth/settings/github
-  updateGitHubSettings(AppUserDetails userDetails, GitHubSettingsRequest req) → ResponseEntity<UserDto>
-PUT    /api/auth/settings/bitbucket
-  updateBitbucketSettings(AppUserDetails userDetails, BitbucketSettingsRequest req) → ResponseEntity<UserDto>
-PUT    /api/auth/settings/ai-keys
-  updateAiKeySettings(AppUserDetails userDetails, AiKeySettingsRequest req) → ResponseEntity<UserDto>
-PUT    /api/auth/settings/jira
-  updateJiraSettings(AppUserDetails userDetails, JiraSettingsRequest req) → ResponseEntity<UserDto>
-PUT    /api/auth/settings/confluence
-  updateConfluenceSettings(AppUserDetails userDetails, ConfluenceSettingsRequest req) → ResponseEntity<UserDto>
-PUT    /api/auth/settings/view-mode
-  updateViewMode(AppUserDetails userDetails, ViewModeRequest req) → ResponseEntity<UserDto>
-POST   /api/auth/settings/ai-keys/validate
-  validateAiKey(ValidateAiKeyRequest req) → ResponseEntity<ValidationResult>
-POST   /api/auth/settings/github/validate
-  validateGitHub(ValidateGitHubRequest req) → ResponseEntity<ValidationResult>
-POST   /api/auth/settings/bitbucket/validate
-  validateBitbucket(ValidateBitbucketRequest req) → ResponseEntity<ValidationResult>
-POST   /api/auth/settings/jira/validate
-  validateJira(ValidateJiraRequest req) → ResponseEntity<ValidationResult>
-POST   /api/auth/settings/confluence/validate
-  validateConfluence(ValidateConfluenceRequest req) → ResponseEntity<ValidationResult>
+GET    /api/runs/{runId}/prs                            listRunPrs(runId, AppUserDetails) → List<PrSummary>
+POST   /api/projects/{projectId}/prs/refresh            refresh(projectId, forceAll=false, AppUserDetails) → PrRefreshService.RefreshResult
+GET    /api/prs/snapshot                                snapshot(AppUserDetails, repo, number, maxChars=4000) → PullRequestSnapshot
 ```
-
-#### OrgController
-- Base: `/api/org`
 
+#### `project/pr/GitHubWebhookController` (no base)
 ```
-POST   /api/org
-  createOrg(AppUserDetails userDetails, CreateOrgRequest req) → ResponseEntity<OrgDto>
-GET    /api/org/me
-  getMyOrg(AppUserDetails userDetails) → ResponseEntity<OrgDto>
-GET    /api/org/me/members
-  listMembers(AppUserDetails userDetails) → ResponseEntity<List<OrgMemberDto>>
-POST   /api/org/accept-invite
-  acceptInvite(String token, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
+POST   /webhooks/github                   webhook(X-Hub-Signature-256, X-GitHub-Event, body) → Void
 ```
 
-#### ProjectController
-- Base: `/api/projects` — read-side only; mutations live on `ProjectInviteController`, `ProjectRepoController`, etc.
+### Execution View (Launches)
 
+#### `execution/controller/ExecutionController` (no base)
 ```
-GET    /api/projects
-  listProjects(AppUserDetails userDetails) → ResponseEntity<List<ProjectDto>>
-GET    /api/projects/{id}
-  getProject(AppUserDetails userDetails, String id) → ResponseEntity<ProjectDto>
-GET    /api/projects/{id}/members
-  listMembers(String id, AppUserDetails userDetails) → ResponseEntity<List<ProjectMemberDto>>
+POST   /api/projects/{projectId}/executions                                   createExecution(projectId, CreateExecutionRequest, AppUserDetails) → ExecutionRunDto
+GET    /api/executions/{id}                                                   getExecution(id, AppUserDetails) → ExecutionRunDto
+GET    /api/projects/{projectId}/executions                                   listExecutions(projectId, page, size, AppUserDetails) → Page<ExecutionRunDto>
+POST   /api/executions/{id}/analyse                                           triggerAnalysis(id, AppUserDetails) → Void (202)
+PUT    /api/executions/{id}/arch-review                                       approveArch(id, ExecutionArchApprovalRequest, AppUserDetails) → Void
+POST   /api/executions/{id}/plan                                              generatePlan(id, AppUserDetails) → Void (202)
+PUT    /api/executions/{id}/plan/approve                                      approvePlan(id, AppUserDetails) → Void (202)
+POST   /api/executions/{id}/solutions/{solutionId}/decide                     decide(id, solutionId, DecisionRequest, AppUserDetails) → Void (202)
+POST   /api/executions/{id}/solutions/{solutionId}/manual-ready               manualReady(id, solutionId, AppUserDetails) → Void (202)
+POST   /api/executions/{id}/resume                                            resume(id, AppUserDetails) → Void
+POST   /api/executions/{id}/abort                                             abort(id, AppUserDetails) → Void
+GET    /api/executions/{id}/solutions/{solutionId}/runs                       solutionRuns(id, solutionId, AppUserDetails) → List<ExecutionSolutionRun>
+GET    /api/executions/{id}/report                                            getReport(id, AppUserDetails) → Map<String,Object>
+GET    /api/projects/{projectId}/prs/{prNumber}/reviews                       prReviewComments(projectId, prNumber, repo, AppUserDetails) → Map<String,String>
+GET    /api/executions/{id}/sse-token                                         sseToken(id, AppUserDetails) → Map<String,String>
+GET    /api/executions/{id}/events                                            subscribe(id, token, Last-Event-ID?, AppUserDetails) → SseEmitter
 ```
 
-#### DsarController
-- Base: `/api/dsar` — GDPR data subject access request
-
+#### `execution/controller/ProjectLaunchController` (no base)
 ```
-GET    /api/dsar/me
-  exportSelf(AppUserDetails principal) → ResponseEntity<Map<String,Object>>
+GET    /api/projects/{projectId}/launches                       listLaunches(projectId, page, size, AppUserDetails) → Page<ExecutionRunDto>
+GET    /api/projects/{projectId}/prs                            projectPrs(projectId, AppUserDetails) → List<PrRollupEntry>
+GET    /api/projects/{projectId}/overview                       overview(projectId, AppUserDetails) → ProjectOverview
+POST   /api/projects/{projectId}/launches/validate-repo-access  validateOwner(projectId, ValidateOwnerRequest, AppUserDetails) → ValidateOwnerResult
 ```
-
-#### SsoConfigController
-- Base: `/api/auth/sso` — SAML / OIDC SSO config (admin-only)
-
-### 1.4 Billing (subscriptions, invoices, accounting, webhooks, audit)
 
-#### BillingController
-- Base: `/api/billing`
-
+#### `execution/controller/ScaffoldController` (no base)
 ```
-GET    /api/billing/plans
-  listPlans(String keyMode, boolean includeHidden, AppUserDetails userDetails) → ResponseEntity<List<PlanResponse>>
-GET    /api/billing/founder-pricing/{tier}
-  getFounderOffer(String tier) → ResponseEntity<FounderOfferDto>
-GET    /api/billing/status
-  getStatus(AppUserDetails userDetails) → ResponseEntity<BillingStatusResponse>
-POST   /api/billing/subscribe
-  subscribe(CreateSubscriptionRequest request, AppUserDetails userDetails) → ResponseEntity<SubscriptionInitResult>
-POST   /api/billing/verify
-  verify(VerifyPaymentRequest request, AppUserDetails userDetails) → ResponseEntity<BillingStatusResponse>
-POST   /api/billing/cancel
-  cancel(AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/billing/seats
-  updateSeats(UpdateSeatsRequest request, AppUserDetails userDetails) → ResponseEntity<BillingStatusResponse>
-GET    /api/billing/topup/packages
-  listTopupPackages() → ResponseEntity<List<TopupPackage>>
-POST   /api/billing/topup/purchase
-  purchaseTopup(TopupPurchaseRequest request, AppUserDetails userDetails) → ResponseEntity<TopupOrderInitResult>
-POST   /api/billing/topup/verify
-  verifyTopup(TopupVerifyRequest request, AppUserDetails userDetails) → ResponseEntity<BillingStatusResponse>
+GET    /api/scaffolds                     list() → List<Scaffold>
 ```
 
-#### BillingWebhookController
-- Base: `/api/webhooks` — HMAC-verified, no auth
+### Code Review + PR Review
 
+#### `codereview/CodeReviewController` (no base)
 ```
-POST   /api/webhooks/razorpay
-  handleRazorpayWebhook(String rawPayload, String signature) → ResponseEntity<Void>
-POST   /api/webhooks/stripe
-  handleStripeWebhook(String rawPayload, String signature) → ResponseEntity<Void>
+POST   /api/code-reviews                                              submit(SubmitCodeReviewRequest, AppUserDetails) → CodeReviewScanDto (202)
+POST   /api/code-reviews/{id}/autofix                                 autofix(id, AutofixRequest, AppUserDetails) → AutofixResponse (202)
+GET    /api/code-reviews/{id}                                         get(id, AppUserDetails) → CodeReviewScanWithIssues
+GET    /api/projects/{projectId}/code-reviews                         listForProject(projectId, AppUserDetails) → List<CodeReviewScanDto>
+GET    /api/projects/{projectId}/code-reviews/latest                  latest(projectId, repo, AppUserDetails) → CodeReviewScanWithIssues
+GET    /api/code-reviews/{id}/report                                  report(id, AppUserDetails) → String (text/markdown)
 ```
 
-#### InvoiceController
-
+#### `prreview/PrReviewController` (no base)
 ```
-GET    /api/billing/profile
-  getProfile(AppUserDetails principal) → BillingProfile
-PUT    /api/billing/profile
-  updateProfile(AppUserDetails principal, BillingProfile body) → BillingProfile
-GET    /api/billing/invoices
-  myInvoices(AppUserDetails principal, Pageable pageable) → Page<Invoice>
-GET    /api/billing/invoices/{id}
-  myInvoiceDetail(AppUserDetails principal, UUID id) → InvoiceDetail
-GET    /api/billing/invoices/{id}/pdf
-  downloadPdf(AppUserDetails principal, UUID id) → ResponseEntity<?>
-GET    /api/admin/invoices
-  allInvoices(AppUserDetails principal, Pageable pageable) → Page<Invoice>
-GET    /api/admin/invoices/{id}/pdf
-  adminDownloadPdf(AppUserDetails principal, UUID id) → ResponseEntity<byte[]>
-POST   /api/admin/invoices/{id}/credit-note
-  issueCreditNote(AppUserDetails principal, UUID id, CreditNoteRequest req) → Invoice
-POST   /api/admin/invoices/{id}/void
-  voidInvoice(AppUserDetails principal, UUID id) → Invoice
-POST   /api/admin/invoices/{id}/send
-  resendInvoice(AppUserDetails principal, UUID id) → void
-GET    /api/admin/seller-config
-  getSellerConfig(AppUserDetails principal) → SellerConfig
-PUT    /api/admin/seller-config
-  updateSellerConfig(AppUserDetails principal, SellerConfig body) → SellerConfig
+POST   /api/pr-reviews                                  submit(AppUserDetails, SubmitPrReviewRequest) → PrReviewDto (202)
+POST   /api/pr-reviews/{id}/autofix                     autofix(id, AppUserDetails) → AutofixResponse (202)
+GET    /api/pr-reviews/{id}                             get(id, AppUserDetails) → PrReviewWithComments
+GET    /api/pr-reviews                                  listForPr(AppUserDetails, repo, number) → List<PrReviewDto>
+GET    /api/projects/{projectId}/pr-reviews             listForProject(projectId, AppUserDetails) → List<PrReviewDto>
 ```
-
-#### AccountingController
-- Base: `/api/accounting` — India GST + double-entry ledger
 
+#### `prreview/inbox/PrCommentInboxController` (base `/api/runs/{runId}/pr-comments`)
 ```
-GET    /api/accounting/revenue
-  getRevenue(AppUserDetails principal, LocalDate from, LocalDate to) → RevenueMetrics
-GET    /api/accounting/gst-summary
-  getGstSummary(AppUserDetails principal, String fy, int quarter) → GstSummary
-GET    /api/accounting/gstr1-export
-  exportGstr1(AppUserDetails principal, String fy, int quarter) → ResponseEntity<byte[]>
-GET    /api/accounting/trial-balance
-  getTrialBalance(AppUserDetails principal, LocalDate from, LocalDate to) → List<TrialBalanceEntry>
-GET    /api/accounting/entries
-  getEntries(AppUserDetails principal, LocalDate from, LocalDate to, Pageable pageable) → Page<AccountingEntry>
+GET    /                                  list(runId, AppUserDetails) → List<Dto>
+GET    /pending-count                     pendingCount(runId, AppUserDetails) → PendingCount
+POST   /{commentId}/dismiss               dismiss(runId, commentId, AppUserDetails) → Dto
+POST   /{commentId}/apply                 apply(runId, commentId, AppUserDetails) → ApplyResponse (202)
 ```
 
-#### PaymentAuditController
-- Base: `/api/admin/payment-audit` (config-resolved) — SUPER_ADMIN-only audit log + CSV export
+### Contracts / ADRs / Standards / Invariants / Activity
 
-#### AdminBillingController
-- Base: `/api/admin/billing`
-
+#### `contracts/drift/ContractDriftController` (base `/api/projects/{projectId}`)
 ```
-POST   /api/admin/billing/seed-plans
-  seedPlans() → ResponseEntity<String>
+POST   /contracts/{contractId}/check-drift                check(projectId, contractId, AppUserDetails) → DriftDetectionService.DriftCheckResult
+POST   /repos/{repoId}/check-drift                        checkRepo(projectId, repoId, AppUserDetails) → List<DriftCheckResult>
+POST   /check-drift                                       checkProject(projectId, AppUserDetails) → List<DriftCheckResult>
+POST   /contracts/{contractId}/refresh-from-source        refresh(projectId, contractId, AppUserDetails) → RefreshResponse
+POST   /contracts/{contractId}/dismiss-drift              dismiss(projectId, contractId, DismissRequest, AppUserDetails) → DismissResponse
 ```
 
-#### TierLifecycleController
-- Base: `/api/admin` — LISTED / HIDDEN / SUNSETTING state machine
-
+#### `contracts/consumers/ContractConsumerController` (base `/api/projects/{projectId}/contracts/{contractId}/consumers`)
 ```
-GET    /api/admin/tiers
-  listTiers() → ResponseEntity<List<TierLifecycleService.TierLifecycleDto>>
-PUT    /api/admin/tiers/{tier}/lifecycle
-  updateTierLifecycle(AppUserDetails userDetails, String tier, LifecycleUpdateRequest req) → ResponseEntity<TierConfig>
-PUT    /api/admin/billing-plans/{planId}/lifecycle
-  updatePlanLifecycle(AppUserDetails userDetails, UUID planId, PlanLifecycleUpdateRequest req) → ResponseEntity<BillingPlan>
+GET    /                                  list(projectId, contractId, AppUserDetails) → List<ConsumerDto>
+POST   /                                  declare(projectId, contractId, DeclareRequest, AppUserDetails) → ConsumerDto
+DELETE /{consumerRepoId}                  remove(projectId, contractId, consumerRepoId, AppUserDetails) → Void (204)
 ```
-
-### 1.5 Code review + PR review (Phase 1 + Phase 4 autofix)
 
-#### CodeReviewController
-
+#### `contracts/coverage/ContractCoverageController` (base `/api/projects/{projectId}/repos/{repoId}/contract-coverage`)
 ```
-POST   /api/code-reviews
-  submit(AppUserDetails userDetails, SubmitCodeReviewRequest req) → ResponseEntity<CodeReviewScanDto>
-POST   /api/code-reviews/{id}/autofix
-  autofix(UUID id, AutofixRequest req, AppUserDetails userDetails) → ResponseEntity<AutofixResponse>
-GET    /api/code-reviews/{id}
-  get(UUID id, AppUserDetails userDetails) → ResponseEntity<CodeReviewScanWithIssues>
-GET    /api/projects/{projectId}/code-reviews
-  listForProject(String projectId, AppUserDetails userDetails) → ResponseEntity<List<CodeReviewScanDto>>
-GET    /api/projects/{projectId}/code-reviews/latest
-  latest(String projectId, String repoFullName, AppUserDetails userDetails) → ResponseEntity<CodeReviewScanWithIssues>
-GET    /api/code-reviews/{id}/report
-  downloadReport(UUID id, AppUserDetails userDetails) → ResponseEntity<String>
+GET    /                                  coverage(projectId, repoId, AppUserDetails) → CoverageResponse
+POST   /rescan                            rescan(projectId, repoId, AppUserDetails) → CoverageResponse
 ```
 
-#### PrReviewController
-
+#### `adr/AdrController` (base `/api/projects/{projectId}/adrs`)
 ```
-POST   /api/pr-reviews
-  submit(AppUserDetails userDetails, SubmitPrReviewRequest req) → ResponseEntity<PrReviewDto>
-POST   /api/pr-reviews/{id}/autofix
-  autofix(UUID id, AppUserDetails userDetails) → ResponseEntity<AutofixResponse>
-GET    /api/pr-reviews/{id}
-  get(UUID id, AppUserDetails userDetails) → ResponseEntity<PrReviewWithComments>
-GET    /api/pr-reviews
-  listForPr(AppUserDetails userDetails, String repoFullName, int prNumber) → ResponseEntity<List<PrReviewDto>>
-GET    /api/projects/{projectId}/pr-reviews
-  listForProject(String projectId, AppUserDetails userDetails) → ResponseEntity<List<PrReviewDto>>
+GET    /                                  list(projectId, acceptedOnly=false, auth) → List<AdrSummary>
+GET    /{id}                              get(projectId, id, auth) → AdrDetail
 ```
-
-#### PrCommentInboxController
-- Base: `/api/runs/{runId}/pr-comments`
 
+#### `standards/OrgStandardController` (base `/api/orgs/{orgId}/standards`) [ORG_ADMIN/SUPER_ADMIN]
 ```
-GET    /api/runs/{runId}/pr-comments
-  list(String runId, AppUserDetails user) → List<Dto>
-GET    /api/runs/{runId}/pr-comments/pending-count
-  pendingCount(String runId, AppUserDetails user) → ResponseEntity<PendingCount>
-POST   /api/runs/{runId}/pr-comments/{commentId}/dismiss
-  dismiss(String runId, Long commentId, AppUserDetails user) → ResponseEntity<Dto>
-POST   /api/runs/{runId}/pr-comments/{commentId}/apply
-  apply(String runId, Long commentId, AppUserDetails user) → ResponseEntity<ApplyResponse>
+GET    /                                  list(AppUserDetails, orgId) → List<StandardDto>
+GET    /{standardId}                      get(AppUserDetails, orgId, standardId) → StandardDto
+POST   /                                  create(AppUserDetails, orgId, StandardUpsert) → StandardDto (201)
+PUT    /{standardId}                      update(AppUserDetails, orgId, standardId, StandardUpsert) → StandardDto
+DELETE /{standardId}                      delete(AppUserDetails, orgId, standardId) → Void (204)
 ```
 
-### 1.6 PRs + GitHub integration
-
-#### PullRequestController
-
+#### `standards/override/StandardsOverrideController` (base `/api/projects/{projectId}/standards`)
 ```
-GET    /api/runs/{runId}/prs
-  listPrsForRun(String runId, AppUserDetails userDetails) → ResponseEntity<List<PrSummary>>
-POST   /api/projects/{projectId}/prs/refresh
-  refreshProjectPrs(String projectId, boolean forceFull) → ResponseEntity<PrRefreshService.RefreshResult>
-GET    /api/prs/snapshot
-  snapshot(AppUserDetails userDetails, String repoFullName, int prNumber, int maxChars) → ResponseEntity<GitHubRepoService.PullRequestSnapshot>
+POST   /violations/{violationId}/override     emergencyOverride(projectId, violationId, OverrideRequest, auth, AppUserDetails)
+POST   /{standardId}/exception                addProjectException(projectId, standardId, ExceptionRequest, auth, AppUserDetails)
+DELETE /{standardId}/exception                removeProjectException(projectId, standardId, auth, AppUserDetails)
 ```
-
-#### GitHubWebhookController
-- HMAC SHA-256 verified; no auth
 
+#### `standards/report/StandardsComplianceController` (base `/api/projects/{projectId}/standards`)
 ```
-POST   /webhooks/github
-  receive(String signature, String event, String body) → ResponseEntity<Void>
+GET    /report                            report(projectId, orgId, sinceDays=30, auth) → ComplianceReport
 ```
-
-#### GitHubAppController
-- Base: `/api/auth/github-app` — GitHub App OAuth installation
-
-### 1.7 Deployments + previews
-
-#### DeploymentController
-- Base: `/api/deployments` — Cloud Run permanent deployments
 
+#### `arch/invariants/InvariantController` (base `/api/projects/{projectId}/invariants`)
 ```
-POST   /api/deployments
-  deploy(DeployRequest request, AppUserDetails userDetails) → ResponseEntity<DeploymentSummary>
-GET    /api/deployments
-  list(String runId, AppUserDetails userDetails) → List<DeploymentSummary>
-GET    /api/deployments/{id}
-  detail(String id, AppUserDetails userDetails) → DeploymentDetail
-DELETE /api/deployments/{id}
-  delete(String id, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/deployments/{id}/rollback
-  rollback(String id, AppUserDetails userDetails) → ResponseEntity<Void>
-GET    /api/deployments/live
-  live(AppUserDetails userDetails) → List<DeploymentSummary>
-POST   /api/deployments/analyze
-  analyze(String runId, AppUserDetails userDetails) → ResponseEntity<?>
-POST   /api/deployments/confirm
-  confirm(DeployConfirmRequest request, AppUserDetails userDetails) → ResponseEntity<DeploymentSummary>
-POST   /api/deployments/{id}/engine-rollback
-  engineRollback(String id, AppUserDetails userDetails) → ResponseEntity<Void>
-DELETE /api/deployments/{id}/engine-destroy
-  engineDestroy(String id, AppUserDetails userDetails) → ResponseEntity<Void>
+GET    /                                  list(projectId, auth) → List<InvariantSummary>
+GET    /violations                        recentViolations(projectId, auth) → List<ViolationDto>
 ```
 
-#### PreviewController
-- Base: `/api/runs` — ephemeral 5-min preview (Cloud Run or Docker)
-
+#### `activity/ActivityFeedController` (base `/api/projects/{projectId}/activity`)
 ```
-GET    /api/runs/{runId}/preview/analyze
-  analyze(String runId, AppUserDetails userDetails) → ResponseEntity<PreviewAnalysisDto>
-GET    /api/runs/{runId}/preview/status
-  getStatus(String runId, AppUserDetails userDetails) → ResponseEntity<PreviewStatusDto>
-POST   /api/runs/{runId}/preview/start
-  start(String runId, PreviewStartRequest request, AppUserDetails userDetails) → ResponseEntity<PreviewStatusDto>
-POST   /api/runs/{runId}/preview/rebuild
-  rebuild(String runId, AppUserDetails userDetails) → ResponseEntity<PreviewStatusDto>
-DELETE /api/runs/{runId}/preview/stop
-  stop(String runId, AppUserDetails userDetails) → ResponseEntity<Void>
-GET    /api/runs/{runId}/preview/logs
-  getLogs(String runId, int lines, String filter, AppUserDetails userDetails) → ResponseEntity<PreviewLogsDto>
-GET    /api/runs/{runId}/preview/probe-api-docs
-  probeApiDocs(String runId, AppUserDetails userDetails) → ResponseEntity<ApiDocsProbeResult>
-POST   /api/runs/{runId}/preview/exec
-  execInContainer(String runId, ExecRequest request, AppUserDetails userDetails) → ResponseEntity<ExecResponse>
+GET    /                                  list(projectId, sinceDays=30, eventTypes?, actorId?, ..., auth) → ActivityPage
 ```
 
-#### PreviewVmController
-- Base: `/api/v1/previews` — VM-pool admin
+### Sharing / Invites / Migrations / Readymades / Library
 
+#### `sharing/controller/ProjectInviteController` (no base)
 ```
-DELETE /api/v1/previews/{previewId}
-  teardown(String previewId) → ResponseEntity<Void>
-POST   /api/v1/previews/{previewId}/extend
-  extend(String previewId, int minutes) → ResponseEntity<Void>
-GET    /api/v1/previews/active
-  listActive() → ResponseEntity<List<PreviewRegistry>>
-GET    /api/v1/previews/stats
-  stats() → ResponseEntity<Map<String,Object>>
-GET    /api/v1/previews/stats/vm
-  vmStats() → ResponseEntity<List<Map<String,Object>>>
+POST   /api/projects/{projectId}/invites                  create(projectId, CreateInviteRequest, AppUserDetails) → ProjectInviteDto
+GET    /api/projects/{projectId}/invites                  listPending(projectId, AppUserDetails) → List<ProjectInviteDto>
+DELETE /api/projects/{projectId}/invites/{inviteId}       revoke(projectId, inviteId, AppUserDetails) → Void
+POST   /api/invites/accept                                accept(token, AppUserDetails) → AcceptResponse
+GET    /api/invites/preview                               preview(token) → InvitePreview
 ```
 
-#### CredentialController
-- Base: `/api/credentials/gcp` — encrypted GCP service-account JSON storage
-
+#### `sharing/controller/ProjectShareLinkController` (no base)
 ```
-GET    /api/credentials/gcp/required-permissions
-  requiredPermissions() → ResponseEntity<List<CredentialService.RequiredPermission>>
-POST   /api/credentials/gcp
-  storeCredential(AppUserDetails userDetails, String projectId, String serviceAccountJson) → ResponseEntity<CredentialService.CredentialSummary>
-GET    /api/credentials/gcp
-  getCredential(AppUserDetails userDetails, String projectId) → ResponseEntity<?>
-GET    /api/credentials/gcp/all
-  listCredentials(AppUserDetails userDetails) → ResponseEntity<List<CredentialService.CredentialSummary>>
-GET    /api/credentials/gcp/validate
-  validateCredential(AppUserDetails userDetails, String projectId) → ResponseEntity<CredentialService.ValidationResult>
-DELETE /api/credentials/gcp
-  deleteCredential(AppUserDetails userDetails, String projectId) → ResponseEntity<Map<String,String>>
-```
-
-### 1.8 Validation reports + scoring + test execution
-
-#### ValidationReportController
-- Base: `/api`
-
-```
-GET    /api/runs/{runId}/report
-  getReport(String runId, AppUserDetails userDetails) → ResponseEntity<ValidationReportDTO>
-POST   /api/runs/{runId}/report/share
-  shareReport(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-GET    /api/runs/{runId}/report/pdf
-  downloadPdf(String runId, AppUserDetails userDetails) → ResponseEntity<byte[]>
-GET    /api/reports/shared/{shareToken}
-  getSharedReport(String shareToken) → ResponseEntity<ValidationReportShareDTO>
-```
-
-#### TestGenController
-
-```
-GET    /api/runs/{runId}/test-plan
-  getTestPlan(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-GET    /api/runs/{runId}/test-graph
-  getTestGraph(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-```
-
-#### TestResultController
-
-```
-GET    /api/runs/{runId}/test-report
-  getTestReport(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-PUT    /api/test-results/{id}/mark-invalid
-  markInvalid(Long id, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/runs/{runId}/run-tests
-  runTests(String runId, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-POST   /api/runs/{runId}/apply-test-fixes
-  applyTestFixes(String runId, String signature, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-```
-
-### 1.9 Admin (super admin, tier console, feature flags, reconciliation, analytics)
-
-#### SuperAdminController
-- Base: `/api/admin` — broad SUPER_ADMIN-gated surface
-
-```
-GET    /api/admin/guardrail
-  currentGuardrail() → ResponseEntity<Map<String,Object>>
-POST   /api/admin/executions/reconcile
-  reconcileExecutions(Map<String,Object> body) → ResponseEntity<AdminReconciliationService.Result>
-POST   /api/admin/validation-reports/backfill-verified-score
-  backfillVerifiedScore() → ResponseEntity<VerifiedScoreBackfillService.Result>
-POST   /api/admin/runs/{runId}/tasks/{taskId}/force-fail
-  forceFailTask(String runId, String taskId, Map<String,String> body, AppUserDetails admin) → ResponseEntity<Map<String,Object>>
-POST   /api/admin/runs/{runId}/re-review
-  reReviewRun(String runId, AppUserDetails admin) → ResponseEntity<Map<String,Object>>
-GET    /api/admin/audit-chain/verify
-  verifyAuditChain() → ResponseEntity<ActivityAuditService.ChainVerifyReport>
-POST   /api/admin/runs/halt-all
-  haltAllActiveRuns(AppUserDetails admin, Map<String,String> body) → ResponseEntity<Map<String,Object>>
-POST   /api/admin/prompts/{name}/rollback
-  rollbackPrompt(String name) → ResponseEntity<Map<String,Object>>
-GET    /api/admin/prompts/{name}/history
-  promptHistory(String name) → ResponseEntity<List<PromptAuditEntry>>
-POST   /api/admin/usage-reports/trigger
-  triggerUsageReports(Map<String,String> body) → ResponseEntity<Map<String,Object>>
-GET    /api/admin/users
-  listUsers() → ResponseEntity<List<UserDto>>
-GET    /api/admin/users/{id}
-  getUser(String id) → ResponseEntity<UserDto>
-PUT    /api/admin/users/{id}/status
-  updateUserStatus(AppUserDetails adminDetails, String id, Map<String,String> body) → ResponseEntity<UserDto>
-PUT    /api/admin/users/{id}/tier
-  updateUserTier(AppUserDetails adminDetails, String id, Map<String,String> body) → ResponseEntity<UserDto>
-PUT    /api/admin/users/{id}/role
-  updateUserRole(AppUserDetails adminDetails, String id, Map<String,String> body) → ResponseEntity<UserDto>
-GET    /api/admin/orgs
-  listOrgs() → ResponseEntity<List<OrgDto>>
-GET    /api/admin/orgs/{id}
-  getOrg(String id) → ResponseEntity<OrgDto>
-PUT    /api/admin/orgs/{id}/status
-  updateOrgStatus(AppUserDetails adminDetails, String id, Map<String,String> body) → ResponseEntity<OrgDto>
-PUT    /api/admin/orgs/{id}/tier
-  updateOrgTier(AppUserDetails adminDetails, String id, Map<String,String> body) → ResponseEntity<OrgDto>
-PUT    /api/admin/orgs/{id}/run-limit
-  updateOrgRunLimit(AppUserDetails adminDetails, String id, Map<String,Object> body) → ResponseEntity<OrgDto>
-PUT    /api/admin/orgs/{id}/api-keys
-  updateOrgApiKeys(AppUserDetails adminDetails, String id, Map<String,Boolean> body) → ResponseEntity<OrgDto>
-GET    /api/admin/tier-config
-  listTierConfig() → ResponseEntity<List<TierConfig>>
-PUT    /api/admin/tier-config/{tier}
-  updateTierConfig(String tier, Map<String,Integer> body) → ResponseEntity<TierConfig>
-POST   /api/admin/invite
-  adminInvite(AppUserDetails adminDetails, AdminInviteRequest req) → ResponseEntity<Map<String,String>>
-GET    /api/admin/invitations/escalated
-  listEscalated() → ResponseEntity<List<OrgInvitation>>
-POST   /api/admin/invitations/{id}/approve
-  approveInvitation(AppUserDetails adminDetails, String id) → ResponseEntity<Map<String,String>>
-POST   /api/admin/invitations/{id}/reject
-  rejectInvitation(AppUserDetails adminDetails, String id) → ResponseEntity<Map<String,String>>
-GET    /api/admin/audit-logs
-  getAuditLogs(String entityType, String eventType, String actorId, String entityId, String from, String to, int page, int size) → ResponseEntity<AuditLogPage>
-POST   /api/admin/test-email
-  sendTestEmail(Map<String,String> body) → ResponseEntity<Map<String,String>>
-POST   /api/admin/users/{id}/grant-runs
-  grantUserRuns(AppUserDetails adminDetails, String id, Map<String,Object> body) → ResponseEntity<RunTopup>
-POST   /api/admin/orgs/{id}/grant-runs
-  grantOrgRuns(AppUserDetails adminDetails, String id, Map<String,Object> body) → ResponseEntity<RunTopup>
-GET    /api/admin/topup-packages
-  listTopupPackages() → ResponseEntity<List<TopupPackage>>
-POST   /api/admin/topup-packages
-  createTopupPackage(Map<String,Object> body) → ResponseEntity<TopupPackage>
-PUT    /api/admin/topup-packages/{id}
-  updateTopupPackage(UUID id, Map<String,Object> body) → ResponseEntity<TopupPackage>
-DELETE /api/admin/topup-packages/{id}
-  deleteTopupPackage(UUID id) → ResponseEntity<Map<String,String>>
+POST   /api/projects/{projectId}/share-links              create(projectId, CreateShareLinkRequest, AppUserDetails) → ShareLinkDto
+GET    /api/projects/{projectId}/share-links              list(projectId, AppUserDetails) → ShareLinkListResponse
+DELETE /api/projects/{projectId}/share-links/{linkId}     revoke(projectId, linkId, AppUserDetails) → Void
 ```
-
-#### ConfigAdminController
-- Base: `/api/admin/config`
 
+#### `sharing/controller/ProjectSharePublicController` (no base, public — no auth)
 ```
-GET    /api/admin/config                 listConfig() → ResponseEntity<Map<String,Object>>
-PUT    /api/admin/config/{key}           putConfig(String key, Map<String,String> body) → ResponseEntity<Map<String,String>>
-DELETE /api/admin/config/{key}           deleteConfig(String key) → ResponseEntity<Map<String,String>>
-GET    /api/admin/config/secrets         listSecrets() → ResponseEntity<Map<String,Object>>
-PUT    /api/admin/config/secrets/{name}  putSecret(String name, Map<String,String> body) → ResponseEntity<Map<String,String>>
-POST   /api/admin/config/refresh         refresh() → ResponseEntity<Map<String,Object>>
+GET    /api/shared/{token}/meta                  meta(token) → SharedLinkMeta
+GET    /api/shared/{token}/run                   run(token) → SharedRun
+GET    /api/shared/{token}/validation-report     validationReport(token) → SharedValidationReport
+GET    /api/shared/{token}/code-review           codeReview(token) → SharedCodeReview
+GET    /api/shared/{token}/pr-review             prReview(token) → SharedPrReview
+GET    /api/shared/{token}/architecture          architecture(token) → SharedArchitecture
 ```
 
-#### FeatureFlagController
-- Base: `/api/admin/feature-flags`
-
+#### `migration/controller/MigrationController` (base `/api/migrations`)
 ```
-GET    /api/admin/feature-flags
-  list() → ResponseEntity<List<FeatureFlagDto>>
-GET    /api/admin/feature-flags/public
-  listPublic(AppUserDetails userDetails) → ResponseEntity<Map<String,Boolean>>
-PUT    /api/admin/feature-flags/{key}
-  update(String key, Map<String,String> body, AppUserDetails userDetails) → ResponseEntity<FeatureFlagDto>
+GET    /                                  list(category?, tier?, search?, AppUserDetails) → List<MigrationListItemDto>
+GET    /{slug}                            detail(slug, AppUserDetails) → MigrationDetailDto
+POST   /{slug}/dry-run                    dryRun(slug, DryRunRequest, AppUserDetails) → MigrationDryRunDto
+POST   /{slug}/apply                      apply(slug, ApplyRequest, AppUserDetails) → Map<String,Object> (202)
 ```
-
-#### AdminReminderController
-- Base: `/api/internal/reminder` — scheduler-callable
 
+#### `migration/controller/MigrationAdminController` (base `/api/admin/migrations`) [SUPER_ADMIN]
 ```
-POST   /api/internal/reminder/send
-  send(String token, ReminderRequest req) → ResponseEntity<Map<String,Object>>
+POST   /reseed                            reseed() → Map<String,Object>
 ```
 
-#### AdminAnalyticsController
-- Base: `/api/admin/analytics`
-
+#### `readymade/controller/ReadymadeController` (base `/api/library`)
 ```
-GET    /api/admin/analytics/usage
-  usage(String entityType, String entityId, int period, AppUserDetails userDetails) → ResponseEntity<UsageMetrics>
-GET    /api/admin/analytics/members
-  members(String orgId, int period, AppUserDetails userDetails) → ResponseEntity<List<MemberUsage>>
-GET    /api/admin/analytics/billing
-  billing(String entityType, String entityId, AppUserDetails userDetails) → ResponseEntity<BillingOverview>
-GET    /api/admin/analytics/cost-breakdown
-  costBreakdown(String orgId, int period, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
+GET    /                                  list(category?, macro_group?, tier?, search?, AppUserDetails) → List<ReadymadeListItemDto>
+GET    /{slug}                            detail(slug, AppUserDetails) → ReadymadeDetailDto
+GET    /categories                        facets() → Map<String,Object>
+POST   /{slug}/resolve                    resolve(slug, projectId, repoId) → VariantResolutionDto
+POST   /{slug}/instantiate                instantiate(slug, InstantiateRequest, AppUserDetails) → Map<String,Object> (202)
+POST   /favourite/{slug}                  favourite(slug, AppUserDetails) → Void (204)
+DELETE /favourite/{slug}                  unfavourite(slug, AppUserDetails) → Void (204)
 ```
-
-#### ActivationFunnelController
-- Base: `/api/admin/activation-funnel` — M-049 activation funnel reads
 
+#### `readymade/controller/ReadymadeAdminController` (base `/api/admin/readymades`) [SUPER_ADMIN]
 ```
-GET    /api/admin/activation-funnel
-  read(int sinceDays) → ResponseEntity<FunnelReport>
+POST   /reseed                            reseed() → Map<String,Object>
 ```
 
-#### MigrationAdminController
-- Base: `/api/admin/migrations`
+### Auth / Org / SSO / DSAR / Admin
 
+#### `auth/controller/AuthController` (base `/api/auth`)
 ```
-POST   /api/admin/migrations/reseed
-  reseed() → ResponseEntity<Map<String,Object>>
+POST   /register                          register(RegisterRequest) → UserDto (201)
+POST   /login                             login(LoginRequest, response) → LoginResponse
+POST   /refresh                           refresh(cookie, response) → LoginResponse
+DELETE /logout                            logout(cookie, response) → Void
+GET    /verify-email                      verifyEmail(token, response) → LoginResponse
+POST   /resend-verification               resendVerification(...) → Map<String,String>
+POST   /forgot-password                   forgotPassword(...) → Map<String,String>
+POST   /reset-password                    resetPassword(...) → Map<String,String>
+POST   /change-password                   changePassword(ChangePasswordRequest, AppUserDetails) → Map<String,String>
+GET    /me                                me(AppUserDetails) → UserDto
+POST   /invalidate-sessions               invalidateSessions(AppUserDetails) → Map<String,String>
+GET    /me/permissions                    permissions(AppUserDetails) → TierPermissionService.TierPermissions
+GET    /me/data-export                    dataExport(AppUserDetails) → byte[] (application/zip)
+DELETE /me/data                           deleteData(AppUserDetails) → Map<String,Object>
+PUT    /settings/github                   setGithub(GitHubSettingsRequest, AppUserDetails) → UserDto
+PUT    /settings/bitbucket                setBitbucket(...) → UserDto
+PUT    /settings/ai-keys                  setAiKeys(...) → UserDto
+PUT    /settings/jira                     setJira(...) → UserDto
+PUT    /settings/confluence               setConfluence(...) → UserDto
+PUT    /settings/view-mode                setViewMode(ViewModeRequest, AppUserDetails) → UserDto
+POST   /settings/ai-keys/validate         validateAiKey(ValidateAiKeyRequest) → ValidationResult
+POST   /settings/github/validate          validateGithub(...) → ValidationResult
+POST   /settings/bitbucket/validate       validateBitbucket(...) → ValidationResult
+POST   /settings/jira/validate            validateJira(...) → ValidationResult
+POST   /settings/confluence/validate      validateConfluence(...) → ValidationResult
+GET    /generate                          bcryptHelper(password) → String  [test helper]
 ```
 
-### 1.10 SWE-bench / ProgramBench / Eval
-
-#### SwebenchController
-- Base: `/api/admin/swebench`
-
+#### `auth/controller/OrgController` (base `/api/org`)
 ```
-POST   /api/admin/swebench/run
-  submit(SubmitRequest req) → ResponseEntity<SwebenchTaskService.TaskSubmitResult>
-GET    /api/admin/swebench/preview/{instanceId}
-  preview(String instanceId) → ResponseEntity<Map<String,Object>>
-GET    /api/admin/swebench/instances
-  listInstances() → ResponseEntity<Map<String,Object>>
+POST   /                                  createOrg(AppUserDetails, CreateOrgRequest) → OrgDto (201)
+GET    /me                                getMyOrg(AppUserDetails) → OrgDto
+PUT    /me                                updateOrg(AppUserDetails, Map<String,Object>) → OrgDto       [ORG_ADMIN]
+GET    /me/members                        listMembers(AppUserDetails) → List<OrgMemberDto>
+DELETE /me/members/{userId}               removeMember(AppUserDetails, userId) → Void                  [ORG_ADMIN]
+PUT    /me/members/{userId}/suspend       suspendMember(AppUserDetails, userId, Map<String,Boolean>) → Void  [ORG_ADMIN]
+PUT    /me/members/{userId}/role          changeRole(AppUserDetails, userId, Map<String,String>) → Void  [ORG_ADMIN]
+POST   /invite                            invite(AppUserDetails, InviteRequest) → Map<String,String> (201)  [ORG_ADMIN]
+GET    /me/invitations                    listInvitations(AppUserDetails) → List<OrgInvitation>
+DELETE /me/invitations/{id}               cancelInvitation(id) → Void
+POST   /me/invitations/{id}/resend        resendInvitation(AppUserDetails, id) → Map<String,String>
+POST   /accept-invite                     acceptInvite(token, AppUserDetails) → Map<String,String>
+GET    /me/audit-logs                     audit(AppUserDetails, filters..., page, size) → AuditLogPage   [ORG_ADMIN]
+PUT    /me/settings/key-source            setKeySource(AppUserDetails, KeySourceSettingsRequest) → OrgDto
+PUT    /me/settings/external-sharing      setExternalSharing(AppUserDetails, ExternalSharingRequest) → OrgDto  [ORG_ADMIN]
+PUT    /me/settings/ai-keys               setAiKeys(AppUserDetails, OrgAiKeySettingsRequest) → OrgDto
+PUT    /me/settings/jira                  setJira(AppUserDetails, OrgJiraSettingsRequest) → OrgDto
+POST   /me/settings/jira/validate         validateJira(OrgJiraSettingsRequest) → ValidationResult
+PUT    /me/settings/confluence            setConfluence(...) → OrgDto
+POST   /me/settings/confluence/validate   validateConfluence(...) → ValidationResult
+POST   /me/seats/adjust                   adjustSeats(AppUserDetails, SeatsAdjustRequest) → SeatsAdjustResponse  [ORG_ADMIN]
 ```
-
-#### ProgramBenchController
-- Base: `/api/admin/programbench`
 
+#### `auth/sso/SsoConfigController` (base `/api/auth/sso`) [SUPER_ADMIN/ORG_ADMIN]
 ```
-POST   /api/admin/programbench/run
-  submit(SubmitRequest req) → ResponseEntity<ProgramBenchTaskService.TaskSubmitResult>
-GET    /api/admin/programbench/preview/{taskId}
-  preview(String taskId) → ResponseEntity<Map<String,String>>
+GET    /config                            getConfig(AppUserDetails) → SsoConfigDto
+PUT    /config                            updateConfig(AppUserDetails, SsoConfigUpdate) → SsoConfigDto
+DELETE /config                            deleteConfig(AppUserDetails) → Void
 ```
 
-#### EvalController
-- Base: `/api/admin/eval`
-
+#### `auth/dsar/DsarController` (base `/api/dsar`)
 ```
-POST   /api/admin/eval/run
-  runEvaluation(List<String> providers) → ResponseEntity<?>
+GET    /me                                exportMe(AppUserDetails) → Map<String,Object>
+GET    /users/{userId}                    exportUser(AppUserDetails, userId) → Map<String,Object>  [SUPER_ADMIN]
 ```
-
-### 1.11 Enterprise (ADRs, invariants, contracts, standards, executespec folder, activity)
-
-#### AdrController
-- Base: `/api/projects/{projectId}/adrs`
 
+#### `auth/controller/SuperAdminController` (base `/api/admin`) [SUPER_ADMIN]
 ```
-GET    /api/projects/{projectId}/adrs
-  list(String projectId, boolean acceptedOnly, Authentication auth) → ResponseEntity<List<AdrSummary>>
-GET    /api/projects/{projectId}/adrs/{id}
-  get(String projectId, UUID id, Authentication auth) → ResponseEntity<AdrDetail>
+GET    /guardrail                                       guardrail() → Map<String,Object>
+POST   /executions/reconcile                            reconcile(Map<String,Object>) → ReconcileReport
+POST   /validation-reports/backfill-verified-score      backfillVerifiedScore() → BackfillResult
+POST   /runs/{runId}/tasks/{taskId}/force-fail          forceFailTask(runId, taskId, body, principal) → Map<String,Object>
+POST   /runs/{runId}/re-review                          reReview(runId, principal) → Map<String,Object> (202)
+GET    /audit-chain/verify                              verifyChain() → ActivityAuditService.ChainVerifyReport
+POST   /runs/halt-all                                   haltAll(principal, body) → Map<String,Object>
+POST   /prompts/{name}/rollback                         rollbackPrompt(name) → Map<String,Object>
+GET    /prompts/{name}/history                          promptHistory(name) → List<PromptAuditEntry>
+POST   /usage-reports/trigger                           triggerUsageReports(body) → Map<String,Object>
+GET    /users                                           listUsers() → List<UserDto>
+GET    /users/{id}                                      getUser(id) → UserDto
+PUT    /users/{id}/status                               setUserStatus(principal, id, body) → UserDto
+PUT    /users/{id}/tier                                 setUserTier(principal, id, body) → UserDto
+PUT    /users/{id}/role                                 setUserRole(principal, id, body) → UserDto
+GET    /orgs                                            listOrgs() → List<OrgDto>
+GET    /orgs/{id}                                       getOrg(id) → OrgDto
+PUT    /orgs/{id}/status                                setOrgStatus(principal, id, body) → OrgDto
+PUT    /orgs/{id}/tier                                  setOrgTier(principal, id, body) → OrgDto
+PUT    /orgs/{id}/run-limit                             setRunLimit(principal, id, body) → OrgDto
+PUT    /orgs/{id}/api-keys                              setOrgApiKeys(principal, id, body) → OrgDto
+GET    /tier-config                                     listTierConfigs() → List<TierConfig>
+PUT    /tier-config/{tier}                              updateTierConfig(tier, Map<String,Integer>) → TierConfig
+POST   /invite                                          adminInvite(principal, AdminInviteRequest) → Map<String,String>
+GET    /invitations/escalated                           listEscalated() → List<OrgInvitation>
+POST   /invitations/{id}/approve                        approveEscalation(id) → Map<String,String>
+POST   /invitations/{id}/reject                         rejectEscalation(id) → Map<String,String>
+GET    /audit-logs                                      auditLogs(filters..., page, size) → AuditLogPage
+POST   /test-email                                      testEmail(body) → Map<String,String>
+POST   /users/{id}/grant-runs                           grantUserRuns(principal, id, body) → RunTopup
+POST   /orgs/{id}/grant-runs                            grantOrgRuns(principal, id, body) → RunTopup
+GET    /topup-packages                                  listTopups() → List<TopupPackage>
+POST   /topup-packages                                  createTopup(body) → TopupPackage
+PUT    /topup-packages/{id}                             updateTopup(id, body) → TopupPackage
+DELETE /topup-packages/{id}                             deleteTopup(id) → Void
 ```
 
-#### InvariantController
-- Base: `/api/projects/{projectId}/invariants`
-
+#### `auth/controller/AdminReminderController` (base `/api/internal/reminder`)
 ```
-GET    /api/projects/{projectId}/invariants
-  list(String projectId, Authentication auth) → ResponseEntity<List<InvariantSummary>>
-GET    /api/projects/{projectId}/invariants/violations
-  recentViolations(String projectId, Authentication auth) → ResponseEntity<List<ViolationDto>>
+POST   /send                              send(X-Admin-Reminder-Token, ReminderRequest) → Map<String,Object>
 ```
 
-#### ContractConsumerController
-- Base: `/api/projects/{projectId}/contracts/{contractId}/consumers`
-
+#### `folder/ExecutespecMigrationController` (base `/api/admin/projects`) [SUPER_ADMIN]
 ```
-GET    /api/projects/{projectId}/contracts/{contractId}/consumers
-  list(String projectId, UUID contractId, Authentication auth) → ResponseEntity<List<ConsumerDto>>
-POST   /api/projects/{projectId}/contracts/{contractId}/consumers
-  declare(String projectId, UUID contractId, DeclareRequest body, Authentication auth) → ResponseEntity<ConsumerDto>
-DELETE /api/projects/{projectId}/contracts/{contractId}/consumers/{consumerRepoId}
-  remove(String projectId, UUID contractId, UUID consumerRepoId, Authentication auth) → ResponseEntity<Void>
+POST   /{projectId}/migrate-codemaps      migrate(projectId, auth) → MigrateResponse
 ```
-
-#### ContractCoverageController
-- Base: `/api/projects/{projectId}/repos/{repoId}/contract-coverage`
 
+#### `eval/EvalController` (base `/api/admin/eval`) [SUPER_ADMIN]
 ```
-GET    /api/projects/{projectId}/repos/{repoId}/contract-coverage
-  coverage(String projectId, UUID repoId, Authentication auth) → ResponseEntity<CoverageResponse>
-POST   /api/projects/{projectId}/repos/{repoId}/contract-coverage/rescan
-  rescan(String projectId, UUID repoId, Authentication auth) → ResponseEntity<CoverageResponse>
+POST   /run                               runEvaluation(providers) → Map<String,Object>
 ```
 
-#### ContractDriftController
-- Base: `/api/projects/{projectId}`
-
+#### `repo/GitHubAppController` (base `/api/auth/github-app`)
 ```
-POST   /api/projects/{projectId}/contracts/{contractId}/check-drift
-  checkContract(String projectId, UUID contractId, Authentication auth) → ResponseEntity<DriftDetectionService.DriftCheckResult>
-POST   /api/projects/{projectId}/repos/{repoId}/check-drift
-  checkRepo(String projectId, UUID repoId, Authentication auth) → ResponseEntity<List<DriftDetectionService.DriftCheckResult>>
-POST   /api/projects/{projectId}/check-drift
-  checkProject(String projectId, Authentication auth) → ResponseEntity<List<DriftDetectionService.DriftCheckResult>>
-POST   /api/projects/{projectId}/contracts/{contractId}/refresh-from-source
-  refreshFromSource(String projectId, UUID contractId, Authentication auth) → ResponseEntity<RefreshResponse>
-POST   /api/projects/{projectId}/contracts/{contractId}/dismiss-drift
-  dismissDrift(String projectId, UUID contractId, DismissRequest body, Authentication auth) → ResponseEntity<DismissResponse>
+GET    /install-url                       installUrl(AppUserDetails) → Map<String,String>  [SUPER_ADMIN/ORG_ADMIN]
+GET    /status                            status(AppUserDetails) → Map<String,Object>
+POST   /callback                          callback(AppUserDetails, InstallCallback) → Map<String,Object>
+DELETE /install                           uninstall(AppUserDetails) → Void
+GET    /install                           installRedirect(AppUserDetails) → RedirectView
 ```
-
-#### OrgStandardController
-- Base: `/api/orgs/{orgId}/standards` — org-level coding-standard catalog
-
-#### StandardsOverrideController
-- Base: `/api/projects/{projectId}/standards`
 
+#### `swebench/SwebenchController` (base `/api/admin/swebench`) [SUPER_ADMIN]
 ```
-POST   /api/projects/{projectId}/standards/violations/{violationId}/override
-  emergencyOverride(String projectId, UUID violationId, OverrideRequest body, Authentication auth, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/projects/{projectId}/standards/{standardId}/exception
-  addProjectException(String projectId, String standardId, ExceptionRequest body, Authentication auth, AppUserDetails userDetails) → ResponseEntity<Void>
-DELETE /api/projects/{projectId}/standards/{standardId}/exception
-  removeProjectException(String projectId, String standardId, Authentication auth, AppUserDetails userDetails) → ResponseEntity<Void>
+POST   /run                               submit(SubmitRequest) → TaskSubmitResult
+GET    /preview/{instanceId}              preview(instanceId) → Map<String,Object>
+GET    /instances                         listInstances() → Map<String,Object>
 ```
 
-#### StandardsComplianceController
-- Base: `/api/projects/{projectId}/standards`
-
+#### `programbench/ProgramBenchController` (base `/api/admin/programbench`) [SUPER_ADMIN]
 ```
-GET    /api/projects/{projectId}/standards/report
-  report(String projectId, String orgId, int sinceDays, Authentication auth) → ResponseEntity<ComplianceReport>
+POST   /run                               submit(SubmitRequest) → TaskSubmitResult
+GET    /preview/{taskId}                  preview(taskId) → Map<String,String>
 ```
 
-#### ExecutespecMigrationController
-- Base: `/api/admin/projects`
+### Billing / Invoices / Accounting
 
+#### `billing/controller/BillingController` (base `/api/billing`)
 ```
-POST   /api/admin/projects/{projectId}/migrate-codemaps
-  migrate(String projectId, Authentication auth) → ResponseEntity<MigrateResponse>
+GET    /plans                             listPlans(keyMode?, includeHidden=false, AppUserDetails) → List<PlanResponse>
+GET    /founder-pricing/{tier}            founderPricing(tier) → FounderOfferDto
+GET    /status                            status(AppUserDetails) → BillingStatusResponse
+POST   /subscribe                         subscribe(CreateSubscriptionRequest, AppUserDetails) → SubscriptionInitResult
+POST   /verify                            verify(VerifyPaymentRequest, AppUserDetails) → BillingStatusResponse
+POST   /cancel                            cancel(AppUserDetails) → Void
+POST   /seats                             updateSeats(UpdateSeatsRequest, AppUserDetails) → BillingStatusResponse
+GET    /topup/packages                    getPackages() → List<TopupPackage>
+POST   /topup/purchase                    initiatePurchase(TopupPurchaseRequest, AppUserDetails) → TopupOrderInitResult
+POST   /topup/verify                      verifyTopup(TopupVerifyRequest, AppUserDetails) → BillingStatusResponse
+GET    /profile                           getProfile(principal) → BillingProfile
+PUT    /profile                           updateProfile(principal, BillingProfile) → BillingProfile
+GET    /invoices                          listInvoices(principal, Pageable) → Page<Invoice>
+GET    /invoices/{id}                     getInvoice(principal, id) → InvoiceDetail
+GET    /invoices/{id}/pdf                 invoicePdf(principal, id) → ResponseEntity<?>
+GET    /payment-history                   paymentHistory(orgId, page, size) → Page<PaymentAudit>   [ORG_ADMIN/BILLING_ADMIN/SUPER_ADMIN]
 ```
 
-#### ActivityFeedController
-- Base: `/api/projects/{projectId}/activity`
-
+#### `billing/controller/BillingWebhookController` (base `/api/webhooks`)
 ```
-GET    /api/projects/{projectId}/activity
-  list(String projectId, int sinceDays, List<String> eventTypes, String actorId, String targetType, String targetId, boolean includeAdminEvents, int limit, Authentication auth) → ResponseEntity<ActivityPage>
+POST   /razorpay                          razorpayWebhook(body, X-Razorpay-Signature) → ResponseEntity<?>
+POST   /stripe                            stripeWebhook(body, Stripe-Signature) → ResponseEntity<?>
 ```
-
-### 1.12 Execution (scaffolds, launches)
 
-#### ExecutionController
-
+#### `billing/controller/InvoiceController` (no base, admin paths)
 ```
-POST   /api/projects/{projectId}/executions
-  createExecution(String projectId, CreateExecutionRequest req, AppUserDetails principal) → ResponseEntity<ExecutionRunDto>
-GET    /api/projects/{projectId}/executions
-  listExecutions(String projectId, int page, int size, AppUserDetails principal) → ResponseEntity<Page<ExecutionRunDto>>
-POST   /api/executions/{id}/analyse
-  triggerAnalysis(String id, AppUserDetails principal) → ResponseEntity<Void>
-PUT    /api/executions/{id}/arch-review
-  approveArch(String id, ExecutionArchApprovalRequest req, AppUserDetails principal) → ResponseEntity<Void>
-POST   /api/executions/{id}/plan
-  generatePlan(String id, AppUserDetails principal) → ResponseEntity<Void>
-PUT    /api/executions/{id}/plan/approve
-  approvePlan(String id, AppUserDetails principal) → ResponseEntity<Void>
-POST   /api/executions/{id}/solutions/{solutionId}/decide
-  decide(String id, String solutionId, DecisionRequest req, AppUserDetails principal) → ResponseEntity<Void>
-POST   /api/executions/{id}/solutions/{solutionId}/manual-ready
-  manualReady(String id, String solutionId, AppUserDetails principal) → ResponseEntity<Void>
-POST   /api/executions/{id}/resume
-  resume(String id, AppUserDetails principal) → ResponseEntity<Void>
-POST   /api/executions/{id}/abort
-  abort(String id, AppUserDetails principal) → ResponseEntity<Void>
-GET    /api/executions/{id}/solutions/{solutionId}/runs
-  solutionRuns(String id, String solutionId, AppUserDetails principal) → ResponseEntity<List<ExecutionSolutionRun>>
-GET    /api/executions/{id}/report
-  getReport(String id, AppUserDetails principal) → ResponseEntity<Map<String,Object>>
-GET    /api/projects/{projectId}/prs/{prNumber}/reviews
-  prReviewComments(String projectId, int prNumber, String repo, AppUserDetails principal) → ResponseEntity<Map<String,String>>
-GET    /api/executions/{id}/sse-token
-  sseToken(String id, AppUserDetails principal) → ResponseEntity<Map<String,String>>
-GET    /api/executions/{id}/events
-  subscribe(String id, String token, String lastEventId, AppUserDetails principal) → SseEmitter
+GET    /api/admin/invoices                listAll(principal, Pageable) → Page<Invoice>
+GET    /api/admin/invoices/{id}/pdf       adminInvoicePdf(principal, id) → byte[]
+POST   /api/admin/invoices/{id}/credit-note   createCreditNote(principal, id, CreditNoteRequest) → Invoice
+POST   /api/admin/invoices/{id}/void          voidInvoice(principal, id) → Invoice
+POST   /api/admin/invoices/{id}/send          resendInvoice(principal, id) → Void
+GET    /api/admin/seller-config           getSellerConfig(principal) → SellerConfig
+PUT    /api/admin/seller-config           updateSellerConfig(principal, SellerConfig) → SellerConfig
 ```
 
-#### ScaffoldController
-
+#### `billing/controller/PaymentAuditController` (no base) [SUPER_ADMIN]
 ```
-GET    /api/scaffolds
-  list() → ResponseEntity<List<Scaffold>>
+GET    /api/admin/payment-audit           paymentAudit(page, size, orgId?, userId?) → Page<PaymentAudit>
+GET    /api/admin/payment-audit/export    exportCsv() → byte[]
+GET    /api/admin/webhook-events          webhookEvents(page, size, gateway?) → Page<WebhookEventLog>
 ```
-
-### 1.13 Migration (recipes, dry-runs)
 
-#### MigrationController
-- Base: `/api/migrations`
-
+#### `billing/controller/AccountingController` (base `/api/accounting`) [FINANCE]
 ```
-GET    /api/migrations
-  list(String category, String tier, String search, AppUserDetails userDetails) → List<MigrationListItemDto>
-GET    /api/migrations/{slug}
-  detail(String slug, AppUserDetails userDetails) → MigrationDetailDto
-POST   /api/migrations/{slug}/dry-run
-  dryRun(String slug, DryRunRequest body, AppUserDetails userDetails) → MigrationDryRunDto
-POST   /api/migrations/{slug}/apply
-  apply(String slug, MigrationOrchestrator.ApplyRequest req, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
+GET    /revenue                           revenue(principal, from, to) → RevenueMetrics
+GET    /gst-summary                       gstSummary(principal, fy, quarter) → GstSummary
+GET    /gstr1-export                      gstr1Export(principal, fy, quarter) → byte[] (CSV)
+GET    /trial-balance                     trialBalance(principal, from, to) → List<TrialBalanceEntry>
+GET    /entries                           entries(principal, from, to, Pageable) → Page<AccountingEntry>
 ```
-
-### 1.14 Readymade catalogue
-
-#### ReadymadeController
-- Base: `/api/library`
 
+#### `billing/controller/AdminBillingController` (base `/api/admin/billing`)
 ```
-GET    /api/library
-  list(String category, String macroGroup, String tier, String search, AppUserDetails userDetails) → List<ReadymadeListItemDto>
-GET    /api/library/{slug}
-  detail(String slug, AppUserDetails userDetails) → ReadymadeDetailDto
-GET    /api/library/categories
-  facets() → Map<String,Object>
-POST   /api/library/{slug}/resolve
-  resolve(String slug, String projectId, UUID repoId) → VariantResolutionDto
-POST   /api/library/{slug}/instantiate
-  instantiate(String slug, ReadymadeOrchestrator.InstantiateRequest req, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-POST   /api/library/favourite/{slug}
-  favourite(String slug, AppUserDetails userDetails) → ResponseEntity<Void>
-DELETE /api/library/favourite/{slug}
-  unfavourite(String slug, AppUserDetails userDetails) → ResponseEntity<Void>
+POST   /seed-plans                        seedPlans() → ResponseEntity<String>
 ```
 
-#### ReadymadeAdminController
-- Base: `/api/admin/readymades`
-
+#### `billing/lifecycle/TierLifecycleController` (base `/api/admin`) [SUPER_ADMIN]
 ```
-POST   /api/admin/readymades/reseed
-  reseed() → ResponseEntity<Map<String,Object>>
+GET    /tiers                                            listAllTiers() → List<TierLifecycleDto>
+PUT    /tiers/{tier}/lifecycle                           transitionTier(AppUserDetails, tier, LifecycleUpdateRequest) → TierConfig
+PUT    /billing-plans/{planId}/lifecycle                 transitionPlan(AppUserDetails, planId, PlanLifecycleUpdateRequest) → BillingPlan
 ```
-
-### 1.15 Integrations (Slack, Jira, Confluence webhooks)
 
-#### SlackIntegrationController
-- Base: `/api/integrations/slack`
-
+#### `api/controller/PricingController` (base `/api/pricing`)
 ```
-GET    /api/integrations/slack/install
-  getInstallUrl(AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-GET    /api/integrations/slack/oauth/callback
-  oauthCallback(String code, String state) → ResponseEntity<Void>
-DELETE /api/integrations/slack/disconnect
-  disconnect(AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-GET    /api/integrations/slack/status
-  getStatus(AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-GET    /api/integrations/slack/channels
-  listSlackChannels(AppUserDetails userDetails) → ResponseEntity<List<Map<String,String>>>
-GET    /api/integrations/slack/projects/{projectId}/channels
-  getProjectChannels(String projectId, AppUserDetails userDetails) → ResponseEntity<List<Map<String,Object>>>
-POST   /api/integrations/slack/projects/{projectId}/channels
-  addProjectChannel(String projectId, Map<String,String> body, AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-DELETE /api/integrations/slack/projects/{projectId}/channels/{channelId}
-  removeProjectChannel(String projectId, String channelId, AppUserDetails userDetails) → ResponseEntity<Void>
-PUT    /api/integrations/slack/projects/{projectId}/channels/{channelId}/verbosity
-  updateVerbosity(String projectId, String channelId, Map<String,String> body, AppUserDetails userDetails) → ResponseEntity<Void>
-POST   /api/integrations/slack/test
-  sendTestMessage(AppUserDetails userDetails, Map<String,String> body) → ResponseEntity<Map<String,Object>>
-GET    /api/integrations/slack/logs
-  getLogs(AppUserDetails userDetails, String runId) → ResponseEntity<List<SlackNotificationLog>>
+GET    /                                  list(AppUserDetails) → List<PricingRow>
+GET    /{provider}/{model}                get(provider, model, AppUserDetails) → PricingRow
+PUT    /{provider}/{model}                upsert(provider, model, PricingUpdateRequest, AppUserDetails) → PricingRow  [SUPER_ADMIN]
 ```
-
-#### IntegrationController
-- Base: `/api/integrations`
 
+#### `api/controller/DeploymentController` (base `/api/deployments`) [`agent.deployment.enabled=true`]
 ```
-POST   /api/integrations/{source}/webhook
-  webhook(String source, Map<String,String> headers, String rawBody) → ResponseEntity<Map<String,String>>
-POST   /api/integrations/jira/trigger
-  jiraTrigger(Map<String,String> body, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-POST   /api/integrations/confluence/trigger
-  confluenceTrigger(Map<String,String> body, AppUserDetails userDetails) → ResponseEntity<Map<String,String>>
-GET    /api/integrations/runs
-  listIntegrationRuns(String source, AppUserDetails userDetails) → List<IntegrationRunSummary>
+POST   /                                  deploy(DeployRequest, AppUserDetails) → DeploymentSummary
+GET    /                                  list(runId?, AppUserDetails) → List<DeploymentSummary>
+GET    /{id}                              detail(id, AppUserDetails) → DeploymentDetail
+DELETE /{id}                              delete(id, AppUserDetails) → Void
+POST   /{id}/rollback                     rollback(id, AppUserDetails) → Void
+GET    /live                              live(AppUserDetails) → List<DeploymentSummary>
+POST   /analyze                           analyze(runId, AppUserDetails) → ResponseEntity<?>
+POST   /confirm                           confirm(DeployConfirmRequest, AppUserDetails) → DeploymentSummary
+POST   /{id}/engine-rollback              engineRollback(id, AppUserDetails) → Void
+DELETE /{id}/engine-destroy               engineDestroy(id, AppUserDetails) → Void
 ```
 
-#### IntegrationStatusController
-- Base: `/api/integrations`
-
+#### `deployment/credential/CredentialController` (base `/api/credentials/gcp`)
 ```
-GET    /api/integrations/status
-  status(AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
-GET    /api/integrations/slack/status
-  slackStatus(AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
+GET    /required-permissions              required() → List<RequiredPermission>
+POST   /                                  store(AppUserDetails, projectId?, json) → CredentialSummary
+GET    /                                  get(AppUserDetails, projectId?) → CredentialSummary
+GET    /all                               listAll(AppUserDetails) → List<CredentialSummary>
+GET    /validate                          validate(AppUserDetails) → ValidationResult
+DELETE /                                  delete(AppUserDetails) → Map<String,String>
 ```
-
-### 1.16 Notifications
-
-#### NotificationController
-- Base: `/api/notifications`
 
+#### `deployment/preview/vm/PreviewVmController` (base `/api/v1/previews`) [`preview.mode=vm`]
 ```
-GET    /api/notifications
-  list(AppUserDetails user, int page, int size) → ResponseEntity<Map<String,Object>>
-GET    /api/notifications/unread-count
-  unreadCount(AppUserDetails user) → ResponseEntity<Map<String,Long>>
-POST   /api/notifications/{id}/read
-  markRead(String id, AppUserDetails user) → ResponseEntity<Void>
-POST   /api/notifications/read-all
-  markAllRead(AppUserDetails user) → ResponseEntity<Void>
+DELETE /{previewId}                       teardown(previewId) → Void
+POST   /{previewId}/extend                extend(previewId, minutes) → Void
+GET    /active                            listActive() → List<PreviewRegistry>
+GET    /stats                             stats() → Map<String,Object>
+GET    /stats/vm                          vmStats() → List<Map<String,Object>>
 ```
 
-#### NotificationPrefController
-- Base: `/api/notifications/preferences`
+### Notifications / Health / Integrations
 
+#### `notification/NotificationController` (base `/api/notifications`)
 ```
-GET    /api/notifications/preferences
-  list(AppUserDetails principal) → ResponseEntity<List<PrefRow>>
-PUT    /api/notifications/preferences
-  update(AppUserDetails principal, PrefUpdate body) → ResponseEntity<PrefRow>
+GET    /                                  list(AppUserDetails, page=0, size=20) → Map<String,Object>
+GET    /unread-count                      unread(AppUserDetails) → Map<String,Long>
+POST   /{id}/read                         markRead(id, AppUserDetails) → Void
+POST   /read-all                          markAllRead(AppUserDetails) → Void
 ```
 
-### 1.17 V3 growth surfaces (referrals, entitlements, signup claim)
-
-#### EntitlementsController
-- Base: `/api/v3` — R-142 entitlements
-
+#### `notification/pref/NotificationPrefController` (base `/api/notifications/preferences`)
 ```
-GET    /api/v3/entitlements
-  me(AppUserDetails userDetails) → ResponseEntity<EntitlementsResponse>
+GET    /                                  list(AppUserDetails) → List<PrefRow>
+PUT    /                                  update(AppUserDetails, PrefUpdate) → PrefRow
 ```
-
-#### ReferralController
-- Base: `/api/v3/referrals`
 
+#### `api/controller/HealthController` (base `/api/health`)
 ```
-POST   /api/v3/referrals/invite
-  invite(InviteRequest body, AppUserDetails userDetails) → ResponseEntity<ReferralService.InviteRecord>
-GET    /api/v3/referrals/state
-  state(AppUserDetails userDetails) → ResponseEntity<ReferralService.InviteState>
-GET    /api/v3/referrals/lookup
-  lookup(String token) → ResponseEntity<ReferralService.ReferralLookup>
+GET    /                                  health() → Map<String,Object>
+GET    /ready                             ready() → Map<String,Object>
 ```
 
-#### SignupClaimController
-- Base: `/api/v3/auth`
+#### `api/controller/SlackIntegrationController` (base `/api/integrations/slack`)
+```
+GET    /install                           getInstallUrl(AppUserDetails) → Map<String,String>
+GET    /oauth/callback                    oauthCallback(code, state) → Void (302)
+DELETE /disconnect                        disconnect(AppUserDetails) → Map<String,String>
+GET    /status                            status(AppUserDetails) → Map<String,Object>
+GET    /channels                          listSlackChannels(AppUserDetails) → List<Map<String,String>>
+GET    /projects/{projectId}/channels     getProjectChannels(projectId, AppUserDetails) → List<Map<String,Object>>
+POST   /projects/{projectId}/channels     addProjectChannel(projectId, body, AppUserDetails) → Map<String,Object>
+DELETE /projects/{projectId}/channels/{channelId}     removeProjectChannel(...) → Void
+PUT    /projects/{projectId}/channels/{channelId}/verbosity     updateVerbosity(...) → Void
+POST   /test                              sendTest(AppUserDetails, body) → Map<String,Object>
+GET    /logs                              getLogs(AppUserDetails, runId?) → List<SlackNotificationLog>
+```
 
+#### `api/controller/IntegrationController` (base `/api/integrations`) [`agent.integrations.enabled`]
 ```
-POST   /api/v3/auth/claim-anonymous-session
-  claimAnonymousSession(ClaimRequest body, AppUserDetails userDetails) → ResponseEntity<ClaimResponse>
+POST   /{source}/webhook                  webhook(source, headers, rawBody) → Map<String,String>
+POST   /jira/trigger                      jiraTrigger(body, AppUserDetails) → Map<String,String>
+POST   /confluence/trigger                confluenceTrigger(body, AppUserDetails) → Map<String,String>
+GET    /runs                              listIntegrationRuns(source?, AppUserDetails) → List<IntegrationRunSummary>
 ```
 
-### 1.18 Observability + meta (health, pricing, models, feasibility, landing, contact, onboarding, SPA fallback)
+#### `api/controller/IntegrationStatusController` (base `/api/integrations`)
+```
+GET    /status                            status(AppUserDetails) → Map<String,Object>
+GET    /slack/status                      slackStatus(AppUserDetails) → Map<String,Object>
+```
 
-#### HealthController
-- Base: `/api/health`
+### Validation Reports / Tests / Analytics / Models
 
+#### `report/ValidationReportController` (base `/api`)
 ```
-GET    /api/health        health() → ResponseEntity<Map<String,Object>>
-GET    /api/health/ready  ready() → ResponseEntity<Map<String,Object>>
+GET    /runs/{runId}/report               getReport(runId, AppUserDetails) → ValidationReportDTO
+POST   /runs/{runId}/report/share         share(runId, AppUserDetails) → Map<String,String>
+GET    /runs/{runId}/report/pdf           pdf(runId, AppUserDetails) → byte[]
+GET    /reports/shared/{shareToken}       publicShared(shareToken) → ValidationReportShareDTO
 ```
 
-#### PricingController
-- Base: `/api/pricing`
-
+#### `testgen/TestGenController` (base `/api`)
 ```
-GET    /api/pricing                              list(AppUserDetails userDetails) → ResponseEntity<List<PricingRow>>
-GET    /api/pricing/{provider}/{model}           get(String provider, String model, AppUserDetails userDetails) → ResponseEntity<PricingRow>
-PUT    /api/pricing/{provider}/{model}           upsert(String provider, String model, PricingUpdateRequest req, AppUserDetails userDetails) → ResponseEntity<PricingRow>
+GET    /runs/{runId}/test-plan            testPlan(runId, AppUserDetails) → Map<String,Object>
+GET    /runs/{runId}/test-graph           testGraph(runId, AppUserDetails) → Map<String,Object>
 ```
 
-#### ModelController
-- Base: `/api/models`
+#### `testgen/TestResultController` (base `/api`)
+```
+GET    /runs/{runId}/test-report          report(runId, AppUserDetails) → Map<String,Object>
+PUT    /test-results/{id}/mark-invalid    markInvalid(id, AppUserDetails) → Void
+POST   /runs/{runId}/run-tests            runTests(runId, AppUserDetails) → Map<String,Object>
+POST   /runs/{runId}/apply-test-fixes     applyTestFixes(runId, signature?, AppUserDetails) → 410 Gone
+```
 
+#### `analytics/ActivationFunnelController` (base `/api/admin/activation-funnel`) [SUPER_ADMIN]
 ```
-GET    /api/models/available  available() → ResponseEntity<AvailableModelsResponse>
+GET    /                                  read(sinceDays=30) → FunnelReport
 ```
 
-#### MetricsController
-- Base: `/api/metrics`
+#### `api/controller/AdminAnalyticsController` (base `/api/admin/analytics`)
+```
+GET    /usage                             usage(entityType, entityId, period=30) → UsageMetrics
+GET    /members                           members(orgId, period=30) → List<MemberUsage>
+GET    /billing                           billing(entityType, entityId) → BillingOverview
+GET    /cost-breakdown                    costBreakdown(orgId, period=30) → Map<String,Object>
+```
 
+#### `api/controller/ModelController` (base `/api/models`)
 ```
-GET    /api/metrics  metrics(int days, AppUserDetails userDetails) → ResponseEntity<MetricsResponse>
+GET    /available                         available() → AvailableModelsResponse
 ```
 
-#### FeasibilityController
-- Base: `/api/feasibility`
+### V3 anonymous / referral / signup / entitlements / landing / misc
 
+#### `api/EntitlementsController` (base `/api/v3`)
 ```
-POST   /api/feasibility  estimate(FeasibilityRequest req) → ResponseEntity<FeasibilityReport>
+GET    /entitlements                      me(AppUserDetails) → EntitlementsResponse
 ```
 
-#### LandingController
-- Base: `/api/v3`
+#### `api/ReferralController` (base `/api/v3/referrals`)
+```
+POST   /invite                            invite(InviteRequest, AppUserDetails) → ReferralService.InviteRecord
+GET    /state                             state(AppUserDetails) → ReferralService.InviteState
+GET    /lookup                            lookup(token) → ReferralService.ReferralLookup  (public)
+```
 
+#### `api/SignupClaimController` (base `/api/v3/auth`)
 ```
-GET    /api/v3/landing/stats         stats() → ResponseEntity<LandingStats>
-GET    /api/v3/landing/sample-runs   sampleRuns() → ResponseEntity<List<SampleRun>>
-GET    /api/v3/public/exec-snapshot  execSnapshot() → ResponseEntity<ExecSnapshot>
+POST   /claim-anonymous-session           claim(ClaimRequest, AppUserDetails) → ClaimResponse
 ```
 
-#### ContactController
-- Base: `/api/contact`
+#### `api/AnonymousRunController` (base `/api/v3`)
+```
+POST   /anonymous-runs                    submit(AnonymousRunRequest, HttpServletRequest) → AnonymousRunResponse
+GET    /anonymous-runs/{sessionToken}     status(sessionToken) → AnonymousRunResponse
+```
 
+#### `landing/LandingController` (base `/api/v3`)
 ```
-POST   /api/contact  submitFeedback(AppUserDetails principal, ContactRequest request) → ResponseEntity<Map<String,String>>
+GET    /landing/stats                     stats() → LandingStats
+GET    /landing/sample-runs               sampleRuns() → List<SampleRun>
+GET    /public/exec-snapshot              execSnapshot() → ExecSnapshot
 ```
 
-#### OnboardingController
-- Base: `/api/onboarding`
+#### `onboarding/OnboardingController` (base `/api/onboarding`)
+```
+GET    /sample-specs                      listSamples() → List<SampleSpecDto>
+POST   /pick-sample                       pickSample(AppUserDetails, PickSampleRequest) → PickSampleResponse
+GET    /sandbox-status                    sandboxStatus(AppUserDetails) → Map<String,Object>
+```
 
+#### `export/ProjectExportController` (base `/api/projects/{projectId}/export`)
 ```
-GET    /api/onboarding/sample-specs    listSamples() → ResponseEntity<List<SampleSpecDto>>
-POST   /api/onboarding/pick-sample     pickSample(AppUserDetails userDetails, PickSampleRequest req) → ResponseEntity<PickSampleResponse>
-GET    /api/onboarding/sandbox-status  sandboxStatus(AppUserDetails userDetails) → ResponseEntity<Map<String,Object>>
+POST   /                                  export(projectId, auth, AppUserDetails) → byte[] (application/gzip)  [SUPER_ADMIN/ORG_ADMIN/BILLING_ADMIN]
 ```
 
-#### SpaFallbackController
-- SPA history-API routing — all non-asset paths return `index.html`
+#### `contact/ContactController` (base `/api/contact`)
+```
+POST   /                                  submitFeedback(AppUserDetails, ContactRequest) → Map<String,String>
+```
 
+#### `rollout/RolloutRunController` (base `/api/v2/runs`)
 ```
-GET    /favicon.ico                                                              → ResponseEntity<Void>
-GET    /                                                                         → ResponseEntity<Resource>
-GET    /{path:[^\.]*}                                                            → ResponseEntity<Resource>  (1-segment)
-GET    /{a:[^\.]*}/{path:[^\.]*}                                                 → ResponseEntity<Resource>  (2-segment)
-GET    /{a:[^\.]*}/{b:[^\.]*}/{path:[^\.]*}                                      → ResponseEntity<Resource>  (3-segment)
-GET    /{a:[^\.]*}/{b:[^\.]*}/{c:[^\.]*}/{path:[^\.]*}                           → ResponseEntity<Resource>  (4-segment)
-GET    /{a:[^\.]*}/{b:[^\.]*}/{c:[^\.]*}/{d:[^\.]*}/{path:[^\.]*}                → ResponseEntity<Resource>  (5-segment)
+POST   /                                  submit(SubmitRequest) → Map<String,Object> (202)
+GET    /{runId}                           poll(runId) → Map<String,Object>
 ```
 
-### 1.19 Test endpoints (dev-only smoke probes — `/api/v2/test/*`)
+### Exception advice (`api/advice/`)
+- `GlobalExceptionAdvice` (`@Order(MAX)`): `ErrorResponseException`, `NoResourceFoundException` → 404 canonical, `Throwable` → 500 with 8-char `errorId`.
+- `OptimisticLockAdvice`: `ObjectOptimisticLockingFailureException` → 409.
+- `ValidationAdvice` (`@Order(HIGHEST_PRECEDENCE)`): `MethodArgumentNotValidException`, `ResponseStatusException`, `AccessDeniedException` → 403, `HttpMessageNotReadableException` → 400, `MethodArgumentTypeMismatchException` → 400, `IllegalArgumentException` → 400, `ConstraintViolationException` → 400, `HttpRequestMethodNotSupportedException` → 405, `MissingServletRequestParameterException` → 400, `BillingException` → 402.
 
-- **ContextStoreTestController** — `/api/v2/test` (no public mappings)
-- **ExecutorTestController** — `GET /api/v2/test/executor` → `testExecutor(provider, model, spec, classification)`
-- **MetricsTestController** — `GET /api/v2/test/metrics` → `dumpV2Metrics()`
-- **NativeToolsTestController** — `GET /api/v2/test/native-tools[/all]` → `testNativeTools(...)` / `testAll()`
-- **PlannerTestController** — `GET /api/v2/test/planner` → `testPlanner(provider, model, spec, classification)`
-- **ReviewerTestController** — `GET /api/v2/test/reviewer` → `testReviewer(provider, model)`
-- **RouterTestController** — `/api/v2/test` (no public mappings)
-- **ToolRegistryTestController** — `/api/v2/test` (no public mappings)
-- **WorkerTestController** — `GET /api/v2/test/worker` → `testWorker(provider, model)`
+OAuth (handled by `auth/oauth/OAuthSuccessHandler`):
+```
+GET    /api/auth/oauth2/init?surface=...           302 → provider
+GET    /api/auth/oauth2/authorize                  (Spring framework)
+GET    /api/auth/oauth2/callback/{provider}        302 → /auth/callback?token=&refresh=
+```
 
 ---
 
-## 2. Services (key public APIs)
+## 2. Services (orchestration-level)
 
-Only the orchestration-level services that controllers call directly are enumerated here. Helper services (e.g. `*Pdf*`, `*Audit*` variants, format adapters) are intentionally omitted.
+### Run + pipeline
 
-### 2.1 TierEnforcementService
-- Pkg: `auth.service` — enforces monthly run quotas + per-tier ceilings.
-
-```java
-void   assertAndIncrementRunCount(String userId)
-void   assertCanSubmitRun(String userId)
-void   assertCanApplySuggestion(String userId, PipelineRun run)
-void   assertCanCreateProject(String userId, String orgId)
-void   assertCanLinkRepoToProject(String userId, String projectId)
-void   assertComplexityAllowed(String userId, TaskPlan plan)
-void   incrementRunCount(String userId)
-void   decrementRunCount(String userId)
-int    effectiveOrgLimit(Org org)
-int    effectiveUserLimit(AppUser user)
-boolean shouldResetUserCounterForJob(AppUser user, Map<String, BillingSubscription> activeByUser)
-boolean shouldResetOrgCounterForJob(Org org, Map<String, BillingSubscription> activeByUser)
-String resolveUserTier(String userId)
-boolean requiresCostCap(String tier, boolean hasByok)
-double resolveRunCostBudget(String tier, boolean hasByok)
+`integration/RunOrchestrator` — V2 BUILD + PATCH pipeline owner.
 ```
-
-### 2.2 BillingService
-- Pkg: `billing.service` — gateway-routed (Razorpay / Stripe).
-
-```java
-List<PlanResponse>       listPlans(String keyMode)
-SubscriptionInitResult   subscribe(String userId, UUID planId)
-BillingStatusResponse    verifyAndActivate(String userId, VerifyPaymentRequest request)
-void                     cancel(String userId)
-BillingStatusResponse    updateSeats(String userId, int newTotalSeats)
-BillingStatusResponse    getStatus(String userId)
-void                     processRazorpayWebhook(String rawPayload, String signature)
-void                     processStripeWebhook(String rawPayload, String signature, String eventType)
-```
-
-### 2.3 ProjectArchitectureService
-- Pkg: `codeintel` — 3-step pipeline owner (codemap → per-repo HLD/LLD → cross-repo synthesis).
-
-```java
-ProjectArchitectureDoc       generate(String projectId)
-Optional<RepoArchitectureDoc> latestRepoArch(String projectId, UUID repoId)
-RepoArchitectureDoc          regenerateForRepo(String projectId, UUID repoId, String patOverride)
-Optional<ProjectArchitectureDoc> latest(String projectId)
-List<ProjectArchitectureDoc> versions(String projectId)
-ProjectArchitectureDoc       annotate(String projectId, String annotation)
-Optional<ProjectCodeMap>     latestCodeMap(String projectId, UUID repoId)
-```
-
-### 2.4 ProjectInviteService
-- Pkg: `sharing.service` — V175 cross-org project sharing.
-
-```java
-ProjectInvite      createInvite(String projectId, String email, String role, AppUser inviter)
-String             accept(String token, AppUser caller)
-void               revoke(UUID inviteId, AppUser actor)
-List<ProjectInvite> listPending(String projectId)
-Optional<ProjectInvite> findByToken(String token)
-```
-
-### 2.5 ProjectShareLinkService
-- Pkg: `sharing.service` — V175 public read-only share links.
-
-```java
-ProjectShareLink   createLink(String projectId, ProjectShareLink.Surface surface, String scopeId, String label, Instant expiresAt, AppUser creator)
-void               revoke(UUID linkId, AppUser actor)
-ProjectShareLink   resolveActive(String token)
-void               recordView(ProjectShareLink link)
-List<ProjectShareLink> listForProject(String projectId)
-long               activeCountForProject(String projectId)
-```
-
-### 2.6 ScmPushService
-- Pkg: `integration.scm` — multi-repo push + per-repo PR + cross-link.
-
-```java
-void                  push(PipelineRun run)
-ApplyPushResult       pushApplyChanges(PipelineRun run, String commitMessage)
-ApplyPushResult       skipped(String reason)
-ApplyPushResult       multiRepo(List<ApplyRepoOutcome> outcomes)
-ApplyPushResult       singleRepo(ApplyRepoOutcome outcome)
-record ApplyRepoOutcome(String repoFullName, String branch, boolean ok, boolean clean, String message)
-record ApplyPushResult(String mode, String skippedReason, List<ApplyRepoOutcome> perRepo)
-```
-
-### 2.7 RunOrchestrator
-- Pkg: `integration` — V2 pipeline orchestrator.
-
-```java
-PipelineRun     submitRun(String userRequest, String source, String repoUrl, String repoMode, String githubPat,
-                          String githubOwner, boolean skipApproval, boolean autoMerge, String modelName,
-                          String aiProvider, String createdByUserId, String orgId, String projectId,
-                          String executionMode, List<UUID> selectedRepoIds, String figmaUrl, boolean tddMode,
-                          String branch, String prReviewComments)
-boolean         cancel(String runId)
-boolean         pause(String runId)
-ResumeOutcome   resume(String runId)
+PipelineRun submitRun(... 7 overloads, canonical 20-arg includes runMode)
+boolean cancel(String runId)
+boolean pause(String runId)
+ResumeOutcome resume(String runId)
 CrashResumeOutcome resumeAfterCrash(String runId)
-RunPipelineRequest fromPausedRow(PipelineRun run)
-List<String>    haltAllActiveRuns(String reason)
+List<String> haltAllActiveRuns(String reason)
 Map<String,Object> forceFailTask(String runId, String taskId, String reason)
-void            retryTask(String runId, String taskId)
-void            retryValidation(String runId)
-void            reReview(String runId)
-record RunPipelineRequest(String runId, String userRequest, String provider, String model,
-                          String executionMode, boolean skipApproval, String projectId,
-                          List<UUID> selectedRepoIds, String githubPat, boolean tddMode, ...)
+void retryTask(String runId, String taskId)
+void retryValidation(String runId)
+void reReview(String runId)
 ```
 
-### 2.8 SequentialExecutor
-- Pkg: `harness` — per-task tier-routed worker dispatcher (the V2 executor boundary, not a service per se).
-
-```java
-ExecutionResult  execute(ExecutionRequest req)
-void             persistTaskStatus(String runId, String taskIdShort, String status)
-record ResumeRequest(String resumeFromTaskId, ...)
+`integration/IntegrationManager` — inbound webhook router.
+```
+String handleWebhook(String sourceType, Map<String,String> headers, String rawBody)
+String submitEvent(IntegrationEvent event)
+List<String> getEnabledSources()
+Optional<InboundAdapter> getInboundAdapter(String sourceType)
+List<IntegrationRun> listIntegrationRuns(String source)
 ```
 
-### 2.9 ValidationReportService
-- Pkg: `report`
-
-```java
-Optional<ValidationReport>       generateAndPersist(String runId, ReportInput input)
-Optional<ValidationReportDTO>    getByRunId(String runId)
-Optional<ValidationReport>       findEntityByRunId(String runId)
-Optional<ValidationReportShareDTO> getByShareToken(String shareToken)
-String                           share(String runId)
-String                           extractFailureSignature(String failureMessage)
+`integration/scm/ScmPushService` — SCM dispatch (GitHub/Bitbucket).
+```
+void push(PipelineRun run)
+ApplyPushResult pushApplyChanges(PipelineRun run, String commitMessage)
 ```
 
-### 2.10 MailService
-- Pkg: `auth.service` — transactional email (SMTP or Gmail API). Twenty-three send methods grouped here:
-
-```java
-String getAdminAddress()
-void sendVerificationEmail(String toEmail, String firstName, String token)
-void sendPasswordResetEmail(String toEmail, String firstName, String token)
-void sendTemporaryPasswordEmail(String toEmail, String firstName, String tempPassword)
-void sendOrgInviteEmail(String toEmail, String orgName, String token)
-void sendProjectInviteEmail(String toEmail, String projectName, String inviterEmail, String acceptUrl, long expiresInDays)
-void sendReferralInvite(String toEmail, String referrerName, String token)
-void sendEscalationToAdmin(String adminEmail, String invitedEmail, String orgName, String invitationId)
-void sendInviteRejectedEmail(String orgAdminEmail, String invitedEmail)
-void sendNewUserAlertToAdmin(String adminEmail, String newUserEmail)
-void sendAdminReminderEmail(String to, String subject, String body)
-void sendWeeklyAdminSummary(String adminEmail, Map<String, Object> summary)
-void sendContactFeedbackEmail(String adminEmail, String userEmail, String userName, String subject, String feedbackBody)
-void sendWelcomeEmail(String toEmail, String firstName, String tier)
-void sendTierUpgradeEmail(String toEmail, String firstName, String planName, String tier)
-void sendSuspensionEmail(String toEmail, String firstName)
-void sendRunCompletionEmail(String toEmail, String firstName, String runId, String status, String statusReason, String runTitle, Double verifiedScore, Double costUsd, String prUrl, String runUrl)
-void sendBonusRunsEmail(String toEmail, String firstName, int quantity)
-void sendInvoiceEmail(String toEmail, String firstName, String invoiceNumber, long subtotalPaise, long gstPaise, long totalAmountPaise, byte[] pdfBytes, String pdfFilename)
-void sendDunningReminder(String toEmail, String firstName, String planName, String urgency)
-void sendRenewalReminder(String toEmail, String firstName, String planName, String renewalDate)
-void sendUserUsageReport(String toEmail, String firstName, String periodLabel, String periodRange, UsageReportService.UserUsageData data)
-void sendOrgUsageReport(String toEmail, String orgName, String periodLabel, String periodRange, UsageReportService.OrgUsageData data)
+`harness/SequentialExecutor` — V2 per-task tier-routed worker dispatcher.
+```
+ExecutionResult execute(ExecutionRequest req)
+ExecutionResult execute(ExecutionRequest req, ResumeRequest resume)
+void persistTaskStatus(String runId, String taskIdShort, String status [, String reason [, String diagJson]])
 ```
 
-### 2.11 FeatureFlagService
-- Pkg: `config.featureflag` — Redis-backed flag store with pub/sub invalidation.
-
-```java
-boolean         isEnabled(String key)
-String          getString(String key, String defaultValue)
-int             getInt(String key, int defaultValue)
-FeatureFlag     update(String key, String value, String userId)
-List<FeatureFlag> listAll()
-void            onMessage(Message message, byte[] pattern)
+`harness/GateStore` — plan/merge approval gate (Redis + DB fallback).
+```
+void openPlanGate(String runId)
+boolean tryClaimPlanGate(String runId, boolean approved)
+void setPlanGate(String runId, boolean approved)
+boolean awaitPlanGate(String runId)
+boolean isPlanGateWaiting(String runId)
+void clearPlanGate(String runId)
 ```
 
-### 2.12 AuthService
-
-```java
-UserDto         register(RegisterRequest req)
-void            verifyEmail(String token)
-LoginResponse   verifyEmailAndAuthenticate(String token)
-LoginResponse   login(LoginRequest req)
-String          generateRefreshToken(String userId)
-LoginResponse   refresh(String refreshToken)
-void            logout(String refreshToken)
-void            forgotPassword(String email)
-void            resetPassword(String token, String newPassword)
-void            changePassword(String userId, ChangePasswordRequest req)
-void            resendVerification(String email)
-AppUser         findOrCreateFromOAuth(String provider, String oauthId, String email, String name, String avatarUrl)
+`harness/WorkspaceInitService`
+```
+void ensureRunWorkspace(String runId)
+void cloneFromRepo(String runId, String repoUrl, String pat)
+void copyFromRun(String sourceRunId, String targetRunId)
+void cloneMultipleRepos(String runId, List<RepoToClone> repos, String pat)
+Path runWorkspacePath(String runId)
 ```
 
-### 2.13 OrgService
-
-```java
-OrgDto              createOrg(String creatorUserId, CreateOrgRequest req)
-OrgDto              getOrg(String orgId)
-OrgDto              updateOrg(String orgId, String actorId, String name, List<String> domains)
-List<OrgMemberDto>  listMembers(String orgId)
-void                removeMember(String orgId, String userId, String performedBy)
-void                changeMemberRole(String orgId, String userId, String newRole, String actorId)
-List<OrgDto>        listAllOrgs()
-void                changeOrgStatus(String orgId, String status, String performedBy)
-void                suspendMember(String orgId, String targetUserId, boolean suspend, String performedBy)
-Org                 createOrgAsAdmin(String name, String adminUserId)
-Org                 bootstrapPersonalOrg(String userId)
-OrgDto              updateRunLimitOverride(String orgId, Integer limit, String actorId)
-OrgDto              updateExternalSharing(String orgId, boolean enabled, String actorId)            // V198
-OrgDto              updateApiKeysProvided(String orgId, boolean provided, String actorId)
-OrgDto              updateAiKeySettings(String orgId, String anthropicKey, String openAiKey, String geminiKey, String actorId)
-OrgDto              updateKeySourceSettings(String orgId, String keySourceMode, List<String> enabledProviders, String actorId)
-OrgDto              updateJiraSettings(String orgId, String baseUrl, String email, String apiToken, String actorId)
-OrgDto              updateConfluenceSettings(String orgId, String baseUrl, String email, String apiToken, String actorId)
-List<String>        getEnabledIntegrations(String orgId)
-void                changeOrgTier(String orgId, String newTier, String performedBy)
-SeatsAdjustResponse adjustSeats(String orgId, int newSeats, String performedBy)
+`harness/UiStyleResolver`
+```
+String loadDesignContent(String designName)
+String fuzzyMatchDesign(String hint)
+String resolveDesignName(String explicit, String plannerStyle, String projectType)
+String extractStyleHint(String userRequest)
+String buildFrontendConstraintBlock(String uiStyleJson, String designContent)
+String getThemeJson(String themeId)
+String resolve(String userRequest, String explicitUiStyle)
+String enrichWithDesignName(String uiStyleJson, String designName)
+List<String> getCuratedStyles()
+Set<String> getAvailableDesigns()
 ```
 
-### 2.14 ProjectService
-
-```java
-ProjectDto              createProject(String orgId, String createdBy, CreateProjectRequest req)
-List<ProjectDto>        listProjectsForUser(String orgId, String userId, boolean isOrgAdmin)
-ProjectDto              getProject(String projectId, String userId, boolean isSuperAdmin, boolean isOrgAdmin)
-ProjectDto              getProjectIncludingDeleted(String projectId)
-ProjectDto              archiveProject(String projectId, String actorId)
-ProjectDto              unarchiveProject(String projectId, String actorId)
-void                    softDeleteProject(String projectId, String actorId)
-ProjectDto              restoreProject(String projectId, String actorId)
-void                    addMember(String projectId, String userId, String role, String actorId)
-void                    removeMember(String projectId, String userId, String actorId)
-ProjectDto              updateSettings(String projectId, UpdateProjectSettingsRequest req, String actorId)
-List<ProjectMemberDto>  listMembers(String projectId)
+`harness/VendoredPathGuard`
+```
+static boolean isVendored(String workspaceRelativePath)
+void augmentGitignore(Path repoDir)
+ScrubResult scrubCommittedVendored(Path repoDir)
+int purgeStagedVendored(Path repoDir)
 ```
 
-### 2.15 InvitationService
+`state/StateStore` — central V2 state mutator (`@Transactional`). 80+ public methods including `createRun`, `savePlan`, `markApproved/Rejected/Reviewing/Complete/Failed/Partial`, `saveReview/V2`, `savePlanVersion/incrementPlanVersion/recreateTasksFromPlan`, `markApiSpecReady/PreviewReady/Retrying/RetryingWithFeedback`, `lockTask`, `completeTask`, `addTokensToRun`, `setAgentTokens`, `setCostEstimate/UserCostCap/HardCapUsd/CreditsCharged/ActualCost`, `setBatchCostFields/BatchInfo/ApprovedExecutionMode/updateBatchProgress`, `recordGateOpened/Resolved`, `findResumableRun`, `listRuns` (4 visibility-spec overloads), `archiveRun/unarchiveRun/softDeleteRun/restoreRun` (V191), `cancelRun/pauseRun/resumeRun`, `computeMetrics[ForOrg]` (4 variants), `buildTimeline`, `computeModelComparison[ForOrg]`, `computeUserRunsSummary[Global]`, `findRunsByStatuses/getActiveTasksForRun/getWorkingTasks/getOutageQueuedRuns`, `updateLastActivity/markStuckDetected/markRunStuck/markTaskForRetry/blockTask`, `getTaskEventLog/appendTaskLog`, `getTask/failTask/escalateTask/setEscalationLevel/forceCompactionFlag/recordLlmFailure`, `createSubtasks/getSubtasks/completeParentFromSubtasks`, `saveChatMessage/getChatHistory`, `createIterationRun`, `appendSuggestionTasks/incrementApplySuggestionCount`, `findRunsToArchive/Cleanup/TerminalRunsWithoutGcsKey/markGcsArchived`, `static detectTechStack`, `updateHeartbeat`.
 
-```java
-OrgInvitation       createInvitation(String orgId, String invitedByUserId, InviteRequest req)
-void                approveEscalation(String invitationId, String adminUserId)
-void                rejectEscalation(String invitationId, String adminUserId)
-void                acceptInvitation(String token, String currentUserId)
-OrgInvitation       createAdminInvitation(String orgId, String invitedEmail, String orgRole, String adminUserId)
-void                resendInvitation(String invitationId, String actorUserId)
-List<OrgInvitation> listEscalated()
-List<OrgInvitation> listByOrg(String orgId)
+`state/InboxService`
+```
+void send(runId, fromAgent, toAgent, messageType, content)
+void sendProviderFallback(runId, agentId, from, to, reason)
+void sendFileLockConflict(runId, fromAgent, toAgent, file)
+String drainInbox(agentId, runId)
+List<AgentInbox> getFallbackEvents(runId) / getDeliveredMessages(runId)
 ```
 
-### 2.16 GitHubRepoService
-- Pkg: `repo` — manages GitHub repos for runs.
+### Cost / pricing / credit / entitlements
 
-```java
-String              createRepo(String goal, String nameOverride, String visibility)
-boolean             closePullRequest(String repoFullName, int prNumber, String overridePat)
-boolean             deleteBranch(String repoFullName, String branch, String overridePat)
-List<ChangedFile>   compareCommits(String repoFullName, String baseSha, String headSha, String overridePat)
-boolean             installWebhook(String repoFullName, String overridePat)
-void                updateRepoDescription(String repoUrl, String description, String overridePat)
-List<String>        listRepoFiles(String repoUrl, String overridePat)
-String              readRepoFile(String repoUrl, String relativePath, String overridePat)
-void                cloneRepo(String repoUrl, String workspacePath)
-String              generateRepoName()
-String              generateSlug(String goal)
-String              getDefaultBranch(String repoUrl, String overridePat)
-long                getRepoSizeKb(String repoUrl, String overridePat)
-String              getBranchHeadSha(String repoUrl, String branch, String overridePat)
-String              createPullRequest(String repoUrl, String head, String base, String title, String prBody, String overridePat)
-void                updatePullRequestBody(String repoUrl, int prNumber, String newBody, String overridePat)
-void                requestReviewers(String repoUrl, int prNumber, List<String> reviewers, String overridePat)
-String              fetchPrReviewComments(String repoFullName, int prNumber, String overridePat)
-String[]            extractOwnerRepo(String repoUrl)
-PullRequestSnapshot getPullRequestSnapshot(String repoFullName, int prNumber, String overridePat, int diffMaxChars)
-CheckRunRollup      getCheckRunRollup(String repoFullName, String sha, String overridePat)
-List<RemoteRepo>    listOwnerRepos(String ownerFilter, String overridePat)
-record ChangedFile(String filename, String status, int additions, int deletions)
-record RemoteRepo(String fullName, String defaultBranch, boolean isPrivate)
-record PullRequestSnapshot(String title, String body, String state, boolean merged, int additions, int deletions, int changedFiles, String headBranch, String baseBranch, String headSha, String diffPreview)
-record CheckRunRollup(String status, int failingCount)
+`cost/RunCostTracker`
+```
+void record(runId, provider, model, ChatResponse)
+void record(runId, taskId, provider, model, ChatResponse)
+Snapshot snapshot(runId) / snapshotTask(runId, taskId)
+Snapshot finalizeRun(runId)
+Estimate estimateRun(provider, model, complexities)
+Estimate estimateRunTierAware(provider, complexities [, strategy [, repoCount, projectScoped]])
+double computeCost(provider, model, inTok, outTok)
 ```
 
-### 2.17 DeploymentService
-
-```java
-void        validatePrerequisites()
-boolean     isEnabled()
-Deployment  deploy(String runId, RunRepo.RepoMode repoMode, String repoUrl, String repoName)
-void        rollback(String deploymentId)
-void        deleteDeployment(String deploymentId)
+`cost/CostHistoryService`
+```
+void recordOnTerminal(String runId)
+Optional<RunCostTracker.Estimate> estimateFromHistory(strategy, provider, repoCount, taskCount)
 ```
 
-### 2.18 PreviewService
-- Pkg: `deployment.preview` — Cloud Run or Docker preview, 5-min TTL.
-
-```java
-PreviewAnalysis analyze(String runId)
-PreviewSession  start(String runId, AppUser user, Map<String, String> envVars)
-void            stop(String runId)
-PreviewSession  rebuild(String runId, AppUser user)
-PreviewSession  getStatus(String runId)
-String          getLogs(String runId, int tailLines, String filter)
-ExecResult      execInContainer(String runId, String cmd, List<String> args)
-record PreviewAnalysis(DatabaseType databaseType, List<EnvVarDetector.DetectedEnvVar> requiredEnvVars)
+`cost/RunTokenAttributor`
+```
+void attributePhase(runId, Phase, in, out, provider, model)  // PLANNER | REVIEWER
+void attributeWorker(runId, ExecutionResult, totalIn, totalOut, provider, model)
 ```
 
-### 2.19 RunCostTracker
-- Pkg: `cost` — per-run cost accumulator (cache-aware pricing, 3-provider).
-
-```java
-void      record(String runId, String provider, String model, ChatResponse response)
-Snapshot  snapshot(String runId)
-Snapshot  snapshotTask(String runId, String taskId)
-Snapshot  finalizeRun(String runId)
-Estimate  estimateRun(String provider, String model, List<String> taskComplexities)
-Estimate  estimateRunTierAware(String provider, List<String> taskComplexities)
-double    computeCost(String provider, String model, int inTok, int outTok)
-record Estimate(double lowUsd, double highUsd, int credits, double hardCapUsd, int taskCount)
-record Snapshot(int inputTokens, int outputTokens, int cacheWriteTokens, int cacheReadTokens, double costUsd, int calls)
+`agent/CostEstimator`
+```
+CostBreakdown estimate(TaskPlan plan [, LlmProvider])
+double[] estimateFromTask(TaskDefinition, provider, model)
+double[] estimateOverhead(AgentModelConfig)
+double computeCost(provider, model, inTok, outTok)
+double computeCostForRun(String runId)
 ```
 
-### 2.20 ModelRegistry
-- Pkg: `router` — YAML-backed model metadata lookup.
-
-```java
-String   canonicalize(String modelName)
-String   providerFor(String modelName)
-boolean  isKnownModel(String name)
-int      contextLimitFor(String modelName)
-int      contextLimitForOrPrefixFallback(String modelName)
-int      maxOutputForModel(String modelName)
-double[] pricingFor(String modelName)
-String   notesFor(String modelName)
-String   displayLabelFor(String modelName)
-List<String[]> fallbackChainFor(String modelName)
-List<String[]> fallbackChainForTier(String tier)
-String   freeTierModel()
-String   freeTierProvider()
-String   workhouseModelFor(String provider)
-String   planningModelFor(String provider)
-String   lightweightModelFor(String provider)
-Map<String, ModelMatrixProperties.ModelConfig> allModels()
+`entitlements/EntitlementResolver`
+```
+EntitlementsResponse resolve(String userId)
 ```
 
-### 2.21 StateStore
-- Pkg: `state` — wide JPA façade over the run-lifecycle entities. ~100 methods; abbreviated below.
-
-```java
-PipelineRun  createRun(String request, String plannerModel, String workerModel, String reviewerModel)
-PipelineRun  save(PipelineRun run)
-Optional<PipelineRun> findRun(String runId)
-void         savePlan(String runId, TaskPlan plan)
-void         markApproved(String runId)
-void         savePlanVersion(String runId, String source, String createdBy)
-void         incrementPlanVersion(String runId)
-void         recreateTasksFromPlan(String runId, TaskPlan plan)
-void         markRejected(String runId, String reason)
-void         markReviewing(String runId)
-void         saveReview(String runId, TaskReviewReport review)
-void         saveReviewV2(String runId, ReviewReport review)
-ReviewReport getReviewReportV2(String runId)
-void         markComplete(String runId)
-void         markFailed(String runId, String reason)
-void         markPartial(String runId, String reason)
-void         markApiSpecReady(String runId)
-void         markPreviewReady(String runId, String serveDir)
-void         markRetrying(String runId, String taskId)
-void         markRetryingWithFeedback(String runId, String taskId, String reworkFeedback)
-boolean      lockTask(String taskId, String model, String branchName)
-void         completeTask(String taskId, WorkerReport report)
-void         addTokensToRun(String runId, int inputTok, int outputTok)
-void         setAgentTokens(String runId, String agentRole, int inputTok, int outputTok, String provider, String model)
-void         setCostEstimate(String runId, double lowUsd, double highUsd)
-void         setUiStyle(String runId, String uiStyleJson)
-void         setCreditsCharged(String runId, int credits)
-void         setHardCapUsd(String runId, double hardCap)
-void         setUserCostCap(String runId, Double userCostCap)
-void         setBatchCostFields(String runId, Integer batchCredits, boolean batchAvailable, int creditSavings)
-void         setBatchInfo(String runId, String batchId, String batchProvider)
-void         setApprovedExecutionMode(String runId, String mode)
-void         clearCurrentGate(String runId)
-void         updateBatchProgress(String runId, int completed, int total)
-List<PipelineRun>   findRunsByStatusIn(List<String> statuses)
-void         markTaskComplete(String taskId)
-void         setTaskModelProvider(String taskId, String model, String provider)
-void         markTaskFailed(String taskId, String reason)
-void         setPromptHash(String taskId, String promptHash)
-void         resetTaskForRetry(String taskId)
-void         updateTaskTokens(String taskId, int inputTokens, int outputTokens)
-void         setActualCost(String runId, double costUsd)
-void         updateTaskReadmeStatus(String taskId, boolean readmeUpdated)
-void         recordCompaction(String taskId, String checkpointPath)
-void         saveTask(AgentTask task)
-List<AgentTask>  getPendingTasks(String runId)
-List<AgentTask>  getIncompleteTasks(String runId)
-List<AgentTask>  getAllTasks(String runId)
-String       recordGateOpened(String runId, String gateType)
-void         recordGateResolved(String gateEventId, boolean approved)
-Optional<PipelineRun> findResumableRun()
-Page<PipelineRun>     listRuns(String status, Pageable pageable)
-PipelineRun  archiveRun(String runId)
-PipelineRun  unarchiveRun(String runId)
-PipelineRun  softDeleteRun(String runId)
-PipelineRun  restoreRun(String runId)
-boolean      cancelRun(String runId)
-boolean      pauseRun(String runId)
-boolean      resumeRun(String runId)
-MetricsData       computeMetrics()
-MetricsData       computeMetricsForOrg(String orgId)
-TimelineData      buildTimeline(String runId)
-ModelComparisonData computeModelComparison(int days)
-ModelComparisonData computeModelComparisonForOrg(int days, String orgId)
-UserRunsSummaryData computeUserRunsSummary(String orgId, int days)
-UserRunsSummaryData computeUserRunsSummaryGlobal(int days)
-void         logMessage(String runId, String from, String to, String type, String summary, int tokenCost)
-List<PipelineRun>  findRunsByStatuses(List<String> statuses)
-List<AgentTask>    getActiveTasksForRun(String runId)
-List<AgentTask>    getWorkingTasks()
-List<PipelineRun>  getOutageQueuedRuns()
-void         updateLastActivity(String taskId)
-void         markStuckDetected(String taskId)
-void         markRunStuck(String runId)
-void         markTaskForRetry(String taskId)
-void         blockTask(String taskId, String reason)
-List<String> getTaskEventLog(String taskId, int limit)
-void         appendTaskLog(String taskId, String event)
-AgentTask    getTask(String taskId)
-void         failTask(String taskId, String reason)
-List<AgentTask>  createSubtasks(String parentTaskId, String runId, List<TaskDefinition> subtaskDefs, String tenantId)
-List<AgentTask>  getSubtasks(String parentTaskId)
-void         completeParentFromSubtasks(String parentTaskId)
-List<AgentTask>  getTasksForRun(String runId)
-void         escalateTask(String taskId, String provider, String model)
-void         setEscalationLevel(String taskId, int level)
-void         forceCompactionFlag(String taskId)
-void         recordLlmFailure(String taskId, Object failure)
-List<PipelineRun>  getRecentCompletedRuns(int limit)
-long         countCompletedRuns()
-TaskReviewReport   getReviewReport(String runId)
-void         saveChatMessage(String runId, String role, String content)
-List<Map<String,String>>  getChatHistory(String runId)
-PipelineRun  createIterationRun(PipelineRun sourceRun, String newRequest)
-List<AgentTask>   appendSuggestionTasks(String runId, TaskPlan miniPlan, int applyIndex, ApplySource source)
-void         incrementApplySuggestionCount(String runId)
-List<PipelineRun>  findRunsToArchive(Instant cutoff)
-void         markGcsArchived(String runId, String gcsKey)
-List<PipelineRun>  findRunsToCleanup(Instant cutoff)
-List<PipelineRun>  findTerminalRunsWithoutGcsKey(Instant cutoff)
-void         updateStatus(String runId, String status)
-void         updateHeartbeat(String runId, String instanceId, Instant heartbeat)
+`credit/LifetimeCreditService`
+```
+int currentBalance(userId) / boolean canSubmit(userId)
+int decrementForRun(userId) / int refund(userId) / int grantInviteCredit(userId)
+static boolean isPaidTier(AppUser)
 ```
 
-### 2.22 LlmRouter (V2)
-- Pkg: `agent` — native-tool-only, provider-agnostic dispatcher.
+### Auth / org / users / projects / billing
 
-```java
-ChatResponse  call(LlmRequest request)
-```
+- `auth/service/AuthService` — register / login / refresh / verify-email / OAuth find-or-create + reset/change password.
+- `auth/service/OrgService` — org lifecycle, members, key-source / AI keys / JIRA / Confluence / external-sharing / seats.
+- `auth/service/ProjectService` — project CRUD, members, archive/unarchive/soft-delete/restore.
+- `auth/service/InvitationService` — org invite create/approve/reject/accept/resend.
+- `auth/service/TierPermissionService` — single source for "can user do feature X?". Returns nested `TierPermissions` record.
+- `auth/service/TierEnforcementService` — `assertAndIncrementRunCount`, `assertCanSubmitRun`, `assertCanApplySuggestion`, `assertCanCreateProject`, `assertCanLinkRepoToProject`, `assertComplexityAllowed`, `decrementRunCount`, `effectiveOrgLimit/UserLimit`, `resolveUserTier`, `requiresCostCap`, `resolveRunCostBudget`.
+- `auth/service/PaymentAuditService` — record + page audit + CSV export.
+- `auth/service/ActivityAuditService` — append + hash-chain audit (`record`, `static computeRowHash`, `verifyChain`, `query`).
+- `auth/service/MonthlyRunCounterResetJob` — cron `0 0 0 1 * *` Asia/Kolkata + ShedLock.
+- `auth/service/WeeklyAdminSummaryJob` — cron `0 0 9 * * MON` Asia/Kolkata.
+- `auth/service/GmailOAuthService` — Gmail REST API OAuth.
+- `auth/service/UserDataExportService` — `exportForUser(userId) → ExportBundle` (GDPR ZIP).
+- `auth/service/MailService` — 23 `@Async` send-* methods (verification, password reset, org invite, project invite, referral invite, escalation, weekly summary, contact, welcome, tier upgrade, suspension, run completion, bonus runs, invoice, dunning, renewal, usage reports).
 
-### 2.23 FallbackLlmRouter (legacy)
-- Pkg: `agent` — fallback router for non-tool-calling agents (`AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`).
+- `billing/service/BillingService` — plans, status, subscribe, verify, cancel, seats, Razorpay + Stripe webhooks, tier bridge to AppUser/Org. `TIER_RANK={FREE:0,STARTER:1,PRO:2,TEAM:3,ENTERPRISE:4}`.
+- `billing/service/InvoiceService` — `generateSubscriptionInvoice`, `generateTopupInvoice`, `generateStripeSubscriptionInvoice`, `generateCreditNote`, `findLatestBySubscriptionId`, `getInvoice`, `getLineItems`, `listByUser/Org/All`, `voidInvoice`, `nextInvoiceNumber()` row-locked.
+- `billing/service/InvoicePdfService` — `generatePdf(invoice) → byte[]` (Thymeleaf + iText).
+- `billing/service/InvoiceEmailService` — `@Async sendInvoice`.
+- `billing/service/RunTopupService` — `getPackages`, `getAvailableBonus[ForOrg]`, `consumeBonusRun[ForOrg]`, `initiatePurchase`, `verifyAndCredit`, `grantBonusRuns`, `listTopups`, `expireOverdueTopups`.
+- `billing/service/FounderPricingService` — `@Transactional tryAllocate(userId, orgId, tier) → AllocationResult` (Granted/NoOffer/SoldOut/Inactive), `revokeAllocation`.
+- `billing/service/AccountingService` — `recordRevenueEntry`, `recordRefundEntry`, `getRevenueMetrics`, `getGstSummary`, `exportGstr1`, `getTrialBalance`, `getEntries`.
+- `billing/service/GstCalculationService` — `calculate(subtotalPaise, buyerStateCode, sellerStateCode, buyerCountry) → GstBreakdown`.
+- `billing/service/UsageTrackingService` — `assertWithinLimits`, `increment`, `decrement`, `getCurrentUsage`.
+- `billing/service/PlanSeederService` — `@Transactional seedAllPlans`.
+- `billing/service/AnalyticsService` — JdbcTemplate-driven `getUsageMetrics`, `getMemberUsage`, `getBillingOverview`, `getCostBreakdown`.
+- `billing/service/BillingNotificationService` — `@Async` Gmail-API lifecycle emails.
+- `billing/service/RunQuotaRefundListener` — `@Async @EventListener` refunds credits on FAILED / clean-PARTIAL.
+- `billing/service/CostOutlierDetector` — `@EventListener` actual > 2× estimate WARN + counter.
+- `billing/lifecycle/TierLifecycleService` — `transitionTier`, `transitionPlan`, `listAll`, `executeSunsettingSideEffects`.
+- `billing/scheduler/DunningScheduler` / `PeriodEndDowngradeScheduler` / `RenewalReminderScheduler` — daily crons.
 
-```java
-LlmResponse  callWithFallbackTracked(String primaryProvider, String primaryModel, Prompt prompt, String runId, String agentId, FallbackMode mode, int iteration, boolean justCompacted)
-ChatResponse callWithFallback(String primaryProvider, String primaryModel, Prompt prompt, String runId, String agentId, FallbackMode mode, int iteration, boolean justCompacted)
-LlmResponse  callDirect(String provider, String model, Prompt prompt)
-void         clearRunCallCounter(String runId)
-int          getRunCallCount(String runId)
-void         setRunUserTier(String runId, String userTier)
-String       getRunUserTier(String runId)
-record LlmResponse(ChatResponse response, String provider, String model)
-```
+- `billing/gateway/PaymentGatewayRouter` — `resolve(entity)`, `resolveByName(name)`, `stripe()`, `razorpay()`, `isStripeEnabled()`, `isRazorpayEnabled()`.
+- `billing/gateway/BillingEntityResolver` — `resolve(AppUser) → BillingEntity` (UserBillingEntity or OrgBillingEntity).
+- `billing/gateway/StripePaymentGateway` (`implements PaymentGateway`).
+- `billing/gateway/RazorpayPaymentGateway` (`implements PaymentGateway` — delegates to `BillingGateway`).
+- `billing/gateway/RazorpayGateway` (`implements BillingGateway`).
 
-### 2.24 ToolRegistry
-- Pkg: `tool` — adapts `Tool` beans to Spring AI `ToolCallback`s.
+### Memory / chat / RAG / project workspace
 
-```java
-List<String>          toolNames()
-Tool                  find(String name)
-List<ToolCallback>    bind(ExecutionContext ctx)
-List<ToolCallback>    bindForWorker(ExecutionContext ctx)     // filters gitCommit per CLAUDE.md
-Map<String, ToolDefinition> toolDefinitions()
-ToolDefinition        getToolDefinition()
-String                call(String toolInput)
-```
+- `memory/RunLedgerAgent` — `generateLedgerEntry(runId)`.
+- `memory/MemoryCompactionService` — `compactNow(projectId, orgId)`, `compactIfNeeded(projectId, currentRunNumber, orgId)`.
+- `memory/ProjectMemoryProvider` — `buildPlannerContext(projectId)`, `getStats(projectId) → MemoryStats`.
+- `memory/ProjectChatService` — `history`, `clearHistory`, `compactHistory`, `compileToSpec`, `send(... callerPat)`.
+- `memory/chattools/ProjectChatTools` — `bind(ToolContext) → List<ToolCallback>` exposing 9 tools.
 
-### 2.25 ContextStore
-- Pkg: `context` — Redis-backed worker-context snapshot store (24h TTL).
+- `chat/ApplyService` — `apply(runId, suggestion, source) → ApplyResult`.
+- `chat/ChatService` — `history(runId)`, `send(runId, userMessage) → SendResult`, `renderValidationReport(runId)`.
+- `chat/ApplyResultStore` — `put/get/delete` (Redis 1h TTL).
 
-```java
-String                   keyFor(String runId, String taskId)
-int                      save(ExecutionContext ctx, List<Message> history, int iteration)
-Optional<SavedContext>   load(ExecutionContext ctx)
-void                     delete(ExecutionContext ctx)
-boolean                  exists(ExecutionContext ctx)
-```
+- `project/rag/ProjectDocumentService` — `upload`, `@Async indexAsync(docId)`, `list`, `delete`.
+- `project/rag/RetrievalService` — `retrieve(projectId, query [, k, tokenCap]) → String`.
+- `project/rag/EmbeddingService` — `embed(List<String>)`, `embedQuery(String)`.
+- `project/rag/ChunkingService` — `chunk(text) → List<Chunk>`.
+- `project/rag/ChunkStore` — `insertAll`, `nearest(projectId, queryEmbedding, k)`, `deleteByDocument`.
+- `project/rag/DocumentExtractor` — `extract(file, mimeType) → String` (Tika).
 
-### 2.26 FindingPatchSubmitter
-- Pkg: `finding` — single chokepoint for the four customer-facing autofix surfaces.
+- `project/workspace/ProjectWorkspaceService` — `rootFor`, `resolve`, `initIfMissing`, `writeAndCommit`, `readFile`, `writeRawFile`, `delete`.
+- `project/workspace/ProjectWorkspaceWarmer` — `@Async warmDiskCache(projectId)`.
 
-```java
-SubmitResult submit(Finding finding)
-record SubmitResult(Outcome outcome, String runId, String findingKey)
-```
+### Project architecture / techdebt / scoring / templates / PRs
+
+- `codeintel/ProjectArchitectureService` — `generate`, `regenerateForRepo`, `latestRepoArch`, `latest`, `versions`, `annotate`, `latestCodeMap`.
+- `codeintel/CodeMapGenerator` — `generateWithSha`, `generate` (2 overloads).
+- `codeintel/JavaAstSymbolExtractor` — `static extract(content)`.
+- `codeintel/FilePurposeSummaryService` — `summariseFile`, `generateAndPersist`.
+- `codeintel/RepoArchitectureGenerator` — `generate(repoFullName, codeMap, provider)`.
+- `codeintel/ArchitectureDocGenerator` — `generate(projectId, repoArchDocs, repoNames, provider)`, `static deterministicCombined`.
+- `codeintel/ProjectBriefService` — `buildBrief`, `summarise`.
+- `codeintel/ProjectDocGeneratorService` — `generate(projectId, docType, generatedByUser, provider)`, `latest`.
+- `codeintel/VersionRetentionService` — 4 `pruneXxx` methods.
+- `codeintel/StalenessService` — `report`, `invalidate`.
+- `codeintel/ArchitectureDiffService` — `diff(projectId, fromVersion, toVersion, callerUserId)`.
+- `codeintel/RunCodeMapService` — `isEligible`, `generateForRun`, `findByRunId`.
+
+- `project/service/ProjectRepoService` — repo lifecycle + linking (see Section 1 endpoints).
+- `project/service/WorkspaceHealthService` — `report(projectId, callerUserId)`.
+- `project/service/StackDetector` — `detect(fullName, pat)`.
+- `project/service/StackRefreshJob` — daily cron `0 0 3 * * *`.
+
+- `project/techdebt/TechDebtService` — `build(projectId, sinceDays) → Report`.
+- `project/techdebt/TechDebtFixService` — `dispatchFixForCategory(projectId, category, user)`.
+
+- `project/estimation/EstimationService` — `estimate(projectId, requirement) → Estimate`.
+- `project/template/SpecTemplateService` — `listForProject`, `createForProject`, `createForOrg`, `delete`.
+- `project/security/ProjectAccessGuard` — `assertCanRead`, `assertCanWrite`.
+
+- `project/pr/PullRequestRecordService` — `recordCreated` (V82 + V169 overloads), `applyWebhookUpdate`, `listForRun`, `static extractPrNumber`.
+- `project/pr/PrRefreshService` — `refreshProject(projectId [, callerPat [, forceAll]])`.
+- `project/pr/PostMergeCascadeService` — `onMerged`, `@Async regenerateAfterMerge`, `resolveProjectId`, `readPostMergeBars`, `dismissPostMergeBars`.
+- `project/pr/CiFailureAutoFixService` — `@Transactional onCheckRunFailed(repoFullName, headBranch, summary, url)`.
+
+### Code review / PR review / inbox
+
+- `prreview/PrReviewService` — `assertTierAndQuota`, `submitReview`, `findById`, `findByPr`, `findByProject`, `commentsFor`.
+- `prreview/PrReviewAutofixService` — `dispatch(reviewId, user)`.
+- `prreview/inbox/PrCommentInboxService` — `ingest`, `listForRun`, `countPending`, `findForRun`, `dismiss`, `markAddressed`.
+- `codereview/CodeReviewService` — `assertTierAndQuota`, `submitScan`, `findScan`, `listForProject`, `latestForProjectRepo[AnyStatus]`, `issuesFor`, `openIssuesFor`.
+- `codereview/SemgrepRunner` — `scan(workspaceRoot) → ScanResult`.
+- `codereview/CodeReviewAutofixService` — `dispatchFixForSeverity(scanId, severity, user)`.
+
+### Contracts / standards / ADRs / invariants / activity
+
+- `contracts/detection/ContractDetectionService` — `runForRepo(repoId, projectId, fileLister, contentLoader)`.
+- `contracts/breaking/BreakingChangeService` — `classify(type, oldContent, newContent) → ContractDiff`.
+- `contracts/drift/DriftDetectionService` — `checkContract`, `checkAllForRepo`, `checkAllForProject`.
+- `contracts/injection/ContractInjectionService` — `compose(projectId)`.
+- `contracts/gate/PlanBreakingChangeReport` — `compose(projectId, IntendedChange[])`.
+
+- `standards/EffectiveStandardsResolver` — `resolve(orgId, projectId, projectYaml)`.
+- `standards/StandardsPromptComposer` — `compose(List<Effective>)`.
+- `standards/StandardsRunner` — `run(effective, repoRoot, repoFilePaths, sourceFiles)`.
+- `standards/model/StandardsParser` — `parse(yamlBody) → List<Standard>`.
+- `standards/override/OverridePatternDetector` — `detect(projectId, standardIds)`.
+- `standards/enforcement/lint/LintProcessRunner` — `run(workingDir, argv, timeoutSeconds)`.
+- `standards/enforcement/llmreview/LlmReviewEnforcer` — `composePromptBlock`, `parseReviewResult`.
+- `standards/enforcement/ast/AstCheckEnforcer` — `enforce(spec, files [, FileReader])`.
+- `standards/enforcement/filepattern/FilePatternEnforcer` — `enforce(spec, repoFilePaths)`.
+
+- `arch/invariants/InvariantChecker` — `check(invariantYaml, repoFilePaths, contentLoader)`.
+- `adr/AdrInjectionService` — `compose(projectId)`.
+- `adr/AdrFrontmatterParser` — `parse(fileContent) → Parsed`.
+
+- `activity/ActivityEventEmitter` — `@Async emit(projectId, type, actorUserId, targetType, targetId, summary, payload)`.
+- `activity/ActivityFeedPartitionJob` — cron `0 30 2 * * *`.
+- `activity/ActivityFeedRetentionJob` — cron `0 0 3 * * *`.
+
+### Execution View
+
+- `execution/service/ExecutionOrchestrator` — `createExecution`, `@Async triggerAnalysis`, `approveArchDoc`, `kickoffPlanning`, `@Async dispatchUnified`, `@Async pollAndMirrorV2`, `@Async approvePlanAndExecute`, `@Async executeApprovedPlan`, `abortExecution`, `buildReport`.
+- `execution/service/ExecutionPlannerService` — `@Async generatePlan(runId)`.
+- `execution/service/SolutionExecutionService` — `executeSolution`, `handleFailure`, `processDecision`, `signalManualFixDone`.
+- `execution/service/SolutionDependencyResolver` — `resolveExecutionOrder`, `getBlockedDownstream`.
+- `execution/service/CrossRepoContextService` — `recordContracts`, `buildHandoverContext`.
+- `execution/service/IncrementalCodeMapService` — `refresh(repoFullName, pat)`.
+- `execution/service/ExecutionBranchService` — `branchName`, `tagStart/End`, `tagSolutionStart/End`, `createFinalPr`.
+- `execution/service/ExecutionJiraSync` — `createTicket`, `updateTicket`.
+- `execution/service/ExecutionCostAggregator` — `compute(runId)`, `recomputeAndPersist(runId)`.
+- `execution/service/AdminReconciliationService` — `@Async @EventListener onApplicationReady`, `@Scheduled scheduledReconcile`, `reconcileOrphans`.
+- `execution/service/ExecutionRunCasUpdater` — `boolean casUpdate(runId, Consumer<ExecutionRun>)`.
+- `execution/service/ExecutionTotalsBackfillJob` — `@PostConstruct @Transactional backfill()`.
+
+### Migrations / readymades / sharing / referral / signup / onboarding
+
+- `migration/service/MigrationService` — `list`, `detail`, `static isLocked`, `requiredTierFor`.
+- `migration/service/MigrationDryRunService` — `dryRun(slug, projectId, repoIds)`.
+- `migration/service/MigrationStackMatcher` — `static match(...)`.
+- `migration/service/MigrationOrchestrator` — `apply(slug, ApplyRequest, callerUserId)`.
+- `migration/seeder/MigrationRecipeSeeder` — `@PostConstruct onStartup`, `@Transactional reseed`.
+
+- `readymade/service/ReadymadeService` — `list`, `detail`, `categoryCounts`, `macroGroupCounts`.
+- `readymade/service/VariantResolver` — `resolve(solutionId, projectId, repoId)`.
+- `readymade/service/ReadymadeOrchestrator` — `instantiate(slug, InstantiateRequest, callerUserId)`.
+- `readymade/service/StackNormalizer` — `static normalizeLanguage/normalizeFramework`.
+- `readymade/seeder/ReadymadeSeeder` — `@PostConstruct onStartup`, `@Transactional reseed`.
+
+- `sharing/service/ProjectInviteService` — `createInvite`, `accept`, `revoke`, `listPending`, `findByToken`.
+- `sharing/service/ProjectShareLinkService` — `createLink`, `revoke`, `resolveActive`, `recordView`, `listForProject`, `activeCountForProject`.
+
+- `anonrun/AnonymousRunService` — `submit(spec, clientIp) → Outcome`, `findSession`, `bindToUser`.
+- `anonrun/AnonymousRunSessionStore` — `save`, `find`, `bindToUser` (Redis 24h TTL).
+- `anonrun/AnonymousRunRateLimiter` — `tryConsume(ip)` (3/hour).
+- `anonrun/AbuseHeuristic` — `check(spec) → Decision`.
+- `anonrun/AnonymousRunDispatcher` (interface) + `StubAnonymousRunDispatcher`.
+
+- `referral/ReferralService` — `recordInvite`, `bindReferral`, `onRefereeFirstReadyRun`, `getInviteState`, `lookupByToken`.
+- `referral/ReferralCompletionHook` — `onTerminalStatus(runId, status, userId)`.
+
+- `onboarding/SandboxProvisioningService` — `provisionIfNeeded(userId, sampleId)`, `currentSandboxId(userId)`.
+- `onboarding/SampleSpecRegistry` — `listAll`, `findById`.
+- `onboarding/SandboxCleanupJob` — cron `0 5 * * * *`.
+
+### Validators / reports / tests / smoketest
+
+- `validator/CodeValidator` (interface) / `CodeValidatorImpl` — `validateFile`, `validateProject`.
+- `validator/gate/GateChain` — `execute(toolchain, projectRoot, filePath, level, perGateTimeout)`.
+- `validator/execution/ProcessExecutor` — `execute(ProcessCommand) → ProcessResult`. Allowlists git/mvn/npm/npx/node/mypy/ruff/eslint/tsc/javac/python3/pytest/docker/etc.
+
+- `report/ValidationReportService` — `generateAndPersist`, `getByRunId`, `findEntityByRunId`, `getByShareToken`, `share(runId)`, `static extractFailureSignature`, `static testFactorFromCoverageLevel`, `static rubricTestPointsFromCoverageLevel`, `static mapVerdictToV2Name`, `static isAccuracyHallucinationDescription`.
+- `report/ValidationReportGenerator` — `generate(ReportInput) → LlmReportResult`.
+- `report/ValidationReportPdfService` — `generatePdf(report) → byte[]`.
+- `report/VerifiedScoreBackfillService` — `@Transactional backfillAll() → BackfillResult`.
+- `report/UsageReportService` — `triggerReports(period) → int`.
+
+- `testgen/TestGenOrchestrator` — `runTestGenPipeline(runId, userRequest, planJson)`.
+- `testgen/TestPlannerAgent` — `planTests(...)`.
+- `testgen/TestWorkerAgent` — `generateTestClass(...)` + retry overload.
+- `testgen/TestCompilationGate` — `compileTests(runId)`, `markFailedTasks`.
+- `testgen/TestExecutionService` — `executeTests(runId, testPlanId, previewBaseUrl)`.
+- `testgen/TestPreviewCoordinator` — `onPreviewReady`, `@EventListener onTestsReady`, `cancelIfPending`, `triggerManualExecution`.
+- `testgen/HeadlessTestExecutor` — `execute(runId, testPlanId)`.
+- `testgen/TestReportGenerator` — `generateAndEmit(runId, planId, summary, previewUrl)`.
+- `testgen/TestProjectScaffold` — `scaffold(runId, isStaticHtml)`, `getTestSourceDir`.
+- `testgen/ApiProber` — `probe(baseUrl, knownPaths)`.
+- `testgen/ApiSurfaceExtractor` — `extractPaths`, `extract`.
+- `testgen/ApiConventionsGenerator` — `generate(userRequest, planJson, isCli, isStaticHtml)`.
+- `testgen/SurefireReportParser` — `parse(reportsDir, testPlanId)`.
+- `scoring/TestCoverageRescorer` — `@EventListener onTestExecutionCompleted`.
+- `scoring/RunRubricVerifier` — `@Transactional verifyRubric(runId)`.
+- `scoring/ReviewScoringService` — `score(run, review, accuracy, verifiedScore, figmaUrl) → Scores`.
+
+- `smoketest/CliSmokeRunner` — `run(workspaceRoot) → Result`.
+- `smoketest/BuildCommandResolver` — `resolve(workspaceRoot, plannerCommand)`, `static normalizePython`.
+
+### Repo / SCM / integrations / Slack
+
+- `repo/GitHubRepoService` — `createRepo`, `closePullRequest`, `deleteBranch`, `installWebhook`, `compareCommits`, `updateRepoDescription`, `listRepoFiles`, `readRepoFile`, `cloneRepo`, `generateRepoName/Slug`, `getDefaultBranch`, `getRepoSizeKb`, `getBranchHeadSha`, `createPullRequest`, `updatePullRequestBody`, `requestReviewers`, `fetchPrReviewComments`, `getPullRequestSnapshot`, `getCheckRunRollup`, `listOwnerRepos`, `static extractOwnerRepo`.
+- `repo/BitbucketRepoService` — `cloneRepo`, `getDefaultBranch`, `createPullRequest`, `validateCredentials`.
+- `repo/MonorepoDetector` — `detect(repoFilePaths) → Verdict`.
+
+- `integration/IntegrationConfig` — bean wiring for JIRA/Confluence/ServiceNow/PagerDuty/Bitbucket/Slack.
+- `integration/IntegrationOutboundListener` — `@EventListener` for RunStarted/MergeCompleted/RunFailed.
+- `integration/PerkyMessenger` — periodic LOG SSE events.
+- `integration/IntegrationEventLogCleanupJob` — daily 3am prune ≥7d.
+- `integration/context/ReferenceExtractorService` — `extractAndEnrich`, `extractFromClarification`.
+- `integration/jira/JiraAdapter` + `JiraClient` — fetch/comment/transition.
+- `integration/confluence/ConfluenceAdapter` + `ConfluenceClient`.
+- `integration/pagerduty/PagerDutyAdapter` + `PagerDutyClient`.
+- `integration/servicenow/ServiceNowAdapter` + `ServiceNowClient`.
+- `integration/bitbucket/BitbucketAdapter` + `BitbucketClient`.
+- `integration/slack/SlackNotificationService` — `@EventListener onRunEvent`, `sendTestMessage`.
+- `integration/slack/SlackRateLimiter` — `acquire`, `tryAcquire`.
+- `integration/slack/SlackMessageBuilder` — `build(eventType, run, payload)`.
+- `integration/slack/SlackOAuthService` — `generateInstallUrl`, `handleCallback`, `disconnect`, `isConnected`.
+- `integration/slack/SlackClient` — `chatPostMessage`, `oauthV2Access`, `authTest`, `conversationsList`, `authRevoke`.
+- `integration/slack/SlackNotificationLogCleanupJob` — daily 4am prune ≥90d.
+
+### Notifications / SSE / compliance / governance / saga / recovery / observability / lint / security
+
+- `notification/InAppNotificationService` — `create`, `getNotifications`, `getUnreadCount`, `markRead`, `markAllRead`.
+- `notification/RunCompletionNotifier` — `@Async @EventListener` for RunCompleted/RunFailed/GateOpened/QuotaWarning.
+- `notification/RunCompletionEmailListener` — `@Async @EventListener` PR-O run-completion email.
+- `notification/pref/NotificationPrefService` — `shouldNotify`, `listOverrides`, `setPreference`.
+
+- `sse/SseBroadcaster` — `subscribe(runId [, lastEventId])`, `emit(runId, RunEvent)`, `emitDirect`, `complete(runId)`.
+- `sse/RunDetailSseService` — `@Async @EventListener onRunEvent` pushes full RunDetail.
+
+- `compliance/DataRetentionService` — cron `0 0 3 * * *` retention sweep; `@Transactional eraseUserData(userId)`.
+- `compliance/WorkspaceDiskCleanupJob` — cron `0 30 3 * * *` per-run dir cleanup.
+- `compliance/StaleScmCleanupJob` — cron `0 45 3 * * *` close-stale-PRs + delete-stale-branches.
+
+- `governance/GovernanceGuard` — `assertCanApproveCost`, `assertProjectSpendCap`, `assertRepoOwnerAllowed`, `static ownerAllowedBy`.
+
+- `saga/SideEffectOutbox` — `enqueue(runId, effectType, payload)`, `enqueueCompensation`.
+- `saga/SideEffectExecutor` — `@Scheduled(fixedRate=30000) processDue()`, `processEntry(entry)`.
+
+- `recovery/StartupRunResumer` — `@Async @EventListener(ApplicationReadyEvent) onApplicationReady`, `@Transactional scanAndRecover`.
+
+- `observability/Metrics` — central `executespec.v2.*` Micrometer facade. Public methods: `recordRunOutcome`, `recordRunLatency`, `recordPlannerLatency`, `recordPlannerTaskCount`, `recordTaskStatus`, `recordTaskLatency`, `recordSmokeTest`, `recordWorkerIterations`, `recordWorkerOutcome`, `recordToolCall`, `recordLlmLatency`, `recordKeySource`, `recordClassifierVerifier`, `recordReviewerVerdict`, `recordContextSave`.
+
+- `lint/LintPass` — `run(workspace) → LintReport`.
+
+- `security/InputSanitizer` — `scan(userRequest [, GuardrailLevel])`.
+- `security/CodeAbuseScanner` — `scan(filePath, content [, GuardrailLevel]) → ScanResult`.
+- `security/KeyEncryptor` — `encrypt`, `decrypt` (AES-256-GCM via JWT-derived key).
+- `security/ContextSanitizer` — `sanitizeInput`, `wrapInBoundary`, `sanitizeOutput`.
+- `security/dependency/DependencySecurityPolicy` — `validateSegment(seg, fullCommand [, level])`.
+- `security/dependency/SupplyChainScanner` (interface) + `NoopSupplyChainScanner`.
+- `security/guardrail/GuardrailLevel` (enum LOW/MEDIUM/HIGH) + `GuardrailLevelResolver.current()`, `recordBlock(layer)`.
+
+### Crypto / contact / export / finding / run helpers / SWE-bench / ProgramBench / batch / rollout / eval / preview / deploy / folder
+
+- `crypto/SimpleKeyEncryptionService` — `encrypt`, `decrypt`, `isEncryptionActive`, `isLikelyEncrypted`.
+- `crypto/KeyMigrationRunner` — `@EventListener(ApplicationReadyEvent) migrateExistingKeys()`.
+- `crypto/EncryptedValueConverter` (`@Converter implements AttributeConverter<String,String>`).
+
+- `contact/ContactService` — `submitFeedback(email, name, subject, body)`.
+- `export/ProjectExportService` — `composeBundle(projectId) → byte[]` (tar.gz).
+- `finding/FindingPatchSubmitter` — `submit(Finding) → SubmitResult`.
+
+- `run/RunSkipPushFlag` — `mark`, `consume`.
+- `run/sync/RunSyncService` — `syncToOriginalCommit(runId)`, `sync(runId, branchOverride)`.
+
+- `swebench/SwebenchTaskService` — `@EventListener onRunStarted`, `submit(instanceId, provider, model)`, `@Async captureOnTerminalAsync`.
+- `swebench/SwebenchInstanceLoader` — `findById`, `allInstanceIds`, `imageNameFor`.
+- `swebench/SwebenchContainerStore` — `put/get/remove`.
+- `swebench/SwebenchBootstrap` — `@EventListener bootstrapOnStartup`.
+
+- `programbench/ProgramBenchTaskService` — `submit(taskId, provider, model)`, `@EventListener onRunStarted`, `@Async captureOnTerminalAsync`.
+- `programbench/ProgramBenchContainerStore` — `put/get/remove`.
+- `programbench/ProgramBenchBootstrap` — `@EventListener bootstrapOnStartup`.
+
+- `batch/BatchCoordinator` — `enabled()`, `submit(runId)` (placeholder).
+- `batch/BatchClientRouter` — `forProvider`, `hasClient`.
+- `batch/BatchPollService` — `@Scheduled pollInFlightJobs()`.
+- `batch/BatchResumeService` — `resume` (placeholder).
+
+- `rollout/RunService` — `find(runId)`, `submit(Request) → Run`.
+- `rollout/RunRegistry` — `put`, `get`, `size`.
+
+- `eval/ModelEvaluator` — `evaluate(providerFilter) → EvalReport`.
+- `eval/EvalScorer` — `scoreAccuracy`, `scoreSpeed`, `normalizeCostScores`, `overallScore`, `countMatchedPatterns`, `isWithinLengthLimit`, `lengthPenalty`, `static latencyCeilingMs`.
+- `eval/EvalTestCaseRegistry` — `allTestCases`, `testCasesForTier(tier)`.
+- `eval/LlmJudgeValidator` — `judge(testCase, modelResponse)`.
+- `eval/PlannerScaffoldValidator` — `static validate(plan, testCase)`.
+
+- `deployment/DeploymentService` — `deploy`, `rollback`, `deleteDeployment`, `cleanupDeployment`, `@PostConstruct validatePrerequisites`, `isEnabled`.
+- `deployment/DockerfileGenerator` — `detectAndGenerate(workspacePath) → DeploymentStrategy`.
+- `deployment/ArtifactRegistryClient` — `buildImage`, `pushImage`, `fullImageUri`.
+- `deployment/CloudRunClient` — `deploy`, `deployPreview` (+overload), `listPreviewServices[WithLabels]`, `rollbackToRevision`, `deleteService`, `deleteImage`, `healthCheck`.
+- `deployment/DeploymentGitHubService` — `createAndPush`, `pushToExisting`, `skipGitHub`.
+- `deployment/DeploymentCleanupJob` — `@Scheduled cleanupExpired`.
+- `deployment/WorkspaceLockService` — `getLock`, `removeLock`.
+- `deployment/GcsWorkspaceStore` — `uploadZip`, `downloadToTemp`, `signedDownloadUrl`, `exists`, `delete`, `objectKey`.
+- `deployment/WorkspaceExportService` — `exportWorkspace`, `exportAsRepoZip`, `static isSecretFile`.
+- `deployment/WorkspaceRestoreService` — `ensureWorkspaceAvailable(runId)`.
+- `deployment/WorkspaceArchiveJob` — cron `0 0 * * * *`.
+- `deployment/WorkspaceGcsUploadListener` — `@Async @EventListener` + fallback sweep.
+- `deployment/WorkspaceFileService` — `listFiles`, `readFile`, `readFileDiff`, `listFilesWithStatus`.
+- `deployment/PreviewAgent` — `run(runId, allTasks) → WorkerReport`.
+
+- `deployment/credential/CredentialService` — `getRequiredPermissions`, `storeCredential`, `validateCredential`, `getCredentialSummary`, `listCredentials`, `deleteCredential`.
+- `deployment/credential/UserGcpCredentialProvider` — `getCredentials`, `getCredentialsOrThrow`, `getGcpProjectId`, `hasCredentials`.
+- `deployment/credential/CredentialEncryptionService` — `encrypt`, `decrypt`.
+
+- `deployment/preview/PreviewService` — `analyze`, `start`, `stop`, `rebuild`, `getStatus`, `getLogs`, `execInContainer`, `@Scheduled cleanupExpired/Orphans`, `@PreDestroy shutdownAll`.
+- `deployment/preview/PreviewPortPool` — `allocate`, `release`, `activeCount`, `getPort`, `findPortByPrefix`.
+- `deployment/preview/GlobalPreviewLimiter` — `tryAcquire`, `release`.
+- `deployment/preview/CaddyProxyManager` — `addRoute`, `removeRoute`, `buildUrl`.
+- `deployment/preview/ComposeFileGenerator` — `generate(workspace, type, mode, db, envVars, hostPort)`.
+- `deployment/preview/ComposeExecutor` — `up`, `down`, `logs`, `isRunning`, `waitForHealthy`, `listProjects`, `isAvailable`, `execInService`.
+- `deployment/preview/DockerExecutor` — `isDockerAvailable`, `build`, `run`, `stop`, `logs`, `isRunning`, `listPreviewContainers`, `inspectHostPort`.
+- `deployment/preview/DatabaseDetector` — `detect(workspacePath) → DatabaseType`.
+- `deployment/preview/EnvVarDetector` — `detect(workspace) → List<DetectedEnvVar>`.
+- `deployment/preview/DevDockerfileGenerator` — `detect`, `generate(type, ws [, mode])`, `generateForCloudRun`, `dockerIgnore`, `detectMode`.
+- `deployment/preview/PreviewProxyFilter` — servlet filter for `preview-{id}.*`.
+
+- `deployment/preview/vm/PreviewDeploymentService` — `deploy`, `teardown`, `extend`, `hasCapacity`.
+- `deployment/preview/vm/PreviewGarbageCollector` — `@Scheduled(fixedRate=600s) collectExpired`.
+
+- `deployment/preview/engine/PreviewEngineHandoff` — `start`, `stop`.
+- `deployment/preview/engine/PreviewEngineClient` — `registerFromImage`, `unregister`, `isEnabled`, `registryUrl`.
+- `deployment/preview/engine/PreviewImagePusher` — `buildAndPush`.
+- `deployment/preview/engine/BuildCachePruneJob` — `@Scheduled prune`.
+
+- `deployment/engine/DeployEngineOrchestrator` — `deployCloudRunDirect`, `rollback`, `destroy`.
+- `deployment/engine/UserCloudRunDeployer` — `deploy`, `deleteService`, `rollbackToRevision`, `healthCheck`.
+- `deployment/engine/UserImageBuilder` — `build`, `ensureArtifactRegistryRepo`, `ensureBuildBucket`.
+
+- `deployment/analyzer/DeploymentAnalyzer` — `analyze(workspace) → InfrastructureManifest`.
+- `deployment/analyzer/DeploymentDecisionEngine` — `decide(manifest) → DeploymentDecision`.
+- `deployment/analyzer/StorageDetector` / `CacheDetector` / `QueueDetector` / `HealthCheckDetector` / `StatelessnessDetector` — each `detect(...)`.
+
+### Folder / activity / scoring (continued) / config
+
+- `folder/ExecutespecFolderWriter` — `writeFiles(repo, projectSlug, files, prTitle, prDescription, actorPat)`, `readFile`, `listFiles`, `hasDrift`.
+- `folder/FolderReadmeGenerator` — `render(repo, projectSlug)`.
+- `folder/BootstrapService` — `@Async bootstrapAsync`, `static slugify`.
+- `folder/ProjectConfigPathResolver` — `resolve(projectId, repoId) → Resolution`, `resolveConfigFilePath`.
+
+### Tools (legacy facades)
+
+- `tool/FileSystemTool` (V1 Spring-AI `@Tool` facade).
+- `tool/GitTool` (V1 Spring-AI `@Tool` facade for worktrees + multi-repo push).
+- `tool/FileLockTool` — DB-backed per-file lock (dormant in V2).
+- `tool/MavenDependencyValidator` — `validate(workspaceRoot)`, `formatError(result)`.
+- `tool/WorkspaceContext` — `static set/getWorkDir/setTaskId/getTaskId/clear`.
+
+### Tenant
+
+- `tenant/TenantContext` — `static setTenantId/getTenantId/clear`.
+- `tenant/TenantFilter` — `Filter` (Order 1) X-Tenant-Id header validation.
+- `tenant/TenantInterceptor` — `@PrePersist` JPA listener.
+- `tenant/TenantContextThreadLocalAccessor` — Micrometer `ThreadLocalAccessor<String>`.
+
+### Helpers
+
+- `util/SafeYamlLoader` — `static safe()`, `static load(yamlBody|InputStream|Reader)`.
+- `util/PoolSizing` — `static int coreMultiple(multiplier, min, max)`.
+- `util/HmacUtil` — `static String hexSha256(secret, body)`.
+- `composer/SpecComposer` — `static compose(template, userValues, defaults)` + overloads; `defaultsFrom`.
+- `composer/SlotValidator` — `static validate`, `validateAll`.
+- `assessment/FeatureAssessmentService` — `assess(projectId, userRequest)`, `assessAsJson`.
+- `apitests/ApiTestSuiteAgent` — `generateAsync(PipelineRun)`.
+- `apitests/ApiTestSuiteProperties` — `isEnabled`, `getModel`, `getProvider`.
+- `optimiser/PromptOptimiserAgent` — `runIfDue(PipelineRun completedRun)`.
+- `optimiser/PromptAuditService` — `record`, `recordRunOutcome`, `getHistory`.
+- `optimiser/PromptPatternAnalyser` — `analyse() → PromptPatterns`.
+
+### Rate limiting
+
+- `ratelimit/RateLimitFilter` — `OncePerRequestFilter` over `/api/**`.
+- `ratelimit/RateLimitPolicy` — `getLimit(group, tier [, level])`, `classifyGroup(method, path)`, `getAuthSubType(path)`.
+
+### Analytics
+
+- `analytics/EventTrackingService` — `@Async track(userId, EventName, properties)`, `isFirstTime`.
+- `analytics/PostHogClient` — `capture`, `identify`, `isEnabled`.
+
+### Provider routing
+
+- `router/ModelRegistry` — `canonicalize`, `providerFor`, `isKnownModel`, `contextLimitFor[OrPrefixFallback]`, `maxOutputForModel`, `pricingFor`, `notesFor`, `displayLabelFor`, `fallbackChainFor[Tier]`, `freeTierModel/Provider`, `workhouseModelFor`, `planningModelFor`, `lightweightModelFor`, `allModels`.
+- `router/ModelResolver` — `resolve(agentName, provider [, tierOverride])`, `resolveFallbackExcluding(agent, provider, exclude)`.
+- `router/ProviderHealthTracker` — `isHealthy`, `recordSuccess`, `recordRateLimit`, `recordFailure`.
+- `router/ProviderStatusService` — `isAnyProviderHealthy`, `recordQueuedDueToOutage`, `recordOutageQueueReleased`, `@Scheduled pollStatusPages`.
+- `router/ProviderRecommendationService` — `recommend(userId, projectType, runtimeSurface)`, `reasonCode`.
+- `router/AvailableProviderResolver` — `resolve(runId) → Set<LlmProvider>`.
+- `router/ModelPerformanceTracker` — `recordCall`, `getScore`, `getAvgLatencyMs`, `isMateriallyBetter`.
+- `router/RunProviderPinStore` — `pinIfAbsent`, `getPin`, `clearPin`.
+
+### LLM dispatch / BYOK
+
+- `agent/LlmRouter` — V2 native tool-calling. `ChatResponse call(LlmRequest request)`.
+- `agent/FallbackLlmRouter` — legacy V1 fallback router. `callWithFallbackTracked(provider, model, prompt, runId, agentId, FallbackMode, iteration, justCompacted)`, `callWithFallback`, `callDirect`, `clearRunCallCounter`, `getRunCallCount`, `setRunUserTier`, `getRunUserTier`.
+- `agent/OpenAiNativeToolClient` — `ChatResponse call(OpenAiToolCallRequest)`.
+- `agent/GeminiNativeToolClient` — `ChatResponse call(GeminiToolCallRequest)`.
+- `agent/ApiKeyResolver` — `resolve(userId) → ResolvedKeys`, `isOwnKeysMode`, `validateKeyAvailability`, `resolveOrgIdForUser`.
+- `agent/RunKeyStore` — L1 Caffeine + L2 Redis encrypted. `put`, `get`, `remove`.
+- `agent/RunKeyContextStore` — `resolveAndPut(runId, userId)`, `get(runId)`, `evict(runId)`.
+- `agent/PromptAssembler` — `assemble(path [, variables])`, `assembleAndTrack`, `loadFile/loadFileSafe`.
+- `agent/PromptResourceVerifier` — `@PostConstruct verify()`.
+- `agent/SpecClassifier` (static) — `classify(spec) → Classification`.
+- `agent/PlannerOutputUtils` (static) — `parsePlanFromArgs`, `validatePlan`, `warnIfConstraintsUnderpropagated`, `salvagePlanFromText`, `truncate`, `cleanTitle`, `resolveProviderForTitle`.
+- `agent/TokenBudgetPolicy` — `evaluate(used, soft, hard) → BudgetAction`.
+- `agent/TokenBudgetMonitor` — `check`, `evaluateBudget`, `resolveEffectiveComplexity`, `maxOutputTokens`, `maxOutputForModel`, `contextLimitFor`.
+- `agent/PlanStrategyCircuitBreaker` — `degradeIfOpen`, `recordSuccess`, `recordFailure`.
 
 ---
 
 ## 3. Agents
 
-Tier resolved from `application.yml model-matrix.agent-tier-map`. PLANNING → Sonnet 4.6 / GPT-5.4 / Gemini 3 Pro; WORKHORSE → Sonnet 4.6 / GPT-5.4-mini / Gemini 3 Flash; LIGHTWEIGHT → Haiku 4.5 / GPT-5.4-mini / Gemini 3 Flash.
+Every `*Agent.java` and related agent-tier services. Tier from `application.yml model-matrix.agent-tier-map`. Default provider is **anthropic** (1.0.0-M1 change).
 
-| Class | Pkg | Tier | Purpose |
-| --- | --- | --- | --- |
-| `SmartClassifierAgent` | `agent` | LIGHTWEIGHT | Phase 0 of the hierarchical planner — chooses the planning strategy for a run before any tier work runs. |
-| `OutlinePlannerAgent` | `agent` | PLANNING | Phase 1 — produces a `Plan` for the run. For LARGE/LEGACY emits SKELETON_ONLY tasks. |
-| `TaskExpanderAgent` | `agent` | WORKHORSE | Phase 2 — fills in the body of one skeleton task (description / acceptance / files / tier) in parallel. |
-| `CoherencePlannerAgent` | `agent` | LIGHTWEIGHT | Phase 3 — final coherence check on the assembled plan after parallel expansion. |
-| `WorkerAgent` | `agent` | WORKHORSE | V2 sequential worker agent — per-task tool-calling loop with iter / token caps. |
-| `PatchAgent` | `agent` | WORKHORSE | Patch-mode entry point — single thin-agent loop for bug-fix shapes (SWE-bench / autofix surfaces). |
-| `ConversationAgent` | `agent` | LIGHTWEIGHT | Post-run conversational AI agent (uses `FallbackLlmRouter`). |
-| `ReviewerAgent` | `reviewer` | PLANNING | V2 post-execution code reviewer — general + wiring passes. |
-| `PrReviewAgent` | `prreview` | PLANNING | PR Review Agent — senior-engineer-style review against a PR diff, emits structured comments. |
-| `CodeReviewAgent` | `codereview` | PLANNING | LLM-augmented whole-repo review (PLANNING tier for quality). |
-| `ApiTestSuiteAgent` | `apitests` | WORKHORSE | Generates OpenAPI 3.0 YAML spec for backend-only runs, post-merge. |
-| `TestPlannerAgent` | `testgen` | WORKHORSE | Plans integration tests from the spec (NOT from generated code). Always CAPABLE tier. |
-| `TestWorkerAgent` | `testgen` | WORKHORSE | Generates a single integration test class per `TestTask`. Always CAPABLE tier. |
-| `ContextAgent` | `context` | LIGHTWEIGHT | Compresses worker context near token-budget boundaries. |
-| `RunLedgerAgent` | `memory` | LIGHTWEIGHT | Generates a compressed ledger entry per completed run; appended to `project_run_ledger`. |
-| `PromptOptimiserAgent` | `optimiser` | WORKHORSE | Self-improvement pass over prompt files; audits prompt drift. |
-| `PreviewAgent` | `deployment` | n/a (deterministic) | Generates `Dockerfile`, `docker-compose.yml`, and other deployment artefacts. Not LLM-backed. |
+| Agent class                                                | Tier        | Purpose                                                                                                     |
+| ---------------------------------------------------------- | ----------- | ----------------------------------------------------------------------------------------------------------- |
+| `agent/SmartClassifierAgent`                               | LIGHTWEIGHT | Phase-0: heuristic-fast-path then LLM-verified `PlanStrategy` (SINGLE_SHOT/SMALL/MEDIUM/LARGE/LEGACY); 1h Redis cache. |
+| `agent/OutlinePlannerAgent`                                | PLANNING    | Phase-1: emits Plan via `submitOutline`; FULL_PLAN or SKELETON_ONLY. Also `synthesizeSingleShot`.            |
+| `agent/TaskExpanderAgent`                                  | WORKHORSE   | Phase-2: fills body of one skeleton task via `submitTaskDetail`; parallel over LEAF skeletons.              |
+| `agent/CoherencePlannerAgent`                              | LIGHTWEIGHT | Phase-3: zero-or-more `patchPlan` minimal-delta tool calls; non-fatal.                                      |
+| `agent/WorkerAgent`                                        | WORKHORSE   | Sequential multi-turn worker; native tool calls; Lever A + Lever B salvage; stagnation guard.               |
+| `agent/PatchAgent`                                         | WORKHORSE   | PATCH-mode entry — single thin loop for SWE-bench / autofix surfaces; per-provider iter caps (150/100/120). |
+| `reviewer/ReviewerAgent`                                   | PLANNING    | General + wiring pass via WorkerAgent; PostEditFormatter + final build; verdict CLEAN/FIXED_ISSUES/UNRESOLVED_ISSUES/REVIEW_FAILED. |
+| `reviewer/AccuracyAssessmentService`                       | PLANNING    | Spec-adherence LLM auditor (4 dims); Layer 3 grep verify + Layer 4 execution-time filter.                    |
+| `reviewer/PostEditFormatter`                               | n/a         | Deterministic non-LLM formatter pass (black/prettier/gofmt).                                                |
+| `agent/ConversationAgent`                                  | LIGHTWEIGHT | Post-run chat + apply-suggestion plan (≤6 tasks); `ApplySuggestionTooLargeException`.                       |
+| `agent/RunTitleSummarizer`                                 | LIGHTWEIGHT | 5-9 word imperative title from spec.                                                                        |
+| `codeintel/RepoArchitectureGenerator`                      | LIGHTWEIGHT | Per-repo HLD+LLD markdown from codemap.                                                                     |
+| `codeintel/ArchitectureDocGenerator`                       | PLANNING    | Combined project-wide architecture markdown synthesis.                                                      |
+| `codeintel/ProjectDocGeneratorService`                     | WORKHORSE   | EXPLANATION + SETUP markdown docs; V195 PR-Q cache.                                                         |
+| `codeintel/ProjectBriefService`                            | LIGHTWEIGHT | 2-4 sentence project brief + heading top-3.                                                                 |
+| `codeintel/FilePurposeSummaryService`                      | LIGHTWEIGHT | PR-N2 2-3 sentence per-file summaries.                                                                      |
+| `memory/RunLedgerAgent`                                    | LIGHTWEIGHT | Per-completed-run digest (≤2000 chars).                                                                     |
+| `memory/MemoryCompactionService`                           | LIGHTWEIGHT | Rewrite `project_memory_snapshot` every 10 runs.                                                            |
+| `memory/ProjectChatService` (`ProjectChatAgent` tier)      | PLANNING    | Project-scoped chat copilot with 9-tool callback set.                                                       |
+| `prreview/PrReviewAgent`                                   | PLANNING    | Single `submitReview` tool call against PR diff.                                                            |
+| `codereview/CodeReviewAgent`                               | PLANNING    | Triages static findings + adds architectural/logic findings via `submitCodeReview`.                         |
+| `report/ValidationReportGenerator`                         | WORKHORSE   | LLM markdown narrative for validation report.                                                               |
+| `testgen/TestPlannerAgent`                                 | WORKHORSE   | Test-plan JSON (≤6 classes × ≤8 methods).                                                                   |
+| `testgen/TestWorkerAgent`                                  | WORKHORSE   | One integration test class per task (Playwright/RestAssured/ProcessBuilder).                                |
+| `testgen/TestReportGenerator`                              | LIGHTWEIGHT | LLM fix-suggestions for failed tests.                                                                       |
+| `apitests/ApiTestSuiteAgent`                               | WORKHORSE   | OpenAPI 3.0 YAML generator for backend-only runs.                                                           |
+| `optimiser/PromptOptimiserAgent`                           | WORKHORSE   | Surgical LLM-driven edits to prompt files (auto-commit disabled).                                           |
+| `context/ContextAgent`                                     | LIGHTWEIGHT | Background context-doc maintenance via JSON patch on CODEBASE_CONTEXT.md.                                   |
 
-Additional non-`*Agent`-named agents in the tier map (treated as agents by `application.yml`):
-
-| Class | Pkg | Tier | Purpose |
-| --- | --- | --- | --- |
-| `RepoArchitectureGenerator` | `codeintel` | PLANNING | Per-repo HLD + LLD from codemap. |
-| `ArchitectureDocGenerator` | `codeintel` | PLANNING | Cross-repo synthesis from per-repo arch docs. |
-| `ProjectDocGeneratorService` | `codeintel` | WORKHORSE | EXPLANATION / SETUP docs. |
-| `ProjectChatCompiler` | `memory` | PLANNING | Compiles chat threads into a polished spec via `ProjectChatService.compile`. |
-| `ProjectChatCompactor` | `memory` | LIGHTWEIGHT | Chat-history compaction (older N → summary, keep last 6 verbatim). |
-| `ProjectBriefService` | `codeintel` | LIGHTWEIGHT | Per-project micro-summary surfaced on dashboard. |
-| `RunTitleSummarizer` | `state` | LIGHTWEIGHT | Generates short run titles for the runs list. |
-| `ValidationReportGenerator` | `report` | WORKHORSE | LLM-judged validation report (legacy fallback for pre-V106 rows). |
-| `TestReportGenerator` | `testgen` | LIGHTWEIGHT | Per-run test-result summary. |
+Failover order (`application.yml`):
+- `anthropic` → `openai`, `gemini`
+- `gemini` → `openai`, `anthropic`
+- `openai` → `gemini`, `anthropic`
 
 ---
 
-## 4. Tools
+## 4. Tools (V2 `tool/`)
 
-V2 worker tools — all bound through `ToolRegistry.bindForWorker(ctx)` (which filters out `gitCommit`; auto-push happens at run-end via `ScmPushService.pushMultiRepo`).
+Tool interface contract: `String name()`, `String description()`, `String inputSchema()`, `ToolResult execute(JsonNode args, ExecutionContext ctx)`.
 
-| Class | `name()` | Purpose |
-| --- | --- | --- |
-| `ReadFileTool` | `readFile` | Reads file contents with optional line-range slicing (8k char truncation). |
-| `WriteFileTool` | `writeFile` | Creates a NEW file. Errors if the file already exists. |
-| `EditFileTool` | `editFile` | Multi-edit string-replacement on an existing file. |
-| `ListFilesTool` | `listFiles` | Lists directory contents with optional recursion. |
-| `SearchFilesTool` | `searchFiles` | Native (no shell subprocess) recursive content search. |
-| `ShellTool` | `shell` | Executes a sandboxed shell command in the run's workspace (6k char truncation). |
-| `GitStatusTool` | `gitStatus` | Returns `git status --short` output for the run's workspace. |
-| `GitDiffTool` | `gitDiff` | Returns working-tree diff (unstaged + staged) since HEAD (5k char truncation). |
-| `GitCommitTool` | `gitCommit` | Stages all changes and commits with the supplied message. (Filtered from worker authority.) |
-| `BuildProjectTool` | `buildProject` | Runs the project's detected build command and returns pass/fail + output. |
-| `RunTestsTool` | `runTests` | Structured pytest tool for patch-mode (SWE-bench / generic Python). Patch-mode only. |
-| `CompleteTaskTool` | `completeTask` | Structured signal that a task is finished (native termination tool). |
+| Class                          | Schema name      | Purpose                                                                                            |
+| ------------------------------ | ---------------- | -------------------------------------------------------------------------------------------------- |
+| `tool/ReadFileTool`            | `readFile`       | Reads file with optional 1-indexed line range; `project:` prefix for per-project workspace.        |
+| `tool/WriteFileTool`           | `writeFile`      | Creates a NEW file only; sandbox-gated. Emits `RunEvent.fileWritten`.                              |
+| `tool/EditFileTool`            | `editFile`       | Multi-edit string-replace on existing file; rejects if any oldStr missing or non-unique.           |
+| `tool/ListFilesTool`           | `listFiles`      | Lists dir contents (optional recursive); hides build artifacts.                                    |
+| `tool/SearchFilesTool`         | `searchFiles`    | Native Java walk + regex search; max 100 matches.                                                  |
+| `tool/ShellTool`               | `shell`          | Sandboxed shell; 60s default / 300s max; container-routed for SWE-bench/ProgramBench.              |
+| `tool/GitStatusTool`           | `gitStatus`      | `git status --short`.                                                                              |
+| `tool/GitDiffTool`             | `gitDiff`        | Working-tree diff vs HEAD; truncates at 3KB.                                                       |
+| `tool/GitCommitTool`           | `gitCommit`      | `git add -A` + vendored-purge + commit. Filtered from worker authority (`WORKER_DENY_TOOLS`).      |
+| `tool/BuildProjectTool`        | `buildProject`   | Runs build via `BuildCommandResolver`. ProgramBench wraps with `./executable` hash-check.          |
+| `tool/RunTestsTool`            | `runTests`       | Structured pytest tool for patch-mode; typed envelope `{summary, passed[], failed[], …}`.          |
+| `tool/CompleteTaskTool`        | `completeTask`   | Structured task-done signal; WorkerAgent intercepts.                                               |
 
-Supporting infrastructure under `tool/` (not LLM-callable):
+Supporting infrastructure:
+- `tool/Tool` (interface).
+- `tool/ToolResult` (sealed): `Ok(content) | Err(message, ErrorKind)`. `ErrorKind` enum: INVALID_ARGS, NOT_FOUND, IO_ERROR, FORBIDDEN, TIMEOUT, INTERNAL.
+- `tool/ToolRegistry` — `toolNames`, `find`, `bind(ctx)`, `bindForWorker(ctx)` (excludes `gitCommit`), `toolDefinitions`. `ContextBoundToolCallback` adapter implements Spring AI `ToolCallback`.
+- `tool/ExecutionContext` (record) — `runId, taskId, workspaceRoot`.
+- `tool/PathSafety` — `static safeResolve(Path workspaceRoot, String relativePath)`.
+- `tool/FileSandboxPolicy` — `validateWrite(workspaceRoot, target [, level]) → Decision`. MEDIUM allowlist of dirs + root files; HIGH adds dotfile allowlist.
+- `tool/ShellSandboxPolicy` — `validate(command, workspacePath [, level]) → ValidationResult`. Allowlisted first-token; BLOCKED_COMMANDS / BLOCKED_PATTERNS at MEDIUM/HIGH.
+- `tool/GitInvoker` — package-private `static GitResult run(workspace, args...)`.
+- `tool/GitToolResult` (sealed `Ok | Err`).
+- `tool/FileSystemTool` (V1 facade) — `@Tool` `readFile`/`writeFile`/`editFile`/`listFiles`/`searchFiles`; non-`@Tool` `readFileRange`, `listFilesRecursive`, `listFilesRecursivePerRepo`.
+- `tool/GitTool` (V1 facade) — worktree lifecycle (`createWorktree`, `pruneAllWorktrees`, `removeWorktree`), `@Tool` `createBranch/commit/status/diff`, `mergeBranchIntoCurrent/IntoMain`, `rebaseBranchOnMain`, `commitIfDirty`, `getFullDiff`, `tagRun`, `abortMerge`, push helpers (`pushToRemote`, `pushToBranch`, `commitAndPushSubdir`, `pushToExistingBranch`, `pushToBranchBitbucket`).
+- `tool/FileLockTool` — DB-backed per-file lock (dormant in V2).
+- `tool/WorkspaceContextThreadLocalAccessor` — Micrometer `ThreadLocalAccessor<String>` bridging `WorkspaceContext`.
 
-- `Tool` — abstract tool interface (`name()`, `description()`, `schema()`, `invoke(ExecutionContext)`).
-- `ToolResult`, `GitToolResult` — structured result envelopes.
-- `ExecutionContext` — per-task tool dispatch context (workspace dir, runId, taskId, repos, sandbox policy).
-- `WorkspaceContext` — thread-local file/git redirection so parallel subtasks each see their own isolated dir.
-- `WorkspaceContextThreadLocalAccessor` — bridges `WorkspaceContext` into Micrometer's context propagation.
-- `PathSafety` — path-escape guard shared by all V2 tools that touch the filesystem.
-- `FileSandboxPolicy` — guardrail-aware file-sandbox policy.
-- `ShellSandboxPolicy` — guardrail-aware shell-sandbox policy.
-- `FileLockTool`, `FileSystemTool`, `GitTool`, `GitInvoker`, `MavenDependencyValidator` — internal helpers.
-- `ToolRegistry` — central registry, adapts beans to Spring AI `ToolCallback`s.
+Smoke / Test tools:
+- `tool/BuildProjectTool.wrapForExecutableCompileCheck` — ProgramBench-only `./executable` compile-check wrapper.
+- `tool/RunTestsTool.containsShellMetachar` — defense-in-depth shell-metachar filter.
 
 ---
 
 ## 5. Repositories
 
-Spring Data JPA repositories. `manages` is the entity, `@Query` count is the number of `@Query`-annotated methods (custom JPQL/native queries are listed below each repo when non-trivial).
+Every `*Repository.java` with notable custom `@Query` methods called out.
 
-### activity/
-- **ActivityFeedEntryRepository** — manages `ActivityFeedEntry` — @Query: 2
-  - `SELECT a FROM ActivityFeedEntry a WHERE a.projectId = :projectId AND a.occurredAt >= :from AND a.occurredAt < :to ORDER BY a.occurredAt DESC`
+### Run / state
 
-### adr/
-- **AdrRepository** — manages `Adr` — @Query: 1
-  - `SELECT a FROM Adr a WHERE a.projectId = :projectId AND a.status = 'ACCEPTED' ORDER BY a.adrIdInRepo`
+- `state/repository/PipelineRunRepository` — `PipelineRun`. Atomic `@Modifying addTokens`, `updateStatusAndClearGate`, `updateApprovedExecutionMode`, `clearCurrentGate`. Notable `@Query`: `sumActualCostByUserAndSince/Project/Org`, `topUsersByRunCount`, `projectBreakdownByOrg/User`, `findRunsToArchive/Cleanup/TerminalRunsWithoutGcsKey`, `findArchivedRunsOlderThan`, `findExpiredRunsForTier`, `findSoftDeletedOlderThan`, `findOutageQueuedRuns`, `findRunsWithoutTitle`, `softDeleteByUserId` (GDPR), `findActiveByTriggeredByFinding` (V183), `aggregateCostAndTokens(Set<String>)` (PR-A).
+- `state/repository/AgentTaskRepository` — `AgentTask`. `@Modifying lockIfPending(taskId, now)` (PENDING→LOCKED), `lockAndStart(taskId, model, branch, now)`.
+- `state/repository/AgentMessageRepository` — `AgentMessage`.
+- `state/repository/GateEventRepository` — `GateEvent`.
+- `state/repository/CompactionEventRepository` — `CompactionEvent`.
+- `state/repository/AgentInboxRepository` — `AgentInbox`. `@Modifying markDelivered(id, now)`.
+- `state/repository/PlanVersionRepository` — `PlanVersion`.
+- `state/repository/RunRepoRepository` — `RunRepo`.
+- `state/repository/RunRepoSnapshotRepository` — `RunRepoSnapshot`.
+- `state/repository/RunRecoveryRepository` — `RunRecovery`. `@Query findByClassificationIn`.
+- `state/repository/IntegrationRunRepository` — `IntegrationRun`.
+- `state/repository/IntegrationEventLogRepository` — `IntegrationEventLog`. `@Modifying deleteByCreatedAtBefore(cutoff)`.
+- `state/repository/DeploymentRepository` — `Deployment`. `@Query countActiveByUserId`, `countByRunId`, `countActiveByRunId`.
+- `state/repository/FileLockRepository` — `FileLock` (PK = filePath).
+- `state/repository/MergeConflictRepository` — `MergeConflict`. Native `findTopConflictedFiles(limit)`, `getResolutionStats(runLimit)`.
+- `state/repository/PromptAuditRepository` — `PromptAuditEntry`. `@Query findAllLatestPerFile()`.
+- `agent/PromptHashAuditRepository` — `PromptAudit` (12-char hash audit).
+- `harness/repository/GateRepository` — `GateRecord`. `@Modifying tryResolveIfPending(gateKey, status, now)`.
 
-### agent/
-- **PromptHashAuditRepository** — manages `PromptAudit` — @Query: 0
+### Cost / pricing
 
-### analytics/
-- **UserActivationEventRepository** — manages `UserActivationEvent` — @Query: 2
-  - `SELECT COUNT(e) FROM UserActivationEvent e WHERE e.eventName = :event`
-  - `SELECT COUNT(e) FROM UserActivationEvent e WHERE e.eventName = :event AND e.occurredAt >= :since`
+- `pricing/ModelPricingRepository` — `ModelPricing` (`@EmbeddedId ModelPricingId(provider, model)`).
+- `billing/cost/RunCostLogRepository` — `RunCostLog`.
+- `cost/RunCostHistoryRepository` — `RunCostHistory`. `@Query findSimilarCosts(strategy, provider, repoCount, taskCount, Pageable)`, `findSimilarCostsLoose`.
 
-### arch/
-- **ArchInvariantRepository** — manages `ArchInvariant` — @Query: 0
-- **ArchInvariantViolationRepository** — manages `ArchInvariantViolation` — @Query: 1
-  - `SELECT v FROM ArchInvariantViolation v WHERE v.invariantId IN (SELECT i.id FROM ArchInvariant i WHERE i.projectId = :projectId) ORDER BY v.detectedAt DESC`
+### Billing
 
-### auth/
-- **ActivityAuditRepository** — manages `ActivityAudit` — @Query: 2 (chain-ordered fetches for tamper detection)
-- **AppUserRepository** — manages `AppUser` — @Query: 4
-  - `SELECT u FROM AppUser u WHERE u.id = :id`
-  - `SELECT u FROM AppUser u WHERE u.status != 'DELETED' ORDER BY u.createdAt DESC`
-  - `SELECT u FROM AppUser u WHERE u.orgId = :orgId AND u.status = 'ACTIVE'`
-- **EmailTokenRepository** — manages `EmailToken` — @Query: 1 (`DELETE FROM EmailToken t WHERE t.expiresAt < :now`)
-- **OrgInvitationRepository** — manages `OrgInvitation` — @Query: 0
-- **OrgMemberRepository** — manages `OrgMember` — @Query: 0
-- **OrgRepository** — manages `Org` — @Query: 2 (list non-deleted, find-by-id)
-- **PaymentAuditRepository** — manages `PaymentAudit` — @Query: 1 (user+org scoped pagination)
-- **ProjectMemberRepository** — manages `ProjectMember` — @Query: 1 (`SELECT pm.projectId FROM ProjectMember pm WHERE pm.userId = :userId`)
-- **ProjectRepository** — manages `Project` — @Query: 0
-- **RefreshTokenBlocklistRepository** — manages `RefreshTokenBlocklist` — @Query: 2 (native upsert + GC)
-- **TierConfigRepository** — manages `TierConfig` — @Query: 0
+- `billing/repository/BillingPlanRepository` — `BillingPlan`.
+- `billing/repository/BillingPlanLimitRepository` — `BillingPlanLimit`.
+- `billing/repository/BillingSubscriptionRepository` — `BillingSubscription`. `findActiveByUserId` (JPQL), `findAllActiveOrPastDue` (B-08 bulk), `findLatestCustomerIdByUserId`, `countActiveFounderSubscriptions`, `findRenewingBefore`, `findCancelledPastPeriodEnd`, `findActiveByTier`.
+- `billing/repository/BillingUsageRepository` — `BillingUsage`. `findCurrentByUserIdAndMetric`, `@Modifying incrementValue(id, delta, now)`.
+- `billing/repository/RunTopupRepository` — `RunTopup`. `sumRemainingByUserId/OrgId(now)`, `findOldestActiveByUserId/OrgId`, `findByGatewayOrderId`, `@Modifying decrementRemaining(id, now)`, `expireOverdue(now)`, `findActiveByUserId`.
+- `billing/repository/InvoiceRepository` — `Invoice`. `findByInvoiceNumber`, `findByGatewayPaymentId`, `findTopBySubscriptionIdOrderByInvoiceDateDesc`.
+- `billing/repository/InvoiceLineItemRepository` — `InvoiceLineItem`.
+- `billing/repository/InvoiceSequenceRepository` — `InvoiceSequence` (PK = fy). `@Lock(PESSIMISTIC_WRITE) findByFinancialYearForUpdate`.
+- `billing/repository/TopupPackageRepository` — `TopupPackage`.
+- `billing/repository/BillingProfileRepository` — `BillingProfile`.
+- `billing/repository/SellerConfigRepository` — `SellerConfig`. default `getDefault()` throws IllegalState.
+- `billing/repository/AccountingEntryRepository` — `AccountingEntry`. `getTrialBalance(from, to)` GROUP BY; `sumByAccountAndType`.
+- `billing/repository/BillingWebhookEventRepository` — `BillingWebhookEvent`. `existsByGatewayAndEventId`.
+- `billing/repository/WebhookEventLogRepository` — `WebhookEventLog`.
+- `billing/repository/FounderPricingDiscountRepository` — `FounderPricingDiscount`. `@Lock(PESSIMISTIC_WRITE) findByIdForUpdate`.
+- `billing/repository/FounderPricingAllocationRepository` — `FounderPricingAllocation`.
 
-### billing/
-- **RunCostLogRepository** — manages `RunCostLog` — @Query: 0
-- **AccountingEntryRepository** — manages `AccountingEntry` — @Query: 2 (account/entryType totals over date range)
-- **BillingPlanLimitRepository** — manages `BillingPlanLimit` — @Query: 0
-- **BillingPlanRepository** — manages `BillingPlan` — @Query: 0
-- **BillingProfileRepository** — manages `BillingProfile` — @Query: 0
-- **BillingSubscriptionRepository** — manages `BillingSubscription` — @Query: 7 (active-subscription lookups by user / status / customerId)
-- **BillingUsageRepository** — manages `BillingUsage` — @Query: 3 (current-period reads, increment)
-- **BillingWebhookEventRepository** — manages `BillingWebhookEvent` — @Query: 0
-- **FounderPricingAllocationRepository** — manages `FounderPricingAllocation` — @Query: 0
-- **FounderPricingDiscountRepository** — manages `FounderPricingDiscount` — @Query: 1
-- **InvoiceLineItemRepository** — manages `InvoiceLineItem` — @Query: 0
-- **InvoiceRepository** — manages `Invoice` — @Query: 0
-- **InvoiceSequenceRepository** — manages `InvoiceSequence` — @Query: 1
-- **RunTopupRepository** — manages `RunTopup` — @Query: 7 (per-user / per-org remaining balance, expiry)
-- **SellerConfigRepository** — manages `SellerConfig` — @Query: 0
-- **TopupPackageRepository** — manages `TopupPackage` — @Query: 0
-- **WebhookEventLogRepository** — manages `WebhookEventLog` — @Query: 0
+### Auth / org / project / payment
 
-### codeintel/
-- **FilePurposeSummaryRepository** — manages `FilePurposeSummary` — @Query: 0
-- **ProjectArchitectureDocRepository** — manages `ProjectArchitectureDoc` — @Query: 0
-- **ProjectCodeMapRepository** — manages `ProjectCodeMap` — @Query: 0
-- **ProjectGeneratedDocRepository** — manages `ProjectGeneratedDoc` — @Query: 0
-- **RepoArchitectureDocRepository** — manages `RepoArchitectureDoc` — @Query: 0
-- **RunCodeMapRepository** — manages `RunCodeMap` — @Query: 0
+- `auth/repository/AppUserRepository` — `AppUser`. `@Lock(PESSIMISTIC_WRITE) findByIdForUpdate`, `findByOauthProviderAndOauthId`, `@Query findAllActive`, `findActiveSoloUsers`.
+- `auth/repository/OrgRepository` — `Org`. `@Lock(PESSIMISTIC_WRITE) findByIdForUpdate`, `@Query findAllActive`.
+- `auth/repository/OrgMemberRepository` — `OrgMember`. `countByOrgIdAndOrgRole`.
+- `auth/repository/OrgInvitationRepository` — `OrgInvitation`.
+- `auth/repository/EmailTokenRepository` — `EmailToken`. `@Modifying deleteExpired(now)`.
+- `auth/repository/RefreshTokenBlocklistRepository` — `RefreshTokenBlocklist`. Native `@Modifying insertIfAbsent(jti, userId, expiresAt)` (ON CONFLICT DO NOTHING).
+- `auth/repository/ProjectRepository` — `Project`. `findByOrgIdAndDeletedAtIsNull`, `countByOrgIdAndStatusAndDeletedAtIsNull`, `findByIsSandboxTrueAndStatus`, `findByDeletedAtBefore`.
+- `auth/repository/ProjectMemberRepository` — `ProjectMember`. `@Query findProjectIdsByUserId(userId)`, `countByProjectIdAndProjectRole`.
+- `auth/repository/TierConfigRepository` — `TierConfig`.
+- `auth/repository/PaymentAuditRepository` — `PaymentAudit`. `@Query findByUserIdOrOrgId(userId, orgId)` (M-017 DSAR).
+- `auth/repository/ActivityAuditRepository` — `ActivityAudit`. `@Query findChainTail(Pageable)`, `findChainOrdered()` (verifier walk).
 
-### codereview/
-- **CodeReviewIssueRepository** — manages `CodeReviewIssue` — @Query: 0
-- **CodeReviewScanRepository** — manages `CodeReviewScan` — @Query: 3 (per-user monthly count, per-project cost sum)
+### Project / codeintel / RAG / memory
 
-### config/
-- **FeatureFlagRepository** — manages `FeatureFlag` — @Query: 0
+- `project/repository/ProjectRepoRepository` — `ProjectRepo`.
+- `project/repository/ProjectRepoLinkRepository` — `ProjectRepoLink`. `countByProjectId` (V140 cap), `existsByRepoId`.
+- `project/template/ProjectSpecTemplateRepository` — `ProjectSpecTemplate`.
+- `project/rag/repository/ProjectDocumentRepository` — `ProjectDocument`. `countByProjectIdAndStatusAndDeletedAtIsNull`.
+- `project/pr/PullRequestRecordRepository` — `PullRequestRecord`. `findByRepoFullNameAndPrNumber`, `findByProjectIdAndKindNotOrderByCreatedAtDesc` (V169), `findFirstByRepoFullNameAndHeadBranchOrderByCreatedAtDesc` (CI autofix), open-only variants.
+- `codeintel/repository/ProjectCodeMapRepository` — `ProjectCodeMap`.
+- `codeintel/repository/RepoArchitectureDocRepository` — `RepoArchitectureDoc`. `@Query sumCostUsdByProject`.
+- `codeintel/repository/ProjectArchitectureDocRepository` — `ProjectArchitectureDoc`. `@Query sumCostUsdByProject`.
+- `codeintel/repository/ProjectGeneratedDocRepository` — `ProjectGeneratedDoc`. PR-Q cache lookup `findFirstByProjectIdAndDocTypeAndSourceArchVersionAndSourceShasFingerprintOrderByVersionDesc`.
+- `codeintel/repository/FilePurposeSummaryRepository` — `FilePurposeSummary`.
+- `codeintel/repository/RunCodeMapRepository` — `RunCodeMap`.
+- `memory/repository/ProjectChatMessageRepository` — `ProjectChatMessage`. `@Modifying deleteByProjectId`.
+- `memory/repository/ProjectMemorySnapshotRepository` — `ProjectMemorySnapshot`.
+- `memory/repository/ProjectRunLedgerRepository` — `ProjectRunLedger`. `findTop10ByProjectIdAndCompactedIntoIsNullOrderByRunNumberDesc`, `@Query findUncompactedBeforeRunNumber`, `existsByRunId`.
 
-### contracts/
-- **ContractConsumerRepository** — manages `ContractConsumer` — @Query: 0
-- **ContractDriftEventRepository** — manages `ContractDriftEvent` — @Query: 1 (open drift by contract)
-- **ContractRegistryRepository** — manages `ContractRegistry` — @Query: 0
-- **ContractVersionRepository** — manages `ContractVersion` — @Query: 0
+### Execution / migration / readymade / sharing / referral / invariants / standards / contracts
 
-### cost/
-- **RunCostHistoryRepository** — manages `RunCostHistory` — @Query: 2 (nearest-neighbour cost lookups for estimation)
+- `execution/repository/ExecutionRunRepository` — `ExecutionRun`. `findListByProjectId`, `findDetailById`, `findStaleNonTerminal`, `countActiveByProjectId`, `findActiveByProjectId`, `sumTotalCostByUserAndSince/Project`, `findCompletedWithZeroTotals`.
+- `execution/repository/ExecutionSolutionRepository` — `ExecutionSolution`. `findWithDependenciesByExecutionRun_Id...`, `findWithRepoMappingsByExecutionRun_Id...`.
+- `execution/repository/ExecutionSolutionRunRepository` — `ExecutionSolutionRun`. `findPipelineRunIdsByExecutionRunId`.
+- `execution/repository/ExecutionSolutionRepoRepository` — `ExecutionSolutionRepo`.
+- `execution/repository/ExecutionContextHandoverRepository` — `ExecutionContextHandover`.
+- `migration/repository/MigrationRecipeRepository` — `MigrationRecipe`.
+- `migration/repository/MigrationVariantRepository` — `MigrationVariant`. `@Transactional void deleteByRecipeId`.
+- `migration/repository/MigrationSlotRepository` — `MigrationSlot`. `@Transactional void deleteByRecipeId`.
+- `migration/repository/MigrationDependencyRepository` — `MigrationDependency`. `@Transactional void deleteByRecipeId`.
+- `migration/repository/MigrationDryRunCacheRepository` — `MigrationDryRunCache`.
+- `readymade/repository/ReadymadeSolutionRepository` — `ReadymadeSolution`.
+- `readymade/repository/ReadymadeVariantRepository` — `ReadymadeVariant`. `findByLanguageAndFramework`, `@Transactional void deleteBySolutionId`.
+- `readymade/repository/ReadymadeSlotRepository` — `ReadymadeSlot`. `@Transactional void deleteBySolutionId`.
+- `readymade/repository/ReadymadeDependencyRepository` — `ReadymadeDependency`. `@Transactional void deleteBySolutionId`.
+- `readymade/repository/ReadymadeFavouriteRepository` — `ReadymadeFavourite`. `@Transactional void deleteByUserIdAndSolutionId`.
+- `sharing/repository/ProjectShareLinkRepository` — `ProjectShareLink`. `@Query countActiveByProject(projectId, now)`.
+- `sharing/repository/ProjectInviteRepository` — `ProjectInvite`.
+- `referral/ReferralInviteRepository` — `ReferralInvite`. `@Query findByRefereeEmailIgnoreCase`, `findPendingByReferrer`, `findUngrantedByAcceptedUser`, `findByReferrerAndEmail`, `findByToken`.
+- `arch/invariants/ArchInvariantRepository` — `ArchInvariant`.
+- `arch/invariants/ArchInvariantViolationRepository` — `ArchInvariantViolation`. `@Query findRecentForProject`.
+- `standards/OrgStandardRepository` — `OrgStandard`.
+- `standards/ProjectStandardOverrideRepository` — `ProjectStandardOverride`.
+- `standards/StandardsViolationRepository` — `StandardsViolation`. `@Query findRecentForProject`, `findRecentOverridesForStandard`.
+- `standards/OrgConfigRepoRepository` — `OrgConfigRepo`.
+- `contracts/ContractRegistryRepository` — `ContractRegistry`.
+- `contracts/ContractVersionRepository` — `ContractVersion`.
+- `contracts/ContractConsumerRepository` — `ContractConsumer`.
+- `contracts/ContractDriftEventRepository` — `ContractDriftEvent`. `@Query findUnresolvedByContractId`.
 
-### deployment/
-- **DeploymentCredentialRepository** — manages `DeploymentCredential` — @Query: 2 (user+cloud lookup, delete)
-- **PreviewMetricRepository** — manages `PreviewMetric` — @Query: 0
-- **PreviewRegistryRepository** — manages `PreviewRegistry` — @Query: 2 (avg deploy duration, VM occupancy histogram)
+### Code review / PR review / preview / standards-enforcement
 
-### execution/
-- **ExecutionContextHandoverRepository** — manages `ExecutionContextHandover` — @Query: 0
-- **ExecutionRunRepository** — manages `ExecutionRun` — @Query: 8 (project paging, soft-delete filters)
-- **ExecutionSolutionRepoRepository** — manages `ExecutionSolutionRepo` — @Query: 0
-- **ExecutionSolutionRepository** — manages `ExecutionSolution` — @Query: 0
-- **ExecutionSolutionRunRepository** — manages `ExecutionSolutionRun` — @Query: 0
+- `codereview/repository/CodeReviewScanRepository` — `CodeReviewScan`. `@Query countByUserSince(userId, sinceMonthStart)`, `sumCostUsdByProject`, `sumTokensByProject`.
+- `codereview/repository/CodeReviewIssueRepository` — `CodeReviewIssue`. `findByFingerprint`.
+- `prreview/repository/PrReviewRepository` — `PrReview`. `findByRepoFullNameAndPrNumberAndHeadSha` (idempotency), `@Query countByUserSince`, `sumCostUsdByProject`, `sumTokensByProject`.
+- `prreview/repository/PrReviewCommentRepository` — `PrReviewComment`. `countByPrReviewId`.
+- `prreview/inbox/PrCommentInboxRepository` — `PrCommentInbox`. `findByRepoFullNameAndPrNumberAndCommentId` (dedup), `countByRunIdAndStatus`.
+- `deployment/credential/DeploymentCredentialRepository` — `DeploymentCredential`. `@Query findUserDefault(userId, cloudProvider)` (project_id IS NULL).
+- `deployment/preview/vm/PreviewRegistryRepository` — `PreviewRegistry`. `@Query avgDeployDurationLastN(n)`, `@Query countActiveByVm()`.
+- `deployment/preview/vm/PreviewMetricRepository` — `PreviewMetric`.
 
-### folder/
-- **ProjectConfigRepository** — manages `ProjectConfig` — @Query: 0
+### Folder / activity / saga / scoring / report / test / notification / Slack / analytics / router / ADR
 
-### harness/
-- **GateRepository** — manages `GateRecord` — @Query: 1
-  - `UPDATE GateRecord g SET g.status = :newStatus, g.resolvedAt = :now WHERE g.gateKey = :gateKey AND g.status = 'PENDING'`
-
-### integration/ (slack)
-- **OrgSlackIntegrationRepository** — manages `OrgSlackIntegration` — @Query: 0
-- **ProjectSlackChannelRepository** — manages `ProjectSlackChannel` — @Query: 0
-- **SlackNotificationLogRepository** — manages `SlackNotificationLog` — @Query: 1 (`DELETE FROM SlackNotificationLog l WHERE l.createdAt < :cutoff`)
-
-### memory/
-- **ProjectChatMessageRepository** — manages `ProjectChatMessage` — @Query: 1 (`DELETE FROM ProjectChatMessage m WHERE m.projectId = :projectId`)
-- **ProjectMemorySnapshotRepository** — manages `ProjectMemorySnapshot` — @Query: 0
-- **ProjectRunLedgerRepository** — manages `ProjectRunLedger` — @Query: 1
-  - `SELECT l FROM ProjectRunLedger l WHERE l.projectId = :projectId AND l.compactedInto IS NULL AND l.runNumber <= :beforeRunNumber ORDER BY l.runNumber ASC`
-
-### migration/
-- **MigrationDependencyRepository** — manages `MigrationDependency` — @Query: 0
-- **MigrationDryRunCacheRepository** — manages `MigrationDryRunCache` — @Query: 0
-- **MigrationRecipeRepository** — manages `MigrationRecipe` — @Query: 0
-- **MigrationSlotRepository** — manages `MigrationSlot` — @Query: 0
-- **MigrationVariantRepository** — manages `MigrationVariant` — @Query: 0
-
-### notification/
-- **NotificationRepository** — manages `Notification` — @Query: 2 (mark-all-read, mark-one-read)
-- **UserNotificationPrefRepository** — manages `UserNotificationPref` — @Query: 0
-
-### pricing/
-- **ModelPricingRepository** — manages `ModelPricing` — @Query: 0
-
-### project/
-- **PullRequestRecordRepository** — manages `PullRequestRecord` — @Query: 0
-- **ProjectDocumentRepository** — manages `ProjectDocument` — @Query: 0
-- **ProjectRepoLinkRepository** — manages `ProjectRepoLink` — @Query: 0
-- **ProjectRepoRepository** — manages `ProjectRepo` — @Query: 0
-- **ProjectSpecTemplateRepository** — manages `ProjectSpecTemplate` — @Query: 0
-
-### prreview/
-- **PrCommentInboxRepository** — manages `PrCommentInbox` — @Query: 0
-- **PrReviewCommentRepository** — manages `PrReviewComment` — @Query: 0
-- **PrReviewRepository** — manages `PrReview` — @Query: 0
-
-### readymade/
-- **ReadymadeDependencyRepository** — manages `ReadymadeDependency` — @Query: 0
-- **ReadymadeFavouriteRepository** — manages `ReadymadeFavourite` — @Query: 0
-- **ReadymadeSlotRepository** — manages `ReadymadeSlot` — @Query: 0
-- **ReadymadeSolutionRepository** — manages `ReadymadeSolution` — @Query: 0
-- **ReadymadeVariantRepository** — manages `ReadymadeVariant` — @Query: 0
-
-### referral/
-- **ReferralInviteRepository** — manages `ReferralInvite` — @Query: 4 (email lookup, pending invites, grant status)
-
-### report/
-- **ValidationReportRepository** — manages `ValidationReport` — @Query: 8 (project-scoped joins, terminal-count, time-series, native queries)
-
-### router/
-- **ModelTaskMetricRepository** — manages `ModelTaskMetric` — @Query: 1 (`SELECT m FROM ModelTaskMetric m ORDER BY m.createdAt DESC`)
-
-### saga/
-- **SideEffectOutboxRepository** — manages `SideEffectOutboxEntry` — @Query: 2 (`PENDING`/`PROCESSING` lookup with retry-time gate, transactional PENDING→PROCESSING flip)
-
-### scoring/
-- **RunRubricRowRepository** — manages `RunRubricRow` — @Query: 0
-
-### sharing/
-- **ProjectInviteRepository** — manages `ProjectInvite` — @Query: 0
-- **ProjectShareLinkRepository** — manages `ProjectShareLink` — @Query: 1 (active-count by project)
-
-### standards/
-- **OrgConfigRepoRepository** — manages `OrgConfigRepo` — @Query: 0
-- **OrgStandardRepository** — manages `OrgStandard` — @Query: 0
-- **ProjectStandardOverrideRepository** — manages `ProjectStandardOverride` — @Query: 0
-- **StandardsViolationRepository** — manages `StandardsViolation` — @Query: 2 (recent-by-project, override audit)
-
-### state/ (run lifecycle — the hot tables)
-- **AgentInboxRepository** — manages `AgentInbox` — @Query: 1 (mark delivered)
-- **AgentMessageRepository** — manages `AgentMessage` — @Query: 0
-- **AgentTaskRepository** — manages `AgentTask` — @Query: 2 (atomic PENDING→LOCKED, PENDING→WORKING transitions)
-- **CompactionEventRepository** — manages `CompactionEvent` — @Query: 0
-- **DeploymentRepository** — manages `Deployment` — @Query: 3 (active-count by user/run/status)
-- **FileLockRepository** — manages `FileLock` — @Query: 0
-- **GateEventRepository** — manages `GateEvent` — @Query: 0
-- **IntegrationEventLogRepository** — manages `IntegrationEventLog` — @Query: 1 (GC by cutoff)
-- **IntegrationRunRepository** — manages `IntegrationRun` — @Query: 0
-- **MergeConflictRepository** — manages `MergeConflict` — @Query: 2 (per-file analytics rollup)
-- **PipelineRunRepository** — manages `PipelineRun` — @Query: **34** (the largest custom-query surface in the codebase; covers token accumulation, status transitions, gate clearing, archive lifecycle, heartbeat updates, batch progress, planner outputs, fork/iteration parent links, runs-by-status, recovery candidates, and finance backfills)
-- **PlanVersionRepository** — manages `PlanVersion` — @Query: 0
-- **PromptAuditRepository** — manages `PromptAuditEntry` — @Query: 1 (latest version per prompt file)
-- **RunRecoveryRepository** — manages `RunRecovery` — @Query: 1 (classification × original-run-id IN-clause)
-- **RunRepoRepository** — manages `RunRepo` — @Query: 0
-- **RunRepoSnapshotRepository** — manages `RunRepoSnapshot` — @Query: 0
-
-### testgen/
-- **TestPlanRepository** — manages `TestPlan` — @Query: 0
-- **TestResultRepository** — manages `TestResult` — @Query: 0
-- **TestTaskRepository** — manages `TestTask` — @Query: 0
+- `folder/ProjectConfigRepository` — `ProjectConfig`.
+- `activity/ActivityFeedEntryRepository` — `ActivityFeedEntry`. `@Query findRecentForProject(projectId, from, to)`, `findRecentForProjectLimited` (Pageable LIMIT).
+- `saga/SideEffectOutboxRepository` — `SideEffectOutboxEntry`. `@Query findDue(now, limit)`, `@Modifying markProcessing(id)`.
+- `scoring/repository/RunRubricRowRepository` — `RunRubricRow`. `existsByRunId`.
+- `report/ValidationReportRepository` — `ValidationReport`. `findByShareToken`, native `findAllByProjectId` (Pilot R6), `countCompletedSince`, `verifiedScorePercentSince`, `countAllTime`, `findTopGalleryRuns(limit)`, `execSnapshotTotals(since)`, `spendByProjectSince(since)`, `topWinsSince(since)`.
+- `testgen/repository/TestPlanRepository` — `TestPlan`. `findByRunId`.
+- `testgen/repository/TestTaskRepository` — `TestTask`. `findByTestPlanIdAndStatus`.
+- `testgen/repository/TestResultRepository` — `TestResult`. `countByTestPlanIdAndStatus`.
+- `notification/NotificationRepository` — `Notification`. `existsByLinkAndType` (dedupe), `@Modifying markAllRead(userId)`, `markRead(id, userId)`.
+- `notification/pref/UserNotificationPrefRepository` — `UserNotificationPref`.
+- `integration/slack/model/OrgSlackIntegrationRepository` — `OrgSlackIntegration`. `findByOrgId`, `findByTeamId`, `deleteByOrgId`.
+- `integration/slack/model/ProjectSlackChannelRepository` — `ProjectSlackChannel`. `deleteByOrgId`, `countByOrgId`.
+- `integration/slack/model/SlackNotificationLogRepository` — `SlackNotificationLog`. `@Modifying deleteByCreatedAtBefore`.
+- `analytics/UserActivationEventRepository` — `UserActivationEvent`. `@Query countByEventName`, `countByEventNameSince`.
+- `router/ModelTaskMetricRepository` — `ModelTaskMetric`. `@Query findTopNOrderByCreatedAtDesc(Pageable)`; default int-arg helper.
+- `adr/AdrRepository` — `Adr`. `@Query findAcceptedForProject(projectId)`, `findByRepoIdAndAdrIdInRepo`.
 
 ---
 
-## 6. Entities (data layer)
+## 6. Entities
 
-JPA `@Entity` classes. Counts are `@Column` annotations + private fields (some fields use `@JoinColumn`/`@Embedded` and don't have a `@Column`). FK column patterns are detected from `@Column(name="..._id")` annotations.
+Format: `EntityName  @Table(name="...")  approx N columns  notable FK columns / migration notes`.
 
-### auth/
-- **ActivityAudit** — `auth/entity` — table `activity_audit` — @Column: 12 | fields: 12 — FK: actor_id, entity_id, org_id
-- **AppUser** — `auth/entity` — table `app_user` — @Column: 45 | fields: 34 — FK: oauth_id, org_id, referred_by_user_id, sandbox_project_id, stripe_customer_id
-- **EmailToken** — `auth/entity` — table `email_token` — @Column: 6 | fields: 6 — FK: user_id
-- **Org** — `auth/entity` — table `org` — @Column: 44 | fields: 29 — FK: created_by_user_id, github_installation_id, payment_ref_id, stripe_customer_id
-- **OrgInvitation** — `auth/entity` — table `org_invitation` — @Column: 11 | fields: 9 — FK: org_id
-- **OrgMember** — `auth/entity` — table `org_member` — @Column: 4 | fields: 3 — FK: org_id, user_id
-- **PaymentAudit** — `auth/entity` — table `payment_audit` — @Column: 18 | fields: 18 — FK: entity_id, gateway_event_id, gateway_payment_id, org_id, payment_ref_id, user_id
-- **Project** — `auth/entity` — table `project` — @Column: 17 | fields: 10 — FK: org_id
-- **ProjectMember** — `auth/entity` — table `project_member` — @Column: 5 | fields: 3 — FK: project_id, user_id
-- **RefreshTokenBlocklist** — `auth/entity` — table `refresh_token_blocklist` — @Column: 3 | fields: 3 — FK: user_id
-- **TierConfig** — `auth/entity` — table `tier_config` — @Column: 26 | fields: 10 — global tier configuration (run quotas editable by super admin)
+### Auth / org / users / projects
 
-### billing/
-- **AccountingEntry** — `billing/entity` — table `accounting_entry` — @Column: 14 | fields: 14 — FK: invoice_id, org_id, user_id
-- **BillingPlan** — `billing/entity` — table `billing_plan` — @Column: 23 | fields: 23 — FK: razorpay_plan_id, stripe_price_id, stripe_product_id
-- **BillingPlanLimit** — `billing/entity` — table `billing_plan_limit` — @Column: 3 | fields: 4 — FK: billing_plan_id
-- **BillingProfile** — `billing/entity` — table `billing_profile` — @Column: 18 | fields: 17 — FK: org_id, user_id
-- **BillingSubscription** — `billing/entity` — table `billing_subscription` — @Column: 24 | fields: 24 — FK: billing_entity_id, billing_plan_id, gateway_customer_id, gateway_subscription_id, org_id, user_id
-- **BillingUsage** — `billing/entity` — table `billing_usage` — @Column: 7 | fields: 8 — FK: org_id, user_id
-- **BillingWebhookEvent** — `billing/entity` — table `billing_webhook_event` — @Column: 8 | fields: 9 — FK: event_id
-- **FounderPricingAllocation** — `billing/entity` — table `founder_pricing_allocation` — @Column: 6 | fields: 7 — FK: discount_id, org_id, user_id
-- **FounderPricingDiscount** — `billing/entity` — table `founder_pricing_discount` — @Column: 13 | fields: 14 — FK: razorpay_offer_id, stripe_coupon_id (V177 singleton "first N" offer)
-- **Invoice** — `billing/entity` — table `invoice` — @Column: 50 | fields: 38 — FK: billing_profile_id, gateway_invoice_id, gateway_order_id, gateway_payment_id, org_id, original_invoice_id, subscription_id, topup_id, user_id
-- **InvoiceLineItem** — `billing/entity` — table `invoice_line_item` — @Column: 8 | fields: 6 — FK: invoice_id
-- **InvoiceSequence** — `billing/entity` — table `invoice_sequence` — @Column: 2 | fields: 2
-- **RunTopup** — `billing/entity` — table `run_topup` — @Column: 14 | fields: 15 — FK: gateway_order_id, gateway_payment_id, org_id, user_id
-- **SellerConfig** — `billing/entity` — table `seller_config` — @Column: 13 | fields: 11
-- **TopupPackage** — `billing/entity` — table `topup_package` — @Column: 8 | fields: 9
-- **WebhookEventLog** — `billing/entity` — table `webhook_event_log` — @Column: 9 | fields: 8 — FK: event_id
+- `auth/entity/AppUser` — `app_user` — 39 cols. Encrypted: openai_api_key/anthropic_api_key/gemini_api_key/bitbucket_app_password/jira_api_token/confluence_api_token. Keys: `id @Id`, `email` unique. FK: org_id, sandbox_project_id, referred_by_user_id, oauth_provider+oauth_id.
+- `auth/entity/Org` — `org` — 36 cols. V198 `external_sharing_enabled`. M-032 `require_admin_approval_above_usd`, M-039 `allowed_github_owners`. SSO + GitHub-App fields. Encrypted anthropic/openai/gemini/jira/confluence tokens. `is_personal` (V162).
+- `auth/entity/OrgMember` — `org_member` — 5 cols — UniqueConstraint(org_id, user_id).
+- `auth/entity/OrgInvitation` — `org_invitation` — 11 cols. Token unique.
+- `auth/entity/Project` — `project` — 16 cols. FK: org_id, created_by. `default_reviewers jsonb`, `is_sandbox`, `archived_at`, `deleted_at` (V191), `config_storage` (E1.7).
+- `auth/entity/ProjectMember` — `project_member` — 6 cols — UniqueConstraint(project_id, user_id). `is_external` (V175).
+- `auth/entity/TierConfig` — `tier_config` — 25 cols — `tier String @Id`. Caps: monthly_run_limit, max_org_members, max_chat_messages, concurrent_run_limit, max_apply_suggestions, max_preview_starts, max_run_auto_retries, can_deploy, max_deployments, max_run_cost_usd, retention_days, max_projects_per_org, max_repos_per_project (V140), pr_review_enabled+quota (V172), code_review_enabled+quota (V172), share_link_active_cap (V175), lifecycle_state (v2.6.0).
+- `auth/entity/ActivityAudit` — `activity_audit` — 13 cols — hash-chain `prev_hash`/`row_hash`/`chain_seq`.
+- `auth/entity/PaymentAudit` — `payment_audit` — 18 cols — JSONB metadata.
+- `auth/entity/RefreshTokenBlocklist` — `refresh_token_blocklist` — 4 cols — `jti String @Id`.
+- `auth/entity/EmailToken` — `email_token` — 7 cols. Token unique.
 
-### codeintel/
-- **FilePurposeSummary** — `codeintel/entity` — table `file_purpose_summary` — @Column: 9 | fields: 5 (V196 per-file LLM-generated purpose, SHA-keyed cache)
-- **ProjectArchitectureDoc** — `codeintel/entity` — table `project_architecture_doc` — @Column: 8 | fields: 5 — FK: project_id
-- **ProjectCodeMap** — `codeintel/entity` — table `project_code_map` — @Column: 6 | fields: 4 — FK: project_id, repo_id
-- **ProjectGeneratedDoc** — `codeintel/entity` — table `project_generated_doc` — @Column: 13 | fields: 9 — FK: project_id
-- **RepoArchitectureDoc** — `codeintel/entity` — table `repo_architecture_doc` — @Column: 13 | fields: 9 — FK: project_id, repo_id, source_code_map_id
-- **RunCodeMap** — `codeintel/entity` — table `run_code_map` — @Column: 11 | fields: 6 — FK: run_id
+### Run / pipeline / state
 
-### codereview/
-- **CodeReviewIssue** — `codereview/entity` — table `code_review_issue` — @Column: 15 | fields: 13 — FK: resolved_by_user_id, rule_id, scan_id
-- **CodeReviewScan** — `codereview/entity` — table `code_review_scan` — @Column: 20 | fields: 11 — FK: created_by_user_id, project_id, repo_id
+- `state/entity/PipelineRun` — `pipeline_run` — ~95 cols — `runId String @Id`. V107 status_reason, V109 plan_requirements_json, V130 hierarchical-planner phase costs, V155 selected_repo_ids jsonb, V162 personal-org, V168 pause fields, V178 user_cost_cap_usd, V182 run_mode, V183 triggered_by_finding, V188 pipeline_run_id (unified-dispatch chaining). `@Deprecated github_pr_url`. `@EntityListeners(TenantInterceptor.class)`.
+- `state/entity/AgentTask` — `agent_task` — 36 cols — `taskId String @Id`. V109 meets_requirements_json, V130 task_type/expansion_status/expanded_at, V184 last_llm_failure TEXT, V190 failure_diagnostic_json.
+- `state/entity/AgentMessage` — `agent_message` — 9 cols — `messageId String @Id`.
+- `state/entity/AgentInbox` — `agent_inbox` — 10 cols.
+- `state/entity/GateEvent` — `gate_event` — 6 cols.
+- `state/entity/CompactionEvent` — `compaction_event` — 5 cols.
+- `state/entity/PlanVersion` — `plan_version` — 6 cols.
+- `state/entity/RunRepo` — `run_repo` — 9 cols. RepoMode enum (NEW/EXISTING/NONE).
+- `state/entity/RunRepoSnapshot` — `run_repo_snapshot` — 6 cols. V100.
+- `state/entity/RunRecovery` — `run_recovery` — 10 cols.
+- `state/entity/IntegrationRun` — `integration_run` — 6 cols.
+- `state/entity/IntegrationEventLog` — `integration_event_log` — 4 cols — unique(source_type, event_id).
+- `state/entity/FileLock` — `file_lock` — 4 cols — `filePath String @Id`.
+- `state/entity/MergeConflict` — `merge_conflict` — 10 cols — `Long id @Id`.
+- `state/entity/Deployment` — `deployment` — ~30 cols. DeployStrategy/DeployStatus enums.
+- `state/entity/PromptAuditEntry` — `prompt_audit_entry` — 11 cols.
+- `harness/entity/GateRecord` — `gate_record` — 7 cols — `gateKey String @Id`.
+- `agent/PromptAudit` — `prompt_audit` — 6 cols — 12-char hash audit.
 
-### execution/
-- **ExecutionContextHandover** — `execution/entity` — table `execution_context_handover` — @Column: 6 | fields: 6 — FK: from_solution_id, to_solution_id
-- **ExecutionRun** — `execution/entity` — table `execution_run` — @Column: 32 | fields: 29 — FK: migration_recipe_id, migration_variant_id, org_id, pipeline_run_id, project_id, readymade_solution_id, readymade_variant_id, source_execution_id
-- **ExecutionSolution** — `execution/entity` — table `execution_solution` — @Column: 27 | fields: 22 — FK: jira_ticket_id, pipeline_run_id
-- **ExecutionSolutionRepo** — `execution/entity` — table `execution_solution_repo` — @Column: 6 | fields: 6 — FK: repo_id
-- **ExecutionSolutionRun** — `execution/entity` — table `execution_solution_run` — @Column: 11 | fields: 11 — FK: pipeline_run_id, solution_id
+### Cost / pricing
 
-### harness/
-- **GateRecord** — `harness/entity` — table `gate_record` — @Column: 7 | fields: 7 — FK: run_id (durable approval gate decisions)
+- `pricing/ModelPricing` — `model_pricing` — `@EmbeddedId ModelPricingId(provider, model)` + 4 cols.
+- `billing/cost/RunCostLog` — `run_cost_log` — 18 cols.
+- `cost/RunCostHistory` — `run_cost_history` — 19 cols — `run_id @Id`. PR-A V187.
 
-### memory/
-- **ProjectChatMessage** — `memory/entity` — table `project_chat_message` — @Column: 9 | fields: 9 — FK: org_id, project_id, user_id
-- **ProjectMemorySnapshot** — `memory/entity` — table `project_memory_snapshot` — @Column: 9 | fields: 9 — FK: org_id, project_id
-- **ProjectRunLedger** — `memory/entity` — table `project_run_ledger` — @Column: 9 | fields: 9 — FK: org_id, project_id, run_id
+### Billing
 
-### migration/
-- **MigrationDependency** — `migration/entity` — table `migration_dependency` — @Column: 3 | fields: 5 — FK: depends_on_id, recipe_id
-- **MigrationDryRunCache** — `migration/entity` — table `migration_dry_run_cache` — @Column: 8 | fields: 9 — FK: recipe_id
-- **MigrationRecipe** — `migration/entity` — table `migration_recipe` — @Column: 26 | fields: 21 — FK: author_org_id, author_user_id
-- **MigrationSlot** — `migration/entity` — table `migration_slot` — @Column: 9 | fields: 7 — FK: recipe_id
-- **MigrationVariant** — `migration/entity` — table `migration_variant` — @Column: 8 | fields: 7 — FK: recipe_id
+- `billing/entity/BillingPlan` — `billing_plan` — 22 cols. v2.6.0 lifecycle.
+- `billing/entity/BillingPlanLimit` — `billing_plan_limit` — 4 cols.
+- `billing/entity/BillingSubscription` — `billing_subscription` — 22 cols. FK: user_id, org_id, billing_plan_id. v2.6.x billing_entity_type/id.
+- `billing/entity/BillingUsage` — `billing_usage` — 7 cols.
+- `billing/entity/RunTopup` — `run_topup` — 13 cols.
+- `billing/entity/Invoice` — `invoice` — 45 cols. India-GST compliant.
+- `billing/entity/InvoiceLineItem` — `invoice_line_item` — 9 cols.
+- `billing/entity/InvoiceSequence` — `invoice_sequence` — `financialYear String @Id`.
+- `billing/entity/BillingProfile` — `billing_profile` — 17 cols.
+- `billing/entity/SellerConfig` — `seller_config` — 11 cols — `id @Id` default "DEFAULT".
+- `billing/entity/AccountingEntry` — `accounting_entry` — 11 cols.
+- `billing/entity/BillingWebhookEvent` — `billing_webhook_event` — 8 cols.
+- `billing/entity/WebhookEventLog` — `webhook_event_log` — 9 cols — unique(gateway, event_id).
+- `billing/entity/TopupPackage` — `topup_package` — 9 cols.
+- `billing/entity/FounderPricingDiscount` — `founder_pricing_discount` — 13 cols.
+- `billing/entity/FounderPricingAllocation` — `founder_pricing_allocation` — 7 cols — unique(discount_id, user_id) (V177).
 
-### project/
-- **ProjectRepo** — `project/entity` — table `project_repo` — @Column: 19 | fields: 14 — FK: owner_org_id, owner_user_id (dual-scoped repo registry)
-- **ProjectRepoLink** — `project/entity` — table `project_repo_link` — @Column: 5 | fields: 4 — FK: project_id, repo_id (project-attach join row)
+### Code review / PR review / preview / VM / project workbench
 
-### prreview/
-- **PrReview** — `prreview/entity` — table `pr_review` — @Column: 17 | fields: 13 — FK: created_by_user_id, github_review_id, project_id
-- **PrReviewComment** — `prreview/entity` — table `pr_review_comment` — @Column: 10 | fields: 9 — FK: github_comment_id, pr_review_id
+- `codereview/entity/CodeReviewScan` — `code_review_scan` — 19 cols.
+- `codereview/entity/CodeReviewIssue` — `code_review_issue` — 14 cols. Fingerprint sha256-64.
+- `prreview/entity/PrReview` — `pr_review` — 16 cols — unique(repo_full_name, pr_number, head_sha).
+- `prreview/entity/PrReviewComment` — `pr_review_comment` — 11 cols.
+- `prreview/inbox/PrCommentInbox` — `pr_comment_inbox` — 13 cols — `Long id @Id`.
+- `deployment/credential/DeploymentCredential` — `deployment_credential` — 11 cols. AES-256-GCM encrypted_data bytea.
+- `deployment/preview/vm/PreviewRegistry` — `preview_registry` — 14 cols.
+- `deployment/preview/vm/PreviewMetric` — `preview_metrics` — 6 cols — `Long id @Id`.
+- `project/entity/ProjectRepo` — `project_repo` — 19 cols. Scope ORG/USER; FolderStatus + PrMode enums. R-322 subdir, R-325 size_kb + attached_anyway, v2.5.2 webhook_installed, E1.1 executespec_folder_status/sha/bootstrap_pr_url, E1.4 executespec_pr_mode.
+- `project/entity/ProjectRepoLink` — `project_repo_link` — 6 cols. relationships jsonb.
+- `project/template/ProjectSpecTemplate` — `project_spec_template` — 10 cols.
+- `project/pr/PullRequestRecord` — `pull_request_record` — 17 cols. Status OPEN/MERGED/CLOSED; Kind RUN/BOOTSTRAP/ARCHITECTURE/CONTRACT/CHAT_TOOL; CiCheckStatus (V186).
+- `project/rag/entity/ProjectDocument` — `project_document` — 14 cols.
 
-### rag/
-- **ProjectDocument** — `rag/entity` — table `project_document` — @Column: 14 | fields: 14 — FK: project_id
+### Execution / arch / contracts / migration / readymade / sharing / standards / invariants / ADR
 
-### readymade/
-- **ReadymadeDependency** — `readymade/entity` — table `readymade_dependency` — @Column: 3 | fields: 4 — FK: depends_on_id, solution_id
-- **ReadymadeFavourite** — `readymade/entity` — table `readymade_favourite` — @Column: 3 | fields: 4 — FK: solution_id, user_id
-- **ReadymadeSlot** — `readymade/entity` — table `readymade_slot` — @Column: 9 | fields: 7 — FK: solution_id
-- **ReadymadeSolution** — `readymade/entity` — table `readymade_solution` — @Column: 22 | fields: 17 — FK: author_org_id, author_user_id
-- **ReadymadeVariant** — `readymade/entity` — table `readymade_variant` — @Column: 9 | fields: 8 — FK: solution_id
+- `execution/entity/ExecutionRun` — `execution_run` — 28 cols — `id String @Id (36)`. `@Version`. V155 selected_repo_ids jsonb, V159 migration_recipe/variant_id, V160 readymade_solution/variant_id, V188 pipeline_run_id, V193 failure_reason TEXT.
+- `execution/entity/ExecutionSolution` — `execution_solution` — 26 cols. EAGER `dependencies` (ManyToMany join `execution_solution_dependency`), `repoMappings` (OneToMany).
+- `execution/entity/ExecutionSolutionRun` — `execution_solution_run` — 10 cols.
+- `execution/entity/ExecutionContextHandover` — `execution_context_handover` — 6 cols.
+- `execution/entity/ExecutionSolutionRepo` — `execution_solution_repo` — 7 cols.
+- `codeintel/entity/ProjectCodeMap` — `project_code_map` — 7 cols.
+- `codeintel/entity/ProjectArchitectureDoc` — `project_architecture_doc` — 9 cols. `generated_from_shas/branches` jsonb (V192).
+- `codeintel/entity/RepoArchitectureDoc` — `repo_architecture_doc` — 12 cols. V174 cost_usd.
+- `codeintel/entity/ProjectGeneratedDoc` — `project_generated_doc` — 12 cols. V195 source_arch_version + source_shas_fingerprint (PR-Q cache).
+- `codeintel/entity/FilePurposeSummary` — `file_purpose_summary` — 10 cols. PR-N2 V196.
+- `codeintel/entity/RunCodeMap` — `run_code_map` — 12 cols.
+- `contracts/ContractRegistry` — `contract_registry` — 12 cols — unique(repo_id, name).
+- `contracts/ContractVersion` — `contract_version` — 7 cols — unique(contract_id, registry_version).
+- `contracts/ContractConsumer` — `contract_consumer` — 7 cols — unique(contract_id, consumer_repo_id, declared_in_project_id).
+- `contracts/ContractDriftEvent` — `contract_drift_event` — 7 cols.
+- `migration/entity/MigrationRecipe` — `migration_recipe` — 25 cols.
+- `migration/entity/MigrationVariant` — `migration_variant` — 8 cols — unique(recipe_id, options_signature).
+- `migration/entity/MigrationSlot` — `migration_slot` — 10 cols — unique(recipe_id, name).
+- `migration/entity/MigrationDependency` — `migration_dependency` — 3 cols — `@IdClass`.
+- `migration/entity/MigrationDryRunCache` — `migration_dry_run_cache` — 8 cols — composite PK (recipe_id, stack_signature).
+- `readymade/entity/ReadymadeSolution` — `readymade_solution` — 23 cols.
+- `readymade/entity/ReadymadeVariant` — `readymade_variant` — 10 cols.
+- `readymade/entity/ReadymadeSlot` — `readymade_slot` — 10 cols — unique(solution_id, name).
+- `readymade/entity/ReadymadeDependency` — `readymade_dependency` — 3 cols — `@IdClass`.
+- `readymade/entity/ReadymadeFavourite` — `readymade_favourite` — 3 cols — `@IdClass`.
+- `sharing/entity/ProjectShareLink` — `project_share_link` — 13 cols. Surface enum.
+- `sharing/entity/ProjectInvite` — `project_invite` — 14 cols.
+- `standards/OrgStandard` — `org_standard` — 7 cols — unique(org_id, standard_id).
+- `standards/ProjectStandardOverride` — `project_standard_override` — 8 cols — unique(project_id, standard_id).
+- `standards/StandardsViolation` — `standards_violation` — 14 cols.
+- `standards/OrgConfigRepo` — `org_config_repo` — 5 cols — unique(org_id).
+- `arch/invariants/ArchInvariant` — `arch_invariant` — 6 cols — unique(project_id, invariant_id).
+- `arch/invariants/ArchInvariantViolation` — `arch_invariant_violation` — 5 cols.
+- `adr/Adr` — `adr` — 17 cols — unique(repo_id, adr_id_in_repo).
 
-### report/
-- **PipelineResult** — `report/entity` — table `` — @Column: 0 | fields: 0 (legacy non-JPA helper)
-- **ValidationReport** — `report/entity` — table `validation_report` — @Column: 33 | fields: 27 — FK: run_id
+### Memory / chat / RAG / activity / saga / folder / notification / Slack / referral / analytics / scoring / report / test / router
 
-### scoring/
-- **RunRubricRow** — `scoring/entity` — table `run_rubric_row` — @Column: 11 | fields: 8 — FK: rubric_row_id, run_id (V197 planner-emitted rubric per run)
-
-### sharing/
-- **ProjectInvite** — `sharing/entity` — table `project_invite` — @Column: 13 | fields: 10 — FK: accepted_by_user_id, invited_by_user_id, invited_org_id, project_id, revoked_by_user_id (V175 cross-org invite)
-- **ProjectShareLink** — `sharing/entity` — table `project_share_link` — @Column: 12 | fields: 10 — FK: created_by_user_id, project_id, revoked_by_user_id, scope_id (V175 public share link)
-
-### state/ (run lifecycle)
-- **AgentInbox** — `state/entity` — table `agent_inbox` — @Column: 1 | fields: 11
-- **AgentMessage** — `state/entity` — table `agent_message` — @Column: 2 | fields: 10 — FK: tenant_id
-- **AgentTask** — `state/entity` — table `agent_task` — @Column: 19 | fields: 33 — FK: parent_task_id, tenant_id
-- **CompactionEvent** — `state/entity` — table `compaction_event` — @Column: 0 | fields: 6
-- **Deployment** — `state/entity` — table `deployment` — @Column: 35 | fields: 34 — FK: credential_id, run_id, run_repo_id, tenant_id, user_id
-- **FileLock** — `state/entity` — table `file_lock` — @Column: 0 | fields: 4
-- **GateEvent** — `state/entity` — table `gate_event` — @Column: 1 | fields: 6 — FK: tenant_id
-- **IntegrationEventLog** — `state/entity` — table `integration_event_log` — @Column: 4 | fields: 4 — FK: event_id, tenant_id
-- **IntegrationRun** — `state/entity` — table `integration_run` — @Column: 6 | fields: 6 — FK: run_id, source_id, tenant_id
-- **MergeConflict** — `state/entity` — table `merge_conflict` — @Column: 10 | fields: 10 — FK: run_id, task_id (analytics → conflict-resolver evolution)
-- **PipelineRun** — `state/entity` — table `pipeline_run` — @Column: **87** | fields: 91 — FK: batch_id, created_by_user_id, org_id, paused_task_id, project_id, source_run_id, tenant_id (the run-state hub; ~100 fields covering plan, costs, score, gates, archives, batch, ownership, retries)
-- **PlanVersion** — `state/entity` — table `plan_version` — @Column: 6 | fields: 6 — FK: run_id
-- **PromptAuditEntry** — `state/entity` — table `prompt_audit_entry` — @Column: 11 | fields: 10 (versioned prompt-file history)
-- **RunRecovery** — `state/entity` — table `run_recovery` — @Column: 10 | fields: 10 — FK: original_run_id, restart_run_id, stuck_task_id, tenant_id
-- **RunRepo** — `state/entity` — table `run_repo` — @Column: 9 | fields: 8 — FK: run_id, tenant_id
-- **RunRepoSnapshot** — `state/entity` — table `run_repo_snapshot` — @Column: 7 | fields: 6 — FK: repo_id, run_id (commit SHA captured at run start; used by `/api/runs/{id}/sync/original`)
+- `memory/entity/ProjectRunLedger` — `project_run_ledger` — 9 cols.
+- `memory/entity/ProjectMemorySnapshot` — `project_memory_snapshot` — 9 cols.
+- `memory/entity/ProjectChatMessage` — `project_chat_message` — 9 cols.
+- `activity/ActivityFeedEntry` — `activity_feed` (partitioned) — 12 cols — `@IdClass(ActivityFeedEntryId)`. V133.
+- `saga/SideEffectOutboxEntry` — `side_effect_outbox` — 10 cols.
+- `folder/ProjectConfig` — `project_config` — 6 cols — unique(project_id, config_key). V134.
+- `notification/Notification` — `notification` — 7 cols — `String id @Id`.
+- `notification/pref/UserNotificationPref` — `user_notification_pref` — 7 cols — unique(user_id, event_type, channel).
+- `integration/slack/model/OrgSlackIntegration` — `org_slack_integration` — 9 cols — `Long id @Id`.
+- `integration/slack/model/ProjectSlackChannel` — `project_slack_channel` — 8 cols.
+- `integration/slack/model/SlackNotificationLog` — `slack_notification_log` — 9 cols.
+- `referral/ReferralInvite` — `referral_invite` — 8 cols. V153.
+- `analytics/UserActivationEvent` — `user_activation_event` — 4 cols — `@IdClass(PK)`. V125.
+- `scoring/entity/RunRubricRow` — `run_rubric_row` — 11 cols. V197.
+- `report/entity/ValidationReport` — `validation_report` — 30 cols. V74 accuracy_* + V83 6-dim scores + V106 verified_score + V194 rubric_score.
+- `testgen/model/TestPlan` — `test_plan` — 14 cols — `Long id @Id`.
+- `testgen/model/TestTask` — `test_task` — 10 cols — `Long id @Id`.
+- `testgen/model/TestResult` — `test_result` — 11 cols — `Long id @Id`.
+- `router/ModelTaskMetric` — `model_task_metric` — 16 cols — `Long id @Id`.
 
 ---
 
-## Cross-reference
+## Application bootstrap
 
-For the package-level overview (which package holds what, dependency graph, migration log per package), see [`CODEMAP.md`](CODEMAP.md). For the LLM-pipeline architecture (run orchestrator → planner → worker → reviewer → preview), see [`ARCHITECTURE.md`](ARCHITECTURE.md). For RBAC matrix per endpoint, see [`RBAC.md`](RBAC.md).
+- `ExecutespecApplication` (`com.navneet.executespec`) — `@SpringBootApplication` excluding 10 Spring AI auto-configurations (Anthropic, Google GenAI chat/embedding, OpenAI chat/audio/embedding/image/moderation) so chat/embedding beans wired manually in `config/AgentModelConfig`. `@EnableScheduling`, `@EnableAsync`, `@EnableRetry`, `@EnableConfigurationProperties({DeploymentProperties.class, IntegrationProperties.class, ModelMatrixProperties.class})`.
 
-This doc reflects the public Java surface as of head `V199` (`1.0.0-M1`). Endpoint signatures may include framework-level wrappers (`@AuthenticationPrincipal`, `@PathVariable`, `@RequestBody`) elided from the compact form; consult the source for binding details.
+## Verification
+
+All API contracts, agent tier mappings, tool schemas, and entity schemas reflect the codebase as of `1.0.0-M1` / V199. Tier mappings driven by `application.yml model-matrix.agent-tier-map`. Default LLM provider is **anthropic** since 1.0.0-M1.
+
+Known anomalies / engineering-honest notes:
+
+- `state/StateStore.completeParentFromSubtasks` overwrites `provider`/`model` last-wins — no aggregation.
+- `notification/RunCompletionNotifier.onQuotaWarning` builds `QUOTA_WARNING_<yyyy-MM>:<userId>` (~56 chars) but `Notification.type` is `length=30` — silent insert failure path.
+- `router/ModelResolver.selectAdaptiveProvider` known tech-debt (Bug #1c) — strict-mode-bypass guard is JVM flag `executespec.strict-provider` + feature flag `routing.adaptive-routing.enabled` (default OFF).
+- `codeintel/RunCodeMapService.summarise` bypasses `LlmRouter` (Anthropic-direct); also field-injects `AnthropicChatModel`.
+- `assessment/FeatureAssessmentService` field-injects `AnthropicChatModel` (required=false).
+- `prreview/PrReviewAgent` does NOT use `PromptAssembler` (loads via `ClassPathResource` directly).
+- `agent/CostEstimator.computeCostForRun` builds a `stateStore.findRun` lambda whose body is empty (dead chain).
+- `tool/FileSystemTool.searchFiles` shells out to `grep -r` (V1 facade) vs V2 `SearchFilesTool` (native Java walk).
+- `tool/GitTool.pushToRemote/pushToBranch/commitAndPushSubdir/pushToBranchBitbucket` use `--force`; `pushToExistingBranch` is the safe (fast-forward) path used by apply-suggestion.
+- Two parallel webhook tables (`webhook_event_log` audit vs `billing_webhook_event` idempotency marker) both unique on (gateway, event_id).
+- `Deployment` mixes `String` ISO timestamps (`ttlExpiresAt`/`createdAt`/`deployedAt`/`deletedAt`) with `Instant` `auto_destroy_at`.
+- `BillingPlan.prePersist` force-sets `active=true` on insert.
+- `IntegrationStatusController` uses field `@Autowired` (violates project pattern).
+- `FeasibilityController` always returns 410 (V1 retired).
+- Ten legacy guard sites remain in `AccessGuardCoverageTest.KNOWN_LEGACY_DRIFT`.
+- `tool/package-info.java` is stale relative to V2 unification pass (references retired `V2`-suffix names).

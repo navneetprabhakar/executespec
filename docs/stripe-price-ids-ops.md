@@ -1,238 +1,272 @@
-# Stripe price IDs — ops checklist
+# Stripe Price IDs — Operations
 
-Operational reference for the four Stripe price IDs the platform reads from
-the environment, plus the supporting Stripe configuration (secret key,
-webhook secret, gateway-enable flags, currency routing). All claims below
-trace to a single source of truth: the code on `main` today.
+How Stripe price identifiers flow from env vars through Spring config into the gateway adapter, how the resolver chain decides which one to use, and the operational steps for rotating or testing them.
 
-## SKUs the platform expects
+This doc covers:
 
-Four `${billing.stripe.*-price-id*}` keys are wired from
-[`application.yml`](../src/main/resources/application.yml) (lines 771–782)
-into
-[`StripePaymentGateway.java`](../src/main/java/com/navneet/executespec/billing/gateway/StripePaymentGateway.java)
-(lines 36–46).
+- Every `STRIPE_*_PRICE_ID` env var and where it lands.
+- The resolution order inside `StripePaymentGateway.resolvePriceId(...)` — DB column first, env var fallback.
+- Supporting env vars: secret/publishable/webhook secrets, gateway-enable toggles, default-gateway selector.
+- Currency-to-gateway routing (INR -> Razorpay; USD/EUR/GBP -> Stripe).
+- Rotation procedure (DB column preferred; env-var swap is a fallback).
+- Test mode vs live mode.
+- The webhook event types the integration actually handles.
 
-| YAML key                          | `@Value` field      | Env var                      | Role                                                                                                                |
-| --------------------------------- | ------------------- | ---------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `billing.stripe.pro-price-id`     | `proPriceId`        | `STRIPE_PRO_PRICE_ID`        | PRO tier monthly subscription. Also the ultimate fallback when `resolvePriceId(planId)` cannot map the plan to anything else (StripePaymentGateway lines 361, 391, 404). |
-| `billing.stripe.enterprise-price-id` | `enterprisePriceId` | `STRIPE_ENTERPRISE_PRICE_ID` | ENTERPRISE tier. Read only when `BillingPlan.tier=ENTERPRISE` (or the legacy planId string contains `"enterprise"`). |
-| `billing.stripe.team-price-id`    | `teamPriceId`       | `STRIPE_TEAM_PRICE_ID`       | TEAM tier USD per-seat. **Must be a Stripe Price with per-unit pricing enabled** — `LineItem.setQuantity(seats)` is honoured (StripePaymentGateway lines 88–93). Self-serve seat range is 2–20 (`BillingService.subscribe` lines 178–183). |
-| `billing.stripe.team-price-id-inr`| `teamPriceIdInr`    | `STRIPE_TEAM_PRICE_ID_INR`   | TEAM tier INR per-seat. Optional. Picked when `BillingPlan.baseAmountInr > 0 && baseAmountUsd == 0` (StripePaymentGateway line 375) OR when the legacy planId string contains both `"team"` and `"inr"` (line 387–389). |
+## Env vars at a glance
 
-There is no `STARTER_PRICE_ID` or `MAX_PRICE_ID`. STARTER is mapped to the
-auth-tier `FREE` inside `BillingService.upgradeTier` (line 1143) and never
-checks out via Stripe. MAX was retired in
-[`V165__drop_max_tier_team_at_39.sql`](../src/main/resources/db/migration/V165__drop_max_tier_team_at_39.sql);
-legacy MAX subscriptions are now folded into TEAM via the switch fall-through
-at line 1148.
+The platform reads four Stripe price-id env vars. Three for canonical tiers + one INR override:
 
-## Plan tier → price ID resolution
+| Env var                          | YAML key                          | Tier        | Currency | Notes                                                                                  |
+| -------------------------------- | --------------------------------- | ----------- | -------- | -------------------------------------------------------------------------------------- |
+| `STRIPE_PRO_PRICE_ID`            | `billing.stripe.pro-price-id`     | PRO         | USD      | Single price across all PRO USD plans (monthly + yearly fall through to same env if no DB row). |
+| `STRIPE_ENTERPRISE_PRICE_ID`     | `billing.stripe.enterprise-price-id` | ENTERPRISE | USD      | ENTERPRISE rarely uses Stripe checkout (custom-contract path); env var still wired for self-serve fallback. |
+| `STRIPE_TEAM_MONTHLY_PRICE_ID`   | `billing.stripe.team-price-id`    | TEAM        | USD      | Per-seat. Quantity passed at checkout-session create time.                              |
+| `STRIPE_TEAM_PRICE_ID_INR`       | `billing.stripe.team-price-id-inr` | TEAM       | INR      | Override when a TEAM customer's billing entity prefers INR (rare; Stripe in India is limited). |
 
-`StripePaymentGateway.resolvePriceId(planId)` (lines 360–392) runs three
-steps in order:
+These are wired in `src/main/resources/application.yml` under the `billing.stripe.*` block (placeholder values for local) and overridden via env-only resolution in `application-prod.yml`. Default local + dev values are empty / placeholder; production fills via env.
 
-1. **DB column lookup.** If `planId` parses as a UUID, look up the row in
-   `billing_plan` and use its `stripe_price_id` column if non-blank. This is
-   the authoritative path once ops has seeded the column post-Stripe-Product
-   creation; it makes test↔live swaps a SQL update, not a code change. The
-   `billing_plan.stripe_price_id` column comes from
-   [`V23__billing_system.sql`](../src/main/resources/db/migration/V23__billing_system.sql)
-   line 25.
-2. **Tier + currency fallback.** If the DB column is blank, branch on
-   `plan.tier`:
-   - `ENTERPRISE` → `enterprisePriceId`
-   - `TEAM` → `teamPriceIdInr` IFF the plan is INR-priced AND `teamPriceIdInr`
-     is set; otherwise `teamPriceId`
-   - `PRO` (and default) → `proPriceId`
-   (`resolvePriceIdByTier`, lines 394–406.)
-3. **Legacy string pattern.** If `planId` is NOT a UUID (legacy callers pass
-   raw strings), match against the lowercased planId: `"enterprise"`,
-   `"team"` (with optional `"inr"` modifier), else default to `proPriceId`
-   (lines 384–391).
-
-| Tier resolver input                                  | Resolved price ID env var                    |
-| ---------------------------------------------------- | --------------------------------------------- |
-| `BillingPlan.tier=PRO`                               | `STRIPE_PRO_PRICE_ID`                         |
-| `BillingPlan.tier=TEAM` (USD-priced plan row)        | `STRIPE_TEAM_PRICE_ID`                        |
-| `BillingPlan.tier=TEAM` (INR-priced plan row + INR id set) | `STRIPE_TEAM_PRICE_ID_INR`              |
-| `BillingPlan.tier=TEAM` (INR plan, no INR id set)    | `STRIPE_TEAM_PRICE_ID` (USD price used for INR plan — known footgun) |
-| `BillingPlan.tier=ENTERPRISE`                        | `STRIPE_ENTERPRISE_PRICE_ID`                  |
-| `BillingPlan.tier=MAX` (legacy)                      | `STRIPE_PRO_PRICE_ID` (falls through default — likely wrong; MAX rows should be migrated to TEAM) |
-| `BillingPlan.tier=STARTER` / `FREE` / unknown        | `STRIPE_PRO_PRICE_ID` (default fallback — MUST not actually checkout; subscribe() blocks FREE on line 203) |
-| `BillingPlan.stripe_price_id` non-blank              | the DB value, bypasses everything above       |
-
-## Supporting Stripe environment variables
-
-Beyond the four price IDs, the Stripe gateway needs three more variables and
-two gateway-enable flags. From
-[`StripePaymentGateway`](../src/main/java/com/navneet/executespec/billing/gateway/StripePaymentGateway.java)
-+ [`PaymentGatewayRouter`](../src/main/java/com/navneet/executespec/billing/gateway/PaymentGatewayRouter.java)
-+ [`application.yml`](../src/main/resources/application.yml) lines 771–789
-+ [`application-prod.yml`](../src/main/resources/application-prod.yml) lines 158–170:
-
-| Env var                       | YAML key                          | What it does                                                                                                                                                                            |
-| ----------------------------- | --------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `STRIPE_SECRET_KEY`           | `billing.stripe.secret-key`       | Server-side API key (`sk_test_...` or `sk_live_...`). Wired into the static `com.stripe.Stripe.apiKey` field at `@PostConstruct` (StripePaymentGateway lines 52–60). If blank → gateway logs `"Stripe gateway disabled"` and the bean stays inert. |
-| `STRIPE_PUBLISHABLE_KEY`      | `billing.stripe.publishable-key`  | Client-side key (`pk_test_...` / `pk_live_...`). Not read by Java directly today — emitted by the billing config endpoint for the frontend to use during Checkout redirects.            |
-| `STRIPE_WEBHOOK_SECRET`       | `billing.stripe.webhook-secret`   | `whsec_...`. Passed to `com.stripe.net.Webhook.constructEvent(payload, signatureHeader, webhookSecret)` (StripePaymentGateway line 134). If blank → ALL incoming Stripe webhooks are rejected with `"Webhook secret not configured"` (line 129). |
-| `BILLING_STRIPE_ENABLED`      | `billing.stripe.enabled`          | Master switch. Dev default `false` (application.yml line 772). Prod default `true` (application-prod.yml line 161). Read by `PaymentGatewayRouter.stripeEnabled` (line 27) — controls whether the Stripe gateway is selectable + whether the webhook endpoint accepts events (`BillingWebhookController` line 80 returns 403 when disabled). |
-| `BILLING_RAZORPAY_ENABLED`    | `billing.razorpay.enabled`        | Same shape as above for Razorpay. Dev default `true` (line 784). Prod default `true` (line 170). At least ONE of the two flags MUST be true — `PaymentGatewayRouter.resolveDefault` throws `IllegalStateException("No payment gateway is enabled.")` otherwise (line 95). |
-| `BILLING_DEFAULT_GATEWAY`     | `billing.default-gateway`         | Tie-breaker when the per-entity preference is empty AND currency routing doesn't apply. Dev default `razorpay` (application.yml line 767); prod default `stripe` (application-prod.yml line 159). String, lowercased internally. |
-
-### Currency-based routing (independent of `default-gateway`)
-
-`application.yml` lines 785–789 declare a static `currency-gateway-map`:
-
-```
-INR: RAZORPAY
-USD: STRIPE
-EUR: STRIPE
-GBP: STRIPE
+```yaml
+# application.yml
+billing:
+  stripe:
+    enabled: false
+    secret-key: ${STRIPE_SECRET_KEY:}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY:}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET:}
+    pro-price-id: ${STRIPE_PRO_PRICE_ID:}
+    enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID:}
+    team-price-id: ${STRIPE_TEAM_MONTHLY_PRICE_ID:}
+    team-price-id-inr: ${STRIPE_TEAM_PRICE_ID_INR:}
 ```
 
-This map is referenced operationally — the per-entity `paymentGateway` field
-on `BillingEntity` is set by `handleStripeCheckoutCompleted` and Razorpay's
-analogous flow to "stripe" / "razorpay" once the customer has actually paid
-through one (BillingService lines 968–986). New customers fall back to
-`BILLING_DEFAULT_GATEWAY` until their first successful checkout.
+And in `application-prod.yml`:
 
-For India traffic: keep `BILLING_DEFAULT_GATEWAY=razorpay` AND
-`BILLING_RAZORPAY_ENABLED=true`. The Razorpay-side env vars are separate from
-this file — see `RAZORPAY_KEY_ID` / `RAZORPAY_KEY_SECRET` /
-`RAZORPAY_WEBHOOK_SECRET` / `RAZORPAY_WEBHOOK_URL` in
-[`.env.template`](../.env.template) lines 24–28 and
-[`RazorpayConfig.java`](../src/main/java/com/navneet/executespec/billing/config/RazorpayConfig.java).
+```yaml
+billing:
+  default-gateway: stripe
+  stripe:
+    enabled: ${BILLING_STRIPE_ENABLED:true}
+    secret-key: ${STRIPE_SECRET_KEY}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY}
+    webhook-secret: ${STRIPE_WEBHOOK_SECRET}
+    pro-price-id: ${STRIPE_PRO_PRICE_ID}
+    enterprise-price-id: ${STRIPE_ENTERPRISE_PRICE_ID}
+    team-price-id: ${STRIPE_TEAM_MONTHLY_PRICE_ID}
+    team-price-id-inr: ${STRIPE_TEAM_PRICE_ID_INR}
+  razorpay:
+    enabled: ${BILLING_RAZORPAY_ENABLED:false}
+```
+
+## Resolution order
+
+Source of truth for resolution is in [`billing/gateway/StripePaymentGateway.java`](../src/main/java/com/navneet/executespec/billing/gateway/StripePaymentGateway.java). The two relevant private methods:
+
+```
+private String resolvePriceId(String planId);
+private String resolvePriceIdByTier(String tier, boolean isInr);
+```
+
+The chain that decides which Stripe price id gets used at checkout-session creation:
+
+```
+StripePaymentGateway.createCheckoutSession(entity, planId, seats, successUrl, cancelUrl)
+        │
+        ├─ 1. planRepo.findById(planId).getStripePriceId()       [billing_plan.stripe_price_id column]
+        │       └─ if non-blank -> use this
+        │
+        ├─ 2. resolveTierForPlan(planId) -> tier  (PRO / ENTERPRISE / TEAM)
+        │
+        ├─ 3. resolvePriceIdByTier(tier, isInr=<billing-entity-currency=INR?>)
+        │       ├─ TEAM    + isInr=true     -> ${billing.stripe.team-price-id-inr}
+        │       ├─ TEAM    + isInr=false    -> ${billing.stripe.team-price-id}
+        │       ├─ ENTERPRISE              -> ${billing.stripe.enterprise-price-id}
+        │       ├─ PRO                     -> ${billing.stripe.pro-price-id}
+        │       └─ <anything else>         -> ${billing.stripe.pro-price-id}  (FOOTGUN)
+        │
+        └─ Stripe.SessionCreateParams.builder()
+              .setLineItem(price=<resolved>, quantity=<seats>)
+              ...
+```
+
+There are two foot-guns in this chain:
+
+1. **`STRIPE_PRO_PRICE_ID` as the universal fallback.** `resolvePriceIdByTier` falls back to `pro-price-id` for any tier it doesn't recognise. If you ever add a new tier (e.g. `STARTER`) and forget to plumb it into both `resolvePriceIdByTier` and YAML, customers will silently get charged at the PRO price. Test the resolution path explicitly when you add or rename a tier.
+
+2. **Legacy "MAX" tier alias.** V141 → V144 → V165 walked MAX <-> TEAM through three migrations and the dust settled at "TEAM at $39/seat" (V165). Any DB row that still carries `tier='MAX'` from before V165 would fall to the PRO fallback above. V165 deletes MAX from `tier_config` and migrates `billing_plan.tier='MAX'` rows, but old `pipeline_run.user_tier='MAX'` rows are remapped (not deleted) and could in theory reach this code path if anyone re-runs a historical checkout flow. Unlikely but worth flagging.
+
+The DB column `billing_plan.stripe_price_id` is the preferred source. It's a `VARCHAR(50)` on `billing_plan` (added in V23). Env-var fallback is the safety net for plans that haven't been seeded with a Stripe id yet.
+
+### `resolveTierForPlan(planId)`
+
+Walks `BillingPlanRepository.findById(planId)` and returns `BillingPlan.tier`. If the plan isn't in the DB (e.g. some stale UI sent an old UUID), the call returns null and `resolvePriceId` ends up at the PRO fallback. Best practice: keep `billing_plan.stripe_price_id` populated for every active plan you intend to sell.
+
+## Supporting env vars
+
+| Env var                       | YAML key                         | Default      | Purpose                                                                                       |
+| ----------------------------- | -------------------------------- | ------------ | --------------------------------------------------------------------------------------------- |
+| `STRIPE_SECRET_KEY`           | `billing.stripe.secret-key`      | (empty)      | `sk_test_*` / `sk_live_*`. Set on `Stripe.apiKey` in `StripePaymentGateway.init()`.            |
+| `STRIPE_PUBLISHABLE_KEY`      | `billing.stripe.publishable-key` | (empty)      | `pk_test_*` / `pk_live_*`. Surfaced to frontend for Stripe.js init.                            |
+| `STRIPE_WEBHOOK_SECRET`       | `billing.stripe.webhook-secret`  | (empty)      | `whsec_*`. Passed to `Webhook.constructEvent` for signature verification.                      |
+| `BILLING_STRIPE_ENABLED`      | `billing.stripe.enabled`         | `false` (local) / `true` (prod) | Controls whether the Stripe webhook endpoint responds and whether `PaymentGatewayRouter.resolve` ever returns the Stripe adapter. |
+| `BILLING_RAZORPAY_ENABLED`    | `billing.razorpay.enabled`       | `true`       | Mirror flag for Razorpay; defaults true in dev, env-driven in prod.                            |
+| `BILLING_DEFAULT_GATEWAY`     | `billing.default-gateway`        | `razorpay` (dev) / `stripe` (prod) | Used by `PaymentGatewayRouter.resolveDefault()` when the billing entity has no explicit gateway preference. |
+| `RAZORPAY_KEY_ID`             | `razorpay.key-id`                | (empty)      | `rzp_test_*` / `rzp_live_*`. Basic auth for Razorpay REST.                                     |
+| `RAZORPAY_KEY_SECRET`         | `razorpay.key-secret`            | (empty)      | Paired with key-id. Also used to sign subscription verification HMACs.                          |
+| `RAZORPAY_WEBHOOK_SECRET`     | `razorpay.webhook-secret`        | (empty)      | Verifies HMAC-SHA256 over Razorpay webhook bodies.                                              |
+
+The gateway-enable flags interact with `PaymentGatewayRouter` ([`billing/gateway/PaymentGatewayRouter.java`](../src/main/java/com/navneet/executespec/billing/gateway/PaymentGatewayRouter.java)) like this:
+
+```
+PaymentGatewayRouter.resolve(billingEntity)
+   │
+   ├─ entity.getPaymentGateway() == "STRIPE"   && isStripeEnabled()    -> Stripe
+   ├─ entity.getPaymentGateway() == "RAZORPAY" && isRazorpayEnabled()  -> Razorpay
+   ├─ entity has no preference                                          -> resolveDefault()
+   │       ├─ default-gateway=stripe   && stripe.enabled               -> Stripe
+   │       ├─ default-gateway=razorpay && razorpay.enabled             -> Razorpay
+   │       ├─ stripe.enabled                                           -> Stripe
+   │       ├─ razorpay.enabled                                         -> Razorpay
+   │       └─ neither enabled                                          -> IllegalStateException
+```
+
+The `BillingWebhookController.stripeWebhook` endpoint returns 403 if `billing.stripe.enabled=false` — webhooks must not be processed by deployments that don't speak Stripe.
+
+## Currency routing
+
+The platform pins gateways to currencies via a YAML map in `application.yml`:
+
+```yaml
+billing:
+  currency-gateway-map:
+    INR: RAZORPAY
+    USD: STRIPE
+    EUR: STRIPE
+    GBP: STRIPE
+```
+
+In practice the routing is also influenced by the billing entity's stored `payment_gateway` column (`app_user.payment_gateway` / `org.payment_gateway`) and `stripe_customer_id` field. The customer's preference wins; the YAML map is the fallback for new customers without a recorded preference.
+
+The `BILLING_DEFAULT_GATEWAY` env var (effectively the boot-time default) tilts the balance for new customers:
+
+- Prod: `BILLING_DEFAULT_GATEWAY=stripe` (US-first).
+- Dev: `BILLING_DEFAULT_GATEWAY=razorpay` (legacy default; India test path is easier with Razorpay's test cards).
+
+The TEAM-INR price-id (`STRIPE_TEAM_PRICE_ID_INR`) exists because Stripe does support INR but with India-specific rules (mandates, ICICI rules). Most INR customers stay on Razorpay; this env is the bypass for the small minority who explicitly want Stripe-INR.
+
+## Rotation procedure
+
+Two rotation paths exist:
+
+### Preferred: rotate via DB column
+
+When you want to swap a Stripe price id (e.g. you re-created the price object in Stripe with different metadata, or you're sunsetting an old price), update `billing_plan.stripe_price_id` for the affected plan rows:
+
+```sql
+UPDATE billing_plan
+   SET stripe_price_id = 'price_NEW_xxx',
+       updated_at = NOW()
+ WHERE id = '<plan-uuid>'
+   AND active = TRUE;
+```
+
+The next `StripePaymentGateway.createCheckoutSession` call for that plan will use the new price. No restart required. The env var stays as a safety net; you can leave it in sync or out-of-date — DB wins.
+
+### Fallback: env-var swap
+
+If you're rotating across all PRO plans (or all TEAM USD plans) and don't want to touch DB rows:
+
+1. Set the new env var value in the deployment manifest (Cloud Run service env or GCE systemd unit).
+2. Restart the JVM. `@ConfigurationProperties` / `@Value` bindings reload at startup only.
+3. After restart, all plans with `billing_plan.stripe_price_id IS NULL` use the new env var.
+
+The env-var path is slower (requires restart) and broader (affects every plan that falls to the env-var fallback). Prefer the DB column route.
+
+### Coordinating with Stripe
+
+Before either rotation, double-check in Stripe Dashboard:
+
+- The new price object exists and is `active=true` on the right Stripe product.
+- Currency matches the plan's `base_amount_usd` / `base_amount_inr` denomination.
+- Recurring interval (month / year) matches the plan's `period` (MONTHLY / YEARLY).
+- If TEAM tier: ensure the price is `per_unit` (not flat) so `setQuantity(seats)` actually charges per seat.
+
+After rotation, exercise one paid test flow end-to-end (see Test mode section below).
 
 ## Test mode vs live mode
 
-Stripe's secret + webhook secret are mode-scoped — `sk_test_*` / `whsec_*`
-created against your Stripe test dashboard will not work against live mode
-and vice versa. The two are flipped per-environment via env vars, not via a
-runtime feature flag, so:
+Stripe key prefixes determine the mode at the SDK layer:
 
-| Environment | `STRIPE_SECRET_KEY`        | `STRIPE_WEBHOOK_SECRET`     | `STRIPE_PUBLISHABLE_KEY` | `BILLING_STRIPE_ENABLED` |
-| ----------- | -------------------------- | --------------------------- | ------------------------ | ------------------------ |
-| Local dev   | `sk_test_*` (or blank, gateway disabled) | `whsec_*` (test mode) | `pk_test_*`              | `false` (default)        |
-| `dev.executespec.ai` | `sk_test_*`                | `whsec_*` (test mode)     | `pk_test_*`              | `true`                   |
-| Production  | `sk_live_*`                | `whsec_*` (live mode)       | `pk_live_*`              | `true`                   |
+- `sk_test_*` + `pk_test_*` + `whsec_test_*` -> Stripe test mode. Cards like `4242 4242 4242 4242` work.
+- `sk_live_*` + `pk_live_*` + `whsec_live_*` -> Stripe live mode. Real money moves.
 
-The price IDs themselves are ALSO mode-scoped — `price_*` created in the
-Stripe test dashboard cannot be checked out with a `sk_live_*` key. So a
-prod-mode switch is a four-line `.env` flip: secret key + webhook secret +
-publishable key + all four price IDs. The DB-column override path is the
-escape hatch when ops needs to swap one price (e.g. a promotional plan) at a
-time without redeploying — set `billing_plan.stripe_price_id` directly.
+The platform doesn't do mode-gating in code; it trusts whatever key it gets. Mixing test and live keys (e.g. `sk_test_*` with a `whsec_live_*`) will cause signature verification to fail with no clear message — symptom is HTTP 401 on every webhook. Quickest debug: check the env var values, then check the Stripe dashboard webhook log.
 
-## Rotating a Stripe price ID without downtime
+Local development: `application-local.yml` defaults to `billing.stripe.enabled=false` and `billing.default-gateway=razorpay`. The Razorpay test card noted in the project memory file (`5500 6700 0000 1002`) is the path of least resistance for end-to-end local checkout testing. If you need to exercise Stripe locally:
 
-The DB-column lookup path (Step 1 of `resolvePriceId`) is the rotation lever.
-Existing subscribers on the old price keep renewing via the Stripe
-Subscription's stored `priceId` until cancelled — Stripe doesn't migrate
-existing subs when you swap the env var. So a rotation only affects NEW
-checkouts.
+1. Set `BILLING_STRIPE_ENABLED=true`.
+2. Set `STRIPE_SECRET_KEY=sk_test_*`, `STRIPE_PUBLISHABLE_KEY=pk_test_*`, `STRIPE_WEBHOOK_SECRET=whsec_*`.
+3. Set the four price-id env vars to the test-mode prices you've created in Stripe Dashboard.
+4. Use `stripe listen --forward-to http://localhost:8080/api/webhooks/stripe` (Stripe CLI) to relay webhooks.
 
-To rotate the TEAM USD price (illustrative):
+Razorpay test mode is keyed by `rzp_test_*` ids; live mode by `rzp_live_*`. The `PlanSeederService` ([`billing/service/PlanSeederService.java`](../src/main/java/com/navneet/executespec/billing/service/PlanSeederService.java)) detects live vs test by inspecting `razorpay.key-id` prefix.
 
-1. Create the new price in Stripe (same Product, new price). Note the new
-   `price_*` id.
-2. Decide the cutover window: do all new TEAM checkouts go to the new price
-   from instant T?
-3. **Preferred path (no deploy):** `UPDATE billing_plan SET stripe_price_id
-   = 'price_NEW' WHERE tier = 'TEAM' AND base_amount_usd > 0;`. Step 1 of
-   `resolvePriceId` picks up the new id on the next checkout. The env var
-   `STRIPE_TEAM_PRICE_ID` is now the fallback for plan rows that don't have
-   the column set — leave it pointed at the old price so anything that
-   somehow bypasses the DB still uses a working price.
-4. **Alternative (env-var only):** redeploy with `STRIPE_TEAM_PRICE_ID=price_NEW`.
-   This works ONLY if every TEAM plan row has `stripe_price_id IS NULL`
-   (Step 1 falls through to Step 2). Verify with `SELECT id, tier,
-   stripe_price_id FROM billing_plan WHERE tier='TEAM' AND
-   stripe_price_id IS NOT NULL;` — if any rows come back, the env var swap
-   won't affect them.
-5. Run a smoke checkout against the new price (one TEAM subscribe in a
-   throwaway test org) before clearing the rollback plan.
-6. Old subscribers keep paying the old price until they cancel + resubscribe.
-   If you need to migrate them, use Stripe's "Update subscription items"
-   from the dashboard (no code path in our gateway for it today).
+## Webhook events the integration handles
 
-There is **no feature flag** for "use new price for X% of traffic" — rotation
-is binary.
+Only four Stripe event types produce side effects today. Everything else lands in `webhook_event_log` with `processing_status=IGNORED` (and counts as a 200 response so Stripe doesn't retry).
 
-## Webhook events Stripe dispatches against us
+| Event type                          | Handler in `BillingService.processStripeWebhook` | Side effect                                                                                          |
+| ----------------------------------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------- |
+| `checkout.session.completed`        | `handleStripeCheckoutCompleted(JsonNode)`        | Activate subscription, link customer-id, sync `org.seat_count` (TEAM tier) via `fetchStripeSubscriptionSeatCount`. Generate first invoice via `InvoiceService.generateStripeSubscriptionInvoice`. Write `payment_audit` rows for USER + ORG. Trigger `BillingNotificationService.sendSubscriptionActivated`. |
+| `invoice.paid`                      | `handleStripeInvoicePaid`                        | Extend `billing_subscription.current_period_end`. Generate next-cycle invoice + PDF (stored in `invoice.gateway_invoice_id` + `invoice.gateway_pdf_url`). Record `SUBSCRIPTION_RENEWED` audit row. |
+| `invoice.payment_failed`            | `handleStripeInvoicePaymentFailed`               | Flip `billing_subscription.status` to `PAST_DUE`. Fire `BillingNotificationService.sendPaymentFailed`. Record `SUBSCRIPTION_PAYMENT_FAILED` audit row. `DunningScheduler` picks up the row at next 09:00 IST cron. |
+| `customer.subscription.deleted`     | `handleStripeSubscriptionDeleted`                | Call `BillingService.downgradeToFree(sub)` — flip user.tier=FREE, org.tier=FREE, sub.status=DOWNGRADED. Fire `sendDowngradedToFree` email. Record `TIER_DOWNGRADED_TO_FREE` audit row.       |
 
-From `BillingService.processStripeWebhook` switch at line 912:
+The Razorpay path handles a longer list — `subscription.authenticated`, `subscription.charged`, `subscription.pending`, `subscription.halted`, `subscription.cancelled`, `subscription.completed`, plus one-time `payment.captured` / `order.paid` for top-ups. See [`docs/payment-history.md`](payment-history.md) for the cross-gateway audit-trail story.
 
-| Stripe event                       | Handler                                                                                                                                                                            | Effect                                                                                                                                |
-| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `checkout.session.completed`       | `handleStripeCheckoutCompleted` (lines 955–1039)                                                                                                                                   | Persist `stripeCustomerId` on user/org; fetch seat quantity off the Stripe Subscription; set local sub status `ACTIVE`.               |
-| `invoice.paid`                     | `handleStripeInvoicePaid` (lines 1041–1090)                                                                                                                                        | Extend period; call `upgradeTier(...)` (bridges to `app_user.tier` + `org.tier`); generate invoice via `generateStripeSubscriptionInvoice` and email.  |
-| `invoice.payment_failed`           | `handleStripeInvoicePaymentFailed` (lines 1092–1113)                                                                                                                               | Mark sub `PAST_DUE`; send `sendPaymentFailed` email.                                                                                  |
-| `customer.subscription.deleted`    | `handleStripeSubscriptionDeleted` (lines 1115–1132)                                                                                                                                | `downgradeToFree(sub)` — flip tier back to FREE.                                                                                      |
-| anything else                      | `default -> log.debug("Stripe webhook: unhandled event type: {}", eventType)` (line 917)                                                                                            | No-op. The raw payload is still persisted in `webhook_event_log` + `billing_webhook_event` for forensic replay.                       |
+Anything outside these four Stripe types or those eight Razorpay subscription/payment types is ignored. Stripe sends ~40 event types — if you ever need to react to `payment_intent.succeeded` or `customer.updated`, the place to add a handler is the dispatch switch inside `BillingService.processStripeWebhook`. The new event will be persisted to `webhook_event_log` regardless, so you can also bolt on a one-time backfill if needed.
 
-In the Stripe dashboard you only need to subscribe to these four events on
-the webhook endpoint at `https://<domain>/api/webhooks/stripe`. Sending
-others wastes Stripe quota but is harmless — the raw payload is logged and
-ignored.
+## Quick reference
 
-## Setup checklist (new environment)
+**Need to know which env var feeds a tier?** Use this table:
 
-1. **Stripe dashboard.** Create the Product + four Prices (PRO USD,
-   ENTERPRISE USD, TEAM USD per-unit, TEAM INR per-unit). Copy each
-   `price_*` id.
-2. **Webhook endpoint.** In the Stripe dashboard, create a webhook at
-   `https://<domain>/api/webhooks/stripe` and subscribe to
-   `checkout.session.completed`, `invoice.paid`, `invoice.payment_failed`,
-   `customer.subscription.deleted`. Copy the signing secret (`whsec_*`).
-3. **Secrets.** Store `sk_live_*`, `whsec_*`, `pk_live_*`, and the four
-   `price_*` ids in your secret manager (GCP Secret Manager in our case —
-   never commit any of these to git; `.env.template` shows the test-mode
-   form, the prod values live in the deploy env only).
-4. **App env vars.** Make sure the runtime sees:
-   - `BILLING_STRIPE_ENABLED=true`
-   - `STRIPE_SECRET_KEY=sk_live_*`
-   - `STRIPE_WEBHOOK_SECRET=whsec_*`
-   - `STRIPE_PUBLISHABLE_KEY=pk_live_*`
-   - `STRIPE_PRO_PRICE_ID=price_*`
-   - `STRIPE_ENTERPRISE_PRICE_ID=price_*`
-   - `STRIPE_TEAM_PRICE_ID=price_*`
-   - `STRIPE_TEAM_PRICE_ID_INR=price_*` (only if you have an INR variant in
-     Stripe; if absent, TEAM-INR checkouts will silently fall back to the
-     USD price — known footgun, see resolution table above).
-5. **Seed `billing_plan.stripe_price_id` (optional but recommended).** For
-   every plan row you want pinned to a specific Stripe Price (e.g. dev vs
-   live diverging, A/B test pricing), `UPDATE billing_plan SET
-   stripe_price_id = '...' WHERE id = '...';`. This bypasses the env-var
-   fallback for that plan.
-6. **Currency routing.** Confirm `application.yml` `billing.currency-gateway-map`
-   matches your gateway availability — today USD/EUR/GBP all route to Stripe
-   and INR routes to Razorpay. Razorpay is the only INR-capable gateway in
-   the codebase.
-7. **Smoke test.**
-   - PRO USD: subscribe a test user → reach Stripe checkout → use a test
-     card (Stripe `4242 4242 4242 4242` in test mode) → verify
-     `checkout.session.completed` lands in `webhook_event_log` AND a
-     `SUBSCRIPTION_CREATED` row appears in `payment_audit`.
-   - TEAM USD with `seats=3`: confirm the Stripe Subscription line item
-     shows `quantity=3` and `BillingSubscription.totalSeats=3` after the
-     `checkout.session.completed` webhook.
-   - INR path: subscribe via Razorpay (Stripe doesn't take INR through us);
-     confirm `subscription.charged` lands in `billing_webhook_event` and a
-     `SUBSCRIPTION_ACTIVATED` row appears in `payment_audit`.
-8. **Verify default-gateway.** Hit `POST /api/billing/subscribe` from a
-   fresh user with no `paymentGateway` set and confirm the routing matches
-   the env var.
+| Customer wants            | Currency | Env var used                  | DB column override?                            |
+| ------------------------- | -------- | ----------------------------- | ---------------------------------------------- |
+| PRO plan (Solo Monthly USD / Yearly USD / Pro Monthly USD / Pro Yearly USD) | USD      | `STRIPE_PRO_PRICE_ID`         | `billing_plan.stripe_price_id` per row.        |
+| TEAM plan (per-seat, USD) | USD      | `STRIPE_TEAM_MONTHLY_PRICE_ID` | `billing_plan.stripe_price_id` per row.        |
+| TEAM plan (per-seat, INR) | INR      | `STRIPE_TEAM_PRICE_ID_INR`    | `billing_plan.stripe_price_id` per row.        |
+| ENTERPRISE plan           | USD      | `STRIPE_ENTERPRISE_PRICE_ID`  | `billing_plan.stripe_price_id` per row.        |
+| Any INR plan (FREE/PRO equivalents) on Razorpay  | INR | n/a (Razorpay) | `billing_plan.razorpay_plan_id` per row. |
+| FREE plan                 | n/a      | n/a (no gateway, no checkout) | n/a — V25 backfills users with `billing_subscription.status='FREE'`. |
 
-## Failure modes worth pre-empting
+**Need to verify which gateway will be used for a customer?**
 
-| Symptom                                                                                                                  | Likely cause                                                                                                                                                                                                                                  |
-| ------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Stripe webhooks log `"Stripe webhook secret not configured — rejecting webhook"`                                          | `STRIPE_WEBHOOK_SECRET` is blank in the runtime env. Set it; existing webhook events are NOT replayed automatically — replay manually from Stripe dashboard.                                                                                  |
-| All Stripe webhooks return 403                                                                                            | `BILLING_STRIPE_ENABLED=false`. Flip to true OR explicitly run on Razorpay (set `BILLING_DEFAULT_GATEWAY=razorpay` and don't expose `/api/webhooks/stripe`).                                                                                   |
-| Stripe checkout creates a session that charges $0 / wrong amount                                                          | Either the `stripe_price_id` in `billing_plan` points at a deleted/archived Stripe Price, or the env-var fallback is pointed at a test-mode price while running with a live `STRIPE_SECRET_KEY`. Both are mode-mismatch class errors.         |
-| TEAM checkout charges base price × 1 instead of × seats                                                                   | The Stripe Price configured for `STRIPE_TEAM_PRICE_ID` is NOT a per-unit price. Fix in Stripe (Price → "Charge per unit" + quantity-aware), not in code — `LineItem.setQuantity(seats)` is sent unconditionally (StripePaymentGateway line 92). |
-| TEAM-INR checkout silently uses USD price                                                                                 | `STRIPE_TEAM_PRICE_ID_INR` is blank. The resolver falls back to `teamPriceId` (StripePaymentGateway line 399).                                                                                                                                  |
-| `IllegalStateException: No payment gateway is enabled.` at startup                                                       | Both `BILLING_STRIPE_ENABLED` and `BILLING_RAZORPAY_ENABLED` are false. At least one must be true (`PaymentGatewayRouter.resolveDefault` line 95).                                                                                              |
-| Subscriber retries an upgrade and gets a duplicate `payment_audit` row                                                    | Not a bug — `paymentAuditService.record` does NOT dedupe on `idempotency_key`. Upstream webhook dedup (`webhookRepo.existsByGatewayAndEventId`) blocks duplicate event processing, but a user clicking "Upgrade" twice produces two `SUBSCRIPTION_CREATED` rows by design (one is a pre-payment intent that will time out). |
-| Stripe customer's `SUBSCRIPTION_ACTIVATED` row is missing from `payment_audit`                                            | Expected. The Razorpay-only `verifyAndActivate` path is the only writer of that event type. For Stripe, lifecycle reconstruction joins `payment_audit` (CREATED + CANCELLED + REFUND) with `billing_webhook_event` (CHECKOUT_COMPLETED + PAID).  |
+```
+1. Check entity.getPaymentGateway() on app_user.payment_gateway / org.payment_gateway
+   - If "STRIPE" or "RAZORPAY" and the matching gateway is enabled, that's the answer.
+2. Otherwise, BILLING_DEFAULT_GATEWAY env (prod: stripe, dev: razorpay).
+3. If only one gateway is enabled, that one wins regardless of preference.
+4. If neither enabled, PaymentGatewayRouter throws IllegalStateException at request time.
+```
+
+**Need to verify which price id will be sent to Stripe for a specific checkout?**
+
+```
+1. Look up the plan row: SELECT id, tier, stripe_price_id FROM billing_plan WHERE id = '<planId>'.
+2. If stripe_price_id is non-blank, that's it.
+3. Otherwise tier -> env var:
+     - PRO        -> STRIPE_PRO_PRICE_ID
+     - ENTERPRISE -> STRIPE_ENTERPRISE_PRICE_ID
+     - TEAM (USD) -> STRIPE_TEAM_MONTHLY_PRICE_ID
+     - TEAM (INR) -> STRIPE_TEAM_PRICE_ID_INR
+     - other      -> STRIPE_PRO_PRICE_ID (FOOTGUN)
+```
+
+## Cross-references
+
+- Webhook flow, idempotency, and the full audit-trail picture: [`docs/payment-history.md`](payment-history.md).
+- Gateway abstractions: [`billing/gateway/PaymentGateway.java`](../src/main/java/com/navneet/executespec/billing/gateway/PaymentGateway.java), [`StripePaymentGateway.java`](../src/main/java/com/navneet/executespec/billing/gateway/StripePaymentGateway.java), [`RazorpayGateway.java`](../src/main/java/com/navneet/executespec/billing/gateway/RazorpayGateway.java), [`PaymentGatewayRouter.java`](../src/main/java/com/navneet/executespec/billing/gateway/PaymentGatewayRouter.java).
+- HMAC verification (Razorpay): [`billing/security/WebhookSignatureVerifier.java`](../src/main/java/com/navneet/executespec/billing/security/WebhookSignatureVerifier.java). Stripe verification is in the SDK (`Webhook.constructEvent`).
+- Billing service orchestration: [`billing/service/BillingService.java`](../src/main/java/com/navneet/executespec/billing/service/BillingService.java).
+- Plan seeding (Razorpay): [`billing/service/PlanSeederService.java`](../src/main/java/com/navneet/executespec/billing/service/PlanSeederService.java).
+- Env-var template (root): [`.env.template`](../.env.template).
+- Spring config: `src/main/resources/application.yml`, `application-dev.yml`, `application-prod.yml`, `application-local.yml`.

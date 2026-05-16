@@ -1,606 +1,553 @@
-# Code style
+# Code Style
 
-> Source of truth: the lint and format configs in the repo. If this doc and the configs disagree, the configs win.
+> Style guide for both halves of the ExecuteSpec codebase: the React 18 + TypeScript 5 frontend
+> (`frontend/`) and the Java 21 + Spring Boot 3.5 backend (`src/main/java/...`).
+>
+> Source of truth: `frontend/.eslintrc.cjs`, `frontend/.prettierrc.json`, `frontend/tsconfig.json`,
+> `pom.xml` Spotless block, `lombok.config`. When this doc disagrees with the linter, the linter
+> wins — update this doc.
 
-This document covers both the TypeScript frontend and the Java backend. Both are derived from `frontend/.eslintrc.cjs`, `frontend/.prettierrc.json`, and the `spotless-maven-plugin` block in `pom.xml`.
+---
 
-## 1. Frontend — TypeScript
+## TypeScript / React (frontend)
 
-### 1.1 Configs
+### Toolchain
 
-| Concern         | File                                                       |
-| --------------- | ---------------------------------------------------------- |
-| Linting         | [`frontend/.eslintrc.cjs`](../../frontend/.eslintrc.cjs)   |
-| Formatting      | [`frontend/.prettierrc.json`](../../frontend/.prettierrc.json) |
-| Format excludes | [`frontend/.prettierignore`](../../frontend/.prettierignore)   |
-| TS compiler     | `frontend/tsconfig.json`                                   |
+| Concern        | Tool                                         | Version (per `frontend/package.json`)    |
+| -------------- | -------------------------------------------- | ---------------------------------------- |
+| Compiler       | `typescript`                                 | `^5.3.0`                                 |
+| Linter         | `eslint`                                     | `^8.57.1`                                |
+| Parser         | `@typescript-eslint/parser`                  | `^8.59.3`                                |
+| Lint plugins   | `@typescript-eslint/eslint-plugin`, `eslint-plugin-react`, `eslint-plugin-react-hooks` | `^8.59.3` / `^7.35.0` / `^4.6.2` |
+| Formatter      | `prettier`                                   | `^3.3.3`                                 |
+| Bundler        | `vite`                                       | `^5.1.0`                                 |
+| Styles         | `tailwindcss` + `@tailwindcss/postcss`       | `^4.3.0` / `^4.3.0`                      |
+| Test framework | n/a — no test runner is wired in `package.json` today; verification lives on the backend side. |
 
-Run gates:
+The lint gate in CI is `npm --prefix frontend run format:check` (Prettier) plus
+`npm --prefix frontend run lint` (ESLint). `lint` is invoked with `--max-warnings 9999`, so warnings
+do not fail the build today — only errors do. Treat warnings as red anyway; CI will tighten this gate
+once the warning backlog is cleared.
 
-```bash
-npm --prefix frontend run lint           # eslint --max-warnings 9999
-npm --prefix frontend run lint:fix       # eslint --fix
-npm --prefix frontend run format         # prettier --write
-npm --prefix frontend run format:check   # CI gate
-```
-
-CI runs `format:check` + `lint` on every PR (`.github/workflows/lint.yml`).
-
-### 1.2 Prettier rules (verbatim from `.prettierrc.json`)
+### `tsconfig.json` highlights
 
 ```json
 {
-  "printWidth": 100,
-  "tabWidth": 2,
-  "useTabs": false,
+  "target": "ES2020",
+  "module": "ESNext",
+  "moduleResolution": "bundler",
+  "jsx": "react-jsx",
+  "strict": true,
+  "noUnusedLocals": false,
+  "noUnusedParameters": false,
+  "noFallthroughCasesInSwitch": true,
+  "isolatedModules": true,
+  "allowImportingTsExtensions": true,
+  "resolveJsonModule": true,
+  "noEmit": true,
+  "baseUrl": ".",
+  "paths": { "@/*": ["./src/*"] }
+}
+```
+
+Notes:
+
+- `strict: true` is on across the board. `noImplicitAny`, `strictNullChecks`,
+  `strictFunctionTypes`, etc. are all enforced.
+- `noUnusedLocals` and `noUnusedParameters` are intentionally `false`. We rely on ESLint
+  (`@typescript-eslint/no-unused-vars`) for that signal instead — it allows the `_unused`
+  prefix-to-ignore convention, which the TS compiler does not. (Deviation D-T2 — see below.)
+- `@/*` alias resolves to `./src/*`. Use it for cross-folder imports
+  (e.g. `import { runUtils } from '@/signal/lib/runUtils'`).
+- A composite reference to `tsconfig.node.json` covers `vite.config.ts` + `tailwind.config.ts`
+  so the build tools type-check separately from app code.
+- `noEmit: true` — Vite handles the transpile; `tsc` is run only as a type-check gate
+  (`npm run build` calls `tsc && vite build`).
+
+### ESLint custom rules
+
+Pulled directly from `frontend/.eslintrc.cjs`. Each rule is paired with the rationale baked into the
+config or the rule itself.
+
+| Rule                                           | Severity | Why                                                                                                       |
+| ---------------------------------------------- | -------- | --------------------------------------------------------------------------------------------------------- |
+| `@typescript-eslint/no-explicit-any`           | `warn`   | We keep `any` legal but conspicuous — see Deviation D-T2.                                                 |
+| `@typescript-eslint/no-unused-vars`            | `warn`   | Variables and args prefixed `_` are ignored. Keeps `try { } catch (_e) {}` clean.                         |
+| `react/react-in-jsx-scope`                     | `off`    | React 18 + `jsx: react-jsx` doesn't need `import React from 'react'`.                                     |
+| `react/prop-types`                             | `off`    | We type props with TypeScript, never PropTypes.                                                           |
+| `react-hooks/rules-of-hooks`                   | `error`  | Mechanical correctness — hooks at top of component, no conditionals.                                      |
+| `react-hooks/exhaustive-deps`                  | `warn`   | Surfaces missing-deps in `useEffect` etc. Frequent false positives, so warn — not error.                  |
+
+`extends`: `eslint:recommended`, `plugin:@typescript-eslint/recommended`, `plugin:react/recommended`,
+`plugin:react-hooks/recommended`, `prettier` (last, so Prettier-conflicting rules are disabled).
+
+`settings.react.version` is `detect` so the React plugin picks up the 18.x major.
+
+### Prettier opinions
+
+`frontend/.prettierrc.json`:
+
+```json
+{
   "semi": true,
   "singleQuote": true,
   "jsxSingleQuote": true,
-  "quoteProps": "as-needed",
   "trailingComma": "all",
-  "bracketSpacing": false,
-  "bracketSameLine": false,
+  "printWidth": 100,
+  "tabWidth": 2,
   "arrowParens": "always",
-  "endOfLine": "lf",
-  "embeddedLanguageFormatting": "auto"
+  "endOfLine": "lf"
 }
 ```
 
-Notable:
+- Always-on semicolons. Single quotes for strings and JSX attribute values
+  (`<div className='signal-card'>`, not `"signal-card"`).
+- `trailingComma: 'all'` — every multi-line literal gets a trailing comma. Makes diffs minimal
+  when you add a new item.
+- 100-column wrap, 2-space indent, LF line endings (cross-platform safe).
+- `arrowParens: 'always'` — even single-arg arrows wear parens: `(x) => x * 2`.
 
-- **`bracketSpacing: false`** — object literals are written `{foo: 1}`, not `{ foo: 1 }`.
-- **`singleQuote: true` / `jsxSingleQuote: true`** — single quotes in TS and in JSX attributes (`<Btn kind='primary'/>`, not `kind="primary"`).
-- **`printWidth: 100`** — 100-character line target.
-- **`trailingComma: 'all'`** — trailing commas on every multi-line list, including function parameters.
-- **`arrowParens: 'always'`** — `(x) => x`, never `x => x`.
+Run `npm --prefix frontend run format` to autofix. CI runs `format:check`; a failure means run
+`format` locally and commit the diff.
 
-### 1.3 ESLint extensions
+### Documented deviations from Google TypeScript Style
 
-```js
-extends: [
-  'eslint:recommended',
-  'plugin:@typescript-eslint/recommended',
-  'plugin:react/recommended',
-  'plugin:react/jsx-runtime',
-  'plugin:react-hooks/recommended',
-  'prettier',
-]
-```
+We follow Google's TS Style Guide as a base except for the items below. Citations link to the
+specific lines in our config that encode the deviation.
 
-`prettier` last so formatting rules don't fight Prettier.
+| ID    | Deviation                                                                                | Where it lives                                       | Rationale                                                                                                                                            |
+| ----- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| D-T1  | Default exports are allowed for top-level page / shell components (`.tsx`).              | No ESLint `import/no-default-export` rule is configured. | Page components in `frontend/src/signal/pages/*` and a few shells (`AuthLayout.tsx`, `Shell.tsx`) use default export so React Router can lazy-import them by file path. Named exports remain required everywhere else. |
+| D-T2  | `any` is warn-mode, not error-mode. `unknown` is the preferred escape hatch.             | `@typescript-eslint/no-explicit-any: 'warn'`         | Some legacy adapters (e.g. the union-shape helpers in `frontend/src/signal/lib/runUtils.ts`) deliberately cast through `unknown` and accept `any` at narrow boundaries — the file's own comment block flags the trade-off. New code should still reach for `unknown`. |
+| D-T3  | We use `interface` for object-prop shapes and `type` for unions / mapped / function types. | Convention, not lint-enforced.                       | `interface Foo` lets us merge a later `interface Foo extends ...`. `type Status = 'a' \| 'b'` for unions because `interface` can't express that. Google's style guide prefers `interface`; we narrow it. |
+| D-T4  | JSDoc on internal types is skipped. Public/exported APIs should still carry a one-line JSDoc. | Convention, not lint-enforced.                       | Types describe themselves once they're typed. Comments on local interfaces drift; comments on exported helpers (`runUtils.ts`, `Primitives.tsx`) stay. |
 
-### 1.4 Rules enforced as errors
+### Naming conventions
 
-These map directly to the Google TypeScript Style sections cited in `frontend/.eslintrc.cjs`:
+| Construct                            | Convention            | Examples                                                                |
+| ------------------------------------ | --------------------- | ----------------------------------------------------------------------- |
+| React component file                 | `UpperCamelCase.tsx`  | `FileIcon.tsx`, `Primitives.tsx`, `Shell.tsx`                            |
+| React component export               | `UpperCamelCase`      | `function FileIcon({ filename }: Props) { ... }`                         |
+| Hook file                            | `useThing.ts`         | `useSignalTheme.ts`, `useProjectMeta.ts`                                 |
+| Hook export                          | `useThing`            | `export function useSignalTheme(rootRef) { ... }`                        |
+| Zustand store file                   | `xxxStore.ts`         | `authStore.ts`, `uiStore.ts`                                             |
+| Zustand store hook export            | `useXxxStore`         | `useAuthStore`, `useUiStore`                                             |
+| Plain helper module                  | `lowerCamelCase.ts`   | `runUtils.ts`, `telemetry.ts`, `api.ts`                                  |
+| Constants                            | `SCREAMING_SNAKE_CASE` | `STORAGE_KEY`, `LIVE_STATUSES`, `MOBILE_TABS`                            |
+| TypeScript types/interfaces          | `UpperCamelCase`      | `RunView`, `FileEntry`, `IconProps`                                      |
+| CSS class names (Signal scope)       | `kebab-case`          | `.signal-card`, `.signal-row`, `.pill-dot.mint`                          |
+| CSS custom property                  | `--kebab-case`        | `--signal-bg`, `--accent-blue-text`, `--motion-press`                    |
 
-| Rule                                            | Level | Google TS §                       |
-| ----------------------------------------------- | ----- | --------------------------------- |
-| `no-var`                                        | error | §6.1 — use `const` / `let`        |
-| `eqeqeq` (`{null: 'ignore'}`)                   | error | §6.13 — strict equality           |
-| `no-eval`                                       | error | §3.8                              |
-| `no-implied-eval`                               | error | §3.8                              |
-| `no-new-func`                                   | error | §3.8                              |
-| `no-with`                                       | error | §3.10                             |
-| `no-debugger`                                   | error | §3.5                              |
-| `no-array-constructor`                          | error | §6.5 — no `new Array()`           |
-| `@typescript-eslint/no-array-constructor`       | error | §6.5                              |
-| `no-new-object`                                 | error | §6.6 — no `new Object()`          |
-| `no-new-wrappers`                               | error | §6.7 — no `new String()` etc.     |
-| `no-compare-neg-zero`                           | error | §6.16                             |
-| `@typescript-eslint/consistent-type-assertions` | error | §4.5.2 — `as` form, not `<T>foo`  |
-| `no-empty` (`{allowEmptyCatch: true}`)          | error | (empty catches for analytics)     |
-
-### 1.5 Rules enforced as warnings
-
-| Rule                                          | Level | Notes                                                            |
-| --------------------------------------------- | ----- | ---------------------------------------------------------------- |
-| `prefer-const` (`{destructuring: 'all'}`)     | warn  |                                                                  |
-| `default-case`                                | warn  | §6.10                                                            |
-| `@typescript-eslint/no-explicit-any`          | warn  | **D-T2** — `any` is allowed during the soup-cleanup migration    |
-| `@typescript-eslint/no-unused-vars`           | warn  | Ignores `^_` (so `_unused` is acceptable)                        |
-| `@typescript-eslint/no-non-null-assertion`    | warn  | §3.10 — `foo!` needs a glance                                    |
-| `react-hooks/rules-of-hooks`                  | warn  | Downgraded to warn while ~6 legacy violations are migrated       |
-| `react-hooks/exhaustive-deps`                 | warn  |                                                                  |
-| `react/self-closing-comp`                     | warn  | §3.4 — `<Br />` not `<Br></Br>`                                  |
-| `no-restricted-syntax`                        | warn  | PR-L: inline async `onClick` / `onSubmit` → suggests `useAsyncAction` |
-
-### 1.6 Rules explicitly disabled
-
-These are off because they conflict with the codebase conventions:
-
-| Rule                                              | Why off                                                                                                  |
-| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `@typescript-eslint/no-unsafe-*` (5 rules)        | **D-T2** — the existing `any` soup makes these noisy; will re-enable once `any` count is in single digits |
-| `react/prop-types`                                | TypeScript handles prop validation                                                                       |
-| `react/display-name`                              | `React.memo` / `forwardRef` patterns are common                                                          |
-| `react/no-unescaped-entities`                     | `don't` reads fine; `don&apos;t` is worse UX                                                             |
-| `no-useless-escape`                               | False positives on regex character classes                                                               |
-| `no-misleading-character-class`                   | False positive on the intentional emoji-stripping regex in `LiveLog`                                     |
-
-### 1.7 Documented deviations from Google TypeScript Style
-
-These are the four deviations enforced by `.eslintrc.cjs`:
-
-#### D-T1 — Default exports OK for `*.tsx`
-
-Google TS forbids default exports. We allow them on `*.tsx` page/component files because they pair well with React's `lazy()` / dynamic imports.
-
-```tsx
-// frontend/src/signal/pages/HomePage.tsx
-export default function HomePage() { ... }
-```
-
-The `.eslintrc.cjs` `overrides` block reserves the right to enforce `import/no-default-export` on `src/lib/`, `src/hooks/`, `src/stores/` (currently a placeholder — not enforced today). Library code already follows it manually.
-
-#### D-T2 — `any` is warn-mode
-
-`@typescript-eslint/no-explicit-any` is `warn`, not `error`. The five `no-unsafe-*` rules are off entirely. This is temporary — the migration is to clean up the existing `any` count first, then promote to `error`. Test files (`**/*.test.{ts,tsx}`) have `no-explicit-any` off via override.
-
-```ts
-// allowed today
-function foo(x: any) { ... }   // warn
-const y = x as any;            // warn
-```
-
-#### D-T3 — `interface` vs `type` both accepted
-
-Google TS prefers `interface` for object types and `type` for unions. ESLint enforces neither; the codebase uses both. Choose whichever reads better:
-
-```ts
-export interface RunSummary { ... }            // OK
-export type Verdict = 'shippable' | 'needs-review' | 'blocked';  // OK
-```
-
-#### D-T4 — JSDoc on internal types skipped
-
-Google TS asks for JSDoc on every exported symbol. We require it on public-API surfaces (anything in `lib/api.ts`, store actions) and skip it on internal helper types. The codebase reality:
-
-- `lib/api.ts` exports — heavily JSDoc'd, including provenance comments (R-numbers, PR refs).
-- Component prop interfaces — usually skipped unless the surface is non-obvious.
-- Pure-function helpers — JSDoc'd if the function is exported from a shared module.
-
-### 1.8 Naming conventions
-
-These come from `eslint:recommended` defaults plus Google TS §5.
-
-| Symbol kind                  | Pattern                       | Example                              |
-| ---------------------------- | ----------------------------- | ------------------------------------ |
-| React component              | `UpperCamelCase`              | `RunDetailTabs`, `VerdictPill`       |
-| React component file         | `UpperCamelCase.tsx`          | `RunDetailTabs.tsx`                  |
-| React hook                   | `camelCase` + `use` prefix    | `useAuthStore`, `useTierPermissions` |
-| Hook file                    | `useThing.ts`                 | `useAsyncAction.ts`                  |
-| Zustand store                | `useXxxStore`                 | `useRunStore`, `useUiStore`          |
-| Function (any)               | `camelCase`                   | `parseErrorMessage`, `deriveVerdict` |
-| Variable / let-binding       | `camelCase`                   | `verifiedScore`, `runId`             |
-| Constant (module-level)      | `UPPER_SNAKE` or `camelCase`  | `STATUS_MESSAGES`, `BASE`            |
-| Type / interface             | `UpperCamelCase`              | `VerdictSignals`, `RunDetail`        |
-| Enum-like string union       | `'UPPER_SNAKE'` literals      | `'PLANNING' \| 'WORKING'`            |
-| Boolean prop / variable      | `is` / `has` / `should` prefix| `isRetryableError`, `hasGithubPat`   |
-
-CSS classes follow BEM-ish kebab-case in `signal.css`:
-
-```
-.signal-card
-.signal-card-link
-.signal-row .row-title
-.signal-btn.primary
-```
-
-### 1.9 File layout
+### File layout (`frontend/src/`)
 
 ```
 frontend/src/
-├── App.tsx                  # Top-level route table
-├── main.tsx                 # Bootstrap (mount, theme, telemetry, SW)
-├── index.css                # Global styles
-├── tokens.css               # CSS-variable design tokens (single source of truth)
-├── signal/                  # Production "Signal" chrome — most pages live here
-│   ├── components/          # Reusable primitives (Modal, Card, Button, etc.)
-│   ├── hooks/               # Signal-specific hooks (useSse, useProjectMeta, ...)
-│   ├── icons/               # Inline SVG icons
-│   ├── lib/                 # Signal-only helpers
-│   ├── pages/               # Routed pages, mirrored to `App.tsx`
-│   └── signal.css           # All Signal-scoped component CSS
-├── v3/                      # Retired V3 top-bar shell — kept for legacy URL redirects
-├── v4/                      # Retired V4 shell — same
-├── components/              # Cross-cutting React components
-│   ├── auth/                # ProtectedRoute, ChangePasswordModal, etc.
-│   ├── layout/              # AppLayout, Header, NotificationBell
-│   ├── project/             # Project workbench components used by Signal pages
-│   ├── runs/                # ScoreRing, VerdictPill, RunCard, etc.
-│   ├── settings/            # SsoConfigCard, NotificationPreferences, OrgStandardsManager
-│   ├── shared/              # Generic primitives (Button, Tooltip, Drawer, ...)
-│   └── execution/           # ExecutionStepper etc.
-├── design-system/           # Pure-function design helpers
-│   ├── primitives.css       # Raw `--c-*` color primitives
-│   ├── contrast.ts          # WCAG contrast helpers
-│   └── contrast.test.ts     # Vitest-shape regression test (dormant)
-├── pages/                   # V2 sidebar-shell pages (legacy; mostly redirected)
-├── stores/                  # Zustand stores
-│   ├── useAuthStore.ts
-│   ├── useUiStore.ts        # Theme + UI preferences
-│   ├── useRunStore.ts
-│   ├── useProjectStore.ts
-│   └── useMetricsStore.ts
-├── hooks/                   # Shared hooks (useTierPermissions, useAsyncAction, ...)
-├── lib/                     # Headless modules (api.ts, verdict.ts, telemetry, ...)
-└── types/                   # Cross-cutting TS types (project.ts, ...)
+├── App.tsx                # React Router route table
+├── main.tsx               # Entry point: telemetry, SW registration, theme bootstrap, render
+├── index.css              # Global stylesheet — primitives → tokens → Tailwind v4
+├── tokens.css             # Design tokens (Graphite + Signal palette, light + dark)
+├── signal/                # Production chrome (the only active chrome)
+│   ├── signal.css         #   Signal-scoped CSS — every component class
+│   ├── components/        #   Reusable primitives (Card, Row, Chip, Button, Modal, ...)
+│   ├── pages/             #   Route-level pages (HomePage, ResultPage, ProjectComposePage, ...)
+│   ├── hooks/             #   Signal-scoped hooks (useSignalTheme, useProjectMeta, ...)
+│   ├── icons/             #   Inline-SVG icon set (icons.tsx)
+│   └── lib/               #   Signal-scoped helpers (runUtils.ts)
+├── design-system/         # Cross-cutting design assets — primitives.css, contrast.ts
+├── stores/                # Zustand stores (authStore, uiStore, ...)
+├── hooks/                 # App-wide hooks (not Signal-specific)
+├── lib/                   # App-wide helpers (api.ts, telemetry.ts, ...)
+└── types/                 # Shared TypeScript types
 ```
 
-What each top-level directory is for:
+Rules of thumb:
 
-- **`signal/`** — the production chrome. All user-facing routes resolve here.
-- **`v3/` and `v4/`** — historical chromes kept solely to catch legacy URLs and redirect them. New code does not go here.
-- **`components/`** — React components shared across pages (run detail, project workbench, settings cards). These are imported by Signal pages.
-- **`pages/`** — V2 sidebar-shell pages. Most have been redirected to Signal equivalents; the remaining few (`ExecSummaryPage`, `org/OrgProjectsPage`) are still in active use for admin/backoffice paths.
-- **`stores/`** — Zustand state slices. State survives navigation across both chromes.
-- **`hooks/`** — generic, non-Signal-scoped React hooks.
-- **`lib/`** — pure JS modules with no React. `api.ts` is the single backend client. `analytics.ts`, `verdict.ts`, `glossary.ts`, `telemetry.ts`, etc. live here.
-- **`design-system/`** — token primitives + pure design helpers. The CSS file here defines `--c-*` raw colors; `tokens.css` aliases them to semantic names.
-- **`types/`** — pure TS type modules shared across stores / components.
+- New page components belong under `frontend/src/signal/pages/`.
+- New reusable primitives belong under `frontend/src/signal/components/`.
+- Cross-cutting helpers that aren't tied to the Signal chrome belong under
+  `frontend/src/lib/`, `frontend/src/hooks/`, or `frontend/src/stores/`.
+- CSS classes shipped from `signal.css` are scoped under `.signal-app` so they cannot leak
+  into legacy V2/V3 shells. New Signal classes follow that convention.
 
-### 1.10 Import alias
+### Imports
 
-`@/` resolves to `frontend/src/`. Configured in `vite.config.ts`:
+- Absolute paths via the `@/` alias for anything outside the current folder:
+  `import * as api from '@/lib/api'`. Relative paths (`./foo`) for siblings.
+- Side-effect imports (CSS) go last:
 
-```ts
-resolve: {
-  alias: {'@': path.resolve(__dirname, './src')},
+  ```ts
+  import { Outlet } from 'react-router-dom';
+  import { useSignalTheme } from '@/signal/hooks/useSignalTheme';
+
+  import '@/signal/signal.css';
+  ```
+
+- Type-only imports use `import type` so the bundler can drop them:
+  `import type { ProjectDto } from '@/lib/api'`.
+
+### React patterns
+
+- Functional components only. No class components (the codebase already migrated off them — see
+  the `class-components-to-hooks` migration recipe for what we'd do to your code).
+- Hooks at the top of the component, before any conditional return.
+- Lift state to the closest common ancestor. Reach for a Zustand store
+  (`frontend/src/stores/*`) only when the state is genuinely cross-page.
+- Memoization (`useMemo` / `useCallback`) is opt-in, not default. Add it when a render profile
+  shows it matters — don't sprinkle it.
+- Side effects (network calls, subscriptions) go in `useEffect`. Cleanup the subscription with
+  the returned function — see `useSignalTheme.ts` for the canonical pattern.
+
+### Mobile-first responsive
+
+Every UI change must verify on a 375×667 viewport (iPhone SE) and a 768×1024 viewport (iPad).
+Patterns:
+
+- Tap targets ≥ 44×44px on mobile (`.hit-target` utility, or `min-height: 44px` on the element).
+- Use `100dvh` not `100vh` for full-screen layouts so the iOS Safari URL bar collapse doesn't
+  cut your content. `.h-screen-dvh`, `.min-h-screen-dvh` utilities live in `index.css`.
+- Respect safe-area insets: `.safe-area-bottom`, `.safe-area-top`, `.sticky-bottom-bar`.
+- Form inputs need `font-size: 16px` minimum on mobile to prevent iOS auto-zoom on focus —
+  the `@supports (-webkit-touch-callout: none)` block in `index.css` enforces this globally.
+
+---
+
+## Java (backend)
+
+### Toolchain
+
+| Concern        | Tool                                       | Version (per `pom.xml`)                  |
+| -------------- | ------------------------------------------ | ---------------------------------------- |
+| JDK            | OpenJDK                                    | 21 (`<java.version>21</java.version>`)   |
+| Build          | Maven                                      | follows the wrapper                      |
+| Parent BOM     | `spring-boot-starter-parent`               | `3.5.14`                                 |
+| Framework      | Spring Boot                                | `3.5.x`                                  |
+| LLM SDK        | Spring AI                                  | `1.1.6`                                  |
+| Boilerplate    | Lombok                                     | managed (optional)                       |
+| Formatter      | `com.diffplug.spotless:spotless-maven-plugin` | `3.4.0` (Dependabot bumped 2.43 → 3.4) |
+| Format engine  | `google-java-format` (style `GOOGLE`)      | `1.22.0`                                 |
+| Test framework | JUnit 5 (Jupiter), Mockito, Testcontainers, ArchUnit | `5.17.0` Mockito, `1.4.2` ArchUnit |
+| Coverage       | JaCoCo                                     | `0.8.14`                                 |
+
+On macOS dev: `export JAVA_HOME=/opt/homebrew/opt/openjdk@21` before any Maven command. The
+project's Bash quickstart documents this explicitly, and the Spotless plugin enforces the format
+during `mvn verify`.
+
+### Formatter (Spotless)
+
+Bound to the `verify` phase via the `spotless-check` execution. From `pom.xml`:
+
+```xml
+<plugin>
+  <groupId>com.diffplug.spotless</groupId>
+  <artifactId>spotless-maven-plugin</artifactId>
+  <version>3.4.0</version>
+  <configuration>
+    <java>
+      <includes>
+        <include>src/main/java/**/*.java</include>
+        <include>src/test/java/**/*.java</include>
+      </includes>
+      <googleJavaFormat>
+        <version>1.22.0</version>
+        <style>GOOGLE</style>
+        <reflowLongStrings>true</reflowLongStrings>
+      </googleJavaFormat>
+      <removeUnusedImports/>
+      <importOrder>
+        <order>java,javax,jakarta,com,org,</order>
+      </importOrder>
+      <formatAnnotations/>
+    </java>
+  </configuration>
+</plugin>
+```
+
+What this means in practice:
+
+- **Format engine**: `google-java-format` with the `GOOGLE` style (4-space continuation,
+  2-space indent, ~100-col soft wrap, dot at end of line for chains).
+- **Long strings**: `reflowLongStrings = true` allows the formatter to break very long literal
+  strings across multiple lines.
+- **Unused imports**: stripped automatically. Don't leave them — Spotless will fail the build.
+- **Import order**: groups in this exact order, each separated by a blank line:
+
+  ```
+  1. java.*
+  2. javax.*
+  3. jakarta.*
+  4. com.*       (third-party + first-party com.navneet.executespec.*)
+  5. org.*
+  6. (everything else — trailing comma in 'java,javax,jakarta,com,org,')
+  ```
+
+- **Annotation formatting**: `formatAnnotations` normalises one-annotation-per-line on
+  declarations.
+
+Run `mvn spotless:apply` to autofix; `mvn verify` (the `spotless-check` execution) is the gate.
+
+### Project coordinates
+
+- `groupId`: `com.navneet`
+- `artifactId`: `executespec`
+- Base Java package: `com.navneet.executespec`
+- Top-level package layout: flat (`com.navneet.executespec.<feature>`). The historical
+  `v2.*` / `v3.*` namespace prefixes were retired in the 2026-05-07 unification pass — do not
+  reintroduce them.
+
+### Dependency injection
+
+We use Lombok-generated constructor injection across every Spring-managed bean.
+
+```java
+@Service
+@RequiredArgsConstructor
+public class RunOrchestrator {
+
+  private final SequentialExecutor sequentialExecutor;
+  private final ContextStore contextStore;
+  private final RunCostTracker runCostTracker;
+
+  public RunRecord submit(RunRequest request) {
+    // ...
+  }
 }
 ```
 
-Use it for every cross-package import:
+Rules:
 
-```ts
-import {req, ApiError} from '@/lib/api';
-import {useAuthStore} from '@/stores/useAuthStore';
-import VerdictPill from '@/components/runs/VerdictPill';
-```
+- **Use `@RequiredArgsConstructor`** on the class. All collaborators are `private final` fields.
+  Lombok generates the constructor; Spring picks it up automatically.
+- **Never field-inject (`@Autowired` on a field)**. It defeats constructor immutability, makes
+  the class harder to unit-test, and hides circular dependencies.
+- **`@Qualifier` propagation**: `lombok.config` at the project root sets
+  `lombok.copyableAnnotations += org.springframework.beans.factory.annotation.Qualifier`. This
+  means `@Qualifier("namedBean")` on a `private final` field is copied through to the generated
+  constructor argument, so Spring can resolve named beans (we use this for named `ChatModel`
+  beans per provider).
 
-Same-directory imports use relative paths.
+### Records for DTOs
 
-### 1.11 Function exports
-
-The codebase uses `export const` arrow functions consistently for `lib/`, `hooks/`, `stores/`:
-
-```ts
-export const getRun = (id: string) => req<RunDetail>(`/runs/${id}`);
-export const useTierPermissions = () => {  ...  };
-```
-
-Page/component files use `export default function`:
-
-```tsx
-export default function HomePage() {  ...  }
-```
-
-This is the D-T1 default-exports allowance.
-
-### 1.12 Patterns to follow
-
-- **Async / await over `.then`** — every `lib/api.ts` consumer awaits the promise. `.then` chains appear only in the few binary-download helpers where readability wins.
-- **`as const` for tuple-like data** — e.g. ratio thresholds in `design-system/contrast.ts`.
-- **Type narrowing via discriminated unions** — `VerdictSignals.reviewerVerdict`, `Verdict`, etc.
-- **`useAsyncAction` for button handlers** — `frontend/src/hooks/useAsyncAction.ts` exposes `[pending, run]` so buttons disable during the request. `no-restricted-syntax` warns on inline async `onClick`.
-
-### 1.13 Patterns to avoid
-
-- Field/`@Autowired` style — does not apply to TS, but listing for symmetry with the backend section: never mutate module state with side effects at import time (other than `initTelemetry()` in `main.tsx`).
-- `console.log` in committed code. The lint config doesn't ban it, but PRs are expected to remove debug logs.
-- New `any`. Each new `any` shows up as a lint warning that counts toward the trend tracked in CI.
-
-## 2. Backend — Java
-
-### 2.1 Configs
-
-| Concern               | File                                                                                                |
-| --------------------- | --------------------------------------------------------------------------------------------------- |
-| Formatter             | `pom.xml` → `<plugin>spotless-maven-plugin</plugin>` (v3.4.0, google-java-format v1.22.0, GOOGLE style) |
-| Build verifier        | `mvn verify` triggers `spotless:check`                                                              |
-| Auto-format           | `mvn spotless:apply`                                                                                |
-| ArchUnit pin          | `src/test/java/com/navneet/executespec/arch/*.java`                                                 |
-
-Run gates:
-
-```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q     # includes spotless:check
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spotless:apply   # auto-format
-```
-
-### 2.2 google-java-format settings (verbatim from `pom.xml`)
-
-```xml
-<googleJavaFormat>
-  <version>1.22.0</version>
-  <style>GOOGLE</style>
-  <reflowLongStrings>true</reflowLongStrings>
-</googleJavaFormat>
-<removeUnusedImports/>
-<importOrder>
-  <order>java,javax,jakarta,com,org,</order>
-</importOrder>
-<formatAnnotations/>
-```
-
-What this means:
-
-- **GOOGLE style** — 2-space indent, 100-character line target, K&R braces, no wildcard imports.
-- **`removeUnusedImports`** — applied on every `spotless:apply` and asserted on `spotless:check`.
-- **Import order** — `java` first, then `javax`, then `jakarta`, then `com.*` (your code + first-party libs), then `org.*` (Spring etc.), then everything else.
-- **`reflowLongStrings`** — long string literals are wrapped automatically.
-- **`formatAnnotations`** — annotations are placed each on their own line above the declaration.
-
-### 2.3 Lombok usage
-
-Allowed and encouraged on JPA entities + DTOs:
+Public DTOs that travel over the API surface or between layers use Java records.
 
 ```java
+public record RunRequest(
+    String userRequest,
+    String aiProvider,
+    ExecutionMode executionMode,
+    RunMode runMode,
+    boolean tddMode,
+    Double userCostCap,
+    String figmaUrl,
+    List<UUID> selectedRepoIds) {}
+```
+
+- Records are immutable, give you `equals`/`hashCode`/`toString` for free, and the canonical
+  constructor lets you validate inputs in one place if needed.
+- Use records for any DTO that holds data only. Use a regular class when behaviour belongs on
+  the object (e.g. `RunOrchestrator`, services, entities — see below).
+- Record components match the JSON field names that the frontend already sends — keep them
+  `lowerCamelCase`. Don't add `@JsonProperty` unless you genuinely need to alias.
+
+### Entities (JPA)
+
+Entities are regular classes (not records — JPA needs a default constructor and mutable state).
+Lombok's `@Data` / `@Builder` are common:
+
+```java
+@Entity
+@Table(name = "pipeline_run")
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-@Entity
 public class PipelineRun {
-  @Id private UUID id;
-  private String status;
+
+  @Id
+  @GeneratedValue
+  private UUID id;
+
+  @Enumerated(EnumType.STRING)
+  private RunStatus status;
+
+  @Column(name = "verified_score")
+  private Double verifiedScore;
   // ...
 }
 ```
 
-For Spring beans, use `@RequiredArgsConstructor` to get constructor-injection without writing the constructor by hand:
+- Use `@Data` only on entities. On services/agents, `@RequiredArgsConstructor` is enough —
+  generating `equals`/`hashCode` on a service is a bug factory.
+- Use `@Builder` when callers want named-arg construction (most entities). Pair with
+  `@NoArgsConstructor` (JPA requires it) and `@AllArgsConstructor` (Lombok-friendly).
+
+### Naming conventions
+
+| Construct                       | Suffix / convention   | Examples                                                              |
+| ------------------------------- | --------------------- | --------------------------------------------------------------------- |
+| Agent                           | `*Agent`              | `WorkerAgent`, `ReviewerAgent`, `OutlinePlannerAgent`                  |
+| Service                         | `*Service`            | `BillingService`, `ProjectWorkspaceService`                            |
+| REST controller                 | `*Controller`         | `RunController`, `BillingController`                                   |
+| Security specification          | `*Spec`               | `PipelineRunSpec` (Spring Data JPA Specifications)                    |
+| LLM tool                        | descriptive verb noun | `ReadFileTool`, `WriteFileTool`, `BuildProjectTool`                    |
+| Repository                      | `*Repository`         | `PipelineRunRepository`                                                |
+| DTO record                      | `*Dto` or `*Request` / `*Response` | `RunRequest`, `RunResponse`, `ProjectDto`                  |
+| Flyway migration                | `V{n}__description.sql` | `V199__add_external_sharing_flag.sql`                                |
+
+### Imports
+
+The import order is enforced by Spotless (`java,javax,jakarta,com,org,`). One typical block:
 
 ```java
-@Service
-@RequiredArgsConstructor
-public class ReviewerAgent {
-  private final LlmRouter llmRouter;
-  private final PromptAssembler promptAssembler;
-  // ...
-}
+package com.navneet.executespec.agent;
+
+import java.time.Duration;
+import java.util.List;
+import java.util.UUID;
+
+import jakarta.annotation.PostConstruct;
+
+import com.navneet.executespec.context.ContextStore;
+import com.navneet.executespec.tool.ToolRegistry;
+
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.stereotype.Service;
+import org.springframework.ai.chat.model.ChatModel;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 ```
 
-This is the standard pattern across the codebase. Sampled:
+- One blank line between groups.
+- No `import package.*` wildcards — google-java-format will keep them, but every IDE config in
+  the repo is set to expand them.
 
-- `agent/ReviewerAgent.java`
-- `credit/LifetimeCreditService.java`
-- `reviewer/AccuracyAssessmentService.java`
-- `crypto/EncryptedValueConverter.java`
+### Patterns that MUST be followed
 
-### 2.4 No field injection
+These are pinned by tests, lint rules, or established convention — breaking them is a build
+failure or a code-review block.
 
-`@Autowired` on fields is **forbidden** by convention. Use constructor injection (`@RequiredArgsConstructor` or explicit constructors).
+1. **All LLM calls go through `LlmRouter`** (or `FallbackLlmRouter` for the legacy non-tool agents).
+   Never call provider SDKs directly. The router writes cost-tracking rows for every call.
 
-`grep` audit — only 3 occurrences of `@Autowired` exist in `src/main/java`:
+2. **Run ownership fields stamped before the async pipeline thread starts.** Set
+   `createdByUserId`, `orgId`, `projectId` on the `RunRecord` before you call
+   `RunOrchestrator.submit(...)` — otherwise the async thread reads partially-initialised state
+   and races on tenant guards.
 
-- `context/ContextStore.java`
-- `test/NativeToolsTestController.java`
-- `security/InputSanitizer.java`
+3. **Sliding-window LLM context: first 2 + last 18 messages.** The conversation snapshots
+   under `v2:agent-ctx:{runId}:{taskId}` keep this shape. Don't reshape it.
 
-These pre-date the convention and are tracked for migration. New code adds `@RequiredArgsConstructor` instead.
+4. **Token-cost truncation limits**: `readFile` 8k chars, `shell` 6k chars, `diff` 5k chars.
+   Constants in the relevant `*Tool.java`.
 
-### 2.5 DTO style
+5. **Webhook signatures verified before processing.** Razorpay HMAC, Stripe `Stripe-Signature`.
+   Never trust the body before the signature check returns true.
 
-Prefer Java records for DTOs:
+6. **Feature flags via `FeatureFlagService.isEnabled(key, ...)`** — never hardcode toggles.
+   Flags live in YAML + DB; the service caches per-process.
 
-```java
-public record ReviewerRequest(
-    String runId,
-    String taskId,
-    List<String> files,
-    Path workspaceRoot) {}
+7. **Structured logging with trace context.** Micrometer auto-populates MDC with `traceId` and
+   `spanId`. Use SLF4J's `log.info("event={} runId={}", "phase.transition", runId)` so
+   structured-logging encoders can pick the fields up.
 
-public record PricingUpdateRequest(
-    double inputCostPer1m,
-    double outputCostPer1m,
-    String notes) {}
-```
+8. **Async work wraps `Thread.ofVirtual().start()` runnables** in
+   `ContextSnapshotFactory.captureAll().wrap(runnable)` so `traceId` and `RequestAttributes`
+   survive the thread boundary.
 
-Records get a generated constructor, accessors, `equals`, `hashCode`, `toString` — and they are immutable, which matters for the immutable-by-default convention on request/response DTOs.
+9. **Tool-calling is provider-native.** Strict JSON schemas live in `tool/` — every tool entry
+   declares its schema. Do not parse XML `<tool_call>` blocks in V2.
 
-Use Lombok `@Data` only for JPA entities that need mutators (Spring Data sets fields via reflection on rehydration). Records do not work for `@Entity` (need a no-arg constructor for Hibernate proxies).
+10. **LLM prompts live in external files.** `src/main/resources/prompts/*.md` (rollback archives
+    `.txt`). Assemble via `PromptAssembler.assemble(path, vars)` — it resolves
+    `{{include:fragment}}` markers from `prompts/fragments/` and substitutes `{{VAR}}`. Never
+    inline a multi-page prompt as a `String` constant in an agent.
 
-Examples in the tree:
+### Patterns that MUST NOT be used
 
-- `reviewer/ReviewerRequest.java` (record)
-- `reviewer/ReviewerResult.java` (record)
-- `api/dto/PricingUpdateRequest.java` (record)
-- `api/dto/MemberUsage.java` (record)
-- `api/dto/DeploymentSummary.java` (record)
+- **Field injection (`@Autowired private SomeService thing;`)** — see DI section.
+- **Raw `String` LLM prompts hardcoded in Java** — use the prompt files + `PromptAssembler`.
+- **Direct HTTP calls to LLM providers** — go through `LlmRouter`.
+- **Swallowed exceptions.** `catch (Exception e) {}` is a code-review block. Log + rethrow, log
+  + translate, or handle the case explicitly.
+- **Setting run ownership fields after `submitRun()` returns** — the async thread has already
+  started; you'll race on tenant guards.
 
-### 2.6 Layering convention
+### Database migrations
 
-The 5-layer flow:
+- Flyway: `src/main/resources/db/migration/V{n}__description.sql`. Sequential, monotonic
+  integer. Current head is documented in the root `CLAUDE.md`.
+- **Never modify an applied migration.** Add a follow-up `V{next}__fix_blah.sql` instead.
+- New migrations cross-linked from the touching package's `CLAUDE.md` and from the entity
+  row that uses them. The doc-refresh checklist enforces this.
+- Local check: `ls src/main/resources/db/migration/V*.sql | tail -5` before creating a new one,
+  so you pick the right next number even if a feature branch is racing.
 
-```
-@RestController  →  @Service  →  *Agent  →  *Tool  →  LlmRouter
-```
+### Tests
 
-- **Controller** — Spring MVC entry. Annotated `@RestController`. Validates input via `@Valid`. Delegates to a service.
-- **Service** — Business logic. Spring `@Service` bean. May persist via `@Repository` interfaces and call agents.
-- **Agent** — LLM-aware logic. Owns prompt assembly + LLM dispatch via `LlmRouter`.
-- **Tool** — Native-tool implementation invoked by the agent during a worker loop. Owns its JSON-schema spec.
-- **LlmRouter** — Provider dispatch (Anthropic / OpenAI / Gemini). Single entry point for every LLM call.
+| Layer / concern               | Framework / library                                | Notes                                                                                            |
+| ----------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Unit                          | JUnit 5 Jupiter (`spring-boot-starter-test`)       | Surefire runs these on `mvn test`.                                                               |
+| Mocking                       | Mockito (`5.17.0`, override SB default for Java 25) | Use `MockitoExtension` rather than the legacy runner. Prefer constructor injection over `@InjectMocks`. |
+| Integration / Testcontainers  | `spring-boot-testcontainers`, `testcontainers/postgresql`, `testcontainers/junit-jupiter` | Tagged `@Tag("integration")`. `mvn test` excludes them; CI runs them under the `-Pintegration` profile. |
+| Architecture                  | ArchUnit (`com.tngtech.archunit:archunit-junit5:1.4.2`) | Pins like `AccessGuardCoverageTest` enforce that every tenant-scoped controller method calls a tenant access guard. New violators fail the build. |
+| Spring Security               | `spring-security-test`                             | `@WithMockUser`, `MockMvc` request-builders with auth.                                           |
 
-Legacy `FallbackLlmRouter` survives only for non-tool-calling agents (`AccuracyAssessmentService`, `ConversationAgent`, `testgen/*`). New agents go through `LlmRouter`.
+Test layout mirrors source layout — `src/test/java/com/navneet/executespec/<feature>/<X>Test.java`.
 
-### 2.7 Naming conventions
+The Surefire excluded groups list is `e2e,integration,chaos`, so `mvn test` runs unit + ArchUnit
+tests only. Integration tests run under `-Pintegration`.
 
-| Symbol kind     | Pattern        | Example                                          |
-| --------------- | -------------- | ------------------------------------------------ |
-| Class           | `UpperCamel`   | `RunOrchestrator`, `OutlinePlannerAgent`         |
-| Method          | `camelCase`    | `submitRun`, `verifyAuditChain`                  |
-| Constant        | `UPPER_SNAKE`  | `KNOWN_LEGACY_DRIFT`, `MAX_ITERATIONS`           |
-| Package         | `lowercase`    | `com.navneet.executespec.reviewer`               |
-| Test class      | `*Test`        | `ApiContractTest`, `AccessGuardCoverageTest`     |
-| Agent class     | `*Agent`       | `WorkerAgent`, `ReviewerAgent`, `PatchAgent`     |
-| Service class   | `*Service`     | `BillingService`, `FindingPatchSubmitter`        |
-| Controller class| `*Controller`  | `RunController`, `OrgController`                 |
-| Spec class      | `*Spec`        | (Spring Security specifications)                 |
+### JaCoCo
 
-### 2.8 Test style
+- Plugin: `org.jacoco:jacoco-maven-plugin:0.8.14`.
+- Bound to the `test` phase: `prepare-agent` + `report`.
+- Excluded packages: `com.navneet.executespec.api.dto.**`, `com.navneet.executespec.**.dto.**`,
+  `com.navneet.executespec.ExecutespecApplication.class`. DTOs are pure data — coverage there
+  is noise.
 
-Stack:
+---
 
-```
-JUnit 5 + Mockito + Testcontainers + ArchUnit + Spring Test
-```
+## Common to both
 
-Sample patterns:
+### Commit hygiene
 
-```java
-// Unit test
-class VerdictDeriverTest {
-  @Test
-  void deriveVerdict_blocksOnFinalBuildFailed() { ... }
-}
+- One feature per branch. Ship every slice on the same branch — one PR per work session, not per
+  slice.
+- Doc refresh in the same commit as the code (root `CLAUDE.md`, per-package `CLAUDE.md`,
+  `docs/CODEMAP.md`, etc.). The doc-refresh checklist is enforced for every non-trivial commit.
+- `skip doc-refresh: trivial typo` is the only escape hatch, and only for typo-grade changes.
 
-// Spring slice test
-@SpringBootTest
-class PipelineE2ETest extends PostgresIntegrationBase { ... }
+### Encoding / line endings
 
-// Repository test
-@DataJpaTest
-class ProjectMemoryRepositoryTest { ... }
+- UTF-8 everywhere.
+- LF (`\n`) line endings. Prettier enforces this for the frontend (`endOfLine: 'lf'`).
 
-// ArchUnit pin
-class ApiContractTest {
-  @Test
-  void everyApiTsUrlResolvesToRegisteredBackendRoute() { ... }
-}
-```
+### Never commit
 
-Testcontainers via `PostgresIntegrationBase` provides a real Postgres for `@SpringBootTest` + `@DataJpaTest` flows. Use it whenever the test reaches JPA — H2 has caused divergences in the past.
+- Real API keys (Anthropic, OpenAI, Google, GitHub PATs, Stripe / Razorpay live secrets,
+  Gmail app passwords). The `.env.template` documents what should go in `.env`. All YAML
+  profiles take secrets via environment variable resolution — every fallback in the YAML must be
+  a placeholder, not a real value.
+- Files prefixed with `.env`, `.secrets`, `credentials.json`. Use the env-resolution chain
+  instead.
 
-### 2.9 Patterns that must be followed (cross-reference with `CLAUDE.md`)
-
-- LLM calls flow through `LlmRouter` (or `FallbackLlmRouter` for legacy non-tool agents). Never call providers directly.
-- Run-ownership fields (`createdByUserId`, `orgId`, `projectId`) are stamped **before** the async pipeline thread starts. Race-condition fix.
-- Token-cost-control truncation limits — `readFile` 8k chars, `shell` 6k chars, `diff` 5k chars.
-- Async work wraps `Thread.ofVirtual().start()` runnables in `ContextSnapshotFactory.captureAll().wrap(...)` so traceId + RequestAttributes survive thread boundaries.
-- Payment-webhook signatures are verified before processing (Razorpay HMAC, Stripe `Stripe-Signature`).
-- Feature flags via `FeatureFlagService.isEnabled()` — never hardcode toggles.
-- Structured logging with traceId / spanId via Micrometer context propagation. MDC is auto-populated.
-
-### 2.10 Patterns that must not be used
-
-- Field injection (`@Autowired` on fields). Use constructor injection instead.
-- Raw `String` for LLM prompts. Use prompt files under `src/main/resources/prompts/*.md` assembled via `PromptAssembler.assemble(path, vars)`.
-- Direct HTTP calls to LLM providers. Always via `LlmRouter`.
-- Swallowed exceptions. Log + rethrow, or handle explicitly with a comment.
-- Setting run-ownership fields **after** `submitRun()` returns.
-
-## 3. Cross-language conventions
-
-### 3.1 Naming of HTTP routes and IDs
-
-- Path placeholders use `{id}` / `{runId}` / `{projectId}` (no leading prefix). The frontend mirrors with `${id}` template substitutions; `ApiContractTest` normalises both forms to `{}` before comparing.
-- Run IDs and project IDs are UUIDs. They are stringified at the API boundary; never expose raw `UUID` types to TypeScript.
-
-### 3.2 Date / time
-
-- Server returns ISO-8601 strings (`2026-05-16T10:42:08.123Z`) in every JSON payload.
-- Client treats them as `string` and parses with `new Date(s)` only at the render layer.
-- `Instant.now().toString()` is the canonical timestamp source on the server (see `ValidationAdvice.baseBody`).
-
-### 3.3 Error messages
-
-- Server error envelope: see [`docs/frontend-api-usage.md` §1.3](../frontend-api-usage.md).
-- All customer-visible messages are written in plain English. Slugs (`payment_required`, `bad_request`) are for programmatic dispatch only.
-- No PII in log messages. The webhook signature failure log line, for example, redacts the gateway event ID before printing.
-
-### 3.4 Feature flags
-
-- Backend: `FeatureFlagService.isEnabled(key)` returns `true`/`false`. Keys are namespaced (`integrations.slack.enabled`, `v2.pause.enabled`, etc.).
-- Frontend: `getPublicFeatureFlags()` returns a whitelisted subset (`integrations.*`, `billing.*`, `pipeline.*`, `project.*`, `execution.view.*`). The result is stored in `useAuthStore` and read via `useFeatureFlag(key)`.
-- New flags are added via Flyway migration on `feature_flag` plus a controller endpoint update. The `adminListFeatureFlags` / `adminUpdateFeatureFlag` admin surface drives them at runtime.
-
-## 4. Editor and tooling
-
-### 4.1 Recommended editor configs
-
-- **TypeScript**: Prettier on save + ESLint on save. Most contributors use the VS Code Prettier + dbaeumer ESLint extensions.
-- **Java**: IntelliJ IDEA with the google-java-format plugin and the `Reformat code` action bound to a hotkey. Spotless will catch anything missed at `mvn verify`.
-
-### 4.2 Pre-commit
-
-There is no committed pre-commit hook. The CI lint workflow is the gate: `format:check` + `lint` for TS, `mvn verify` for Java. PRs that fail either are blocked from merge.
-
-### 4.3 Auto-fix shortcuts
+### Build commands
 
 ```bash
-npm --prefix frontend run format          # prettier --write everywhere
-npm --prefix frontend run lint:fix        # eslint --fix
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spotless:apply  # google-java-format + imports
-```
+# Backend full verify (Spotless gate + unit tests + ArchUnit)
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
 
-Running these three locally before pushing is the fastest way to avoid CI churn.
+# Backend autofix formatting
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spotless:apply
 
-## 5. Examples grepped from the tree
+# Frontend build (TS check then bundle)
+npm --prefix frontend run build
 
-### 5.1 Typed API client function
+# Frontend autofix
+npm --prefix frontend run format
+npm --prefix frontend run lint:fix
 
-```ts
-// frontend/src/lib/api.ts (line 539)
-export const createRun = (body: {
-  userRequest: string;
-  executionMode?: 'PROTOTYPE' | 'PRODUCTION';
-  // ...
-  userCostCap?: number;
-}) => req<{runId: string}>('/runs', {method: 'POST', body: JSON.stringify(body)});
-```
-
-### 5.2 Zustand store action
-
-```ts
-// frontend/src/stores/useRunStore.ts (line 113)
-const result = await api.getRuns({
-  status: filters.status,
-  projectId: filters.projectId,
-  scope: filters.scope,
-});
-```
-
-### 5.3 React component with default export
-
-```tsx
-// frontend/src/components/runs/VerdictPill.tsx (line 54)
-export default function VerdictPill({className, size = 'sm', ...signals}: VerdictPillProps) {
-  const result = deriveVerdict(signals);
-  if (!result) return null;
-  // ...
-}
-```
-
-### 5.4 Java service with constructor injection
-
-```java
-// src/main/java/com/navneet/executespec/reviewer/ReviewerAgent.java
-@Service
-@RequiredArgsConstructor
-public class ReviewerAgent {
-  private final LlmRouter llmRouter;
-  private final PromptAssembler promptAssembler;
-  // ...
-}
-```
-
-### 5.5 Java record DTO
-
-```java
-// src/main/java/com/navneet/executespec/api/dto/PricingUpdateRequest.java
-public record PricingUpdateRequest(
-    double inputCostPer1m, double outputCostPer1m, String notes) {}
-```
-
-### 5.6 ArchUnit pin
-
-```java
-// src/test/java/com/navneet/executespec/arch/ApiContractTest.java
-@Test
-void everyApiTsUrlResolvesToRegisteredBackendRoute() throws Exception {
-  Set<String> backendPatterns = collectBackendPatterns();
-  Set<String> apiTsUrls = extractApiTsUrls(Files.readString(API_TS_PATH));
-  // ... fails the build if any URL has no matching @*Mapping
-}
+# Frontend gate (what CI runs)
+npm --prefix frontend run format:check
+npm --prefix frontend run lint
 ```

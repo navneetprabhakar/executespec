@@ -1,408 +1,509 @@
 # Local Test Playbook
 
-How to bring up ExecuteSpec on a developer workstation, run the test suite, and verify a change before pushing. Code-truth only — every command below is reproducible from a clean checkout.
+Step-by-step recipe to bring ExecuteSpec up on a developer machine and run the
+test suites. Everything here is copy-paste runnable from a fresh checkout of the
+repo on macOS or Linux. Where macOS-specific paths appear (`/opt/homebrew/...`),
+the Linux equivalent is called out.
 
-If a step here disagrees with what `mvn`/`npm` actually does, the code wins; fix this file.
+The single most common boot failure on macOS is a wrong `JAVA_HOME` — the parent
+POM (`pom.xml`) pins `java.version=21`, and `mvn` will pick up whatever Java is
+on `$PATH` first. Always set `JAVA_HOME` explicitly before any Maven invocation.
 
-## Prerequisites
+---
 
-| Tool       | Version                  | Why                                                                       |
-| ---------- | ------------------------ | ------------------------------------------------------------------------- |
-| Java       | 21 (Temurin)             | `pom.xml` `<java.version>21</java.version>` + Spring Boot 3.5 baseline    |
-| Maven      | 3.9+                     | Build + Spotless + JaCoCo                                                  |
-| Node.js    | LTS                      | `frontend/package.json` requires `vite ^5.1.0` (Node 18+); CI uses `lts/*` |
-| Docker     | 24+ with Compose plugin   | Local Postgres/Redis, observability stack, cleanroom containers, previews  |
-| PostgreSQL | 16                       | `application.yml` JDBC URL targets PG; matches Cloud SQL                  |
-| Redis      | 7                        | `application.yml` `spring.data.redis.*`                                   |
-| `psql`     | from PostgreSQL          | Used by `scripts/dev-cleanup.sh` and ad-hoc DB pokes                      |
-| `jq`       | latest                   | Used by `scripts/v2-eval.sh`, `scripts/e2e-test.sh`                       |
-| `curl`     | latest                   | Health probes + scripts                                                    |
-| `gsutil` / `gcloud` | optional         | Only needed if interacting with the deploy bucket / Secret Manager        |
+## 1. Prerequisites
 
-### macOS-specific JAVA_HOME
+### Required
 
-The project's standing rule (from MEMORY): macOS dev sets `JAVA_HOME` to the Homebrew-installed OpenJDK 21 before every Maven command.
+| Tool | Version | Where it's used |
+| --- | --- | --- |
+| JDK 21 | exactly 21 (Temurin or OpenJDK) | Spring Boot 3.5, `pom.xml` `<java.version>21</java.version>` |
+| Maven | 3.9+ (project ships no `mvnw`) | All backend build/test/run |
+| Node.js | LTS (>= 20) | Vite dev server, ESLint, Prettier |
+| npm | bundled with Node 20+ | Frontend tooling (`npm --prefix frontend run ...`) |
+| Docker | 24+ | Postgres + Redis sidecars, observability stack, preview containers |
+| PostgreSQL client | 16+ (`psql`, `pg_dump`) | Dev-wipe helper scripts under `scripts/` |
+| `curl` + `jq` | any recent | Eval scripts under `scripts/` |
+
+### Optional
+
+- `redis-cli` for inspecting Redis state during runs (SSE replay log, pause
+  flags, BYOK cache).
+- `gcloud` only if you need to test the deploy-engine path
+  (`com.navneet.executespec.deployment.engine.UserCloudRunDeployer`) against a
+  real GCP project. Local dev never needs it.
+- `gsutil` only if you intend to exercise the GCS workspace archive path
+  (`agent.deployment.workspace.gcs-enabled=true`, off by default in
+  `application.yml`).
+
+### macOS `JAVA_HOME`
+
+Install JDK 21 via Homebrew and export `JAVA_HOME` in every shell that will run
+Maven:
 
 ```bash
+brew install openjdk@21
+# One-shot
 export JAVA_HOME=/opt/homebrew/opt/openjdk@21
+# Persistent (zsh)
+echo 'export JAVA_HOME=/opt/homebrew/opt/openjdk@21' >> ~/.zshrc
 ```
 
-If `mvn -v` ever shows `Runtime: ... 17` or `... 23`, you forgot to export this. Re-export and retry. The CLAUDE.md MUST-follow patterns list this constraint explicitly.
+On Linux pick whatever your distro names JDK 21 (`/usr/lib/jvm/temurin-21-jdk`
+on Debian, `/usr/lib/jvm/java-21-openjdk` on Fedora).
 
-## Bring up Postgres and Redis
+---
 
-There is no integrated dev `docker-compose.yml` for app dependencies. Two options:
+## 2. Postgres + Redis (Docker)
 
-### Option A — single-command Docker
+`application.yml` defaults to:
+
+- `spring.datasource.url=jdbc:postgresql://localhost:5432/executespec`,
+  user `postgres`, password `postgres`.
+- `spring.data.redis.host=localhost`, `port=6379`, `timeout=2000ms`, Lettuce
+  pool `max-active=50`, `min-idle=5`.
+
+Spin up both with one pair of docker run commands so they survive restarts:
 
 ```bash
 docker run -d --name executespec-pg \
-  -e POSTGRES_PASSWORD=postgres \
-  -e POSTGRES_USER=postgres \
+  -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres \
   -e POSTGRES_DB=executespec \
   -p 5432:5432 \
-  postgres:16
+  -v executespec_pg:/var/lib/postgresql/data \
+  postgres:16-alpine
 
 docker run -d --name executespec-redis \
   -p 6379:6379 \
   redis:7-alpine
 ```
 
-Stop / start with `docker stop executespec-pg executespec-redis` and `docker start ...`. Drop the data with `docker rm -f executespec-pg && docker volume prune`.
-
-### Option B — Homebrew (macOS)
+Health check both:
 
 ```bash
-brew install postgresql@16 redis
-brew services start postgresql@16
-brew services start redis
-
-# Create the DB if this is a fresh install
-createdb executespec
+docker exec executespec-pg pg_isready -U postgres        # expect: accepting connections
+docker exec executespec-redis redis-cli ping             # expect: PONG
 ```
 
-The defaults in `src/main/resources/application.yml` already match these settings (`localhost:5432`, db `executespec`, user `postgres`, password `postgres`; Redis at `localhost:6379`).
+Flyway will run on backend boot. Migration head is `V199`; locations are
+`classpath:db/migration` per `application.yml`
+(`spring.flyway.locations=classpath:db/migration`). The base profile carries
+`baseline-on-migrate=true`, `baseline-version=0`, and
+`ignore-migration-patterns="*:missing"` to absorb the orphan `V119`
+preview-engine row.
 
-Verify both are up:
+If you need a clean reset partway through testing:
 
 ```bash
-psql -h localhost -U postgres -d executespec -c 'select 1;'
-redis-cli ping
+scripts/dev-wipe-runs-and-projects.sh     # backs up + truncates run/project tables
 ```
 
-## Boot the backend
+That helper SQL preserves identity + billing tables — it is intentionally not a
+DROP DATABASE.
+
+---
+
+## 3. Environment variables
+
+Copy the template and fill in the two required keys:
 
 ```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21
-
-# One-time: compile + run unit tests + check formatting
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
-
-# Then run the app
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run -Dspring-boot.run.profiles=local
+cp .env.template .env
+# Required for the V2 pipeline to dispatch any run:
+#   ANTHROPIC_API_KEY=...
+#   OPENAI_API_KEY=...
+#   GOOGLE_API_KEY=...     (only if testing the Gemini provider)
+#   GITHUB_PAT=...         (only if testing the GitHub push path)
 ```
 
-`local` profile is REQUIRED. The base `application.yml` has the OTel tracer pointed at `http://localhost:4318/v1/traces`; when no Tempo is running, the JVM retries every 5–30s indefinitely and (worst case) eats off-heap memory. The `local` profile in `application.yml` (line 851+) and `application-local.yml` both disable tracing + OTLP metrics. See the comment block at the bottom of `application.yml` for the full story.
+The default Spring profile when developing should be `local`. That profile
+(declared inside `application.yml`) silences the OTLP exporter so the JVM
+doesn't spam reconnect attempts when Tempo isn't running:
 
-On first boot Flyway applies every migration up to **V199** (latest). Subsequent boots only apply pending migrations. The Hibernate setting `ddl-auto: validate` means schema mismatches fail boot.
-
-### Health probes
-
-```bash
-# Custom HealthController — liveness, cached 30s
-curl http://localhost:8080/api/health
-
-# Custom HealthController — readiness, inline DB check
-curl http://localhost:8080/api/health/ready
-
-# Spring Actuator (used by CI deploy gate)
-curl http://localhost:8080/actuator/health
+```yaml
+# application.yml — local profile
+spring.config.activate.on-profile: local
+management.tracing.enabled: false
+management.otlp.metrics.export.enabled: false
 ```
 
-A successful `/api/health` returns `status: UP` and includes `db: UP`, `redis: UP`, plus run counters (active / queued / total / completed / failed). If either DB or Redis is `DOWN`, the status flips to `DEGRADED` — the JVM is alive but a downstream is unreachable.
+There is also a committed `application-local.yml`. **Important:** that file
+contains hardcoded API key fallbacks from earlier development. Do not commit
+new keys there — rely on `.env` / shell env vars. The keys in the committed
+file should be considered burned.
 
-`/api/health/ready` returns HTTP 503 when DB is unreachable (`HealthController.ready()` runs an inline `Connection.isValid(2)` against the datasource).
-
-### Local-only LLM API keys
-
-`application-local.yml` ships with placeholder Anthropic / OpenAI / Gemini keys. If you want to actually run a pipeline locally:
+Source the env before launching:
 
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-export OPENAI_API_KEY=sk-...
-export GOOGLE_API_KEY=AIza...
+set -a; source .env; set +a
 ```
 
-These take precedence over the local-profile defaults (`spring.ai.{anthropic,openai,google}.api-key`).
+---
 
-## Boot the frontend
+## 4. Backend boot
+
+### Compile only
 
 ```bash
-npm --prefix frontend install   # first time only
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn compile -q
+```
+
+### Boot the app
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+  mvn spring-boot:run -Dspring-boot.run.profiles=local
+```
+
+The JVM binds to `localhost:8080`. First boot will run all Flyway migrations
+through V199, which can take ~30-60s on a cold DB.
+
+### Liveness probe
+
+`HealthController`
+(`src/main/java/com/navneet/executespec/api/controller/HealthController.java`)
+exposes a cheap, cached liveness endpoint:
+
+```bash
+curl -s http://localhost:8080/api/health | jq .
+```
+
+Expected JSON shape includes `status: UP` or `DEGRADED`, `uptime`, cached
+`db.up` / `redis.up`, and a cached metrics block (refreshed in background every
+30s — `CACHE_INTERVAL_MS=30_000` in `HealthController`). The probe never opens a
+DB connection on the request thread, so it cannot exhaust the Hikari pool even
+if called many times per second.
+
+### Readiness probe
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8080/api/health/ready
+# 200 if DB pings back, 503 if DB is down
+```
+
+Readiness runs an inline DB check; that's the right signal for a load balancer.
+
+### Spring Boot Actuator
+
+`application.yml` exposes a small allowlist:
+
+```yaml
+management.endpoints.web.exposure.include: health,info,metrics,prometheus
+```
+
+So you also get:
+
+- `GET /actuator/health` — Spring's standard composite health (DB, Redis, disk
+  space, etc.).
+- `GET /actuator/metrics` — list of registered metric names.
+- `GET /actuator/metrics/{name}` — single metric snapshot.
+- `GET /actuator/prometheus` — Prometheus scrape endpoint (Micrometer + Spring
+  AI + V2 custom metrics under `executespec.v2.*`).
+- `GET /actuator/info` — empty unless you populate `info.*` in config.
+
+Other actuator endpoints (`env`, `beans`, `loggers`, `threaddump`, `heapdump`)
+are intentionally **not** exposed.
+
+### Common boot failures
+
+| Symptom | Root cause | Fix |
+| --- | --- | --- |
+| `UnsupportedClassVersionError: class file version 65.0` | `mvn` picked up Java 17 | `export JAVA_HOME=/opt/homebrew/opt/openjdk@21` |
+| `Flyway: Validate failed: Migration checksum mismatch` | Edited an already-applied `V*.sql` | Add a new `V_next__patch.sql` instead. Never modify applied migrations |
+| `org.hibernate.tool.schema.spi.SchemaManagementException` on boot | DB schema drifted from Flyway head | Drop the DB and let Flyway re-baseline, or run `scripts/dev-wipe-runs-and-projects.sh` |
+| `Connection refused (localhost:5432)` | Postgres container not running | `docker start executespec-pg` |
+| `Connection refused (localhost:6379)` | Redis container not running | `docker start executespec-redis` |
+| `OTLP exporter failed` log every 60s | OTel exporter pointed at unreachable endpoint | Confirm you booted with `--spring-boot.run.profiles=local` so the local-profile override fires |
+
+---
+
+## 5. Frontend boot
+
+Frontend lives under `frontend/` as a standalone npm project, ESM-only,
+Vite-driven.
+
+### Install once
+
+```bash
+npm --prefix frontend ci
+```
+
+(`ci` rather than `install` to honour the committed lockfile.)
+
+### Dev server
+
+`frontend/vite.config.ts` reads:
+
+```ts
+server.port    = Number(process.env.VITE_PORT ?? 5173)
+server.proxy['/api'] = process.env.VITE_BACKEND_URL ?? 'http://localhost:8080'
+```
+
+So the default dev URL is `http://localhost:5173`, and all `/api/*` calls are
+proxied to `localhost:8080` (matching the backend's default port).
+
+```bash
 npm --prefix frontend run dev
+# Vite v5 -> ready at http://localhost:5173
 ```
 
-Vite dev server on **5173** (`frontend/vite.config.ts`). Proxies `/api/**` → `http://localhost:8080` so the SPA can hit the local backend without CORS pain.
-
-Override the port and/or the proxy target:
+If you're running concurrent worktrees on the same machine, override:
 
 ```bash
-VITE_PORT=5174 npm --prefix frontend run dev
-VITE_BACKEND_URL=http://localhost:8081 npm --prefix frontend run dev
+VITE_PORT=5174 VITE_BACKEND_URL=http://localhost:8081 npm --prefix frontend run dev
 ```
 
-Open `http://localhost:5173/` in a browser. Use the local creds from `~/Desktop/local_creds.txt` (per MEMORY rule `feedback_local_creds_file.md`); do not register a fresh user unless you specifically want to test the registration flow.
-
-## Run the test suite
+### Production build
 
 ```bash
-# All unit tests (excludes JUnit groups: e2e, integration, chaos)
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn test
-```
-
-`pom.xml` configures `maven-surefire-plugin` with `<excludedGroups>e2e,integration,chaos</excludedGroups>`. The full count is roughly 1295 tests at the time of this writing (cross-referenced in `pom.xml` comments around line 14). CI runs the same default via `mvn verify -q`.
-
-The suite includes ArchUnit guards:
-
-- `AccessGuardCoverageTest` — pins every controller method touching tenant-scoped paths to call a tenant access guard.
-- `ApiContractTest` — pins every URL in `frontend/src/lib/api.ts` to a registered backend `@*Mapping`.
-
-A failing ArchUnit test typically means a controller-level guard was missed or a frontend URL doesn't resolve.
-
-### Run a single test class
-
-```bash
-mvn test -Dtest=AccessGuardCoverageTest
-mvn test -Dtest=ProjectMemoryProviderTest#buildPlannerContext_emptyProject_emitsZeroSnapshot
-```
-
-### Run with the spotless gate
-
-```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
-```
-
-`verify` triggers the `spotless:check` execution bound to that phase in `pom.xml`. Any drift from `googleJavaFormat` fails the build with a non-zero exit. CI runs exactly this.
-
-### Apply formatting before commit
-
-```bash
-# Reformat Java source in place
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn com.diffplug.spotless:spotless-maven-plugin:apply
-
-# Verify the result is clean
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn com.diffplug.spotless:spotless-maven-plugin:check
-```
-
-Spotless version is pinned in `pom.xml` (currently 3.4.0) and uses `googleJavaFormat 1.22.0` in `GOOGLE` style with `reflowLongStrings: true`, `removeUnusedImports`, and `importOrder: java,javax,jakarta,com,org,`.
-
-### Run an integration / e2e test on purpose
-
-```bash
-# JUnit groups are tag-based; pass them explicitly
-mvn test -Dgroups=integration
-mvn test -Dgroups=e2e
-mvn test -Dgroups=chaos
-```
-
-These usually need Docker + a live DB + real API keys. They are not part of CI's `mvn verify` default.
-
-### JaCoCo coverage report
-
-```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn test
-open target/site/jacoco/index.html
-```
-
-DTOs and the application entrypoint are excluded from the headline number (`pom.xml` `jacoco-maven-plugin` configuration).
-
-## Frontend lint, format, build
-
-```bash
-# Lint (eslint)
-npm --prefix frontend run lint
-
-# Auto-fix lint errors
-npm --prefix frontend run lint:fix
-
-# Prettier check (CI gate)
-npm --prefix frontend run format:check
-
-# Prettier apply
-npm --prefix frontend run format
-
-# Production build (outputs to ../src/main/resources/static/)
 npm --prefix frontend run build
 ```
 
-`lint` runs eslint with `--max-warnings 9999` — warnings exist in the codebase today but are tolerated; new errors will fail CI.
+This compiles TS then runs `vite build` with output **emptied and rewritten
+into `src/main/resources/static/`** — i.e. it directly populates the Spring Boot
+JAR's static folder. Don't run this if you want to keep your in-memory dev
+backend in sync with a Vite dev server; instead run `npm run dev`.
 
-`format:check` is what CI runs first in `.github/workflows/lint.yml`. If it fails, run `format`, commit the result, push again.
-
-`build` runs `tsc && vite build`. The TypeScript compile is part of the build step, so type errors fail the build.
-
-## Run a real pipeline locally
-
-After the backend is up and you've set the LLM API keys:
+### Lint / format
 
 ```bash
-# 1. Authenticate (uses local creds from ~/Desktop/local_creds.txt per MEMORY rule)
-TOKEN=$(curl -s -X POST http://localhost:8080/api/auth/login \
-  -H 'Content-Type: application/json' \
-  -d "$(jq -n --arg e "<email>" --arg p "<password>" '{email:$e,password:$p}')" \
-  | jq -r '.accessToken')
-
-# 2. Submit a 1-credit spec in PROTOTYPE mode (skips plan gate)
-curl -s -X POST http://localhost:8080/api/runs \
-  -H "Authorization: Bearer $TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{"requirement":"Build me a hello-world endpoint at /hello returning text/plain", "executionMode":"PROTOTYPE", "aiProvider":"ANTHROPIC"}'
-
-# 3. Poll status
-RUN_ID=<from previous response>
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/api/runs/$RUN_ID | jq '.status, .verifiedScore'
+npm --prefix frontend run lint           # eslint, --max-warnings 9999
+npm --prefix frontend run format:check   # prettier --check
+npm --prefix frontend run format         # prettier --write
 ```
 
-See `scripts/e2e-test.sh` for a fuller harness; `scripts/v2-eval.sh` for the 3 × 3 evaluation matrix.
+---
 
-### V2 eval matrix
+## 6. Backend tests
 
-`scripts/v2-eval.sh` submits one spec per `{low, medium, high}` complexity band × `{anthropic, openai, gemini}` provider in PROTOTYPE mode and writes a markdown + JSON report.
+The Surefire profile in `pom.xml` declares
+`<excludedGroups>e2e,integration,chaos</excludedGroups>`, so the default
+`mvn test` only runs unit + ArchUnit + minimal slice tests.
+
+### Full unit suite
 
 ```bash
-# Run the full 9-way matrix
-EMAIL=<admin email> PASSWORD=<admin password> ./scripts/v2-eval.sh
-
-# Subset
-./scripts/v2-eval.sh --providers anthropic --bands low,medium
-./scripts/v2-eval.sh --concurrency 3 --timeout 900
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn test -q
 ```
 
-Output lands in `scripts/v2-eval-results/v2-eval-<timestamp>.{md,json}` plus per-run raw payloads. Requires the backend at `BASE_URL` (default `http://localhost:8080`) and login creds (`EMAIL` / `PASSWORD` env vars). PROTOTYPE bypasses the plan approval gate so the runs flow through unattended.
+### One test class
 
-## Local observability stack
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+  mvn -q -Dtest=RunOrchestratorTest test
+```
+
+### One method
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+  mvn -q -Dtest=RunOrchestratorTest#shouldClaimPlanGateAtomically test
+```
+
+### Full verify (formats + JaCoCo report)
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
+```
+
+`verify` invokes:
+
+- The Spotless `check` execution (`spotless-check`, bound to `verify`) using
+  `google-java-format` 1.22.0 with the import order
+  `java, javax, jakarta, com, org, (others)`.
+- JaCoCo's `report` execution (HTML at `target/site/jacoco/index.html`).
+
+### Spotless fix
+
+If `mvn verify` fails on a Spotless gate, run:
+
+```bash
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+  mvn spotless:apply
+```
+
+…then re-run verify.
+
+### Integration / e2e profiles
+
+The default `pom.xml` excludes the JUnit tags `e2e`, `integration`, `chaos`. To
+run them you must un-exclude or use a profile that overrides `excludedGroups`.
+None of the integration profile machinery is declared in this POM; see the
+shell scripts in `scripts/` for harness-driven end-to-end coverage instead.
+
+---
+
+## 7. Eval and smoke-test scripts
+
+All shell harnesses live under `scripts/` and read shared env (`BASE_URL`
+defaults to `http://localhost:8080`, `EMAIL`/`PASSWORD` to your local admin).
+Hot paths to know about:
+
+### V2 eval matrix (3 bands x 3 providers)
+
+```bash
+EMAIL=admin@executespec.ai PASSWORD=Admin@123 \
+  scripts/v2-eval.sh --providers anthropic,openai,gemini --bands low,medium,high
+```
+
+Output lands in `scripts/v2-eval-results/v2-eval-<ts>.{json,md}` plus a
+`-raw/` directory with each `{run,report,result}.json`. Used to verify
+regression on the model matrix or fallback-chain config (see
+`application.yml model-matrix.fallback-chains`).
+
+### Strict eval (S3/S4/S5 specs, captures `verifiedScore`)
+
+```bash
+scripts/v2-eval-strict.sh --providers anthropic,openai,gemini
+```
+
+Uses the `s3-medium.txt`, `s4-large.txt`, `s5-integration.txt` specs under
+`scripts/v2-eval-specs/`. Captures both `accuracyScore` (legacy LLM-judged) and
+`verifiedScore` (the deterministic multiplicative score), plus
+`reviewerVerdict`, `finalBuildPassed`, `testsPassed/Total`, `statusReason`.
+
+### Multi-provider regression
+
+```bash
+scripts/test-providers.sh           # single-shot HTML + Express multi-task
+scripts/exhaustive-eval.sh          # 16 specs x 3 providers (large, slow)
+scripts/benchmark-run.sh            # 9-run production-readiness benchmark
+```
+
+### Crash-resilience (StartupRunResumer)
+
+```bash
+scripts/test-resilience.sh
+# boots a JVM via mvn spring-boot:run, submits a run, SIGKILLs mid-flight,
+# restarts the JVM, asserts the run reaches terminal post-restart.
+```
+
+Outputs go to `/tmp/executespec-resilience/`.
+
+### Preview + code-editor probe
+
+```bash
+scripts/e2e-preview-test.sh
+# 3 providers x 2 spec sizes; verifies workspace files, /preview/status,
+# and a HTTP-200 response from the preview URL.
+```
+
+### Dev cleanup helpers
+
+```bash
+scripts/dev-wipe-runs-and-projects.sh     # pg_dump + truncate run tables, wipe workspace, FLUSHDB
+scripts/dev-cleanup.sh                    # interactive DELETE-based cleanup (preserves users/billing)
+```
+
+The two cleanup paths cover slightly different table sets — `dev-cleanup.sh`
+omits the V131-V139 enterprise-readiness tables that `dev-wipe-...sql`
+truncates. Use whichever matches the table set you actually need to reset.
+
+---
+
+## 8. Observability stack (Prometheus + Tempo + Grafana)
+
+The `observability/docker-compose.yml` brings up a 3-container local stack:
 
 ```bash
 cd observability
 docker compose up -d
+docker compose ps   # confirm all three are Up
 ```
 
-| Service     | URL                              | Notes                                             |
-| ----------- | -------------------------------- | ------------------------------------------------- |
-| Grafana     | http://localhost:3001            | Login: `admin` / `admin` (anonymous Viewer also enabled) |
-| Prometheus  | http://localhost:9090            | Scrapes `host.docker.internal:8080/actuator/prometheus` every 15s |
-| Tempo       | http://localhost:3200            | OTLP gRPC on 4317, HTTP on 4318                  |
+Ports (from `observability/docker-compose.yml`):
 
-Dashboards: `ExecuteSpec — Overview` and `JVM / HTTP Overview`, provisioned from `observability/grafana/dashboards/`.
+| Service | Host port | Container port | URL |
+| --- | --- | --- | --- |
+| Grafana | **3001** | 3000 | http://localhost:3001 (admin/admin) |
+| Prometheus | 9090 | 9090 | http://localhost:9090 |
+| Tempo (OTLP gRPC) | 4317 | 4317 | n/a |
+| Tempo (OTLP HTTP) | 4318 | 4318 | matches `management.otlp.tracing.endpoint` in `application.yml` |
+| Tempo (query API) | 3200 | 3200 | http://localhost:3200 |
 
-To actually ship traces from the local JVM, you need to compose the `local` profile with one that re-enables OTLP. The simplest path:
+Prometheus scrapes Spring Boot at `host.docker.internal:8080/actuator/prometheus`
+every 15s (`observability/prometheus.yml`):
+
+```yaml
+scrape_configs:
+  - job_name: executespec
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+```
+
+Grafana auto-loads two dashboards from `observability/grafana/dashboards/`:
+
+- `jvm-http-overview.json` — JVM heap/non-heap, GC, threads, HikariCP, HTTP
+  request rate + latency (p50/p95/p99), Lettuce/Redis command latency.
+- `executespec-overview.json` — Active/queued runs, run duration percentiles,
+  LLM calls + latency + tokens by provider/model, tool calls, agent handover
+  duration, gate wait, preview/deploy lifecycle, stuck-run detector.
+
+Note that the Grafana dashboard JSON queries `executespec_run_total_total` and
+similar names (the Micrometer Counter double-`_total` shape). The
+`Metrics.java` facade registers them as `executespec.v2.run.outcome` etc., so
+some dashboard panels may show empty if the metric never fires — query
+`/actuator/prometheus | grep executespec_v2_` to confirm the metric name being
+exported.
+
+To turn off the stack:
 
 ```bash
-# Re-enable OTLP export by NOT using the local profile (or compose another profile)
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn spring-boot:run
+docker compose down            # stop + remove containers
+docker compose down -v         # also wipe volumes (Tempo trace history)
 ```
 
-Boot without any profile and the base `application.yml` defaults take over — OTLP tracing is enabled and points at `localhost:4318`. Metrics export to OTLP is disabled at the base level (`management.otlp.metrics.export.enabled: false`); Prometheus scrape via `/actuator/prometheus` is the active path.
-
-Stop the stack:
+To send traces from the local backend into the stack, drop the local-profile
+override:
 
 ```bash
-cd observability
-docker compose down
+JAVA_HOME=/opt/homebrew/opt/openjdk@21 \
+  mvn spring-boot:run \
+      -Dspring-boot.run.profiles=default \
+      -Dmanagement.otlp.tracing.endpoint=http://localhost:4318/v1/traces \
+      -Dmanagement.tracing.enabled=true \
+      -Dmanagement.tracing.sampling.probability=1.0
 ```
 
-## Common debugging recipes
+---
 
-### Inspect the dependency tree
+## 9. Common 500s and their root causes
 
-```bash
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn dependency:tree
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn dependency:tree -Dincludes=org.springframework.ai
-```
+Pulled from the global exception advisors
+(`src/main/java/com/navneet/executespec/api/advice/`) and the validation /
+optimistic-lock / billing handlers:
 
-### Stream the backend log
+| HTTP shape | Source | Likely cause when seen locally |
+| --- | --- | --- |
+| 500 with `errorId` UUID | `GlobalExceptionAdvice.onAny(Throwable)` | Unhandled `RuntimeException`; full stack is in the server log keyed by `errorId`. **Always** grep for the UUID before assuming flake. |
+| 503 on `/api/health/ready` | `HealthController#ready` failed inline DB check | Postgres container down or `maxLifetime` exhausted the pool |
+| 409 with `entity, id` | `OptimisticLockAdvice.onOptimisticLock` | Two concurrent writers to the same `ExecutionRun` (`@Version`) — reload + retry |
+| 400 with `fields` map | `ValidationAdvice.onValidation` | `RunRequest` JSR-380 violation (e.g. `aiProvider` not in `ANTHROPIC|GEMINI|GOOGLE|OPENAI`, `userCostCap` out of `[0.10, 1000.00]`, `userRequest` empty or >50_000 chars) |
+| 402 PAYMENT_REQUIRED | `ValidationAdvice.onBilling` | Project monthly spend cap exceeded (`GovernanceGuard.assertProjectSpendCap`) or insufficient lifetime credits |
+| 405 with supported-methods list | `ValidationAdvice.onMethodNotAllowed` | Wrong verb on a known path (e.g. `POST /api/runs/{id}` instead of `GET`) |
+| 410 Gone on `/clarify`, `/merge`, `/retry`, `/iterate`, `/edit-and-restart`, `/rework`, `/implement-suggestions`, `/reopen-merge`, `/edit-plan`, `/api/feasibility` | Various controllers explicitly throw 410 | All V1 endpoints; V2 doesn't have these. Update the client. |
+| 429 on `/api/**` | `RateLimitFilter` Redis-backed bucket | Per-tier req/min cap hit. FREE READ=300/min, WRITE=60/min, RUNS=5/min. Wait `retryAfterSeconds` or temporarily flip `executespec.rate-limit.enabled=false` in `application.yml`. |
+| `OutOfMemoryError: Java heap space` | Mid-run agent context blow-out | Raise `-Xmx` on the spring-boot-run JVM; check `agent.token-budget.max-tokens` (default 64000) and `agent.compaction.compact-pct` (default 0.60) in `application.yml` |
+| `Connection is not available, request timed out after 10000ms` | Hikari pool exhausted (`maximum-pool-size=30`) | Usually a long-running blocking call on a Tomcat thread; the apply-suggestion endpoint already routes through a dedicated `applyExecutor`. Look for non-async code in `RunController` |
+| Frontend `GET /api/...` returns HTML | Vite proxy not running or wrong `VITE_BACKEND_URL` | Restart `npm run dev`, confirm proxy in `frontend/vite.config.ts` |
 
-When booting via `mvn spring-boot:run`, logs print to the terminal directly. When running the packaged JAR:
+---
 
-```bash
-# Boot the packaged JAR
-java -jar target/executespec-1.0.0-M1.jar --spring.profiles.active=local > /tmp/executespec.log 2>&1 &
-tail -f /tmp/executespec.log
-```
+## 10. Reference: ports and URLs cheat-sheet
 
-Structured JSON logging (via `logstash-logback-encoder` from `pom.xml`) is wired so traceId / spanId propagate. Greppable by `traceId`.
-
-### Common 500 root causes
-
-| Symptom in log                                    | Likely cause                                                                            |
-| ------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `FlywayMigrateException` / `out of order`         | Migrations applied in an unexpected order. The `dev` profile enables `out-of-order: true`; `local` does not. Either switch profiles or apply migrations manually with `flyway repair` against a dev DB |
-| `Schema-validation: missing column ...`           | Hibernate `ddl-auto: validate` caught a drift between entity and DB. A migration is missing or has not run                                                                                            |
-| `Failed to initialize HikariDataSource`           | Postgres not running on `localhost:5432`, or the password is wrong                                                                                                                                       |
-| `RedisCommandTimeoutException`                    | Redis not running, or `REDIS_HOST`/`REDIS_PORT` set to a stale value                                                                                                                                     |
-| `OAuth2AuthenticationException: redirect_uri ...` | `application.yml` redirect URIs don't match the OAuth client config in Google / GitHub Console — check `spring.security.oauth2.client.registration.*.redirect-uri`                                       |
-| `JwtException` / `IllegalStateException: JWT secret`  | `app.jwt.secret` shorter than 256 bits in prod. `JwtSecretValidator` enforces this under `@Profile("prod")`                                                                                          |
-| `ApiContractTest` fails                            | A URL in `frontend/src/lib/api.ts` doesn't match a registered backend mapping. Re-run `mvn test -Dtest=ApiContractTest` for the offending URL                                                            |
-| `AccessGuardCoverageTest` fails                    | A new controller method touches `/runs/{`, `/projects/{`, `/executions/{`, `/launches/{`, or `/repos/{` without calling a tenant access guard. Either wire the guard or add to `KNOWN_LEGACY_DRIFT`     |
-
-### Reset the local DB
-
-`scripts/dev-cleanup.sh` is parameterised on DB host / user / port; against a local `localhost:5432` it wipes run data and resets usage counters while preserving users, orgs, projects, and billing config.
-
-```bash
-DB_HOST=localhost DB_PORT=5432 DB_NAME=executespec DB_USER=postgres ./scripts/dev-cleanup.sh
-```
-
-For a harder reset (drop projects too):
-
-```bash
-./scripts/dev-wipe-runs-and-projects.sh
-```
-
-The bare nuclear option:
-
-```bash
-docker rm -f executespec-pg && docker volume prune -f
-# then re-create per Option A above
-```
-
-### Provider connectivity smoke
-
-```bash
-./scripts/test-providers.sh
-```
-
-Pings each LLM provider with a trivial completion to verify keys + reachability.
-
-### Resilience harness
-
-```bash
-./scripts/test-resilience.sh
-```
-
-Drives the retry / fallback / circuit-breaker paths.
-
-## Pre-push checklist
-
-Run these in order, fix any output, then push. From MEMORY rule `feedback_test_locally_first.md`: **before every push to `dev`, run the change locally; CI is not authoritative**.
-
-```bash
-# 1. Format Java
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn com.diffplug.spotless:spotless-maven-plugin:apply
-
-# 2. Format frontend
-npm --prefix frontend run format
-
-# 3. Full build (verifies spotless + runs unit tests + builds JAR)
-JAVA_HOME=/opt/homebrew/opt/openjdk@21 mvn verify -q
-
-# 4. Frontend lint + build
-npm --prefix frontend run lint
-npm --prefix frontend run build
-
-# 5. Smoke-boot the packaged JAR
-java -jar target/executespec-1.0.0-M1.jar --spring.profiles.active=local
-# (Ctrl-C once you see "Started ExecutespecApplication")
-
-# 6. Hit the health endpoint
-curl -fsS http://localhost:8080/api/health | jq '.status, .db, .redis'
-```
-
-Only push when all six steps are green.
-
-## Optional: GitHub PR review locally
-
-If you're adding a feature touching the autofix surfaces or the PR Review pipeline, you can stand up a temporary repo to exercise the path:
-
-```bash
-# Create a throwaway repo under your GH account
-gh repo create executespec-smoke-$RANDOM --public --add-readme
-```
-
-Set `GITHUB_PAT` (with `repo` scope) before booting the backend so the run can clone + push.
-
-## Optional: Caddy reverse proxy
-
-If you want to mirror the production routing pattern locally for HTTPS testing, `infra/scripts/startup.sh` (phase 11) shows the Caddy JSON config used in prod. Adapting it for local needs a self-signed cert and `caddy run --config caddy.json`.
-
-In the common case, just hit `http://localhost:8080` directly.
+| Service | URL / port | Source |
+| --- | --- | --- |
+| Backend HTTP | http://localhost:8080 | Spring Boot default; `application.yml` doesn't override |
+| Backend health (cheap) | http://localhost:8080/api/health | `HealthController` |
+| Backend readiness | http://localhost:8080/api/health/ready | `HealthController` |
+| Actuator health (composite) | http://localhost:8080/actuator/health | `application.yml` exposure |
+| Actuator metrics | http://localhost:8080/actuator/metrics | `application.yml` exposure |
+| Prometheus scrape | http://localhost:8080/actuator/prometheus | `application.yml` exposure |
+| Vite dev | http://localhost:5173 | `frontend/vite.config.ts` default |
+| Postgres | localhost:5432 | `application.yml` `spring.datasource.url` |
+| Redis | localhost:6379 | `application.yml` `spring.data.redis` |
+| Grafana | http://localhost:3001 (admin/admin) | `observability/docker-compose.yml` |
+| Prometheus UI | http://localhost:9090 | `observability/docker-compose.yml` |
+| Tempo OTLP HTTP | http://localhost:4318 | `observability/docker-compose.yml` |
+| Tempo query API | http://localhost:3200 | `observability/docker-compose.yml` |

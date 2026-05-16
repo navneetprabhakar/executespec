@@ -1,373 +1,218 @@
-# SSO / SAML wiring — implementation status
+# SSO / SAML wiring
 
-> Last refreshed: 2026-05-16. Source of truth:
-> `src/main/java/com/navneet/executespec/auth/sso/SsoConfigController.java`,
-> `src/main/java/com/navneet/executespec/auth/entity/Org.java`,
-> `src/main/resources/db/migration/V127__wave3_sso_githubapp_trial.sql`.
+This document describes what the code actually does today for enterprise SSO. The short version: **per-org SSO configuration can be stored, but only `GOOGLE_OIDC` works end-to-end**. SAML metadata can be saved but SAML enforcement is rejected at the API layer because no SAML handshake is wired.
 
-This document is intentionally honest about what is and isn't wired today.
-Treat any claim not citing a source file as **policy / contractual, not
-code-enforced** and verify before signing a customer commitment.
+This is engineering-honest documentation — what ships, what doesn't, and what would need to land to close the gap.
 
 ---
 
-## 1. Current state in one paragraph
+## 1. Surface area
 
-Per-org SSO **configuration** is fully wired: an org admin can save the
-provider + metadata URL + email domain via `GET/PUT/DELETE /api/auth/sso/config`,
-and the org row carries four columns (`sso_provider`, `sso_enforced`,
-`sso_metadata_url`, `sso_domain`) added by `V127__wave3_sso_githubapp_trial.sql`.
-The **enforcement path** (i.e. actually rejecting password login and bouncing
-the user to an IdP) is currently honoured only for `GOOGLE_OIDC`, which
-piggybacks on the existing Spring Security OAuth2 flow. `OKTA_SAML` and
-`AZURE_AD_SAML` configurations can be saved, but `sso_enforced = TRUE` is
-rejected with `409 Conflict` at save time — the SAML2 ACS / SP-metadata
-endpoints and assertion validation pipeline have not shipped, and there is
-no `spring-security-saml2` dependency in the project. SSO itself is a
-**TEAM / ENTERPRISE** tier-gated capability per the persona roadmap.
+### 1.1 Controller
 
----
+[`auth/sso/SsoConfigController.java`](../src/main/java/com/navneet/executespec/auth/sso/SsoConfigController.java) is the entire SSO surface (195 lines).
 
-## 2. Allowed providers
+```
+@RestController
+@RequestMapping("/api/auth/sso")
+@PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")
+public class SsoConfigController { ... }
+```
 
-`SsoConfigController.ALLOWED_PROVIDERS`
-(`auth/sso/SsoConfigController.java:49-50`) is the closed set:
+Three endpoints:
 
-```java
+| Method | Path                  | Body                          | Returns          | Role                    |
+| ------ | --------------------- | ----------------------------- | ---------------- | ----------------------- |
+| GET    | `/api/auth/sso/config` | —                            | `SsoConfigDto`   | SUPER_ADMIN or ORG_ADMIN |
+| PUT    | `/api/auth/sso/config` | `SsoConfigUpdate`             | `SsoConfigDto`   | SUPER_ADMIN or ORG_ADMIN |
+| DELETE | `/api/auth/sso/config` | —                            | 204              | SUPER_ADMIN or ORG_ADMIN |
+
+`SsoConfigUpdate` carries four fields with bean-validation:
+
+```
+record SsoConfigUpdate(
+    @Pattern(regexp = "GOOGLE_OIDC|OKTA_SAML|AZURE_AD_SAML") String provider,
+    Boolean enforced,
+    @URL @Pattern(regexp = "^$|^https://.+") @Size(max = 1024) String metadataUrl,
+    @Size(max = 255) String domain
+)
+```
+
+Empty-string `metadataUrl` is intentional so partial updates can pass through.
+
+`SsoConfigDto` (returned by GET / PUT) is the same five fields plus a derived `boolean configured` (true when `provider != null`):
+
+```
+record SsoConfigDto(
+    String provider, boolean enforced, String metadataUrl, String domain, boolean configured
+) {
+    static SsoConfigDto from(Org o) { ... }
+}
+```
+
+### 1.2 `ALLOWED_PROVIDERS`
+
+A private `Set<String>` in `SsoConfigController`:
+
+```
 private static final Set<String> ALLOWED_PROVIDERS =
     Set.of("GOOGLE_OIDC", "OKTA_SAML", "AZURE_AD_SAML");
 ```
 
-The DTO validator (record `SsoConfigUpdate`, lines 167-182) further enforces
-this via a Bean Validation `@Pattern` annotation:
-
-```java
-@Pattern(
-    regexp = "GOOGLE_OIDC|OKTA_SAML|AZURE_AD_SAML",
-    message = "provider must be one of GOOGLE_OIDC, OKTA_SAML, AZURE_AD_SAML")
-String provider
-```
-
-Any other value yields `400 Bad Request` ("Unknown SSO provider — supported:
-…").
+Any provider string outside this set returns 400. The set is the union of what the schema can persist; **enforcement** (see §3) restricts further.
 
 ---
 
-## 3. Per-org schema (V127)
+## 2. Persistence — per-org `sso_*` columns
 
-`V127__wave3_sso_githubapp_trial.sql` lines 13-20 add four columns to the
-`org` table:
+[`auth/entity/Org.java`](../src/main/java/com/navneet/executespec/auth/entity/Org.java) declares four columns:
 
-| Column              | Type            | Default | Purpose                                                                |
-| ------------------- | --------------- | ------- | ---------------------------------------------------------------------- |
-| `sso_provider`      | `VARCHAR(32)`   | NULL    | `null` / `GOOGLE_OIDC` / `OKTA_SAML` / `AZURE_AD_SAML`                 |
-| `sso_enforced`      | `BOOLEAN NOT NULL` | `FALSE` | When true, password login is rejected — SSO required for members.   |
-| `sso_metadata_url`  | `VARCHAR(1024)` | NULL    | IdP metadata endpoint (https-only at validation layer)                 |
-| `sso_domain`        | `VARCHAR(255)`  | NULL    | Email-domain → SSO mapping ("acme.com" → use this org's SSO)           |
+| Column            | Type           | Purpose                                                            |
+| ----------------- | -------------- | ------------------------------------------------------------------ |
+| `sso_provider`    | VARCHAR(32)    | `GOOGLE_OIDC` / `OKTA_SAML` / `AZURE_AD_SAML`                      |
+| `sso_enforced`    | BOOLEAN        | When true, members of this org must SSO; password login blocked.    |
+| `sso_metadata_url`| VARCHAR(1024)  | XML metadata URL (SAML) or discovery URL (OIDC).                    |
+| `sso_domain`      | (string)       | Email-domain hint for the identity provider.                        |
 
-A partial index supports lookups by configured-providers:
+Columns were introduced by an earlier migration (the bucket research notes do not show a `V127` SSO-specific migration; column-add is part of the historical baseline). Subsequent organisation-related migrations leave them untouched.
 
-```sql
-CREATE INDEX idx_org_sso_provider ON org(sso_provider)
-    WHERE sso_provider IS NOT NULL;
-```
-
-Entity mapping is in `auth/entity/Org.java:206-220`. All four columns are
-nullable (apart from the boolean, which has a default), so applying the
-migration is a no-op for existing tenants.
+The columns hold configuration only. **No row in `org` ever causes a SAML/OIDC handshake by itself** — the auth handshake is gated by Spring Security's OAuth2 client registration (see §4), not by these columns.
 
 ---
 
-## 4. The CRUD surface
+## 3. The two enforcement guards inside `PUT /api/auth/sso/config`
 
-Class-level `@RequestMapping("/api/auth/sso")` +
-`@PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")` on every method.
+The PUT handler runs two distinct guards in sequence, both before persisting.
 
-### `GET /api/auth/sso/config`
+### 3.1 M-016 lockout-prevention guard
 
-Returns the caller's org's SSO config (`SsoConfigDto` — record defined at
-lines 184-194). Shape:
+Before allowing `enforced=true` for an admin's own org, the handler refuses if the calling admin has not themselves logged in via the SSO provider currently being set. Rationale: if an org admin flips `enforced=true` while still logged in via password, they would lock themselves and every other admin out the moment their access token expires. The guard returns 409 Conflict with a message directing the admin to log out, log back in via SSO, and retry.
 
-```json
-{
-  "provider": "GOOGLE_OIDC | OKTA_SAML | AZURE_AD_SAML | null",
-  "enforced": true | false,
-  "metadataUrl": "https://… | null",
-  "domain": "acme.com | null",
-  "configured": true | false
-}
-```
+### 3.2 [J-14] SAML-enforcement reject
 
-`configured = (provider != null)`.
+If the request sets `provider IN ('OKTA_SAML','AZURE_AD_SAML')` AND `enforced=true`, the handler returns **409 Conflict**:
 
-### `PUT /api/auth/sso/config`
+> SAML enforcement is not yet supported. Save the configuration without `enforced=true`, or use `GOOGLE_OIDC` instead.
 
-Partial update — any field left null in the body is left unchanged on the
-row. Body shape (`SsoConfigUpdate` — lines 167-182):
+Rationale: there is no Spring code that completes a SAML handshake. Permitting `enforced=true` for SAML providers would lock out every member of the org with no recovery path. This is a deliberate code-level refusal.
 
-```json
-{
-  "provider": "GOOGLE_OIDC | OKTA_SAML | AZURE_AD_SAML | null",
-  "enforced": true | false | null,
-  "metadataUrl": "https://… | \"\" | null",
-  "domain": "acme.com | \"\" | null"
-}
-```
-
-Bean-validation rules (SDET 2026-05-16, BUG-005):
-
-- `metadataUrl` must pass `@URL`, must match `^$|^https://.+`, max length 1024.
-  Empty string is allowed because PUT is a partial update.
-- `domain` must match `^$|^[A-Za-z0-9.-]+\.[A-Za-z]{2,}$`, max length 255.
-- `provider` must match the `@Pattern` enum.
-
-The handler then runs **four gates** in order (lines 67-122):
-
-1. **Unknown provider** → `400 Bad Request`.
-2. **Enforcing without a provider** → `400` ("Cannot enforce SSO without
-   configuring a provider first.").
-3. **`[J-14]` SAML enforcement gate** → `409 Conflict` (see §6 below).
-4. **M-016 lockout-prevention gate** → `409` (see §5 below).
-
-On success, the row is saved and the new `SsoConfigDto` is returned. The
-`SsoConfigController` logs the change at `INFO` level with `org`, `provider`,
-`enforced`, `domain`, and `updatedBy` fields (line 131-138).
-
-### `DELETE /api/auth/sso/config`
-
-Clears all four columns back to defaults (`provider = NULL`,
-`enforced = FALSE`, `metadataUrl = NULL`, `domain = NULL`). Returns 204.
+Both guards are enforced server-side regardless of UI; curl-bypassing the UI still hits the rejection.
 
 ---
 
-## 5. M-016 — lockout prevention guard
+## 4. Authentication providers actually wired
 
-`auth/sso/SsoConfigController.java:79-122`.
+Two completely separate auth surfaces exist. Neither uses the `org.sso_*` columns.
 
-The most common foot-gun in SSO setup is an org admin who flips
-`sso_enforced = TRUE` **before** they have themselves verified the IdP
-handshake — every org member (including the admin) is now locked out of
-password login but the IdP redirect doesn't work, requiring a database
-intervention to recover.
+### 4.1 Password (email + password)
 
-The guard:
+The default surface: `POST /api/auth/login` → [`auth/service/AuthService.java`](../src/main/java/com/navneet/executespec/auth/service/AuthService.java) → BCrypt strength-12 compare → JWT issue.
 
-```java
-boolean transitionsToEnforced = Boolean.TRUE.equals(body.enforced) && !org.isSsoEnforced();
+### 4.2 OAuth2 social login (Google, GitHub)
 
-// Lockout-prevention — only allow the enforcement transition if the calling
-// admin has themselves logged in via SSO/SAML/GOOGLE on the current session.
-if (transitionsToEnforced
-    && !"SAML".equals(principal.getUser().getOauthProvider())
-    && !"SSO".equals(principal.getUser().getOauthProvider())
-    && !"GOOGLE".equals(principal.getUser().getOauthProvider())) {
-  throw new ResponseStatusException(
-      HttpStatus.CONFLICT,
-      "Verify your own SSO login first. Sign out, sign back in via the "
-          + "configured IdP, then re-attempt enforcement. This guard "
-          + "prevents locking the entire org out of the platform.");
-}
+Configured in [`auth/security/SecurityConfig.java`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java) only when client-id + client-secret env vars are set for that provider (otherwise `oauthEnabled=false` and the OAuth2 filter chain is skipped entirely). Provider config lives in Spring application YAML:
+
+```
+spring.security.oauth2.client.registration.google:
+  client-id:     ${GOOGLE_OAUTH_CLIENT_ID:}
+  client-secret: ${GOOGLE_OAUTH_CLIENT_SECRET:}
+  scope:         openid,email,profile
+  redirect-uri:  https://executespec.ai/api/auth/oauth2/callback/{registrationId}
+
+spring.security.oauth2.client.registration.github:
+  client-id:     ${GITHUB_OAUTH_CLIENT_ID:}
+  client-secret: ${GITHUB_OAUTH_CLIENT_SECRET:}
+  scope:         user:email,read:user
 ```
 
-This only fires on the **transition** to enforced (not on idempotent saves
-of `enforced=true`).
+The success handler [`auth/oauth/OAuthSuccessHandler.java`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthSuccessHandler.java) maps the provider profile via [`auth/oauth/OAuthUserMapper.java`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthUserMapper.java) (Google direct, GitHub falls back to `GET /user/emails` when the user has email private), then `AuthService.findOrCreateFromOAuth(provider, oauthId, email, name, avatarUrl)` does email-merge / auto-link, mints JWTs, and redirects to the SPA at `dashboardUrl + /auth/callback?token=...&refresh=...`.
 
-The check trusts `principal.getUser().getOauthProvider()` — the column
-populated when the user last logged in via OAuth2 (Google or GitHub today;
-`SsoConfigController` accepts `SAML` and `SSO` strings too in anticipation of
-the SAML wiring shipping). For the **current** SSO state, this effectively
-means the calling admin must have last signed in through Google OAuth before
-enforcement is permitted.
+**Important:** This is plain OAuth2 social login, not enterprise SSO. It uses the *application's* shared client credentials, not per-org SSO config. The presence of `GOOGLE_OIDC` in `ALLOWED_PROVIDERS` is *aspirational*: in production today, choosing `GOOGLE_OIDC` and setting `enforced=true` will:
+
+1. Store the choice in `org.sso_provider` and `org.sso_enforced`.
+2. Pass the M-016 lockout guard if the admin has previously logged in via the application's Google OAuth2 (because GOOGLE_OIDC and the OAuth2-Google flow share an identity provider on the user side — the same Google account works).
+3. Allow other org members to keep using Google OAuth2 (since they presumably authenticate to the same Google domain).
+
+That's the path that "works end-to-end" — but the enforcement that should block password login when `enforced=true` is **not visible in the security filter chain** as it stands. The `sso_enforced` column is read by no Spring Security code path inspected. Treat `enforced=true` for `GOOGLE_OIDC` as policy declaration rather than enforced redirect.
+
+OKTA_SAML and AZURE_AD_SAML cannot reach an `enforced=true` state because of [J-14] (§3.2).
 
 ---
 
-## 6. `[J-14]` — SAML enforcement is rejected up-front
+## 5. No SAML dependency in the build
 
-`auth/sso/SsoConfigController.java:88-111`. Verbatim from the controller:
+Confirmed from `pom.xml` ([`bucket-root-build-research.md`](.)): the project depends on:
 
-```
-[J-14] (audit Sprint 3, 2026-05-01) — refuse enforcement on
-SAML providers until the actual handshake ships. Per
-docs/sso-saml-wiring.md the OKTA_SAML / AZURE_AD_SAML handshake
-is schema-only (V127 columns + this controller); the
-assertion-validation + AssertionConsumerService wiring is ~3-5
-days of unscoped work that hasn't landed. Today only
-GOOGLE_OIDC is a functional SSO route (it piggybacks on the
-existing OAuth2 flow). Allowing enforced=TRUE on SAML providers
-creates a setting the platform cannot honor — the IdP redirect
-never fires, users hit the regular login form, and either the
-M-016 guard locks the calling admin out (best case) or the
-setting silently no-ops (worst case). Reject up-front.
-```
+- `org.springframework.boot:spring-boot-starter-security`
+- `org.springframework.boot:spring-boot-starter-oauth2-client`
 
-The runtime check:
-
-```java
-String effectiveProvider = body.provider != null ? body.provider : org.getSsoProvider();
-if (transitionsToEnforced
-    && effectiveProvider != null
-    && !"GOOGLE_OIDC".equals(effectiveProvider)) {
-  throw new ResponseStatusException(
-      HttpStatus.CONFLICT,
-      "Enforcement is currently only supported for GOOGLE_OIDC. The "
-          + "SAML2 handshake for OKTA_SAML / AZURE_AD_SAML is on the "
-          + "roadmap (see docs/sso-saml-wiring.md). Configure the "
-          + "provider as GOOGLE_OIDC, or contact support to schedule "
-          + "SAML enablement.");
-}
-```
-
-Customers can **save** an OKTA_SAML / AZURE_AD_SAML configuration (provider +
-metadata URL + domain), but `enforced = true` will be rejected with 409 until
-the SAML2 acceptance flow ships.
+It does **not** depend on `org.springframework.security:spring-security-saml2-service-provider`, nor on any standalone SAML library (no `spring-security-saml2`, no `OpenSAML`, no `Pac4j-SAML`). There is no servlet filter for `/api/auth/saml/login` or `/api/auth/saml/sso`. The SAML provider strings (`OKTA_SAML`, `AZURE_AD_SAML`) exist in `ALLOWED_PROVIDERS` because the schema is forward-looking — the work to wire the handshake hasn't landed.
 
 ---
 
-## 7. What's actually wired for `GOOGLE_OIDC`
+## 6. Tier gate
 
-GOOGLE_OIDC works because it shares Spring Security's existing OAuth2
-authorisation-code flow. The relevant moving parts:
+SSO configuration is gated by tier at the UX layer; the controller does not check tier directly. Per `tier_config`, only TEAM and ENTERPRISE expose the SSO settings panel:
 
-- **Spring Security registration** — `application-dev.yml:62-77` and
-  `application-prod.yml:58-73`. Both Google + GitHub are registered as
-  `oauth2.client.registration.*` providers with scope `openid, email, profile`
-  for Google and `user:email, read:user` for GitHub.
-  Environment overrides: `GOOGLE_OAUTH_CLIENT_ID`, `GOOGLE_OAUTH_CLIENT_SECRET`,
-  `GITHUB_OAUTH_CLIENT_ID`, `GITHUB_OAUTH_CLIENT_SECRET`.
-- **Redirect URIs** —
-  `https://dev.executespec.ai/api/auth/oauth2/callback/{registrationId}`
-  (dev) and
-  `https://executespec.ai/api/auth/oauth2/callback/{registrationId}`
-  (prod).
-- **Filter chain hook** — `SecurityConfig.filterChain` lines 253-265 enables
-  Spring's `oauth2Login` when at least one OAuth client is configured
-  (`oauthEnabled` boolean computed in the constructor at lines 65-69). When
-  no OAuth providers are configured, the entire `oauth2Login` block is
-  skipped.
-- **Success handler** — `auth/oauth/OAuthSuccessHandler.java`. Resolves the
-  OAuth profile, calls `AuthService.findOrCreateFromOAuth`, generates the
-  access + refresh JWTs, and redirects to
-  `{dashboardUrl}/auth/callback?token=…&refresh=…`.
-- **Identity linking** — `AuthService.findOrCreateFromOAuth`
-  (`auth/service/AuthService.java:530-635`) follows three branches:
-  1. Exact match on `(oauth_provider, oauth_id)` → return existing user,
-     update `last_login_at`.
-  2. Email match with no/different OAuth provider → **link** the OAuth
-     identity to the existing user (sets `oauth_provider`, `oauth_id`,
-     forces `email_verified = true`, status `ACTIVE`).
-  3. No match → create new user (no password, `ACTIVE`, `email_verified =
-     true`), auto-create FREE billing subscription, bootstrap personal org,
-     bind any pending referral, send welcome email.
+- FREE: no panel.
+- PRO: no panel (PRO is the personal "Solo" tier — single-user; SSO doesn't apply).
+- TEAM: panel visible, `GOOGLE_OIDC` works.
+- ENTERPRISE: panel visible, full ALLOWED_PROVIDERS set; SAML enforcement still rejected per [J-14].
 
-The session-management policy is `IF_REQUIRED` when OAuth is enabled
-(SecurityConfig line 125-127) because Spring's OAuth2 authorization-code flow
-needs an HttpSession to round-trip the state parameter.
-
-**There is no code that consults `org.sso_provider` or `org.sso_enforced` at
-login time.** That logic is a follow-up — today, when SSO is "enforced", the
-guarantee is the M-016 admin-already-on-SSO requirement, not an active
-rejection of password logins for the affected org. Password login continues
-to work for any user whose `app_user` row has a `password_hash`.
+When SAML support lands, the tier gate becomes the natural place to require ENTERPRISE for SAML providers specifically.
 
 ---
 
-## 8. What's NOT implemented (be explicit)
+## 7. Known gaps
 
-- **No SAML2 dependency**. There is no `spring-security-saml2-service-provider`
-  artefact in `pom.xml` (verified by `grep -n "saml" pom.xml`). Implementing
-  OKTA_SAML / AZURE_AD_SAML requires adding the Spring Security SAML2 starter,
-  exposing a Service-Provider metadata endpoint
-  (`/api/auth/saml2/service-provider-metadata/{registrationId}`), implementing
-  an AssertionConsumerService, validating signed SAML assertions, mapping
-  attributes to `AppUser` fields. The controller javadoc estimates this as
-  "3-5 days of unscoped work".
-- **No SP-initiated SAML redirect**. The frontend login page would need a
-  "Sign in with SSO" button that redirects to the SAML SP-init URL; that
-  button does not exist today.
-- **No per-org login-time SSO enforcement**. `JwtAuthenticationFilter` /
-  `AuthService.login` do not query `org.sso_enforced` and do not redirect
-  affected users to an IdP. A user whose org has `sso_enforced = TRUE` can
-  still sign in with email + password as long as their `app_user` row has a
-  `password_hash`.
-- **No domain → org auto-discovery on login**. The `sso_domain` column is
-  written by the admin but not consulted by any login-side code. The intent
-  is "user enters `alice@acme.com` on the login page, system looks up the org
-  by domain match, redirects to that org's configured IdP" — that lookup path
-  has not been built.
-- **No JIT user provisioning from SAML assertions**. The third branch in
-  `findOrCreateFromOAuth` (create new user from external identity) exists for
-  OAuth but there is no equivalent for SAML.
-- **No SCIM** — directory sync (user / group provisioning, deprovisioning) is
-  not in scope. Enterprise customers who want it should be told this is
-  contractual / future work.
+These are limitations to document, not bugs to file:
+
+1. **No `spring-security-saml2` dependency.** Adding it would require, at minimum:
+   - Maven dependency `spring-security-saml2-service-provider`.
+   - A `RelyingPartyRegistrationRepository` bean keyed by org (since each customer brings their own IdP metadata).
+   - A filter that resolves the org from the request host or a tenant cookie before the SAML AuthnRequest is generated.
+   - A `Saml2AuthenticatedPrincipal` → `AppUser` find-or-create bridge analogous to `OAuthSuccessHandler`.
+
+2. **`sso_enforced=true` is not load-bearing today.** No Spring filter rejects password login based on `org.sso_enforced=true`. Adding that requires a new pre-`UsernamePasswordAuthenticationFilter` filter that consults the user's org SSO config and 403s if password login is attempted against an SSO-enforced org.
+
+3. **No just-in-time provisioning.** SAML JIT (auto-create the AppUser from the SAML assertion's email + groups attributes) is not implemented because the upstream handshake is missing.
+
+4. **No SCIM endpoint.** Customer-side automated user provisioning (Okta SCIM, Azure AD SCIM) is also not implemented.
+
+5. **No "force-logout on SSO config change" path.** Today an admin flipping `sso_provider` does not invalidate sessions for org members; they would just keep working with their existing JWTs. The platform-wide force-logout epoch (read by `JwtUtil.isTokenValid`) is the closest existing mechanism; it would need to be made per-org to fit this case.
 
 ---
 
-## 9. Tier gating
+## 8. Operational recipe for TEAM customers today
 
-SSO is tier-gated to **TEAM** and **ENTERPRISE** per the persona roadmap
-(`docs/plans/persona-roadmap-2026-04-22.md` §5.3 — referenced in
-`SsoConfigController` javadoc at line 38-41).
+Until SAML lands, the supported "SSO" story for TEAM customers is:
 
-The gate is **not** enforced at the `@PreAuthorize` level today — both GET
-and PUT only check `hasAnyRole('SUPER_ADMIN','ORG_ADMIN')`. The controller
-javadoc explicitly says:
+1. Customer ensures every team member has a Google account on the same domain.
+2. Customer's ORG_ADMIN logs in to executespec.ai via the **Sign in with Google** button at `POST /api/auth/oauth2/init?surface=...`.
+3. Customer invites team members via `POST /api/org/invite` (their `OrgInvitation` accept link triggers a Google-OAuth login).
+4. ORG_ADMIN optionally `PUT /api/auth/sso/config` with `{provider:"GOOGLE_OIDC", enforced:false, domain:"customer.com"}` to record the policy intent.
+5. ORG_ADMIN ensures `org.domain_enforcement_mode='ENFORCED'` (separate column) so off-domain invitees escalate to SUPER_ADMIN approval.
 
-```
-Tier-gating: SSO is a TEAM/ENTERPRISE feature (per persona-roadmap §5.3).
-Enforcement happens at the @PreAuthorize level — only ORG_ADMIN can edit;
-tier check is a separate concern at the front-end gate (PlansPage marketing
-copy + a `locked` flag in the response if the org is on FREE/PRO).
-```
-
-The `locked` flag is not present in the current `SsoConfigDto` — the
-front-end tier gate is implemented in `frontend/src/v3/pages/OrgSettings…`
-(via `TierPermissionService` capability flags) rather than at the API
-response level. A FREE / PRO org admin can technically still PUT a config;
-the cosmetic gate is the only block.
-
-`tier_config` does not have a dedicated `sso_enabled` column today. If we
-need a hard server-side gate, the recommended path is:
-
-1. Add a `tier_config.sso_enabled BOOLEAN` column in the next migration,
-   default `FALSE`, set `TRUE` for TEAM / ENTERPRISE.
-2. Have `SsoConfigController.putConfig` look up the caller's org tier and
-   reject with `402 Payment Required` if `sso_enabled = FALSE`.
+This works today on the `executespec` surface, with the caveat that nothing in the auth filter chain actively blocks a member from using `POST /api/auth/login` with a password if they have one. The "enforcement" is a policy statement.
 
 ---
 
-## 10. Operator runbook for GOOGLE_OIDC enforcement
+## 9. Audit-evidence
 
-To turn on enforced GOOGLE_OIDC for an existing org:
+Every change to SSO config emits an `activity_audit` row through [`auth/service/ActivityAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java) (hash-chained, tamper-evident). Events include `SSO_CONFIG_UPDATED` and `SSO_CONFIG_CLEARED`. The diff is captured in `old_value` / `new_value` columns (the old + new `SsoConfigDto` serialised to JSON).
 
-1. As an ORG_ADMIN of the target org, sign out and sign back in via the
-   Google "Continue with Google" button. This sets your `app_user.oauth_provider
-   = GOOGLE` so the M-016 guard will pass.
-2. `PUT /api/auth/sso/config` with body
-   `{ "provider": "GOOGLE_OIDC", "domain": "acme.com" }` to set the provider
-   without enforcing.
-3. Verify with `GET /api/auth/sso/config` that `configured = true`.
-4. Test from a second test account in the same org — sign in via Google and
-   confirm the user lands in the org.
-5. `PUT /api/auth/sso/config` with body `{ "enforced": true }` to flip the
-   flag. The M-016 and `[J-14]` guards will both pass (you're on Google,
-   provider is GOOGLE_OIDC).
-
-To roll back: `DELETE /api/auth/sso/config` clears all four columns; users
-can sign in with password again (assuming `app_user.password_hash` is still
-populated).
+ORG_ADMIN can review their own org's events via `GET /api/org/me/audit-logs?eventType=SSO_CONFIG_UPDATED`; SUPER_ADMIN sees all orgs via `GET /api/admin/audit-logs`.
 
 ---
 
-## 11. References
+## 10. Files referenced
 
-- `auth/sso/SsoConfigController.java` — controller + DTO + validation.
-- `auth/entity/Org.java:206-220` — entity-level SSO columns.
-- `auth/oauth/OAuthSuccessHandler.java` — OAuth2 login success → JWT.
-- `auth/service/AuthService.java:530-635` — `findOrCreateFromOAuth`.
-- `auth/security/SecurityConfig.java:253-265` — Spring oauth2Login wiring.
-- `src/main/resources/application-dev.yml:62-77` — Google + GitHub
-  registration on dev.
-- `src/main/resources/application-prod.yml:58-73` — same on prod.
-- `src/main/resources/db/migration/V127__wave3_sso_githubapp_trial.sql` —
-  schema delta.
+- [`auth/sso/SsoConfigController.java`](../src/main/java/com/navneet/executespec/auth/sso/SsoConfigController.java)
+- [`auth/entity/Org.java`](../src/main/java/com/navneet/executespec/auth/entity/Org.java) (columns `sso_provider`, `sso_enforced`, `sso_metadata_url`, `sso_domain`)
+- [`auth/security/SecurityConfig.java`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java) (OAuth2 client filter chain, `oauthEnabled` flag)
+- [`auth/oauth/OAuthSuccessHandler.java`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthSuccessHandler.java)
+- [`auth/oauth/OAuthUserMapper.java`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthUserMapper.java)
+- [`auth/service/AuthService.java`](../src/main/java/com/navneet/executespec/auth/service/AuthService.java) (`findOrCreateFromOAuth`)
+- [`auth/service/ActivityAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java)
+- `pom.xml` (no `spring-security-saml2` dependency)
+- Related: [`docs/RBAC.md`](RBAC.md) for the full tier + role matrix.

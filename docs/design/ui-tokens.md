@@ -1,186 +1,172 @@
-# UI design tokens
+# UI Tokens
 
-> Source of truth: [`frontend/src/tokens.css`](../../frontend/src/tokens.css), [`frontend/src/design-system/primitives.css`](../../frontend/src/design-system/primitives.css), and [`frontend/tailwind.config.ts`](../../frontend/tailwind.config.ts). If this doc disagrees with those files, the CSS wins.
+> Design-token reference for the ExecuteSpec frontend.
+>
+> **Source of truth:**
+> - `frontend/src/tokens.css` — Graphite + Signal tokens, light + dark themes
+> - `frontend/src/signal/signal.css` — Signal-scoped chrome tokens + components
+> - `frontend/tailwind.config.ts` — Tailwind v4 theme extensions that point at the CSS vars
+> - `frontend/src/design-system/primitives.css` — primitive `--c-*` palette (loaded first)
+>
+> Tokens defined in those files override anything documented here. When they disagree, the CSS
+> wins — update this file.
 
-This doc is generated from the code. Every variable name and value below is verbatim from the CSS files cited above.
+---
 
-## 1. Two-layer system
+## Theming model
 
-Token resolution flows through two layers:
+Two parallel theme attributes coexist:
 
-1. **Primitive layer** (`design-system/primitives.css`) — raw color values prefixed `--c-*`. No semantic meaning ("`--c-graphite-2` is a colour, not a card surface").
-2. **Semantic layer** (`tokens.css`) — meaning-named tokens like `--text-primary`, `--accent-blue`, `--status-success`. Each aliases a primitive (or another semantic, recursively).
+| Attribute            | Scope                                | Values            | Where it's set                                                                 |
+| -------------------- | ------------------------------------ | ----------------- | ------------------------------------------------------------------------------ |
+| `data-theme`         | Root `tokens.css` selectors          | `light` (or none) | `tokens.css` defaults to dark via `:root`; `[data-theme='light']` flips it.    |
+| `data-signal-theme`  | `signal.css` (scoped under `.signal-app`) | `light`, `dark`   | `frontend/src/signal/hooks/useSignalTheme.ts` — written to BOTH the shell root and `<html>` so public routes get themed. |
 
-Component CSS only reads semantic tokens. Touching primitives in a component CSS rule is a smell — change the semantic alias instead.
+`frontend/src/main.tsx` also sets the `.signal-app` class on `<html>` and reads
+`localStorage['signal:theme']` on first paint to avoid a flash of wrong theme. Tailwind's `dark:`
+variant is defined as `&:where([data-theme='dark'], [data-theme='dark'] *)` (Tailwind v4
+`@custom-variant` directive in `index.css`). That variant only matches when `data-theme='dark'` is
+present — the default dark state is not wired to that variant, so `dark:` utilities are mostly
+inactive today.
 
-Theming flips the semantic layer via `[data-theme='light']` overrides in `tokens.css`. Primitives stay constant; aliases re-point.
+The dark theme is the default (the `:root` block in `tokens.css`); the `[data-theme='light']`
+override flips the surface ladder, borders, text, accents, and elevation. Signal's chrome is
+scoped under `.signal-app` and uses its own `--signal-*` token set with a separate light-default
+behaviour (Signal's `.signal-app` declares light values; `.signal-app[data-signal-theme='dark']`
+overrides).
 
-## 2. Primitive layer (`primitives.css`)
+---
 
-### 2.1 Graphite (dark surface ladder, 9 steps)
+## Surface ladder
 
-| Variable           | Value     | Role                                                  |
-| ------------------ | --------- | ----------------------------------------------------- |
-| `--c-graphite-0`   | `#10131A` | Page background (dark default)                        |
-| `--c-graphite-1`   | `#161A23` | Lowest surface                                        |
-| `--c-graphite-2`   | `#1A1F29` | Card                                                  |
-| `--c-graphite-3`   | `#232936` | Card-elevated                                         |
-| `--c-graphite-4`   | `#2D3441` | Surface border (subtle)                               |
-| `--c-graphite-5`   | `#3D4553` | Surface divider                                       |
-| `--c-graphite-6`   | `#545C6A` | Disabled foreground                                   |
-| `--c-graphite-7`   | `#5E6771` | `--border-default` — AA non-text passing (3.05 on g-2)|
-| `--c-graphite-8`   | `#7B8593` | `--border-hover` — AA-large body passing              |
+The "ladder" goes from the page background (the lowest, most-recessed surface) to the most-raised
+card surface that can sit on top.
 
-The 2026-05-06 website-parity refresh warmed each step ~3-5° toward charcoal-with-indigo to match the marketing site.
+### Dark theme (`:root` in `tokens.css`)
 
-### 2.2 Paper (light surface ladder, 5 steps)
+| Token                  | Value                       | Used for                                                    |
+| ---------------------- | --------------------------- | ----------------------------------------------------------- |
+| `--geist-bg`           | `var(--c-graphite-0)`       | Page background.                                            |
+| `--geist-bg-secondary` | `var(--c-graphite-2)`       | Secondary surface (toolbars, side panes).                   |
+| `--bg-primary`         | `var(--geist-bg)`           | Alias — added to fix transparent-drawer bug in MoreDrawer, Drawer, RunStamp, EmptyProjectLanding. |
+| `--surface-page`       | `var(--c-graphite-0)`       | UX-overhaul role-named alias for page bg.                   |
+| `--surface-card`       | `var(--c-graphite-2)`       | Default card surface.                                       |
+| `--surface-raised`     | `var(--c-graphite-3)`       | Raised state (hover, dropdowns).                            |
+| `--surface-sunken`     | `var(--c-graphite-1)`       | Sunken surface (well, inset).                               |
+| `--gray-100`           | `var(--c-graphite-2)`       | Tailwind `gray-100`.                                        |
+| `--gray-200`           | `var(--c-graphite-3)`       | Tailwind `gray-200`.                                        |
+| `--gray-300`           | `var(--c-graphite-4)`       | Tailwind `gray-300`.                                        |
+| `--gray-400`           | `var(--c-graphite-5)`       | Tailwind `gray-400`.                                        |
+| `--gray-500`           | `var(--c-graphite-6)`       | Tailwind `gray-500`.                                        |
+| `--gray-600`           | `var(--c-graphite-6)`       | Collapsed onto `graphite-6` in Wave 6.                      |
+| `--gray-700`           | `var(--c-ink-300)` (`#8A94A6`) | Tailwind `gray-700`.                                     |
+| `--gray-800`           | `#aab2bf` (literal)         | Tailwind `gray-800`. The only literal hex outside the primitive layer. |
+| `--gray-900`           | `var(--c-ink-200)` (`#C9D1DB`) | Tailwind `gray-900`.                                     |
+| `--gray-1000`          | `var(--c-ink-100)` (`#ECEEF2`) | Brightest gray (close to white).                          |
 
-| Variable        | Value     | Role                                       |
-| --------------- | --------- | ------------------------------------------ |
-| `--c-paper-0`   | `#FAFAFB` | Page background (light)                    |
-| `--c-paper-1`   | `#F3F4F6` | Card (light)                               |
-| `--c-paper-2`   | `#E7E9EE` | Card-elevated (light)                      |
-| `--c-paper-3`   | `#D8DCE3` | Border (light)                             |
-| `--c-paper-4`   | `#BFC6D0` | Border-strong (light, AA-non-text floor)   |
+### Light theme (`[data-theme='light']` overrides)
 
-### 2.3 Ink scale (text)
+| Token                  | Value                        |
+| ---------------------- | ---------------------------- |
+| `--geist-bg`           | `var(--c-paper-0)`           |
+| `--geist-bg-secondary` | `var(--c-paper-1)`           |
+| `--bg-primary`         | `var(--geist-bg)`            |
+| `--surface-page`       | `var(--c-paper-0)`           |
+| `--surface-card`       | `var(--c-paper-1)`           |
+| `--surface-raised`     | `#ffffff`                    |
+| `--surface-sunken`     | `var(--c-paper-2)`           |
+| `--gray-100`           | `var(--c-paper-1)`           |
+| `--gray-200`           | `var(--c-paper-2)`           |
+| `--gray-300`           | `var(--c-paper-3)`           |
+| `--gray-400`           | `var(--c-paper-4)`           |
+| `--gray-500`           | `#959eab`                    |
+| `--gray-600`           | `#6e7785`                    |
+| `--gray-700`           | `var(--c-graphite-6)`        |
+| `--gray-800`           | `var(--c-graphite-5)`        |
+| `--gray-900`           | `var(--c-graphite-3)`        |
+| `--gray-1000`          | `var(--c-graphite-0)`        |
 
-| Variable        | Value     | Role                                                          |
-| --------------- | --------- | ------------------------------------------------------------- |
-| `--c-ink-100`   | `#ECEEF2` | Primary text                                                  |
-| `--c-ink-200`   | `#C9D1DB` | Secondary text                                                |
-| `--c-ink-300`   | `#8A94A6` | Muted text                                                    |
-| `--c-ink-400`   | `#5E6771` | Subtle / caption text (same hex as graphite-7 by design)      |
+---
 
-### 2.4 Brand — Signal Blue + Teal
+## Borders
 
-| Variable                   | Value     | Role                                                                       |
-| -------------------------- | --------- | -------------------------------------------------------------------------- |
-| `--c-signal-blue`          | `#3B6FCC` | Primary CTA surface — AA-body on white text (4.85 contrast)                |
-| `--c-signal-blue-hover`    | `#2B5BB3` | Hover (darker, not lighter — preserves contrast)                           |
-| `--c-signal-teal`          | `#7AD1C8` | Gradient destination (logo, primary CTA, scorecard highlight)              |
-| `--c-signal-blue-on-dark`  | `#7AA5F5` | Body-text-on-dark variant — AA-body on graphite-2 (~7.4 contrast)          |
+`tokens.css` raises borders to the SC 1.4.11 (non-text contrast) AA floor.
 
-### 2.5 Pop — marketing accent
+| Token                       | Dark default            | Light override   | Used for                                                                 |
+| --------------------------- | ----------------------- | ---------------- | ------------------------------------------------------------------------ |
+| `--border-default`          | `var(--c-graphite-7)` (`#5E6771`, ≈3.05:1) | `#bfc6d0` (paper-4) | Default card / input border.                                  |
+| `--border-hover`            | `var(--c-graphite-8)` (≈4.5:1)             | `#a0a8b5`           | Hover state on the same elements.                              |
+| `--border-divider-subtle`   | `var(--c-graphite-5)`   | `#d8dce3` (paper-3) | Intentional non-AA hairlines (table rows). Documented exception.     |
+| `--hairline`                | `var(--c-graphite-5)`   | `var(--c-paper-3)`  | UX-overhaul role-named border for sections.                          |
 
-| Variable           | Value     | Role                                          |
-| ------------------ | --------- | --------------------------------------------- |
-| `--c-pop-orange`   | `#EC4899` | (Misnamed — actually pink since the R10 retarget) marketing gradient accent |
-| `--c-pop-amber`    | `#FBBF24` | Pop amber for gradient pairs                  |
+---
 
-`--c-pop-orange` was retargeted from orange (`#F97316`) to pink (`#EC4899`) to avoid clashing with `--c-warning` (`#F59E0B`) and `--status-partial` (`#F5A524`). The variable name stays "orange" to avoid churning callers.
+## Text
 
-### 2.6 Semantic states
+| Token              | Dark default          | Light override            | Used for                                       |
+| ------------------ | --------------------- | ------------------------- | ---------------------------------------------- |
+| `--text-primary`   | `var(--c-ink-100)` (`#ECEEF2`) | `var(--c-graphite-0)` | Body copy, headings.                  |
+| `--text-secondary` | `var(--c-ink-200)` (`#C9D1DB`) | `var(--c-graphite-5)` | Secondary copy.                       |
+| `--text-muted`     | `var(--c-ink-300)` (`#8A94A6`) | `#6e7785`             | Captions, hints, placeholder.         |
 
-| Variable        | Value     | Role                                          |
-| --------------- | --------- | --------------------------------------------- |
-| `--c-success`   | `#10B981` | Green                                         |
-| `--c-warning`   | `#F59E0B` | Amber (distinct hue from `--c-pop-amber`)     |
-| `--c-error`     | `#EF4444` | Red                                           |
-| `--c-info`      | `#22D3EE` | Cyan-teal (intentionally distinct from brand) |
+---
 
-### 2.7 Accent — non-brand visual variety
+## Accent — Signal palette
 
-| Variable               | Value     | Role                                |
-| ---------------------- | --------- | ----------------------------------- |
-| `--c-accent-purple`    | `#A78BFA` | Harness, planner, thinking-state    |
-| `--c-accent-pink`      | `#EC4899` | Blocked status                      |
+The accent set went through a round-3 contrast audit (the F-16 commit). Three brand-blue
+slots cover the use cases that previously collapsed into one.
 
-## 3. Semantic layer — dark theme (default) from `tokens.css`
+| Token                   | Dark default                | Light override   | Used for                                                                                  |
+| ----------------------- | --------------------------- | ---------------- | ----------------------------------------------------------------------------------------- |
+| `--accent-blue`         | `#5b8def`                   | `#2563eb`        | Button surface — brightened for graphite-0 readability per 2026-05-06 website parity.      |
+| `--accent-blue-hover`   | `#7aa5f5`                   | `#1d4ed8`        | Hover state on `--accent-blue` buttons.                                                   |
+| `--accent-blue-text`    | `var(--c-signal-blue-on-dark)` | `#2563eb`     | Brand-blue **text** on dark/light surfaces. AA-body alias (Tailwind `accent.blue-text`).  |
+| `--accent-harness`      | `var(--c-accent-purple)`    | —                | Agent-orchestration tone — used for the "harness" surface.                                 |
+| `--accent-planner`      | `var(--c-info)` (info-cyan) | —                | Planner / info phase. Split from brand-blue in Wave-5 E.2 — was the same colour before.    |
+| `--brand-grad`          | `linear-gradient(135deg, var(--accent-blue) 0%, var(--c-signal-teal) 100%)` | — | Logo, primary CTA, scorecard highlight. |
 
-These aliases live in `:root`. Light-theme overrides are in section 4.
+---
 
-### 3.1 Surface ladder (legacy "geist-*" names + role-named aliases)
+## Status
 
-| Variable                    | Aliases               | Role                                                         |
-| --------------------------- | --------------------- | ------------------------------------------------------------ |
-| `--geist-bg`                | `var(--c-graphite-0)` | Page background                                              |
-| `--geist-bg-secondary`      | `var(--c-graphite-2)` | Secondary page-level surface                                 |
-| `--bg-primary`              | `var(--geist-bg)`     | Drawer / `MoreDrawer` / `RunStamp` page-equivalent surface   |
-| `--surface-page`            | `var(--c-graphite-0)` | 2026-05-14 role-named alias for the page                     |
-| `--surface-card`            | `var(--c-graphite-2)` | Card                                                         |
-| `--surface-raised`          | `var(--c-graphite-3)` | Raised card / hover state                                    |
-| `--surface-sunken`          | `var(--c-graphite-1)` | Sunken / inset                                               |
+Semantic status colours (the F-17 audit, 2026-05 polish).
 
-### 3.2 Gray scale (legacy step names)
+| Token                | Dark default                         | Light override   | Used for                                                                                    |
+| -------------------- | ------------------------------------ | ---------------- | ------------------------------------------------------------------------------------------- |
+| `--status-success`   | `var(--c-success)`                   | —                | COMPLETED, healthy, SHIPPABLE.                                                              |
+| `--status-executing` | `#5b89e0` (AA pass at 5.21:1)        | —                | EXECUTING phase. R11 + F-17 audit re-tuned this off pure brand-blue.                         |
+| `--status-thinking`  | `var(--c-accent-purple)`             | —                | CLASSIFYING / PLANNING / classifier reasoning.                                              |
+| `--status-waiting`   | `var(--c-warning)`                   | `#d97706`        | AWAITING_APPROVAL plan-gate.                                                                |
+| `--status-partial`   | `#f5a524`                            | —                | PARTIAL terminal — softer amber, not red-adjacent.                                          |
+| `--status-error`     | `var(--c-error)` (`#EF4444`)         | `#dc2626`        | FAILED. V3 drift resolved.                                                                  |
+| `--status-blocked`   | `var(--c-accent-pink)`               | —                | BLOCKED.                                                                                    |
+| `--status-queued`    | `#66707d`                            | —                | QUEUED.                                                                                     |
+| `--numeric-neutral`  | `var(--c-ink-200)`                   | `var(--c-graphite-6)` | Money / tokens / stats. Used to be amber — moved to neutral to stop "everything looks like a warning." |
+| `--status-building`  | `var(--c-warning)`                   | —                | Legacy alias for `--status-waiting`.                                                         |
 
-| Variable     | Aliases                  | Notes                                          |
-| ------------ | ------------------------ | ---------------------------------------------- |
-| `--gray-100` | `var(--c-graphite-2)`    |                                                |
-| `--gray-200` | `var(--c-graphite-3)`    |                                                |
-| `--gray-300` | `var(--c-graphite-4)`    |                                                |
-| `--gray-400` | `var(--c-graphite-5)`    |                                                |
-| `--gray-500` | `var(--c-graphite-6)`    |                                                |
-| `--gray-600` | `var(--c-graphite-6)`    | Collapsed onto g-6 (was `#66707D`)             |
-| `--gray-700` | `var(--c-ink-300)`       | `#8A94A6`                                      |
-| `--gray-800` | `#AAB2BF`                | No primitive — single literal consumer         |
-| `--gray-900` | `var(--c-ink-200)`       | `#C9D1DB`                                      |
-| `--gray-1000`| `var(--c-ink-100)`       | `#ECEEF2`                                      |
+---
 
-### 3.3 Borders
+## Radius
 
-| Variable                   | Aliases                | Role                                                       |
-| -------------------------- | ---------------------- | ---------------------------------------------------------- |
-| `--border-default`         | `var(--c-graphite-7)`  | Card boundaries — AA non-text (3.05 on graphite-2)         |
-| `--border-hover`           | `var(--c-graphite-8)`  | Hover step — AA-large body                                 |
-| `--border-divider-subtle`  | `var(--c-graphite-5)`  | Explicit non-AA hairlines (table rows, inner dividers)     |
-| `--hairline`               | `var(--c-graphite-5)`  | 2026-05-14 role-name for the same thing                    |
+| Token              | Value     |
+| ------------------ | --------- |
+| `--radius-sm`      | `4px`     |
+| `--radius-md`      | `6px`     |
+| `--radius-lg`      | `8px`     |
+| `--radius-xl`      | `12px`    |
+| `--radius-2xl`     | `16px`    |
+| `--radius-full`    | `9999px`  |
+| `--radius-control` | `8px` — UX-overhaul role-named (controls/inputs/buttons) |
+| `--radius-card`    | `14px` — cards |
+| `--radius-pill`    | `9999px` — pills, chips |
 
-The R12/F-15 audit moved `--border-default` from `--c-graphite-5` (1.59 contrast, fail) → `--c-graphite-7` (3.05, pass) so card boundaries hit WCAG SC 1.4.11.
+---
 
-### 3.4 Text
+## Spacing scale
 
-| Variable           | Aliases               | Role                          |
-| ------------------ | --------------------- | ----------------------------- |
-| `--text-primary`   | `var(--c-ink-100)`    | Primary body text             |
-| `--text-secondary` | `var(--c-ink-200)`    | Secondary body text           |
-| `--text-muted`     | `var(--c-ink-300)`    | Muted / caption text          |
+`rem`-based scale, declared in `tokens.css`:
 
-### 3.5 Accent (brand + roles)
-
-| Variable               | Value / alias                       | Role                                                          |
-| ---------------------- | ----------------------------------- | ------------------------------------------------------------- |
-| `--accent-blue`        | `#5B8DEF` (dark theme literal)      | Button surface — white text on top                            |
-| `--accent-blue-hover`  | `#7AA5F5` (dark theme literal)      | Button hover                                                  |
-| `--accent-blue-text`   | `var(--c-signal-blue-on-dark)`      | Brand-blue text on dark surface (#7AA5F5)                     |
-| `--accent-harness`     | `var(--c-accent-purple)`            | Agent-orchestration purple                                    |
-| `--accent-planner`     | `var(--c-info)`                     | Info-cyan, split from brand blue                              |
-| `--brand-grad`         | `linear-gradient(135deg, var(--accent-blue) 0%, var(--c-signal-teal) 100%)` | Logo, primary CTAs, scorecard highlight |
-
-Note: `--accent-blue` in **dark** theme is literal `#5B8DEF` (the brighter "marketing site" hex) for legibility on graphite-0. The primitive `--c-signal-blue` (`#3B6FCC`, AA-on-white) is the light-theme override target.
-
-### 3.6 Status — distinct hue per semantic group
-
-| Variable             | Value / alias                   | Role                                          |
-| -------------------- | ------------------------------- | --------------------------------------------- |
-| `--status-success`   | `var(--c-success)` (`#10B981`)  | Green                                         |
-| `--status-executing` | `#5B89E0`                       | Blue, separated from brand (AA-body)          |
-| `--status-thinking`  | `var(--c-accent-purple)`        | Purple                                        |
-| `--status-waiting`   | `var(--c-warning)` (`#F59E0B`)  | Amber                                         |
-| `--status-partial`   | `#F5A524`                       | Softer amber — uniquely positioned between warning and pop-amber |
-| `--status-error`     | `var(--c-error)` (`#EF4444`)    | Red                                           |
-| `--status-blocked`   | `var(--c-accent-pink)`          | Pink                                          |
-| `--status-queued`    | `#66707D`                       | Historic literal — half-step between g-5 and ink-300 |
-| `--status-building`  | `var(--c-warning)`              | Legacy alias                                  |
-| `--numeric-neutral`  | `var(--c-ink-200)`              | Money / tokens / stats (was amber; collided with warning) |
-
-### 3.7 Radius
-
-| Variable          | Value     | Role                  |
-| ----------------- | --------- | --------------------- |
-| `--radius-sm`     | `4px`     | (was 2px)             |
-| `--radius-md`     | `6px`     | (was 4px)             |
-| `--radius-lg`     | `8px`     | (was 6px)             |
-| `--radius-xl`     | `12px`    |                       |
-| `--radius-2xl`    | `16px`    |                       |
-| `--radius-full`   | `9999px`  | Pill                  |
-| `--radius-control`| `8px`     | 2026-05-14 role-name  |
-| `--radius-card`   | `14px`    | 2026-05-14 role-name  |
-| `--radius-pill`   | `9999px`  | 2026-05-14 role-name  |
-
-### 3.8 Spacing scale (rem)
-
-| Variable      | Value      |
+| Token         | Value      |
 | ------------- | ---------- |
 | `--space-0`   | `0`        |
 | `--space-1`   | `0.25rem`  |
@@ -193,608 +179,500 @@ Note: `--accent-blue` in **dark** theme is literal `#5B8DEF` (the brighter "mark
 | `--space-10`  | `2.5rem`   |
 | `--space-12`  | `3rem`     |
 | `--space-16`  | `4rem`     |
-| `--page-gutter-mobile`  | `var(--space-4)` |
-| `--page-gutter-tablet`  | `var(--space-6)` |
-| `--page-gutter-desktop` | `var(--space-8)` |
-| `--page-stack`          | `var(--space-6)` |
 
-### 3.9 Elevation (dark)
+Layout gutters:
 
-| Variable        | Value                                        |
-| --------------- | -------------------------------------------- |
-| `--elevation-1` | `0 1px 2px 0 rgba(0, 0, 0, 0.4)`             |
-| `--elevation-2` | `0 4px 12px 0 rgba(0, 0, 0, 0.5)`            |
-| `--elevation-3` | `0 12px 32px 0 rgba(0, 0, 0, 0.6)`           |
+| Token                    | Value             | Used for                                |
+| ------------------------ | ----------------- | --------------------------------------- |
+| `--page-gutter-mobile`   | `var(--space-4)`  | `.page-gutter` mobile (default).        |
+| `--page-gutter-tablet`   | `var(--space-6)`  | `.page-gutter` at `min-width: 640px`.   |
+| `--page-gutter-desktop`  | `var(--space-8)`  | `.page-gutter` at `min-width: 1024px`.  |
+| `--page-stack`           | `var(--space-6)`  | Vertical rhythm between page sections.  |
 
-### 3.10 Shadows (2026-05-14 UX overhaul — dark)
+Tailwind also exposes a discrete spacing scale (in `tailwind.config.ts`):
 
-| Variable                | Value                                                                            |
-| ----------------------- | -------------------------------------------------------------------------------- |
-| `--shadow-card-rest`    | `inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4)`           |
-| `--shadow-card-hover`   | `inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 20px rgba(0, 0, 0, 0.55)`         |
-| `--shadow-sheet`        | `0 -12px 32px rgba(0, 0, 0, 0.6)`                                                 |
-| `--shadow-overlay`      | `0 24px 64px rgba(0, 0, 0, 0.7)`                                                  |
+| Tailwind class | px equivalent |
+| -------------- | ------------- |
+| `sp-1`         | `4px`         |
+| `sp-2`         | `8px`         |
+| `sp-3`         | `12px`        |
+| `sp-4`         | `16px`        |
+| `sp-6`         | `24px`        |
+| `sp-8`         | `32px`        |
+| `sp-12`        | `48px`        |
+| `sp-16`        | `64px`        |
+| `sp-24`        | `96px`        |
+| `sp-32`        | `128px`       |
 
-The inner-highlight trick (`inset 0 1px 0 rgba(255,255,255,0.04)`) is the macOS Aqua "inner light" — it makes a flat dark card read as a slightly raised plane.
+---
 
-### 3.11 Motion
+## Elevation
 
-| Variable             | Value                                                                                       |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `--ease-out`         | `cubic-bezier(0.16, 1, 0.3, 1)`                                                              |
-| `--ease-spring`      | `cubic-bezier(0.34, 1.56, 0.64, 1)`                                                          |
-| `--duration-fast`    | `120ms`                                                                                      |
-| `--duration-base`    | `200ms`                                                                                      |
-| `--duration-slow`    | `320ms`                                                                                      |
-| `--motion-press`     | `transform 80ms cubic-bezier(0.4, 0, 0.6, 1)`                                                |
-| `--motion-tap`       | `opacity 120ms ease-out`                                                                     |
-| `--motion-reveal`    | `opacity 200ms cubic-bezier(0.2, 0, 0, 1), transform 200ms cubic-bezier(0.2, 0, 0, 1)`       |
-| `--motion-pulse`     | `background-color 320ms ease-out`                                                            |
+| Token            | Dark default                                | Light override                                |
+| ---------------- | ------------------------------------------- | --------------------------------------------- |
+| `--elevation-1`  | `0 1px 2px 0 rgba(0, 0, 0, 0.4)`            | `0 1px 2px 0 rgba(15, 23, 42, 0.05)`           |
+| `--elevation-2`  | `0 4px 12px 0 rgba(0, 0, 0, 0.5)`           | `0 4px 12px 0 rgba(15, 23, 42, 0.08)`          |
+| `--elevation-3`  | `0 12px 32px 0 rgba(0, 0, 0, 0.6)`          | `0 12px 32px 0 rgba(15, 23, 42, 0.12)`         |
 
-### 3.12 Focus ring
+The 2026-05-14 UX overhaul adds "inner light" shadow tokens that combine a top inset highlight with
+a soft outer shadow (Aqua / liquid-glass effect):
 
-| Variable        | Value                                                                |
-| --------------- | -------------------------------------------------------------------- |
-| `--focus-ring`  | `0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue)`            |
+| Token                  | Dark default                                                            | Light override                                                          |
+| ---------------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `--shadow-card-rest`   | `inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4)`  | `inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 2px rgba(15, 23, 42, 0.04)` |
+| `--shadow-card-hover`  | `inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 20px rgba(0, 0, 0, 0.55)` | `inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 20px rgba(15, 23, 42, 0.08)` |
+| `--shadow-sheet`       | `0 -12px 32px rgba(0, 0, 0, 0.6)`                                       | `0 -12px 32px rgba(15, 23, 42, 0.1)`                                    |
+| `--shadow-overlay`     | `0 24px 64px rgba(0, 0, 0, 0.7)`                                        | `0 24px 64px rgba(15, 23, 42, 0.14)`                                    |
 
-Two-stop ring: 2 px of page bg, then 2 px of brand blue. Visible on every dark-theme control.
+---
 
-### 3.13 Font scale
+## Motion
 
-| Variable        | Value      |
-| --------------- | ---------- |
-| `--text-xs`     | `0.75rem`  |
-| `--text-sm`     | `0.8125rem`|
-| `--text-base`   | `0.9375rem`|
-| `--text-lg`     | `1.0625rem`|
-| `--text-xl`     | `1.25rem`  |
-| `--text-2xl`    | `1.5rem`   |
-| `--text-3xl`    | `1.875rem` |
-| `--text-4xl`    | `2.5rem`   |
-| `--text-5xl`    | `3.25rem`  |
+`tokens.css` motion vocabulary (Apple HIG-style refinement layer, 2026-05-14):
 
-### 3.14 Hit targets
+| Token                | Value                                                                     |
+| -------------------- | ------------------------------------------------------------------------- |
+| `--ease-out`         | `cubic-bezier(0.16, 1, 0.3, 1)`                                           |
+| `--ease-spring`      | `cubic-bezier(0.34, 1.56, 0.64, 1)`                                       |
+| `--duration-fast`    | `120ms`                                                                   |
+| `--duration-base`    | `200ms`                                                                   |
+| `--duration-slow`    | `320ms`                                                                   |
+| `--motion-press`     | `transform 80ms cubic-bezier(0.4, 0, 0.6, 1)`                              |
+| `--motion-tap`       | `opacity 120ms ease-out`                                                  |
+| `--motion-reveal`    | `opacity 200ms cubic-bezier(0.2, 0, 0, 1), transform 200ms cubic-bezier(0.2, 0, 0, 1)` |
+| `--motion-pulse`     | `background-color 320ms ease-out`                                          |
 
-| Variable             | Value     | Role                              |
-| -------------------- | --------- | --------------------------------- |
-| `--hit-min-mobile`   | `44px`    | iOS / Android min tap target      |
-| `--hit-min-desktop`  | `32px`    | Desktop min click target          |
-| `--hit-comfort`      | `48px`    | Comfortable tap target            |
+Reduced motion: `index.css` ships a `@media (prefers-reduced-motion: reduce)` block at the end of
+the file that zeroes every animation / transition / transform `!important`. Anything you build
+should still feel right with motion off.
 
-### 3.15 Breakpoints (shared with `useBreakpoint()`)
+Animations declared in `tailwind.config.ts` (each maps to a `@keyframes` block in the config):
 
-| Variable        | Value      |
-| --------------- | ---------- |
-| `--bp-phone`    | `480px`    |
-| `--bp-tablet`   | `768px`    |
-| `--bp-desktop`  | `1024px`   |
-| `--bp-wide`     | `1280px`   |
-| `--bp-xl`       | `1536px`   |
+| Class name        | Duration                |
+| ----------------- | ----------------------- |
+| `slide-in-right`  | `0.3s ease-out`         |
+| `fade-in-up`      | `0.4s ease-out`         |
+| `shimmer`         | `2s linear infinite`    |
+| `log-line`        | `0.15s ease-out`        |
+| `status-pulse`    | `2s ease-in-out infinite` |
 
-## 4. Semantic layer — light theme (`[data-theme='light']` overrides)
+---
 
-Activated by `document.documentElement.dataset.theme = 'light'` (set pre-paint by `main.tsx` from `localStorage.signal:theme`). Variables override the dark defaults.
+## Focus ring
 
-### 4.1 Surfaces
-
-| Variable                 | Light-theme alias / value          |
-| ------------------------ | ---------------------------------- |
-| `--geist-bg`             | `var(--c-paper-0)` (`#FAFAFB`)     |
-| `--geist-bg-secondary`   | `var(--c-paper-1)` (`#F3F4F6`)     |
-| `--bg-primary`           | `var(--geist-bg)`                  |
-| `--surface-page`         | `var(--c-paper-0)`                 |
-| `--surface-card`         | `var(--c-paper-1)`                 |
-| `--surface-raised`       | `#FFFFFF`                          |
-| `--surface-sunken`       | `var(--c-paper-2)`                 |
-
-### 4.2 Gray scale (light)
-
-| Variable     | Light-theme alias              |
-| ------------ | ------------------------------ |
-| `--gray-100` | `var(--c-paper-1)`             |
-| `--gray-200` | `var(--c-paper-2)`             |
-| `--gray-300` | `var(--c-paper-3)`             |
-| `--gray-400` | `var(--c-paper-4)`             |
-| `--gray-500` | `#959EAB` (between paper-4 and graphite-6) |
-| `--gray-600` | `#6E7785`                      |
-| `--gray-700` | `var(--c-graphite-6)`          |
-| `--gray-800` | `var(--c-graphite-5)`          |
-| `--gray-900` | `var(--c-graphite-3)`          |
-| `--gray-1000`| `var(--c-graphite-0)`          |
-
-### 4.3 Borders (light)
-
-| Variable                  | Value     | Role                              |
-| ------------------------- | --------- | --------------------------------- |
-| `--border-default`        | `#BFC6D0` | AA non-text floor on light theme  |
-| `--border-hover`          | `#A0A8B5` | AA-large hover step               |
-| `--border-divider-subtle` | `#D8DCE3` | Explicit non-AA hairlines         |
-| `--hairline`              | `var(--c-paper-3)` |                          |
-
-### 4.4 Text (light)
-
-| Variable           | Light-theme alias / value      |
-| ------------------ | ------------------------------ |
-| `--text-primary`   | `var(--c-graphite-0)`          |
-| `--text-secondary` | `var(--c-graphite-5)`          |
-| `--text-muted`     | `#6E7785`                      |
-
-### 4.5 Accent (light) — deeper variants
-
-| Variable                 | Light-theme value      | Notes                                                                |
-| ------------------------ | ---------------------- | -------------------------------------------------------------------- |
-| `--accent-blue`          | `#2563EB`              | Deeper than the dark default (AA on white)                           |
-| `--accent-blue-hover`    | `#1D4ED8`              |                                                                      |
-| `--accent-blue-text`     | `#2563EB`              | Same as button surface — light theme already has the right contrast  |
-| `--status-error`         | `#DC2626`              | Light-mode-only deeper red                                           |
-| `--status-waiting`       | `#D97706`              | Light-mode-only deeper amber                                         |
-| `--numeric-neutral`      | `var(--c-graphite-6)`  |                                                                      |
-
-### 4.6 Elevation (light)
-
-| Variable        | Value                                                |
-| --------------- | ---------------------------------------------------- |
-| `--elevation-1` | `0 1px 2px 0 rgba(15, 23, 42, 0.05)`                  |
-| `--elevation-2` | `0 4px 12px 0 rgba(15, 23, 42, 0.08)`                 |
-| `--elevation-3` | `0 12px 32px 0 rgba(15, 23, 42, 0.12)`                |
-
-### 4.7 Shadows (light)
-
-| Variable              | Value                                                                                    |
-| --------------------- | ---------------------------------------------------------------------------------------- |
-| `--shadow-card-rest`  | `inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 2px rgba(15, 23, 42, 0.04)`                |
-| `--shadow-card-hover` | `inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 20px rgba(15, 23, 42, 0.08)`               |
-| `--shadow-sheet`      | `0 -12px 32px rgba(15, 23, 42, 0.1)`                                                      |
-| `--shadow-overlay`    | `0 24px 64px rgba(15, 23, 42, 0.14)`                                                      |
-
-### 4.8 Focus ring (light)
-
-| Variable        | Value                                                                |
-| --------------- | -------------------------------------------------------------------- |
-| `--focus-ring`  | `0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue)`            |
-
-(Same recipe; values change because `--geist-bg` and `--accent-blue` shift.)
-
-## 5. Signal-scoped tokens (`signal/signal.css`)
-
-The Signal chrome owns its own token set, scoped to `.signal-app` so it never leaks. The pre-paint script in `main.tsx` adds the `signal-app` class to `<html>` and sets `data-signal-theme="dark"|"light"` based on `localStorage.signal:theme`.
-
-### 5.1 Light (default) tokens
-
-```
---signal-bg            #FBFAF6
---signal-card-bg       #FFFFFF
---signal-card-elev     #F4F2EB
---signal-bg-translucent rgba(251, 250, 246, 0.88)
---signal-phone-frame   #0E0F12
-
---signal-ink           #0E0F12
---signal-ink-soft      #2D2E33
---signal-text-dim      #6B6960
---signal-text-mute     #9A968A
-
---signal-hero-bg-1     #0E0F12
---signal-hero-bg-2     #15161B
---signal-hero-text     #FBFAF6
---signal-hero-text-dim rgba(251, 250, 246, 0.6)
---signal-hero-text-mute rgba(251, 250, 246, 0.15)
---signal-hero-glow     rgba(244, 211, 94, 0.18)
---signal-hero-btn-bg   rgba(255, 255, 255, 0.1)
---signal-hero-btn-bg-hover rgba(255, 255, 255, 0.18)
-
---signal-hairline         #E6E2D8
---signal-hairline-strong  #BFB9A8
-
---signal-y               #F4D35E   (Signal yellow accent)
---signal-y-soft          #FBEEC0
---signal-y-text          #5A4A08
---signal-coral           #FF6B6B
---signal-coral-soft      #FFD9D5
---signal-coral-text      #8A2828
---signal-mint            #7CE3B4
---signal-mint-soft       #D6F4E2
---signal-mint-text       #0E0F12
---signal-mint-text-on-light #1D6543
---signal-lavender        #C4B8E0
---signal-lavender-soft   #E8E2F3
---signal-ocean           #5C9DDB
-
---signal-r-sm    10px
---signal-r-md    16px
---signal-r-lg    22px
---signal-r-xl    28px
---signal-shadow  0 6px 16px -6px rgba(14, 15, 18, 0.08)
---signal-shadow-strong  rgba(14, 15, 18, 0.18)
+```css
+--focus-ring: 0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue);
 ```
 
-### 5.2 Signal dark overrides (`[data-signal-theme='dark']`)
+Applied globally via:
 
-```
---signal-bg            #0F1014
---signal-card-bg       #1B1C22
---signal-card-elev     #0F1014
---signal-bg-translucent rgba(15, 16, 20, 0.88)
---signal-phone-frame   #34363D
-
---signal-ink           #F3F1ED
---signal-ink-soft      #D6D3CA
---signal-text-dim      #9A9B95
---signal-text-mute     #6E6E68
-
---signal-hero-bg-1     #1F2028
---signal-hero-bg-2     #15161B
---signal-hero-text-dim rgba(251, 250, 246, 0.55)
---signal-hero-text-mute rgba(255, 255, 255, 0.08)
---signal-hero-glow     rgba(244, 211, 94, 0.22)
---signal-hero-btn-bg   rgba(255, 255, 255, 0.07)
---signal-hero-btn-bg-hover rgba(255, 255, 255, 0.14)
-
---signal-hairline         rgba(255, 255, 255, 0.08)
---signal-hairline-strong  rgba(255, 255, 255, 0.16)
-
---signal-y-soft        rgba(244, 211, 94, 0.18)
---signal-y-text        #F4D35E
---signal-coral-soft    rgba(255, 107, 107, 0.18)
---signal-coral-text    #FF8585
---signal-mint-soft     rgba(124, 227, 180, 0.18)
---signal-mint-text-on-light #7CE3B4
---signal-lavender-soft rgba(196, 184, 224, 0.16)
+```css
+:where(button, a, input, textarea, select, [role='button'], [role='tab']):focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+  border-radius: inherit;
+}
 ```
 
-## 6. Tailwind theme extension (`tailwind.config.ts`)
+Both themes use the same shape; only `--geist-bg` and `--accent-blue` swap.
 
-The Tailwind config maps utility keys to CSS variables — every color is `var(--token)`, never a literal hex. This is the bridge that lets utility classes pick up theme switches automatically.
+---
+
+## Hit targets
+
+Apple HIG-aligned tap-target floors:
+
+| Token              | Value     | Used for                                  |
+| ------------------ | --------- | ----------------------------------------- |
+| `--hit-min-mobile` | `44px`    | Mobile button / link / tab floor.         |
+| `--hit-min-desktop`| `32px`    | Desktop hover-precision floor.            |
+| `--hit-comfort`    | `48px`    | Primary-CTA comfort target on mobile.     |
+
+`index.css` enforces the mobile floor globally under `@media (max-width: 1023px)`:
+
+```css
+button,
+a[role='button'],
+[role='tab'] {
+  min-height: 44px;
+}
+```
+
+There's also a coarser `@media (pointer: coarse)` block that bumps inline links, checkbox/radio
+inputs, and selects to `min-height: 40px` minimum.
+
+---
+
+## Breakpoints
+
+Declared in `tokens.css` and consumed by the `useBreakpoint()` hook:
+
+| Token            | Value      |
+| ---------------- | ---------- |
+| `--bp-phone`     | `480px`    |
+| `--bp-tablet`    | `768px`    |
+| `--bp-desktop`   | `1024px`   |
+| `--bp-wide`      | `1280px`   |
+| `--bp-xl`        | `1536px`   |
+
+The mobile UI cuts over to desktop chrome at `1024px` (the persistent sidebar in `Shell.tsx`
+flips on at `min-width: 1024px`).
+
+---
+
+## Font scale
+
+`rem`-based:
+
+| Token            | Value         |
+| ---------------- | ------------- |
+| `--text-xs`      | `0.75rem`     |
+| `--text-sm`      | `0.8125rem`   |
+| `--text-base`    | `0.9375rem`   |
+| `--text-lg`      | `1.0625rem`   |
+| `--text-xl`      | `1.25rem`     |
+| `--text-2xl`     | `1.5rem`      |
+| `--text-3xl`     | `1.875rem`    |
+| `--text-4xl`     | `2.5rem`      |
+| `--text-5xl`     | `3.25rem`     |
+
+Mobile typography lift (the Track A.1 hammer in `index.css`) overrides any arbitrary
+`text-[10/10.5/11/11.5/12px]` Tailwind class to a `13px` floor on `@media (max-width: 767px)`,
+because 562 individual call sites were using arbitrary pixel sizes below the legibility floor.
+Anything below `12px` is forbidden on mobile.
+
+---
+
+## Fonts
+
+```css
+font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+```
+
+This applies to `body`, every form control (via the `input, textarea, select, button, optgroup`
+inheritance fix), and Tailwind's `sans` + `mono` font-family classes (they're aliased to the same
+chain in `tailwind.config.ts`). Geist Sans / Geist Mono were retired on 2026-05-11 — JetBrains
+Mono is the only typeface across the app.
+
+Loaded from Google Fonts in `signal.css` with weight ranges:
+
+- `Space Grotesk` `300..700` — used for `.signal-app` body copy (chrome-only)
+- `JetBrains Mono` `400..600` — used for everything else (including code, stats, monospaced UI)
+
+Signal additionally uses `font-family: 'Space Grotesk', ...` for its `body` style. Component
+classes that want monospace explicitly opt in (e.g. `.signal-kv-list .v .mono` switches back to
+JetBrains).
+
+The frontend ships JetBrains Mono with a **variable** font axis, so all weights are served by a
+single file.
+
+---
+
+## Signal-scoped tokens (`.signal-app`)
+
+These are scoped under the Signal shell — they never leak into other chromes. Light values
+default; dark values live under `.signal-app[data-signal-theme='dark']`.
+
+### Surface ladder (light default)
+
+| Token                       | Value                  | Used for                                                            |
+| --------------------------- | ---------------------- | ------------------------------------------------------------------- |
+| `--signal-bg`               | `#fbfaf6`              | Page background.                                                    |
+| `--signal-card-bg`          | `#ffffff`              | Default card surface.                                                |
+| `--signal-card-elev`        | `#f4f2eb`              | Raised state (chip backgrounds, secondary buttons).                  |
+| `--signal-bg-translucent`   | `rgba(...)`            | Backdrop blurs for sticky bars.                                      |
+| `--signal-phone-frame`      | `#0e0f12`              | Dark phone-frame fallback (legacy, mostly retired in shell).         |
+
+### Surface ladder (dark override)
+
+| Token                       | Value                                  |
+| --------------------------- | -------------------------------------- |
+| `--signal-bg`               | `#0f1014`                              |
+| `--signal-card-bg`          | `#1b1c22`                              |
+| `--signal-card-elev`        | (shifted darker)                       |
+| `--signal-hero-bg-1` / `2`  | `#1f2028` / `#15161b`                  |
+| `--signal-hairline`         | `rgba(255, 255, 255, 0.08)`            |
+| `--signal-hairline-strong`  | `rgba(255, 255, 255, 0.16)`            |
+
+### Text
+
+| Token                  | Light default | Dark override |
+| ---------------------- | ------------- | ------------- |
+| `--signal-ink`         | `#0e0f12`     | `#f3f1ed`     |
+| `--signal-ink-soft`    | `#2d2e33`     | (inverted)    |
+| `--signal-text-dim`    | `#6b6960`     | (inverted)    |
+| `--signal-text-mute`   | `#9a968a`     | (inverted)    |
+
+### Hairlines
+
+| Token                       | Light default | Dark override                |
+| --------------------------- | ------------- | ---------------------------- |
+| `--signal-hairline`         | `#e6e2d8`     | `rgba(255, 255, 255, 0.08)`  |
+| `--signal-hairline-strong`  | `#bfb9a8`     | `rgba(255, 255, 255, 0.16)`  |
+
+### Accents
+
+| Token                    | Value (light)  | Used for                                                  |
+| ------------------------ | -------------- | --------------------------------------------------------- |
+| `--signal-y`             | `#f4d35e`      | Brand yellow — hero accent, "Live now" eyebrow.            |
+| `--signal-coral`         | `#ff6b6b`      | Live dot, errors, FAILED state, "danger" buttons.          |
+| `--signal-mint`          | `#7ce3b4`      | COMPLETED / SHIPPABLE, "mint" buttons.                     |
+| `--signal-lavender`      | `#c4b8e0`      | Default pill-dot, tool stream cards.                       |
+| `--signal-ocean`         | `#5c9ddb`      | Secondary blue (less brand-loaded than yellow).            |
+| `--signal-y-soft`        | derived        | Soft yellow card background (10–14% opacity).              |
+| `--signal-y-text`        | derived        | AA-body yellow text on the yellow-soft surface.            |
+| `--signal-coral-soft`    | derived        | Soft coral background.                                     |
+| `--signal-coral-text`    | derived        | AA-body coral text.                                        |
+| `--signal-mint-soft`     | derived        | Soft mint background.                                      |
+| `--signal-mint-text`     | derived        | AA-body mint text.                                         |
+| `--signal-mint-on-light` | derived        | Mint that reads on the light page background.              |
+| `--signal-lavender-soft` | derived        | Soft lavender — nav-badge BETA chip, default stream card.  |
+
+### Radius
+
+| Token             | Value     | Used for                                  |
+| ----------------- | --------- | ----------------------------------------- |
+| `--signal-r-sm`   | `10px`    | Small pills, status chips.                 |
+| `--signal-r-md`   | `16px`    | Default card radius.                       |
+| `--signal-r-lg`   | `22px`    | Hero card, splash, plans card.             |
+| `--signal-r-xl`   | `28px`    | Composer card, plan-gate, score card.      |
+
+### Shadow
+
+| Token                       | Used for                          |
+| --------------------------- | --------------------------------- |
+| `--signal-shadow`           | Default card shadow.              |
+| `--signal-shadow-strong`    | Modals, toasts, floating pills.   |
+
+---
+
+## Tailwind theme extensions
+
+`frontend/tailwind.config.ts` is var-driven — the palette can be themed at runtime through
+`tokens.css`. The relevant `theme.extend` entries:
 
 ```ts
-darkMode: 'class',
-content: ['./src/**/*.{ts,tsx}', './index.html'],
-```
-
-### 6.1 Color keys
-
-```ts
-geist: {
-  bg: 'var(--geist-bg)',
-  'bg-secondary': 'var(--geist-bg-secondary)',
-},
-gray: {
-  100: 'var(--gray-100)',
-  200: 'var(--gray-200)',
-  300: 'var(--gray-300)',
-  400: 'var(--gray-400)',
-  500: 'var(--gray-500)',
-  600: 'var(--gray-600)',
-  700: 'var(--gray-700)',
-  800: 'var(--gray-800)',
-  900: 'var(--gray-900)',
-  1000: 'var(--gray-1000)',
-},
-accent: {
-  blue:        'var(--accent-blue)',
-  'blue-hover':'var(--accent-blue-hover)',
-  'blue-text': 'var(--accent-blue-text)',
-  red:         'var(--status-error)',
-  amber:       'var(--status-waiting)',
-  green:       'var(--status-success)',
-  harness:     'var(--accent-harness)',
-  planner:     'var(--accent-planner)',
-},
-status: {
-  success:   'var(--status-success)',
-  executing: 'var(--status-executing)',
-  thinking:  'var(--status-thinking)',
-  waiting:   'var(--status-waiting)',
-  partial:   'var(--status-partial)',
-  error:     'var(--status-error)',
-  blocked:   'var(--status-blocked)',
-  queued:    'var(--status-queued)',
-  building:  'var(--status-building)',
-},
-border: {
-  default: 'var(--border-default)',
-  hover:   'var(--border-hover)',
+colors: {
+  geist: {
+    bg: 'var(--geist-bg)',
+    'bg-secondary': 'var(--geist-bg-secondary)',
+  },
+  gray: {
+    100: 'var(--gray-100)',
+    // ...10-stop ramp through 1000
+  },
+  accent: {
+    blue: 'var(--accent-blue)',
+    'blue-hover': 'var(--accent-blue-hover)',
+    'blue-text': 'var(--accent-blue-text)',
+    red: 'var(--status-error)',
+    amber: 'var(--status-waiting)',
+    green: 'var(--status-success)',
+    harness: 'var(--accent-harness)',
+    planner: 'var(--accent-planner)',
+  },
+  status: {
+    success: 'var(--status-success)',
+    executing: 'var(--status-executing)',
+    thinking: 'var(--status-thinking)',
+    waiting: 'var(--status-waiting)',
+    partial: 'var(--status-partial)',
+    error: 'var(--status-error)',
+    blocked: 'var(--status-blocked)',
+    queued: 'var(--status-queued)',
+    building: 'var(--status-building)',  // legacy alias
+  },
+  border: {
+    default: 'var(--border-default)',
+    hover: 'var(--border-hover)',
+  },
 },
 textColor: {
-  primary:   'var(--text-primary)',
+  primary: 'var(--text-primary)',
   secondary: 'var(--text-secondary)',
-  muted:     'var(--text-muted)',
+  muted: 'var(--text-muted)',
 },
-```
-
-Use Tailwind utility forms in JSX:
-
-```tsx
-<div className='bg-status-success/10 text-status-success border-status-success/30 ...' />
-```
-
-### 6.2 Border radius
-
-```ts
+height: { dvh: '100dvh' },
+minHeight: { dvh: '100dvh' },
+maxHeight: { dvh: '100dvh' },
+fontFamily: {
+  sans: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+  mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+},
 borderRadius: {
   sm: 'var(--radius-sm)',
   md: 'var(--radius-md)',
   lg: 'var(--radius-lg)',
+},
+```
+
+Important: `accent.green`, `accent.amber`, and `accent.red` are all CSS-var aliases to the
+matching `--status-*` token (`success` / `waiting` / `error`). They exist so legacy class names
+like `bg-accent-green` keep working without splitting the palette — a `2.6.0`-era cleanup
+documented in the inline comment.
+
+---
+
+## Score palette (4 bands)
+
+The verified score (`0..100`) is mapped to one of four bands. The mapping lives in
+`frontend/src/signal/lib/runUtils.ts`:
+
+```ts
+export function scoreKind(score?: number | null): 'good' | 'warn' | 'fail' | 'default' {
+  if (score == null) return 'default';
+  if (score >= 85) return 'good';
+  if (score >= 70) return 'warn';
+  if (score > 0) return 'fail';
+  return 'default';
 }
 ```
 
-### 6.3 Font family
+| Band       | Threshold     | Token used      | Verdict label (UI)   |
+| ---------- | ------------- | --------------- | -------------------- |
+| `good`     | `score >= 85` | `--signal-mint` | "Shippable"          |
+| `warn`     | `70..84`      | `--signal-y`    | "Needs review"       |
+| `fail`     | `0 < score < 70` | `--signal-coral` | "Failed"          |
+| `default`  | `score == null` or `0` | `--signal-text-dim` | (no verdict — score not yet computed) |
 
-Both `sans` and `mono` resolve to the same chain — JetBrainsMono is the single brand face:
+The trailing-cell colour mapping in `Primitives.tsx` mirrors this for inline row stats:
 
 ```ts
-fontFamily: {
-  sans: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
-  mono: ['JetBrains Mono', 'ui-monospace', 'SFMono-Regular', 'Menlo', 'monospace'],
+type RowTrailing = 'good' | 'warn' | 'fail' | 'default';
+```
+
+Live status pills (`runUtils.statusToDot`) also map to the same colour set, plus
+`'live'` (animated coral) and `'lavender'` (default fallback) for an extra dimension:
+
+```ts
+function statusToDot(s?: string): 'live' | 'mint' | 'coral' | 'signal' | 'lavender' {
+  // CLASSIFYING/PLANNING/EXECUTING/AWAITING_APPROVAL/RUNNING/PROVIDER_SWITCHING/PAUSED → 'live'
+  // COMPLETED → 'mint'
+  // FAILED/CANCELLED → 'coral'
+  // PARTIAL → 'signal' (brand yellow)
+  // else → 'lavender'
 }
 ```
 
-### 6.4 Spacing extensions
+---
 
-Sub-pixel design grid:
+## File-icon palette
 
-```ts
-spacing: {
-  'sp-1':  '4px',
-  'sp-2':  '8px',
-  'sp-3':  '12px',
-  'sp-4':  '16px',
-  'sp-6':  '24px',
-  'sp-8':  '32px',
-  'sp-12': '48px',
-  'sp-16': '64px',
-  'sp-24': '96px',
-  'sp-32': '128px',
-}
+`frontend/src/signal/components/FileIcon.tsx` ships VS Code / IntelliJ-style inline SVG icons.
+Each icon is a small hand-rolled SVG (avoids a third-party dependency). The dispatcher walks
+extension/name rules to pick:
+
+| Icon            | Match                                                                                 | Brand colour                              |
+| --------------- | ------------------------------------------------------------------------------------- | ----------------------------------------- |
+| `TestIcon`      | `*.test.{ts,tsx,js,jsx}`, `*.spec.{ts,tsx,js,jsx}`, `test.java`, `tests.java`         | `#10B981` (mint)                          |
+| `DockerIcon`    | `Dockerfile`, `*.dockerfile`                                                          | `#2496ED`                                 |
+| `ConfigIcon`    | `.gitignore`, `.gitattributes`, `.dockerignore`, `.editorconfig`, `.env(.*)`, `.npmrc`, `.prettierrc(.json)`, `.eslintrc.(cjs\|json)` | `#888` |
+| `MarkdownIcon`  | `*.md`, `readme`, `license`                                                            | `#519ABA`                                 |
+| `JavaIcon`      | `.java`                                                                                | `#ED8B00`                                 |
+| `KotlinIcon`    | `.kt`, `.kts`                                                                          | gradient `#7F52FF → #E44857`               |
+| `PythonIcon`    | `.py`, `.pyi`                                                                          | `#3776AB` + `#FFD43B`                     |
+| `TypeScriptIcon`| `.ts`, `.mts`, `.cts`                                                                  | `#3178C6`                                 |
+| `ReactIcon`     | `.tsx`, `.jsx` (matched before plain TS/JS)                                            | `#61DAFB`                                 |
+| `JavaScriptIcon`| `.js`, `.mjs`, `.cjs`                                                                  | `#F7DF1E` on `#000`                       |
+| `GoIcon`        | `.go`                                                                                  | `#00ADD8`                                 |
+| `RustIcon`      | `.rs`                                                                                  | `#000` + `#DEA584`                        |
+| `RubyIcon`      | `.rb`                                                                                  | `#CC342D`                                 |
+| `HtmlIcon`      | `.html`, `.htm`                                                                        | `#E34F26`                                 |
+| `CssIcon`       | `.css`, `.scss`, `.less`                                                                | `#1572B6`                                 |
+| `JsonIcon`      | `.json`                                                                                | `#FAB005`                                 |
+| `YamlIcon`      | `.yml`, `.yaml`                                                                        | `#CB171E`                                 |
+| `XmlIcon`       | `.xml`, `pom.xml`                                                                      | `#005A9E`                                 |
+| `TomlIcon`      | `.toml`                                                                                | `#9C4221`                                 |
+| `ShellIcon`     | `.sh`, `.bash`, `.zsh`                                                                  | `#4A4A4A` bg + `#4EAB4E` glyph             |
+| `SqlIcon`       | `.sql`                                                                                  | `#336791`                                 |
+| `ImageIcon`     | `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg`, `.webp`, `.ico`                                | `#A074C4`                                 |
+| `FolderIcon`    | (any folder; `open` shifts the path)                                                    | `#5B8DEF` (signal blue)                   |
+| `DefaultIcon`   | fallback                                                                                | `#888`                                    |
+
+The dispatch order matters: test files match before language, dotfiles before language,
+`Dockerfile` before any general extension. New rules go in the same `FileIcon` dispatcher.
+
+---
+
+## Code viewer palette
+
+`frontend/src/signal/components/CodeView.tsx` is a regex-tokenised code viewer (replaces Monaco
+to save ~600KB of bundle). Syntax colours:
+
+| Concept   | Colour      | Reasoning                                       |
+| --------- | ----------- | ----------------------------------------------- |
+| Comments  | `#7d8590`   | Slate — recessed, low-attention.                |
+| Strings   | `#a5d6a3`   | Green — easy to skim.                            |
+| Numbers   | `#e5b977`   | Amber — distinct from strings without screaming.|
+| Keywords  | `#5b8def`   | Signal blue — matches `--accent-blue`.           |
+
+Diff mode adds line-background tints (10–12% opacity):
+
+| Marker         | Background                                |
+| -------------- | ----------------------------------------- |
+| `+` adds       | `rgba(124, 227, 180, 0.08)` (mint)        |
+| `-` removes    | `rgba(255, 107, 107, 0.08)` (coral)       |
+| `@@` hunk      | `rgba(91, 141, 239, 0.08)` (signal blue)  |
+| `+++/---` file | `rgba(244, 211, 94, 0.06)` (amber)        |
+
+Languages with explicit keyword sets: `ts`, `tsx`, `js`, `jsx`, `java`, `python`, `json`, `yaml`,
+`sql`, `bash`. Unknown extensions fall through to plain text with no highlighting.
+
+---
+
+## Cost progress bar
+
+`frontend/src/signal/components/CostProgressBar.tsx` (and `tailwind.config.ts`'s `status` palette)
+defines the three bands:
+
+| Band        | Threshold       | Bar colour                |
+| ----------- | --------------- | ------------------------- |
+| `good`      | `<80%` of cap   | `var(--signal-mint)`      |
+| `warn`      | `80%..<100%`    | `var(--signal-y)`         |
+| `fail`      | `>=100%`        | `var(--signal-coral)`     |
+
+ARIA: `role='progressbar'`, `aria-valuenow`, `aria-valuemin=0`, `aria-valuemax=100`,
+`aria-label` set to the prop. Label font is JetBrains Mono `11px`. Bar height `6px`, radius `3px`.
+
+---
+
+## WCAG contrast helpers
+
+`frontend/src/design-system/contrast.ts` ships a small utility set for verifying any new token
+combination passes WCAG AA. The library exposes:
+
+- `relativeLuminance(hex)` — computes the WCAG relative luminance of a hex colour.
+- `contrastRatio(fg, bg)` — returns the contrast ratio (1.0–21.0) between foreground and
+  background, both hex.
+- `meetsAA(fg, bg)` — boolean shortcut for the AA body-text floor (`>= 4.5:1`).
+- `meetsAALarge(fg, bg)` — `>= 3:1` for "large text" (18pt+ or 14pt+ bold).
+
+The accent + status tokens were tuned through round 3 of this audit (the F-15 and F-16 commits in
+`tokens.css`) — borders are at `>= 3.05:1` (SC 1.4.11 non-text floor), accents and status text are
+at `>= 4.5:1` (SC 1.4.3 body-text floor). New tokens must clear these floors before they land.
+
+---
+
+## Where tokens live (file map)
+
+```
+frontend/src/
+├── design-system/
+│   ├── primitives.css   #  --c-graphite-N, --c-paper-N, --c-ink-N, --c-signal-*, semantic
+│   │                    #  primitives. Loaded first; never reference --c-* outside this file
+│   │                    #  if a semantic alias exists.
+│   └── contrast.ts      #  WCAG luminance + ratio helpers.
+├── tokens.css           #  Graphite + Signal semantic tokens (--c-* → --geist-*, --status-*, etc).
+│                        #  Dark default + [data-theme='light'] override.
+├── index.css            #  Imports primitives → tokens → Tailwind v4 → tailwind.config.ts compat
+│                        #  layer, then global utilities, motion vocabulary, page gutters.
+├── signal/
+│   └── signal.css       #  Signal chrome — --signal-* tokens, every component class, scoped
+│                        #  under .signal-app so it can't leak into legacy shells.
+└── tailwind.config.ts   #  theme.extend points every colour/spacing/font at the CSS vars above.
 ```
 
-### 6.5 Height utilities
-
-```ts
-height:    {dvh: '100dvh'},
-minHeight: {dvh: '100dvh'},
-maxHeight: {dvh: '100dvh'},
-```
-
-These exist so `h-dvh` works even on iOS Safari where `100vh` includes the URL bar.
-
-### 6.6 Animation keyframes
-
-```ts
-animation: {
-  'slide-in-right': 'slide-in-right 0.3s ease-out',
-  'fade-in-up':     'fade-in-up 0.4s ease-out',
-  shimmer:          'shimmer 2s linear infinite',
-  'log-line':       'log-line 0.15s ease-out',
-  'status-pulse':   'status-pulse 2s ease-in-out infinite',
-}
-```
-
-Underlying keyframes (`slide-in-right`, `fade-in-up`, `shimmer`, `log-line`, `status-pulse`) are defined in the same `tailwind.config.ts` `keyframes` block.
-
-### 6.7 PostCSS pipeline
-
-Tailwind 4 ships PostCSS support as a separate package. The pipeline is configured in `frontend/postcss.config.js`:
-
-```js
-export default {
-  plugins: {
-    '@tailwindcss/postcss': {},
-  },
-};
-```
-
-Autoprefixer is no longer needed (Tailwind 4 bakes it in).
-
-## 7. Typography
-
-### 7.1 Font loading
-
-JetBrainsMono is loaded via Google Fonts at the top of `frontend/src/signal/signal.css`:
-
-```css
-@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300..700&family=JetBrains+Mono:wght@400..600&display=swap');
-```
-
-`display=swap` falls back to system fonts during the network load window. The Tailwind chain (`ui-monospace`, `SFMono-Regular`, `Menlo`, `monospace`) is the fallback.
-
-The fallback choice is intentional — JetBrainsMono is the brand face on every surface (login + dashboard + project surfaces), so even the system-font flash looks monospace.
-
-### 7.2 No more Geist Sans / Geist Mono
-
-The PR #108 (2026-05-11) unification dropped both Geist faces. Every CSS var that used to resolve to a Geist family (`--v3-font-sans`, `--v3-font-mono`) now resolves to the same JetBrainsMono chain.
-
-## 8. Score-band palette (verdict thresholds)
-
-Source: [`frontend/src/components/runs/ScoreRing.tsx`](../../frontend/src/components/runs/ScoreRing.tsx) line 27–32 and [`frontend/src/lib/verdict.ts`](../../frontend/src/lib/verdict.ts).
-
-### 8.1 4-band score color (`ScoreRing.defaultColor`)
-
-```ts
-function defaultColor(score: number): string {
-  if (score >= 85) return 'var(--status-success)';    // green
-  if (score >= 70) return 'var(--accent-blue)';        // blue
-  if (score >= 50) return 'var(--status-waiting)';     // amber
-  return 'var(--status-error)';                        // red
-}
-```
-
-| Band             | Range  | Token alias            | Resolves to (dark)   |
-| ---------------- | ------ | ---------------------- | -------------------- |
-| Shippable        | ≥85    | `--status-success`     | `#10B981`            |
-| Solid            | 70-84  | `--accent-blue`        | `#5B8DEF` (dark)     |
-| Needs attention  | 50-69  | `--status-waiting`     | `#F59E0B`            |
-| Failed           | <50    | `--status-error`       | `#EF4444`            |
-
-### 8.2 Verdict thresholds (`lib/verdict.ts`)
-
-```
-verifiedScore < 50         → blocked
-verifiedScore < 85         → needs-review
-verifiedScore ≥ 85         → shippable
-```
-
-These thresholds were aligned at ≥85 in the Signal P0/P1 punch-list (2026-05-16). Pre-2026-05-16 ResultPage previously used a 90 threshold; that's been collapsed onto 85 so RunCard, ScoreRing, VerdictPill, HomePage, and AllRunsPage all agree.
-
-The threshold is multiplicative — the `verifiedScore` itself is computed multiplicatively from build + tests + reviewer signals (see backend `scoring/`).
-
-### 8.3 Pill styling
-
-Used by [`VerdictPill.tsx`](../../frontend/src/components/runs/VerdictPill.tsx):
-
-| Verdict          | Wrapper classes                                                            | Icon          |
-| ---------------- | -------------------------------------------------------------------------- | ------------- |
-| `shippable`      | `border-status-success/30 bg-status-success/10 text-status-success`        | `CheckCircle2`|
-| `needs-review`   | `border-status-waiting/30 bg-status-waiting/10 text-status-waiting`        | `AlertTriangle`|
-| `blocked`        | `border-status-error/30 bg-status-error/10 text-status-error`              | `XCircle`     |
-
-## 9. Theming flow
-
-### 9.1 Pre-paint theme application (`main.tsx`)
-
-```ts
-document.documentElement.classList.add('signal-app');
-const saved = localStorage.getItem('signal:theme');
-const sysDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-document.documentElement.setAttribute('data-signal-theme', saved || (sysDark ? 'dark' : 'light'));
-```
-
-Both `data-theme` (for the `tokens.css` overrides) and `data-signal-theme` (for the Signal-scoped overrides) are set before React renders. The first paint is correct — no FOUC.
-
-### 9.2 User-driven flip
-
-`stores/useUiStore.ts` exposes `setTheme(t)` / `toggleTheme()`. Both write `<html data-theme>` + `<html data-signal-theme>` and persist to `localStorage.signal:theme`.
-
-### 9.3 `prefers-color-scheme` default
-
-For first-time visitors with no saved preference, `tokens.css` declares:
-
-```css
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) {
-    color-scheme: light;
-  }
-}
-```
-
-The browser's preferred theme is respected until the user toggles, after which the saved preference overrides.
-
-## 10. Accessibility — WCAG-AA regression tests
-
-### 10.1 Pure-function helpers (`design-system/contrast.ts`)
-
-```ts
-parseHex(hex: string): [number, number, number] | null
-luminance(rgb: [number, number, number]): number
-contrastRatio(fg: string, bg: string): number
-
-export const WCAG = {
-  AA_BODY:     4.5,   // normal-size text (≥14pt / ≥18pt bold)
-  AA_LARGE:    3.0,   // large text
-  AA_NON_TEXT: 3.0,   // UI components (borders, icons, focus rings)
-  AAA_BODY:    7.0,   // aspirational
-};
-```
-
-These are pure functions — no DOM, no CSS parsing. They make `contrast.test.ts` a meaningful regression guard regardless of the test runner (the file is currently dormant; vitest hasn't been wired into CI yet).
-
-### 10.2 Token-level contrast contract
-
-[`frontend/src/design-system/contrast.test.ts`](../../frontend/src/design-system/contrast.test.ts) (dormant — vitest-shape) pins ratios for the round-3 audit fixes:
-
-- `--border-default` on `--c-graphite-2` ≥ 3.0 (was 1.59 — fixed by moving to `--c-graphite-7`).
-- `--status-executing` on `--c-graphite-2` ≥ 4.5 (was 4.19 — fixed by moving to `#5B89E0`).
-- `--c-signal-blue-on-dark` on `--c-graphite-2` ≥ 4.5 (the dark-surface body-text variant).
-
-Any palette tweak that shifts a hex must update **both** the CSS and the fixed value in `contrast.test.ts` so the test stays a true regression guard.
-
-### 10.3 Live a11y crawl (`.pa11yci.json`)
-
-[`frontend/.pa11yci.json`](../../frontend/.pa11yci.json) runs pa11y-ci with axe-core + HTML CodeSniffer against every public surface:
-
-| URL                              | Standard | Notes                              |
-| -------------------------------- | -------- | ---------------------------------- |
-| `/login`                         | WCAG2AA  |                                    |
-| `/register`                      | WCAG2AA  |                                    |
-| `/forgot-password`               | WCAG2AA  |                                    |
-| `/plans`                         | WCAG2AA  |                                    |
-| `/pricing`                       | WCAG2AA  |                                    |
-| `/terms`                         | WCAG2AA  |                                    |
-| `/privacy`                       | WCAG2AA  |                                    |
-| `/dpa`                           | WCAG2AA  |                                    |
-
-Runner config:
-
-```json
-{
-  "standard": "WCAG2AA",
-  "runners": ["axe", "htmlcs"],
-  "timeout": 30000,
-  "wait": 1500,
-  "viewport": {"width": 1440, "height": 900},
-  "ignore": ["warning", "notice"]
-}
-```
-
-Auth-gated routes (`/projects/*`, `/admin/*`) aren't crawled yet — pa11y can't authenticate without a cookie-priming driver. Follow-up plan in [`frontend/A11Y.md`](../../frontend/A11Y.md).
-
-### 10.4 Run a11y locally
-
-From `frontend/A11Y.md`:
-
-```bash
-cd frontend
-npm install --save-dev pa11y-ci
-npm run dev          # in one terminal; serves at :5173
-npx pa11y-ci         # in another; reads .pa11yci.json
-```
-
-For contrast regression tests:
-
-```bash
-cd frontend
-npm install --save-dev vitest @vitest/ui jsdom
-npx vitest run contrast
-```
-
-## 11. Where to add a new token
-
-### 11.1 Adding a primitive
-
-1. Add `--c-foo: #hex;` to `frontend/src/design-system/primitives.css`.
-2. Add a CSS comment explaining what it's for and why an existing primitive can't be reused.
-3. Update this doc (section 2).
-
-### 11.2 Adding a semantic alias
-
-1. Add `--your-token: var(--c-foo);` to `frontend/src/tokens.css` `:root` (the dark theme).
-2. Add the light-theme override under `[data-theme='light']` if it should differ.
-3. If the token has a Tailwind utility key, extend `frontend/tailwind.config.ts`.
-4. Update this doc (section 3 + 4 + 6).
-
-### 11.3 Adding a Signal-scoped token
-
-1. Add `--signal-foo: #hex;` to the `.signal-app` block in `frontend/src/signal/signal.css`.
-2. Add the dark-mode override under `.signal-app[data-signal-theme='dark']`.
-3. Update this doc (section 5).
-
-## 12. Quick-reference cheatsheet
-
-| When you want                          | Use                                       |
-| -------------------------------------- | ----------------------------------------- |
-| Page background                        | `bg-geist-bg` or `var(--geist-bg)`        |
-| Card surface                           | `var(--surface-card)` (role-named alias)  |
-| Primary CTA                            | `bg-accent-blue text-white`               |
-| Brand-coloured inline text             | `text-accent-blue-text`                   |
-| Default border                         | `border border-border-default`            |
-| Body text                              | `text-primary`                            |
-| Muted secondary text                   | `text-muted`                              |
-| Success badge                          | `bg-status-success/10 text-status-success border-status-success/30` |
-| Warning / "needs attention"            | `bg-status-waiting/10 text-status-waiting border-status-waiting/30` |
-| Error badge                            | `bg-status-error/10 text-status-error border-status-error/30`       |
-| Score 0-100 ring                       | `ScoreRing` (auto-picks colour by band)   |
-| Verdict pill                           | `VerdictPill` (≥85 / 70-84 / <70 bands)   |
-| Focus ring                             | `box-shadow: var(--focus-ring)`           |
-| Card shadow                            | `box-shadow: var(--shadow-card-rest)`     |
-| 100% viewport height (iOS-safe)        | `h-dvh`                                   |
-| Card radius                            | `rounded-[var(--radius-card)]` or `--signal-r-md` for Signal cards |
-| Pill radius                            | `rounded-full` or `var(--radius-pill)`    |
+Loading order matters: `index.css` imports `primitives.css` first, then `tokens.css`, then
+`tailwindcss` (Tailwind 4 single-directive form), then re-applies `tailwind.config.ts` via the v4
+compat `@config` directive. `signal.css` is imported separately by `main.tsx` so it's available on
+public routes too.
