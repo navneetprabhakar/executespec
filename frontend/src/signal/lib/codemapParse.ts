@@ -18,6 +18,11 @@
  *   - `GET /api/foo`
  *   ...
  *
+ *   ## Files (listing)
+ *   - `path/to/file.ts`
+ *   - `another/file.java`
+ *   ...
+ *
  *   ## Functions
  *
  *   ### `path/to/file.ts`
@@ -28,13 +33,13 @@
  *   - func2
  *   ...
  *
- *   ### `another/file.java`
- *   ...
- *
- * The per-file sections (`### `<path>``) are the authoritative source for
- * what's in the repo, since the function-map scan is bounded to MAX_FUNCTION_FILES
- * source files. We surface those as the browsable tree and pull each
- * section's body as the "open file" view.
+ * The full listing under `## Files (listing)` is the source of truth for
+ * what's in the repo — it carries every path the GitHub Trees API returned
+ * (the same source the function-extractor uses). The per-file `## Functions`
+ * sections only cover whatever subset the regex pass succeeded on (bounded
+ * by MAX_FUNCTION_FILES on the backend). We merge both: every path becomes
+ * a file in the tree, and the `## Functions` section enriches matching
+ * paths with their function list + optional purpose summary.
  */
 
 export interface CodemapFile {
@@ -70,10 +75,15 @@ export function parseCodemap(md: string): CodemapSummary {
   let fileCount = 0;
   const topLevelDirs: string[] = [];
   const routes: string[] = [];
-  const files: CodemapFile[] = [];
+  // The full file listing under `## Files (listing)` (added 2026-05-16). The
+  // browser uses this as the master file tree; the per-file `## Functions`
+  // sections then enrich matching paths with function + purpose details.
+  const allFilePaths = new Set<string>();
+  const fileDetails = new Map<string, CodemapFile>();
 
   // Sections are H2 headings; file blocks are H3 headings inside ## Functions.
-  let section: 'preamble' | 'layout' | 'routes' | 'models' | 'functions' | 'other' = 'preamble';
+  let section: 'preamble' | 'layout' | 'routes' | 'models' | 'files' | 'functions' | 'other' =
+    'preamble';
   let currentFile: CodemapFile | null = null;
   let currentFileBuf: string[] = [];
 
@@ -87,7 +97,8 @@ export function parseCodemap(md: string): CodemapSummary {
         .map((l) => l.trim())
         .find((l) => l.length > 0 && !l.startsWith('-'));
       if (firstNonBullet) currentFile.purpose = firstNonBullet.replace(/^>\s*/, '');
-      files.push(currentFile);
+      fileDetails.set(currentFile.path, currentFile);
+      allFilePaths.add(currentFile.path);
     }
     currentFile = null;
     currentFileBuf = [];
@@ -113,6 +124,7 @@ export function parseCodemap(md: string): CodemapSummary {
       if (heading.startsWith('top-level')) section = 'layout';
       else if (heading.startsWith('routes')) section = 'routes';
       else if (heading.startsWith('models') || heading.startsWith('entities')) section = 'models';
+      else if (heading.startsWith('files')) section = 'files';
       else if (heading.startsWith('functions')) section = 'functions';
       else section = 'other';
       continue;
@@ -131,6 +143,13 @@ export function parseCodemap(md: string): CodemapSummary {
     } else if (section === 'routes' && line.startsWith('- ')) {
       // routes formatted as `- \`METHOD /path\``
       routes.push(line.slice(2).trim().replace(/^`|`$/g, ''));
+    } else if (section === 'files' && line.startsWith('- ')) {
+      // ## Files (listing) bullets: `- \`path/to/file.ext\``
+      // The `- … (+N more)` overflow marker is the only non-path bullet; ignore it.
+      const raw = line.slice(2).trim();
+      if (raw.startsWith('…') || raw.startsWith('...')) continue;
+      const path = raw.replace(/^`|`$/g, '').trim();
+      if (path) allFilePaths.add(path);
     } else if (section === 'functions' && currentFile) {
       currentFileBuf.push(rawLine);
       if (line.startsWith('- ')) {
@@ -140,5 +159,19 @@ export function parseCodemap(md: string): CodemapSummary {
   }
   flushFile();
 
-  return {repoSlug, fileCount, topLevelDirs, routes, files};
+  // Merge: every path from `## Files (listing)` becomes an entry; the
+  // function-section data (when present) enriches the matching path.
+  const files: CodemapFile[] = Array.from(allFilePaths)
+    .sort()
+    .map(
+      (path) =>
+        fileDetails.get(path) ?? {
+          path,
+          functions: [],
+          purpose: null,
+          rawMd: '',
+        },
+    );
+
+  return {repoSlug, fileCount: fileCount || files.length, topLevelDirs, routes, files};
 }

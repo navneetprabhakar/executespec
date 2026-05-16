@@ -137,6 +137,30 @@ public class CodeMapGenerator {
         .forEach(d -> md.append("- ").append(d).append("\n"));
     md.append("\n");
 
+    // 2026-05-16 — full file listing.
+    //
+    // Why we need this in the codemap: the per-file `## Functions` section
+    // below is limited to a bounded slice (MAX_FUNCTION_FILES) of source
+    // files in the language allowlist, so for repos that are mostly
+    // configuration / static assets / unsupported languages, the codemap
+    // emerged with no actual file paths in it. That broke the new
+    // Project → Code → Browse view, which parses the codemap to build a
+    // file tree — it saw zero files even when the repo had hundreds.
+    //
+    // Emit every file path the GitHub Trees API returned, capped to keep
+    // prompt size reasonable. The listing is the cheapest, most complete
+    // signal of "what's in the repo" we have without re-fetching the tree.
+    // 1000 paths × ~60 chars ≈ 60 KB markdown — still under most LLMs'
+    // context and the planner already truncates upstream if needed.
+    if (!files.isEmpty()) {
+      md.append("## Files (listing)\n\n");
+      files.stream().limit(1000).forEach(p -> md.append("- `").append(p).append("`\n"));
+      if (files.size() > 1000) {
+        md.append("- … (+").append(files.size() - 1000).append(" more)\n");
+      }
+      md.append("\n");
+    }
+
     // Routes — scan a small set of likely files; full-text scan would be too expensive.
     List<String> routes = scanRoutes(repoFullName, defaultBranch, files, pat);
     if (!routes.isEmpty()) {
