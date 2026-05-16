@@ -119,18 +119,29 @@ export function projectIsArchived(p: ProjectDto): boolean {
 }
 
 /**
- * Render the display name for a project repo. The backend `ProjectRepoDto`
- * carries `githubRepoFullName` (e.g. `owner/repo`) — older fixtures and
- * fallback paths may surface a bare `name` / `repoName` instead. If every
- * candidate is missing, fall back to a short ID (first 8 chars + `…`)
- * rather than the full UUID, which is unreadable in chip pills + tables.
+ * Render the display name for a project repo. Two shapes flow through this
+ * helper today:
  *
- * Centralised here so the "UUID instead of repo name" regression spotted
- * on the Compose page, Code → Code review per-repo list, and Architecture
- * per-repo grid is fixed in exactly one place going forward.
+ *  1. **`ProjectRepoDto`** (returned by `/api/repos` and `/api/repos/{id}`):
+ *     fields live at the top level — `githubRepoFullName`, `githubOwner`, etc.
+ *  2. **`ProjectRepoLinkDto`** (returned by `/api/projects/{id}/repos`):
+ *     the link wrapper, with the repo nested at `.repo`. Its own `id` is the
+ *     LINK uuid, not the repo uuid, so reading `.id` for a fallback name shows
+ *     a meaningless prefix that users mistake for a git SHA.
+ *
+ * Order of preference:
+ *   1. top-level `githubRepoFullName` / `fullName` (ProjectRepoDto)
+ *   2. nested `repo.githubRepoFullName` / `repo.fullName` (ProjectRepoLinkDto)
+ *   3. top-level or nested `name` / `repoName` (legacy fixtures)
+ *   4. nothing left → 8-char short of the *repo* UUID (never the link UUID)
+ *
+ * Bug fixed 2026-05-16 (user feedback): the helper used to fall through to
+ * `link.id.slice(0,8)` for every linked repo because the nested `.repo`
+ * shape's name fields are invisible at the top level. That produced strings
+ * like "a47b3c91…" in the Repos tab — visually indistinguishable from a SHA.
  */
 export function repoDisplayName(r: unknown): string {
-  const rec = r as {
+  const rec = (r ?? {}) as {
     githubRepoFullName?: string | null;
     fullName?: string | null;
     name?: string | null;
@@ -138,21 +149,54 @@ export function repoDisplayName(r: unknown): string {
     githubOwner?: string | null;
     repoId?: string | null;
     id?: string | null;
+    repo?: {
+      githubRepoFullName?: string | null;
+      fullName?: string | null;
+      name?: string | null;
+      repoName?: string | null;
+      githubOwner?: string | null;
+      id?: string | null;
+    } | null;
   };
+  // ProjectRepoDto shape (top-level fields)
   const slug = rec.githubRepoFullName?.trim() || rec.fullName?.trim();
   if (slug) return slug;
-  const bare = rec.name?.trim() || rec.repoName?.trim();
-  if (bare) {
-    return rec.githubOwner ? `${rec.githubOwner}/${bare}` : bare;
+  // ProjectRepoLinkDto shape (nested .repo)
+  const nestedSlug = rec.repo?.githubRepoFullName?.trim() || rec.repo?.fullName?.trim();
+  if (nestedSlug) return nestedSlug;
+  // legacy bare-name fixtures (top-level or nested)
+  const bareTop = rec.name?.trim() || rec.repoName?.trim();
+  if (bareTop) {
+    return rec.githubOwner ? `${rec.githubOwner}/${bareTop}` : bareTop;
   }
-  const rawId = rec.id || rec.repoId || '';
+  const bareNested = rec.repo?.name?.trim() || rec.repo?.repoName?.trim();
+  if (bareNested) {
+    const owner = rec.repo?.githubOwner;
+    return owner ? `${owner}/${bareNested}` : bareNested;
+  }
+  // Last resort: short of the REPO uuid (not the link uuid).
+  const rawId = rec.repoId || rec.repo?.id || rec.id || '';
   return rawId ? `${rawId.slice(0, 8)}…` : '—';
 }
 
-/** Stable, never-empty repo id for use as map keys / API params. */
+/**
+ * Stable, never-empty repo id for use as map keys / API params.
+ *
+ * Same nested-shape gotcha as {@link repoDisplayName}: when the caller passes
+ * a `ProjectRepoLinkDto`, the link's `.id` is the link UUID — wrong for any
+ * subsequent repo-scoped call (`syncRepo`, `installRepoWebhook`,
+ * `unlinkProjectRepo`). Prefer the inner repo UUID in that order:
+ *   1. top-level `repoId` (already a repo-id alias)
+ *   2. nested `repo.id` (ProjectRepoLinkDto)
+ *   3. top-level `id` (ProjectRepoDto — already a repo UUID)
+ */
 export function repoIdFor(r: unknown): string {
-  const rec = r as {repoId?: string | null; id?: string | null};
-  return String(rec.repoId || rec.id || '');
+  const rec = (r ?? {}) as {
+    repoId?: string | null;
+    id?: string | null;
+    repo?: {id?: string | null} | null;
+  };
+  return String(rec.repoId || rec.repo?.id || rec.id || '');
 }
 
 /**

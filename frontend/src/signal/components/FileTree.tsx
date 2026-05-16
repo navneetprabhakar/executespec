@@ -1,4 +1,5 @@
 import {useMemo, useState} from 'react';
+import {FileIcon, FolderIcon} from './FileIcon';
 
 /**
  * Folder-tree file browser. Replaces the flat list that used to sit in the
@@ -71,43 +72,11 @@ function buildTree(files: FileEntry[]): DirNode {
   return root;
 }
 
-/** Pick an emoji-ish glyph by file extension. Kept light — one chevron per
- *  ext, no Material/Lucide chunk pulled in. */
-function iconFor(filename: string): string {
-  const lower = filename.toLowerCase();
-  if (lower.endsWith('.md') || lower === 'readme.md' || lower === 'readme') return '📄';
-  if (lower.endsWith('.json')) return '⚙';
-  if (lower.endsWith('.yml') || lower.endsWith('.yaml')) return '⚙';
-  if (lower.endsWith('.xml')) return '⚙';
-  if (lower.endsWith('.toml')) return '⚙';
-  if (lower === 'dockerfile' || lower.endsWith('.dockerfile')) return '🐳';
-  if (lower === '.gitignore' || lower === '.gitattributes' || lower === '.dockerignore') return '⊘';
-  if (lower.endsWith('.test.ts') || lower.endsWith('.test.tsx') || lower.endsWith('.test.js'))
-    return '✓';
-  if (lower.endsWith('test.java') || lower.endsWith('tests.java')) return '✓';
-  if (lower.endsWith('.spec.ts') || lower.endsWith('.spec.js')) return '✓';
-  if (lower.endsWith('.java')) return '☕';
-  if (lower.endsWith('.kt') || lower.endsWith('.kts')) return '◇';
-  if (lower.endsWith('.py')) return '🐍';
-  if (lower.endsWith('.ts') || lower.endsWith('.tsx')) return '◷';
-  if (lower.endsWith('.js') || lower.endsWith('.jsx') || lower.endsWith('.mjs')) return '◷';
-  if (lower.endsWith('.go')) return '◷';
-  if (lower.endsWith('.rs')) return '◷';
-  if (lower.endsWith('.rb')) return '◷';
-  if (lower.endsWith('.css') || lower.endsWith('.scss') || lower.endsWith('.less')) return '◧';
-  if (lower.endsWith('.html') || lower.endsWith('.htm')) return '◧';
-  if (
-    lower.endsWith('.svg') ||
-    lower.endsWith('.png') ||
-    lower.endsWith('.jpg') ||
-    lower.endsWith('.jpeg') ||
-    lower.endsWith('.gif')
-  )
-    return '◨';
-  if (lower.endsWith('.sh') || lower.endsWith('.bash')) return '$';
-  if (lower.endsWith('.sql')) return '⊟';
-  return '·';
-}
+// Icon dispatch moved to `./FileIcon` — SVG-based VS Code / IntelliJ-style
+// language marks (Java cup, Python yin-yang, TS/JS badges, React atom,
+// Docker whale, etc.) Replaces the prior emoji-based glyph table which
+// looked off in the dark theme and rendered as platform-specific emoji
+// fonts. The dispatch ladder mirrors what `iconFor` used to do.
 
 /** Status dot colour matches the previous flat-list design. */
 function statusDotKind(status?: string): 'mint' | 'signal' | 'coral' | 'lavender' {
@@ -159,7 +128,7 @@ export function FileTree({files, selectedPath, onSelect}: FileTreeProps) {
               {isCollapsed ? '▸' : '▾'}
             </span>
             <span className='signal-file-tree-folder-icon' aria-hidden='true'>
-              📁
+              <FolderIcon size={14} open={!isCollapsed} />
             </span>
             <span className='signal-file-tree-name'>{node.name}</span>
             <span className='signal-file-tree-count' aria-hidden='true'>
@@ -186,7 +155,7 @@ export function FileTree({files, selectedPath, onSelect}: FileTreeProps) {
       >
         <span className='signal-file-tree-caret' aria-hidden='true' />
         <span className='signal-file-tree-file-icon' aria-hidden='true'>
-          {iconFor(filename)}
+          <FileIcon filename={filename} size={14} />
         </span>
         <span className='signal-file-tree-name'>{filename}</span>
         <span
