@@ -3093,6 +3093,21 @@ export interface ProjectChatInfo {
 export const getProjectChatInfo = (projectId: string) =>
   req<ProjectChatInfo>(`/projects/${projectId}/chat/info`);
 
+export interface ProjectChatMessageDto {
+  id: string;
+  projectId: string;
+  orgId: string;
+  userId: string;
+  role: 'USER' | 'ASSISTANT';
+  content: string;
+  tokensIn?: number | null;
+  tokensOut?: number | null;
+  createdAt: string;
+}
+
+export const getProjectChatHistory = (projectId: string) =>
+  req<ProjectChatMessageDto[]>(`/projects/${projectId}/chat`);
+
 // ── Migrations product (R-336..R-339) ─────────────────────────────────────
 
 export interface MigrationRecipeSummary {

@@ -37,11 +37,16 @@ export default function ProjectChatPage() {
     let cancelled = false;
     let memTimer: number | undefined;
     api
-      .getProjectChatInfo(id)
-      .then((c) => {
+      .getProjectChatHistory(id)
+      .then((rows) => {
         if (cancelled) return;
-        const cAny = c as unknown as {messages?: ChatMsg[]};
-        if (cAny?.messages) setMessages(cAny.messages);
+        setMessages(
+          rows.map((r) => ({
+            role: r.role === 'USER' ? 'user' : 'assistant',
+            content: r.content,
+            ts: r.createdAt,
+          })),
+        );
       })
       .catch((e: unknown) => {
         if (cancelled) return;
@@ -49,7 +54,6 @@ export default function ProjectChatPage() {
         if (/403|forbidden|Team or Enterprise/i.test(msg)) {
           setChatGated(true);
         }
-        // Otherwise swallow — chat may still be usable even if /info fails.
       });
     function refreshMemory() {
       api
