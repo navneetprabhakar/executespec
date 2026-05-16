@@ -9,6 +9,7 @@ import {Share, More} from '@/signal/icons/icons';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
 import {useAuthStore, selectNormalizedTier} from '@/stores/useAuthStore';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
 type Provider = 'anthropic' | 'openai' | 'gemini';
@@ -277,14 +278,8 @@ export default function ProjectComposePage() {
             <div className='signal-composer-card' style={{padding: 14}}>
               <div className='composer-chips'>
                 {repos.map((r) => {
-                  const rId = String(
-                    (r as {repoId?: string; id?: string}).repoId || (r as {id?: string}).id || '',
-                  );
-                  const rName = String(
-                    (r as {repoName?: string; name?: string}).repoName ||
-                      (r as {name?: string}).name ||
-                      rId,
-                  );
+                  const rId = repoIdFor(r);
+                  const rName = repoDisplayName(r);
                   const selected = selectedRepoIds.includes(rId);
                   return (
                     <Chip

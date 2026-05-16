@@ -117,3 +117,40 @@ export function formatElapsed(ms?: number | null): string {
 export function projectIsArchived(p: ProjectDto): boolean {
   return !!p.archivedAt;
 }
+
+/**
+ * Render the display name for a project repo. The backend `ProjectRepoDto`
+ * carries `githubRepoFullName` (e.g. `owner/repo`) — older fixtures and
+ * fallback paths may surface a bare `name` / `repoName` instead. If every
+ * candidate is missing, fall back to a short ID (first 8 chars + `…`)
+ * rather than the full UUID, which is unreadable in chip pills + tables.
+ *
+ * Centralised here so the "UUID instead of repo name" regression spotted
+ * on the Compose page, Code → Code review per-repo list, and Architecture
+ * per-repo grid is fixed in exactly one place going forward.
+ */
+export function repoDisplayName(r: unknown): string {
+  const rec = r as {
+    githubRepoFullName?: string | null;
+    fullName?: string | null;
+    name?: string | null;
+    repoName?: string | null;
+    githubOwner?: string | null;
+    repoId?: string | null;
+    id?: string | null;
+  };
+  const slug = rec.githubRepoFullName?.trim() || rec.fullName?.trim();
+  if (slug) return slug;
+  const bare = rec.name?.trim() || rec.repoName?.trim();
+  if (bare) {
+    return rec.githubOwner ? `${rec.githubOwner}/${bare}` : bare;
+  }
+  const rawId = rec.id || rec.repoId || '';
+  return rawId ? `${rawId.slice(0, 8)}…` : '—';
+}
+
+/** Stable, never-empty repo id for use as map keys / API params. */
+export function repoIdFor(r: unknown): string {
+  const rec = r as {repoId?: string | null; id?: string | null};
+  return String(rec.repoId || rec.id || '');
+}

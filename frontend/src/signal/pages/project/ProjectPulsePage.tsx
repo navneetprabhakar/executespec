@@ -7,6 +7,7 @@ import {SkeletonRow} from '@/signal/components/Loaders';
 import {ProjectTabs} from './ProjectTabs';
 import {Share, More} from '@/signal/icons/icons';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
 function relTime(input?: string): string {
@@ -317,8 +318,8 @@ export default function ProjectPulsePage() {
           (
             health?.repos ||
             repos.map((r) => ({
-              repoId: (r as unknown as {id?: string}).id,
-              name: (r as unknown as {name?: string}).name,
+              repoId: repoIdFor(r),
+              name: repoDisplayName(r),
               headSha: (r as unknown as {headSha?: string}).headSha,
               webhookInstalled: false,
               openPrs: 0,

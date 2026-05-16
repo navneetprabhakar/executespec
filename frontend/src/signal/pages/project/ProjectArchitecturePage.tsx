@@ -6,6 +6,7 @@ import {LoadingState, SkeletonRow} from '@/signal/components/Loaders';
 import {Markdown} from '@/signal/components/Markdown';
 import {ProjectTabs} from './ProjectTabs';
 import {useProjectMeta} from '@/signal/hooks/useProjectMeta';
+import {repoDisplayName, repoIdFor} from '@/signal/lib/runUtils';
 import * as api from '@/lib/api';
 
 type ArchTab = 'current' | 'versions' | 'invariants' | 'adrs' | 'contracts';
@@ -623,14 +624,8 @@ export default function ProjectArchitecturePage() {
             <>
               <SectionHeader>Per-repo coverage</SectionHeader>
               {repos.map((rep) => {
-                const repoId = String(
-                  (rep as {repoId?: string; id?: string}).repoId || (rep as {id?: string}).id || '',
-                );
-                const repoName = String(
-                  (rep as {repoName?: string; name?: string}).repoName ||
-                    (rep as {name?: string}).name ||
-                    repoId,
-                );
+                const repoId = repoIdFor(rep);
+                const repoName = repoDisplayName(rep);
                 const cov = coverage[repoId];
                 const detectors = (cov?.scans || []) as api.DetectorSummary[];
                 const knownGaps = (cov?.knownGaps || []) as api.KnownGap[];

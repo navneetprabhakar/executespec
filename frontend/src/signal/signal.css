@@ -2658,6 +2658,105 @@ body {
 }
 
 /* ─────────────────────────────────────────────────────────────
+   Slimmer 1:3 layout for the Code tab on Result page. The file
+   tree fits in ~260px; the viewer takes the rest. Without this
+   override the generic split-runs grid burns half the width on
+   a tree that doesn't need it. Falls back to the default 5fr/4fr
+   when the consumer doesn't opt in.
+   ───────────────────────────────────────────────────────────── */
+@media (min-width: 1024px) {
+  .signal-app .signal-split-runs.signal-split-code {
+    grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────
+   File tree — folder + file nodes inside the Code-tab sidebar.
+   Visually similar to VS Code's Explorer pane: caret, folder
+   icon, filename, status dot. Click anywhere on the row to
+   open the file or toggle the folder.
+   ───────────────────────────────────────────────────────────── */
+.signal-file-tree {
+  font-size: 13px;
+  line-height: 1.4;
+  background: var(--signal-card-bg);
+  border: 1px solid var(--signal-hairline);
+  border-radius: 12px;
+  padding: 6px 0;
+  user-select: none;
+}
+.signal-file-tree-node {
+  display: grid;
+  grid-template-columns: 16px 18px 1fr auto;
+  gap: 6px;
+  align-items: center;
+  padding: 4px 10px 4px 6px;
+  cursor: pointer;
+  border-radius: 6px;
+  margin: 0 6px;
+  color: var(--signal-ink);
+}
+.signal-file-tree-node:hover {
+  background: var(--signal-card-elev);
+}
+.signal-file-tree-node.is-selected {
+  background: var(--signal-card-elev);
+  outline: 1px solid var(--signal-hairline);
+}
+.signal-file-tree-caret {
+  font-size: 10px;
+  color: var(--signal-text-mute);
+  width: 16px;
+  text-align: center;
+}
+.signal-file-tree-folder-icon,
+.signal-file-tree-file-icon {
+  font-size: 13px;
+  width: 18px;
+  text-align: center;
+  color: var(--signal-text-dim);
+}
+.signal-file-tree-dir .signal-file-tree-name {
+  font-weight: 500;
+}
+.signal-file-tree-file .signal-file-tree-name {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12.5px;
+}
+.signal-file-tree-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.signal-file-tree-count {
+  font-size: 11px;
+  color: var(--signal-text-mute);
+  padding: 1px 6px;
+  background: var(--signal-card-elev);
+  border-radius: 999px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.signal-file-tree-status {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--signal-hairline);
+}
+.signal-file-tree-status.mint {
+  background: var(--signal-mint);
+}
+.signal-file-tree-status.signal {
+  background: var(--signal-y);
+}
+.signal-file-tree-status.coral {
+  background: var(--signal-coral);
+}
+.signal-file-tree-status.lavender {
+  background: var(--signal-lavender, #c4b8e0);
+}
+
+/* ─────────────────────────────────────────────────────────────
    Glossary — hover/focus tooltip for term definitions. v3 parity.
    ───────────────────────────────────────────────────────────── */
 .signal-glossary {
