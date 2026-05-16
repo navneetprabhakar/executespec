@@ -1,92 +1,255 @@
-# ExecuteSpec — Enterprise one-pager
+# ExecuteSpec — Enterprise tier
 
-_For IT / Security / Procurement teams evaluating ExecuteSpec for adoption._
-
-## What ExecuteSpec is
-
-A spec-driven AI coding platform. Your engineers submit a specification in
-natural language; ExecuteSpec plans the work, generates code across one or
-more repositories, runs a build + tests, and opens a pull request with a
-0-100 verified score. Human approval happens at a plan gate — no code is
-executed until an engineer clicks approve.
-
-## Security posture
-
-| Control | Status |
-|---|---|
-| Data-at-rest encryption | AES-256-GCM on all user-supplied secrets (API keys, OAuth tokens, passwords) |
-| Data-in-transit encryption | TLS 1.2+ enforced via HSTS (`Strict-Transport-Security: max-age=31536000; includeSubDomains`) |
-| Authentication | JWT access (1h TTL) + refresh cookie (7d, HttpOnly, SameSite=Lax) |
-| SSO / SAML | Google Workspace OIDC on TEAM tier; Okta + Azure AD SAML on Enterprise (Wave 3 schema shipped, wiring tracked in `sso-saml-wiring.md`) |
-| RBAC | SUPER_ADMIN / ORG_ADMIN / BILLING_ADMIN / DEVELOPER / PROJECT_ADMIN / PROJECT_DEVELOPER / PROJECT_VIEWER (V175 cross-org) |
-| Audit logging | Every privileged action → `activity_audit` table with cryptographic chain verification, retained per tier (FREE 30d / PRO 90d / TEAM 180d / ENTERPRISE unlimited) |
-| Secret scanning in user code | `InputSanitizer` + `CodeAbuseScanner` (8-layer defense) — blocks prompt injection, crypto-mining, reverse shells, PowerShell, DNS exfil, cloud-metadata access |
-| Infrastructure | GCP us-east4 (N. Virginia); Cloud Run for previews (5-min TTL, managed HTTPS), Cloud SQL for state, Redis for gate coordination |
-| SOC 2 Type I | Scoping in progress with Vanta (target: Q3 2026) |
-| SOC 2 Type II | Target: Q1 2027 |
-| GDPR DSAR | Soft-delete on `app_user`; PostHog analytics can be opted out; admin can hard-delete on request |
-| HIPAA / PCI | Not in scope — ExecuteSpec is not a BAA-eligible or PCI-DSS-eligible service |
-
-## Data handling
-
-| Question | Answer |
-|---|---|
-| Where is customer data stored? | GCP us-east4 (PostgreSQL on Cloud SQL, Redis on GCE VMs, file workspaces on GCS `executespec-workspaces` bucket) |
-| Who has access to customer data? | Engineering team (Navneet as sole operator today; CSM role opening Q4 2026). Access logged to `activity_audit`. |
-| How is customer code isolated? | Each run gets a dedicated Docker container (read-only filesystem, `--cap-drop ALL`, memory/CPU limits, env-var whitelist); container destroyed at run end. |
-| Multi-tenant data isolation | **Application-layer `org_id` stamping** — every JPA query filters by the caller's `org_id`; PostgreSQL row-level security policies are NOT applied. Defense in depth at the DB layer is on the roadmap; today's protection is application-layer + WAF + per-tenant rate limits. (Audit Sprint 1 [F-11]: prior versions of this doc implied database-layer isolation; this row makes the actual model explicit so procurement can ask the right follow-up questions.) |
-| Do you train models on customer data? | No. Model providers (Anthropic, OpenAI, Google) are reached via API with zero-retention prompts on paid plans; ExecuteSpec does not fine-tune models on customer content. |
-| Sub-processors | Anthropic API, OpenAI API, Google GenAI, Stripe (US/global billing), Razorpay (India billing), GCP (infra), PostHog (product analytics; opt-out available) |
-| Incident response | Operator notification within 2 hours for P1 (security incident); customer notification within 24 hours per ENTERPRISE SLA |
-| Deletion on churn | On cancellation, customer data is retained for 30 days for billing reconciliation then hard-deleted |
-
-## Compliance-adjacent
-
-- Stripe handles all payment card data — ExecuteSpec does not store card numbers
-- Webhook signatures verified via HMAC SHA-256 (Razorpay, GitHub) or `Stripe-Signature` (Stripe)
-- JWT secret validated at boot in prod (`JwtSecretValidator`) — placeholder values block startup
-- Rate limiting per tenant via Redis (`RateLimitFilter`) — AUTH / RUNS / WEBHOOK / READ / WRITE / PREVIEW / DEPLOY groups
-
-## What's available on each tier
-
-| | FREE | PRO (HIDDEN) | TEAM | ENTERPRISE |
-|---|---|---|---|---|
-| Monthly runs | 5 (1-credit only) | 20 credits | Unlimited (BYOK) | Unlimited + SLA |
-| Seats | 1 | 1 | 2-20 self-serve | Unlimited |
-| BYOK | No | No | Yes (required) | Yes |
-| SSO / SAML | No | No | Google OIDC | All providers + SCIM (Q1 2027) |
-| Audit log retention | 30d | 90d | 180d | Unlimited + CSV export |
-| Uptime SLA | None | None | 99.5% (target, no credit) | 99.9% with credits |
-| Named support | No | No | No | Named CSM + P1 4h |
-| MSA / DPA | Standard Terms | Standard Terms | Standard Terms | Negotiable |
-| Sub-processor approval | Implicit | Implicit | Implicit | Right to object |
-
-PRO is HIDDEN from new buyers (grandfathered). Solo / MAX tiers do not exist on `dev`/`main` (V179/V185 retired both).
-
-## Contract path
-
-1. **Evaluation:** 14-day team trial (up to 5 seats) — email `admin@executespec.ai` with work email + company name
-2. **Pilot:** 30-day paid pilot on TEAM (standard Terms, no negotiation)
-3. **Enterprise:** annual contract with negotiable MSA, minimum 10 seats, starts at $1,500/mo (~$75/seat for 20 seats)
-4. **Volume pricing:** 21+ seats → direct sales engagement (not self-serve)
-
-## Point of contact
-
-- **Primary:** Navneet Prabhakar — `admin@executespec.ai`
-- **Security:** `admin@executespec.ai` with subject line `SECURITY` (24h response target)
-- **Procurement:** `admin@executespec.ai` with subject line `PROCUREMENT` (48h response target)
-
-## Appendix — document requests
-
-On request, we can provide:
-
-- [ ] Latest SOC 2 scoping document (pre-Type-I)
-- [ ] MSA template (PDF) — standard terms for ENTERPRISE; negotiable
-- [ ] DPA template (PDF) — GDPR sub-processor list included
-- [ ] Penetration test report — on NDA after signing LOI (Q3 2026 target for first pen-test)
-- [ ] Sub-processor registry — full list with data residency + purpose of processing
-- [ ] Security questionnaire response — SIG Core + custom questionnaires supported
+> What customers on the ENTERPRISE tier get, derived from the code that
+> implements it. Each capability cites the file or migration that makes
+> it real.
 
 ---
 
-_Last updated: 2026-05-12 (1.0.0-M1). This document is under active review as the platform progresses toward SOC 2 Type I certification._
+## 1. Unlimited monthly runs (with BYOK)
+
+`TierEnforcementService.effectiveOrgLimit(Org)` in
+`src/main/java/com/navneet/executespec/auth/service/TierEnforcementService.java`
+(lines 538-556):
+
+```java
+public int effectiveOrgLimit(Org org) {
+  String effectiveTier = org.getTier() != null ? org.getTier() : "FREE";
+
+  // ENTERPRISE with own keys = unlimited (BYOK contract).
+  if ("ENTERPRISE".equals(effectiveTier) && org.isApiKeysProvided()) return -1;
+
+  if (org.getMonthlyRunLimitOverride() != null) return org.getMonthlyRunLimitOverride();
+
+  return getMonthlyLimit(effectiveTier);
+}
+```
+
+When an ENTERPRISE org sets `org.api_keys_provided = TRUE` (via the
+ORG_ADMIN settings page that backs `PUT /api/org/me/settings/ai-keys`), the
+return value is `-1` (unlimited). Without BYOK keys, the org falls through
+to `tier_config.monthly_run_limit` for ENTERPRISE, currently seeded at
+`5000` (`V6__tier_config_and_org_limits.sql:13-15`).
+
+Solo ENTERPRISE users (single-member personal org per V162) follow the same
+path because `TierPermissionService.getPermissions` routes them through
+`effectiveUserLimit` for the cap check, which still resolves to the
+ENTERPRISE tier_config row.
+
+---
+
+## 2. BYOK with full cost-cap exemption
+
+Two interlocking pieces:
+
+### Per-org key resolution
+
+`Org.keySourceMode` (lines 96-100 of `auth/entity/Org.java`):
+
+- `SYSTEM` — always use platform-provided keys.
+- `OWN_KEYS` — only use user/org keys; no platform fallback.
+- `HYBRID` (default) — user/org keys first, fall back to platform.
+
+`Org.enabledProviders` lets the ORG_ADMIN narrow the allowed set
+(`"anthropic,openai,gemini"` — null = all allowed). Both are set via
+`PUT /api/org/me/settings/key-source` (OrgController line 203-213).
+
+### Cost-cap exemption
+
+The platform-wide cost cap defaults to `$8` per run (per
+`docs/CLAUDE.md` references; verified by `RunOrchestrator` not by re-read
+here). When `org.keySourceMode == OWN_KEYS`, the cap is bypassed — the run
+is paid for entirely by the customer's own LLM provider account, so
+ExecuteSpec has no cost exposure.
+
+The customer can still set a voluntary `userCostCap` on the run request
+(see API contract for `POST /api/runs` in the project CLAUDE.md). This is
+clamped against the platform cap on non-BYOK orgs; BYOK skips clamping.
+
+---
+
+## 3. Single Sign-On (TEAM and ENTERPRISE)
+
+**What works today**: `GOOGLE_OIDC` enforced SSO. An ORG_ADMIN sets the
+provider + email domain via `PUT /api/auth/sso/config` and flips
+`enforced = true`. Future logins for the org's email domain land on Google's
+authorisation code flow and are auto-bounced back into ExecuteSpec.
+
+**What's saved-but-not-enforced**: `OKTA_SAML` and `AZURE_AD_SAML`. The
+schema columns exist (`V127__wave3_sso_githubapp_trial.sql`) and the
+configuration UI accepts the metadata URL + domain, but enforcement is
+rejected with 409 Conflict — the SAML2 ACS / SP-metadata wiring has not
+shipped. See `docs/sso-saml-wiring.md` for the full picture and the
+operator runbook.
+
+The save itself is gated to `SUPER_ADMIN` or `ORG_ADMIN`
+(`@PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")` at every method on
+`auth/sso/SsoConfigController.java`). The tier gate is currently a
+front-end cosmetic gate, not a server-side hard gate.
+
+---
+
+## 4. Audit log (TEAM and ENTERPRISE)
+
+Every meaningful state change (settings updates, role changes, payment
+events, run lifecycle, invitations, SSO toggles, sharing toggles) is
+recorded as an `ActivityAudit` row by `ActivityAuditService.record(...)`.
+
+Org-scoped query endpoint:
+
+```
+GET /api/org/me/audit-logs
+  ?entityType=&eventType=&actorId=&entityId=&from=&to=&page=&size=
+```
+
+Annotated `@PreAuthorize("hasRole('ORG_ADMIN') or hasRole('SUPER_ADMIN')")`
+(`auth/controller/OrgController.java:179`). Returns a paginated
+`AuditLogPage` DTO. Backed by `ActivityAuditService.query(...)`.
+
+Auth-side event types in the audit log include `USER_REGISTERED`,
+`EMAIL_VERIFIED`, `PASSWORD_RESET`, `PASSWORD_CHANGED`,
+`USER_GITHUB_SETTINGS_CHANGED`, `USER_AI_KEYS_CHANGED`,
+`USER_JIRA_SETTINGS_CHANGED`, `USER_CONFLUENCE_SETTINGS_CHANGED`,
+`USER_BITBUCKET_SETTINGS_CHANGED`, `ORG_EXTERNAL_SHARING_CHANGED` (V198).
+The audit table has a hash-chain integrity field (`hash_chain_value`); the
+chain is verified by an internal job and is **not** exposed in DSAR exports.
+
+`TierPermissionService.orgMemberPermissions` (ORG_ADMIN branch, lines
+207-236) sets `canViewAudit = true`; the FREE / PRO front-end does not
+surface the menu item. ENTERPRISE customers see it by default.
+
+---
+
+## 5. External cross-org collaboration (V175 + V198)
+
+ENTERPRISE orgs (and any PRO+ tier where the org admin has enabled it) can
+invite collaborators from outside the org as `is_external = TRUE`
+`ProjectMember` rows on a single project. The flow is:
+
+1. ORG_ADMIN flips `org.external_sharing_enabled = TRUE` via
+   `PUT /api/org/me/settings/external-sharing` (`OrgController:228-237`).
+2. ORG_ADMIN calls `POST /api/projects/{id}/invites` with `{email,
+   projectRole}`. Role can be `PROJECT_VIEWER` (read-only), `PROJECT_DEVELOPER`,
+   or `PROJECT_ADMIN`.
+3. Invitee receives an email with a magic link, accepts via
+   `POST /api/invites/accept?token=…`, gets a `project_member` row added.
+4. From that moment, `ProjectAccessGuard.assertCanRead` admits them on any
+   project sub-resource via the cross-org branch; writes are blocked for
+   `PROJECT_VIEWER` only.
+
+Three gates are enforced by `ProjectInviteService.assertCanInvite`
+(`sharing/service/ProjectInviteService.java:99-147`):
+
+- Tier: caller must be `PRO`, `TEAM`, `MAX`, or `ENTERPRISE`.
+- Role (V198): caller must be SUPER_ADMIN, or ORG_ADMIN of their own org.
+- Org flag (V198): the caller's `org.external_sharing_enabled` must be
+  `true`. SUPER_ADMIN bypasses the last two.
+
+A separate **public share link** surface (`project_share_link` table) lets
+an admin generate signed, read-only URLs for specific surfaces
+(`PROJECT_OVERVIEW`, `RUN_DETAIL`, `CODE_REVIEW`, `PR_REVIEW`,
+`VALIDATION_REPORT`, `ARCHITECTURE_DOC`). Tier-gated by
+`tier_config.share_link_active_cap` (FREE=3, PRO=25, ENTERPRISE
+unlimited).
+
+---
+
+## 6. Standards compliance + architecture invariants
+
+`src/main/java/com/navneet/executespec/standards/` houses the per-org coding
+standards engine. ORG_ADMINs can:
+
+- Add per-org standards (`POST /api/admin/standards/...`, gated to
+  `@PreAuthorize("hasAnyRole('SUPER_ADMIN','ORG_ADMIN')")` at every method
+  on `standards/OrgStandardController.java`).
+- Override or grant standing exceptions on violations via
+  `POST /api/projects/{id}/standards/violations/{id}/override` and
+  `POST /api/projects/{id}/standards/{id}/exception` (≥30-char rationale
+  required).
+- Query the standards compliance report at
+  `GET /api/projects/{id}/standards/report?orgId=&sinceDays=`.
+
+`arch/invariants/` holds architecture invariants — declarative rules that
+the planner / reviewer enforce on generated code (no field injection, prompt
+files only via `PromptAssembler`, etc.). These are the same rules the
+platform itself follows; they ship as defaults for enterprise customers and
+can be customised per org.
+
+---
+
+## 7. Other ENTERPRISE-grade features (one-liners with code anchors)
+
+| Feature                          | Anchor                                                                                                                       |
+| -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Org-wide JIRA + Confluence creds  | `auth/entity/Org.java:160-187`; managed via `PUT /api/org/me/settings/{jira,confluence}` (ORG_ADMIN only)                     |
+| Per-org domain enforcement       | `org.domain_enforcement_mode` (`V21__tier_permissions.sql:11`); ENTERPRISE is always `ENFORCED` regardless of column          |
+| Block common consumer domains    | `org.block_common_domains` — ENTERPRISE always `TRUE` (`V21__tier_permissions.sql:24`)                                        |
+| Per-org GitHub owner allowlist   | `org.allowed_github_owners` (V148, M-039) — `ProjectRepoService` rejects links outside the list                              |
+| Admin-approval threshold         | `org.require_admin_approval_above_usd` (V148, M-032) — plan-gate approval requires ORG_ADMIN above the USD threshold         |
+| Suspend / un-suspend members     | `PUT /api/org/me/members/{userId}/suspend` (`OrgController:93-103`)                                                          |
+| GitHub App installation          | `org.github_installation_id` (`V127__wave3_sso_githubapp_trial.sql:26-31`); preferred over per-user PATs when set            |
+| Seat management (TEAM tier)      | `POST /api/org/me/seats/adjust` — proration via Stripe/Razorpay (`OrgController:389-398`)                                    |
+| Multi-repo runs                  | `auth/entity/Project.java` + `project_repo` join — per-repo workspace + per-repo PR cross-link                                |
+| Data retention                   | `tier_config.retention_days` — ENTERPRISE=365 days (`auth/entity/TierConfig.java:85-87`)                                     |
+| GDPR data export                 | `GET /api/auth/me/data-export` — ZIP bundle. See `docs/dpa-flow.md`                                                          |
+| DSAR (legal-team workflow)       | `GET /api/dsar/me` + `GET /api/dsar/users/{id}` (SUPER_ADMIN only)                                                            |
+| Per-org cleanup / erasure        | `DELETE /api/auth/me/data` — soft-deletes the caller's runs; full account closure is policy / contractual via admin@         |
+
+---
+
+## 8. Onboarding workflow
+
+The customer-facing onboarding pattern (verified by reading code, not
+inferring from marketing):
+
+1. **Tier provisioning** — SUPER_ADMIN sets `org.tier = "ENTERPRISE"` (and
+   typically `api_keys_provided = TRUE` once the customer has shared their
+   LLM keys). Billing path: either `BILLING_DEFAULT_GATEWAY=stripe` with the
+   `STRIPE_ENTERPRISE_PRICE_ID`, or a manual override row written via
+   `PaymentAuditService` (event `MANUAL_OVERRIDE`).
+2. **ORG_ADMIN onboarding** — One ORG_ADMIN account from the customer's
+   domain. Either signs up via Google OAuth (and is then promoted) or via
+   email + password followed by manual `app_user.global_role` update.
+3. **Domain enforcement** — `org.domain_patterns = "acme.com"` so future
+   members from that domain auto-attach. `block_common_domains` is always
+   true on ENTERPRISE per `V21__tier_permissions.sql`.
+4. **SSO setup** — Today this means GOOGLE_OIDC. SAML is on the roadmap (see
+   `docs/sso-saml-wiring.md`). The M-016 lockout guard requires the
+   onboarding admin to themselves have logged in via Google before
+   enforcement can be flipped on.
+5. **External sharing decision** — V198 flag stays off unless the customer
+   asks for cross-org collaboration. Toggle via the Org Settings page.
+6. **GitHub App install (preferred)** — installs at the org level and writes
+   `org.github_installation_id`. Avoids requiring every member to upload a
+   PAT.
+7. **First project + repos** — created by the ORG_ADMIN via
+   `POST /api/projects` and `POST /api/projects/{id}/repos`. Tier caps
+   (`tier_config.max_projects_per_org`, `max_repos_per_project`) default to
+   `-1` (unlimited) for ENTERPRISE.
+
+---
+
+## 9. SLA + support
+
+For uptime targets, support response times, maintenance windows, and
+incident reporting, see `docs/enterprise-sla.md`. This document does not
+restate those terms.
+
+---
+
+## 10. References
+
+- `auth/service/TierEnforcementService.java` — limit + BYOK exemption logic.
+- `auth/entity/Org.java` — every org-level capability column.
+- `auth/entity/TierConfig.java` — per-tier feature toggles + caps.
+- `auth/service/TierPermissionService.java` — capability matrix derived
+  from tier + role.
+- `auth/controller/OrgController.java` — all ORG_ADMIN-gated settings.
+- `auth/sso/SsoConfigController.java` — SSO config (see also
+  `docs/sso-saml-wiring.md`).
+- `sharing/service/ProjectInviteService.java` — V175 + V198 cross-org
+  invite gates.
+- `V6__tier_config_and_org_limits.sql`, `V21__tier_permissions.sql`,
+  `V127__wave3_sso_githubapp_trial.sql`, `V148__governance_caps.sql`,
+  `V175__external_project_sharing.sql`, `V198__org_external_sharing_flag.sql`
+  — schema deltas that underlie each capability.

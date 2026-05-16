@@ -1,328 +1,566 @@
-# ExecuteSpec — Codemap
+# ExecuteSpec — CODEMAP
 
-> Structural index of `src/main/java/com/navneet/executespec/` as of 2026-05-12.
-> Companion to [ARCHITECTURE.md](ARCHITECTURE.md) (deep-dive) and [document_map.md](document_map.md) (which doc to update for which change).
->
-> **Versioning convention (since the 2026-05-07 unification pass):** no `v2.*` or `v3.*` markers in Java paths or class names. Everything lives flat under `com.navneet.executespec.*`. The legacy router (`agent/FallbackLlmRouter`) survives for non-tool-calling agents only; the canonical `agent/LlmRouter` covers every native-tool-calling agent.
->
-> **Style enforcement:** `spotless-maven-plugin` 2.43.0 + `googleJavaFormat` 1.22.0 bound to `mvn verify`. CI runs `mvn -B spotless:check` on every PR (`.github/workflows/lint.yml`). Documented deviations in [`design/code-style.md`](design/code-style.md).
->
-> 72 top-level packages, 98 REST controllers, 78 entities, 186 Flyway migrations.
+Mechanical index of `src/main/java/com/navneet/executespec/`, `frontend/src/`, prompts, migrations, controllers, agents, tools, entities, and feature flags. Generated from the repo at version `1.0.0-M1` (Flyway head V199).
 
-## Top-level layout
-
-```
-src/main/java/com/navneet/executespec/
-├── ExecutespecApplication.java          # Spring Boot entry point
-├── activity/                            # Customer-facing project activity feed (E1, partitioned by month)
-├── adr/                                 # ADRs as first-class — frontmatter cache (E3.12)
-├── agent/                               # Hierarchical planner pipeline + worker + native-tool LLM router
-├── analytics/                           # PostHog activation funnel (6-event ledger)
-├── anonrun/                             # Anonymous (no-auth) run flow
-├── api/                                 # REST surface — controllers, DTOs, advice
-├── apitests/                            # API test suite agent
-├── arch/                                #   .invariants/ — architectural invariant checker (E3.14)
-├── assessment/                          # Pre-plan feature assessment (heuristic + LLM-gated)
-├── auth/                                # JWT + OAuth2 + RBAC + tier permissions (+ dsar/ sso/ data-export)
-├── batch/                               # Frozen V1 batch (V2 batch scoped separately — see docs/plans/pending.md §3)
-├── billing/                             # Razorpay + Stripe + tier lifecycle + founder pricing
-├── chat/                                # Apply-suggestion service (chat → patch dispatch)
-├── codeintel/                           # Codemaps + 3-step architecture pipeline + Generate Docs
-├── codereview/                          # Whole-repo Code Review agent (semgrep + LLM augmentation)
-├── compliance/                          # Data retention / GDPR soft-delete
-├── composer/                            # Migration recipe slot validator + spec composer
-├── config/                              # Feature flags, secrets, observability config
-├── contact/                             # Public contact form
-├── context/                             # ContextAgent (legacy non-tool helper) + V2 ContextStore
-├── contracts/                           # Cross-repo contract registry — drift, consumers, coverage (E2)
-├── cost/                                # RunCostTracker (per-call token + $ accumulator, cache-aware)
-├── credit/                              # Credit grant + ledger
-├── crypto/                              # KMS / encryption-at-rest
-├── deployment/                          # Cloud Run + Docker preview/deploy
-├── entitlements/                        # EntitlementResolver (tier rank + project scope)
-├── eval/                                # Model evaluation framework
-├── execution/                           # Execution View (multi-repo, multi-solution)
-├── export/                              # Project export bundle — zip of .executespec/ (E4.7)
-├── finding/                             # FindingPatchSubmitter — chokepoint for the 4 autofix surfaces (V183)
-├── folder/                              # .executespec/ folder write chokepoint + bootstrap (E1)
-├── governance/                          # Plan-approval policy + project spend cap + repo allowlist
-├── harness/                             # SequentialExecutor + V1 primitives reused by V2 (workspace, gates, design system)
-├── integration/                         # RunOrchestrator + Slack/JIRA/Confluence/Bitbucket/PagerDuty/ServiceNow + ScmPushService
-├── landing/                             # Landing page state (legacy v3 surface)
-├── lint/                                # Lint autofix flag (V180)
-├── memory/                              # Project memory + project chat + chat tools
-├── migration/                           # Migration recipe orchestrator (sibling to readymade/)
-├── notification/                        # In-app notifications (+ pref/ per-user channel matrix, E4.5)
-├── observability/                       # Metrics — executespec.v2.* Micrometer meters
-├── onboarding/                          # Sandbox + sample specs (3 starter projects)
-├── optimiser/                           # PromptOptimiserAgent
-├── pricing/                             # Model pricing matrix DTOs (YAML-derived)
-├── programbench/                        # ProgramBench cleanroom-benchmark adapter
-├── project/                             # Project workspace (dashboard, estimation, pr, rag, scores, techdebt, template, workspace)
-├── prreview/                            # PR Review agent — single-call diff review (PLANNING tier)
-├── ratelimit/                           # Per-tenant Redis-backed rate limiter
-├── readymade/                           # Readymade Solutions library (W1-W5 shipped on feature/readymades-and-migrations)
-├── recovery/                            # StartupRunResumer — boot-time crash recovery
-├── referral/                            # Referral codes + lifetime credit grants (legacy v3 surface)
-├── repo/                                # GitHubRepoService + BitbucketRepoService + ScmProvider
-├── report/                              # ValidationReport entity + PDF + share
-├── reviewer/                            # ReviewerAgent (general + wiring) + AccuracyAssessmentService
-├── rollout/                             # RolloutRunController (gradual-rollout surface)
-├── router/                              # LlmProvider enum + ModelRegistry + ProviderHealthTracker + ProviderRecommendationService
-├── run/                                 # Run sync helpers + run-aux services
-├── saga/                                # Side-effect outbox (compensation)
-├── scoring/                             # 6-dimension scoring + verifiedScore
-├── security/                            # Sanitizers, abuse scanner, guardrail levels (+ guardrail/ sub)
-├── sharing/                             # External project sharing — cross-org ProjectMember + public share links (V175 + V198 org-flag gate)
-├── smoketest/                           # CliSmokeRunner
-├── sse/                                 # SSE channel — RunEvent, broadcaster
-├── standards/                           # Engineering standards as binding policy — AST/LLM checks + override (E3)
-├── state/                               # StateStore + JPA entities for pipeline_run / agent_task
-├── swebench/                            # SWE-bench Lite adapter
-├── tenant/                              # Tenant filter + interceptor + thread context
-├── test/                                # Test controllers (V2 dev-only)
-├── testgen/                             # Test generation orchestrator + agents
-├── tool/                                # Worker tools (11 + CompleteTaskTool) + ToolRegistry + ShellSandboxPolicy
-├── util/                                # PoolSizing.coreMultiple + small shared helpers
-└── validator/                           # Code validator + execution/gate/language/prompt subpackages
-```
+Sections:
+1. [Top-level Java packages](#1-top-level-java-packages)
+2. [REST controllers](#2-rest-controllers-98-files)
+3. [Agents](#3-agents-17-agentjava-files--auxiliaries)
+4. [Tools](#4-tools-tooljava--16-files-in-tool)
+5. [Entities and table mapping](#5-entities-and-table-mapping)
+6. [Flyway migrations](#6-flyway-migrations-199-files-head-v199)
+7. [LLM prompts](#7-llm-prompts)
+8. [Frontend pages](#8-frontend-pages)
+9. [Feature flags](#9-feature-flags)
 
 ---
 
-## Agents — `agent/`, `reviewer/`, `testgen/`, `codereview/`, `prreview/`
+## 1. Top-level Java packages
 
-| Subpackage | Key files | Purpose |
-|------------|-----------|---------|
-| `agent/` | `LlmRouter`, `FallbackLlmRouter`, `OpenAiNativeToolClient`, `GeminiNativeToolClient`, `SmartClassifierAgent`, `OutlinePlannerAgent`, `TaskExpanderAgent`, `CoherencePlannerAgent`, `PatchAgent`, `WorkerAgent`, `CompleteTaskTool`, `PlanStrategy`, `PlanStrategyCircuitBreaker`, `ClassificationResult`, `PromptAssembler`, `PromptAudit`, `RunCostEstimate`, `CostEstimator`, `PlannerOutputUtils` | The full V2 pipeline brain. `LlmRouter` for native tool-calling agents; `FallbackLlmRouter` for non-tool-calling agents (TestPlannerAgent, ApiTestSuiteAgent, AccuracyAssessmentService, ConversationAgent). Classification fast-path is heuristic; verifier is LLM. Hierarchical planning: full plan for SMALL/MEDIUM, skeleton + expand + coherence for LARGE, recursive depth-2 for LEGACY. `PatchAgent` is the patch-mode single-shot agent. |
-| `reviewer/` | `ReviewerAgent`, `AccuracyAssessmentService`, `ReviewIssue`, `ReviewReport` | General + project-type-aware wiring pass over the workspace. Two `WorkerAgent`-backed passes, 30 iter cap each. AccuracyAssessmentService is the LLM read-budget judge (10k char/file, 100k char ceiling). |
-| `testgen/` | `TestGenOrchestrator`, `TestPlannerAgent`, `TestWorkerAgent`, `TestExecutionService`, `TestPreviewCoordinator`, `ApiProber`, `ApiSurfaceExtractor`, `TestResultController` | Background test generation pipeline. Plan → generate → compile → execute against live preview. `ApiProber` hits live endpoints first; `ApiSurfaceExtractor` regex-extracts routes for the planner. |
-| `codereview/` | `CodeReviewAgent`, `CodeReviewService`, `CodeReviewController`, `CodeReviewAutofixService`, `SemgrepRunner`, `CodeReviewMarkdownRenderer`, entities + repos for `code_review_scan` + `code_review_issue` | Whole-repo Code Review agent. Stage 1 semgrep + Stage 2 LLM triage + markdown report download. Phase-4 autofix dispatch through `FindingPatchSubmitter`. |
-| `prreview/` | `PrReviewAgent`, `PrReviewService`, `PrReviewController`, `PrReviewAutofixService`, entity + repos for `pr_review` + `pr_review_comment` | Single-call PR review (PLANNING tier) emits verdict + line-anchored comments. Phase-1 autofix dispatch through `FindingPatchSubmitter`. |
-| `apitests/` | `ApiTestSuiteAgent` | API test suite generator (legacy V1 surface, still wired). |
+72 packages directly under `com.navneet.executespec`. Counts via `find <pkg> -name '*.java'`.
 
-Tier mapping (`application.yml`):
+| Package | Purpose (one line) | Ctrl | Svc | Agent | Tool | Total |
+|---|---|---:|---:|---:|---:|---:|
+| `activity` | Org/project audit-trail activity feed with month-partitioned reads. | 1 | 0 | 0 | 0 | 8 |
+| `adr` | Architecture Decision Records for projects (CRUD + render). | 1 | 1 | 0 | 0 | 5 |
+| `agent` | LLM agents (worker / planner / classifier) + `LlmRouter`. | 0 | 0 | 7 | 0 | 45 |
+| `analytics` | PostHog event tracking + activation funnel admin. | 1 | 1 | 0 | 0 | 6 |
+| `anonrun` | Anonymous-trial run support (Redis-throttled, no auth). | 0 | 1 | 0 | 0 | 7 |
+| `api` | REST controllers, DTOs, exception advice (`RestControllerAdvice`). | 21 | 0 | 0 | 0 | 47 |
+| `apitests` | API-test-suite agent (generates OpenAPI + smoke tests). | 0 | 0 | 1 | 0 | 2 |
+| `arch` | ArchUnit tests + architectural-invariant detection (also under `arch/invariants/`). | 1 | 0 | 0 | 0 | 6 |
+| `assessment` | Feature-assessment heuristic + LLM augmentation. | 0 | 1 | 0 | 0 | 2 |
+| `auth` | JWT auth, OAuth2 login, RBAC, users, orgs, GitHub-app, GDPR data export. | 7 | 11 | 0 | 0 | 72 |
+| `batch` | Batch-execution coordinator (Anthropic batch + Gemini inline ≥10 tasks). | 0 | 2 | 0 | 0 | 8 |
+| `billing` | Stripe + Razorpay gateways, plans, subscriptions, invoices, founder pricing. | 7 | 13 | 0 | 0 | 84 |
+| `chat` | Shared chat service primitives (kept thin). | 0 | 2 | 0 | 0 | 3 |
+| `codeintel` | Per-repo codemaps + per-repo / cross-repo architecture docs. | 2 | 8 | 0 | 0 | 26 |
+| `codereview` | Repo-wide code-review agent (Phase 4 autofix surface). | 1 | 2 | 1 | 0 | 10 |
+| `compliance` | Sunsetting / compliance-policy enforcement around tier lifecycle. | 0 | 1 | 0 | 0 | 3 |
+| `composer` | Spec composer support utilities. | 0 | 0 | 0 | 0 | 2 |
+| `config` | `@ConfigurationProperties` types + `FeatureFlagService` + bean wiring. | 3 | 3 | 0 | 0 | 24 |
+| `contact` | Contact-form intake routed to Jira / fallback email. | 1 | 1 | 0 | 0 | 4 |
+| `context` | Per-run conversation snapshot store (Redis-backed, 24h TTL). | 0 | 0 | 1 | 0 | 7 |
+| `contracts` | Cross-repo contract drift detection + consumer pinning + coverage. | 3 | 4 | 0 | 0 | 32 |
+| `cost` | `RunCostTracker`, cache-aware pricing, run-cost history. | 0 | 1 | 0 | 0 | 5 |
+| `credit` | Lifetime run credit balance accounting. | 0 | 1 | 0 | 0 | 1 |
+| `crypto` | Key encryption helpers (GCP Secret Manager + local fallback). | 0 | 1 | 0 | 0 | 4 |
+| `deployment` | Cloud Run + Cloud Build + Artifact Registry deploys + per-run preview engine. | 2 | 10 | 1 | 0 | 77 |
+| `entitlements` | Tier-based feature entitlements DTO. | 0 | 0 | 0 | 0 | 2 |
+| `eval` | Model-evaluation framework (planner / worker / reviewer eval admin). | 1 | 0 | 0 | 0 | 10 |
+| `execution` | V3 `ExecutionRun` orchestration + dependency graph + spec template. | 3 | 6 | 0 | 0 | 38 |
+| `export` | Project-scoped artefact ZIP export (`.executespec/` bundle). | 1 | 1 | 0 | 0 | 2 |
+| `finding` | Common patch-submitter chokepoint for the 4 autofix surfaces. | 0 | 0 | 0 | 0 | 3 |
+| `folder` | Writes the `.executespec/` folder layout into customer repos. | 1 | 1 | 0 | 0 | 7 |
+| `governance` | Activity-retention + audit-chain policy. | 0 | 0 | 0 | 0 | 1 |
+| `harness` | `SequentialExecutor`, `GateStore`, `UiStyleResolver`, `WorkspaceInitService`. | 0 | 1 | 0 | 0 | 15 |
+| `integration` | `RunOrchestrator`, SCM push service, multi-repo Git ops. | 0 | 4 | 0 | 0 | 42 |
+| `landing` | Landing-page / marketing API support. | 1 | 0 | 0 | 0 | 4 |
+| `lint` | Deterministic auto-formatter pass between executor and reviewer (V180). | 0 | 0 | 0 | 0 | 1 |
+| `memory` | Project memory snapshots + ledger + project chat (compaction). | 2 | 2 | 1 | 0 | 13 |
+| `migration` | Customer-side migration recipe catalogue + dry-run cache. | 2 | 2 | 0 | 0 | 24 |
+| `notification` | In-app notifications + per-user preferences. | 2 | 2 | 0 | 0 | 10 |
+| `observability` | `Metrics` constants + counter / timer helpers. | 0 | 0 | 0 | 0 | 1 |
+| `onboarding` | Welcome flow + new-user provisioning. | 1 | 1 | 0 | 0 | 5 |
+| `optimiser` | `PromptOptimiserAgent` + offline prompt-A/B suggestion loop. | 0 | 1 | 1 | 0 | 5 |
+| `pricing` | Pricing-display API (reads YAML model-matrix). | 0 | 0 | 0 | 0 | 3 |
+| `programbench` | ProgramBench cleanroom adapter (Docker-bound execution). | 1 | 1 | 0 | 0 | 5 |
+| `project` | Project workbench: dashboard, repos, tech debt, PR refresh, briefs. | 7 | 15 | 0 | 0 | 42 |
+| `prreview` | PR Review agent (Phase 1 autofix surface) + GitHub PR comment ingestion. | 2 | 3 | 1 | 0 | 12 |
+| `ratelimit` | Sliding-window rate limit + per-tier bucket (Redis). | 0 | 0 | 0 | 0 | 3 |
+| `readymade` | Readymade solution catalogue (vetted starter solutions). | 2 | 1 | 0 | 0 | 24 |
+| `recovery` | `StartupRunResumer` + crash-recovery wiring. | 0 | 0 | 0 | 0 | 1 |
+| `referral` | Referral-invite tracking. | 0 | 1 | 0 | 0 | 4 |
+| `repo` | GitHub + Bitbucket repo services. | 1 | 2 | 0 | 0 | 5 |
+| `report` | `ValidationReport` build + persistence + PDF + share link. | 1 | 4 | 0 | 0 | 14 |
+| `reviewer` | `ReviewerAgent`, `AccuracyAssessmentService`, `PostEditFormatter`. | 0 | 1 | 1 | 0 | 12 |
+| `rollout` | Phased-rollout admin endpoints. | 1 | 1 | 0 | 0 | 4 |
+| `router` | `ModelRegistry`, `ModelResolver`, provider health tracker. | 0 | 2 | 0 | 0 | 14 |
+| `run` | Per-run state utilities (`RunSkipPushFlag` etc.). | 0 | 1 | 0 | 0 | 2 |
+| `saga` | Compensation framework for partial-fail recovery (`side_effect_outbox`). | 0 | 0 | 0 | 0 | 4 |
+| `scoring` | Multiplicative verified-score calculator. | 0 | 1 | 0 | 0 | 5 |
+| `security` | `InputSanitizer`, `CodeAbuseScanner`, dependency policy, guardrail level. | 0 | 0 | 0 | 0 | 9 |
+| `sharing` | Cross-org `ProjectMember` invites + public share-link service. | 3 | 2 | 0 | 0 | 9 |
+| `smoketest` | Per-task post-write smoke check. | 0 | 0 | 0 | 0 | 3 |
+| `sse` | Server-sent events broadcaster + replay buffer. | 0 | 1 | 0 | 0 | 3 |
+| `standards` | Org standards + violations + overrides (compliance report). | 3 | 0 | 0 | 0 | 26 |
+| `state` | `StateStore`, `PipelineRun`, `AgentTask`, `PlanVersion` (state management). | 0 | 2 | 0 | 0 | 37 |
+| `swebench` | SWE-bench Lite cleanroom adapter (Docker-bound execution). | 1 | 1 | 0 | 0 | 6 |
+| `tenant` | Hibernate per-tenant connection interceptor (AOP). | 0 | 0 | 0 | 0 | 4 |
+| `test` | Internal test-only / diagnostic controllers (gated). | 9 | 0 | 0 | 0 | 9 |
+| `testgen` | Test plan + test worker + report generator (non-tool-calling agents). | 2 | 1 | 2 | 0 | 29 |
+| `tool` | The `Tool` contract + 11 concrete tools + facades + `CompleteTaskTool`. | 0 | 0 | 0 | 16 | 28 |
+| `util` | Misc utility helpers. | 0 | 0 | 0 | 0 | 3 |
+| `validator` | Validation v3 strict-mode requirement graph checks. | 0 | 0 | 0 | 0 | 27 |
 
-| Tier | Agents |
-|------|--------|
-| PLANNING | OutlinePlannerAgent, ReviewerAgent, RepoArchitectureGenerator, ArchitectureDocGenerator, ProjectChatCompiler, PrReviewAgent, CodeReviewAgent |
-| WORKHORSE | WorkerAgent, TaskExpanderAgent, TestPlannerAgent, TestWorkerAgent, ApiTestSuiteAgent, ProjectDocGeneratorService, ValidationReportGenerator, PromptOptimiserAgent |
-| LIGHTWEIGHT | SmartClassifierAgent, CoherencePlannerAgent, ContextAgent, RunLedgerAgent, RunTitleSummarizer, ProjectChatCompactor, ProjectBriefService, ConversationAgent, TestReportGenerator |
+Counts above reflect class-name suffixes only (`*Controller.java`, `*Service.java`, `*Agent.java`, `*Tool.java`); composite / supporting classes inflate the `Total` column.
 
----
-
-## Run pipeline — `harness/`, `integration/`, `state/`, `recovery/`, `cost/`, `observability/`, `sse/`, `tool/`
-
-| Subpackage | Key files | Purpose |
-|------------|-----------|---------|
-| `integration/` | `RunOrchestrator` | Pipeline entry point + finding/PR-mode dispatch + crash-resume entry. Also hosts `scm/ScmPushService` (multi-repo push), `slack/SlackNotificationService`, `jira/JiraAdapter`, `confluence/ConfluenceAdapter`, `pagerduty/PagerDutyAdapter`, `servicenow/ServiceNowAdapter`, `bitbucket/BitbucketAdapter`, `IntegrationManager`. |
-| `harness/` | `SequentialExecutor`, `WorkspaceInitService`, `GateStore`, `UiStyleResolver`, `DesignSystemProperties` | Per-task tier-routed dispatch + buildProject smoke + one-retry on smoke fail + soft-completion gate. Workspace + plan-gate primitives reused from the V1 era. |
-| `state/` | `StateStore`, `PipelineRun`, `AgentTask`, `RunRepoSnapshot`, repository interfaces | Single source of truth for run + task state. `StateStore.setUserCostCap` / `setHardCapUsd` / `setStatusReason` are the chokepoint mutators. |
-| `recovery/` | `StartupRunResumer` | Boot-time crash recovery — AWAITING_APPROVAL stays, salvageable flips to COMPLETE, others call `RunOrchestrator.resumeAfterCrash(runId)`. 3-attempt cap. |
-| `cost/` | `RunCostTracker` | Per-call token + $ accumulator. Cache-aware pricing reads YAML `model-pricing[].cached-input-per-1m`. Per-task accumulator keyed by `runId|taskId`. |
-| `observability/` | `Metrics`, `CustomMetricsConfig` | `executespec.v2.*` Micrometer meters — `run.{outcome,latency}`, `planner.{latency,tasks}`, `task.{status,latency,smoketest}`, `worker.{iterations,outcome,toolcall}`, `llm.latency`, `reviewer.verdict`, `context.{save,save.bytes}`. |
-| `sse/` | `RunEvent`, `SseBroadcaster`, `ExecutionEventTypes` | SSE channel — terminal `RunEvent.complete(runId, status, statusReason)` overload threads the reason for status badge tooltips. |
-| `tool/` | `ToolRegistry`, `Tool` interface, all 11 worker tools (`ReadFileTool`, `WriteFileTool`, `EditFileTool`, `ListFilesTool`, `SearchFilesTool`, `ShellTool`, `GitStatusTool`, `GitDiffTool`, `GitCommitTool`, `BuildProjectTool`, `RunTestsTool` — patch-mode only), `ShellSandboxPolicy`, `FileSandboxPolicy`, `ProcessExecutor` | Worker tool bindings. `ToolRegistry.bindForWorker(ctx)` filters `gitCommit` (auto-push at run-end). `ShellTool` + `BuildProjectTool` consult `programbench/ProgramBenchContainerStore` and dispatch via `docker exec` when a container is registered for the run. |
-| `smoketest/` | `CliSmokeRunner` | CLI smoke runner. |
-| `context/` | `ContextStore` | Redis snapshot per task (24h TTL, every 5 iters). Persists conversation history for replay on crash. |
-| `finding/` | `FindingPatchSubmitter`, `Finding` | Chokepoint that the 4 autofix surfaces dispatch through. Dedupes per finding key, sets `runMode=PATCH` + `source="finding:<TYPE>"`. |
-
----
-
-## Run modes + bench adapters
-
-| Package | Purpose |
-|---------|---------|
-| `swebench/` | SWE-bench Lite adapter — submits SWE-bench instances as PipelineRuns, captures `git diff HEAD` from the cleanroom container, emits `preds.json`. SUPER_ADMIN-gated `POST /api/admin/swebench/run`. |
-| `programbench/` | ProgramBench (Meta cleanroom-rebuild benchmark) adapter. `ProgramBenchContainerStore` (Redis-backed runId→containerId map, 4h TTL). `ProgramBenchBootstrap` creates synthetic Bench Org/User/Project on first run. `ProgramBenchTaskService` does per-task docker create/cp/run + `RunOrchestrator.submitRun`, captures workspace tar at terminal. SUPER_ADMIN endpoint `POST /api/admin/programbench/run`. |
-
-Workspace contract: cleanroom container runs with `--rm --network none -v <hostDir>:/workspace`. The hostDir is the same as the V2 worker's workspace dir, so `Read/Write/Edit/ListFiles` (host fs) and `Shell/BuildProject` (container exec) see identical files.
-
----
-
-## Project workbench — `project/`, `codeintel/`, `assessment/`, `scoring/`, `memory/`
-
-| Package | Key files | Purpose |
-|---------|-----------|---------|
-| `project/` | `ProjectService`, `ProjectController`, `project/repo/{ProjectRepoService,…}` (ORG + USER scoped registry), `project/dashboard/ProjectDashboardController`, `project/estimation/EstimationService` (heuristic from last 20 runs), `project/pr/{PullRequestController,GitHubWebhookController,PullRequestRecordService,CiFailureAutoFixService}` (V169-V170 + Phase 3 autofix), `project/rag/{DocumentExtractor,ChunkingService,EmbeddingService,RetrievalService,ProjectDocumentService}` (always-on RAG over pgvector), `project/scores/ProjectScoresController`, `project/techdebt/{TechDebtService,TechDebtFixService}` (Phase 2 autofix), `project/template/{ProjectSpecTemplate,SpecTemplateService}` (V102), `project/workspace/{ProjectWorkspaceService,ProjectWorkspaceWarmer,WorkspaceHealthService}` | Project workspace, repo linking, dashboard aggregator, multi-repo PR + webhook handling, RAG corpus, tech-debt rollup + autofix, spec templates, workspace warmer (DB → disk mirror), workspace-health rollup. |
-| `codeintel/` | `CodeMapGenerator`, `RepoArchitectureGenerator` (PLANNING tier — per-repo HLD/LLD), `ArchitectureDocGenerator` (PLANNING tier — cross-repo synthesis), `ProjectArchitectureService.generate()` + `regenerateForRepo()`, `ProjectArchitectureController`, `ProjectDocGeneratorService` + Controller (EXPLANATION + SETUP), `ArchitectureDiffService`, `StalenessService` (Redis-backed cache, project + run-aware overrides) | 3-step architecture pipeline + on-demand Generate Docs + LCS arch diff + per-repo SHA staleness. |
-| `assessment/` | `FeatureAssessmentService`, `AssessmentResult` | Pre-plan feature assessment. Heuristic by default; LLM-backed when `assessment.llm.enabled` flag is on. Surfaces complexity + risks + cross-repo deps above the plan-approval gate. |
-| `scoring/` | `ReviewScoringService` | 6-dimension scoring (code quality / test coverage / architecture / security / performance / design compliance). Anchors on `verifiedScore` when present; falls back to `accuracyScore` for legacy rows. |
-| `memory/` | `RunLedgerAgent` (LIGHTWEIGHT), `MemoryCompactionService`, `ProjectMemoryProvider`, `ProjectMemoryController`, `ProjectChatService` (clear + compact + per-bubble copy), `ProjectChatCompactor` (LIGHTWEIGHT), `ProjectChatCompiler` (PLANNING), `ProjectChatTools` (chat tool surface incl. `run_code_review`, `get_latest_code_review`), entities `ProjectRunLedger` + `ProjectMemorySnapshot` + `ProjectChatMessage` | Append-only run digest ledger → rewritten into versioned snapshot every 10 runs. Planner reads it as `{{PROJECT_MEMORY}}`. Chat compaction summarises older N messages, keeps last 6 verbatim. |
-
----
-
-## Cross-repo contracts + standards + ADRs + invariants — `contracts/`, `standards/`, `adr/`, `arch/`
-
-| Package | Purpose |
-|---------|---------|
-| `contracts/` | 4-subpackage cross-repo contract registry — `breaking/` (per-kind classifiers + service), `consumers/` (consumer pinning), `coverage/` (per-repo rollup + rescan), `detection/` (per-kind detectors for OPENAPI/GRAPHQL/JSON_SCHEMA/PROTO), `drift/` (drift event triage controller), `injection/` (planner-side hooks — bounded). V135 schema. |
-| `standards/` | Engineering standards as binding policy. `EffectiveStandardsResolver` merges org-level + project-level. `ast/` (AST-based checks), `llmreview/` (LLM-augmented checks for non-AST rules), `override/` (single-violation + standing exception, both require ≥30 char rationale), `report/StandardsComplianceController`. V136 schema. |
-| `adr/` | ADRs as first-class — `Adr` entity caches frontmatter parsed from `.executespec/arch/adrs/<NNNN>-<slug>.md`. `AdrFrontmatterParser` is the single parser; `AdrInjectionService` is the planner-side injection point. V137. |
-| `arch/invariants/` | Architectural invariants — `ArchInvariant` + `ArchInvariantViolation`. `InvariantChecker` runs per-codemap-version; definitions live in customer git as `.executespec/arch/invariants.yaml` per repo. V138. |
-| `folder/` | `.executespec/` folder write chokepoint. `ExecutespecFolderWriter.writeFiles` dispatches PR vs DIRECT_PUSH via `ProjectRepo.prModeEnum()`. `BootstrapService` creates initial scaffold + bootstrap PR + flips 4-state status machine to READY. `FolderReadmeGenerator` auto-generates the README inside `.executespec/`. `ProjectConfigPathResolver` returns FOLDER_FLAT / FOLDER_NAMESPACED / DATABASE per (project, repo). `ExecutespecMigrationController` exposes the SUPER_ADMIN legacy-codemap migration endpoint. V131-V134. **Caller-allowlist pinned** by `arch/ExecutespecFolderWriterCallerAllowlistTest` (4 approved callers). |
-| `activity/` | Customer-facing project activity feed. `ActivityEventEmitter` chokepoint dual-writes to `activity_audit` for AUDIT-tagged events. `ActivityFeedController` exposes paginated GET with limit/eventType/from/to. `ActivityFeedRetentionJob` + `ActivityFeedPartitionJob` are `@Scheduled + @SchedulerLock`. V133 (12 monthly partitions seeded 2026-04 → 2027-03). |
-| `export/` | Project export bundle — `ProjectExportController.export` returns a zip of every `.executespec/` artefact + DB-only counterparts when `config_storage=DATABASE`. |
-| `notification/pref/` | Per-user × event-type × channel opt-in/out matrix. `NotificationPrefService` applies sensible defaults. V139. |
-
----
-
-## Auth + tenancy + security — `auth/`, `tenant/`, `security/`, `crypto/`, `ratelimit/`
-
-| Package | Purpose |
-|---------|---------|
-| `auth/` | `controller/` (AuthController, OrgController, UserController), `dto/`, `entity/` (AppUser, Org, TierConfig), `service/` (AuthService, OrgService, ProjectService, TierEnforcementService, TierPermissionService, EntitlementResolver, UserDataExportService — GDPR ZIP, `TierProductSurfaceMapper` — dormant post-V179), `oauth/` (Google + GitHub success handler + `OAuthSurfaceResolver` + `OAuthInitController`), `security/` (SecurityConfig, JwtUtil with scoped-SSE tokens, JwtSecretValidator, ProductSurfaceFilter, RoleGuard, AccessGuard), `dsar/` (DSAR data-export endpoint), `sso/` (`SsoConfigController` + lockout-prevention guard). |
-| `tenant/` | TenantFilter + TenantInterceptor + ThreadContextHolder. |
-| `security/` | InputSanitizer (NFKC + zero-width strip + base64 decode + 26 regex patterns + abuse markers), CodeAbuseScanner (file-write blocker), guardrail level enum + LOW/MEDIUM/HIGH per-layer behaviour. |
-| `crypto/` | KMS / encryption-at-rest helpers. |
-| `ratelimit/` | RateLimitFilter (Redis sliding window, per-tenant groups AUTH/RUNS/WEBHOOK/READ/WRITE/PREVIEW/DEPLOY). |
+Per-package code-adjacent CLAUDE.md context exists in: `agent/`, `codereview/`, `deployment/`, `harness/`, `prreview/`, `router/`, `sharing/`, `state/`, `validator/`.
 
 ---
 
-## Billing — `billing/`, `pricing/`, `credit/`, `entitlements/`
+## 2. REST controllers (98 files)
 
-| Package | Purpose |
-|---------|---------|
-| `billing/` | `service/BillingService`, `gateway/{PaymentGatewayRouter, RazorpayPaymentGateway, StripePaymentGateway}`, `service/InvoiceService`, `service/PaymentAuditService`, `service/AnalyticsService`, `lifecycle/{LifecycleState, TierLifecycleService, TierLifecycleController}` (3-state machine), `entity/{BillingPlan, BillingSubscription, Invoice}`, `cost/{RunCostLog, RunCostLogRepository}` (audit table), `webhook/` (Razorpay + Stripe HMAC-verified handlers), `founder/FounderPricingService` (lifetime founder discount allocator with row-level lock). |
-| `pricing/` | `PricingController` — yields YAML-driven `PricingRow[]` (incl. `cachedInputCostPer1m`, `chainTier`, `displayLabel`). |
-| `credit/` | Credit grant + ledger (legacy v3 surface). |
-| `entitlements/` | `EntitlementResolver.resolveTier` — picks higher of (user.tier, org.tier). |
+For each controller: class name + (class-level `@RequestMapping` base path | first method-level mapping if no class-level).
 
----
+| Controller | Base path |
+|---|---|
+| `AccountingController` | `/api/accounting` |
+| `ActivationFunnelController` | `/api/admin/activation-funnel` |
+| `ActivityFeedController` | `/api/projects/{projectId}/activity` |
+| `AdminAnalyticsController` | `/api/admin/analytics` |
+| `AdminBillingController` | `/api/admin/billing` |
+| `AdminReminderController` | `/api/internal/reminder` |
+| `AdrController` | `/api/projects/{projectId}/adrs` |
+| `AnonymousRunController` | `/api/v3` |
+| `AuthController` | `/api/auth` |
+| `BillingController` | `/api/billing` |
+| `BillingWebhookController` | `/api/webhooks` |
+| `CodeReviewController` | `/api/code-reviews` (method-level) |
+| `ConfigAdminController` | `/api/admin/config` |
+| `ContactController` | `/api/contact` |
+| `ContextStoreTestController` | `/api/v2/test` |
+| `ContractConsumerController` | `/api/projects/{projectId}/contracts/{contractId}/consumers` |
+| `ContractCoverageController` | `/api/projects/{projectId}/repos/{repoId}/contract-coverage` |
+| `ContractDriftController` | `/api/projects/{projectId}` |
+| `ConversationController` | `/api/conversation` |
+| `CredentialController` | `/api/credentials/gcp` |
+| `DeploymentController` | `/api/deployments` |
+| `DsarController` | `/api/dsar` |
+| `EntitlementsController` | `/api/v3` |
+| `EvalController` | `/api/admin/eval` |
+| `ExecutespecMigrationController` | `/api/admin/projects` |
+| `ExecutionController` | `/api/projects/{projectId}/executions` (method-level) |
+| `ExecutorTestController` | `/api/v2/test` |
+| `FeasibilityController` | `/api/feasibility` |
+| `FeatureFlagController` | `/api/admin/feature-flags` |
+| `GitHubAppController` | `/api/auth/github-app` |
+| `GitHubWebhookController` | `/webhooks/github` (method-level) |
+| `HealthController` | `/api/health` |
+| `IntegrationController` | `/api/integrations` |
+| `IntegrationStatusController` | `/api/integrations` |
+| `InvariantController` | `/api/projects/{projectId}/invariants` |
+| `InvoiceController` | `/api/billing/profile` (method-level) |
+| `LandingController` | `/api/v3` |
+| `MetricsController` | `/api/metrics` |
+| `MetricsTestController` | `/api/v2/test` |
+| `MigrationAdminController` | `/api/admin/migrations` |
+| `MigrationController` | `/api/migrations` |
+| `ModelController` | `/api/models` |
+| `NativeToolsTestController` | `/api/v2/test` |
+| `NotificationController` | `/api/notifications` |
+| `NotificationPrefController` | `/api/notifications/preferences` |
+| `OnboardingController` | `/api/onboarding` |
+| `OrgController` | `/api/org` |
+| `OrgStandardController` | `/api/orgs/{orgId}/standards` |
+| `PaymentAuditController` | `/api/admin/payment-audit` (method-level) |
+| `PlannerTestController` | `/api/v2/test` |
+| `PrCommentInboxController` | `/api/runs/{runId}/pr-comments` |
+| `PrReviewController` | `/api/pr-reviews` (method-level) |
+| `PreviewController` | `/api/runs` |
+| `PreviewVmController` | `/api/v1/previews` |
+| `PricingController` | `/api/pricing` |
+| `ProgramBenchController` | `/api/admin/programbench` |
+| `ProjectArchitectureController` | `/api/projects/{projectId}/architecture/generate` (method-level) |
+| `ProjectChatController` | `/api/projects/{projectId}/chat` |
+| `ProjectController` | `/api/projects` |
+| `ProjectDashboardController` | `/api/projects/{projectId}/dashboard` (method-level) |
+| `ProjectDocGeneratorController` | `/api/projects/{projectId}/docs/{docType}/generate` (method-level) |
+| `ProjectDocumentController` | `/api/projects/{projectId}/documents` |
+| `ProjectExportController` | `/api/projects/{projectId}/export` |
+| `ProjectInviteController` | `/api/projects/{projectId}/invites` (method-level) |
+| `ProjectLaunchController` | `/api/projects/{projectId}/launches` (method-level) |
+| `ProjectMemoryController` | `/api/projects/{projectId}/memory` |
+| `ProjectRepoController` | `/api/repos/github` (method-level) |
+| `ProjectScoresController` | `/api/projects/{projectId}/scores` (method-level) |
+| `ProjectShareLinkController` | `/api/projects/{projectId}/share-links` (method-level) |
+| `ProjectSharePublicController` | `/api/shared/{token}/meta` (method-level) |
+| `PullRequestController` | `/api/runs/{runId}/prs` (method-level) |
+| `ReadymadeAdminController` | `/api/admin/readymades` |
+| `ReadymadeController` | `/api/library` |
+| `ReferralController` | `/api/v3/referrals` |
+| `ReviewerTestController` | `/api/v2/test` |
+| `RolloutRunController` | `/api/v2/runs` |
+| `RouterTestController` | `/api/v2/test` |
+| `RunController` | `/api/runs` |
+| `RunConversationController` | `/api/runs` |
+| `ScaffoldController` | `/api/scaffolds` (method-level) |
+| `SignupClaimController` | `/api/v3/auth` |
+| `SlackIntegrationController` | `/api/integrations/slack` |
+| `SpaFallbackController` | `/favicon.ico` (method-level — SPA fallback) |
+| `SpecTemplateController` | `/api/projects/{projectId}/templates` (method-level) |
+| `SseController` | `/api/runs` |
+| `SsoConfigController` | `/api/auth/sso` |
+| `StandardsComplianceController` | `/api/projects/{projectId}/standards` |
+| `StandardsOverrideController` | `/api/projects/{projectId}/standards` |
+| `SuperAdminController` | `/api/admin` |
+| `SwebenchController` | `/api/admin/swebench` |
+| `TestGenController` | `/api` |
+| `TestResultController` | `/api` |
+| `TierLifecycleController` | `/api/admin` |
+| `TimelineController` | `/api` |
+| `ToolRegistryTestController` | `/api/v2/test` |
+| `UserRunsController` | `/api` |
+| `ValidationReportController` | `/api` |
+| `WorkerTestController` | `/api/v2/test` |
 
-## Deployment + preview — `deployment/`
+Endpoint exception advice: `src/main/java/com/navneet/executespec/api/advice/` — `RestExceptionAdvice`, `ValidationAdvice`, `ResponseStatusExceptionAdvice`.
 
-| Subpackage | Purpose |
-|------------|---------|
-| `preview/` | `PreviewService` (dual-mode: docker / cloud-run), `PreviewProperties` (mode, TTL, concurrency), `CaddyProxyManager` (Docker-mode only), `DevDockerfileGenerator` (reads `.agent-context/project.json`). |
-| (root) | `DeploymentService`, `DockerfileGenerator` (strategy-pattern per project type), `CloudRunClient`, `ArtifactRegistryClient`. |
-
----
-
-## LLM routing — `router/`
-
-| Key files | Purpose |
-|-----------|---------|
-| `LlmProvider` (enum: ANTHROPIC / OPENAI / GEMINI; GOOGLE alias rewritten to GEMINI on input) | Canonical provider enum. |
-| `ModelRegistry` | Reads `application.yml model-matrix.*` — `resolve(agentName, provider)` returns tier-routed model, `workhouseModelFor(provider)` returns default workhorse, `contextLimitForOrPrefixFallback(model)` returns context window. **Single source of truth** — `ModelContextWindowMap` was deleted; `ModelController.MODEL_LABELS` reads `display-label` from YAML. |
-| `ModelMatrixProperties` | YAML binding. |
-| `ProviderHealthTracker` | Redis-backed circuit breaker (5 failures → open 60s) on the legacy router. |
-| `ProviderRecommendationService` | Heuristic project-type → provider routing (gated by `provider.smart-routing.enabled`). |
-| `AvailableProviderResolver`, `ResolvedModel`, `ProviderStatusService` | Provider availability + resolved-model DTO. |
-
----
-
-## Execution View — `execution/`
-
-Project-level workbench for multi-repo, multi-solution work.
-
-| Key files | Purpose |
-|-----------|---------|
-| `service/ExecutionOrchestrator` | Drives `ExecutionRun` through SETUP → ANALYSING → ARCH_REVIEW → PLANNING → EXECUTING → COMPLETE. Boot-time `@EventListener(ApplicationReadyEvent)` resumes EXECUTING runs. |
-| `service/ExecutionPlannerService` | Decomposes the requirement (with `{{PROJECT_MEMORY}}`) into ordered `ExecutionSolution`s — each targeting one repo, dispatched through `RunOrchestrator.submitRun(...)` by `SolutionExecutionService`. |
-| `service/SolutionExecutionService`, `service/ExecutionBranchService`, `service/CrossRepoContextService`, `service/IncrementalCodeMapService`, `service/SolutionDependencyResolver`, `service/FileConflictDetector`, `service/ExecutionRunCasUpdater` (CAS-with-retry chokepoint for every async @Version write site) | Solution dispatch + branching + handover + dependency + conflict + CAS-with-retry. |
-| `entity/{ExecutionRun, ExecutionSolution, ExecutionSolutionRepo, ExecutionContextHandover}` | Persistent state. |
-| `event/ExecutionEventTypes` | SSE channel `sse:channel:exec:{id}` with `EXEC_*` events. |
-| `controller/{ExecutionController, ProjectLaunchController}` | REST surface. |
-
-Feature flag: `execution.view.enabled` (default OFF). ENTERPRISE tier gate (`tier_config.execution_view_enabled`).
-
----
-
-## Readymade Solutions + Migration Recipes — `readymade/`, `migration/`, `composer/`
-
-| Package | Purpose |
-|---------|---------|
-| `readymade/` (V157, W1-W5 shipped on `feature/readymades-and-migrations`) | `entity/ReadymadeSolution`, `service/{ReadymadeService, ReadymadeOrchestrator, StackNormalizer, VariantResolver, ReadymadeSeeder}`, `controller/ReadymadeController` + `ReadymadeAdminController`. Library of pluggable parametric solutions with stack-aware variants → instantiates via Execution View. |
-| `migration/` (V158-V159, W1-W7 shipped on same branch) | `entity/MigrationRecipe`, `service/{MigrationRecipeSeeder, MigrationStackMatcher, MigrationDryRunService, MigrationOrchestrator}`, `controller/MigrationController` + `MigrationAdminController`. Source-stack → target-stack codemod recipes with halt-and-inspect Phase 1. |
-| `composer/` | `SlotValidator` + `SpecComposer` — cross-product helpers shared between readymade + migration. |
-
-Full plans + remaining waves W6-W9 / W8-W10 in [`docs/plans/pending.md`](plans/pending.md) §7 + §8.
-
----
-
-## Integrations + SCM — `integration/`, `repo/`
-
-| Subpackage | Purpose |
-|------------|---------|
-| `integration/slack/` | `SlackNotificationService` — org-level OAuth, per-project channel routing, Block Kit messages. |
-| `integration/jira/` | `JiraAdapter` — inbound webhook + outbound comments on MergeCompleted. |
-| `integration/confluence/` | `ConfluenceAdapter` — inbound + outbound child pages. |
-| `integration/bitbucket/` | `BitbucketAdapter` (sibling to repo/BitbucketRepoService). |
-| `integration/pagerduty/` | `PagerDutyAdapter`. |
-| `integration/servicenow/` | `ServiceNowAdapter` — HMAC-verified inbound webhook. |
-| `integration/scm/` | `ScmPushService.pushMultiRepo` + `ScmPushService.push`. |
-| `integration/IntegrationManager` | Routes webhooks; listens for `MergeCompleted`. |
-| `repo/` | `GitHubRepoService` (branch, PR creation, default branch lookup, webhook install, `compareCommits` for arch diff, `getPullRequestSnapshot` with `headSha`), `BitbucketRepoService`, `ScmProvider` abstraction. |
-
----
-
-## Resources
-
-| Path | Purpose |
-|------|---------|
-| `src/main/resources/application.yml` | Single config file. Model matrix (per-tier per-provider + pricing + failover + agent-tier-map + display-label), Flyway settings (out-of-order true, ignore-migration-patterns), Spring AI bean defaults, billing routing, feature flags seed values. |
-| `src/main/resources/db/migration/V*.sql` | 186 Flyway migrations. Filenames immutable post-apply. |
-| `src/main/resources/prompts/*.md` | Current prompts (planner, outline-planner, outline-planner-skeleton, task-expander, coherence-planner, classifier, worker, reviewer, etc.). |
-| `src/main/resources/prompts/fragments/*.md` | Composable fragments resolved via `{{include:name}}` markers (security-rules, preview-defaults, cors-config, etc.). |
-| `src/main/resources/prompts/scaffolds/*.md` | Per-project-type scaffold templates injected via `{{SCAFFOLD_TEMPLATE}}` (spring-boot, node-backend, node-frontend, python, go, react-native-expo, …). |
-| `src/main/resources/prompts/planner.v*.txt` + `reviewer-v2.txt` | Frozen rollback archives for `PromptVersioningService` — deliberately retained. |
-| `src/main/resources/sample-specs/*.yml` | 3 onboarding sample specs (web-api, frontend, cli). |
-| `src/main/resources/readymades/*.yml` | Readymade catalog files (per-solution) — see [`docs/readymades-catalog-format.md`](readymades-catalog-format.md). |
-| `src/main/resources/migration-recipes/*.yml` | Migration recipe catalog files — see [`docs/migration-recipes-catalog-format.md`](migration-recipes-catalog-format.md). |
-| `src/main/resources/templates/email/*.html` | 21 HTML email templates (palette unified in v2.6.0 Graphite+Signal). |
-| `src/main/resources/templates/report/validation-report-pdf.html` | Validation-report PDF template (Signal Blue brand accent). |
-
----
-
-## Frontend — `frontend/`
-
-| Path | Purpose |
-|------|---------|
-| `frontend/src/main.tsx` | App entry, theme pre-paint, PostHog init. |
-| `frontend/src/lib/api.ts` | Single API client; every backend endpoint consumed here. |
-| `frontend/src/stores/` | Zustand stores — `useAuthStore`, `useRunStore`, `useUiStore` (theme), `useProjectStore`, `useV3ProjectStore`, `useExecutionStore`. |
-| `frontend/src/components/layout/` | V2 sidebar shell (`AppLayout`, `Sidebar`, `Header`). |
-| `frontend/src/v3/` | V3 top-bar shell (`Shell`, `V3TopBar`, `V3HomeRedirect`, V3 pages). |
-| `frontend/src/components/runs/` | Run cards / `RunDetailTabs` / `InlineRunDetail` / `ValidationReportPanel` / `ScoreCard` / `ScoreRing` / `VerdictPill` / `SignalBreakdown` / `CostProgressBar` / `RunSpecBlock` / `FirstRunCelebration` / `PrReviewButton`. |
-| `frontend/src/components/project/` | Project dashboard / `PulseTab` / `RepoCard` / `TechDebtPanel` / `WorkspaceHealthPanel` / `PostMergeBar` / `CodeQualityPanel` / `GeneratedDocsPanel` / `ProjectMemoryPanel` / `ProjectChatPanel` / `ArchitectureViewer`. |
-| `frontend/src/components/shared/` | `Button`, `Checkbox`, `Radio`, `ResponsiveModal`, `Tooltip`, `Glossary` (5-term dict), `Drawer`, `EstimateChip`, `MarkdownContent`. |
-| `frontend/src/tokens.css` + `tailwind.config.ts` | UI tokens (Graphite + Signal palette, 4-band score colours, semantic + status palette, theme overrides for `[data-theme='light']`). See [`docs/design/ui-tokens.md`](design/ui-tokens.md). |
-| `frontend/.prettierrc.json` + `.eslintrc.cjs` + `.prettierignore` | Style config; gated by `npm run format:check` + `npm run lint` in CI. |
-| `frontend/.pa11yci.json` | pa11y-ci a11y gate config (public surfaces). |
+Public read paths whitelisted in `SecurityConfig`: `/api/shared/**`, `/api/invites/preview`, `/api/health`, `/api/landing/**`, `/webhooks/**`, `/api/webhooks/**`, `/favicon.ico`.
 
 ---
 
-## Migrations index (highlights)
+## 3. Agents (17 `*Agent.java` files + auxiliaries)
 
-Full filenames in `src/main/resources/db/migration/`. Head: **V186** (2026-05-11).
+Tier resolves from `application.yml model-matrix.agent-tier-map`.
 
-| Range | Theme |
-|-------|-------|
-| V1–V44 | Core schema (users, orgs, projects, runs, agent_task, design system, payment_audit, JWT epoch). |
-| V45–V60 | Stripe gateway + OAuth tables + force-logout epoch + cost-proportional credits + run_cost_log. |
-| V61–V90 | Frozen V1 batch tables (now unused), preview registry, accuracy reports, Pilot v3.0 project workspace (project_repo, project_repo_link, project_architecture_doc, pull_request_record), execution view. |
-| V91–V102 | Project chat (V93-V94), pgvector + project documents (V95), auto-push flag (V96-V97), execution_relax_id_lengths (V98), backfill_execution_run_ai_provider (V99), run_repo_snapshot (V100), project_repo.webhook_installed (V101), project_spec_template (V102). |
-| V103–V115 | Execution branch (V103), project.github_owner (V104), execution_run.continue_pr (V105), validation_report.verified_score + scoring.v2-verified flag (V106), pipeline_run.status_reason (V107), historical PARTIAL backfill (V108), plan_requirements_json + meets_requirements_json + validation.v3-strict flag (V109), enable scoring.v2-verified (V110), execution_solution failure-signature dedup (V111), execution_run.version @Version (V112), project_generated_doc (V113-V114), repo_architecture_doc (V115). |
-| V116–V120 | Memory + assessment polish + plan-version tooling + LlmProvider GEMINI rename (V120). |
-| V121–V129 | v2.6.1 persona-roadmap waves — tier lifecycle (V121-V124), activation funnel + sandbox (V125-V126), SSO + GitHub-app schema + trial queue (V127), provider routing log (V128), startup-program (V129). |
-| V130 | Hierarchical planner schema (`plan_strategy`, `plan_outline_json`, per-phase token/cost columns, `agent_task.{task_type, expansion_status, expanded_at}`). |
-| V131–V139 | Enterprise readiness — `.executespec/` folder status (V131-V132), `project.config_storage` + `project_config` (V134), `activity_feed` partitioned-by-month (V133), `contract_registry` (V135), `org_standard` + `project_standard_override` + `standards_violation` (V136), `adr` (V137), `arch_invariant` + violation (V138), `user_notification_pref` (V139). |
-| V140–V146 | Tier-config alignment (V140), ladder consolidations (V141, MAX→TEAM rename later reverted), dead-flag drops (V142), product split (V143, retired by V179), per-seat TEAM reinstatement (V144), FREE 5→10 (V145, reverted V167), annual billing plans (V146). |
-| V147–V164 | v2.7 Foundation — audit-chain (V147), governance caps (V148), TEAM-BYOK plan (V149), retention seed (V150), audit chain widen (V151), referral + lifetime credits (V152-V153), personal org bootstrap (V162-V163), tier-config caps polish. |
-| V165–V168 | Drop MAX tier, rename to TEAM @ $39 (V165), align FREE billing plan run limit (V166), revert FREE to 5 (V167), pause/resume columns (V168). |
-| V169–V178 | PR record project_id + kind (V169), CI auto-fix attempts (V170), R09 reconcile pipeline_result with status_reason (V171), PR Review + Code Review agent schema (V172), widen review user_id columns (V173), arch-doc cost columns (V174), external project sharing (V175), un-hide PRO as Solo (V176, retired by V185), Solo annual + founder pricing (V177), user_cost_cap on pipeline_run (V178). |
-| V179–V186 | Drop product split (V179), lint autofix flag (V180), PR comment inbox (V181), `pipeline_run.run_mode = BUILD \| PATCH` (V182), `pipeline_run.triggered_by_finding` (V183), widen `agent_task.last_llm_failure` VARCHAR(255) → TEXT (V184), retire Solo branding (V185), pull_request CI status columns (V186). |
-| V187–V198 | `execution_run.failure_reason` (V193), `validation_report.rubric_score` (V194), `generated_doc.source_fingerprint` (V195), `file.purpose_summary` (V196), `pipeline_run.rubric` rubric breakdown row (V197), **per-org `external_sharing_enabled` BOOLEAN flag** (V198) gating cross-org project invites on top of the existing tier check. |
+| Agent | Tier | Source file |
+|---|---|---|
+| `ApiTestSuiteAgent` | WORKHORSE | `apitests/ApiTestSuiteAgent.java` |
+| `CodeReviewAgent` | PLANNING | `codereview/CodeReviewAgent.java` |
+| `CoherencePlannerAgent` | LIGHTWEIGHT | `agent/CoherencePlannerAgent.java` |
+| `ContextAgent` | LIGHTWEIGHT | `context/ContextAgent.java` |
+| `ConversationAgent` | LIGHTWEIGHT | `agent/ConversationAgent.java` |
+| `OutlinePlannerAgent` | PLANNING | `agent/OutlinePlannerAgent.java` |
+| `PatchAgent` | WORKHORSE (Patch-mode loop; tier source same as WorkerAgent) | `agent/PatchAgent.java` |
+| `PrReviewAgent` | PLANNING | `prreview/PrReviewAgent.java` |
+| `PreviewAgent` | (preview-engine specific) | `deployment/preview/PreviewAgent.java` |
+| `PromptOptimiserAgent` | WORKHORSE | `optimiser/PromptOptimiserAgent.java` |
+| `ReviewerAgent` | PLANNING | `reviewer/ReviewerAgent.java` |
+| `RunLedgerAgent` | LIGHTWEIGHT | `memory/RunLedgerAgent.java` |
+| `SmartClassifierAgent` | LIGHTWEIGHT | `agent/SmartClassifierAgent.java` |
+| `TaskExpanderAgent` | WORKHORSE | `agent/TaskExpanderAgent.java` |
+| `TestPlannerAgent` | WORKHORSE | `testgen/TestPlannerAgent.java` |
+| `TestWorkerAgent` | WORKHORSE | `testgen/TestWorkerAgent.java` |
+| `WorkerAgent` | per-task: LOW=LIGHTWEIGHT / MEDIUM=WORKHORSE / HIGH=PLANNING | `agent/WorkerAgent.java` |
+
+Non-agent classes also referenced in `agent-tier-map` (services that hit the LLM directly): `RepoArchitectureGenerator` (PLANNING), `ArchitectureDocGenerator` (PLANNING), `ProjectChatCompiler` (PLANNING), `ProjectDocGeneratorService` (WORKHORSE), `ValidationReportGenerator` (WORKHORSE), `RunTitleSummarizer` (LIGHTWEIGHT), `ProjectChatCompactor` (LIGHTWEIGHT), `ProjectBriefService` (LIGHTWEIGHT), `TestReportGenerator` (LIGHTWEIGHT).
+
+Routers + provider clients (also in `agent/`):
+- `LlmRouter.java` — canonical native-tool dispatcher.
+- `FallbackLlmRouter.java` — legacy non-tool router with `FallbackMode` enum.
+- `OpenAiNativeToolClient.java`, `GeminiNativeToolClient.java` — direct provider clients (bypass Spring AI quirks).
+- `PromptAssembler.java`, `PromptAudit.java`, `PromptAuditService.java` — composable prompt fragment + audit pipeline.
+- `ApiKeyResolver.java`, `RunKeyStore.java` — API-key resolution (user → org → system) + BYOK awareness.
+- `LlmRouterModes.java` — `FallbackMode { ALLOW, NO_FALLBACK }`.
+
+Plan types: `Plan`, `PlannedTask`, `PlanStrategy`, `PlanStrategyCircuitBreaker`, `ClassificationResult`, `Classification`, `RequirementSpec`, `SpecClassifier`, `PlannerOutputUtils`, `PlannerRequest`, `WorkerReport` (under `agent/model/`).
 
 ---
 
-## Where to start reading
+## 4. Tools (`Tool.java` + 16 files in `tool/`)
 
-- **Pipeline shape:** `integration/RunOrchestrator.java` → `agent/SmartClassifierAgent.java` → `agent/OutlinePlannerAgent.java` → `harness/SequentialExecutor.java` → `agent/WorkerAgent.java` → `reviewer/ReviewerAgent.java`.
-- **Patch mode + autofix:** `agent/PatchAgent.java` → `finding/FindingPatchSubmitter.java` → `prreview/PrReviewAutofixService.java` + `project/techdebt/TechDebtFixService.java` + `project/pr/CiFailureAutoFixService.java` + `codereview/CodeReviewAutofixService.java`.
-- **Cost + scoring:** `cost/RunCostTracker.java` → `report/ValidationReportService.java` (`computeVerifiedScore`) → `scoring/ReviewScoringService.java`.
-- **Multi-repo PR:** `project/pr/PullRequestRecordService.java` → `integration/scm/ScmPushService.java` → `repo/GitHubRepoService.java`.
-- **Project memory + chat:** `memory/ProjectMemoryProvider.java` → `memory/RunLedgerAgent.java` → `memory/MemoryCompactionService.java` → `memory/ProjectChatService.java`.
-- **RAG:** `project/rag/RetrievalService.java` → `project/rag/EmbeddingService.java` → `project/rag/ChunkStore.java`.
-- **External sharing:** `sharing/ProjectShareLinkService.java` → `sharing/ProjectMemberService.java`.
-- **Cleanroom adapters:** `swebench/SwebenchTaskService.java` + `programbench/ProgramBenchTaskService.java` → `tool/ShellTool.java` + `tool/BuildProjectTool.java` (`ProgramBenchContainerStore` dispatch).
+The `Tool` interface lives at [`tool/Tool.java`](../src/main/java/com/navneet/executespec/tool/Tool.java) — every implementation declares `name()`, `description()`, `inputSchema()`, and `execute(args, ctx)`. Strict JSON schemas with `additionalProperties: false`.
+
+Concrete tools registered by `ToolRegistry`:
+
+| Class | `name()` returned | Purpose |
+|---|---|---|
+| `ReadFileTool` | `readFile` | Read file relative to workspace; 8k-char truncation cap. |
+| `WriteFileTool` | `writeFile` | Create/overwrite file. |
+| `EditFileTool` | `editFile` | Find-and-replace edit; fails if `oldString` not unique. |
+| `ListFilesTool` | `listFiles` | List directory contents. |
+| `SearchFilesTool` | `searchFiles` | Recursive grep with regex + glob. |
+| `ShellTool` | `shell` | Allowlisted shell command; 6k-char output cap. Cleanroom-aware via `ProgramBenchContainerStore`. |
+| `GitStatusTool` | `gitStatus` | Read-only `git status`. |
+| `GitDiffTool` | `gitDiff` | `git diff`; 5k-char cap. |
+| `GitCommitTool` | `gitCommit` | Stage + commit. Filtered out for `WorkerAgent` via `ToolRegistry.bindForWorker(ctx)`. |
+| `BuildProjectTool` | `buildProject` | Run `mvn verify` / `npm run build` / detected build step. Cleanroom-aware. |
+| `RunTestsTool` | `runTests` | Patch-mode only — runs the targeted test command. |
+| `CompleteTaskTool` | `completeTask` | Native termination signal — present in every bind list. |
+
+Higher-level wrappers (composite tools used by services, not exposed to the LLM directly):
+- `FileLockTool`, `FileSystemTool`, `GitTool` — convenience aggregators.
+
+`ToolRegistry.WORKER_DENY_TOOLS` is the per-worker denylist; currently `{"gitCommit"}` only.
+
+`ExecutionContext` (in `tool/`) carries per-task state: workspace root, run id, task id, project id, branch, GitHub creds, container id (if cleanroom), token budget.
+
+---
+
+## 5. Entities and table mapping
+
+115 `@Entity` / `@Table` classes total. Selected mappings (entity class → `@Table(name=...)`):
+
+| Entity class | Table |
+|---|---|
+| `AccountingEntry` | `accounting_entry` |
+| `ActivityAudit` | `activity_audit` |
+| `ActivityFeedEntry` | `activity_feed` |
+| `AgentInbox` | `agent_inbox` |
+| `AgentMessage` | `agent_message` |
+| `AgentTask` | `agent_task` |
+| `AppUser` | `app_user` |
+| `ArchInvariantViolation` | `arch_invariant_violation` |
+| `BillingPlan` | `billing_plan` |
+| `BillingPlanLimit` | `billing_plan_limit` |
+| `BillingProfile` | `billing_profile` |
+| `BillingSubscription` | `billing_subscription` |
+| `BillingUsage` | `billing_usage` |
+| `BillingWebhookEvent` | `billing_webhook_event` |
+| `CodeReviewIssue` | `code_review_issue` |
+| `CodeReviewScan` | `code_review_scan` |
+| `CompactionEvent` | `compaction_event` |
+| `ContractDriftEvent` | `contract_drift_event` |
+| `Deployment` | `deployment` |
+| `DeploymentCredential` | `deployment_credential` |
+| `EmailToken` | `email_token` |
+| `ExecutionContextHandover` | `execution_context_handover` |
+| `ExecutionRun` | `execution_run` |
+| `ExecutionSolution` | `execution_solution` |
+| `ExecutionSolutionRepo` | `execution_solution_repo` |
+| `ExecutionSolutionRun` | `execution_solution_run` |
+| `FeatureFlag` | `feature_flag` |
+| `FileLock` | `file_lock` |
+| `FilePurposeSummary` | `file_purpose_summary` |
+| `FounderPricingAllocation` | `founder_pricing_allocation` |
+| `FounderPricingDiscount` | `founder_pricing_discount` |
+| `GateEvent` | `gate_event` |
+| `GateRecord` | `gate_record` |
+| `Invoice` | `invoice` |
+| `InvoiceLineItem` | `invoice_line_item` |
+| `InvoiceSequence` | `invoice_sequence` |
+| `MergeConflict` | `merge_conflict` |
+| `MigrationDependency` | `migration_dependency` |
+| `MigrationDryRunCache` | `migration_dry_run_cache` |
+| `MigrationRecipe` | `migration_recipe` |
+| `ModelPricing` | `model_pricing` |
+| `ModelTaskMetric` | `model_task_metric` |
+| `Notification` | `notification` |
+| `Org` | `org` |
+| `OrgConfigRepo` | `org_config_repo` |
+| `OrgInvitation` | `org_invitation` |
+| `OrgSlackIntegration` | `org_slack_integration` |
+| `PaymentAudit` | `payment_audit` |
+| `PipelineRun` | `pipeline_run` |
+| `PlanVersion` | `plan_version` |
+| `PrCommentInbox` | `pr_comment_inbox` |
+| `PrReview` | `pr_review` |
+| `PrReviewComment` | `pr_review_comment` |
+| `PreviewMetric` | `preview_metrics` |
+| `PreviewRegistry` | `preview_registry` |
+| `Project` | `project` |
+| `ProjectArchitectureDoc` | `project_architecture_doc` |
+| `ProjectChatMessage` | `project_chat_message` |
+| `ProjectCodeMap` | `project_code_map` |
+| `ProjectDocument` | `project_document` |
+| `ProjectGeneratedDoc` | `project_generated_doc` |
+| `ProjectInvite` | `project_invite` |
+| `ProjectMemorySnapshot` | `project_memory_snapshot` |
+| `ProjectRepo` | `project_repo` |
+| `ProjectRepoLink` | `project_repo_link` |
+| `ProjectRunLedger` | `project_run_ledger` |
+| `ProjectShareLink` | `project_share_link` |
+| `ProjectSlackChannel` | `project_slack_channel` |
+| `ProjectSpecTemplate` | `project_spec_template` |
+| `PromptAudit` | `prompt_audit` |
+| `PullRequestRecord` | `pull_request_record` |
+| `ReadymadeDependency` | `readymade_dependency` |
+| `ReadymadeFavourite` | `readymade_favourite` |
+| `ReadymadeSolution` | `readymade_solution` |
+| `ReadymadeVariant` | `readymade_variant` |
+| `ReferralInvite` | `referral_invite` |
+| `RefreshTokenBlocklist` | `refresh_token_blocklist` |
+| `RepoArchitectureDoc` | `repo_architecture_doc` |
+| `RunCodeMap` | `run_code_map` |
+| `RunCostHistory` | `run_cost_history` |
+| `RunCostLog` | `run_cost_log` |
+| `RunRepo` | `run_repo` |
+| `RunRepoSnapshot` | `run_repo_snapshot` |
+| `RunRubricRow` | `run_rubric_row` |
+| `RunTopup` | `run_topup` |
+| `SellerConfig` | `seller_config` |
+| `SideEffectOutboxEntry` | `side_effect_outbox` |
+| `SlackNotificationLog` | `slack_notification_log` |
+| `StandardsViolation` | `standards_violation` |
+| `TestPlan` | `test_plan` |
+| `TestResult` | `test_result` |
+| `TestTask` | `test_task` |
+| `TierConfig` | `tier_config` |
+| `TopupPackage` | `topup_package` |
+| `UserActivationEvent` | `user_activation_event` |
+| `ValidationReport` | `validation_report` |
+| `WebhookEventLog` | `webhook_event_log` |
+
+Embeddables and entities without an explicit `@Table` (Hibernate auto-derives): `Adr`, `ArchInvariant`, `ContractConsumer`, `ContractRegistry`, `ContractVersion`, `IntegrationEventLog`, `IntegrationRun`, `MigrationSlot`, `MigrationVariant`, `OrgMember`, `OrgStandard`, `ProjectConfig`, `ProjectMember`, `ProjectStandardOverride`, `PromptAuditEntry`, `ReadymadeSlot`, `RunRecovery`, `UserNotificationPref`.
+
+---
+
+## 6. Flyway migrations (199 files, head V199)
+
+Location: `src/main/resources/db/migration/V*.sql`. Head: `V199__sync_org_tier_with_subscription_tier.sql`.
+
+Last 30 migrations (chronological, one-line purpose):
+
+| # | File | Purpose |
+|---|---|---|
+| V170 | `pr_record_ci_auto_fix_attempts.sql` | Counter on `pull_request_record` for CI-failure autofix attempts (cap 3). |
+| V171 | `r09_reconcile_pipeline_result_with_status_reason.sql` | Backfill `pipeline_run.status_reason` consistent with PR-record status. |
+| V172 | `code_review_and_pr_review_agents.sql` | Tables for `code_review_scan`, `code_review_issue`, `pr_review`, `pr_review_comment`. |
+| V173 | `widen_review_user_id_columns.sql` | Widen review reviewer-id columns to `VARCHAR(255)`. |
+| V174 | `add_cost_to_arch_doc_artefacts.sql` | Cost columns on `project_architecture_doc` and `repo_architecture_doc`. |
+| V175 | `external_project_sharing.sql` | `project_invite` + `project_member` (cross-org sharing) + `project_share_link` (public links). |
+| V176 | `unhide_pro_as_solo_tier.sql` | Re-list PRO as "Solo" (later retired by V185). |
+| V177 | `solo_annual_and_founder_pricing.sql` | Annual plan + founder-pricing seed (later retired by V185). |
+| V178 | `user_cost_cap_on_pipeline_run.sql` | Voluntary `user_cost_cap` column. |
+| V179 | `drop_product_split.sql` | Reverse V143 — drop `product_id` columns + `app_user_product_access`. |
+| V180 | `lint_autofix_flag.sql` | Deterministic auto-formatter pass toggle (`lint.autofix.enabled`). |
+| V181 | `pr_comment_inbox.sql` | `pr_comment_inbox` table for GitHub PR review comment ingestion. |
+| V182 | `run_mode.sql` | `pipeline_run.run_mode` (BUILD vs PATCH). |
+| V183 | `triggered_by_finding.sql` | `pipeline_run.triggered_by_finding` stamp for the 4 autofix surfaces. |
+| V184 | `widen_agent_task_last_llm_failure.sql` | Widen `agent_task.last_llm_failure` to `TEXT`. |
+| V185 | `retire_solo_branding.sql` | Drop Solo monthly/yearly + founder-pricing seed; rename PRO back to "Pro" (HIDDEN). |
+| V186 | `pull_request_ci_status.sql` | CI-state columns on `pull_request_record` + `head_sha` for check-runs polling. |
+| V187 | `cost_history.sql` | `run_cost_history` table. |
+| V188 | `execution_run_pipeline_run_id.sql` | Unified `execution_run.pipeline_run_id` link. |
+| V189 | `execution_run_cost_backfill.sql` | One-shot backfill of `execution_run.{actual_cost_usd, total_actual_tokens}`. |
+| V190 | `agent_task_failure_diagnostic.sql` | `agent_task.failure_diagnostic_json TEXT` for worker diagnostics. |
+| V191 | `project_archive_delete_timestamps.sql` | `project.{archived_at, deleted_at}` + soft-delete + restore. |
+| V192 | `arch_doc_generated_from_branches.sql` | `project_architecture_doc.generated_from_branches jsonb`. |
+| V193 | `execution_run_failure_reason.sql` | `execution_run.failure_reason TEXT`. |
+| V194 | `validation_report_rubric_score.sql` | Rubric-score column on `validation_report`. |
+| V195 | `generated_doc_source_fingerprint.sql` | Source fingerprint on `project_generated_doc` for staleness detection. |
+| V196 | `file_purpose_summary.sql` | `file_purpose_summary` table for codemap purpose annotations. |
+| V197 | `run_rubric_row.sql` | `run_rubric_row` table for per-rubric line items. |
+| V198 | `org_external_sharing_flag.sql` | `org.external_sharing_enabled` flag (default false). |
+| V199 | `sync_org_tier_with_subscription_tier.sql` | One-shot sync `org.tier` to active subscription tier. |
+
+Flyway tolerates `*:missing` to cover the V119 orphan from the preview-engine repo split (see the long comment in `application.yml`).
+
+---
+
+## 7. LLM prompts
+
+Location: `src/main/resources/prompts/`.
+
+**Active prompts (top level):**
+- `classifier.md` — `SmartClassifierAgent`
+- `outline-planner.md` + `outline-planner-skeleton.md` — `OutlinePlannerAgent` (FULL_PLAN + SKELETON_ONLY modes)
+- `coherence-planner.md` — `CoherencePlannerAgent`
+- `task-expander.md` — `TaskExpanderAgent`
+- `worker.txt` + `worker-openai.txt` + `worker-gemini.txt` — provider-specific worker system prompts
+- `patch-agent.md` — `PatchAgent` (PATCH-mode runs, bench-mode + autofix surfaces)
+- `reviewer-general.md` + `reviewer-wiring.md` — `ReviewerAgent` two-pass review
+- `validation-report.txt` — `ValidationReportGenerator`
+- `triage.txt` — incoming-request fast triage
+- `conversation-system.md` — `ConversationAgent` (project chat)
+- `memory-compaction.txt` — `ProjectChatCompactor`
+- `run-ledger.txt` — `RunLedgerAgent`
+- `context-agent.txt` — `ContextAgent`
+- `api-test-suite.txt` — `ApiTestSuiteAgent`
+- `test-planner.txt`, `test-worker.txt`, `test-fix-suggestions.txt` — test-gen agents
+- `compiler.txt` — compile agent
+- `conflict-resolver.txt` — merge conflict resolver
+- `execution_planner.txt` — V3 execution planner
+- `task-compile-supervisor.txt` — per-task build supervisor
+
+**Subdirectories:**
+
+`prompts/codereview/`:
+- `code-review-agent.md` — `CodeReviewAgent`
+- `pr-review-agent.md` — `PrReviewAgent`
+
+`prompts/scaffolds/` (project-type scaffolds, used by `OutlinePlannerAgent`):
+- `all.md`, `fullstack.md`, `go.md`, `java.md`, `node-backend.md`, `node-frontend.md`, `python.md`, `react-native-expo.md`, `rust.md`, `spring-boot.md`, `static-html.md`
+
+`prompts/fragments/` (composable `{{include:<name>}}` fragments):
+- `api-url-rules.md`, `backend-robustness.md`, `compilation-checklist.md`, `cors-config.md`, `format-after-edit.md`, `fullstack-directory.md`, `module-system.md`, `preview-defaults.md`, `router-isolation.md`, `security-rules-planner.md`, `security-rules-worker.md`, `security-rules.md`
+
+`prompts/eval/` (eval-matrix specs):
+- `cost-*.txt` (11 files) — cost-band evaluations (AI PDF summariser, booking system, e-commerce, fitness, kanban, landing, portfolio, chat, REST API recipes, SaaS dashboard, URL shortener)
+- `lightweight-*.txt` (3 files) — request triage, review summary, validation report
+- `planning-*.txt` (7 files) — architecture decision, code review, conflicting requirements, plan generation, saga compliance/consistency/diagnosis
+- `workhorse-*.txt` (4 files) — compilation fix, optimistic locking, React component, WebSocket notification
+
+**Rollback archives (retained for `PromptVersioningService`):**
+- `planner.v1.txt` ... `planner.v14.txt` + `planner.txt` (current symlink-equivalent)
+- `reviewer-v2.txt`
+
+Composition mechanics: `agent/PromptAssembler.java` resolves `{{include:fragment-name}}` markers (looks up `prompts/fragments/<name>.md`) and `{{VAR}}` substitutions. SHA-256 of the assembled prompt persisted to `prompt_audit`.
+
+---
+
+## 8. Frontend pages
+
+The Signal chrome is the only production layout (see `frontend/src/App.tsx` header comment). `v3/` and `v4/` page folders remain on disk for legacy URL catching plus a few demo pages still exposed by `App.tsx` redirects.
+
+### `frontend/src/signal/pages/` (production)
+
+Top-level:
+- `AllRunsPage.tsx`
+- `AuthCallbackPage.tsx`
+- `AuthPages.tsx` (re-exports `LoginPage`, `SignupPage`, `VerifyPage`, `WelcomePage`)
+- `ComposePage.tsx`
+- `ExtraPages.tsx` (re-exports `InsightsPage`, `LibraryPage`, `LibraryDetailPage`, `MigrationsPage`, `MigrationDetailPage`, `TrustPage`, `EmptyProjectPage`, `PublicPricingPage`, `ForgotPasswordPage`, `ResetPasswordPage`, `AcceptInvitePage`, `AuditLogPage`, `DeploymentsPage`, `SpecTemplatesPage`)
+- `HomePage.tsx`
+- `LegalPages.tsx` (re-exports `TermsPage`, `PrivacyPage`, `DpaPage`, `OrgSettingsPage`)
+- `LivePage.tsx`
+- `MiscPages.tsx` (re-exports `NotificationsPage`, `SearchPage`, `MorePage`, `AdminPage`, `SharedPage`)
+- `PlanPage.tsx`
+- `ProjectsPage.tsx`
+- `ResultPage.tsx`
+
+`signal/pages/account/`:
+- `AccountPage.tsx`
+- `BillingPage.tsx`
+- `MiscAccountPages.tsx` (re-exports `TopupPage`, `IntegrationsPage`, `ApiKeysPage`, `OrgMembersPage`)
+- `PlansPage.tsx`
+
+`signal/pages/project/`:
+- `ProjectActivityPage.tsx`
+- `ProjectArchitecturePage.tsx`
+- `ProjectChatPage.tsx`
+- `ProjectCodePage.tsx`
+- `ProjectComposePage.tsx`
+- `ProjectMembersPage.tsx`
+- `ProjectPulsePage.tsx`
+- `ProjectReposPage.tsx`
+- `ProjectRunsPage.tsx`
+- `ProjectSettingsPage.tsx`
+- `ProjectTabs.tsx` (tab navigation primitive)
+
+### Retired chromes (kept for legacy redirects)
+
+`frontend/src/v3/pages/`:
+- `AuthPage.tsx`, `BillingPage.tsx`, `EmptyProjectPage.tsx`, `ExecDemoPage.tsx`, `HomeRedirectPage.tsx`, `InsightsPage.tsx`, `LandingPage.tsx`, `LibraryDetailPage.tsx`, `LibraryPage.tsx`, `MigrationDetailPage.tsx`, `MigrationsPage.tsx`, `RunDetailPage.tsx`, `RunsListPage.tsx`, `RunsNewPage.tsx`, `TeamPage.tsx`, `TrustPage.tsx`
+
+`frontend/src/v4/pages/`:
+- `ActivityPage.tsx`, `EmbedPage.tsx`, `HomePage.tsx`, `LibraryPage.tsx`, `ProjectInspectPage.tsx`, `ProjectPage.tsx`, `ProjectReposPage.tsx`, `RunPage.tsx`, `SettingsPage.tsx`
+
+### Pre-Signal pages still imported
+
+`frontend/src/pages/`:
+- Top-level: `AccountingPage.tsx`, `AuditPage.tsx`, `DeploymentsPage.tsx`, `DpaPage.tsx`, `ExecSummaryPage.tsx`, `IntegrationsPage.tsx`, `InvoicesPage.tsx`, `PricingPage.tsx`, `PrivacyPage.tsx`, `SettingsPage.tsx`, `SharedProjectPage.tsx`, `SharedReportPage.tsx`, `TermsPage.tsx`
+- `pages/admin/`: `AdminInviteModal.tsx`, `AdminPage.tsx`, `FeatureFlagsPage.tsx`, `GrantRunsModal.tsx`, `OrgAdminDashboard.tsx`, `PricingManager.tsx`, `TeamMemberDashboard.tsx`, `TierLifecyclePage.tsx`
+- `pages/auth/`: `AcceptInvitePage.tsx`, `AuthCallbackPage.tsx`, `ForgotPasswordPage.tsx`, `LoginPage.tsx`, `RegisterPage.tsx`, `ResetPasswordPage.tsx`, `VerifyEmailPage.tsx`
+- `pages/execution/`: `ExecutionViewPage.tsx`
+- `pages/onboarding/`: `RunsNewLanding.tsx`, `WelcomePage.tsx`
+- `pages/org/`: `OrgProjectsPage.tsx`, `OrgSettingsPage.tsx`
+- `pages/project/`: `ProjectDashboardPage.tsx`, `ProjectsListPage.tsx`
+
+---
+
+## 9. Feature flags
+
+Resolved via `config/featureflag/FeatureFlagService.java`. Active keys observed by grepping `isEnabled(...)` across the backend:
+
+| Key | Default | Origin |
+|---|---|---|
+| `submissions.paused` | OFF | Maintenance gate at `RunController.submit` (returns 503). |
+| `v2.pause.enabled` | OFF | `POST /api/runs/{id}/pause`, V168. |
+| `scoring.v2-verified` | ON | `ReportInput` / score-builder path. Seeded by V106. |
+| `project.runs.auto-push` | ON | Toggles auto-push after BUILD-mode terminal. |
+| `lint.autofix.enabled` | OFF | Deterministic formatter pass before reviewer (V180). |
+| `validation.v3-strict` | OFF | `PlannerOutputUtils.validatePlan` strict requirement-graph check. Seeded V109. |
+| `assessment.llm.enabled` | OFF | LLM augmentation on `FeatureAssessmentService` heuristic. |
+| `codemap.purpose-summaries` | OFF | Per-file purpose summaries during codemap generation. |
+| `provider.smart-routing.enabled` | OFF | Smart-routing entry point (`router/`). |
+| `routing.adaptive-routing.enabled` | OFF | Redis-backed success-rate adaptive routing. |
+| `ci.autofix.enabled` | OFF | GitHub `check_run` webhook auto-fire for PR CI failures (Phase 3 autofix surface). |
+| `harness.v2.batch_enabled` | OFF | Batch coordinator (`batch/BatchCoordinator`). |
+| `security.guardrail_level` | LOW | `GuardrailLevelResolver` (3 levels: LOW / MEDIUM / HIGH). |
+| `execution.view.enabled` | OFF | V3 execution view UI surface. |
+| `v3.anonymous-trial.real-dispatch` | OFF | Anonymous-trial real-dispatch toggle (`anonrun/`). |
+| `billing.lifecycle.sunsetting.enabled` | OFF | Tier-lifecycle SUNSETTING admin transitions. |
+
+Flag rows live in the `feature_flag` table. Admin surface: `POST /api/feature-flags/{key}` (SUPER_ADMIN only).

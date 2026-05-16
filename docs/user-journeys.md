@@ -1,256 +1,135 @@
-# ExecuteSpec — UI User Journeys (by Tier)
+# System-wide user journeys
 
-> Last reviewed: 2026-05-12 (1.0.0-M1). Source: frontend routes, `TierPermissionService`, `LockedFeature`, `UpgradeModal`, sidebar nav.
-> **Live tier ladder:** FREE → PRO (HIDDEN — grandfathered) → TEAM ($39/seat, min 2, BYOK) → ENTERPRISE. The Solo / MAX tiers do not exist on `dev`/`main` today (V179/V185 retired both).
-> RBAC roles (SUPER_ADMIN, ORG_ADMIN, BILLING_ADMIN, DEVELOPER, PROJECT_ADMIN, PROJECT_DEVELOPER, PROJECT_VIEWER from V175 cross-org) are orthogonal to tier.
->
-> **Relevant capabilities (kept from prior iterations):**
-> - **Sandbox onboarding:** `/welcome` after first signup. 3 sample specs (web-api / frontend / cli) provision a sandbox project + pre-filled spec — target median TTFV under 3 minutes. `FirstRunCelebration` component fires on first complete run.
-> - **Theme toggle:** Sun/Moon `ThemeToggle` button in header — toggles `<html data-theme="light|dark">` with `localStorage` persistence.
-> - **Exec summary page:** `/exec` route (Business Owner / PgM persona view). MTD spend, success rate, needs-attention count, spend-by-project bars, cross-project awaiting-approval digest. Gated behind `canViewCostBreakdown` (TEAM / ENTERPRISE — FREE / PRO see upgrade wall).
-> - **Project dashboard IA:** Pulse / Repos / Runs / Code / Chat. V3 surface adds `V3ProjectHome` thread + `/projects/:slug` shell.
-> - **Verdict pill** (`VerdictPill.tsx`) — Shippable / Needs review / Blocked, derived from build + tests + reviewer + verifiedScore. Numerics demoted to disclosure.
-> - **Glossary primitive** (`<Glossary>`) — hover/focus tooltip with plain-English definitions for `codemap`, `wiring pass`, `verified score`, `status reason`, `classifier`.
+> Cross-cutting journeys that aren't project-specific: signup, billing upgrade, BYOK setup, teammate invitations, SSO config, audit log review. Derived from the code on this branch (migration head V199).
 
----
+## Journey 1 — Signup → first verified run (no GitHub repo)
 
-## 0. Shared journeys (all tiers)
+Goal: a brand-new user goes from landing page to a verified PR in a sandbox spec without needing to connect any external accounts.
 
-### 0.1 Sign up
-1. Land on `/register` (public).
-2. Submit email + password.
-3. Receive verification email → click link → `/verify-email` → account active.
-4. Redirected to `/login` → then to `/` (Runs page).
-5. Default tier: **FREE**, role: org owner of a solo org.
+1. **Land on the marketing site.** `landing/LandingController` serves the public landing page from `static/index.html`. CTA → `/register`.
+2. **Register.** UI: `/register` (`AuthPages.tsx`). Collects email + first/last name + password (≥12 chars). Posts `POST /api/auth/register {email, firstName, lastName, password, signupSource?, utmSource?, utmCampaign?}` (`auth/controller/AuthController`).
+3. **Auto-create user + personal org.** `AuthService.register` writes `AppUser` with `globalRole=USER` + `tier=FREE` + `email_verified=FALSE`. `OrgService.bootstrapPersonalOrg(userId)` writes an `org` row with `is_personal=TRUE` (V162). This unblocks `POST /api/projects` for the FREE-tier user.
+4. **Verify email.** Verification email sent via `app.mail.transport=smtp`. User clicks the link → `GET /api/auth/verify-email?token=...` returns `{accessToken, user}` (auto-session, no password re-entry per [F-29], 2026-04-30). UI stores the token and routes to `/welcome`.
+5. **Pick a sandbox starter.** UI: `/welcome` (`EmptyProjectPage`). "Path 2 · Try a sandbox" → `POST /api/onboarding/pick-sample {sampleId}` (`onboarding/OnboardingController`). Backend provisions a sandbox project under the personal org and seeds a sample spec body. Returns `{projectId, spec, projectType, preferredProvider}`.
+6. **Submit the spec.** UI auto-navigates to `/compose` with the sandbox project pre-selected and spec pre-filled. User reviews and clicks Submit. `POST /api/runs` → 202 RunSummary.
+7. **Approve the plan + watch live.** Same shape as the in-product flow — `/plan/:runId` → approve → `/live/:runId`. FREE tier is capped at 1-credit specs (`agent.cost.max-credits-free=1`) so the plan gate only ever offers 1 credit on FREE.
+8. **Review the result.** `/result/:runId` → ScoreCard. FREE users have `canDeploy=false` so the "Preview deploy" row reads "Upgrade" instead of "Start".
+9. **Activation funnel.** `EventName.PLAN_APPROVED` and `EventName.RUN_COMPLETE` are emitted to PostHog (when `analytics.posthog.enabled=true`) and to the in-DB `activation_event_ledger` (V125).
 
-### 0.2 Sign in (email or OAuth)
-1. `/login` — email + password, OR Google / GitHub OAuth2 button.
-2. OAuth: `/auth/oauth2/authorize` → provider → `/auth/callback` → JWT issued → `/`.
-3. Session: access token 1h, refresh cookie 7d.
+## Journey 2 — Upgrade from FREE to TEAM
 
-### 0.3 Recover password
-1. `/forgot-password` → submit email.
-2. Link in email → `/reset-password?token=…` → set new password → `/login`.
+Goal: a FREE user hits the monthly cap and upgrades to TEAM.
 
-### 0.4 View own profile + settings
-- `/settings` — name, password, notification prefs, connect GitHub PAT, connect Slack (if org-admin).
+1. **Hit the FREE quota.** User submits a 6th run in the calendar month. `POST /api/runs` calls `tierEnforcementService.assertAndIncrementRunCount(userId)` which throws HTTP 429 ("Monthly run cap exceeded — limit 5"). UI surfaces this on `/home` via the "All runs" quick-card ("5 / 5 this cycle") and on `/compose` via the "You've used all 5 runs in this billing cycle" banner.
+2. **Open the upgrade flow.** Either:
+   - Click "Top up credits" → `/topup` (instant, no plan change), or
+   - Click "Upgrade your plan" → `/plans`.
+3. **Pick a plan.** `/plans` (`PlansPage.tsx`) calls `GET /api/billing/plans` (`billing/controller/BillingController`). PRO is filtered server-side (V122 `lifecycle_state=HIDDEN`) so the user sees FREE / TEAM / ENTERPRISE.
+4. **Subscribe.** Click "Subscribe" on TEAM. UI calls `POST /api/billing/subscribe {planId, currency, seatCount?}` (`BillingController.subscribe`). `PaymentGatewayRouter` picks Razorpay (INR) or Stripe (USD/EUR/GBP) per `currency-gateway-map`. Returns a checkout URL.
+5. **Pay.** User redirects to Stripe / Razorpay checkout, pays, returns to `/billing?session_id=…`.
+6. **Webhook fires.** Gateway posts `POST /api/webhooks/stripe` or `POST /api/webhooks/razorpay` (`BillingWebhookController`). HMAC verified (`STRIPE_WEBHOOK_SECRET` / Razorpay HMAC). `BillingService.handleSubscriptionCreated` writes `billing_subscription` row, updates `org.tier='TEAM'`, fires `TierUpgradedEvent`.
+7. **V199 sync.** `V199__sync_org_tier_with_subscription_tier.sql` ensures `org.tier` stays in sync with the active subscription's tier on any subsequent webhook.
+8. **Use the new tier.** Refresh `/home` → `permissions` re-fetched from `GET /api/auth/me/permissions` → monthly cap shows "0 / ∞" → composer unlocks multi-credit specs, multi-repo selection up to 5, BYOK panel visible, audit log visible.
 
-### 0.5 Read shared validation report
-- `/reports/shared/:token` — public, no auth. Anyone with the link sees the report.
+Adjust seats later: `/org-members` → "Adjust seats" → `POST /api/org/me/seats/adjust {newSeats}` (`OrgController`). Range 2–20 self-serve. Stripe gets a prorated quantity update. Refuses to drop below current active member count.
 
----
+## Journey 3 — Set up BYOK (bring-your-own-keys)
 
-## 1. FREE tier
+Goal: a PRO+ user provides their own Anthropic / OpenAI / Gemini keys so platform cost caps don't apply.
 
-Goal: prove the product works, ship one trivial project, nudge to PRO.
+1. **Open API keys.** UI: `/api-keys` (`MiscAccountPages.tsx ApiKeysPage`). Hidden on FREE via `Shell.tsx:58`.
+2. **Validate keys first.** For each provider field, click "Test" → `POST /api/auth/settings/ai-keys/validate {provider, apiKey}` (`AuthController`). Pings the provider's models endpoint. Returns `{valid, message}`.
+3. **Save per-user keys.** "Save" → `PUT /api/auth/settings/ai-keys {openAiApiKey, anthropicApiKey, geminiApiKey}`. Keys are KMS-wrapped (`executespec.crypto.enabled=true` in prod).
+4. **Switch the org to OWN_KEYS mode (ORG_ADMIN only).** `PUT /api/org/me/settings/key-source {keySourceMode: 'OWN_KEYS', enabledProviders: ['ANTHROPIC', 'OPENAI', 'GEMINI']}` (`OrgController`).
+5. **Verify cost-cap exemption.** Next run submission: `RunOrchestrator.persistEstimate` checks `org.keySourceMode == 'OWN_KEYS'` and skips the `hardCapUsd` ceiling (`RunOrchestrator.java:1550`). `userCostCap` from the DTO still applies if set.
+6. **Provider failover.** When the user's key for one provider fails, the YAML `failover-order` chain (anthropic → openai → gemini, etc.) picks the next enabled provider's key via `ApiKeyResolver`. Failover events emitted as `RUN_PROVIDER_SWITCHED` over SSE so the live log shows the swap.
 
-### 1.1 Create first run (happy path)
-1. Click **"Create Run"** from `/`.
-2. `NewRunModal` opens. Provider selector locked to `OpenAI gpt-5.4-mini`. No batch toggle. No BYOK option. No "existing GitHub repo" option unless they've pasted a PAT in `/settings`.
-3. Enter spec (text). Submit → 202.
-4. Redirect to run detail. Plan generates → `AWAITING_APPROVAL` gate banner shows estimated cost + credit count.
-5. Click **Approve**. Run executes → tasks complete → `COMPLETE`.
-6. Preview panel auto-starts (5-min TTL).
+Per-org keys (TEAM tier): `PUT /api/org/me/settings/ai-keys` (ORG_ADMIN only) shares one set of keys across all org members.
 
-### 1.2 Hit a tier limit
-- **Run #6 in a month**: submission returns `403 QUOTA_EXCEEDED` → `UpgradeModal` opens: "FREE tier allows 5 runs/month. Upgrade to PRO for 100."
-- **Spec estimated at >$3**: submission rejected with "Spec exceeds FREE tier cost cap ($3)". Upgrade CTA.
-- **Batch toggle**: not visible at all in the UI.
-- **Deploy button** (on `/deployments`): renders `LockedFeature` — "Deployments available on PRO+".
-- **Integrations page**: sidebar entry hidden. Direct URL → `UpgradeModal`.
-- **BYOK** in `/settings`: section hidden.
+## Journey 4 — Invite a teammate to the org
 
-### 1.3 Preview + download
-- Max **3 preview starts per run**; 4th click shows "Preview limit reached for FREE tier".
-- Download zip: always available.
+Goal: ORG_ADMIN invites a developer who'll be added to the org and (optionally) specific projects.
 
-### 1.4 Push to GitHub
-- If user pasted a PAT in `/settings`, same flow as higher tiers (see §5). **No tier gating on GitHub push.**
+1. **Open the team page.** UI: `/org-members` (`MiscAccountPages.tsx OrgMembersPage`).
+2. **Invite.** "Invite member" button opens a modal. Fields: `email`, `orgRole` (DEVELOPER / BILLING_ADMIN / ORG_ADMIN), `projectIds[]` (optional project pre-assignment). POST `/api/org/invite {email, orgRole, projectIds}` (`OrgController`).
+3. **Invitation row created.** `OrgInvitation` row written with `status=PENDING`, `expires_at = NOW() + 14 days`, unique `token`. Email sent via `app.mail` with the accept link.
+4. **Recipient accepts.** UI: `/accept-invite?token=<token>` (`AcceptInvitePage` in `ExtraPages.tsx`). Calls `POST /api/org/accept-invite?token=<token>` (`OrgController`). Email-match check; conflict if the email doesn't match the logged-in user. On success, creates `OrgMember` row with the assigned `orgRole`, optionally adds `ProjectMember` rows for any `projectIds` from the invite.
+5. **Audit row written.** `ActivityAudit` row with `eventType=MEMBER_INVITED` / `MEMBER_ACCEPTED`. Visible on `/audit` (TEAM+ only).
+6. **TEAM seat-count check.** If the org is TEAM tier and adding this member would exceed `org.seatCount`, the accept call returns HTTP 402 with a message asking the admin to adjust seats first (`POST /api/org/me/seats/adjust`).
 
-### 1.5 Upgrade journey
-1. Sidebar shows blue **"Upgrade to Pro"** button.
-2. Click → `/plans` → select PRO → Razorpay or Stripe checkout.
-3. On success → tier updates live → batch / deploy / integrations unlock within seconds.
+Resend / revoke: UI shows pending invitations with "Resend" (`POST /api/org/me/invitations/{id}/resend`) and "Revoke" actions.
 
----
+Suspend / remove: `PUT /api/org/me/members/{userId}/suspend {suspended: true}` blocks login without removing the row. `DELETE /api/org/me/members/{userId}` removes.
 
-## 2. PRO tier
+Change role: `PUT /api/org/me/members/{userId}/role {role}` flips DEVELOPER ↔ BILLING_ADMIN ↔ ORG_ADMIN.
 
-Goal: regular individual / small-team use, managed API keys, 100 runs/mo.
+## Journey 5 — Accept an invite as a brand-new user
 
-### 2.1 Delta from FREE
-- 100 runs/month, 2 concurrent.
-- Cost cap $5/run.
-- Provider selector: Anthropic / Google (Gemini) / OpenAI — model matrix unlocked.
-- Batch toggle visible at approval time.
-- 5 preview starts per run.
-- Apply suggestions: up to 10 per run.
-- Auto-retries on task failure: up to 2.
-- Invite org members (up to 10). Chat copilot on run detail (10 messages/run).
+Goal: an external email recipient (no existing ExecuteSpec account) accepts an invitation.
 
-### 2.2 Create run with execution mode choice
-1. Same start as FREE.
-2. At plan approval: two cards side-by-side — **Run Now (Realtime)** vs **Batch Process (saves 50%)** with both cost estimates.
-3. Choose batch → status moves through `QUEUED_BATCH` → `IN_PROGRESS_BATCH` → `BATCH_COMPLETE` → normal post-exec flow.
-4. Realtime path unchanged from FREE.
+1. **Receive the email.** Invite email contains `https://executespec.ai/accept-invite?token=<token>`.
+2. **Click the link.** Lands on `/accept-invite?token=…`. UI calls `GET /api/invites/preview?token=` (`sharing/controller/ProjectInviteController` for project invites, `OrgController` for org invites). Returns `{invitedEmail, projectName | orgName, role, expiresAt}`. No auth required for preview — whitelisted in `SecurityConfig`.
+3. **Sign up if needed.** If the recipient has no account, UI prompts "Create account" → `/register?invite=<token>`. Email is pre-filled and locked to the invited email so the email-match check on accept can't fail.
+4. **Verify email.** Same as Journey 1 step 4.
+5. **Accept.** UI calls `POST /api/invites/accept?token=…` (or `POST /api/org/accept-invite` for org invites). Creates `ProjectMember` with `is_external=TRUE` (V175) for project invites, or `OrgMember` for org invites.
+6. **Routed to the project.** UI navigates to `/projects/:projectId` (project invite) or `/home` (org invite).
 
-### 2.3 Deploy to Cloud Run
-1. On a COMPLETE run → **Deploy** button (run-detail toolbar) → `DeployWizardModal`.
-2. Choose region, env vars, custom domain (optional).
-3. Click deploy → run moves to `DEPLOYING` → permanent Cloud Run URL issued.
-4. `/deployments` page lists active deployments. Cap: **5 active**.
+## Journey 6 — Configure SSO (Enterprise / TEAM)
 
-### 2.4 Integrations (ORG_ADMIN only)
-- `/integrations` sidebar entry visible.
-- Connect: Slack, JIRA, Confluence, ServiceNow, PagerDuty, Bitbucket, GitHub (via PAT, not OAuth), Figma (enterprise/max only).
-- On connect: org-wide; all members can trigger outbound notifications.
+Goal: ORG_ADMIN configures SAML or OIDC SSO so org members log in via their identity provider.
 
-### 2.5 Billing view
-- `/billing`: plan card "PRO — $X/mo", usage bar, **Top-up Runs** button for overage credits.
-- `/invoices`: self-service list.
+1. **Open SSO settings.** UI: `/integrations` → "Single Sign-On" card (TEAM+ tier surface).
+2. **Choose provider.** SAML, Google Workspace OIDC, Okta, Azure AD.
+3. **Configure.** `POST /api/sso/config {provider, metadataUrl | issuerUrl, clientId, clientSecret, attributeMap}` (`auth/sso/SsoConfigController`). Stores in `sso_config` table (V127 schema).
+4. **Test.** "Test SSO" button → backend does a server-to-server probe of the IdP metadata. Returns `{valid, message}`.
+5. **Enable for the org.** `PUT /api/sso/config/{id}/enable`. Sets `org.sso_enabled=TRUE`. Future logins from the org's email domain pattern are redirected to `/auth/oauth2/init?surface=sso&orgId=<id>` which kicks off the IdP flow.
+6. **SCIM provisioning (Enterprise only).** SCIM endpoint `/scim/v2/Users` accepts standard SCIM 2.0 payloads with a per-org token. Provisions / deprovisions `AppUser` + `OrgMember` rows on user assignment / unassignment in the IdP.
+7. **Login flow.** Org member visits `/login` → enters email → backend matches the email's domain to the org's `domain_patterns` → redirects to IdP → IdP redirects back to `/auth/callback/sso?code=…&state=…` (`AuthCallbackPage.tsx`) → backend exchanges the code, mints a session, redirects to `/home`.
 
-### 2.6 Top-up when low on credits
-1. Sidebar quota badge turns amber at <10 runs remaining.
-2. Click **Top-up Runs** → buy N credits (Razorpay / Stripe).
-3. Credits arrive instantly; run submission resumes.
+## Journey 7 — Review org-level audit log
 
----
+Goal: an ORG_ADMIN reviews compliance-relevant events across the org for a quarterly review.
 
-## 3. MAX tier
+1. **Open the audit log.** UI: `/audit` (`AuditLogPage` in `ExtraPages.tsx`). Sidebar entry gated on tier TEAM+ or SUPER_ADMIN (`Shell.tsx:63`).
+2. **Tier / role gate.** UI calls `GET /api/audit-logs?page=0&size=100` (`activity/ActivityFeedController`). 403 branches the error message:
+   - FREE / PRO tier → "Audit log is a TEAM+ feature. Upgrade your plan to enable it."
+   - TEAM+ but not ORG_ADMIN → "Audit log is restricted to org admins. Ask your org admin to grant you access."
+   - TEAM+ ORG_ADMIN but disabled → "Audit log isn't enabled for your org yet. Open Org Settings → Compliance to turn it on, or contact support if the toggle isn't visible."
+3. **Browse and filter.** Tabs: All / Auth / Billing / Members / Admin. Each row shows action name, actor email, target id, timestamp. Backed by `activity_audit` table (partitioned by month).
+4. **Verify hash chain (SUPER_ADMIN).** `GET /api/admin/audit-chain/verify` returns `{totalChained, verified, clean, firstBreak: {rowId, chainSeq, reason} | null}`. Confirms the hash chain hasn't been tampered with since the last verified row (M-019 / M-042).
+5. **Export.** "Export filtered as CSV" button generates a CSV client-side from the filtered list. For a real compliance handover, ORG_ADMIN can call `GET /api/admin/payment-audit/export` (SUPER_ADMIN-only via tier-gated proxy) for a full DB-backed export.
+6. **Specific compliance events to look for.** `ORG_EXTERNAL_SHARING_CHANGED` (V198 flag toggles), `MEMBER_ROLE_CHANGED`, `BILLING_SUBSCRIPTION_UPDATED`, `RUN_ARCHIVED`, `KEY_SOURCE_CHANGED`, `TIER_LIFECYCLE_CHANGED` (SUPER_ADMIN-driven).
 
-Goal: heavy individual / power-user with their own API keys.
+## Journey 8 — Toggle external sharing for the org (V198)
 
-### 3.1 Delta from PRO
-- **Unlimited** runs per month.
-- Cost cap lifted (still subject to silent hard cap = credits × $5 × 1.5).
-- **BYOK** unlocked — `/settings` shows "AI Keys" card; user can paste Anthropic/OpenAI/Gemini keys per provider.
-- Concurrent runs: 3.
-- Apply suggestions + preview starts: unlimited.
-- Model selection UI exposes all available models in the matrix.
+Goal: ORG_ADMIN enables cross-org collaborators (e.g. a contractor with a gmail address) on a single project.
 
-### 3.2 BYOK connect flow
-1. `/settings` → **AI Keys** tab.
-2. Paste provider API key → saved (encrypted at rest).
-3. Key source badge on run submission switches to **"Your key"** instead of platform key.
-4. Run cost billed at $0 to platform wallet (user pays provider directly). Credit usage: 1 credit per run (flat) for platform services.
+1. **Open org settings.** UI: `/integrations` → Org Settings card → "External Sharing" toggle.
+2. **Enable.** `PUT /api/org/me/settings/external-sharing {enabled: true}` (`OrgController`). Requires `ORG_ADMIN` of own org or `SUPER_ADMIN`. Writes `org.external_sharing_enabled=TRUE` (V198).
+3. **Audit row.** `ActivityAudit` row written with `eventType=ORG_EXTERNAL_SHARING_CHANGED` so the toggle is reviewable in the audit log.
+4. **Invite shows up.** On `/projects/:projectId/members`, the "Invite" popover now shows the external-email input field (previously hidden). Tier check still applies: PRO+ AND ORG_ADMIN-of-own-org (or SUPER_ADMIN) AND `org.externalSharingEnabled=true`.
+5. **Send invite.** `POST /api/projects/{id}/invites {email, projectRole}` writes `project_invite` (V175) with unique token. Recipient flow matches Journey 5.
+6. **Revoke if needed.** UI shows pending external invites with "Revoke" action → `DELETE /api/projects/{id}/invites/{inviteId}`.
 
-### 3.3 Figma integration (MAX-gated)
-- If org has enabled Figma (via ORG_ADMIN) and user's tier is MAX or ENTERPRISE → `NewRunModal` shows optional **"Figma URL"** field.
-- Behind the scenes: `FigmaIntegrationGate` blocks non-MAX users. (Plan: [figma-integration-v2-plan.md](figma-integration-v2-plan.md)).
+## Journey 9 — Request GDPR data export
 
----
+Goal: any user requests an export of all data tied to their account (GDPR right of access).
 
-## 4. ENTERPRISE tier
+1. **Open account page.** UI: `/account` (`AccountPage.tsx`).
+2. **Export.** "Export my data" button calls `GET /api/auth/me/data-export` (`auth/dsar/DsarController` + `UserDataExportService`). Returns a ZIP with manifest + payload + README.
+3. **Contents.** `manifest.json` lists every dataset included; `payload/` contains JSON files for `app_user`, `org` (if user owns the org), `org_member`, `project` (for project memberships), `pipeline_run` (the user's runs), `agent_task`, `validation_report`, `notification`, `activity_audit` (filtered to actor=userId), `billing_subscription`, `payment_history`. `README.md` documents the format.
+4. **Download.** Browser saves `executespec-export-<date>.zip`.
 
-Goal: large org, centralised billing, compliance.
+Available on all tiers (GDPR-mandatory).
 
-### 4.1 Delta from MAX
-- Up to 10 concurrent runs.
-- Org member cap lifted.
-- Domain enforcement (SAML/SSO) — ORG_ADMIN sets allowed email domain; new sign-ups outside the domain are rejected.
-- Dedicated org analytics at `/admin/analytics`.
-- Figma + all enterprise integrations available.
+## Journey 10 — Billing admin reviews invoices
 
-### 4.2 ORG_ADMIN journeys
-- `/org/settings` — members, invites, role assignment (ORG_ADMIN / DEVELOPER / FINANCE), domain enforcement, billing profile.
-- `/org/projects` — project-scoped run filtering; assign members to specific projects.
-- `/integrations` — connect integrations for the entire org.
-- `/billing` — master billing profile (GST for India, invoice email).
-- `/audit` — view audit log (who did what).
-- `/accounting` — view accounting exports. Requires **FINANCE** role.
+Goal: a BILLING_ADMIN downloads invoices for the org's accounting books.
 
-### 4.3 FINANCE role journeys
-- Read-only. Can view `/invoices`, `/accounting`, `/audit`, `/billing`. Cannot submit runs, cannot manage members.
-
-### 4.4 DEVELOPER role journeys
-- Can submit runs, view live logs, use chat copilot, download artifacts. Cannot see cost breakdown, cannot manage integrations, cannot invite members.
-
----
-
-## 5. GitHub push journey (all tiers)
-
-No tier gating. Runs on both FREE and ENTERPRISE.
-
-### 5.1 Connect GitHub
-1. `/settings` → GitHub card.
-2. Paste Personal Access Token (PAT) + GitHub username → **Save**.
-3. Card badge changes to green **"Connected"**.
-
-### 5.2 Submit run against existing repo
-1. `NewRunModal` → repo mode **"Start from existing repo"**.
-2. Paste `https://github.com/owner/repo`.
-3. Run workspace is initialized from a shallow clone. Generated commits go to a feature branch named `executespec/<runId-short>`.
-4. On run completion → PR opened automatically back to the repo's default branch. URL surfaces on Overview tab as `scmPrUrl`.
-
-### 5.3 Submit run that creates a new repo
-1. `NewRunModal` → **"Create new repo"**.
-2. On completion → private repo created under `githubOwner`, code pushed to default branch. No PR (nothing to merge against).
-
-### 5.4 Push a completed run manually
-1. Open a COMPLETE run → toolbar **Publish / Push to GitHub**.
-2. If no PAT configured → inline modal prompts for one.
-3. PR URL appears on the Overview tab after success.
-
-### 5.5 Error paths (GitHub)
-- No PAT → 400 "GitHub credentials not configured" → prompt to paste one.
-- Invalid PAT → 401 "Authentication failed. Check your token."
-- Token lacks repo scope → 403 "Insufficient permissions for this repository".
-- Repo not found → 404 "Repository not found or not accessible".
-- Rate limited → 429 "GitHub API rate limit exceeded — retry in N minutes".
-- Run still executing → 409 "Only COMPLETE or PARTIAL runs can be pushed".
-- Default branch locked → merge conflict banner, suggested resolution.
-
----
-
-## 6. Admin journeys (SUPER_ADMIN only)
-
-Orthogonal to tier; SUPER_ADMIN is a role granted out-of-band.
-
-- `/admin` — landing with org analytics, recent activity.
-- `/admin/pricing` — edit tier_config live (monthly_run_limit, concurrent cap, preview cap, cost cap, deployment cap).
-- `/admin/feature-flags` — toggle any feature flag, per-org or global.
-- `/admin/analytics` — cross-org aggregate metrics.
-- `/admin/payment-audit` — payment audit log, CSV export.
-- `/admin/webhook-events` — inbound webhook event log, filter by source.
-
----
-
-## 7. Notification bell (all tiers)
-
-- Header bell icon polls `/api/notifications/unread-count` every 30s.
-- Dropdown lists run completion / failure / batch events. Mark-read, mark-all-read, click-to-navigate.
-
----
-
-## 8. Journey matrix (quick reference)
-
-| Journey | FREE | PRO | MAX | ENTERPRISE |
-|---|---|---|---|---|
-| Create run | ✓ (5/mo, $3 cap) | ✓ (100/mo, $5 cap) | ✓ (∞) | ✓ (∞) |
-| Approve plan realtime | ✓ | ✓ | ✓ | ✓ |
-| Approve plan batch | ✗ | ✓ | ✓ | ✓ |
-| Provider selector | OpenAI-mini only | 3 providers | All | All |
-| BYOK | ✗ | ✗ | ✓ | ✓ |
-| Preview | 3/run | 5/run | ∞ | ∞ |
-| Deploy | ✗ | ✓ (5 max) | ✓ (∞) | ✓ (∞) |
-| Invite org members | ✗ | ✓ (10 max) | ✓ (∞) | ✓ (∞) |
-| Integrations | ✗ | ORG_ADMIN | ORG_ADMIN | ORG_ADMIN |
-| Figma integration | ✗ | ✗ | ✓ | ✓ |
-| Domain enforcement | ✗ | ✗ | ✗ | ✓ |
-| Audit log | ✗ | ORG_ADMIN | ORG_ADMIN | ORG_ADMIN |
-| Accounting | ✗ | ✗ | ✗ | FINANCE |
-| Admin panel | ✗ | ✗ | ✗ | SUPER_ADMIN |
-| Chat copilot on runs | ✗ | ✓ (10/run) | ✓ (10/run) | ✓ (10/run) |
-| Apply suggestions | 2/run | 10/run | ∞ | ∞ |
-| Data retention | 30d | 90d | 365d | 365d |
-
----
-
-## 9. Dead-end journeys worth testing
-
-- Token expired mid-run (JWT force-logout via feature flag epoch bump).
-- Payment failed — webhook lands → run credits not granted → UI shows retry CTA.
-- OAuth callback with mismatched state → redirected to `/login` with error toast.
-- Plan approval after pricing change → 409 conflict, user must re-confirm credit count.
-- Attempting to view another user's run via direct URL → 403 access denied.
-- Sign-up with email outside enforced domain (ENTERPRISE) → rejected.
+1. **Open billing.** UI: `/billing` (`BillingPage.tsx`). Visible to ORG_ADMIN + BILLING_ADMIN.
+2. **Payment history.** Calls `GET /api/billing/payment-history?orgId=` (`billing/controller/PaymentAuditController`). Lists payments / refunds with gateway, amount, currency, status, paid_at.
+3. **Invoices.** `GET /api/billing/invoices?orgId=` (`InvoiceController`) lists `invoice` rows. Click an invoice → `GET /api/billing/invoices/{id}/download` returns the PDF.
+4. **Top-up history.** `GET /api/billing/topup/history` lists every `run_topup_purchase` row (consumed and unconsumed) so the BILLING_ADMIN can reconcile credit purchases.
+5. **Payment audit (SUPER_ADMIN only).** For deeper drill-down: `/admin` → "Payment audit" row → `GET /api/admin/payment-audit?orgId=`. Full ledger including webhook events. CSV export via `GET /api/admin/payment-audit/export`.
+</content>
+</invoke>
