@@ -76,7 +76,12 @@ public class AgentModelConfig {
   private ChatModel resolveModel(String provider) {
     return switch (provider.toLowerCase()) {
       case "anthropic" -> {
-        AnthropicChatModel model = ctx.getBean(AnthropicChatModel.class);
+        // 2026-05-16 (Spring Boot 3.5 upgrade) — Spring 6.2 narrows bean types by reflecting the
+        // returned instance, so plannerModel + workerModel + reviewerModel all register as
+        // AnthropicChatModel at runtime (whatever the declared `ChatModel` return type says).
+        // That made `ctx.getBean(AnthropicChatModel.class)` ambiguous. Qualify by the @Bean
+        // name "anthropicChatModel" so we always resolve the canonical bean.
+        AnthropicChatModel model = ctx.getBean("anthropicChatModel", AnthropicChatModel.class);
         if (model == null) {
           throw new IllegalStateException(
               "Anthropic provider requested but ANTHROPIC_API_KEY not configured");
@@ -84,7 +89,7 @@ public class AgentModelConfig {
         yield model;
       }
       case "openai" -> {
-        OpenAiChatModel model = ctx.getBean(OpenAiChatModel.class);
+        OpenAiChatModel model = ctx.getBean("openAiChatModel", OpenAiChatModel.class);
         if (model == null) {
           throw new IllegalStateException(
               "OpenAI provider requested but OPENAI_API_KEY not configured");

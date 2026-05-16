@@ -3,9 +3,14 @@
 @import './design-system/primitives.css';
 @import './tokens.css';
 
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+/*
+ * 2026-05-16 (Dependabot #130) — Tailwind 4 collapsed the three @tailwind
+ * directives into a single @import. The compat layer in `tailwind.config.ts`
+ * (loaded via `@config` below) keeps the v3-style config working with v4.
+ */
+@import 'tailwindcss';
+@config '../tailwind.config.ts';
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
 
 /* ── Mobile / iOS Safari fixes ─────────────────────────────────── */
 html,
@@ -676,5 +681,124 @@ optgroup {
   input[type='radio'],
   select {
     min-height: 40px;
+  }
+}
+
+/* ── 2026-05-14 UX overhaul — motion + layout utilities ──────────────────
+ * Apple-HIG-aligned motion vocabulary, exposed as classes so any component
+ * can opt in without hand-rolling its own transition. See
+ * docs/design/ux-redesign-2026-05-14.md §"Motion vocabulary".
+ * ─────────────────────────────────────────────────────────────────────── */
+
+/* Pressable surface — used on cards/buttons that take a tap.
+ *   - At rest:        --shadow-card-rest, hairline-ish border.
+ *   - On hover:       lift + brighter border + slightly raised surface.
+ *   - On active:      tiny scale-down for haptic-equivalent feedback.
+ *   - Reduced motion: all transforms removed via @media block below. */
+.surface-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card-rest);
+  transition:
+    box-shadow var(--duration-base) var(--ease-out),
+    border-color var(--duration-base) var(--ease-out),
+    transform var(--duration-fast) var(--ease-out),
+    background-color var(--duration-base) var(--ease-out);
+}
+.surface-card.is-interactive {
+  cursor: pointer;
+}
+.surface-card.is-interactive:hover {
+  background: var(--surface-raised);
+  border-color: var(--border-hover);
+  box-shadow: var(--shadow-card-hover);
+}
+.surface-card.is-interactive:active {
+  transform: scale(0.985);
+}
+
+/* Pressable button — the universal tap-press affordance.
+ * Apply on any <button> that should feel iOS-native. */
+.press-effect {
+  transition: var(--motion-press);
+}
+.press-effect:active {
+  transform: scale(0.96);
+}
+
+/* Hover lift — for cards/links that go somewhere on click. */
+.hover-lift {
+  transition:
+    box-shadow var(--duration-base) var(--ease-out),
+    transform var(--duration-base) var(--ease-out);
+}
+.hover-lift:hover {
+  box-shadow: var(--shadow-card-hover);
+  transform: translateY(-1px);
+}
+
+/* Tap fade — for inline links / chips where a scale is too much. */
+.tap-fade {
+  transition: var(--motion-tap);
+}
+.tap-fade:active {
+  opacity: 0.6;
+}
+
+/* Min-height utility — guarantees the Apple HIG 44pt floor on mobile.
+ * The @media-coarse rule above is broad (every button); this is the
+ * precise opt-in for inline links that don't render as <button>. */
+.hit-target {
+  min-height: var(--hit-min-mobile);
+  min-width: var(--hit-min-mobile);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Reveal-on-mount — used by hero headlines + sheet content.
+ * Pair with `animation: reveal-in var(--duration-slow) var(--ease-out) both;`. */
+@keyframes reveal-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.reveal-on-mount {
+  animation: reveal-in 320ms cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+/* Segmented tab indicator — the iOS-style underline slider. */
+.segmented-tab-indicator {
+  position: absolute;
+  bottom: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--accent-blue);
+  transition:
+    left var(--duration-base) var(--ease-out),
+    width var(--duration-base) var(--ease-out);
+  pointer-events: none;
+}
+
+/* Reduced-motion override — every animation collapses to instant. */
+@media (prefers-reduced-motion: reduce) {
+  .surface-card,
+  .surface-card.is-interactive:active,
+  .press-effect,
+  .press-effect:active,
+  .hover-lift,
+  .hover-lift:hover,
+  .tap-fade,
+  .reveal-on-mount,
+  .segmented-tab-indicator {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }

@@ -1,8 +1,22 @@
 # `frontend/` — React + Vite dashboard
 
-> Last reviewed: 2026-05-12 (1.0.0-M1).
+> Last reviewed: 2026-05-16 (1.0.0-M1).
 
-React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3. Two coexisting chromes share Zustand stores; both build into the Spring Boot JAR at `src/main/resources/static/`.
+React 18 + Vite 5 + Tailwind CSS 3.4 + TypeScript 5.3. Signal is the production chrome; the V2 sidebar and V3 top-bar shells are retained for legacy redirect catching only. All Signal pages live under `frontend/src/signal/`. Single Vite build into the Spring Boot JAR at `src/main/resources/static/`.
+
+## Signal primitives (`signal/components/`)
+
+The reusable surface that every Signal page builds on. **Net-new this round (2026-05-15→16):**
+
+- `Modal.tsx` — `Modal`, `ConfirmModal`, `PromptModal` with focus-trap, ESC dismiss, click-backdrop dismiss. Mobile-friendly (slides up on narrow screens). Replaces every `window.confirm` / `window.prompt` across Signal pages (9 destructive surfaces + 3 prompt surfaces verified).
+- `Loaders.tsx` — `Spinner`, `LoadingState`, `SkeletonRow`, `InlineLoader`. Wired on HomePage / ProjectPulsePage / ProjectComposePage so the first paint shows shimmer rows instead of the empty state.
+- `CodeView.tsx` — regex-tokenised syntax highlighter with Content/Diff toggle. Replaces V3's Monaco editor (saves ~600 KB on the bundle). Languages: TS/JS/Java/Python/JSON/SQL/Bash/YAML.
+- `Markdown.tsx` — ~3 KB custom GFM-subset parser (no react-markdown). Used by SpecChat replies + ProjectChatPage assistant bubbles.
+- `CostProgressBar.tsx` — green 0–80 % / amber 80–100 % / red ≥100 % of hard cap, `role='progressbar'`, `aria-valuenow`. Wired on LivePage.
+- `BrandLogos.tsx` — real multicolour SVG logos for Google, GitHub, Slack, Jira, Confluence, Bitbucket, Stripe, Razorpay.
+- `SpecChat.tsx` — "Build my spec" trigger + assistant chat with Markdown rendering. The launcher is also exposed on ComposePage / ProjectComposePage.
+
+The shared 4-band score palette + multiplicative `verifiedScore` thresholds live in `Primitives.tsx` (Button kinds: `primary | secondary | mint | coral | ghost`). `VerdictPill` thresholds align with `RunCard` / `ScoreRing` / HomePage / AllRunsPage: **≥85 = Shippable**, 70–84 = Needs review, <70 = Failed (since 2026-05-16; previously ResultPage used 90).
 
 ## Top-level layout
 
@@ -148,6 +162,7 @@ Documented deviations from Google TypeScript style in [`docs/design/code-style.m
 
 ## Recent work (kept as breadcrumbs)
 
+- **Signal P0/P1 punch-list (2026-05-16, PR #138)** — VerdictPill threshold aligned at ≥85; `Members · -1` regression hardened (ProjectTabs clamps counts ≥0 + reads real dashboard fields + Architecture promoted to a tab); /audit error message branches on tier+role; monthly run cap surfaced on /home; Signal Breakdown distinguishes 0 from "not measured"; Activity feed + project memory poll-refresh every 30 s; "Try another provider" row on Result page; runTitle preferred in list rows; SkeletonRow loaders on initial fetches; scroll fix (html/body/.signal-shell/.signal-main locked at 100dvh + `.signal-content`/`.signal-feed` get `min-height:0` so `overflow-y:auto` actually scrolls inside the Feed); ConfirmModal/PromptModal swap on all destructive surfaces; CostProgressBar on LivePage; Plans 3-col on desktop; LivePage hero label maps status → human phase; `external_sharing_enabled` UI toggle on Org Settings + invite-card gate on Project Members (V198).
 - **PR refresh button** also polls CI check-runs alongside open/merged state (PR #106 / V186, 2026-05-11).
 - **SPA fallback** for 4-segment routes (e.g. `/projects/:slug/runs/:runShort/...`); favicon redirect; V3 chat actions restored; file scope toggle.
 - **RunDetail auto-refresh** — files refresh every 5s while non-terminal (was: only on RUN_STATUS SSE). Folder tree replaces flat list of changed files. Goal / userRequest expandable with `RunSpecBlock`.

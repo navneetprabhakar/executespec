@@ -4,6 +4,13 @@ import java.time.Instant;
 import java.util.List;
 import java.util.UUID;
 
+import jakarta.validation.Valid;
+import jakarta.validation.constraints.Email;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
+import jakarta.validation.constraints.Size;
+
+import com.fasterxml.jackson.annotation.JsonAlias;
 import com.navneet.executespec.auth.security.AppUserDetails;
 import com.navneet.executespec.project.security.ProjectAccessGuard;
 import com.navneet.executespec.sharing.entity.ProjectInvite;
@@ -35,21 +42,44 @@ public class ProjectInviteController {
 
   // ── Project-scoped admin endpoints ────────────────────────────────────────
 
-  public record CreateInviteRequest(String email, String role) {}
+  /**
+   * SDET 2026-05-16 — BUG-002 / BUG-003 fix.
+   *
+   * <p><b>BUG-002:</b> a junk email like {@code "not an email"} was being saved as a PENDING invite
+   * because there was no format check. Add {@code @Email} + {@code @Size(max=254)} (RFC 5321) +
+   * {@code @NotBlank} and let bean validation reject before persistence.
+   *
+   * <p><b>BUG-003:</b> the wire contract every caller uses is {@code projectRole} (verified in
+   * {@code frontend/src/lib/api.ts} and the OpenAPI client). The record's field was {@code role};
+   * Jackson silently dropped the unknown {@code projectRole} key, the resolved value ended up
+   * {@code null}, and the service downstream defaulted it to {@code PROJECT_VIEWER} — a security
+   * concern when a caller intended a higher role. Rename + {@code @JsonAlias("role")} keeps
+   * back-compat for any old callers still sending {@code "role"}. {@code @NotBlank} +
+   * {@code @Pattern} now reject unknown roles loud at the controller boundary.
+   */
+  public record CreateInviteRequest(
+      @NotBlank(message = "email is required") @Email(message = "email must be a valid address") @Size(max = 254, message = "email must not exceed 254 characters") String email,
+      @NotBlank(message = "projectRole is required") @Pattern(
+              regexp = "PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER",
+              message = "projectRole must be PROJECT_ADMIN, PROJECT_DEVELOPER, or PROJECT_VIEWER")
+          @JsonAlias("role")
+          String projectRole) {}
 
   @PostMapping("/api/projects/{projectId}/invites")
   public ResponseEntity<ProjectInviteDto> create(
       @PathVariable String projectId,
-      @RequestBody CreateInviteRequest req,
+      @Valid @RequestBody CreateInviteRequest req,
       @AuthenticationPrincipal AppUserDetails userDetails) {
     // Audit 2026-05-12 review item B #9 — assertCanRead used as a write-gate; now uses
     // assertCanWrite so PROJECT_VIEWER members can't mint invites.
     accessGuard.assertCanWrite(projectId, userDetails);
-    if (req == null || req.email() == null || req.email().isBlank()) {
-      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "email is required");
+    // Defensive null-check survives even if a test or service-layer caller bypasses @Valid.
+    if (req == null) {
+      throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "request body is required");
     }
     ProjectInvite invite =
-        inviteService.createInvite(projectId, req.email(), req.role(), userDetails.getUser());
+        inviteService.createInvite(
+            projectId, req.email(), req.projectRole(), userDetails.getUser());
     return ResponseEntity.status(HttpStatus.CREATED).body(ProjectInviteDto.from(invite));
   }
 

@@ -34,7 +34,13 @@ public record OrgDto(
     String jiraBaseUrl,
     // Confluence integration flags (raw credentials never exposed)
     boolean hasConfluenceCredentials,
-    String confluenceBaseUrl) {
+    String confluenceBaseUrl,
+    /**
+     * V198 — when true, ORG_ADMIN / SUPER_ADMIN of this org may invite any email domain (gmail,
+     * outlook, etc.) as cross-org collaborators on a project. Used by the frontend to gate the
+     * "External invite" UI on the project Members page + show/hide the toggle on Org Settings.
+     */
+    boolean externalSharingEnabled) {
   private static boolean present(String s) {
     return s != null && !s.isBlank();
   }
@@ -68,7 +74,8 @@ public record OrgDto(
         present(org.getConfluenceBaseUrl())
             && present(org.getConfluenceEmail())
             && present(org.getConfluenceApiToken()),
-        org.getConfluenceBaseUrl());
+        org.getConfluenceBaseUrl(),
+        org.isExternalSharingEnabled());
   }
 
   private static List<String> parseProviders(String csv) {

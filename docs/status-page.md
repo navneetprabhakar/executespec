@@ -1,177 +1,278 @@
-# ExecuteSpec — Status Page Reference
+# Status and Health Monitoring
 
-> Companion to [`enterprise-sla.md`](enterprise-sla.md). Captures the public
-> status-page commitment + the per-component health signals that should
-> drive the page.
-> Last reviewed: 2026-05-12 (1.0.0-M1).
-
-## What "live" means
-
-A status page lives at **status.executespec.ai** (CNAME → **Better Stack**).
-Every published incident maps to a component below; SLA credits in
-`enterprise-sla.md` reference component-level uptime measured here.
-
-## Components
-
-| Component | What it measures | Health signal | Severity rules |
-|---|---|---|---|
-| **API** (REST surface) | `GET /actuator/health` returns 2xx within 2s | External Pingdom probe (60s interval) from 3 regions. 2/3 must succeed for the minute to count as up. | 1 minute down → **Investigating**. 5 minutes down → **Identified** + Slack page. 15 minutes down → **Major Outage**. |
-| **Realtime runs** (V2 pipeline) | A canary run kicks off every 15 minutes; succeeds end-to-end within 8 minutes (LOW spec, anthropic provider) | `executespec.v2.run.outcome` Prometheus counter — alert when `failure / total > 10%` over 30 min | Yellow when canary fails once; Red when 2 consecutive fail. |
-| **Plan approval gate** | Median time-to-plan-rendered (PLANNING → AWAITING_APPROVAL transition) | `executespec.v2.planner.latency` p50 — alert when >180s | Yellow > 180s, Red > 600s. |
-| **Webhooks (Stripe + Razorpay + GitHub)** | Webhook signature verification rate + processing success | `webhook_event` table inspection (failed_count vs total over 5 min) | Red when failure rate > 5% over 10 min. |
-| **Auth (login + OAuth)** | `/api/auth/login` p95 < 500ms; OAuth callback success rate > 99% | Pingdom + 5xx rate from access logs | Yellow > 1s p95; Red on auth failure spike. |
-| **Preview environments** | Cloud Run preview start success rate | `executespec.preview.start` outcome counter | Yellow on start-failure rate > 5% over 30 min. |
-| **GCP infrastructure** | Cloud SQL availability, Cloud Run platform status | Inherits from GCP status page (proxied as a sub-component) | Mirrored from cloud.google.com/status. |
-
-## Incident severity matrix
-
-| Severity | Description | Customer impact | Response SLA |
-|---|---|---|---|
-| **P1 — Critical** | Service unavailable for >50% of customers; data integrity at risk; auth flow broken | Customers cannot log in or submit runs | 15-min page → Slack `#incidents` + on-call PagerDuty. Status page banner published within 30 min of detection. |
-| **P2 — Major** | Single component degraded, partial customer impact | Slow runs, intermittent failures | 30-min ack → on-call engineer engaged. Status page note within 1 hour. |
-| **P3 — Minor** | One non-critical component degraded | Cosmetic, intermittent error in a niche feature | Triaged next business day; status page only if customer-reported. |
-| **P4 — Notice** | Planned maintenance / scheduled downtime | None or minimal | Posted ≥7 days in advance. |
-
-Cross-references the [`enterprise-sla.md`](enterprise-sla.md) credit
-table — credits accrue based on component-level uptime as reported on
-this status page, not subjective "felt slow" reports.
-
-## Subscription mechanics
-
-- Customers can subscribe to status updates via email or webhook on
-  status.executespec.ai (Statuspage.io's built-in subscription flow).
-- Enterprise customers also get auto-CC on every P1/P2 incident via
-  the contact email on their org row.
-- Internal Slack `#executespec-status` mirrors public posts.
-
-## Authoring incidents
-
-1. **Detect** — alert fires (Prometheus / Pingdom / customer report).
-2. **Acknowledge** in Statuspage within the SLA above. Use the
-   templated incident text — Investigating / Identified / Monitoring
-   / Resolved.
-3. **Update** at least every 30 minutes during P1, every hour during
-   P2.
-4. **Resolve** with a one-paragraph summary + remediation note.
-5. **Postmortem** within 5 business days for P1; within 10 for P2.
-   Posted internally + linked from the resolved incident page (no
-   customer auto-email — postmortems are pull, not push).
-
-## Status page provider — Better Stack (parked decision #1)
-
-Going with **Better Stack** at $29/mo — cheaper than Statuspage.io's
-$79/mo Audience tier, modern UI, native component groups, and
-Slack/email subscriptions out of the box. Provider swap is config-only
-should we ever need to revisit (a single Pingdom + status-page
-re-config day per the parked decision rationale).
-
-### Better Stack setup runbook (M-018)
-
-> Ops-side setup; this section captures the exact steps so the
-> first oncall doesn't have to re-derive them. Skip if Better Stack
-> is already provisioned.
-
-1. **Account creation** (one-time, billing admin only)
-   - Sign up at <https://betterstack.com/uptime> with the
-     `admin@executespec.ai` mailbox.
-   - Pick the **Team** plan ($29/mo) — covers up to 50 monitors,
-     unlimited subscribers, public status page, custom domain.
-   - Enable 2FA on the workspace (Better Stack supports TOTP +
-     WebAuthn).
-
-2. **Status page** at status.executespec.ai
-   - In Better Stack → **Status pages** → **Create status page**.
-   - Page title: "ExecuteSpec status".
-   - Slug: `executespec` (gives `executespec.betteruptime.com`
-     until the CNAME flips).
-   - Custom domain: `status.executespec.ai`. Add the suggested
-     DNS records to Cloudflare → CNAME `status` →
-     `*.betteruptime.com` (Better Stack issues a Let's Encrypt cert
-     automatically).
-   - Branding: upload the ExecuteSpec wordmark + favicon from
-     `website/press-kit/`. Use brand colour `#5B8DEF` (Signal Blue
-     per `docs/design/ui-tokens.md`).
-
-3. **Component groups** (mirror the table above)
-   - Create one **Component group** for each row in the Components
-     table: API · Realtime runs · Plan approval gate · Webhooks
-     (Stripe + Razorpay + GitHub) · Auth · Preview environments ·
-     GCP infrastructure.
-   - Inside each group, create one **Monitor** per probe target.
-
-4. **Monitors** (per group)
-   - **API** monitor: HTTP probe `https://api.executespec.ai/actuator/health`
-     every 60s from 3 regions (us-east, eu-west, ap-south). Expect
-     200 + body containing `UP|DEGRADED`. Alert after 1 failure;
-     escalate after 2.
-   - **Realtime runs** monitor: Heartbeat URL — receives a `POST` from
-     the canary-runner cron in our infra (separate from Better
-     Stack; see § Canary runner below). Expect a heartbeat every
-     15 minutes; alert after 30 minutes silent.
-   - **Plan approval gate** monitor: not directly probable; use a
-     Better Stack **Custom alert** that listens for a Prometheus
-     webhook posting (see § Prometheus integration).
-   - **Webhooks** monitor: Custom alert — Prometheus webhook on
-     `webhook_event` failure-rate metric.
-   - **Auth** monitor: HTTP probe
-     `https://api.executespec.ai/api/auth/health` (returns 200 if
-     OAuth providers are reachable). Same cadence as API.
-   - **Preview environments** monitor: Custom alert on
-     `executespec.preview.start` outcome counter.
-   - **GCP infrastructure** monitor: Better Stack's built-in GCP
-     status integration (Settings → Integrations → Google Cloud).
-
-5. **Subscriptions**
-   - Enable **email subscriptions** on the public page.
-   - Enable **Slack incoming webhook** mirror to `#executespec-status`
-     (Settings → Integrations → Slack).
-   - Enable **Atom/RSS feed** for customer-side scrapers.
-
-6. **Postmortem template**
-   - Better Stack → Settings → **Templates** → Add a
-     "Postmortem" template (markdown body) matching the structure
-     in § Authoring incidents.
-
-7. **Smoke check**
-   - Trigger a manual test incident: Better Stack → Incidents →
-     **Create incident** → component "API", severity "Investigating".
-     Confirm the status page renders the banner + the Slack mirror
-     fires + a subscriber test email arrives. Resolve immediately.
-
-### Canary runner
-
-The realtime-runs heartbeat needs an external scheduler. Use
-**Cloud Scheduler** in our GCP project (`us-east4`) firing every 15
-minutes:
-
-```
-HTTP target: https://api.executespec.ai/api/admin/canary/run
-Auth header: Bearer <CANARY_BEARER_TOKEN> (rotated quarterly)
-Frequency:   */15 * * * *
-```
-
-The endpoint kicks a LOW spec into RunOrchestrator on the anthropic
-provider, polls to terminal, and on success pings Better Stack's
-heartbeat URL.
-
-### Prometheus integration (for the metric-driven monitors)
-
-The metric-driven monitors (Plan approval gate, Webhooks, Preview
-environments) read off our local Prometheus stack at
-`prometheus.executespec.internal`. Better Stack supports
-**Alertmanager webhooks** — register Better Stack's webhook URL as
-a Prometheus AlertManager receiver, then declare per-metric alerts
-using the rules in § Components.
-
-### What this doc DOES NOT do
-
-- Doesn't create the Better Stack account (needs billing-admin
-  hands).
-- Doesn't write the canary-runner code (separate ticket; the spec
-  above is the contract).
-- Doesn't change the in-app health endpoints — they already
-  return the right thing for Better Stack to probe.
+How ExecuteSpec exposes liveness, readiness, and runtime health — both for our
+own load balancers / probes and for the operator. Customer-facing status
+beyond a self-hosted readiness URL does **not** exist as of today; that gap
+is called out in section 5.
 
 ---
 
-*Companion: [`enterprise-sla.md`](enterprise-sla.md) for the SLA + uptime credit schedule that this status page enforces.*
+## 1. Application health endpoints
+
+Two distinct probe surfaces ship with the backend:
+
+### 1.1 Custom cheap probe — `/api/health`
+
+`HealthController`
+(`src/main/java/com/navneet/executespec/api/controller/HealthController.java`)
+defines a deliberately lightweight pair of endpoints under `/api/health`:
+
+```
+GET  /api/health        liveness, always 200 if JVM is up; cached metrics block
+GET  /api/health/ready  readiness, inline DB ping; 200 on success, 503 on DB down
+```
+
+Implementation details:
+
+- The class holds an `AtomicReference<MetricsData> cachedMetrics`,
+  `AtomicBoolean cachedDbUp`, `AtomicBoolean cachedRedisUp`, and an
+  `AtomicReference<Instant> lastCacheRefresh`. Every call to `/api/health`
+  checks `lastCacheRefresh` and refreshes the snapshot **only if older than
+  `CACHE_INTERVAL_MS = 30_000`**. The refresh runs on a background thread
+  (a virtual thread, per the `@Async` annotation), so the request thread
+  never opens a Hikari connection.
+- This is the design's defence against probe-induced pool exhaustion. Kubernetes
+  livenessProbes that hit the endpoint every 5s used to drain the 30-slot
+  Hikari pool when an upstream blip held connections open; switching to the
+  cached liveness fixed it.
+- `/api/health/ready` deliberately bypasses the cache. It opens a fresh
+  connection from the pool, runs `SELECT 1`, releases it, and reports 200 or
+  503. That's the correct signal for "should the load balancer route traffic
+  here right now."
+- Uptime is computed from `START_TIME = Instant.now()`, set at class-load time.
+
+Response body shape (`/api/health`):
+
+```json
+{
+  "status": "UP" | "DEGRADED",
+  "uptime": "1d 4h 23m",
+  "version": "1.0.0-M1",
+  "metrics": {
+    "totalRuns": 12345,
+    "activeRuns": 7,
+    "queuedRuns": 0,
+    "completedRuns": 12001,
+    "failedRuns": 337
+  },
+  "db": { "up": true },
+  "redis": { "up": true }
+}
+```
+
+`status=DEGRADED` if either `db.up` or `redis.up` flipped to false in the most
+recent cache refresh. Note that "DEGRADED" still returns HTTP 200 — only
+`/api/health/ready` returns 503.
+
+### 1.2 Standard Spring Boot Actuator — `/actuator/health`
+
+`application.yml` exposes the actuator allowlist:
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+```
+
+So `GET /actuator/health` returns Spring Boot's composite health, built from
+the auto-discovered `HealthIndicator` beans. Out-of-the-box that includes:
+
+- `db` — `DataSourceHealthIndicator` (validates the configured Hikari pool).
+- `redis` — `RedisHealthIndicator` (Lettuce `PING`).
+- `mail` — `MailHealthIndicator` (SMTP CONNECT to `smtp.gmail.com:587`).
+- `diskSpace` — `DiskSpaceHealthIndicator` (default threshold 10 MB).
+- `livenessState` / `readinessState` — Spring's standard probes.
+
+No custom `HealthIndicator` beans are registered in the codebase as of the
+research notes. Anything new — for example a custom indicator wrapping
+`ProviderHealthTracker` (the circuit breaker for LLM providers) — would need
+to be added under the `health` package or alongside `observability/`.
+
+Operationally:
+
+- `/api/health` is the right choice for high-frequency liveness checks
+  (load balancer health, K8s liveness probe).
+- `/actuator/health` is the right choice for composite "is everything bolted
+  on" diagnostic checks (deploy gates, alerting).
+- `/api/health/ready` is the right choice for readiness probes that should
+  pull a node out of rotation when the DB is unreachable.
+
+### 1.3 Other actuator endpoints
+
+The full set exposed by `application.yml`:
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /actuator/health` | Composite health (DB, Redis, Mail, diskSpace, liveness, readiness) |
+| `GET /actuator/info` | Service info bundle. Empty unless `info.*` properties are set. |
+| `GET /actuator/metrics` | List of registered metric names |
+| `GET /actuator/metrics/{name}` | Single metric snapshot |
+| `GET /actuator/prometheus` | Prometheus scrape target (Micrometer + Spring AI + custom `executespec.v2.*`) |
+
+Everything else (`env`, `beans`, `loggers`, `threaddump`, `heapdump`, etc.) is
+intentionally **off**. That keeps the attack surface narrow: those endpoints
+can leak credentials (`env`), CPU-intensive heap snapshots (`heapdump`), or
+reveal the bean graph in a way useful for OWASP-style enumeration.
+
+---
+
+## 2. Operational signals beyond `/health`
+
+### 2.1 Maintenance and feature flags
+
+There is no application-wide `submissions.paused` flag. The closest knobs are:
+
+- `agent.recovery.enabled` (default `true`) — turns the
+  `StartupRunResumer` salvage path off without redeploying.
+- `agent.recovery.auto-resume-on-startup` (default `false`; `true` on `dev`)
+  — controls whether interrupted runs auto-resume after a restart.
+- `agent.recovery.max-auto-restarts` (default 2) — caps loop-back recoveries.
+- `v2.pause.enabled` feature flag (default `false`, gated through
+  `FeatureFlagService`) — gates the `POST /api/runs/{id}/pause` /
+  `POST /api/runs/{id}/resume` endpoints. 503 if the flag is off.
+- `ci.autofix.enabled` feature flag (default `false`) — gates the
+  unattended CI-failure autofix webhook (`CiFailureAutoFixService`).
+- `security.guardrail_level` (`LOW` / `MEDIUM` / `HIGH`) — flips between three
+  pre-defined guardrail profiles (`security/ShellSandboxPolicy`,
+  `security/CodeAbuseScanner`, `security/InputSanitizer`).
+- `executespec.rate-limit.enabled` (default `true`) — kill-switch for the
+  Redis-backed `RateLimitFilter` (`ratelimit/RateLimitFilter.java`). On at
+  rest; flip to `false` only for emergency loosening.
+- `analytics.posthog.enabled` (default `false`) — gate for PostHog product
+  analytics dispatch.
+- `agent.api-test-suite.enabled` (default `true`) — gates the post-merge
+  OpenAPI generator (`apitests/ApiTestSuiteAgent`).
+
+There is also no "freeze submissions" toggle by default. The simplest way to
+hard-stop new runs is to flip `agent.concurrency.max-runs` to `0` (the
+orchestrator queues them but never dispatches) and announce the change via the
+operator Telegram bridge (chat `6475810501`, bot `8489535450`). That keeps
+existing runs alive without burning credits while new ones queue.
+
+### 2.2 Quotas and tier limits
+
+`application.yml` ships defaults that act as soft circuit breakers:
+
+```yaml
+app.tiers:
+  free:        { monthly-run-limit: 5,   concurrent-run-limit: 1 }
+  pro:         { monthly-run-limit: 100, concurrent-run-limit: 3 }
+  enterprise:  { monthly-run-limit: -1,  concurrent-run-limit: 10 }   # -1 = unlimited
+```
+
+`agent.concurrency.max-runs: 50` in base config and `20` in production
+(`application-prod.yml`). When that ceiling is hit, the orchestrator returns
+202 with a `queuePosition` field rather than 503 — runs are durable in
+Postgres, not lost.
+
+### 2.3 Operator Telegram bridge
+
+There is an out-of-band monitoring channel the operator uses:
+
+- `chat_id=6475810501`, bot `8489535450`.
+- Push: heartbeat every 600s plus an event on every status-count change.
+- Pull: `getUpdates` polled every 120s, output appended to `/tmp/tg-inbox.log`.
+
+Not a customer-facing integration; it lives alongside the deployment as a
+side-channel for "is the matrix still moving" awareness.
+
+---
+
+## 3. Self-monitoring (Prometheus + Grafana)
+
+The local observability stack (`observability/docker-compose.yml`) and the GCP
+profile both scrape `/actuator/prometheus` for the same `executespec.v2.*`
+metrics. Dashboards live under `observability/grafana/dashboards/`:
+
+- `executespec-overview.json` — the operator dashboard. Eighteen panels:
+  active/queued runs, run duration percentiles, LLM call rate + latency +
+  tokens by provider/model, LLM errors and fallbacks, task duration, agent
+  handover duration, gate wait, tool calls, preview build + deploy duration,
+  preview/deploy failures, **stuck-runs detected**.
+- `jvm-http-overview.json` — JVM-level dashboard: heap/non-heap, GC pause,
+  thread counts, HikariCP pool, Lettuce/Redis command latency, HTTP request
+  rate + latency.
+
+The stuck-run panel is the most operationally useful: it tracks
+`executespec_monitor_stuck_detected_total`. A non-zero value means a run has
+exceeded the watchdog thresholds (`agent.recovery.warn-threshold-minutes`,
+`act-threshold-minutes`) without progress. There's no automatic alert wired —
+operator owns the response.
+
+Local Grafana credentials are committed in the compose file (`admin/admin`).
+Acceptable for the local-only stack; do not expose this compose file to a
+non-local host without rotating credentials.
+
+---
+
+## 4. Alerting integrations (present, partial)
+
+The following hooks exist in code but are not wired end-to-end as alert
+destinations:
+
+| Integration | Source | State |
+| --- | --- | --- |
+| Slack incident channels | `agent.integrations.slack.*` (controller `api/controller/SlackIntegrationController.java`) | OAuth flow + project/channel mapping ships, used for **run notifications** not infrastructure alerts. Per-org config; no global "ops alerts" channel wiring. |
+| Email (Gmail SMTP) | `app.mail.smtp.host=smtp.gmail.com:587` | Used for transactional mail (run-complete, password reset, invoices). No automatic alerting hook. |
+| PagerDuty | `agent.integrations.pagerduty.enabled: false` | Config slot exists; never enabled. Trigger types in `application.yml`: `["incident.trigger"]`. |
+| JIRA | `agent.integrations.jira.enabled: false` | Inbound webhook receiver lives in `api/controller/IntegrationController.java`. Outbound ticketing not wired. |
+
+The Grafana dashboards have alerting capable but **no Slack / PagerDuty
+destination is configured** in the JSON. Adding one is config-only.
+
+---
+
+## 5. Customer-facing status page
+
+**There is no customer-facing status page today.** The trust-pack PDF
+(`scripts/trust-pack/render.mjs` → `frontend/public/trust-pack.pdf`) documents
+the data-flow and certifications posture but does not include a real-time
+status URL.
+
+Specifically:
+
+- No `status.executespec.ai` subdomain.
+- No public Statuspage / Better Stack / Statusgator integration.
+- No public endpoint that returns "all systems operational" / "degraded".
+- The closest customer-visible signal is the `/api/health` endpoint, which
+  is JWT-protected at the security filter chain and not designed for public
+  consumption.
+
+If a status surface were added, the sane shape would be a static page hosted
+behind Cloudflare (where `*.executespec.ai` already terminates) backed by a
+small JSON polled from `/api/health` (cheap path, already cached) plus the
+Prometheus `executespec_v2_run_outcome_total` and stuck-runs counters via a
+read-only token.
+
+---
+
+## 6. Incident escalation channels
+
+The current channels, ordered by criticality:
+
+1. **Operator Telegram bridge** (chat `6475810501`) — first-touch for any
+   operator awareness. Heartbeats + status-count changes auto-fire.
+2. **Prometheus + Grafana** (`observability/`) — the operator dashboard is
+   the primary debugging surface. Stuck-run, preview/deploy failures, and
+   LLM error rates are the panels to check first.
+3. **Application log stream** — structured JSON via Logback
+   (`logstash-logback-encoder:8.0` in `pom.xml`). Every error path stamps a
+   correlation id (`errorId` on 500 responses, `runId`/`taskId` on V2 spans).
+4. **Email to `admin@executespec.ai`** — `app.contact.fallback-email`.
+   `app.contact.jira.{base-url, email, api-token, project-key=SUP,
+   issue-type=Task}` exists in config but is gated off; flipping it on routes
+   inbound support email into a JIRA `SUP-*` ticket via the inbound integration
+   controller.
+5. **Deploy rollback path** — `POST /api/deployments/{id}/rollback` re-routes
+   Cloud Run traffic to the previous revision; `engine-rollback` does the
+   same via the deploy-engine handoff (`DeployEngineOrchestrator`).
+6. **Workspace recovery** — `agent.recovery.auto-resume-on-startup` (true on
+   dev) plus `StartupRunResumer` (`recovery/StartupRunResumer.java`) salvages
+   any RESUMABLE_STATUSES run on JVM start. If the workspace dir is missing,
+   the run is marked PARTIAL with `status_reason=REVIEWER_INTERRUPTED_CODE_PRESERVED`
+   so the operator can see exactly what was rescued vs lost.
+
+There is no on-call rotation tool wired in. The operator absorbs all four
+channels; this is one of the larger gaps for a publishable status posture.
