@@ -904,6 +904,12 @@ public class ValidationReportService {
    *   <li><b>testFactor</b> — testsPassed/testsTotal when tests ran; 0.5 ("unknown, neutral") when
    *       no tests were captured. We don't punish runs that have no test infra (covered by the v3
    *       UI's "testsTotal>0" headline gate, see R-132), but we also don't reward them.
+   *       <b>2026-05-16 trust gate:</b> when reviewer is CLEAN or FIXED_ISSUES, build passed, and
+   *       endpoint coverage is ≥95%, testFactor is floored at reviewerFactor to prevent the
+   *       AccuracyAssessment LLM's "PARTIAL coverage" judgment from overriding the reviewer's
+   *       wiring-pass + endpoint-coverage signals on specs that explicitly request minimal tests
+   *       ("one JUnit test"). See OpenAI todo run 29b761fc analysis for the false-positive class
+   *       this closes.
    *   <li><b>reviewerFactor</b> — CLEAN=1.0, FIXED_ISSUES=0.85, UNRESOLVED_ISSUES=0.4,
    *       REVIEW_FAILED=0.2, null=0.5. Captures the qualitative reviewer signal as a multiplicative
    *       damper.
@@ -1034,6 +1040,38 @@ public class ValidationReportService {
     // so the LLM signal is the only check we have.
     if ("CLEAN".equals(reviewerVerdictName) || "FIXED_ISSUES".equals(reviewerVerdictName)) {
       endpointFactor = Math.max(endpointFactor, reviewerFactor);
+    }
+
+    // 2026-05-16 — test-coverage trust gate (mirror of the endpoint gate).
+    //
+    // Root cause from the OpenAI todo-app run (29b761fc, vScore 60 vs 85
+    // for Anthropic/Gemini on the same spec): the spec said "Include
+    // ONE JUnit test for the controller". OpenAI shipped exactly one
+    // @Test method covering all 4 endpoints in a single happy-path flow
+    // — literally what the spec asked for. Anthropic / Gemini
+    // over-delivered with 9 / 5 @Test methods respectively. The
+    // AccuracyAssessment LLM then judged OpenAI's testCoverageLevel as
+    // PARTIAL (factor 0.7) and Anthropic / Gemini as GOOD (factor 1.0).
+    // Multiplicatively that's a 30% score gap caused entirely by the
+    // model following the spec literally.
+    //
+    // Same fix as endpointFactor: when the reviewer's wiring pass came
+    // back CLEAN or FIXED_ISSUES AND the build passed AND endpoint
+    // coverage is ≥95%, the build is provably wired up — at that point
+    // an LLM "PARTIAL" testCoverageLevel signal is more likely measuring
+    // breadth-of-tests-relative-to-some-ideal than spec compliance.
+    // Floor testFactor at reviewerFactor so a strong end-to-end signal
+    // doesn't get clobbered by the LLM judge's preference for
+    // exhaustive over minimal.
+    //
+    // Only fires when `testsTotal == 0` (i.e. we couldn't actually run
+    // the tests). When real tests ran the pass/total ratio stays the
+    // truth; the LLM judge is unused.
+    if (testsTotal <= 0
+        && ("CLEAN".equals(reviewerVerdictName) || "FIXED_ISSUES".equals(reviewerVerdictName))
+        && endpointCoveragePercent != null
+        && endpointCoveragePercent >= 95) {
+      testFactor = Math.max(testFactor, reviewerFactor);
     }
 
     // Each unfixed critical knocks 5% off, floored at 0.5. Substantially weaker than the

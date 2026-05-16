@@ -1364,6 +1364,12 @@ export interface OrgDto {
   // Confluence integration flags (raw credentials never returned)
   hasConfluenceCredentials?: boolean;
   confluenceBaseUrl?: string | null;
+  /**
+   * V198 — when true, ORG_ADMIN / SUPER_ADMIN may invite any email domain
+   * (gmail, outlook, etc.) as cross-org collaborators on a project. Defaults
+   * to false on new orgs. Toggle via {@link updateExternalSharing}.
+   */
+  externalSharingEnabled?: boolean;
 }
 
 export interface OrgMemberDto {
@@ -1462,6 +1468,18 @@ export const updateOrgKeySourceSettings = (
   req<OrgDto>('/org/me/settings/key-source', {
     method: 'PUT',
     body: JSON.stringify({keySourceMode, enabledProviders}),
+  });
+
+/**
+ * V198 — toggle per-org external project sharing. When true, ORG_ADMIN or
+ * SUPER_ADMIN may invite any email domain (gmail, outlook, etc.) as a
+ * cross-org collaborator on a project. Default is false; existing tenants
+ * are opt-in.
+ */
+export const updateExternalSharing = (enabled: boolean) =>
+  req<OrgDto>('/org/me/settings/external-sharing', {
+    method: 'PUT',
+    body: JSON.stringify({enabled}),
   });
 
 /** Saves org-level JIRA credentials (ORG_ADMIN only). Pass empty strings to clear. */
@@ -2937,6 +2955,30 @@ export const annotateArchitecture = (projectId: string, annotation: string) =>
 
 export const getRepoCodeMap = (projectId: string, repoId: string) =>
   req<{content: string}>(`/projects/${projectId}/repos/${repoId}/codemap`);
+
+// 2026-05-16 — Browse tab — list the actual files in a linked repo via the
+// backend's GitHub-proxied endpoint. The backend uses the caller's stored
+// PAT, so file reads stay within the user's GitHub permissions.
+export interface RepoFileList {
+  repoFullName: string;
+  defaultBranch: string;
+  files: string[];
+}
+export const listRepoFiles = (projectId: string, repoId: string) =>
+  req<RepoFileList>(`/projects/${projectId}/repos/${repoId}/files`);
+
+// 2026-05-16 — Browse tab — fetch the raw text of one file. Cap-enforced
+// to 1 MB on the backend; longer content is truncated with a trailing
+// marker so the UI can warn the user without bailing entirely.
+export interface RepoFile {
+  repoFullName: string;
+  defaultBranch: string;
+  path: string;
+  content: string;
+  sizeBytes: number;
+}
+export const readRepoFile = (projectId: string, repoId: string, path: string) =>
+  req<RepoFile>(`/projects/${projectId}/repos/${repoId}/file?path=${encodeURIComponent(path)}`);
 
 // PR list for a run (R5)
 export const getRunPrs = (runId: string) =>

@@ -186,6 +186,52 @@
   --text-3xl: 1.875rem;
   --text-4xl: 2.5rem;
   --text-5xl: 3.25rem;
+
+  /* ── 2026-05-14 UX overhaul tokens ────────────────────────────────────
+   * Apple-HIG-aligned refinement layer. NEW tokens — every existing token
+   * above is preserved. See docs/design/ux-redesign-2026-05-14.md.
+   * ────────────────────────────────────────────────────────────────── */
+
+  /* Surface ladder — role-named (job-based, not depth-numbered). */
+  --surface-page: var(--c-graphite-0);
+  --surface-card: var(--c-graphite-2);
+  --surface-raised: var(--c-graphite-3);
+  --surface-sunken: var(--c-graphite-1);
+
+  /* Border hierarchy. */
+  --hairline: var(--c-graphite-5);
+
+  /* Depth — cards carry a 1-px inner highlight + a soft outer shadow.
+   * That inner highlight is the trick that makes a flat dark surface
+   * read as a real, slightly raised plane (macOS Aqua "inner light"). */
+  --shadow-card-rest: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-card-hover: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 8px 20px rgba(0, 0, 0, 0.55);
+  --shadow-sheet: 0 -12px 32px rgba(0, 0, 0, 0.6);
+  --shadow-overlay: 0 24px 64px rgba(0, 0, 0, 0.7);
+
+  /* Hit targets. */
+  --hit-min-mobile: 44px;
+  --hit-min-desktop: 32px;
+  --hit-comfort: 48px;
+
+  /* Motion vocabulary (4 named tracks). */
+  --motion-press: transform 80ms cubic-bezier(0.4, 0, 0.6, 1);
+  --motion-tap: opacity 120ms ease-out;
+  --motion-reveal:
+    opacity 200ms cubic-bezier(0.2, 0, 0, 1), transform 200ms cubic-bezier(0.2, 0, 0, 1);
+  --motion-pulse: background-color 320ms ease-out;
+
+  /* Radius — role-named.  */
+  --radius-control: 8px;
+  --radius-card: 14px;
+  --radius-pill: 9999px;
+
+  /* Breakpoints — single source of truth shared with useBreakpoint(). */
+  --bp-phone: 480px;
+  --bp-tablet: 768px;
+  --bp-desktop: 1024px;
+  --bp-wide: 1280px;
+  --bp-xl: 1536px;
 }
 
 /* ── Light theme override (v2.5.14 Phase 2) ─────────────────────────────
@@ -245,6 +291,17 @@
   --elevation-3: 0 12px 32px 0 rgba(15, 23, 42, 0.12);
 
   --focus-ring: 0 0 0 2px var(--geist-bg), 0 0 0 4px var(--accent-blue);
+
+  /* 2026-05-14 UX overhaul — light-theme role-surface aliases. */
+  --surface-page: var(--c-paper-0);
+  --surface-card: var(--c-paper-1);
+  --surface-raised: #ffffff;
+  --surface-sunken: var(--c-paper-2);
+  --hairline: var(--c-paper-3);
+  --shadow-card-rest: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 1px 2px rgba(15, 23, 42, 0.04);
+  --shadow-card-hover: inset 0 1px 0 rgba(255, 255, 255, 0.9), 0 8px 20px rgba(15, 23, 42, 0.08);
+  --shadow-sheet: 0 -12px 32px rgba(15, 23, 42, 0.1);
+  --shadow-overlay: 0 24px 64px rgba(15, 23, 42, 0.14);
 }
 
 /* ── prefers-color-scheme default for first-time visitors (no saved pref) ── */

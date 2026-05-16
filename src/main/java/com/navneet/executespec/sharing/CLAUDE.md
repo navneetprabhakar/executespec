@@ -1,12 +1,16 @@
-# `sharing/` — External project sharing (V175)
+# `sharing/` — External project sharing (V175 + V198)
 
-> Last reviewed: 2026-05-12 (1.0.0-M1). **Merged to dev/main.**
+> Last reviewed: 2026-05-16 (1.0.0-M1). **Merged to dev/main.**
 >
 > Two complementary surfaces for sharing project visibility outside the host org:
 > 1. **Project invites** — cross-org `ProjectMember` rows (collaboration)
 > 2. **Public share links** — signed read-only links per surface (one-off viewing)
 >
-> Both tier-aware.
+> Both tier-aware. **V198 (2026-05-16)** added a per-org feature flag
+> `org.external_sharing_enabled` (default false) plus a role gate (ORG_ADMIN
+> or SUPER_ADMIN only) on `ProjectInviteService.createInvite`. PROJECT_ADMIN
+> on its own is no longer enough — adding outsiders is an org-level decision.
+> Flag is toggled via `PUT /api/org/me/settings/external-sharing`.
 
 ## Files
 
@@ -15,7 +19,7 @@
 - `repository/ProjectInviteRepository.java`, `ProjectShareLinkRepository.java`.
 - `service/ProjectInviteService.java` — invite lifecycle (create / accept / revoke). Tier-gated to PRO+ for `createInvite`. Email send via `MailService.sendProjectInviteEmail` (best-effort, never fails the invite).
 - `service/ProjectShareLinkService.java` — link lifecycle (create / resolve / revoke / view-counter). Tier-gated by `tier_config.share_link_active_cap` (FREE 3, PRO 25, TEAM/MAX/ENTERPRISE -1=unlimited).
-- `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview.
+- `controller/ProjectInviteController.java` — auth-protected create/list/revoke + auth-required accept + public preview. **SDET 2026-05-16 (BUG-002/003):** `CreateInviteRequest` now has `@Email` + `@NotBlank` + `@Size(254)` on the email field and `@NotBlank` + `@Pattern("PROJECT_ADMIN|PROJECT_DEVELOPER|PROJECT_VIEWER")` + `@JsonAlias("role")` on the role field (renamed `role` → `projectRole` to match the wire contract used by `frontend/src/lib/api.ts`). `@Valid` on the controller param wires bean validation — garbage emails and unknown roles now fail loud at 400.
 - `controller/ProjectShareLinkController.java` — auth-protected admin endpoints (create/list/revoke).
 - `controller/ProjectSharePublicController.java` — **no-auth** public read paths (`/api/shared/{token}/...`).
 

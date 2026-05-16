@@ -440,6 +440,37 @@ public class OrgService {
     return result;
   }
 
+  /**
+   * V198 (2026-05-16) — toggle the per-org "external sharing enabled" flag. When this is true,
+   * SUPER_ADMIN or ORG_ADMIN of this org may invite users from any email domain (gmail, outlook,
+   * etc.) as cross-org members on a project. Default is false; existing tenants are opt-in.
+   *
+   * <p>Gated to ORG_ADMIN of this org / SUPER_ADMIN at the controller via {@code @PreAuthorize}.
+   * The service method emits an audit row so flips can be retraced for compliance.
+   */
+  @Transactional
+  public OrgDto updateExternalSharing(String orgId, boolean enabled, String actorId) {
+    Org org =
+        orgRepo
+            .findById(orgId)
+            .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Org not found"));
+    boolean before = org.isExternalSharingEnabled();
+    org.setExternalSharingEnabled(enabled);
+    org.setUpdatedAt(Instant.now());
+    OrgDto result = OrgDto.from(orgRepo.save(org));
+
+    auditOrgEvent(
+        "ORG_EXTERNAL_SHARING_CHANGED",
+        "ORG",
+        orgId,
+        orgId,
+        actorId,
+        Map.of("enabled", before),
+        Map.of("enabled", enabled));
+
+    return result;
+  }
+
   /** Toggle the api_keys_provided flag for an enterprise org. */
   @Transactional
   public OrgDto updateApiKeysProvided(String orgId, boolean provided, String actorId) {

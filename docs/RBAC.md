@@ -1,225 +1,402 @@
-# ExecuteSpec RBAC Map
+# Role-Based Access Control
 
-> Last updated: 2026-05-12. Reflects post-V165 tier ladder (MAX renamed to TEAM @ $39) and V175 cross-org `ProjectMember`.
+This document describes RBAC as implemented in code, not as aspired-to. Every claim here is traceable to a file path under `src/main/java/com/navneet/executespec/`.
 
-## Roles
+Two orthogonal axes govern every authorisation decision:
 
-### Global roles (`AppUser.globalRole`)
+1. **Tier** (`FREE` / `PRO` / `TEAM` / `ENTERPRISE`) — what the user has paid for.
+2. **Role** (global on the user, org-scoped on org-member, project-scoped on project-member) — what the user is allowed to do.
 
-| Role | Description |
-|------|-------------|
-| `SUPER_ADMIN` | Full system access. Manages feature flags, admin panels, seller config, every project / org / tier surface. |
-| `USER` | Default role. Access depends on tier + org membership + project membership. |
-
-### Organization roles (`OrgMember.orgRole`)
-
-| Role | Description |
-|------|-------------|
-| `ORG_ADMIN` | Manages org settings, members, integrations, billing, AI keys. |
-| `BILLING_ADMIN` | Org-scoped payment history + invoice access. |
-| `DEVELOPER` | Standard org member. Runs, chat, metrics, live logs. |
-
-### Project roles (`ProjectMember.projectRole`)
-
-| Role | Description |
-|------|-------------|
-| `PROJECT_ADMIN` | Manages project settings, members, archival. |
-| `PROJECT_DEVELOPER` | Standard project member (read + write). |
-| `PROJECT_VIEWER` | **Read-only**. Used by V175 cross-org `ProjectMember` invitees (`is_external=true`). |
-
-Legacy: `STARTER` maps to `FREE` in the auth system; `FINANCE` was retired (its capabilities folded into `BILLING_ADMIN` + `SUPER_ADMIN`).
+Tier gates feature availability (e.g. "can I open a PR review?"). Role gates row-level access (e.g. "can I read this specific project?").
 
 ---
 
-## Subscription tiers (live, post-V165/V179/V185)
+## 1. The Tier Axis
 
-| Tier | Price | Runs (credits) | Seats | Key Mode | Lifecycle | Notes |
-|------|-------|----------------|-------|----------|-----------|-------|
-| `FREE` | $0 | 5 / month, 1-credit specs only | 1 | Managed | LISTED | Lifetime quota gating; no HIGH-complexity plans; personal org auto-provisioned (V162/V163). |
-| `PRO` | $20 / mo | 20 / month | 1 | Managed | **HIDDEN** | Grandfathered from 2026-04-28 — existing subscribers untouched, hidden from new buyers. |
-| `TEAM` | $39 / seat / mo (min 2) | Unlimited (BYOK) | 2-20 self-serve | BYOK | LISTED | Shared per-seat pool. V165 renamed (was MAX @ $29 BYOK); V149's TEAM-BYOK plan ID. |
-| `ENTERPRISE` | Custom (from $1,500/mo) | Unlimited + SLA | Unlimited | BYOK / SYSTEM | LISTED | Custom contract, audit log export, SSO + SCIM (future). |
+Tier lives in two places that must stay in sync (`V199__sync_org_tier_with_subscription_tier.sql` exists specifically to enforce that):
 
-**The Solo / MAX tiers do not exist on `dev` / `main` today** — V176/V177 introduced "Solo" but V179 + V185 retired both Solo and the V143 product-split discriminator. The 4-tier ladder above is canonical.
+| Column                         | File                                                                                                              | Default        |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------- | -------------- |
+| `app_user.tier`                | [`auth/entity/AppUser.java`](../src/main/java/com/navneet/executespec/auth/entity/AppUser.java)                   | `FREE`         |
+| `org.tier`                     | [`auth/entity/Org.java`](../src/main/java/com/navneet/executespec/auth/entity/Org.java)                           | `PRO`          |
+| `billing_subscription.tier_*`  | seeded by [`auth/service/AuthService.java`](../src/main/java/com/navneet/executespec/auth/service/AuthService.java) `createFreeSubscription` on register | derived        |
 
-**Tier lifecycle states** (V121): `LISTED` (visible + buyable), `HIDDEN` (invisible to new buyers, existing subscribers untouched), `SUNSETTING` (scheduled for removal — gateway side-effects gated by `billing.lifecycle.sunsetting.enabled` feature flag, default OFF).
+Constants are plain Java strings, validated against `tier_config` rows (`auth/entity/TierConfig.java`). Per-tier numeric caps come from `tier_config`:
 
----
+- `monthly_run_limit` (`-1` = unlimited)
+- `max_org_members`
+- `concurrent_run_limit`
+- `max_chat_messages`
+- `max_apply_suggestions`
+- `max_preview_starts`
+- `max_run_auto_retries`
+- `can_deploy` / `max_deployments`
+- `max_run_cost_usd` (per-run BYOK cost cap)
+- `retention_days`
+- `pr_review_enabled` / `pr_review_monthly_quota` (V172)
+- `code_review_enabled` / `code_review_monthly_quota` (V172)
+- `share_link_active_cap` (V175)
+- `lifecycle_state` (LISTED / HIDDEN / SUNSETTING — v2.6.0)
+- `execution_view_enabled`
 
-## Backend endpoint authorization
+Tier history:
 
-### Spring Security (`SecurityConfig.java`)
+- **V145** (later) raised FREE 5 → 10 runs/month, **V167** reverted to 5.
+- **V165** (`drop_max_tier_team_at_39.sql`) collapsed legacy MAX tier into TEAM, deleted MAX from `tier_config` and `billing_plan`.
+- **V176** rebranded PRO display as "Solo" (display only).
+- **V185** rolled that branding back; tier identifier remained `PRO`.
 
-| Endpoint | Rule |
-|----------|------|
-| `POST /api/auth/register`, `/login`, `/refresh`, `/forgot-password`, `/reset-password` | `permitAll` |
-| `GET /api/auth/verify-email`, `/oauth2/**` | `permitAll` |
-| `GET /api/auth/me`, `/api/auth/me/**` | `authenticated` |
-| `POST /api/webhooks/razorpay`, `/api/webhooks/stripe` | `permitAll` (signature-verified) |
-| `POST /webhooks/github` | `permitAll` (HMAC SHA-256 verified) |
-| `GET /api/health/**` | `permitAll` |
-| `GET /actuator/health/**`, `/actuator/prometheus` | `permitAll` |
-| `GET /actuator/**` (other) | `hasRole('SUPER_ADMIN')` |
-| `POST /api/integrations/*/webhook` | `permitAll` (signature-verified) |
-| `GET /api/integrations/slack/oauth/callback` | `permitAll` |
-| `GET /api/runs/*/events` (SSE) | `permitAll` (scoped JWT token in query param, `scope=sse` + `runId` claim) |
-| `GET /api/reports/shared/*` | `permitAll` (public share token) |
-| `GET /api/shared/{token}/**` (V175 project share links) | `permitAll` (token-bearer auth) |
-| `GET /api/invites/preview` + `POST /api/invites/accept` (V175 cross-org invites) | `permitAll` (preview) / `authenticated` (accept; email-match required) |
-| Static assets (`/`, `/index.html`, `/assets/**`) | `permitAll` |
-| `/api/admin/**` | `hasRole('SUPER_ADMIN')` |
-| All other `/api/**` | `authenticated` |
-
-### `@PreAuthorize` / Access guards
-
-| Controller | Endpoint | Required role |
-|------------|----------|---------------|
-| **SuperAdminController** (class-level) | All | `SUPER_ADMIN` |
-| **ConfigAdminController** (class-level) | All | `SUPER_ADMIN` |
-| **ExecutespecMigrationController** (class-level) | All | `SUPER_ADMIN` |
-| **PaymentAuditController** | `GET /api/admin/payment-audit` + `/export` | `SUPER_ADMIN` |
-| | `GET /api/admin/webhook-events` | `SUPER_ADMIN` |
-| | `GET /api/billing/payment-history` | `ORG_ADMIN` or `BILLING_ADMIN` or `SUPER_ADMIN` |
-| **OrgController** | `PUT /api/org` + member-management | `ORG_ADMIN` or `SUPER_ADMIN` |
-| **ProjectController** | `POST /api/projects` | `ORG_ADMIN` or `DEVELOPER` or `SUPER_ADMIN` (also tier-gated by `TierEnforcementService.assertCanCreateProject`) |
-| | `PUT /api/projects/{id}` / `archive` / member-management | `ORG_ADMIN` or `SUPER_ADMIN` (also `ProjectAccessGuard.assertCanWrite`) |
-| **TierLifecycleController** | `GET /api/admin/tiers` + `PUT /{tierId}` | `SUPER_ADMIN` |
-| **AdminReconciliationController** | `POST /api/admin/executions/reconcile` | `SUPER_ADMIN` |
-| **SwebenchController** + **ProgramBenchController** | `POST /api/admin/swebench/run` + `/programbench/run` | `SUPER_ADMIN` |
-
-### Tenant access guards (per-resource ownership)
-
-| Guard | Resource | Check |
-|-------|----------|-------|
-| `RunAccessGuard.requireRunAccess(runId, user)` | `pipeline_run` | User must own the run OR be a member of the run's org/project. |
-| `ProjectAccessGuard.assertCanRead(projectId, user)` | `project` | Org-match OR `project_member` row (V175 cross-org). |
-| `ProjectAccessGuard.assertCanWrite(projectId, user)` | `project` | Same but excludes `PROJECT_VIEWER`. |
-
-`AccessGuardCoverageTest` (ArchUnit, under `src/test/java/com/navneet/executespec/arch/`) pins every controller method whose URL touches `/runs/{` / `/projects/{` / `/executions/{` / `/launches/{` / `/repos/{` to call a guard. **10 sites** remain in `KNOWN_LEGACY_DRIFT` — 3 in `ProjectRepoController` (`deleteRepo`, `installRepoWebhook`, `syncRepo` — need a dedicated `RepoAccessGuard`), 2 in `SuperAdminController` + 1 in `ExecutespecMigrationController` (already SUPER_ADMIN-gated), 1 in `RunController#poll` (separate access path), 3 unrelated. New violators fail the build.
+Enforcement lives in [`auth/service/TierEnforcementService.java`](../src/main/java/com/navneet/executespec/auth/service/TierEnforcementService.java) (`assertAndIncrementRunCount`, `assertCanCreateProject`, `assertCanLinkRepoToProject`, `assertComplexityAllowed`, etc.) under pessimistic-write locks on `app_user` / `org`. Tier resolution for personal-org users routes through `freeUserPermissions` in [`auth/service/TierPermissionService.java`](../src/main/java/com/navneet/executespec/auth/service/TierPermissionService.java).
 
 ---
 
-## Tier permissions matrix
+## 2. The Role Axes
 
-Resolved by `TierPermissionService.resolve(user)`. Priority: SUPER_ADMIN > Org member > Solo user. `EntitlementResolver.resolveTier` picks the higher of (user.tier, org.tier) — fixes the FREE-leak class.
+### 2.1 Global role (`app_user.global_role`)
 
-| Permission | SUPER_ADMIN | ORG_ADMIN | DEVELOPER (org) | Solo FREE | Solo PRO (HIDDEN) | Solo TEAM* | Solo ENT |
-|------------|:-----------:|:---------:|:---------------:|:---------:|:-----------------:|:----------:|:--------:|
-| `canManageAiKeys` | Y | Y | - | - | - | Y | Y |
-| `canViewPricing` | Y | Y | - | Y | Y | Y | Y |
-| `canManageIntegrations` | Y | Y | - | - | - | Y | Y |
-| `canViewMetrics` | Y | Y | Y | Y | Y | Y | Y |
-| `canViewCostBreakdown` | Y | - | - | - | - | Y | Y |
-| `canViewTokenUsage` | Y | Y | Y | Y | Y | Y | Y |
-| `canUseChat` | Y | Y | Y | Y | Y | Y | Y |
-| `canCreateOrg` | Y | Y | - | - | - | - | - |
-| `canInviteMembers` | Y | Y | - | - | - | Y | Y |
-| `canViewOrgMembers` | Y | Y | Y | - | - | Y | Y |
-| `canViewAudit` | Y | Y | - | - | - | Y | Y |
-| `canViewLiveLog` | Y | Y | Y | Y | Y | Y | Y |
-| `canViewInvoices` | Y | Y | - | Y | Y | Y | Y |
-| `canManageBillingProfile` | Y | Y | - | Y | Y | Y | Y |
-| `canDeploy` | Y | tier-based | tier-based | - | Y | Y | Y |
+Declared in `AppUser` as a plain string with default `USER`. Two values in production:
 
-*Solo TEAM means a single-seat TEAM subscription (technically minimum is 2). **Y** = granted, **-** = denied, **tier-based** = from `tier_config.max_deployments`.
+- `SUPER_ADMIN` — platform operator. Bypasses every guard except payment-webhook signature verification.
+- `USER` — everyone else.
 
-R8 (personal-org permission gap) was fixed in 1.0.0-M1 — TEAM/ENTERPRISE users on personal orgs get `canViewAudit / canInviteMembers / canViewOrgMembers / canManageIntegrations / canViewPricing` correctly.
+There is no on-disk constants enum; the strings are compared directly. Spring authorities are minted in [`auth/security/AppUserDetails.java`](../src/main/java/com/navneet/executespec/auth/security/AppUserDetails.java) as `ROLE_<globalRole>`.
 
----
+### 2.2 Org role (`org_member.org_role`)
 
-## Tier enforcement (`TierEnforcementService`)
+Declared in [`auth/entity/OrgMember.java`](../src/main/java/com/navneet/executespec/auth/entity/OrgMember.java). Default `DEVELOPER`.
 
-| Check | FREE | PRO (HIDDEN) | TEAM | ENTERPRISE |
-|-------|------|--------------|------|------------|
-| Run submission | 5 / month, 1-credit specs only | 20 / month (billing cycle) | Unlimited (BYOK) | Unlimited (custom) |
-| Complexity gate (HIGH plans) | Blocked | Allowed | Allowed | Allowed |
-| Credit charge at approval | Yes (max 1 credit) | Yes (N credits) | Skip (BYOK) | Skip (BYOK) |
-| Cost-budget ceiling | min(credits × $5 × 1.5, userCostCap) | min(credits × $5 × 1.5, userCostCap) | userCostCap only (BYOK exempt) | userCostCap only (BYOK exempt) |
-| API key requirement | System keys | System keys | Own keys required | Org policy (BYOK or SYSTEM) |
-| Monthly counter reset | Asia/Kolkata 00:00 IST on 1st (`MonthlyRunCounterResetJob`) | Billing cycle | — | — |
-| Max projects / org | 1 | 2 | 5 | -1 (unlimited) |
-| Max repos / project | 1 | 2 | 5 | -1 (unlimited) |
-| Share-link active cap (V175) | 3 | 25 | -1 (unlimited) | -1 |
-| PR Review monthly quota (V172) | 0 (blocked) | 10 | -1 | -1 |
-| Code Review monthly quota (V172) | 0 (blocked) | 4 | -1 | -1 |
+| Value           | Capabilities                                                                                          |
+| --------------- | ----------------------------------------------------------------------------------------------------- |
+| `ORG_ADMIN`     | Org settings, member CRUD, role changes, invitations, BYOK key config, JIRA/Confluence/SSO config, external-sharing flag toggle (V198), seat adjustments. |
+| `BILLING_ADMIN` | Read billing for own org, view analytics scoped to billing.                                           |
+| `DEVELOPER`     | Submit runs, create projects, read org-wide runs.                                                     |
 
-**Seat enforcement (TEAM only):** `InvitationService` returns 402 Payment Required when active members + pending invites would exceed `org.seat_count`. `OrgController.adjustSeats` is the chokepoint for raising / lowering.
+[`AppUserDetails`](../src/main/java/com/navneet/executespec/auth/security/AppUserDetails.java) adds `ROLE_<orgRole>` alongside `ROLE_<globalRole>` so `@PreAuthorize("hasRole('ORG_ADMIN')")` works.
+
+### 2.3 Project role (`project_member.project_role`)
+
+Declared in [`auth/entity/ProjectMember.java`](../src/main/java/com/navneet/executespec/auth/entity/ProjectMember.java). Default `PROJECT_DEVELOPER`. The row also carries `is_external` (V175) to mark cross-org collaborators.
+
+| Value                | Capabilities                                                          |
+| -------------------- | --------------------------------------------------------------------- |
+| `PROJECT_ADMIN`      | Add/remove project members, update project settings.                  |
+| `PROJECT_DEVELOPER`  | Submit runs against project, upload docs, manage repos.               |
+| `PROJECT_VIEWER`     | Read-only — runs, reports, architecture, validation, chat history.    |
+
+`PROJECT_VIEWER` was added in V175 to support cross-org read-only sharing without granting org membership.
 
 ---
 
-## Frontend access controls
+## 3. JWT Claim Shape
 
-### Navigation
+Tokens are minted in [`auth/security/JwtUtil.java`](../src/main/java/com/navneet/executespec/auth/security/JwtUtil.java). HS256 over an HMAC secret. Three token types share the signing key.
 
-| Path | Visible When |
-|------|--------------|
-| `/runs` (V2 sidebar) / `/home` (V3) | Always |
-| `/projects/:id/dashboard` (V2 sidebar) / `/projects/:slug` (V3) | `ProjectAccessGuard` |
-| `/exec` (Exec summary) | `canViewCostBreakdown` (TEAM / ENTERPRISE → FREE / PRO see upgrade wall) |
-| `/pricing` | `canViewPricing` |
-| `/integrations` | `canManageIntegrations` |
-| `/invoices` | `canViewInvoices` |
-| `/audit` | `canViewAudit` |
-| `/deployments` | `superAdminOnly` |
-| `/admin/*` (analytics, pricing, tiers, payment-audit, webhooks) | `superAdminOnly` |
-| `/settings` | Always |
+### 3.1 Access token (`generateAccessToken(AppUser, OrgMember)`)
 
-### Header + sidebar tier pills
+```
+sub:        <userId>
+email:      <email>
+globalRole: <SUPER_ADMIN | USER>
+tier:       <FREE | PRO | TEAM | ENTERPRISE>
+orgId:      <orgId or null for solo>
+orgRole:    <ORG_ADMIN | BILLING_ADMIN | DEVELOPER | null>
+iat:        <issuedAt>
+exp:        <iat + access-token-expiry-minutes>
+```
 
-| Element | Visible When |
-|---------|--------------|
-| Upgrade pill (Header) | `FREE` or `PRO` |
-| Top-up pill (Header) | Paid tier, NOT `TEAM` or `ENTERPRISE` (BYOK skips credit purchases) |
-| Usage badge (Sidebar) | `max !== -1` (hidden for unlimited tiers) |
-| Theme toggle (Sun/Moon) | Always |
+Default expiry is `15` minutes per `JwtUtil` constructor default (`${app.jwt.access-token-expiry-minutes:15}`); `application.yml` and prod override to `360` minutes. The root `CLAUDE.md` claim of "1h access token" is stale relative to code default.
 
-### Settings page
+### 3.2 Refresh token (`generateRefreshToken(AppUser)`)
 
-| Section | Gated by |
-|---------|----------|
-| AI Provider Keys (Anthropic / OpenAI / Gemini) | `canManageAiKeys` (TEAM, ENTERPRISE, ORG_ADMIN, SUPER_ADMIN). `POST /api/auth/settings/ai-keys/validate` Test button per provider. |
-| System health metrics | `canViewMetrics` |
-| GitHub PAT | Always (per-user) |
+```
+sub:  <userId>
+jti:  <random UUID>
+type: refresh
+iat:  <issuedAt>
+exp:  <iat + refresh-token-expiry-days> (default 7 days)
+```
 
-### Run submission (`NewRunModal`)
+Revocation: on `POST /api/auth/logout` the JTI is inserted into `refresh_token_blocklist` ([`auth/entity/RefreshTokenBlocklist.java`](../src/main/java/com/navneet/executespec/auth/entity/RefreshTokenBlocklist.java)). `JwtAuthenticationFilter` consults this list. Native upsert avoids duplicate-PK errors on race.
 
-| Guard | Condition |
-|-------|-----------|
-| BYOK warning banner | `tier === 'TEAM' || tier === 'ENTERPRISE'` and no API keys configured |
-| Launch button disabled | BYOK without keys; or run count exhausted |
-| Provider pills greyed out | Provider key not configured (BYOK) |
-| 402 billing limit | Run count exhausted (FREE / PRO) |
-| `userCostCap` input | Optional override, $0.10–$1000 (V178) |
+### 3.3 SSE-scoped token (`generateSseToken(userId, runId)`)
 
-### Billing page
+```
+sub:   <userId>
+scope: sse
+runId: <runId>
+iat:   <issuedAt>
+exp:   <iat + 5 minutes>
+```
 
-| Section | Visible when |
-|---------|--------------|
-| Current plan | Always (authenticated) |
-| Cancel subscription | Paid tier, NOT `ENTERPRISE` |
-| Usage bars | Always (shows "Unlimited" for `max === -1`) |
-| Bonus runs | Has active top-ups |
-| Buy Extra Runs | NOT `TEAM` or `ENTERPRISE` (BYOK has no credit purchases) |
+Carried in the `?token=` query parameter on `/api/runs/{id}/events`. Permitted in `SecurityConfig`'s public-path matcher; validated inline in `SseController`.
 
----
+### 3.4 Per-user JWT epoch invalidation
 
-## Provider naming convention
+`app_user.token_invalidated_at` (Instant). When set (via `POST /api/auth/invalidate-sessions`), `JwtAuthenticationFilter` rejects every token whose `iat` is older. There is also a feature-flag-gated global force-logout epoch read by `JwtUtil.isTokenValid(String)`.
 
-| Internal ID | Display label | Notes |
-|-------------|---------------|-------|
-| `anthropic` / `ANTHROPIC` | **Anthropic** | Claude models. Default provider since 1.0.0-M1. |
-| `gemini` / `GEMINI` | **Gemini** | Gemini models. Renamed from `google`/`GOOGLE` in v2.6.0 (V120). `GOOGLE` is accepted as a back-compat alias on `RunRequest.aiProvider` / `CreateProjectRequest.aiProvider` input but is rewritten to `GEMINI` before persistence. |
-| `openai` / `OPENAI` | **OpenAI** | GPT models. |
+### 3.5 Authentication filter
 
-YAML keys (`model-matrix.gemini`, `failover-order.gemini`, `model-pricing[].provider: gemini`, `provider-pool.GEMINI`) must match the canonical `GEMINI` spelling. Spring AI library keys (`spring.ai.google.genai.*`) and OAuth registration (`spring.security.oauth2.client.registration.google`) are deliberately untouched — those refer to Google the company, not the LLM provider rename. See `FailoverOrderEnumAlignmentTest` for the regression guard.
+[`auth/security/JwtAuthenticationFilter.java`](../src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java) is a `OncePerRequestFilter` that:
+
+1. Reads `Authorization: Bearer <token>` or, for SSE, `?token=`.
+2. Validates signature + expiry + per-user invalidation.
+3. Loads `AppUserDetails` via `UserDetailsServiceImpl.loadUserById`.
+4. Sets `SecurityContextHolder`.
+
+It runs before `UsernamePasswordAuthenticationFilter`; `RateLimitFilter` runs after JWT.
 
 ---
 
-## Key mode mapping (billing → auth)
+## 4. Authorization at the controller layer
 
-| Plan key mode | Org `keySourceMode` | Behaviour |
-|---------------|---------------------|-----------|
-| `BYOK` | `OWN_KEYS` | User/org keys only, no system fallback. **Platform cost cap skipped** (customer pays their own API bill); `userCostCap` still honoured. |
-| `MANAGED` | `SYSTEM` | Platform keys only, user keys ignored. Platform cap applies. |
-| `PLATFORM` (legacy) | `SYSTEM` | Same as MANAGED. |
-| (default) | `HYBRID` | User/org keys first, system fallback. Platform cap applies. |
+### 4.1 `@PreAuthorize` surfaces
+
+`@EnableMethodSecurity` is on (see [`auth/security/SecurityConfig.java`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java)). The following controllers gate methods declaratively.
+
+**Class-level `@PreAuthorize("hasRole('SUPER_ADMIN')")`:**
+
+- [`auth/controller/SuperAdminController.java`](../src/main/java/com/navneet/executespec/auth/controller/SuperAdminController.java) — every endpoint under `/api/admin` (guardrail diagnostic, force-fail-task, halt-all, audit-chain verify, user/org status/tier changes, tier_config edits, escalated invitations, audit-logs, top-up packages, grant-runs).
+- [`folder/ExecutespecMigrationController.java`](../src/main/java/com/navneet/executespec/folder/ExecutespecMigrationController.java) — `POST /api/admin/projects/{projectId}/migrate-codemaps`.
+
+**Method-level `@PreAuthorize("hasRole('SUPER_ADMIN')")`:**
+
+- `PricingController#upsert` — `PUT /api/pricing/{provider}/{model}`.
+
+**Method-level `@PreAuthorize("hasRole('ORG_ADMIN')")` (or equivalent doc-comment in OrgController):**
+
+- `OrgController#updateOrg` — `PUT /api/org/me`
+- `OrgController#removeMember` — `DELETE /api/org/me/members/{userId}`
+- `OrgController#suspendMember`, `changeMemberRole`
+- `OrgController#createInvitation` — `POST /api/org/invite`
+- `OrgController#getAuditLogs` — `GET /api/org/me/audit-logs`
+- `OrgController#updateExternalSharing` — `PUT /api/org/me/settings/external-sharing` (V198 — must be ORG_ADMIN of own org)
+- `OrgController#adjustSeats` — `POST /api/org/me/seats/adjust`
+- `ProjectController#archive`, `unarchive`, `softDelete`, `restore`, `addMember`, `removeMember`, `updateSettings`
+- `SlackIntegrationController#install`, `disconnect`, `listChannels`, `addProjectChannel`
+
+**Method-level multi-role gate** (e.g. `hasAnyRole('ORG_ADMIN','SUPER_ADMIN')`):
+
+- `SsoConfigController` — see [`sso-saml-wiring.md`](sso-saml-wiring.md).
+
+**Internal admin (shared-secret, not JWT):**
+
+- `AdminReminderController` — `POST /api/internal/reminder/send`, gated by constant-time compare of `X-Admin-Reminder-Token` header against env-configured shared secret.
+
+### 4.2 Programmatic guards
+
+For row-level access (tenant isolation), declarative `@PreAuthorize` is not sufficient. Three programmatic guards run inline:
+
+- **[`auth/security/RunAccessGuard.java`](../src/main/java/com/navneet/executespec/auth/security/RunAccessGuard.java)** — `requireRunAccess(runId, userDetails)` / `requireRunWriteAccess(...)` / `assertAccess(PipelineRun, ...)`. Throws 401 (no auth), 403 (wrong tenant), 404 (run not found).
+- **[`project/security/ProjectAccessGuard.java`](../src/main/java/com/navneet/executespec/project/security/ProjectAccessGuard.java)** — `assertCanRead(projectId, userDetails)` and `assertCanWrite(projectId, userDetails)`.
+- **[`auth/security/RunVisibilitySpec.java`](../src/main/java/com/navneet/executespec/auth/security/RunVisibilitySpec.java)** — for list endpoints; builds a JPA `Specification<PipelineRun>` filtered by global/org role.
+
+### 4.3 The `RunAccessGuard` logic
+
+```
+SUPER_ADMIN                        => allowed for any run.
+ORG_ADMIN / BILLING_ADMIN          => allowed if run.orgId == userOrgId.
+DEVELOPER (org member)             => allowed if run.orgId == userOrgId.
+FREE user (no org)                 => allowed only if run.createdByUserId == userId.
+```
+
+Write access (`requireRunWriteAccess`) tightens BILLING_ADMIN — they get read-only on runs, plus full read/write on billing.
+
+### 4.4 The `ProjectAccessGuard` logic
+
+```
+assertCanRead(projectId, userDetails):
+  1. 401 if userDetails is null.
+  2. 404 if project not in DB.
+  3. SUPER_ADMIN  ->  allow.
+  4. project.orgId == user.orgId  ->  allow (org-scoped membership).
+  5. project_member row exists for (projectId, userId)  ->  allow (V175 cross-org).
+  6. else 403.
+
+assertCanWrite(projectId, userDetails):
+  1. assertCanRead(...).
+  2. Additionally: reject if project_member.project_role == PROJECT_VIEWER.
+```
+
+Org-match wins over membership row. The `project_member.is_external=true` row from V175 lets a user in `org_B` read `project_A` whose org is `org_A`, without any org-membership change.
+
+### 4.5 Known guard-coverage gap
+
+The 2026-05-12 audit identified controllers calling `assertCanRead` on endpoints that mutate state. As of head V199 the following endpoints still bypass `assertCanWrite` for `PROJECT_VIEWER`:
+
+- `ProjectRepoController#linkToProject`, `#unlinkFromProject`, `#updateRelationships`
+- `SpecTemplateController#createForProject`, `#delete`
+- `ProjectDocumentController#upload`, `#delete`
+- `PullRequestController#refreshProjectPrs`
+- `ProjectDashboardController#fixTechDebt`, `#dismissPostMergeBar`
+
+A `PROJECT_VIEWER` cross-org collaborator would currently pass these. Closing them is a follow-up; see [`project/security/ProjectAccessGuard.java`](../src/main/java/com/navneet/executespec/project/security/ProjectAccessGuard.java) doc-comment for the original intent.
+
+---
+
+## 5. `AccessGuardCoverageTest` — the architecture pin
+
+[`src/test/java/com/navneet/executespec/arch/AccessGuardCoverageTest.java`](../src/test/java/com/navneet/executespec/arch/AccessGuardCoverageTest.java) is an ArchUnit test that fails the build when a controller method whose `@RequestMapping` URL contains any of `/runs/{`, `/projects/{`, `/executions/{`, `/launches/{`, `/repos/{` does NOT call one of:
+
+- `RunAccessGuard.<any method>`
+- `ProjectAccessGuard.<any method>`
+- A verb-named guard (`requireXxx`, `requiresXxx`, `assertXxx`, `ensureXxx`, `checkXxx`, `authorize`, `loadFor*`)
+
+Two named lists carve out exceptions:
+
+### 5.1 `ALLOWLIST` (public-by-design + SUPER_ADMIN-gated)
+
+| Class                              | Method                | Reason                              |
+| ---------------------------------- | --------------------- | ----------------------------------- |
+| `ProjectSharePublicController`     | x 6 endpoints         | Public read-by-token, no auth.      |
+| `SuperAdminController`             | x 2 endpoints         | SUPER_ADMIN class-level annotation. |
+| `ExecutespecMigrationController`   | x 1 endpoint          | SUPER_ADMIN class-level annotation. |
+| `RolloutRunController`             | x 1 endpoint          | V2 canary smoke probe.              |
+
+### 5.2 `KNOWN_LEGACY_DRIFT`
+
+Empty in code as of the 2026-05-06 entry in the test file. The root `CLAUDE.md` mentions ten remaining legacy guard sites; that count appears to be drift between docs and the file — the test as committed has zero `KNOWN_LEGACY_DRIFT` entries.
+
+### 5.3 The test asserts
+
+1. Every protected-segment endpoint outside `ALLOWLIST + KNOWN_LEGACY_DRIFT` calls a guard.
+2. Stale `KNOWN_LEGACY_DRIFT` entries (a method now calling a guard) are flagged so the list shrinks toward zero.
+
+Adding a new endpoint without a guard fails the build.
+
+---
+
+## 6. Cross-org sharing (V175 + V198)
+
+### 6.1 V175 — `ProjectMember.is_external` + `project_invite`
+
+Two tables enable a user in `org_A` to access a project owned by `org_B`:
+
+- `project_member` (already existed; V175 added `is_external BOOLEAN NOT NULL DEFAULT FALSE`).
+- `project_invite` (new in V175). Columns: `id, project_id FK CASCADE, email, project_role DEFAULT 'PROJECT_VIEWER', token UNIQUE, invited_by_user_id, invited_org_id, status DEFAULT 'PENDING', expires_at, accepted_at, accepted_by_user_id, revoked_at, revoked_by_user_id, created_at`.
+
+Flow:
+
+1. `POST /api/projects/{id}/invites` (tier PRO+, ORG_ADMIN of own org or SUPER_ADMIN, V198 flag enabled — see §6.3) creates a `project_invite` row with `status=PENDING` and a random URL-safe token.
+2. `MailService.sendProjectInviteEmail(...)` mails the invitee the accept URL.
+3. `GET /api/invites/preview?token=...` returns the invitation metadata (public, no auth).
+4. `POST /api/invites/accept?token=...` (requires JWT auth) verifies the authenticated user's email matches the invited email (case-insensitive), inserts a `project_member` row with `is_external=true`, flips `project_invite.status='ACCEPTED'`.
+5. Project owners can list/delete invites via `DELETE /api/projects/{id}/invites/{inviteId}`.
+
+The invitee is allowed in `org_B`'s project rows by `ProjectAccessGuard.assertCanRead` step (5) above — the `project_member` row admits them even though `project.orgId != user.orgId`.
+
+### 6.2 Public share links (V175 — `project_share_link`)
+
+Independent of the invite flow. Anonymous read-only access via signed URL token:
+
+- `POST /api/projects/{id}/share-links` — creates a row in `project_share_link` (token, surface, scope_id, label, expires_at, optional revoked_at, view counter).
+- `GET /api/shared/{token}/meta`, `/run`, `/validation-report`, `/code-review`, `/pr-review`, `/architecture` — public, no auth, view counter increments per access.
+
+`tier_config.share_link_active_cap` enforces simultaneous-link limit: FREE = 3, PRO = 25, TEAM+ENT = -1 (unlimited).
+
+### 6.3 V198 — per-org `external_sharing_enabled` flag
+
+[`auth/entity/Org.java`](../src/main/java/com/navneet/executespec/auth/entity/Org.java) has `external_sharing_enabled BOOLEAN NOT NULL DEFAULT FALSE` (`V198__org_external_sharing_flag.sql`).
+
+`PUT /api/org/me/settings/external-sharing` toggles it. The handler in `OrgController` requires:
+
+- Caller's `globalRole == SUPER_ADMIN`, OR
+- Caller's `orgRole == ORG_ADMIN` AND the org being modified is the caller's own org.
+
+`PROJECT_ADMIN` alone is no longer enough to invite cross-org collaborators since V198 — the org's flag must also be on. `OrgService.updateExternalSharing` records an `ORG_EXTERNAL_SHARING_CHANGED` row to `activity_audit` (with hash chain) so the toggle is forensically auditable.
+
+The public-share-link surface (§6.2) is independent of this flag — only the `project_invite` cross-org membership path is gated.
+
+---
+
+## 7. Solo registration → personal org (V162 + V163)
+
+Solo users who register without an org get a personal org auto-provisioned so every code path can assume `orgId != null`.
+
+- **V162** added `org.is_personal BOOLEAN NOT NULL DEFAULT FALSE` and a partial index `WHERE is_personal=TRUE` for the SUPER_ADMIN console to filter them out of "real" org listings.
+- **V163** is a PL/pgSQL `DO` block that backfills: for every `app_user` with `org_id IS NULL AND status='ACTIVE' AND email_verified=TRUE`, it inserts a personal org (`tier=user.tier`, `is_personal=TRUE`, `key_source_mode='HYBRID'`, `domain_enforcement_mode='OPEN'`, `block_common_domains=FALSE`, `seat_count=1`) and an `org_member` row with `org_role='ORG_ADMIN'`.
+
+Runtime equivalent is `OrgService.bootstrapPersonalOrg(userId)`, idempotent, called from `AuthService.register` and `AuthService.findOrCreateFromOAuth`. The user becomes `ORG_ADMIN` of their personal org.
+
+`TierPermissionService.getPermissions` checks `org.is_personal` and routes personal-org users through `freeUserPermissions` so the personal-org doesn't accidentally inherit TEAM/ENTERPRISE billing-admin capabilities.
+
+---
+
+## 8. RBAC reference matrix (selected endpoints)
+
+| Endpoint                                                | Tier gate          | Role gate                                                |
+| ------------------------------------------------------- | ------------------ | -------------------------------------------------------- |
+| `POST /api/auth/register`                               | none               | none (public)                                            |
+| `POST /api/auth/login`                                  | none               | none (public)                                            |
+| `GET /api/auth/me`                                      | any                | authenticated                                            |
+| `GET /api/auth/me/permissions`                          | any                | authenticated                                            |
+| `GET /api/auth/me/data-export`                          | any                | authenticated; SUPER_ADMIN for others' export            |
+| `POST /api/runs`                                        | tier-driven quota  | authenticated; quota enforced by `TierEnforcementService`|
+| `POST /api/runs/{id}/approve`                           | none               | `RunAccessGuard.assertWriteAccess`                       |
+| `DELETE /api/runs/{id}` (cancel)                        | none               | `RunAccessGuard.assertWriteAccess`                       |
+| `GET /api/projects`                                     | any                | authenticated                                            |
+| `POST /api/projects`                                    | tier-cap V140      | `DEVELOPER` or `ORG_ADMIN` or `SUPER_ADMIN`              |
+| `PUT /api/projects/{id}/archive`                        | none               | `ORG_ADMIN`                                              |
+| `POST /api/projects/{id}/invites` (V175 cross-org)      | PRO+               | `ORG_ADMIN` of own org or `SUPER_ADMIN`; V198 flag on    |
+| `POST /api/projects/{id}/share-links`                   | tier-cap V175      | `ProjectAccessGuard.assertCanRead` (any project member)  |
+| `PUT /api/org/me/settings/external-sharing` (V198)      | none               | `ORG_ADMIN` of own org or `SUPER_ADMIN`                  |
+| `POST /api/org/me/seats/adjust` (TEAM only)             | TEAM               | `ORG_ADMIN`                                              |
+| `PUT /api/pricing/{provider}/{model}`                   | none               | `SUPER_ADMIN`                                            |
+| `GET /api/admin/audit-logs`                             | none               | `SUPER_ADMIN`                                            |
+| `POST /api/admin/grant-runs`                            | none               | `SUPER_ADMIN`                                            |
+| `POST /api/admin/projects/{id}/migrate-codemaps`        | none               | `SUPER_ADMIN`                                            |
+| `POST /api/pr-reviews`                                  | PRO+ (V172)        | `ProjectAccessGuard.assertCanRead`                       |
+| `POST /api/code-reviews`                                | PRO+ (V172)        | `ProjectAccessGuard.assertCanRead`                       |
+| `POST /api/deployments`                                 | `can_deploy=true`  | `RunAccessGuard.assertWriteAccess`                       |
+| `GET /api/admin/analytics/*`                            | none               | `SUPER_ADMIN`, `ORG_ADMIN` (own org), `BILLING_ADMIN`    |
+| `POST /api/webhooks/{razorpay,stripe}`                  | none               | HMAC signature (no JWT)                                  |
+| `POST /webhooks/github`                                 | none               | HMAC SHA-256 (no JWT)                                    |
+| `GET /api/runs/{id}/events` (SSE)                       | none               | 5-min scoped SSE token                                   |
+| `GET /api/shared/{token}/*`                             | none               | public-by-token                                          |
+| `POST /api/internal/reminder/send`                      | none               | shared-secret header                                     |
+
+Public path matchers are declared in [`auth/security/SecurityConfig.java`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java) `filterChain(HttpSecurity)`. Everything not on the public list defaults to `authenticated`.
+
+---
+
+## 9. Audit trail
+
+Every privileged action emits an `activity_audit` row (V22 baseline + V147 SHA-256 hash chain + V151 column widen). [`auth/service/ActivityAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java) is the only writer; it serialises every write through a JVM monitor, reads the chain tail, computes `row_hash = SHA-256(prev_hash || canonical_row_content)`, and assigns a monotonic `chain_seq` from `activity_audit_chain_seq`. Tamper-evidence: a forensic auditor can walk every row, recompute hashes, and detect any inserted, deleted, or modified row.
+
+`GET /api/admin/audit-chain/verify` returns a `ChainVerifyReport` with the first break (if any). `KNOWN_LEGACY_DRIFT` ArchUnit pin (§5.2) is the structural complement of this runtime check.
+
+---
+
+## 10. Files referenced
+
+- [`auth/entity/AppUser.java`](../src/main/java/com/navneet/executespec/auth/entity/AppUser.java)
+- [`auth/entity/Org.java`](../src/main/java/com/navneet/executespec/auth/entity/Org.java)
+- [`auth/entity/OrgMember.java`](../src/main/java/com/navneet/executespec/auth/entity/OrgMember.java)
+- [`auth/entity/ProjectMember.java`](../src/main/java/com/navneet/executespec/auth/entity/ProjectMember.java)
+- [`auth/entity/TierConfig.java`](../src/main/java/com/navneet/executespec/auth/entity/TierConfig.java)
+- [`auth/entity/ActivityAudit.java`](../src/main/java/com/navneet/executespec/auth/entity/ActivityAudit.java)
+- [`auth/entity/RefreshTokenBlocklist.java`](../src/main/java/com/navneet/executespec/auth/entity/RefreshTokenBlocklist.java)
+- [`auth/security/SecurityConfig.java`](../src/main/java/com/navneet/executespec/auth/security/SecurityConfig.java)
+- [`auth/security/AppUserDetails.java`](../src/main/java/com/navneet/executespec/auth/security/AppUserDetails.java)
+- [`auth/security/JwtUtil.java`](../src/main/java/com/navneet/executespec/auth/security/JwtUtil.java)
+- [`auth/security/JwtAuthenticationFilter.java`](../src/main/java/com/navneet/executespec/auth/security/JwtAuthenticationFilter.java)
+- [`auth/security/JsonAuthenticationEntryPoint.java`](../src/main/java/com/navneet/executespec/auth/security/JsonAuthenticationEntryPoint.java)
+- [`auth/security/UserDetailsServiceImpl.java`](../src/main/java/com/navneet/executespec/auth/security/UserDetailsServiceImpl.java)
+- [`auth/security/RunAccessGuard.java`](../src/main/java/com/navneet/executespec/auth/security/RunAccessGuard.java)
+- [`auth/security/RunVisibilitySpec.java`](../src/main/java/com/navneet/executespec/auth/security/RunVisibilitySpec.java)
+- [`project/security/ProjectAccessGuard.java`](../src/main/java/com/navneet/executespec/project/security/ProjectAccessGuard.java)
+- [`auth/service/AuthService.java`](../src/main/java/com/navneet/executespec/auth/service/AuthService.java)
+- [`auth/service/TierEnforcementService.java`](../src/main/java/com/navneet/executespec/auth/service/TierEnforcementService.java)
+- [`auth/service/TierPermissionService.java`](../src/main/java/com/navneet/executespec/auth/service/TierPermissionService.java)
+- [`auth/service/OrgService.java`](../src/main/java/com/navneet/executespec/auth/service/OrgService.java)
+- [`auth/service/InvitationService.java`](../src/main/java/com/navneet/executespec/auth/service/InvitationService.java)
+- [`auth/service/ActivityAuditService.java`](../src/main/java/com/navneet/executespec/auth/service/ActivityAuditService.java)
+- [`auth/service/ProjectService.java`](../src/main/java/com/navneet/executespec/auth/service/ProjectService.java)
+- [`auth/controller/AuthController.java`](../src/main/java/com/navneet/executespec/auth/controller/AuthController.java)
+- [`auth/controller/OrgController.java`](../src/main/java/com/navneet/executespec/auth/controller/OrgController.java)
+- [`auth/controller/ProjectController.java`](../src/main/java/com/navneet/executespec/auth/controller/ProjectController.java)
+- [`auth/controller/SuperAdminController.java`](../src/main/java/com/navneet/executespec/auth/controller/SuperAdminController.java)
+- [`auth/oauth/OAuthSuccessHandler.java`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthSuccessHandler.java)
+- [`auth/oauth/OAuthUserMapper.java`](../src/main/java/com/navneet/executespec/auth/oauth/OAuthUserMapper.java)
+- [`auth/sso/SsoConfigController.java`](../src/main/java/com/navneet/executespec/auth/sso/SsoConfigController.java) — see [`sso-saml-wiring.md`](sso-saml-wiring.md)
+- [`src/test/java/com/navneet/executespec/arch/AccessGuardCoverageTest.java`](../src/test/java/com/navneet/executespec/arch/AccessGuardCoverageTest.java)
+- Migrations: V14, V21, V22, V147, V151, V162, V163, V172, V175, V198, V199 (paths under `src/main/resources/db/migration/`).
